@@ -4,6 +4,7 @@
  */
 
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -189,6 +190,39 @@ describe("Ritual Casting", () => {
 
 			it("should allow ritual casting of prepared ritual spells", () => {
 				const spell = {name: "Detect Magic", source: "PHB", level: 1, ritual: true, prepared: true};
+				expect(state.canCastAsRitual(spell)).toBe(true);
+			});
+
+			it.each([
+				["Cleric", "Artificer|EFA"],
+				["Druid", {name: "Artificer", source: "EFA"}],
+			])("does not let %s ritual casting authorize an EFA Artificer spell", (otherClass, sourceClass) => {
+				state = new CharacterSheetState();
+				state.addClass({name: "Artificer", level: 5, source: "EFA"});
+				state.addClass({name: otherClass, level: 5, source: "PHB"});
+				const spell = {
+					name: "Detect Magic",
+					source: "PHB",
+					sourceClass,
+					level: 1,
+					ritual: true,
+					prepared: true,
+				};
+				expect(state.canCastAsRitual(spell)).toBe(false);
+			});
+
+			it("preserves TCE Artificer ritual casting when spell ownership is explicit", () => {
+				state = new CharacterSheetState();
+				state.addClass({name: "Artificer", level: 5, source: "TCE"});
+				state.addClass({name: "Cleric", level: 5, source: "PHB"});
+				const spell = {
+					name: "Detect Magic",
+					source: "PHB",
+					sourceClass: "Artificer|TCE",
+					level: 1,
+					ritual: true,
+					prepared: true,
+				};
 				expect(state.canCastAsRitual(spell)).toBe(true);
 			});
 		});

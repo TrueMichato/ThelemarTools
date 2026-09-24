@@ -3,18 +3,283 @@
  * Tests for play mode state fields (viewMode, favorites) and state management helpers.
  */
 
-import "./setup.js";
+import fs from "node:fs";
 import {jest} from "@jest/globals";
+import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const artificerData = JSON.parse(fs.readFileSync(new URL("../../../data/class/class-artificer.json", import.meta.url), "utf8"));
+const objectData = JSON.parse(fs.readFileSync(new URL("../../../data/objects.json", import.meta.url), "utf8")).object;
+const fullArtificer = {
+	...artificerData.class.find(cls => cls.name === "Artificer" && cls.source === "EFA"),
+	subclasses: artificerData.subclass.filter(sc => sc.className === "Artificer" && sc.classSource === "EFA"),
+};
+
+function makeCartographer () {
+	const state = new CharacterSheetState();
+	state.setClassCatalog([fullArtificer]);
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 5,
+		subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+	});
+	state.setAbilityBase("int", 16);
+	return state;
+}
+
+const getArtillerist = source => artificerData.subclass.find(it =>
+	it.name === "Artillerist"
+	&& it.source === source
+	&& it.classSource === source,
+);
+
+const makeArtilleristState = ({source = "EFA", level = 15} = {}) => {
+	const state = new CharacterSheetState();
+	state.setClassSummonTemplateCatalog(objectData);
+	state.setAbilityBase("int", 18);
+	const subclass = getArtillerist(source);
+	state.addClass({
+		name: "Artificer",
+		source,
+		level,
+		hd: {number: 1, faces: 8},
+		subclass: {
+			name: subclass.name,
+			shortName: subclass.shortName,
+			source: subclass.source,
+		},
+	});
+	if (source === "EFA") {
+		state.addItem({id: "cannon-tool", name: "Smith's Tools", source: "PHB", type: "AT", _isCustom: true}, 1, true);
+		state.addToolProficiency("Smith's Tools");
+	}
+	return state;
+};
+
+const createCannon = state => state.pCreateEfaEldritchCannon({
+	form: "forceBallista",
+	size: "S",
+	placement: "deployed",
+	mobility: "wheels",
+	distanceFromOwnerFt: 5,
+	createdWith: "freeUse",
+	createdWithSlotLevel: null,
+	createdWithSlotKind: "spell",
+});
+
+const makeElement = (tag = "div", className = "", parent = null) => {
+	const classes = new Set((className || "").split(/\s+/g).filter(Boolean));
+	const el = {
+		tag,
+		className: className || "",
+		parentNode: parent,
+		children: [],
+		attributes: {},
+		handlers: {},
+		textContent: "",
+		classList: {
+			add: (...names) => names.forEach(name => classes.add(name)),
+			contains: name => classes.has(name),
+			toggle: (name, force) => {
+				const isEnabled = force == null ? !classes.has(name) : !!force;
+				if (isEnabled) classes.add(name);
+				else classes.delete(name);
+				return isEnabled;
+			},
+		},
+		setAttribute: (name, value) => { el.attributes[name] = String(value); },
+		addEventListener: (name, handler) => { el.handlers[name] = handler; },
+		querySelector: selector => selector === ".pm-card__header"
+			? el.children.find(child => child.classList?.contains?.("pm-card__header")) || null
+			: null,
+		replaceChildren: (...children) => { el.children = children; },
+	};
+	parent?.children?.push(el);
+	return el;
+};
+
+const prepareCannonPlayMode = ({state, combat = {}}) => {
+	const actionsHub = makeElement();
+	const page = {
+		getState: () => state,
+		_combat: combat,
+		pAnimateDamageDice: jest.fn(),
+		showDiceResult: jest.fn(),
+	};
+	const pm = new CharacterSheetPlayMode(page);
+	pm._elActionsHub = actionsHub;
+	pm._ce = (tag, className, parent) => makeElement(tag, className, parent);
+	pm._makeCard = (parent, icon, title) => {
+		const card = makeElement("section", "pm-card", parent);
+		const header = makeElement("header", "pm-card__header", card);
+		const titleEl = makeElement("span", "pm-card__title", header);
+		titleEl.textContent = title;
+		return card;
+	};
+	pm._setIconLabel = (el, icon, label) => { el.textContent = label.trim(); return el; };
+	pm._logActivity = jest.fn();
+	pm._renderStatusBar = jest.fn();
+	return {pm, page, actionsHub};
+};
+
+const getDescendants = root => [
+	root,
+	...root.children.flatMap(child => getDescendants(child)),
+];
 
 describe("CharacterSheetPlayMode", () => {
 	let state;
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	describe("EFA Steel Defender lifecycle surface", () => {
+		const makeNode = (tag = "div", className = "") => ({
+			tag,
+			className,
+			children: [],
+			attributes: {},
+			textContent: "",
+			disabled: false,
+			appendChild (child) { this.children.push(child); return child; },
+			setAttribute (name, value) { this.attributes[name] = String(value); },
+			addEventListener (name, handler) { this[`on${name}`] = handler; },
+			click () { return this.onclick?.(); },
+		});
+
+		it("renders compact shared lifecycle status, visible disabled reason, and shared Page actions", async () => {
+			const useLifecycle = jest.fn(async () => ({committed: true}));
+			const page = {
+				getState: () => state,
+				getFeatureCompanionLifecycleFocusKey: jest.fn(() => "feature-companion-lifecycle::defender-1::revival"),
+				pUseFeatureCompanionLifecycle: useLifecycle,
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._ce = (tag, className, parent) => {
+				const node = makeNode(tag, className);
+				parent?.appendChild(node);
+				return node;
+			};
+			const card = makeNode();
+			const companion = {id: "defender-1"};
+			const reasonId = pm._renderFeatureCompanionLifecycle(card, companion, {
+				status: "dead",
+				tone: "danger",
+				label: "Dead",
+				generation: 2,
+				summary: "Died at game minute 10. Revival is allowed through minute 70.",
+				guidance: "Begin revival before the window closes.",
+				disabledReason: "This defender is dead. Ordinary operations cannot revive it.",
+				revival: {available: false, message: "No normal or Pact Magic spell slot is available."},
+			});
+
+			expect(reasonId).toBe("pm-feature-companion-lifecycle-defender-1-disabled-reason");
+			expect(card.children[0]).toMatchObject({
+				tag: "section",
+				className: "pm-companion-lifecycle pm-companion-lifecycle--danger",
+				attributes: {
+					role: "status",
+					"aria-live": "polite",
+					"aria-atomic": "true",
+				},
+			});
+			const actionRow = card.children[0].children.at(-1);
+			const [button, reason] = actionRow.children;
+			expect(button).toMatchObject({textContent: "Begin revival", disabled: true});
+			expect(reason.textContent).toMatch(/no normal or Pact Magic spell slot/i);
+			expect(button.attributes["aria-describedby"]).toContain(reasonId);
+			expect(button.attributes["aria-describedby"]).toContain(reason.id);
+
+			button.disabled = false;
+			button.click();
+			expect(useLifecycle).toHaveBeenCalledWith({
+				companionId: companion.id,
+				operation: "revival",
+			});
+		});
+
+		it.each([
+			[
+				"EFA non-Battle-Smith",
+				[{
+					name: "Artificer",
+					source: "EFA",
+					subclass: {name: "Alchemist", shortName: "Alchemist", source: "EFA"},
+				}],
+				false,
+			],
+			[
+				"unrelated Artificer",
+				[{name: "Artificer", source: "PHB"}],
+				false,
+			],
+			[
+				"exact EFA Battle Smith",
+				[{
+					name: "Artificer",
+					source: "EFA",
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+				}],
+				false,
+			],
+			[
+				"name-only TCE subclass with wrong subclass source",
+				[{
+					name: "Artificer",
+					source: "TCE",
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+				}],
+				false,
+			],
+			[
+				"legacy exact TCE Battle Smith",
+				[{
+					name: "Artificer",
+					source: "TCE",
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "TCE"},
+				}],
+				true,
+			],
+		])("source-qualifies the legacy Steel Defender add button for %s", (_label, classes, shouldShow) => {
+			const fakeState = {
+				constructor: CharacterSheetState,
+				getClasses: () => classes,
+				getFeatureCompanionSetupRecord: () => null,
+				getPendingFeatureCompanionSetups: () => [],
+				getCompanions: () => [],
+			};
+			const page = {
+				getState: () => fakeState,
+				getFeatureCompanionLifecycleSurfaceCompanions: () => [],
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._ce = (tag, className, parent) => {
+				const node = makeNode(tag, className);
+				parent?.appendChild(node);
+				return node;
+			};
+			pm._setIconLabel = (element, _icon, label) => { element.textContent = label.trim(); };
+			pm._renderEmptyState = jest.fn();
+			pm._addBuiltinCompanion = jest.fn();
+			const container = makeNode();
+
+			pm._renderCompanionsDrawer(container);
+			const steelButton = container.children
+				.flatMap(child => child.children || [])
+				.find(child => child.title === "Steel Defender");
+			expect(!!steelButton).toBe(shouldShow);
+			if (steelButton) {
+				steelButton.click();
+				expect(pm._addBuiltinCompanion).toHaveBeenCalledWith("steel-defender");
+			} else {
+				expect(pm._addBuiltinCompanion).not.toHaveBeenCalled();
+			}
+		});
 	});
 
 	describe("Active-state lifecycle", () => {
@@ -75,6 +340,75 @@ describe("CharacterSheetPlayMode", () => {
 			expect(fakeState.toggleActiveState).not.toHaveBeenCalled();
 			expect(page._saveCurrentCharacter).not.toHaveBeenCalled();
 			expect(page._renderActiveStates).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("HP changes", () => {
+		it("delegates damage to the page's canonical damage/intervention pipeline", async () => {
+			state.setHp(10, 20);
+			const page = {
+				getState: () => state,
+				_pApplyDamage: jest.fn(async (amount, opts) => state.takeDamage(amount, opts)),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._logActivity = jest.fn();
+			pm._renderStatusBar = jest.fn();
+
+			await pm._applyHpChange("damage", 10, "fire");
+
+			expect(page._pApplyDamage).toHaveBeenCalledTimes(1);
+			expect(page._pApplyDamage).toHaveBeenCalledWith(10, {damageType: "fire"});
+			expect(state.getCurrentHp()).toBe(0);
+			expect(pm._renderStatusBar).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("Damage concentration protection", () => {
+		it("preserves spell source when casting a concentration spell", () => {
+			const fakeState = {
+				setSpellSlotCurrent: jest.fn(),
+				setConcentration: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode({getState: () => fakeState});
+			pm._logActivity = jest.fn();
+			pm._renderSpellsQuick = jest.fn();
+			pm._renderStatusBar = jest.fn();
+
+			pm._doExecuteCast(
+				{name: "Faerie Fire", source: "XPHB", level: 1, concentration: true},
+				{level: 1, current: 1, max: 2},
+			);
+
+			expect(fakeState.setConcentration).toHaveBeenCalledWith({
+				name: "Faerie Fire",
+				source: "XPHB",
+				level: 1,
+			});
+		});
+
+		it("uses the state provider instead of rolling a damage concentration check in the fallback pipeline", async () => {
+			const fakeState = {
+				applyDamageDefenses: () => ({damage: 8, applied: null, reduction: 0}),
+				getTempHp: () => 0,
+				getCurrentHp: () => 20,
+				takeDamage: jest.fn(),
+				isConcentrating: () => true,
+				getDamageConcentrationProtection: () => ({name: "Guided Precision"}),
+				getConcentrationLabel: () => "Faerie Fire",
+			};
+			const pm = new CharacterSheetPlayMode({getState: () => fakeState});
+			pm._logActivity = jest.fn();
+			pm._renderStatusBar = jest.fn();
+			pm._doConcentrationCheck = jest.fn();
+
+			await pm._applyHpChange("damage", 8, "fire");
+
+			expect(fakeState.takeDamage).toHaveBeenCalledWith(8, {damageType: "fire"});
+			expect(pm._doConcentrationCheck).not.toHaveBeenCalled();
+			expect(pm._logActivity).toHaveBeenCalledWith(
+				"shield",
+				"Guided Precision: damage can't end concentration on Faerie Fire",
+			);
 		});
 	});
 
@@ -254,12 +588,27 @@ describe("CharacterSheetPlayMode", () => {
 				},
 			};
 			const economy = {action: false, bonus: false, reaction: false};
+			let movementUsed = 0;
 			const pm = new CharacterSheetPlayMode({
 				getState: () => ({
 					getActionEconomyState: () => ({...economy}),
 					isActionTypeAvailable: type => economy[type],
 					restoreActionType: type => { economy[type] = true; return true; },
-					getSpeed: () => 30,
+					getMovementEconomyState: () => ({
+						speed: 30,
+						allowance: 30,
+						used: movementUsed,
+						remaining: 30 - movementUsed,
+						receipts: [],
+					}),
+					spendMovement: amount => { movementUsed += amount; return {ok: true}; },
+					resetMovementEconomy: () => { movementUsed = 0; },
+					resetTurnEconomy: () => {
+						economy.action = true;
+						economy.bonus = true;
+						economy.reaction = true;
+						movementUsed = 0;
+					},
 				}),
 			});
 
@@ -317,10 +666,82 @@ describe("CharacterSheetPlayMode", () => {
 					"Use Movement",
 					"Reset turn (restore all actions)",
 				]);
+				const movement = clickable.slice(-5)[3];
+				expect(movement.children[1]).toBe(" 30/30 ft.");
+				movement._handler();
+
+				const usedMovement = clickable.slice(-5)[3];
+				expect(usedMovement._label).toBe("Restore Movement");
+				expect(usedMovement.children[1]).toBe(" 0/30 ft.");
+				usedMovement._handler();
+
+				const restoredMovement = clickable.slice(-5)[3];
+				expect(restoredMovement._label).toBe("Use Movement");
+				expect(restoredMovement.children[1]).toBe(" 30/30 ft.");
 			} finally {
 				if (previousDocument === undefined) delete globalThis.document;
 				else globalThis.document = previousDocument;
 			}
+		});
+
+		it("Reset Turn releases Guided Precision for the opposite route in the same round", () => {
+			const cartographer = makeCartographer();
+			cartographer.startCombat();
+			const attackRider = cartographer.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+			cartographer.consumeDeferredFlatDamageRider(attackRider);
+			const spellContext = {
+				route: "spell",
+				spell: {name: "Guiding Bolt", source: "XPHB"},
+			};
+			expect(cartographer.getDeferredFlatDamageRiderOptions(spellContext)).toEqual([]);
+
+			const actionsHub = {
+				children: [],
+				querySelector: () => null,
+			};
+			const pm = new CharacterSheetPlayMode({getState: () => cartographer});
+			const clickable = [];
+			pm._elActionsHub = actionsHub;
+			pm._makeCard = (parent) => {
+				const card = {
+					dataset: {},
+					children: [],
+					querySelector: () => null,
+				};
+				parent.children.push(card);
+				return card;
+			};
+			pm._ce = (tag, className, parent) => {
+				const el = {
+					tag,
+					className,
+					children: [],
+					replaceChildren (...children) { this.children = children; },
+				};
+				parent.children.push(el);
+				return el;
+			};
+			pm._makeClickable = (el, label, handler) => {
+				el._label = label;
+				el._handler = handler;
+				clickable.push(el);
+			};
+			pm._icon = () => ({});
+			pm._setIconLabel = () => {};
+			pm._logActivity = jest.fn();
+
+			const previousDocument = globalThis.document;
+			globalThis.document = {createTextNode: text => text};
+			try {
+				pm._renderActionEconomy();
+				clickable.find(it => it._label === "Reset turn (restore all actions)")._handler();
+			} finally {
+				if (previousDocument === undefined) delete globalThis.document;
+				else globalThis.document = previousDocument;
+			}
+
+			expect(cartographer.getCombatRound()).toBe(1);
+			expect(cartographer.getDeferredFlatDamageRiderOptions(spellContext)).toHaveLength(1);
 		});
 	});
 
@@ -434,6 +855,73 @@ describe("CharacterSheetPlayMode", () => {
 
 			expect(pm._logActivity).toHaveBeenCalledWith("attack", message);
 			expect(pm._renderCombatMethods).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("EFA Artillerist cannon surface", () => {
+		it("renders an exact-source cannon outside generic companions and delegates creation and activation to Combat", async () => {
+			const efa = makeArtilleristState();
+			const creation = await createCannon(efa);
+			const combat = {
+				_pShowEfaEldritchCannonCreationModal: jest.fn(),
+				_pShowEfaEldritchCannonActivationModal: jest.fn(),
+			};
+			const {pm, actionsHub} = prepareCannonPlayMode({state: efa, combat});
+
+			pm._renderEfaEldritchCannons();
+
+			const descendants = getDescendants(actionsHub);
+			expect(descendants.map(it => it.textContent).filter(Boolean)).toEqual(expect.arrayContaining([
+				"Eldritch Cannons",
+				"Cannon 1 · Force Ballista",
+				"HP",
+				"AC",
+				"Duration",
+				"Activate Cannon 1",
+			]));
+			expect(descendants.find(it => it.textContent === "Shimmering Field active: Half Cover (+2 AC and Dex saves)")).toBeTruthy();
+			expect(efa.getCompanions()).toEqual([]);
+
+			await descendants.find(it => it.textContent === "Create Another").handlers.click();
+			await descendants.find(it => it.textContent === "Activate Cannon 1").handlers.click();
+			expect(combat._pShowEfaEldritchCannonCreationModal).toHaveBeenCalledTimes(1);
+			expect(combat._pShowEfaEldritchCannonActivationModal).toHaveBeenCalledWith(creation.instanceId);
+		});
+
+		it("routes Play Mode damage through the canonical save transaction and exposes Explosive Cannon", async () => {
+			const efa = makeArtilleristState();
+			const creation = await createCannon(efa);
+			efa.startCombat();
+			const combat = {
+				_pCommitEfaCannonMutation: jest.fn(async mutate => mutate()),
+				_refreshEfaCannonSurfaces: jest.fn(),
+				_pShowEfaCannonDetonationModal: jest.fn(),
+			};
+			const {pm, actionsHub} = prepareCannonPlayMode({state: efa, combat});
+			const previousPGetUserNumber = globalThis.InputUiUtil.pGetUserNumber;
+			globalThis.InputUiUtil.pGetUserNumber = jest.fn(async () => 1);
+			pm._renderEfaEldritchCannons();
+
+			await getDescendants(actionsHub).find(it => it.textContent === "Damage").handlers.click();
+
+			expect(combat._pCommitEfaCannonMutation).toHaveBeenCalledTimes(1);
+			expect(efa.getEfaEldritchCannon(creation.instanceId).hp.current).toBe(74);
+			expect(combat._pShowEfaCannonDetonationModal).toHaveBeenCalledWith(expect.objectContaining({
+				instanceId: creation.instanceId,
+				reaction: expect.objectContaining({tracked: true}),
+			}));
+			expect(combat._refreshEfaCannonSurfaces).toHaveBeenCalledTimes(1);
+			if (previousPGetUserNumber) globalThis.InputUiUtil.pGetUserNumber = previousPGetUserNumber;
+			else delete globalThis.InputUiUtil.pGetUserNumber;
+		});
+
+		it("does not render the EFA surface for legacy TCE Artillerists", () => {
+			const tce = makeArtilleristState({source: "TCE"});
+			const {pm, actionsHub} = prepareCannonPlayMode({state: tce});
+
+			pm._renderEfaEldritchCannons();
+
+			expect(actionsHub.children).toEqual([]);
 		});
 	});
 

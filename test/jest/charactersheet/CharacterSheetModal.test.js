@@ -94,11 +94,13 @@ describe("CharacterSheetModal", () => {
 		});
 
 		it("passes the caller's options through untouched", async () => {
-			await CharacterSheetModal.pGetShow({title: "Craft", isWidth100: true, isHeight100: true});
+			const fnCanClose = () => false;
+			await CharacterSheetModal.pGetShow({title: "Craft", isWidth100: true, isHeight100: true, fnCanClose});
 
 			expect(calls[0].title).toBe("Craft");
 			expect(calls[0].isWidth100).toBe(true);
 			expect(calls[0].isHeight100).toBe(true);
+			expect(calls[0].fnCanClose).toBe(fnCanClose);
 		});
 
 		it("honours the escape hatch and strips its own flag", async () => {
@@ -108,6 +110,20 @@ describe("CharacterSheetModal", () => {
 			expect(calls[0].title).toBe("Raw");
 			// Untouched — no dialog semantics applied
 			expect(modal.eleModal.getAttribute("role")).toBeNull();
+		});
+
+		it("routes string input dialogs through the character-sheet modal front door", async () => {
+			let inputOpts = null;
+			globalThis.InputUiUtil.pGetUserString = async opts => {
+				inputOpts = opts;
+				return "Goblin";
+			};
+
+			await expect(CharacterSheetModal.pGetUserString({title: "Choose target"})).resolves.toBe("Goblin");
+			await inputOpts.fnGetShowModal({title: "Choose target"});
+
+			expect(calls[0].title).toBe("Choose target");
+			expect(calls[0].cbClose).toEqual(expect.any(Function));
 		});
 	});
 

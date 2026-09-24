@@ -90,6 +90,7 @@ Each class file (`data/class/class-<name>.json`) contains four top-level arrays:
   "classFeatures": [
     "Fighting Style|Fighter||1",           // UID: name|class|classSource|level
     "Second Wind|Fighter||1",              //   (classSource empty = same as source)
+    "Epic Boon|Artificer|EFA|19|EFA",      // optional 5th field = feature source
     {
       "classFeature": "Martial Archetype|Fighter||3",
       "gainSubclassFeature": true          // marks where subclass is chosen
@@ -115,10 +116,13 @@ Each class file (`data/class/class-<name>.json`) contains four top-level arrays:
 ### classFeature UID Format
 
 ```
-FeatureName|ClassName|ClassSource|Level
+FeatureName|ClassName|ClassSource|Level[|FeatureSource]
 ```
 
 When `ClassSource` matches the class's own source, it can be empty: `"Extra Attack|Fighter||5"`.
+The optional fifth field preserves an explicitly source-qualified feature reference, as in
+`"Epic Boon|Artificer|EFA|19|EFA"`. Consumers must continue reading the class level from
+field 4 while validating the referenced class name/source against the containing class.
 
 ### classFeatures Array Entry Variants
 

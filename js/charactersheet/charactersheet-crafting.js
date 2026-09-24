@@ -92,11 +92,62 @@ class CharacterSheetCrafting {
 		return `${Math.round(n * 100) / 100}`;
 	}
 
+	static _fmtWorkweeks (workweeks) {
+		return this._fmtRequired(workweeks);
+	}
+
+	static _fmtWorkweekUnit (workweeks) {
+		return workweeks === 1 ? "workweek" : "workweeks";
+	}
+
+	static _fmtCraftingTimeSource (source) {
+		return `${source.name} [${source.source}] \u00d7${source.multiplier}`;
+	}
+
 	static _fmtQuantity (harvest) {
 		if (!harvest) return "1";
 		if (harvest.quantityRoll) return harvest.quantityRoll;
 		const n = harvest.quantity ?? 1;
 		return harvest.quantityUnit ? `${n} ${harvest.quantityUnit}` : `${n}`;
+	}
+
+	static _resolveRecipeItem (recipe, items = []) {
+		const [uidName, uidSource] = String(recipe?.itemUid || "").split("|");
+		return items.find(item =>
+			item.name?.toLowerCase() === String(uidName || recipe?.name || "").toLowerCase()
+				&& item.source?.toLowerCase() === String(uidSource || recipe?.source || "").toLowerCase())
+			|| items.find(item => item.name === recipe?.name && item.source === recipe?.source)
+			|| null;
+	}
+
+	static _CRAFTING_WORKWEEKS_BY_RARITY = {
+		common: 1,
+		uncommon: 2,
+		rare: 10,
+		"very rare": 25,
+		legendary: 50,
+	};
+
+	/**
+	 * Calculate crafting workweeks from an authored copper-piece value, falling
+	 * back to the XDMG rarity baseline for value-less magic items, then apply any
+	 * reusable character-state crafting-time multiplier to the resolved item.
+	 * @param {*} recipe
+	 * @param {{state?: *, items?: Array<*>}} [opts]
+	 * @returns {number|null}
+	 */
+	static getCraftingWorkweeks (recipe, {state = null, items = []} = {}) {
+		const item = CharacterSheetCrafting._resolveRecipeItem(recipe, items);
+		const value = recipe?.value ?? item?.value;
+		let baseWorkweeks = value == null
+			? CharacterSheetCrafting._CRAFTING_WORKWEEKS_BY_RARITY[
+				String(recipe?.rarity || item?.rarity || "").toLowerCase()
+			] ?? null
+			: Math.max(1, Math.round(value / 100 / 50));
+		if (baseWorkweeks == null) return null;
+		if (recipe?.recipeCategory === "potion") baseWorkweeks /= 2;
+		const multiplier = state?.getCraftingTimeMultiplier?.({item}) ?? 1;
+		return baseWorkweeks * multiplier;
 	}
 
 	/** Roll a quantity expression through the dice pipeline so it lands in the roll log. */
@@ -903,6 +954,73 @@ class CharacterSheetCrafting {
 		return counts.findIndex(n => n > 0);
 	}
 
+	_getRecipeResultItem (recipe) {
+		const [uidName, uidSource] = `${recipe?.itemUid ?? ""}`.split("|");
+		const name = uidName || recipe?.name;
+		const source = uidSource || recipe?.source;
+		return (this._page.getItems() || []).find(it =>
+			`${it?.name ?? ""}`.toLowerCase() === `${name ?? ""}`.toLowerCase()
+			&& `${it?.source ?? ""}`.toLowerCase() === `${source ?? ""}`.toLowerCase(),
+		) || null;
+	}
+
+	_getCraftingTime (recipe, {quantity = 1} = {}) {
+		return this._state.getCraftingTimeCalculation({
+			quantity,
+			recipe,
+			item: this._getRecipeResultItem(recipe),
+		});
+	}
+
+	static _getCraftingTimeBaselineLabel (craftingTime) {
+		switch (craftingTime?.baselineSource?.type) {
+			case "explicit": return craftingTime.baselineSource.name;
+			case "value": return "recipe value \u00f7 50 GP";
+			case "xdmg-rarity": {
+				const source = craftingTime.baselineSource;
+				return `${source.source} p. ${source.page}, ${source.rarity.toTitleCase()} magic item${source.isConsumable ? " (non-scroll consumable time halved)" : ""}`;
+			}
+			default: return "shared crafting rule";
+		}
+	}
+
+	static _getCraftingTimeListItems (craftingTime) {
+		if (!craftingTime?.isSupported) {
+			const reason = craftingTime?.reason || "Crafting time is unavailable because no shared duration rule matched.";
+			return `<li><strong>Time:</strong> <span class="cs-crafting__warning">${reason.qq()}</span></li>`;
+		}
+		const effective = this._fmtWorkweeks(craftingTime.effectiveWorkweeks);
+		const effectiveUnit = this._fmtWorkweekUnit(craftingTime.effectiveWorkweeks);
+		const baselineLabel = this._getCraftingTimeBaselineLabel(craftingTime);
+		if (!craftingTime.sourceBreakdown.length) {
+			return `<li><strong>Time:</strong> ~${effective} ${effectiveUnit} <span class="ve-muted">(${baselineLabel.qq()})</span></li>`;
+		}
+
+		const baseline = this._fmtWorkweeks(craftingTime.baselineWorkweeks);
+		const baselineUnit = this._fmtWorkweekUnit(craftingTime.baselineWorkweeks);
+		const sources = craftingTime.sourceBreakdown.map(source => this._fmtCraftingTimeSource(source)).join("; ");
+		return [
+			`<li><strong>Time:</strong> ~${effective} ${effectiveUnit} <span class="ve-muted">(baseline ~${baseline} ${baselineUnit} from ${baselineLabel.qq()})</span></li>`,
+			`<li><strong>Time modifier:</strong> ${sources.qq()}</li>`,
+		].join("");
+	}
+
+	static _getCraftingTimeOutcomeText (craftingTime) {
+		if (!craftingTime?.isSupported) {
+			const reason = craftingTime?.reason || "Crafting time is unavailable because no shared duration rule matched.";
+			return ` ${reason.qq()}`;
+		}
+		const effective = this._fmtWorkweeks(craftingTime.effectiveWorkweeks);
+		const effectiveUnit = this._fmtWorkweekUnit(craftingTime.effectiveWorkweeks);
+		const baselineLabel = this._getCraftingTimeBaselineLabel(craftingTime);
+		if (!craftingTime.sourceBreakdown.length) return ` About ${effective} ${effectiveUnit} of work (${baselineLabel}).`;
+
+		const baseline = this._fmtWorkweeks(craftingTime.baselineWorkweeks);
+		const baselineUnit = this._fmtWorkweekUnit(craftingTime.baselineWorkweeks);
+		const sources = craftingTime.sourceBreakdown.map(source => this._fmtCraftingTimeSource(source)).join("; ");
+		return ` About ${effective} ${effectiveUnit} of work (baseline ${baseline} ${baselineUnit} from ${baselineLabel}; ${sources}).`;
+	}
+
 	/**
 	 * Craft: a commit dialog, not a check.
 	 *
@@ -920,7 +1038,7 @@ class CharacterSheetCrafting {
 		// click from an empty bag. Inventory is the only authority on what is held.
 		status = this._getRecipeReadiness(recipe);
 
-		const workweeks = recipe.value != null ? Math.max(1, Math.round(recipe.value / 100 / 50)) : null;
+		const craftingTime = this._getCraftingTime(recipe);
 
 		// A component spent on a craft is a component you can no longer cast with. Say so.
 		// Driven off the spend plan rather than the raw ingredient rows: the plan is already
@@ -951,7 +1069,7 @@ class CharacterSheetCrafting {
 			`<p>Crafting <strong>${recipe.name.qq()}</strong>${recipe.rarity ? ` (${recipe.rarity.toTitleCase()})` : ""}.</p>`,
 			`<ul class="mb-2">`,
 			recipe.crafter ? `<li><strong>Crafter:</strong> ${recipe.crafter}${advisory?.tool ? ` \u2014 ${advisory.tool}` : ""} ${advisory?.isProficient ? "\u2705" : "\u26a0\ufe0f not proficient"}</li>` : "",
-			workweeks ? `<li><strong>Time:</strong> ~${workweeks} workweek${workweeks === 1 ? "" : "s"} (gp \u00f7 50)</li>` : "",
+			this.constructor._getCraftingTimeListItems(craftingTime),
 			rarityAdvisory && !rarityAdvisory.isSufficient ? `<li>\u26a0\ufe0f Hamund's Crafter Skill rule wants a +${rarityAdvisory.needed} proficiency bonus; yours is +${rarityAdvisory.prof}</li>` : "",
 			`</ul>`,
 			status.ingredients.length ? `<p class="mb-1"><strong>Consumes:</strong></p><ul class="mb-2">${this.constructor.getSpendPlan(status.ingredients).map(sp => `<li>${this.constructor._fmtRequired(sp.quantity)}\u00d7 ${sp.name.qq()}</li>`).join("")}</ul>` : "",
@@ -984,7 +1102,7 @@ class CharacterSheetCrafting {
 		this._page.saveCharacter();
 		this._page._inventory?.render?.();
 
-		await this._pShowCraftOutcome(recipe, {ledger, workweeks, consumed: this.constructor.getSpendPlan(status.ingredients)});
+		await this._pShowCraftOutcome(recipe, {ledger, craftingTime, consumed: this.constructor.getSpendPlan(status.ingredients)});
 	}
 
 	/**
@@ -994,12 +1112,12 @@ class CharacterSheetCrafting {
 	 * an act that can consume a Very Rare component and represent weeks of in-world work. Same
 	 * shape, plus the one affordance a consuming action owes the player: a way back.
 	 */
-	async _pShowCraftOutcome (recipe, {ledger, workweeks, consumed}) {
+	async _pShowCraftOutcome (recipe, {ledger, craftingTime, consumed}) {
 		const renderer = Renderer.get();
 
 		const choice = await this._pThreeWay({
 			title: `\ud83d\udd28 ${recipe.name}`,
-			html: `<p><strong>Crafted.</strong>${recipe.rarity ? ` ${recipe.rarity.toTitleCase()}.` : ""}${workweeks ? ` About ${workweeks} workweek${workweeks === 1 ? "" : "s"} of work.` : ""}</p>
+			html: `<p><strong>Crafted.</strong>${recipe.rarity ? ` ${recipe.rarity.toTitleCase()}.` : ""}${this.constructor._getCraftingTimeOutcomeText(craftingTime)}</p>
 				${consumed.length ? `<p class="ve-small ve-muted mb-1">Spent: ${consumed.map(i => `${CharacterSheetCrafting._fmtRequired(i.quantity ?? 1)}\u00d7 ${i.name}`).join(", ").qq()}</p>` : ""}
 				${recipe.entries?.length ? `<div class="mb-2">${renderer.render({entries: recipe.entries}, 2)}</div>` : ""}
 				<p class="ve-small ve-muted">It is in your inventory.</p>`,
@@ -1421,13 +1539,13 @@ class CharacterSheetCrafting {
 	 * @param {{name: string, source: string}|null} [opts.material] Material chosen at the workbench.
 	 */
 	_addCraftedItem (recipe, {material = null} = {}) {
-		const real = (this._page.getItems() || []).find(it => it.name === recipe.name && it.source === recipe.source);
+		const real = this._getRecipeResultItem(recipe);
 
 		const base = real ? {...real} : {
 			name: recipe.name,
 			source: recipe.source,
 			_isCraftedItem: true,
-			type: "G",
+			type: recipe.itemType || "G",
 			rarity: recipe.rarity || "unknown",
 			entries: recipe.entries || [],
 		};

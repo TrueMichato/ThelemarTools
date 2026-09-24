@@ -184,6 +184,7 @@ Every `featuresMatrix` entry that points at a feature with a
 | Exposes a number on `getFeatureCalculations()` | `featureCalculation` (`exact` / `min`, or `isNull: true` for an explicit "no cap" sentinel that must be *present and null*, never absent) |
 | That number is supposed to be **derived** from a live stat, not hard-coded | `featureCalculationDerivedFrom` (`equals: "abilityMod" \| "spellSaveDc" \| "spellAttackBonus" \| "proficiencyBonus"`) — use this instead of a loose `min` floor whenever the preset doesn't pin ability scores; the wizard's auto-fill can hand a Bard CHA 8 |
 | Summons a statblock companion that scales with class level | `classSummon` (drives the state API, asserts HP / AC / attack bonus / damage, then dismisses; `restFirst: "long"` makes the limited-use cost deterministic) |
+| Uses the EFA Artillerist's operated cannon/firearm controls | `efaArtilleristProbe` (`baseCannon`, `arcaneFirearm`, `explosiveCannon`, or `fortifiedPosition`) |
 | Creates a real inventory item | `createsInventoryItem` (invokes the creator, asserts the row landed under `maxValueGp`, then invokes `cleanupMethod`) |
 | Trades a spell slot for a feature use | `restoreFeatureUseWithSpellSlot` |
 | Pure narrative / cinematic (Wish, Divine Intervention, capstone) | none — add `// no measurable derived effect: <reason>` comment |

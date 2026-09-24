@@ -369,6 +369,25 @@ _getMaxSpellLevel(classInfo, characterLevel) {
 }
 ```
 
+### Source-qualified Artificer focuses
+
+Every exact `Artificer|EFA` spell resolves its casting owner before applying the
+EFA material-focus rule. The base rule accepts equipped, proficient Thieves'
+Tools, Tinker's Tools, or Artisan's Tools. While exact EFA Battle Ready is
+active, the same canonical requirement additionally accepts any live, equipped,
+positive-quantity weapon for which `_isWeaponProficient` returns true. TCE
+Battle Smith and name-only legacy Artificer attribution do not gain this rule.
+
+The Battle Ready form uses stable rule ID
+`efa-battle-ready-tools-or-proficient-weapon` and exact feature UID
+`Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA`. Focus selection and
+committed-cast receipts reuse the normal focus pipeline: receipts mirror
+`ruleId`, `sourceFeatureUid`, and `focusRule`, while `focusReference` records the
+exact live inventory wrapper and lets cast results name the selected weapon.
+Nothing is stored in a parallel focus ledger, so unequipping, consuming,
+removing proficiency, or Respeccing away from Battle Ready takes effect on the
+next resolution.
+
 ### Prepared Spells
 
 For prepared casters (Cleric, Druid, Paladin, Wizard):

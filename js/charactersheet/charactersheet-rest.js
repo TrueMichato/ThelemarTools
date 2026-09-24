@@ -4,12 +4,21 @@
  */
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetProgression} from "./charactersheet-progression.js";
+import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetRest {
 	static _UNDO_REST_BTN_ID = "charsheet-btn-undo-rest";
+	static _EFA_ARMOR_MODEL_NAMES = ["Dreadnaught", "Guardian", "Infiltrator"];
+	static _EFA_ARMOR_MODEL_PREVIEWS = {
+		Dreadnaught: "Force Demolisher (melee, Reach); Giant Stature",
+		Guardian: "Thunder Pulse (melee); Defensive Field while Bloodied",
+		Infiltrator: "Lightning Launcher (90/300); +5 Speed and Stealth Advantage",
+	};
 
 	constructor (page) {
 		this._page = page;
@@ -30,11 +39,28 @@ class CharacterSheetRest {
 		document.getElementById("charsheet-btn-long-rest")?.addEventListener("click", () => this._showLongRestDialog());
 	}
 
+	_advanceCommittedRestTime (restType, identity) {
+		const receipt = this._state.advanceRestTime?.(restType, {identity});
+		if (receipt?.ok) return receipt;
+		if (this._page) this._page._lastRestSnapshot = null;
+		JqueryUtil.doToast({
+			type: "danger",
+			content: `Could not finish the ${restType} rest: ${receipt?.message || receipt?.code || "time advancement failed"}.`,
+		});
+		return receipt || {ok: false, code: "rest-time-advance-unavailable"};
+	}
+
 	async _showShortRestDialog () {
 		const currentHp = this._state.getHp().current;
 		const maxHp = this._state.getHp().max;
 		const hitDice = this._state.getHitDice();
 		const availableHitDice = hitDice.filter(hd => hd.current > 0);
+		const companionHitDieTargets = (this._state.getCompanions?.() || []).filter(companion =>
+			companion.featureGrant?.uid
+			&& companion.hitDice?.current > 0
+			&& companion.hp?.current > 0
+			&& companion.hp.current < companion.hp.max,
+		);
 		const conditions = this._state.getConditionNames?.() || [];
 		const isConcentrating = this._state.isConcentrating?.();
 		const concentration = this._state.getConcentration?.();
@@ -47,8 +73,18 @@ class CharacterSheetRest {
 			? CharacterSheetRest.getMemorizeSpellCandidates(this._state)
 			: null;
 		const canMemorizeSpell = !!(memorizeCandidates && memorizeCandidates.prepared.length && memorizeCandidates.spellbook.length);
+		const canRetuneEfaArmorModel = !!this._state.getEfaArmorerModel?.();
+		const activeEfaCannons = this._state.listEfaEldritchCannons?.() || [];
 
-		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell) {
+		if (currentHp >= maxHp
+			&& !availableHitDice.length
+			&& !companionHitDieTargets.length
+			&& !conditions.length
+			&& !isConcentrating
+			&& !canReduceExhaustion
+			&& !canMemorizeSpell
+			&& !canRetuneEfaArmorModel
+			&& !activeEfaCannons.length) {
 			JqueryUtil.doToast({type: "info", content: "You're already at full health with no hit dice to spend."});
 			return;
 		}
@@ -62,6 +98,7 @@ class CharacterSheetRest {
 		let totalHealing = 0;
 		// Track spent dice by type
 		const spentDice = {};
+		const pendingCompanionHitDice = [];
 
 		const eleTotalHealing = e_({tag: "span", clazz: "charsheet__rest-healing-value", txt: "0"});
 
@@ -79,6 +116,14 @@ class CharacterSheetRest {
 				<div class="charsheet__rest-section-title">🎲 Available Hit Dice</div>
 				<div id="short-rest-hit-dice-container"></div>
 			</div>
+
+			${companionHitDieTargets.length ? `
+			<div class="charsheet__rest-section">
+				<div class="charsheet__rest-section-title">🤖 Companion Hit Dice</div>
+				<p class="ve-muted ve-small mb-2">These d8s heal only their companion and never spend your Hit Dice.</p>
+				<div id="short-rest-companion-hit-dice-container"></div>
+			</div>
+			` : ""}
 			
 			<div class="charsheet__rest-healing-display">
 				<span class="charsheet__rest-healing-icon">💚</span>
@@ -122,6 +167,50 @@ class CharacterSheetRest {
 					${cb}
 					<span>⚠️ Remove: ${condition}</span>
 				</label>`.appendTo(condContainer);
+			});
+		}
+
+		if (companionHitDieTargets.length) {
+			const companionHdContainer = e_({ele: modalInner}).find("#short-rest-companion-hit-dice-container");
+			companionHitDieTargets.forEach(companion => {
+				let remaining = companion.hitDice.current;
+				let projectedHp = companion.hp.current;
+				const dieSides = Number(String(companion.hitDice.die || "d8").replace(/^d/i, "")) || 8;
+				const constitutionModifier = this._state.getCompanionAbilityMod(companion.id, "con");
+				const eleRemaining = e_({tag: "span", txt: `${remaining}`});
+				const eleProjectedHp = e_({tag: "span", txt: `${projectedHp}/${companion.hp.max} HP`});
+				const btn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", txt: `🎲 Roll ${companion.hitDice.die || "d8"}`});
+
+				btn.onClick(() => {
+					if (remaining <= 0 || projectedHp >= companion.hp.max) return;
+					const roll = this._page.rollDice(1, dieSides);
+					const requested = Math.max(1, roll + constitutionModifier);
+					const actual = Math.min(requested, companion.hp.max - projectedHp);
+					pendingCompanionHitDice.push({companionId: companion.id, roll});
+					projectedHp += actual;
+					remaining--;
+					eleRemaining.txt(`${remaining}`);
+					eleProjectedHp.txt(`${projectedHp}/${companion.hp.max} HP`);
+					if (remaining <= 0 || projectedHp >= companion.hp.max) btn.disabled = true;
+					JqueryUtil.doToast({
+						type: "success",
+						content: `${companion.customName || companion.name}: ${companion.hitDice.die || "d8"} (${roll}) + CON (${constitutionModifier >= 0 ? "+" : ""}${constitutionModifier}) = ${actual} HP`,
+					});
+					this._page._rollHistory?.addRoll({
+						title: `${companion.customName || companion.name} Hit Die`,
+						total: actual,
+						breakdown: `${companion.hitDice.die || "d8"} (${roll}) + CON (${constitutionModifier >= 0 ? "+" : ""}${constitutionModifier})`,
+					});
+				});
+
+				ee`<div class="charsheet__hit-die-row">
+					<div class="charsheet__hit-die-info">
+						<span class="charsheet__hit-die-class">${companion.customName || companion.name}:</span>
+						<span class="charsheet__hit-die-die">${companion.hitDice.die || "d8"}</span>
+					</div>
+					<span class="charsheet__hit-die-remaining">${eleRemaining} / ${companion.hitDice.max} remaining • ${eleProjectedHp}</span>
+					${btn}
+				</div>`.appendTo(companionHdContainer);
 			});
 		}
 
@@ -322,6 +411,13 @@ class CharacterSheetRest {
 			else modalInner.append(huntersPreySwap.section);
 		}
 
+		const armorModelSwitch = this._buildEfaArmorModelSection({restType: "short"});
+		if (armorModelSwitch) {
+			const amTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (amTarget?.parentNode) amTarget.parentNode.insertBefore(armorModelSwitch.section, amTarget);
+			else modalInner.append(armorModelSwitch.section);
+		}
+
 		// --- Tireless exhaustion reduction (TGTT Ranger) ---
 		const tirelessExhaustion = this._buildTirelessExhaustionSection();
 		if (tirelessExhaustion) {
@@ -352,104 +448,176 @@ class CharacterSheetRest {
 		refreshHealingTotal();
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
-		btnConfirm.onClick(() => {
+		btnConfirm.onClick(async () => {
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
-			this._captureRestSnapshot("short");
-
-			// Apply hit dice spending using spentDice tracker. The healing was
-			// already rolled into `totalHealing` above, so decrement the pools
-			// WITHOUT healing again (useHitDie() would heal a second time).
-			Object.entries(spentDice).forEach(([dieType, count]) => {
-				for (let i = 0; i < count; i++) {
-					this._state.adjustHitDieCurrent(dieType, -1);
+			const previousRestSnapshot = this._page?._lastRestSnapshot || null;
+			const restSnapshot = this._captureRestSnapshot("short");
+			if (!restSnapshot?.json) {
+				this._page._lastRestSnapshot = previousRestSnapshot;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "The Short Rest could not start because the current character state could not be protected for rollback. No changes were made.",
+				});
+				return;
+			}
+			btnConfirm.disabled = true;
+			try {
+				const timeReceipt = this._state.advanceRestTime?.("short", {
+					identity: "CharacterSheetRest.finishShortRest",
+				});
+				if (!timeReceipt?.ok) {
+					throw new Error(`Could not finish the short rest: ${timeReceipt?.message || timeReceipt?.code || "time advancement failed"}.`);
 				}
-			});
 
-			if (totalHealing > 0) {
-				this._state.heal(totalHealing);
-			}
+				// Apply hit dice spending using spentDice tracker. The healing was
+				// already rolled into `totalHealing` above, so decrement the pools
+				// WITHOUT healing again (useHitDie() would heal a second time).
+				Object.entries(spentDice).forEach(([dieType, count]) => {
+					for (let i = 0; i < count; i++) {
+						this._state.adjustHitDieCurrent(dieType, -1);
+					}
+				});
 
-			// Material rest bonuses land AFTER the dice healing and are reported separately,
-			// so the log distinguishes "you rolled well" from "the pearl paid out".
-			const bonusHealing = this._applyRestBonusHealing({
-				bonuses: restBonuses,
-				suppressedNames: suppressedBonuses,
-				hasSpentHitDice: Object.keys(spentDice).length > 0,
-			});
+				if (totalHealing > 0) {
+					this._state.heal(totalHealing);
+				}
 
-			this._restoreResources("short");
-			this._state.restoreSignatureSpells?.();
-
-			// Restore Warlock pact slots on short rest
-			const pactSlots = this._state.getPactSlots();
-			if (pactSlots && pactSlots.max > 0) {
-				this._state.setPactSlotsCurrent(pactSlots.max);
-			}
-
-			// Remove selected conditions
-			conditionsToRemove.forEach(condition => {
-				this._state.removeCondition?.(condition);
-			});
-
-			// Break concentration if requested
-			if (shouldBreakConcentration) {
-				this._state.breakConcentration?.();
-			}
-
-			// Apply Arcane/Natural Recovery slot selections
-			let slotsRecovered = 0;
-			if (hasSlotRecovery && slotRecoverySelections) {
-				const slotsToRecover = Object.entries(slotRecoverySelections)
-					.filter(([_, amount]) => amount > 0)
-					.map(([level, amount]) => ({level: parseInt(level), amount}));
-
-				if (slotsToRecover.length > 0) {
-					const method = calc.hasArcaneRecovery
-						? "useArcaneRecovery"
-						: "useNaturalRecovery";
-					if (this._state[method](slotsToRecover)) {
-						slotsRecovered = slotsToRecover.reduce((s, r) => s + r.amount, 0);
+				let companionHealing = 0;
+				for (const pending of pendingCompanionHitDice) {
+					const result = this._state.spendCompanionHitDie({
+						companionId: pending.companionId,
+						target: {companionId: pending.companionId, confirmed: true},
+						rolls: {hitDie: pending.roll},
+					});
+					if (result.ok) companionHealing += result.hp.actual;
+					else {
+						JqueryUtil.doToast({
+							type: "warning",
+							content: result.message || "A queued companion Hit Die could not be committed.",
+						});
 					}
 				}
+
+				// Material rest bonuses land AFTER the dice healing and are reported separately,
+				// so the log distinguishes "you rolled well" from "the pearl paid out".
+				const bonusHealing = this._applyRestBonusHealing({
+					bonuses: restBonuses,
+					suppressedNames: suppressedBonuses,
+					hasSpentHitDice: Object.keys(spentDice).length > 0,
+				});
+
+				this._restoreResources("short");
+				this._state.restoreSignatureSpells?.();
+
+				// Restore Warlock pact slots on short rest
+				const pactSlots = this._state.getPactSlots();
+				if (pactSlots && pactSlots.max > 0) {
+					this._state.setPactSlotsCurrent(pactSlots.max);
+				}
+
+				// Remove selected conditions
+				conditionsToRemove.forEach(condition => {
+					this._state.removeCondition?.(condition);
+				});
+
+				// Break concentration if requested
+				if (shouldBreakConcentration) {
+					this._state.breakConcentration?.();
+				}
+
+				// Apply Arcane/Natural Recovery slot selections
+				let slotsRecovered = 0;
+				if (hasSlotRecovery && slotRecoverySelections) {
+					const slotsToRecover = Object.entries(slotRecoverySelections)
+						.filter(([_, amount]) => amount > 0)
+						.map(([level, amount]) => ({level: parseInt(level), amount}));
+
+					if (slotsToRecover.length > 0) {
+						const method = calc.hasArcaneRecovery
+							? "useArcaneRecovery"
+							: "useNaturalRecovery";
+						if (this._state[method](slotsToRecover)) {
+							slotsRecovered = slotsToRecover.reduce((s, r) => s + r.amount, 0);
+						}
+					}
+				}
+
+				// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
+				const spRecovered = this._state.applySorcerousRestoration();
+
+				// Apply Hunter's Prey option swap, if changed
+				huntersPreySwap?.apply();
+
+				// Apply Tireless exhaustion reduction, if elected
+				const tirelessReduced = tirelessExhaustion?.apply() || 0;
+
+				// Apply Memorize Spell swap, if elected
+				const memorizeSwap = memorizeSpell?.apply() || false;
+				const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 60});
+
+				const armorModelOutcome = armorModelSwitch?.apply() || null;
+				const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+
+				const saveResult = this._page._saveCurrentCharacter
+					? await this._page._saveCurrentCharacter({isReturnStatus: true})
+					: await this._page.saveCharacter?.();
+				if (saveResult === false) throw new Error("The Short Rest could not be saved.");
+				this._page.renderCharacter();
+				doClose(true);
+
+				let message = `😴 Short rest complete!`;
+				if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
+				if (companionHealing > 0) message += ` Companions recovered ${companionHealing} HP.`;
+				if (bonusHealing > 0) message += ` Materials added ${bonusHealing} HP.`;
+				if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
+				if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
+				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
+				if (shouldBreakConcentration) message += ` Broke concentration.`;
+				if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
+				if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
+				message += armorModelFeedback.successSuffix;
+				if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
+
+				JqueryUtil.doToast({
+					type: "success",
+					content: message,
+				});
+				if (armorModelFeedback.warning) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: armorModelFeedback.warning,
+					});
+				}
+
+				// Offer a persistent undo for this rest (BUG 8).
+				this._showUndoRestAffordance("short");
+
+				this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("short");
+				this._page.getMaterialsModule?.()?.offerShortRestRepairs();
+			} catch (error) {
+				if (restSnapshot?.json) this._state.loadFromJson(restSnapshot.json);
+				if (this._page) this._page._lastRestSnapshot = previousRestSnapshot;
+				if (previousRestSnapshot) this._showUndoRestAffordance(previousRestSnapshot.restType);
+				else this._removeUndoRestAffordance();
+				let isRollbackPersisted = true;
+				try {
+					const rollbackSaveResult = this._page._saveCurrentCharacter
+						? await this._page._saveCurrentCharacter({isReturnStatus: true})
+						: await this._page.saveCharacter?.();
+					isRollbackPersisted = rollbackSaveResult !== false;
+				} catch {
+					isRollbackPersisted = false;
+				}
+				this._page.renderCharacter?.();
+				btnConfirm.disabled = false;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: isRollbackPersisted
+						? `${error?.message || "The Short Rest could not be completed."} No changes were kept.`
+						: `${error?.message || "The Short Rest could not be completed."} The sheet was restored, but that rollback could not be saved; save the character manually before leaving.`,
+				});
 			}
-
-			// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
-			const spRecovered = this._state.applySorcerousRestoration();
-
-			// Apply Hunter's Prey option swap, if changed
-			huntersPreySwap?.apply();
-
-			// Apply Tireless exhaustion reduction, if elected
-			const tirelessReduced = tirelessExhaustion?.apply() || 0;
-
-			// Apply Memorize Spell swap, if elected
-			const memorizeSwap = memorizeSpell?.apply() || false;
-
-			this._page.saveCharacter();
-			this._page.renderCharacter();
-			doClose(true);
-
-			let message = `😴 Short rest complete!`;
-			if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
-			if (bonusHealing > 0) message += ` Materials added ${bonusHealing} HP.`;
-			if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
-			if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
-			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
-			if (shouldBreakConcentration) message += ` Broke concentration.`;
-			if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
-			if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
-
-			JqueryUtil.doToast({
-				type: "success",
-				content: message,
-			});
-
-			// Offer a persistent undo for this rest (BUG 8).
-			this._showUndoRestAffordance("short");
-
-			this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("short");
-			this._page.getMaterialsModule?.()?.offerShortRestRepairs();
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -633,7 +801,238 @@ class CharacterSheetRest {
 		};
 	}
 
-	async _showLongRestDialog () {
+	prepareEfaExperimentalElixirLongRestDraft (opts = {}) {
+		return this._state.prepareEfaExperimentalElixirLongRestDraft(opts);
+	}
+
+	_createEfaExperimentalElixirLongRestSection ({onChange = null} = {}) {
+		const batchSize = this._state.getEfaExperimentalElixirBatchSize?.() || 0;
+		if (!batchSize) return null;
+
+		const suppliesRows = this._state.getEfaExperimentalElixirSuppliesRows?.() || [];
+		const hasSupplies = suppliesRows.length > 0;
+		const existingCount = this._state.getEfaExperimentalElixirRows?.().length || 0;
+		const classLevel = this._state._getEfaAlchemistClassEntry?.()?.level || 0;
+		const radioName = `efa-elixir-rest-${CryptUtil.uid()}`;
+		const section = e_({outer: `<section class="charsheet__rest-section charsheet__efa-elixir-rest" aria-labelledby="${radioName}-title">
+			<div class="charsheet__rest-section-title" id="${radioName}-title">Experimental Elixir</div>
+			<p class="mb-2">Finishing this rest expires ${existingCount} supported vial${existingCount === 1 ? "" : "s"} from the prior batch and replaces them with this choice.</p>
+			${hasSupplies
+		? `<fieldset class="charsheet__efa-elixir-fieldset" aria-describedby="${radioName}-help">
+					<legend>Long Rest batch</legend>
+					<label class="charsheet__efa-elixir-inline-choice"><input type="radio" name="${radioName}" value="produce"> Produce ${batchSize} vials</label>
+					<label class="charsheet__efa-elixir-inline-choice"><input type="radio" name="${radioName}" value="decline" checked> Decline production</label>
+				</fieldset>
+				<p class="ve-muted ve-small" id="${radioName}-help">Production rolls ${batchSize}d6 once. Every rolled 6 requires an explicit effect choice.</p>`
+		: `<p class="charsheet__efa-elixir-alert">Production unavailable. Equip Alchemist's Supplies (XPHB) and be proficient with them. The rest can still finish and will replace the supported batch with no new vials.</p>`}
+			<div class="charsheet__efa-elixir-rest-rolls" data-efa-elixir-rest-rolls></div>
+			<div class="charsheet__efa-elixir-live" role="status" aria-live="polite" aria-atomic="true" data-efa-elixir-rest-live></div>
+		</section>`});
+		const rollsWrp = section.querySelector("[data-efa-elixir-rest-rolls]");
+		const live = section.querySelector("[data-efa-elixir-rest-live]");
+		let decision = "decline";
+		let rolls = null;
+		let row6Selects = [];
+
+		const rollD6 = () => typeof RollerUtil !== "undefined" && typeof RollerUtil.randomise === "function"
+			? RollerUtil.randomise(6)
+			: Math.floor(Math.random() * 6) + 1;
+		const getRow6Choices = () => row6Selects.map(select => Number(select.value)).filter(Boolean);
+		const clearLive = () => {
+			if (!live) return;
+			live.textContent = "";
+			live.classList.remove("charsheet__efa-elixir-live--error");
+		};
+		const renderRolls = () => {
+			row6Selects = [];
+			if (rollsWrp) rollsWrp.innerHTML = "";
+			if (decision !== "produce") return;
+			if (!rolls) rolls = Array.from({length: batchSize}, rollD6);
+			if (!rollsWrp) return;
+			rolls.forEach((roll, ix) => {
+				const row = e_({outer: `<div class="charsheet__efa-elixir-rest-roll">
+					<span class="charsheet__efa-elixir-roll-value" aria-label="Vial ${ix + 1} rolled ${roll}">Vial ${ix + 1}: <strong>${roll}</strong></span>
+				</div>`});
+				if (roll === 6) {
+					const selectId = `${radioName}-choice-${ix}`;
+					const label = e_({outer: `<label for="${selectId}">Rolled 6 - choose the vial ${ix + 1} effect</label>`});
+					const select = e_({tag: "select", id: selectId, clazz: "form-control input-sm"});
+					select.append(e_({tag: "option", val: "", txt: "Choose an effect"}));
+					CharacterSheetEfaExperimentalElixirUi.getEffectEntries().forEach((effect, effectIx) => {
+						const snapshot = CharacterSheetState.getEfaExperimentalElixirEffectSnapshot(effect.key, classLevel);
+						select.append(e_({
+							tag: "option",
+							val: `${effectIx + 1}`,
+							txt: `${effect.label} - ${CharacterSheetEfaExperimentalElixirUi.formatEffectSnapshot(effect.key, snapshot, {
+								intelligenceModifier: effect.key === "healing" ? this._state.getAbilityMod?.("int") : null,
+							})}`,
+						}));
+					});
+					select.addEventListener("change", () => {
+						clearLive();
+						onChange?.();
+					});
+					row.append(label, select);
+					row6Selects.push(select);
+				} else {
+					const effect = CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS[roll];
+					const snapshot = CharacterSheetState.getEfaExperimentalElixirEffectSnapshot(effect.key, classLevel);
+					row.append(e_({
+						tag: "span",
+						clazz: "ve-small",
+						txt: `${effect.label}: ${CharacterSheetEfaExperimentalElixirUi.formatEffectSnapshot(effect.key, snapshot, {
+							intelligenceModifier: effect.key === "healing" ? this._state.getAbilityMod?.("int") : null,
+						})}`,
+					}));
+				}
+				rollsWrp.append(row);
+			});
+		};
+		const setDecision = nextDecision => {
+			decision = nextDecision === "produce" ? "produce" : "decline";
+			section.querySelectorAll(`input[name="${radioName}"]`).forEach(radio => {
+				radio.checked = radio.value === decision;
+			});
+			clearLive();
+			renderRolls();
+			onChange?.();
+		};
+		const getPreparedDraft = () => {
+			if (!hasSupplies || decision === "decline") {
+				return this._state.prepareEfaExperimentalElixirLongRestDraft({decision: "decline"});
+			}
+			if (!rolls || row6Selects.some(select => !select.value)) {
+				return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+			}
+			const plan = this._state.planEfaExperimentalElixirBatch({
+				rolls,
+				row6Choices: getRow6Choices(),
+			});
+			if (!plan.ok) return plan;
+			return this._state.prepareEfaExperimentalElixirLongRestDraft({
+				decision: "produce",
+				plan: plan.plan,
+			});
+		};
+
+		section.querySelectorAll(`input[name="${radioName}"]`).forEach(radio => {
+			radio.addEventListener("change", () => setDecision(radio.value));
+		});
+
+		return {
+			element: section,
+			setDecision,
+			getPreparedDraft,
+			isValid: () => getPreparedDraft().ok,
+			focusFirstInvalid: () => {
+				const unresolved = row6Selects.find(select => !select.value);
+				unresolved?.focus();
+				if (live) {
+					live.classList.add("charsheet__efa-elixir-live--error");
+					live.textContent = "Choose an effect for every vial that rolled a 6.";
+				}
+			},
+			getDecision: () => decision,
+			getRolls: () => rolls ? [...rolls] : null,
+		};
+	}
+
+	_commitLongRestTransaction ({
+		restOptions = {},
+		experimentalElixirDraft = null,
+		applyModalChoices = null,
+	} = {}) {
+		const validatedElixir = experimentalElixirDraft == null
+			? null
+			: this._state.validateEfaExperimentalElixirLongRestDraft(experimentalElixirDraft);
+		if (validatedElixir && !validatedElixir.ok) {
+			return {...validatedElixir, committed: false, restCommitted: false};
+		}
+
+		const snapshot = this._captureRestSnapshot("long");
+		if (!snapshot) {
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-snapshot-failed",
+			};
+		}
+
+		try {
+			const restResult = this._state.onLongRest(restOptions) || {};
+			const modalChoices = applyModalChoices?.() || {ok: true};
+			if (modalChoices.ok === false) {
+				this._state.loadFromJson(snapshot.json);
+				if (this._page) this._page._lastRestSnapshot = null;
+				return {
+					...modalChoices,
+					committed: false,
+					restCommitted: false,
+					rolledBack: true,
+				};
+			}
+
+			const experimentalElixir = validatedElixir
+				? this._state.commitEfaExperimentalElixirLongRestDraft(validatedElixir.draft)
+				: null;
+			if (experimentalElixir && !experimentalElixir.ok) {
+				this._state.loadFromJson(snapshot.json);
+				if (this._page) this._page._lastRestSnapshot = null;
+				return {
+					...experimentalElixir,
+					committed: false,
+					restCommitted: false,
+					rolledBack: true,
+				};
+			}
+
+			this._page?.saveCharacter?.();
+			this._page?.renderCharacter?.();
+			return {
+				ok: true,
+				committed: true,
+				restCommitted: true,
+				restType: "long",
+				restResult,
+				modalChoices,
+				experimentalElixir,
+			};
+		} catch (error) {
+			this._state.loadFromJson(snapshot.json);
+			if (this._page) this._page._lastRestSnapshot = null;
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-commit-failed",
+				error: error?.message || "Unable to commit Long Rest.",
+				rolledBack: true,
+			};
+		}
+	}
+
+	commitEfaExperimentalElixirLongRestDraft ({
+		draft,
+		cancelled = false,
+		restOptions = {},
+	} = {}) {
+		if (cancelled) {
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-cancelled",
+			};
+		}
+
+		return this._commitLongRestTransaction({
+			restOptions,
+			experimentalElixirDraft: draft,
+		});
+	}
+
+	async _showLongRestDialog ({focusAdventurersAtlas = false} = {}) {
 		const currentHp = this._state.getHp().current;
 		const maxHp = this._state.getHp().max;
 		const hitDice = this._state.getHitDice();
@@ -805,12 +1204,26 @@ class CharacterSheetRest {
 			else modalInner.append(huntersPreySwap.section);
 		}
 
+		const arcaneFirearmChoice = this._buildEfaArcaneFirearmLongRestSection();
+		if (arcaneFirearmChoice) {
+			const afTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (afTarget?.parentNode) afTarget.parentNode.insertBefore(arcaneFirearmChoice.section, afTarget);
+			else modalInner.append(arcaneFirearmChoice.section);
+		}
+
 		// --- Primal Focus mode selector (TGTT Ranger) ---
 		const primalFocusSelect = this._buildPrimalFocusModeSection();
 		if (primalFocusSelect) {
 			const pfTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
 			if (pfTarget?.parentNode) pfTarget.parentNode.insertBefore(primalFocusSelect.section, pfTarget);
 			else modalInner.append(primalFocusSelect.section);
+		}
+
+		const armorModelSwitch = this._buildEfaArmorModelSection({restType: "long"});
+		if (armorModelSwitch) {
+			const amTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (amTarget?.parentNode) amTarget.parentNode.insertBefore(armorModelSwitch.section, amTarget);
+			else modalInner.append(armorModelSwitch.section);
 		}
 
 		const daemonologistSideSelect = this._buildDaemonologistSideSection();
@@ -840,156 +1253,890 @@ class CharacterSheetRest {
 		if (spellMasterySwap) modalInner.append(spellMasterySwap.section);
 		const temporalMasteryAge = this._buildTemporalMasteryAgeSection();
 		if (temporalMasteryAge) modalInner.append(temporalMasteryAge.section);
+		const adventurersAtlas = this._buildAdventurersAtlasLongRestSection();
+		if (adventurersAtlas) modalInner.append(adventurersAtlas.section);
+		const replicateMagicItemProduction = this._buildEfaReplicateMagicItemProductionSection();
+		if (replicateMagicItemProduction) modalInner.append(replicateMagicItemProduction.section);
+		const spellStoringItemChoice = this._buildEfaSpellStoringItemSection();
+		if (spellStoringItemChoice) modalInner.append(spellStoringItemChoice.section);
+		const steelDefenderReplacement = this._buildEfaSteelDefenderReplacementSection();
+		if (steelDefenderReplacement) modalInner.append(steelDefenderReplacement.section);
+		let syncValidity = () => {};
+		const experimentalElixir = this._createEfaExperimentalElixirLongRestSection({
+			onChange: () => syncValidity(),
+		});
+		if (experimentalElixir) modalInner.append(experimentalElixir.element);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
-		if (temporalMasteryAge) {
-			const syncValidity = () => { btnConfirm.disabled = !temporalMasteryAge.isValid(); };
-			temporalMasteryAge.onChange(syncValidity);
-			syncValidity();
-		}
-		btnConfirm.onClick(() => {
+		syncValidity = () => {
+			btnConfirm.disabled = !!(
+				(temporalMasteryAge && !temporalMasteryAge.isValid())
+				|| (adventurersAtlas && !adventurersAtlas.isValid())
+				|| (experimentalElixir && !experimentalElixir.isValid())
+			);
+		};
+		temporalMasteryAge?.onChange(syncValidity);
+		adventurersAtlas?.onChange(syncValidity);
+		syncValidity();
+		btnConfirm.onClick(async () => {
 			if (temporalMasteryAge && !temporalMasteryAge.isValid()) return;
+			if (adventurersAtlas && !adventurersAtlas.isValid()) {
+				adventurersAtlas.focusFirstInvalid();
+				return;
+			}
+			const preparedElixir = experimentalElixir?.getPreparedDraft() || null;
+			if (preparedElixir && !preparedElixir.ok) {
+				experimentalElixir.focusFirstInvalid();
+				return;
+			}
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
-			this._captureRestSnapshot("long");
-
-			// Full HP recovery
-			this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
-
-			// Recover half hit dice (minimum 1)
-			hitDice.forEach(hd => {
-				const recovery = Math.max(1, Math.floor(hd.max / 2));
-				hd.current = Math.min(hd.max, hd.current + recovery);
-			});
-			this._state.setHitDice(hitDice);
-
-			// Restore all spell slots
-			for (let level = 1; level <= 9; level++) {
-				const max = this._state.getSpellSlotsMax(level);
-				if (max > 0) {
-					this._state.setSpellSlots(level, max, max);
+			const previousRestSnapshot = this._page?._lastRestSnapshot || null;
+			const restSnapshot = this._captureRestSnapshot("long");
+			if (!restSnapshot?.json) {
+				this._page._lastRestSnapshot = previousRestSnapshot;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "The Long Rest could not start because the current character state could not be protected for rollback. No changes were made.",
+				});
+				return;
+			}
+			btnConfirm.disabled = true;
+			let atlasResult = null;
+			try {
+				atlasResult = this._applyAdventurersAtlasLongRestPlan(adventurersAtlas?.getPlan());
+				if (!atlasResult.ok) {
+					throw new Error(atlasResult.errors.join(" "));
 				}
-			}
-
-			// Restore Warlock pact slots on long rest as well
-			const pactSlots = this._state.getPactSlots();
-			if (pactSlots && pactSlots.max > 0) {
-				this._state.setPactSlotsCurrent(pactSlots.max);
-			}
-
-			// Restore long-rest and short-rest resources
-			this._restoreResources("long");
-			this._state.restoreSignatureSpells?.();
-
-			// Clear one level of exhaustion using the dedicated exhaustion tracker
-			if (cbClearExhaustion.checked) {
-				const currentExhaustion = this._state.getExhaustion();
-				if (currentExhaustion > 0) {
-					this._state.setExhaustion(currentExhaustion - 1);
+				const timeReceipt = this._state.advanceRestTime?.("long", {
+					identity: "CharacterSheetRest.finishLongRest",
+				});
+				if (!timeReceipt?.ok) {
+					throw new Error(`Could not finish the long rest: ${timeReceipt?.message || timeReceipt?.code || "time advancement failed"}.`);
 				}
+				this._state.applyEfaArtificerTinkerLongRestTransition?.();
+				this._state.resetTurnEconomy?.({round: null});
+
+				// Full HP recovery
+				this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
+
+				// Recover half hit dice (minimum 1)
+				hitDice.forEach(hd => {
+					const recovery = Math.max(1, Math.floor(hd.max / 2));
+					hd.current = Math.min(hd.max, hd.current + recovery);
+				});
+				this._state.setHitDice(hitDice);
+
+				// Restore all spell slots
+				for (let level = 1; level <= 9; level++) {
+					const max = this._state.getSpellSlotsMax(level);
+					if (max > 0) {
+						this._state.setSpellSlots(level, max, max);
+					}
+				}
+
+				// Restore Warlock pact slots on long rest as well
+				const pactSlots = this._state.getPactSlots();
+				if (pactSlots && pactSlots.max > 0) {
+					this._state.setPactSlotsCurrent(pactSlots.max);
+				}
+
+				// Restore long-rest and short-rest resources
+				this._restoreResources("long");
+				this._state.restoreSignatureSpells?.();
+				this._state.restoreCartographerMappingMagicUses?.();
+
+				// Clear one level of exhaustion using the dedicated exhaustion tracker
+				if (cbClearExhaustion.checked) {
+					const currentExhaustion = this._state.getExhaustion();
+					if (currentExhaustion > 0) {
+						this._state.setExhaustion(currentExhaustion - 1);
+					}
+				}
+
+				// Restore ability-score damage (all drains) if requested.
+				let abilityDamageRestored = 0;
+				if (cbRestoreAbilityDamage?.checked) {
+					abilityDamageRestored = totalAbilityDamage;
+					this._state.clearAllAbilityDamage?.();
+				}
+
+				// Remove selected conditions
+				conditionsToRemove.forEach(condition => {
+					this._state.removeCondition?.(condition);
+				});
+
+				// Break concentration if requested
+				if (cbBreakConcentration?.checked) {
+					this._state.breakConcentration?.();
+				}
+
+				// Reset death saves
+				this._state.setDeathSaves({successes: 0, failures: 0});
+
+				// Clear transient Druid Wild Shape forms and Wild-Companion familiars.
+				// Wild Shape uses recharge on a rest, so any assumed beast form reverts
+				// and a Wild-Companion-summoned familiar (which cost a Wild Shape use)
+				// disappears — re-summoning after the rest costs a fresh use. Regular
+				// Find Familiar / Pact of the Chain familiars are NOT removed (only the
+				// Wild-Companion-origin ones), and other companion types are untouched.
+				const removedCompanions = this._removeWildShapeCompanionsOnLongRest();
+
+				// Reset Gambler prepared spell roll (TGTT Rogue subclass)
+				const calcs = this._state.getFeatureCalculations();
+				if (calcs.hasGamblerSpellcasting) {
+					this._state.resetGamblerPreparedRoll(false); // Keep current prepared spells as options
+				}
+
+				// Reset Gambler daily resources (Extra Luck, Master of Fortune uses)
+				if (calcs.hasGamblerFolly) {
+					this._state.resetGamblerDailyResources();
+				}
+				this._state.resetBonusAction?.();
+
+				// Apply Hunter's Prey option swap, if changed
+				huntersPreySwap?.apply();
+				const replicateMagicItemResult = this._commitEfaReplicateMagicItemProduction(replicateMagicItemProduction, {
+					protectedInventoryItemIds: [arcaneFirearmChoice?.getSelectedItemId?.()].filter(Boolean),
+				});
+				const arcaneFirearmChanged = arcaneFirearmChoice?.apply() || false;
+
+				// Apply Primal Focus mode selection, if changed (free on a long rest)
+				const primalFocusChanged = primalFocusSelect?.apply() || false;
+				const daemonologistSideChanged = daemonologistSideSelect?.apply() || false;
+
+				// Forked Tongue: a new long rest re-enables the once-per-rest swap, then we
+				// apply any language swap the player chose in this dialog.
+				this._state.resetForkedTongueSwap?.();
+				const forkedTongueChanged = forkedTongueSwap?.apply() || false;
+
+				// Apply Terrorizing Force damage-type re-choice (free on a long rest)
+				const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
+				const spellMasteryChanged = spellMasterySwap?.apply() || false;
+				const temporalAgeChanged = temporalMasteryAge?.apply() || false;
+				const armorModelOutcome = armorModelSwitch?.apply() || null;
+				const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+				const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
+				const steelDefenderReplacementResult = this._commitEfaSteelDefenderReplacement(steelDefenderReplacement);
+				const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 480});
+				const experimentalElixirResult = preparedElixir
+					? this._state.commitEfaExperimentalElixirLongRestDraft(preparedElixir.draft)
+					: null;
+				if (experimentalElixirResult && !experimentalElixirResult.ok) {
+					throw new Error(CharacterSheetEfaExperimentalElixirUi.getErrorMessage(
+						experimentalElixirResult.code,
+						experimentalElixirResult.error,
+					));
+				}
+
+				// Save changes
+				let saveResult;
+				if (this._page._saveCurrentCharacter) {
+					saveResult = await this._page._saveCurrentCharacter({isReturnStatus: true});
+				} else {
+					saveResult = this._page.saveCharacter?.();
+					if (saveResult?.then) saveResult = await saveResult;
+				}
+				if (saveResult === false) throw new Error("The Long Rest could not be saved.");
+				this._page.renderCharacter();
+
+				doClose(true);
+
+				let message = "🌙 Long rest complete! All resources restored.";
+				if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
+				if (daemonologistSideChanged) message += ` Fair and Foul set to ${daemonologistSideChanged}.`;
+				if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
+				if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
+				if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
+				if (temporalAgeChanged) message += ` Temporal Mastery changed age to ${temporalAgeChanged}.`;
+				if (arcaneFirearmChanged) message += ` Arcane Firearm carved into ${arcaneFirearmChanged}.`;
+				if (replicateMagicItemResult?.ok && replicateMagicItemResult.code === "replicate-production-committed") {
+					message += ` Created ${replicateMagicItemResult.created.length} replicated item${replicateMagicItemResult.created.length === 1 ? "" : "s"}.`;
+					if (replicateMagicItemResult.evicted.length) {
+						message += ` Removed ${replicateMagicItemResult.evicted.length} oldest replicated item${replicateMagicItemResult.evicted.length === 1 ? "" : "s"} to stay within capacity.`;
+					}
+				} else if (replicateMagicItemResult && !replicateMagicItemResult.ok) {
+					message += ` Replicate Magic Item was skipped: ${replicateMagicItemResult.message || replicateMagicItemResult.code}.`;
+				}
+				if (spellStoringItemResult?.committed) {
+					message += ` Stored ${spellStoringItemResult.storage.spell.name} in ${spellStoringItemResult.storage.host.name}.`;
+				} else if (spellStoringItemResult && !spellStoringItemResult.ok) {
+					message += " Spell-Storing Item was unchanged because the selected host or spell could not be resolved.";
+				}
+				if (steelDefenderReplacementResult?.committed) {
+					message += ` Steel Defender replacement created as generation ${steelDefenderReplacementResult.generation.generation} at ${steelDefenderReplacementResult.hp.current}/${steelDefenderReplacementResult.hp.max} HP.`;
+				} else if (steelDefenderReplacementResult && !steelDefenderReplacementResult.ok) {
+					message += ` Steel Defender replacement made no changes: ${steelDefenderReplacementResult.message || "the staged replacement could not be committed"}.`;
+				}
+				if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
+				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
+				if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
+				if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
+				if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
+				message += armorModelFeedback.successSuffix;
+				if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
+				if (experimentalElixirResult) {
+					message += ` Experimental Elixir: ${experimentalElixirResult.expiredItemIds.length} expired, ${experimentalElixirResult.createdItemIds.length} created.`;
+				}
+
+				JqueryUtil.doToast({
+					type: "success",
+					content: message,
+				});
+				if (armorModelFeedback.warning) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: armorModelFeedback.warning,
+					});
+				}
+
+				// Offer a persistent undo for this rest (BUG 8).
+				this._showUndoRestAffordance("long");
+
+				// Auto-popup Gambler prepared roll modal after long rest
+				if (calcs.hasGamblerSpellcasting) {
+					this._showGamblerPreparedRollModal();
+				}
+
+				// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
+				if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
+					this._showScribingMemorizeModal();
+				}
+
+				this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("long");
+			} catch (error) {
+				if (restSnapshot?.json) this._state.loadFromJson(restSnapshot.json);
+				if (this._page) this._page._lastRestSnapshot = previousRestSnapshot;
+				if (previousRestSnapshot) this._showUndoRestAffordance(previousRestSnapshot.restType);
+				else this._removeUndoRestAffordance();
+				let isRollbackPersisted = true;
+				try {
+					let rollbackSaveResult;
+					if (this._page._saveCurrentCharacter) {
+						rollbackSaveResult = await this._page._saveCurrentCharacter({isReturnStatus: true});
+					} else {
+						rollbackSaveResult = this._page.saveCharacter?.();
+						if (rollbackSaveResult?.then) rollbackSaveResult = await rollbackSaveResult;
+					}
+					isRollbackPersisted = rollbackSaveResult !== false;
+				} catch {
+					isRollbackPersisted = false;
+				}
+				this._page.renderCharacter?.();
+				btnConfirm.disabled = false;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: isRollbackPersisted
+						? `${error?.message || "The Long Rest could not be completed."} No changes were kept.`
+						: `${error?.message || "The Long Rest could not be completed."} The sheet was restored, but that rollback could not be saved; save the character manually before leaving.`,
+				});
+				if (atlasResult && !atlasResult.ok) adventurersAtlas?.focusFirstInvalid();
 			}
-
-			// Restore ability-score damage (all drains) if requested.
-			let abilityDamageRestored = 0;
-			if (cbRestoreAbilityDamage?.checked) {
-				abilityDamageRestored = totalAbilityDamage;
-				this._state.clearAllAbilityDamage?.();
-			}
-
-			// Remove selected conditions
-			conditionsToRemove.forEach(condition => {
-				this._state.removeCondition?.(condition);
-			});
-
-			// Break concentration if requested
-			if (cbBreakConcentration?.checked) {
-				this._state.breakConcentration?.();
-			}
-
-			// Reset death saves
-			this._state.setDeathSaves({successes: 0, failures: 0});
-
-			// Clear transient Druid Wild Shape forms and Wild-Companion familiars.
-			// Wild Shape uses recharge on a rest, so any assumed beast form reverts
-			// and a Wild-Companion-summoned familiar (which cost a Wild Shape use)
-			// disappears — re-summoning after the rest costs a fresh use. Regular
-			// Find Familiar / Pact of the Chain familiars are NOT removed (only the
-			// Wild-Companion-origin ones), and other companion types are untouched.
-			const removedCompanions = this._removeWildShapeCompanionsOnLongRest();
-
-			// Reset Gambler prepared spell roll (TGTT Rogue subclass)
-			const calcs = this._state.getFeatureCalculations();
-			if (calcs.hasGamblerSpellcasting) {
-				// Reset the rolled prepared count - requires new roll after rest
-				this._state.resetGamblerPreparedRoll(false); // Keep current prepared spells as options
-			}
-
-			// Reset Gambler daily resources (Extra Luck, Master of Fortune uses)
-			if (calcs.hasGamblerFolly) {
-				this._state.resetGamblerDailyResources();
-			}
-			this._state.resetBonusAction?.();
-
-			// Apply Hunter's Prey option swap, if changed
-			huntersPreySwap?.apply();
-
-			// Apply Primal Focus mode selection, if changed (free on a long rest)
-			const primalFocusChanged = primalFocusSelect?.apply() || false;
-			const daemonologistSideChanged = daemonologistSideSelect?.apply() || false;
-
-			// Forked Tongue: a new long rest re-enables the once-per-rest swap, then we
-			// apply any language swap the player chose in this dialog.
-			this._state.resetForkedTongueSwap?.();
-			const forkedTongueChanged = forkedTongueSwap?.apply() || false;
-
-			// Apply Terrorizing Force damage-type re-choice (free on a long rest)
-			const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
-			const spellMasteryChanged = spellMasterySwap?.apply() || false;
-			const temporalAgeChanged = temporalMasteryAge?.apply() || false;
-
-			// Save changes
-			this._page.saveCharacter();
-			this._page.renderCharacter();
-
-			doClose(true);
-
-			let message = "🌙 Long rest complete! All resources restored.";
-			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
-			if (daemonologistSideChanged) message += ` Fair and Foul set to ${daemonologistSideChanged}.`;
-			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
-			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
-			if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
-			if (temporalAgeChanged) message += ` Temporal Mastery changed age to ${temporalAgeChanged}.`;
-			if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
-			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
-			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
-			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
-
-			JqueryUtil.doToast({
-				type: "success",
-				content: message,
-			});
-
-			// Offer a persistent undo for this rest (BUG 8).
-			this._showUndoRestAffordance("long");
-
-			// Auto-popup Gambler prepared roll modal after long rest
-			if (calcs.hasGamblerSpellcasting) {
-				this._showGamblerPreparedRollModal();
-			}
-
-			// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
-			if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
-				this._showScribingMemorizeModal();
-			}
-
-			this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("long");
 		});
 
 		ee`<div class="charsheet__modal-footer">
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+		if (focusAdventurersAtlas) adventurersAtlas?.selectCreateModeAndFocus();
+	}
+
+	openAdventurersAtlasLongRest () {
+		return this._showLongRestDialog({focusAdventurersAtlas: true});
+	}
+
+	_applyAdventurersAtlasLongRestPlan (plan) {
+		if (!plan || plan.mode === "keep") {
+			return {ok: true, changed: false, errors: [], atlas: this._state.getAdventurersAtlas()};
+		}
+		if (plan.mode === "create") {
+			return this._state.createAdventurersAtlas(plan.holders, {isHoldingTools: plan.isHoldingTools});
+		}
+		if (plan.mode === "recreate") {
+			return this._state.recreateAdventurersAtlas(plan.holders, {isHoldingTools: plan.isHoldingTools});
+		}
+		return {
+			ok: false,
+			changed: false,
+			errors: ["Unknown Adventurer's Atlas Long Rest action."],
+			atlas: this._state.getAdventurersAtlas(),
+		};
+	}
+
+	_buildAdventurersAtlasLongRestSection () {
+		if (!this._state.hasAdventurersAtlasFeature?.()) return null;
+
+		const atlas = this._state.getAdventurersAtlas();
+		const capacity = this._state.getAdventurersAtlasCapacity();
+		const hasTools = this._state.hasCartographersToolsForAtlas();
+		const isRecreate = atlas.generation > 0;
+		const groupName = `adventurers-atlas-mode-${Date.now()}`;
+		const listeners = new Set();
+		let lastErrors = [];
+		const previousSelf = atlas.holders.find(holder => holder.isSelf)?.name;
+		const previousOthers = atlas.holders.filter(holder => !holder.isSelf).map(holder => holder.name);
+		const selfName = previousSelf || this._state.getCharacterName?.() || "Character";
+
+		const section = e_({
+			tag: "section",
+			clazz: "charsheet__rest-section charsheet__atlas-rest",
+			attrs: {
+				"aria-labelledby": "charsheet-atlas-rest-title",
+				tabindex: "-1",
+			},
+		});
+		const title = e_({
+			tag: "div",
+			clazz: "charsheet__rest-section-title",
+			attrs: {id: "charsheet-atlas-rest-title"},
+			txt: "Adventurer's Atlas",
+		});
+		const intro = e_({
+			tag: "p",
+			clazz: "charsheet__atlas-rest-copy",
+			txt: `Keep the current Atlas, or ${isRecreate ? "replace every existing map" : "create it"} while holding Cartographer's Tools. Choose 2–${capacity} creatures; you may include yourself. Capacity is frozen when created.`,
+		});
+		section.append(title, intro);
+
+		const modeGroup = e_({tag: "div", clazz: "charsheet__atlas-rest-modes", attrs: {role: "radiogroup", "aria-label": "Adventurer's Atlas action"}});
+		const radioKeep = e_({tag: "input", type: "radio", attrs: {name: groupName, value: "keep"}});
+		radioKeep.checked = true;
+		const radioChange = e_({tag: "input", type: "radio", attrs: {name: groupName, value: isRecreate ? "recreate" : "create"}});
+		radioChange.disabled = !hasTools;
+		ee`<label class="charsheet__atlas-rest-mode">${radioKeep}<span><strong>Keep current Atlas</strong><small>${isRecreate ? "No maps or holder statuses change." : "Finish the rest without creating an Atlas."}</small></span></label>`.appendTo(modeGroup);
+		ee`<label class="charsheet__atlas-rest-mode">${radioChange}<span><strong>${isRecreate ? "Recreate Atlas" : "Create Atlas"}</strong><small>${hasTools ? "Validate this roster and commit it only when the rest finishes." : "Requires Cartographer's Tools|XPHB in inventory."}</small></span></label>`.appendTo(modeGroup);
+		section.append(modeGroup);
+
+		const controls = e_({tag: "div", clazz: "charsheet__atlas-rest-controls"});
+		controls.hidden = true;
+		const cbHeld = e_({tag: "input", type: "checkbox"});
+		const heldLabel = ee`<label class="charsheet__rest-option charsheet__atlas-rest-held">${cbHeld}<span>I confirm I am holding Cartographer's Tools for this rest.</span></label>`;
+		controls.append(heldLabel);
+		const cbIncludeSelf = e_({tag: "input", type: "checkbox"});
+		cbIncludeSelf.checked = !!previousSelf;
+		const selfLabel = ee`<label class="charsheet__rest-option charsheet__atlas-rest-self-choice">${cbIncludeSelf}<span><strong>Include yourself as a map holder</strong><small>${selfName} receives Awareness only while this self map is active.</small></span></label>`;
+		controls.append(selfLabel);
+
+		const rosterHeading = e_({tag: "div", clazz: "charsheet__atlas-rest-roster-heading"});
+		rosterHeading.append(
+			e_({tag: "span", txt: `Map holders (2–${capacity})`}),
+		);
+		const btnAddHolder = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", attrs: {type: "button"}, txt: "Add holder"});
+		rosterHeading.append(btnAddHolder);
+		controls.append(rosterHeading);
+
+		const roster = e_({tag: "div", clazz: "charsheet__atlas-rest-roster"});
+		controls.append(roster);
+		const status = e_({
+			tag: "div",
+			clazz: "charsheet__atlas-rest-feedback",
+			attrs: {role: "status", "aria-live": "polite", "aria-atomic": "true", tabindex: "-1"},
+		});
+		controls.append(status);
+		section.append(controls);
+
+		const rows = previousOthers
+			.slice(0, Math.max(0, capacity - (cbIncludeSelf.checked ? 1 : 0)))
+			.map(name => ({name}));
+		while (rows.length + (cbIncludeSelf.checked ? 1 : 0) < 2) rows.push({name: ""});
+
+		const getDraftHolders = () => [
+			...(cbIncludeSelf.checked
+				? [{
+					id: null,
+					name: selfName,
+					isSelf: true,
+					status: "active",
+					destroyedBy: null,
+					destroyedAt: null,
+				}]
+				: []),
+			...rows.map(row => ({
+				id: null,
+				name: row.input?.value || row.name || "",
+				isSelf: false,
+				status: "active",
+				destroyedBy: null,
+				destroyedAt: null,
+			})),
+		];
+
+		const notifyChange = () => listeners.forEach(fn => fn());
+		const sync = () => {
+			const isChanging = radioChange.checked;
+			controls.hidden = !isChanging;
+			if (!isChanging) {
+				lastErrors = [];
+				status.textContent = "";
+				status.classList.remove("charsheet__atlas-rest-feedback--error", "charsheet__atlas-rest-feedback--ready");
+				notifyChange();
+				return;
+			}
+			const validation = this._state.validateAdventurersAtlasRoster(getDraftHolders(), {capacity});
+			lastErrors = [
+				...(!hasTools ? ["Cartographer's Tools|XPHB must be in inventory."] : []),
+				...(!cbHeld.checked ? ["Confirm that the tools are being held."] : []),
+				...validation.errors,
+			];
+			status.classList.toggle("charsheet__atlas-rest-feedback--error", !!lastErrors.length);
+			status.classList.toggle("charsheet__atlas-rest-feedback--ready", !lastErrors.length);
+			const holderCount = getDraftHolders().length;
+			status.textContent = lastErrors.length
+				? `Needs attention: ${lastErrors.join(" ")}`
+				: `Ready: ${holderCount} active maps will ${isRecreate ? "replace the prior Atlas" : "be created"} when this Long Rest finishes.`;
+			btnAddHolder.disabled = holderCount >= capacity;
+			notifyChange();
+		};
+
+		const renderRows = () => {
+			roster.replaceChildren();
+			rows.forEach((row, ix) => {
+				const inputId = `charsheet-atlas-holder-${Date.now()}-${ix}`;
+				const input = e_({
+					tag: "input",
+					clazz: "form-control input-sm",
+					attrs: {
+						id: inputId,
+						type: "text",
+						autocomplete: "off",
+						placeholder: "Creature name",
+					},
+				});
+				input.value = row.name;
+				row.input = input;
+				input.addEventListener("input", sync);
+				const rowEle = e_({tag: "div", clazz: "charsheet__atlas-rest-holder"});
+				const label = e_({
+					tag: "label",
+					attrs: {for: inputId},
+					txt: `Ally holder ${ix + 1}`,
+				});
+				const field = e_({tag: "div", clazz: "charsheet__atlas-rest-holder-field"});
+				field.append(input);
+				const btnRemove = e_({
+					tag: "button",
+					clazz: "ve-btn ve-btn-xs ve-btn-default",
+					attrs: {type: "button", "aria-label": `Remove ally holder ${ix + 1}`},
+					txt: "Remove",
+				});
+				btnRemove.addEventListener("click", () => {
+					rows.splice(ix, 1);
+					renderRows();
+					sync();
+				});
+				field.append(btnRemove);
+				rowEle.append(label, field);
+				roster.append(rowEle);
+			});
+			btnAddHolder.disabled = getDraftHolders().length >= capacity;
+		};
+
+		btnAddHolder.addEventListener("click", () => {
+			if (getDraftHolders().length >= capacity) return;
+			rows.push({name: ""});
+			renderRows();
+			sync();
+			rows.at(-1)?.input?.focus();
+		});
+		radioKeep.addEventListener("change", sync);
+		radioChange.addEventListener("change", sync);
+		cbHeld.addEventListener("change", sync);
+		cbIncludeSelf.addEventListener("change", sync);
+		renderRows();
+		sync();
+
+		return {
+			section,
+			getPlan: () => radioKeep.checked
+				? {mode: "keep"}
+				: {mode: isRecreate ? "recreate" : "create", holders: getDraftHolders(), isHoldingTools: cbHeld.checked},
+			isValid: () => radioKeep.checked || !lastErrors.length,
+			onChange: fn => listeners.add(fn),
+			focusFirstInvalid: () => {
+				if (!radioChange.checked) return radioChange.focus();
+				if (!cbHeld.checked) return cbHeld.focus();
+				const firstEmpty = rows.find(row => !row.input?.value.trim());
+				if (firstEmpty) return firstEmpty.input.focus();
+				if (getDraftHolders().length < 2) return btnAddHolder.focus();
+				status.focus?.();
+			},
+			selectCreateModeAndFocus: () => {
+				if (!hasTools) return section.focus();
+				radioChange.checked = true;
+				radioKeep.checked = false;
+				sync();
+				queueMicrotask(() => (rows[0]?.input || cbIncludeSelf).focus());
+			},
+		};
+	}
+
+	_buildEfaSpellStoringItemSection () {
+		const options = this._state.getEfaSpellStoringItemOptions?.();
+		if (!options?.available) return null;
+		const current = this._state.getEfaSpellStoringItem?.();
+		const section = e_({tag: "fieldset", clazz: "charsheet__rest-section charsheet__spell-storage-rest"});
+		const title = e_({tag: "legend", clazz: "charsheet__rest-section-title", txt: "Spell-Storing Item — Optional"});
+		const summary = e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mb-2",
+			txt: current
+				? `Currently storing ${current.storage.spell.name} in ${current.item?.name || current.storage.host.name}. Leave both choices blank to keep it unchanged.`
+				: "Choose one held eligible item and one exact EFA Artificer spell. Leave both choices blank to skip this feature.",
+		});
+		const hostId = `efa-spell-storage-host-${CryptUtil.uid()}`;
+		const spellId = `efa-spell-storage-spell-${CryptUtil.uid()}`;
+		const hostSelect = e_({tag: "select", clazz: "form-control input-sm"});
+		hostSelect.id = hostId;
+		hostSelect.setAttribute("aria-describedby", `${hostId}-help`);
+		hostSelect.append(e_({tag: "option", value: "", txt: "Keep current storage unchanged"}));
+		for (const host of options.hosts) hostSelect.append(e_({tag: "option", value: host.itemId, txt: `${host.name} (${host.source})`}));
+		const spellSelect = e_({tag: "select", clazz: "form-control input-sm"});
+		spellSelect.id = spellId;
+		spellSelect.setAttribute("aria-describedby", `${spellId}-help`);
+		spellSelect.append(e_({tag: "option", value: "", txt: "Keep current storage unchanged"}));
+		for (const spell of options.spells) spellSelect.append(e_({tag: "option", value: spell.spellUid, txt: `${spell.name} (${spell.source}) — level ${spell.level}`}));
+		const hostLabel = e_({tag: "label", clazz: "ve-flex-col mb-2"});
+		hostLabel.htmlFor = hostId;
+		hostLabel.append(
+			e_({tag: "span", clazz: "ve-bold", txt: "Held host item"}),
+			hostSelect,
+			e_({tag: "span", id: `${hostId}-help`, clazz: "ve-muted ve-small", txt: "Simple or Martial weapon, proficient Artificer's Tools, or an eligible active replicated Wand or Weapon."}),
+		);
+		const spellLabel = e_({tag: "label", clazz: "ve-flex-col mb-2"});
+		spellLabel.htmlFor = spellId;
+		spellLabel.append(
+			e_({tag: "span", clazz: "ve-bold", txt: "Stored spell"}),
+			spellSelect,
+			e_({tag: "span", id: `${spellId}-help`, clazz: "ve-muted ve-small", txt: "Level 1–3, one Action, on the exact EFA Artificer list, with no consumed Material component. Preparation is not required."}),
+		);
+		const status = e_({tag: "div", clazz: "ve-small charsheet__spell-storage-rest-status"});
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		const getRequest = () => {
+			const hostItemId = String(hostSelect.value || "");
+			const spellUid = String(spellSelect.value || "");
+			if (!hostItemId && !spellUid) return null;
+			if (!hostItemId || !spellUid) return null;
+			if (!options.hosts.some(host => host.itemId === hostItemId)) return null;
+			if (!options.spells.some(spell => spell.spellUid === spellUid)) return null;
+			return {hostItemId, spellUid};
+		};
+		const renderStatus = () => {
+			const hostItemId = String(hostSelect.value || "");
+			const spellUid = String(spellSelect.value || "");
+			status.classList.remove("text-warning", "text-success");
+			if (!hostItemId && !spellUid) {
+				status.textContent = current ? "Current storage will remain unchanged." : "No spell will be stored.";
+				return;
+			}
+			if (!getRequest()) {
+				status.textContent = "Choose both a host and a spell. The long rest will still finish, and current storage will remain unchanged.";
+				status.classList.add("text-warning");
+				return;
+			}
+			const host = options.hosts.find(it => it.itemId === hostItemId);
+			const spell = options.spells.find(it => it.spellUid === spellUid);
+			status.textContent = `${spell.name} will be stored in ${host.name} with ${Math.max(2, 2 * this._state.getAbilityMod("int"))} uses.`;
+			status.classList.add("text-success");
+		};
+		hostSelect.addEventListener("change", renderStatus);
+		spellSelect.addEventListener("change", renderStatus);
+		section.append(title, summary, hostLabel, spellLabel, status);
+		renderStatus();
+		return {section, hostSelect, spellSelect, status, getRequest};
+	}
+
+	_commitEfaSpellStoringItemChoice (choice) {
+		if (!choice) return null;
+		const request = choice.getRequest();
+		if (!request) return {ok: true, committed: false, reason: "selection-skipped"};
+		return this._state.commitEfaSpellStoringItemAtLongRest?.(request)
+			|| {ok: false, committed: false, reason: "storage-unavailable"};
+	}
+
+	_buildEfaSteelDefenderReplacementSection () {
+		const ownerUid = this._state.constructor?.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		if (!ownerUid) return null;
+		const companion = (this._state.getFeatureOwnedCompanions?.(ownerUid) || []).find(candidate =>
+			String(candidate?.name || "").trim().toLowerCase() === "steel defender"
+			&& String(candidate?.source || "").trim().toUpperCase() === "EFA",
+		);
+		if (!companion) return null;
+
+		const toolRows = this._state.getFeatureCompanionReplacementToolRows?.(companion.id) || [];
+		const section = e_({
+			tag: "fieldset",
+			clazz: "charsheet__rest-section charsheet__steel-defender-replacement",
+		});
+		const legend = e_({
+			tag: "legend",
+			clazz: "charsheet__rest-section-title",
+			txt: "Steel Defender — Optional Replacement",
+		});
+		const summary = e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mb-2",
+			txt: `Create a new generation after this Long Rest. Leaving this blank keeps generation ${Math.max(1, Number(companion.lifecycle?.generation) || 1)} unchanged.`,
+		});
+		const toolLabel = e_({tag: "label", clazz: "charsheet__steel-defender-replacement-field"});
+		toolLabel.append(e_({tag: "span", clazz: "ve-small ve-bold", txt: "Exact persisted Smith's Tools row"}));
+		const toolSelect = e_({tag: "select", clazz: "form-control input-sm"});
+		const blankOption = e_({tag: "option", txt: "Do not replace the defender"});
+		blankOption.value = "";
+		toolSelect.append(blankOption);
+		for (const row of toolRows) {
+			const option = e_({tag: "option", txt: row.label});
+			option.value = row.itemId;
+			toolSelect.append(option);
+		}
+		if (!toolRows.length) toolSelect.disabled = true;
+		toolLabel.append(toolSelect);
+
+		const inHandLabel = e_({tag: "label", clazz: "charsheet__rest-option charsheet__steel-defender-replacement-confirm"});
+		const inHand = e_({tag: "input", type: "checkbox"});
+		inHand.disabled = true;
+		inHandLabel.append(inHand, e_({
+			tag: "span",
+			txt: "I will have this exact Smith's Tools (XPHB) inventory row in hand when the rest finishes.",
+		}));
+		const status = e_({tag: "div", clazz: "ve-small charsheet__steel-defender-replacement-status"});
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		status.setAttribute("aria-atomic", "true");
+		toolSelect.setAttribute("aria-describedby", "charsheet-steel-defender-replacement-status");
+		inHand.setAttribute("aria-describedby", "charsheet-steel-defender-replacement-status");
+		status.id = "charsheet-steel-defender-replacement-status";
+		section.append(legend, summary, toolLabel, inHandLabel, status);
+
+		const renderStatus = () => {
+			const selected = toolRows.find(row => row.itemId === toolSelect.value) || null;
+			inHand.disabled = !selected;
+			if (!selected) inHand.checked = false;
+			status.textContent = !toolRows.length
+				? "No positive-quantity exact Smith's Tools (XPHB) inventory row is available. The Long Rest will finish normally."
+				: !selected
+					? "No replacement selected. The Long Rest will finish normally."
+					: inHand.checked
+						? `Generation ${Math.max(1, Number(companion.lifecycle?.generation) || 1) + 1} will replace the current defender after canonical rest processing.`
+						: "Confirm the selected tools are in hand. Without confirmation, the Long Rest still finishes but replacement makes no changes.";
+			status.classList.toggle("text-warning", !!selected && !inHand.checked);
+			status.classList.toggle("text-success", !!selected && inHand.checked);
+		};
+		toolSelect.onChange(renderStatus);
+		inHand.onChange(renderStatus);
+		renderStatus();
+
+		return {
+			section,
+			companionId: companion.id,
+			toolRows,
+			getRequest: () => toolSelect.value
+				? {
+					companionId: companion.id,
+					toolItemId: toolSelect.value,
+					inHandConfirmed: inHand.checked === true,
+				}
+				: null,
+		};
+	}
+
+	_commitEfaSteelDefenderReplacement (replacement) {
+		const request = replacement?.getRequest?.();
+		if (!request) return null;
+		if (typeof this._page.commitFeatureCompanionReplacementAfterLongRest !== "function") {
+			return {
+				ok: false,
+				committed: false,
+				reason: "pageLifecycleCoordinatorUnavailable",
+				message: "The shared Steel Defender lifecycle coordinator is unavailable.",
+			};
+		}
+		return this._page.commitFeatureCompanionReplacementAfterLongRest(request);
+	}
+
+	_buildEfaReplicateMagicItemProductionSection () {
+		const production = this._state.getEfaReplicateMagicItemProductionOptions?.();
+		if (!production || production.classLevel < 2 || production.maxCreatedItems < 1) return null;
+
+		const section = e_({
+			tag: "fieldset",
+			clazz: "charsheet__rest-section charsheet__replicate-rest",
+		});
+		const title = e_({tag: "legend", clazz: "charsheet__rest-section-title", txt: "Replicate Magic Item — Optional Production"});
+		const currentCount = this._state.getGeneratedFeatureItemRows?.(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER)?.length || 0;
+		const summary = e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mb-2",
+			txt: `Create up to ${production.maxCreatedItems} items from different known plans. You currently have ${currentCount}/${production.maxCreatedItems}. Leaving every row blank skips production without affecting the rest.`,
+		});
+		const rowsContainer = e_({tag: "div", clazz: "charsheet__replicate-rest-rows"});
+		const status = e_({tag: "div", clazz: "ve-small charsheet__replicate-rest-status"});
+		status.setAttribute("aria-live", "polite");
+		status.setAttribute("role", "status");
+		section.append(title, summary, rowsContainer, status);
+
+		if (!production.available) {
+			status.textContent = production.unavailableReason || "Replicate Magic Item production is unavailable.";
+			status.classList.add("text-warning");
+			return {
+				section,
+				rows: [],
+				getRequest: () => ({selections: []}),
+				getValidation: () => ({isValid: true, issues: []}),
+				onChange: () => {},
+			};
+		}
+
+		const planBySlot = new Map(production.plans.map(plan => [String(plan.plan?.slotId), plan]));
+		const rows = [];
+		let notifyChange = () => {};
+		const appendOption = (select, {value = "", label, disabled = false} = {}) => {
+			const option = e_({tag: "option", txt: label});
+			option.value = value;
+			option.disabled = disabled;
+			select.append(option);
+			return option;
+		};
+		const clearSelect = select => {
+			select.innerHTML = "";
+			if (Array.isArray(select._children)) select._children.length = 0;
+		};
+		const getSelectedOption = row => {
+			const plan = planBySlot.get(String(row.planSelect.value || ""));
+			if (!plan?.ok) return null;
+			return plan.options.find(option => option.itemUid === row.itemSelect.value) || null;
+		};
+
+		const renderValidation = () => {
+			const issues = [];
+			const selectedSlots = rows.map(row => row.planSelect.value).filter(Boolean);
+			if (new Set(selectedSlots).size !== selectedSlots.length) issues.push("Each produced item must use a different known plan.");
+			for (const row of rows) {
+				if (!row.planSelect.value) continue;
+				const plan = planBySlot.get(String(row.planSelect.value));
+				if (!plan?.ok) issues.push(`${plan?.plan?.selection?.displayName || plan?.plan?.selection?.name || "A selected plan"} is unavailable in the item catalog.`);
+				else if (!getSelectedOption(row)) issues.push(`Choose the specific item for ${plan.plan.selection.displayName || plan.plan.selection.name}.`);
+			}
+			status.textContent = issues.length
+				? `${issues.join(" ")} The long rest will still finish, but unresolved production makes no inventory changes.`
+				: selectedSlots.length
+					? `${selectedSlots.length} item${selectedSlots.length === 1 ? "" : "s"} will be created when the rest finishes.`
+					: "No production selected. The long rest will finish normally.";
+			status.classList.toggle("text-warning", !!issues.length);
+			status.classList.toggle("text-success", !issues.length && !!selectedSlots.length);
+			notifyChange();
+			return {isValid: !issues.length, issues};
+		};
+
+		for (let index = 0; index < production.maxCreatedItems; index++) {
+			const rowId = `efa-replicate-rest-${index + 1}`;
+			const row = e_({tag: "div", clazz: "charsheet__replicate-rest-row"});
+			const rowLabel = e_({tag: "div", clazz: "charsheet__replicate-rest-row-label", txt: `Item ${index + 1}`});
+			const planLabel = e_({tag: "label", clazz: "charsheet__replicate-rest-field"});
+			planLabel.setAttribute("for", `${rowId}-plan`);
+			planLabel.append(e_({tag: "span", clazz: "ve-small ve-bold", txt: "Known plan"}));
+			const planSelect = e_({tag: "select", clazz: "form-control input-xs"});
+			planSelect.id = `${rowId}-plan`;
+			appendOption(planSelect, {label: "No item"});
+			for (const plan of production.plans) {
+				appendOption(planSelect, {
+					value: String(plan.plan?.slotId || ""),
+					label: plan.ok
+						? (plan.plan.selection.displayName || plan.plan.selection.name)
+						: `${plan.plan?.selection?.displayName || plan.plan?.selection?.name || "Unavailable plan"} — unavailable`,
+					disabled: !plan.ok,
+				});
+			}
+			planLabel.append(planSelect);
+
+			const itemLabel = e_({tag: "label", clazz: "charsheet__replicate-rest-field"});
+			itemLabel.setAttribute("for", `${rowId}-item`);
+			itemLabel.append(e_({tag: "span", clazz: "ve-small ve-bold", txt: "Created item"}));
+			const itemSelect = e_({tag: "select", clazz: "form-control input-xs"});
+			itemSelect.id = `${rowId}-item`;
+			itemSelect.disabled = true;
+			appendOption(itemSelect, {label: "Choose a plan first"});
+			itemLabel.append(itemSelect);
+
+			const attuneLabel = e_({tag: "label", clazz: "charsheet__rest-option charsheet__replicate-rest-attune"});
+			const attune = e_({tag: "input", type: "checkbox"});
+			attune.disabled = true;
+			attuneLabel.append(attune, e_({tag: "span", txt: "Attune immediately if possible"}));
+			row.append(rowLabel, planLabel, itemLabel, attuneLabel);
+			rowsContainer.append(row);
+
+			const rowState = {row, planSelect, itemSelect, attune};
+			rows.push(rowState);
+			const updatePlan = () => {
+				clearSelect(itemSelect);
+				const plan = planBySlot.get(String(planSelect.value || ""));
+				if (!plan?.ok) {
+					itemSelect.disabled = true;
+					appendOption(itemSelect, {label: planSelect.value ? "Plan unavailable" : "Choose a plan first"});
+					attune.checked = false;
+					attune.disabled = true;
+					renderValidation();
+					return;
+				}
+				if (plan.options.length === 1) {
+					appendOption(itemSelect, {
+						value: plan.options[0].itemUid,
+						label: `${plan.options[0].name} (${plan.options[0].source})`,
+					});
+					itemSelect.value = plan.options[0].itemUid;
+					itemSelect.disabled = true;
+				} else {
+					appendOption(itemSelect, {label: "Choose a specific item"});
+					for (const option of plan.options) {
+						appendOption(itemSelect, {
+							value: option.itemUid,
+							label: `${option.name} (${option.source})`,
+						});
+					}
+					itemSelect.value = "";
+					itemSelect.disabled = false;
+				}
+				const selected = getSelectedOption(rowState);
+				attune.disabled = !selected?.requiresAttunement;
+				if (attune.disabled) attune.checked = false;
+				renderValidation();
+			};
+			planSelect.onChange(updatePlan);
+			itemSelect.onChange(() => {
+				const selected = getSelectedOption(rowState);
+				attune.disabled = !selected?.requiresAttunement;
+				if (attune.disabled) attune.checked = false;
+				renderValidation();
+			});
+			attune.onChange(renderValidation);
+		}
+		renderValidation();
+
+		return {
+			section,
+			rows,
+			getRequest: () => ({
+				selections: rows
+					.filter(row => row.planSelect.value)
+					.map(row => ({
+						slotId: row.planSelect.value,
+						resolvedItemUid: row.itemSelect.value || null,
+						attune: !!row.attune.checked,
+					})),
+			}),
+			getValidation: renderValidation,
+			onChange: fn => { notifyChange = typeof fn === "function" ? fn : () => {}; },
+		};
+	}
+
+	_commitEfaReplicateMagicItemProduction (production, {protectedInventoryItemIds = []} = {}) {
+		if (!production) return null;
+		const request = production.getRequest();
+		const protectedIds = [...new Set(protectedInventoryItemIds.filter(Boolean))];
+		return this._state.commitEfaReplicateMagicItemsAtLongRest({
+			...request,
+			...(protectedIds.length ? {protectedInventoryItemIds: protectedIds} : {}),
+		});
 	}
 
 	_buildTemporalMasteryAgeSection () {
@@ -1127,6 +2274,279 @@ class CharacterSheetRest {
 		return removed;
 	}
 
+	_getEfaArmorModelOptions () {
+		const expected = new Set(CharacterSheetRest._EFA_ARMOR_MODEL_NAMES);
+		const optionsByName = new Map(
+			(this._page?.getSubclassFeatures?.() || [])
+				.filter(feature =>
+					expected.has(feature?.name)
+					&& feature.source === "EFA"
+					&& feature.className === "Artificer"
+					&& feature.classSource === "EFA"
+					&& feature.subclassShortName === "Armorer"
+					&& feature.subclassSource === "EFA"
+					&& Number(feature.level) === 3)
+				.map(feature => [feature.name, {
+					...feature,
+					ref: `${feature.name}|Artificer|EFA|Armorer|EFA|3|EFA`,
+					type: "subclassFeature",
+					refType: "subclassFeature",
+				}]),
+		);
+		return CharacterSheetRest._EFA_ARMOR_MODEL_NAMES
+			.map(name => optionsByName.get(name))
+			.filter(Boolean);
+	}
+
+	_getEfaArmorModelSwitchContext ({reconcile = false, options = null} = {}) {
+		const model = this._state.getEfaArmorerModel?.();
+		if (!model) return null;
+
+		const exactOptions = options || this._getEfaArmorModelOptions();
+		const binding = this._state.getEfaArcaneArmorBindingStatus?.({reconcile}) || {};
+		const boundName = binding.boundItem?.name || null;
+		const isDoffed = !!binding.boundItemId && binding.boundItem?.equipped === false;
+		let error = null;
+
+		if (exactOptions.length !== CharacterSheetRest._EFA_ARMOR_MODEL_NAMES.length) {
+			error = {
+				code: "armor-model-data-unavailable",
+				message: "Exact EFA Armor Model definitions are unavailable; reload the character data before switching.",
+			};
+		} else if (!binding.boundItemId || !binding.boundItem) {
+			error = {
+				code: "arcane-armor-not-bound",
+				message: "Bind Arcane Armor to a body armor before switching Armor Model.",
+			};
+		} else if (!this._state.hasToolProficiency?.("Smith's Tools")) {
+			error = {
+				code: "missing-smiths-tools-proficiency",
+				message: "Smith's Tools proficiency is required to switch Armor Model.",
+			};
+		} else if (!this._state.hasEfaSmithsToolsItem?.()) {
+			error = {
+				code: "missing-smiths-tools-item",
+				message: "A canonical Smith's Tools item from PHB or XPHB must be in inventory.",
+			};
+		}
+
+		const currentText = `Current model: ${model.name}. Arcane Armor: ${boundName ? `${boundName} (${isDoffed ? "doffed; binding persists" : "worn"})` : "not bound"}.`;
+		const statusText = error?.message
+			|| (isDoffed
+				? `Switching is available while ${boundName} is doffed; model benefits resume when it is worn.`
+				: "Choose the model to apply when this rest finishes.");
+
+		return {
+			model,
+			binding,
+			boundName,
+			isDoffed,
+			options: exactOptions,
+			canSwitch: !error,
+			error,
+			currentText,
+			statusText,
+		};
+	}
+
+	_applyEfaArmorModelSelection ({selectedName, options = null} = {}) {
+		const exactOptions = options || this._getEfaArmorModelOptions();
+		const context = this._getEfaArmorModelSwitchContext({reconcile: true, options: exactOptions});
+		if (!context) {
+			return {
+				changed: false,
+				oldLabel: null,
+				newLabel: null,
+				boundName: null,
+				error: {
+					code: "efa-armorer-unavailable",
+					message: "An exact Artificer|EFA Armorer with a canonical Armor Model is required.",
+				},
+			};
+		}
+
+		const oldLabel = context.model.name;
+		const newOption = exactOptions.find(option => option.name === selectedName);
+		if (!newOption) {
+			return {
+				changed: false,
+				oldLabel,
+				newLabel: oldLabel,
+				boundName: context.boundName,
+				error: {
+					code: "armor-model-option-invalid",
+					message: "Choose an exact EFA Armor Model option.",
+				},
+			};
+		}
+		if (newOption.name === oldLabel) {
+			return {changed: false, oldLabel, newLabel: oldLabel, boundName: context.boundName, error: null};
+		}
+		if (!context.canSwitch) {
+			return {changed: false, oldLabel, newLabel: oldLabel, boundName: context.boundName, error: context.error};
+		}
+
+		const history = (this._state.getLevelHistory?.() || []).find(entry =>
+			entry.class?.name === "Artificer"
+			&& entry.class?.source === "EFA"
+			&& Number(entry.classLevel) === 3);
+		const choices = history?.choices?.featureChoices || [];
+		const choiceIndex = choices.findIndex(choice =>
+			choice.featureName === "Armor Model"
+			&& choice.source === "EFA"
+			&& CharacterSheetRest._EFA_ARMOR_MODEL_NAMES.includes(choice.choice));
+		const oldChoice = choiceIndex >= 0 ? choices[choiceIndex] : null;
+		const decision = (history?.decisions || []).find(item =>
+			item.type === "featureChoice"
+			&& (item.sourceKey === "Armor Model" || item.label === "Armor Model"));
+		const artificer = (this._state.getClasses?.() || []).find(cls =>
+			cls.name === "Artificer"
+			&& cls.source === "EFA"
+			&& (cls.subclass?.shortName || cls.subclass?.name) === "Armorer"
+			&& cls.subclass?.source === "EFA");
+
+		if (!history || !oldChoice || !artificer) {
+			return {
+				changed: false,
+				oldLabel,
+				newLabel: oldLabel,
+				boundName: context.boundName,
+				error: {
+					code: "armor-model-history-unavailable",
+					message: "The canonical Armor Model history is unavailable; reload the character before switching.",
+				},
+			};
+		}
+
+		try {
+			CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+				state: this._state,
+				page: this._page,
+				characterLevel: history.level,
+				classLevel: 3,
+				className: "Artificer",
+				classSource: "EFA",
+				subclassName: artificer.subclass?.name,
+				subclassShortName: artificer.subclass?.shortName || artificer.subclass?.name,
+				subclassSource: "EFA",
+				parentFeature: "Armor Model",
+				parentSource: "EFA",
+				choiceIndex,
+				oldChoice,
+				newOption,
+				catalogs: {
+					classFeatures: this._page?.getClassFeatures?.() || [],
+					subclassFeatures: this._page?.getSubclassFeatures?.() || [],
+					optionalFeatures: this._page?.getOptionalFeatures?.() || [],
+				},
+				sourceDecisionKey: decision?.semanticKey || CharacterSheetProgression.getSemanticKey({
+					className: "Artificer",
+					classSource: "EFA",
+					classLevel: 3,
+					type: "featureChoice",
+					sourceKey: "Armor Model",
+					slot: 0,
+				}),
+				persistHistory: true,
+				recalculate: true,
+				syncCanonical: true,
+			});
+			this._state.reconcileEfaArmorerState?.({cause: "rest-model-switch"});
+			return {changed: true, oldLabel, newLabel: newOption.name, boundName: context.boundName, error: null};
+		} catch (error) {
+			return {
+				changed: false,
+				oldLabel,
+				newLabel: oldLabel,
+				boundName: context.boundName,
+				error: {
+					code: "armor-model-transaction-failed",
+					message: error?.message || "Armor Model could not be switched.",
+				},
+			};
+		}
+	}
+
+	/**
+	 * Build the staged EFA Armor Model selector shared by both rest dialogs.
+	 * Opening or changing the selector is read-only; `apply()` revalidates and
+	 * commits through the canonical structured-choice transaction.
+	 * @param {{restType:"short"|"long"}} opts
+	 * @returns {{section:HTMLElement, control:HTMLSelectElement, label:HTMLLabelElement, currentLine:HTMLElement, previewLine:HTMLElement, statusLine:HTMLElement, apply:function}|null}
+	 */
+	_buildEfaArmorModelSection ({restType} = {}) {
+		const options = this._getEfaArmorModelOptions();
+		const context = this._getEfaArmorModelSwitchContext({reconcile: false, options});
+		if (!context) return null;
+
+		const idBase = `charsheet-${restType || "rest"}-armor-model`;
+		const selectId = `${idBase}-select`;
+		const currentId = `${idBase}-current`;
+		const previewId = `${idBase}-preview`;
+		const statusId = `${idBase}-status`;
+
+		const section = e_({tag: "div", clazz: "charsheet__rest-section"});
+		const title = e_({tag: "div", clazz: "charsheet__rest-section-title", txt: "Armor Model"});
+		const currentLine = e_({tag: "p", clazz: "ve-small mb-2", txt: context.currentText});
+		currentLine.id = currentId;
+		const label = e_({tag: "label", clazz: "ve-bold ve-small mb-1", txt: "Armor model after rest"});
+		label.htmlFor = selectId;
+		const control = e_({tag: "select", clazz: "form-control input-sm w-100"});
+		control.id = selectId;
+		control.setAttribute("aria-describedby", `${currentId} ${previewId} ${statusId}`);
+		control.ariaDescribedBy = `${currentId} ${previewId} ${statusId}`;
+		options.forEach(option => {
+			const opt = e_({tag: "option", val: option.name, txt: option.name});
+			opt.value = option.name;
+			if (option.name === context.model.name) opt.selected = true;
+			control.appendChild(opt);
+		});
+		control.value = context.model.name;
+		control.disabled = !context.canSwitch;
+		const previewLine = e_({tag: "p", clazz: "ve-small mt-1 mb-0"});
+		previewLine.id = previewId;
+		const updatePreview = () => {
+			const preview = CharacterSheetRest._EFA_ARMOR_MODEL_PREVIEWS[control.value];
+			previewLine.textContent = preview
+				? `Selected model: ${control.value}. ${preview}.`
+				: "Selected model preview unavailable.";
+		};
+		control.onChange(updatePreview);
+		updatePreview();
+		const statusLine = e_({tag: "p", clazz: "ve-muted ve-small mt-1 mb-0", txt: context.statusText});
+		statusLine.id = statusId;
+
+		section.append(title, currentLine, label, control, previewLine, statusLine);
+		return {
+			section,
+			control,
+			label,
+			currentLine,
+			previewLine,
+			statusLine,
+			apply: () => this._applyEfaArmorModelSelection({
+				selectedName: control.value,
+				options,
+			}),
+		};
+	}
+
+	static getEfaArmorModelRestFeedback (outcome) {
+		if (outcome?.changed) {
+			return {
+				successSuffix: ` Armor Model changed from ${outcome.oldLabel} to ${outcome.newLabel} on ${outcome.boundName || "bound armor"}.`,
+				warning: null,
+			};
+		}
+		if (outcome?.error) {
+			return {
+				successSuffix: "",
+				warning: `Rest completed, but Armor Model remained ${outcome.oldLabel || "unchanged"}: ${outcome.error.message}`,
+			};
+		}
+		return {successSuffix: "", warning: null};
+	}
+
 	/**
 	 * Build a Hunter's Prey swap control for the rest dialogs.
 	 * Returns null when the character lacks Hunter's Prey.
@@ -1159,6 +2579,92 @@ class CharacterSheetRest {
 				if (chosen && chosen !== currentOption) {
 					this._state.setHuntersPreyOption?.(chosen);
 				}
+			},
+		};
+	}
+
+	/**
+	 * Build the optional EFA Arcane Firearm carve/re-carve choice for Long Rest.
+	 * The returned apply callback is the only UI path which changes the binding.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildEfaArcaneFirearmLongRestSection () {
+		const status = this._state.getEfaArcaneFirearmStatus?.();
+		if (!status?.available) return null;
+
+		const candidates = this._state.getEfaArcaneFirearmEligibleInventoryRows?.() || [];
+		const currentId = status.binding?.inventoryItemId || null;
+		const currentIsLegal = !!currentId && candidates.some(item => item.id === currentId);
+		const section = e_({outer: `<div class="charsheet__rest-section charsheet__arcane-firearm-rest">
+			<div class="charsheet__rest-section-title">🔥 Arcane Firearm</div>
+			<p class="ve-muted ve-small mb-2">Optionally carve or re-carve one eligible inventory item when this Long Rest finishes.</p>
+		</div>`});
+
+		if (!candidates.length) {
+			const empty = e_({
+				tag: "div",
+				clazz: "charsheet__arcane-firearm-rest-empty",
+				txt: currentIsLegal
+					? `${status.item?.name || "Your current Arcane Firearm"} remains carved.`
+					: "No eligible rod, staff, wand, or martial ranged weapon is in your inventory. Add one before a future Long Rest to carve it.",
+			});
+			empty.setAttribute("role", "status");
+			section.appendChild(empty);
+			return {
+				section,
+				getSelectedItemId: () => null,
+				apply: () => false,
+			};
+		}
+
+		const selectId = "charsheet-rest-arcane-firearm-choice";
+		const label = e_({
+			tag: "label",
+			clazz: "charsheet__arcane-firearm-rest-label",
+			txt: "Item to carve",
+		});
+		label.setAttribute("for", selectId);
+		const select = e_({
+			tag: "select",
+			clazz: "form-control input-sm charsheet__arcane-firearm-rest-select",
+			id: selectId,
+		});
+		select.setAttribute("aria-label", "Arcane Firearm item to carve after this Long Rest");
+
+		select.appendChild(e_({
+			tag: "option",
+			val: "__keep__",
+			txt: currentIsLegal
+				? `Keep Current — ${status.item?.name || "carved item"}`
+				: "Do not carve an item",
+		}));
+		candidates.forEach(item => {
+			select.appendChild(e_({
+				tag: "option",
+				val: item.id,
+				txt: item.bindingLabel,
+			}));
+		});
+		select.value = "__keep__";
+		section.appendChild(label);
+		section.appendChild(select);
+		section.appendChild(e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mt-1 mb-0",
+			txt: "The item remains in inventory and may stay carved while unequipped, but it must be equipped to serve as a focus or add damage.",
+		}));
+
+		return {
+			section,
+			getSelectedItemId: () => {
+				if (!select.value || select.value === "__keep__") return currentIsLegal ? currentId : null;
+				return candidates.some(item => item.id === select.value) ? select.value : null;
+			},
+			apply: () => {
+				if (!select.value || select.value === "__keep__") return false;
+				const result = this._state.setEfaArcaneFirearmBinding?.(select.value);
+				if (!result?.ok) throw new Error("The selected Arcane Firearm item is no longer eligible.");
+				return result.binding?.lastKnownItem?.name || "the selected item";
 			},
 		};
 	}
@@ -1511,6 +3017,7 @@ class CharacterSheetRest {
 		const features = this._state.getFeatures();
 		features.forEach(feature => {
 			if (feature.uses) {
+				if (resources.some(resource => resource.mirrorsFeatureUses && resource.featureId === feature.id)) return;
 				if (restType === "short" && feature.uses.shortRestRecovery) {
 					this._state.setFeatureUses(feature.id, Math.min(feature.uses.max, feature.uses.current + feature.uses.shortRestRecovery));
 				} else if (restType === "long" || feature.uses.recharge === "short") {
@@ -1519,6 +3026,8 @@ class CharacterSheetRest {
 				}
 			}
 		});
+		if (restType === "short") this._state.restoreEfaFlashOfGeniusOnShortRest?.();
+		this._state.applyFeatureCompanionRest?.(restType);
 
 		// Restore stamina (Combat Methods system) - recovers on both short and long rests
 		if (this._state.usesCombatSystem?.()) {

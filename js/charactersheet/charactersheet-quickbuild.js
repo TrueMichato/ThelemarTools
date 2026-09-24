@@ -1,3 +1,5 @@
+import {CharacterSheetArtificerPlanPicker} from "./charactersheet-artificer-plan-picker.js";
+
 /**
  * Character Sheet Quick Build
  * A guided wizard that allows players to create/level a character to any target level (1–20)
@@ -52,6 +54,7 @@ class CharacterSheetQuickBuild {
 			_combatTraditions: [], // TGTT combat tradition selections (base)
 			_subclassChoiceTraditions: [], // TGTT subclass-choice picks (separate cap)
 			weaponMasteries: null, // XPHB weapon mastery selections (null = step not yet seeded; see _renderWeaponMasteryStep)
+			artificerPlanDecisions: [],
 		};
 
 		// Modal/overlay reference
@@ -176,6 +179,7 @@ class CharacterSheetQuickBuild {
 			_combatTraditions: [],
 			_subclassChoiceTraditions: [],
 			weaponMasteries: null,
+			artificerPlanDecisions: [],
 		};
 		this._levelAnalysis = [];
 		this._steps = [];
@@ -319,14 +323,7 @@ class CharacterSheetQuickBuild {
 					preparedCantripsGainAtLevel = Math.max(0, newCantrips - prevCantrips);
 				}
 
-				const casterProg = classData.casterProgression;
-				if (casterProg === "pact") {
-					preparedMaxSpellLevel = Math.min(5, Math.ceil(classLevel / 2));
-				} else if (casterProg === "full") {
-					preparedMaxSpellLevel = Math.min(9, Math.ceil(classLevel / 2));
-				} else {
-					preparedMaxSpellLevel = Math.min(9, Math.ceil(classLevel / 2));
-				}
+				preparedMaxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, classLevel);
 			}
 
 			// Update running optional feature counts
@@ -572,6 +569,26 @@ class CharacterSheetQuickBuild {
 				data: subclassLevels,
 				render: (content) => this._renderSubclassStep(content, subclassLevels),
 				validate: () => this._validateSubclassStep(subclassLevels),
+			});
+		}
+
+		const artificerPlanLevels = analysis.filter(a =>
+			globalThis.CharacterSheetArtificerPlans?.isExactOwner?.({
+				className: a.className,
+				classSource: a.classSource,
+			}) && Number(a.classLevel) >= 2,
+		);
+		if (artificerPlanLevels.length) {
+			const hasRequiredArtificerPlans = this._getArtificerPlanOpportunities(artificerPlanLevels)
+				.some(opportunity => opportunity.required);
+			this._steps.push({
+				id: "artificer-plans",
+				label: "Magic Item Plans",
+				icon: "🛠️",
+				required: hasRequiredArtificerPlans,
+				data: artificerPlanLevels,
+				render: content => this._renderArtificerPlanStep(content, artificerPlanLevels),
+				validate: () => this._validateArtificerPlanStep(artificerPlanLevels),
 			});
 		}
 
@@ -918,7 +935,7 @@ class CharacterSheetQuickBuild {
 	// that may add or remove steps (e.g. selecting a subclass removes the
 	// subclass step and can add a Class Options step once the subclass's
 	// optionalfeatureProgression — Arcane Shot, Maneuvers — merges in).
-	static _STEP_ORDER = ["target", "subclass", "asi", "optfeatures", "classfeats", "featoptions", "weaponmastery", "expertise", "spells", "hp", "review"];
+	static _STEP_ORDER = ["target", "subclass", "artificer-plans", "asi", "optfeatures", "classfeats", "featoptions", "weaponmastery", "expertise", "spells", "hp", "review"];
 
 	/**
 	 * After rebuilding `this._steps`, advance to the correct next step by
@@ -936,6 +953,81 @@ class CharacterSheetQuickBuild {
 		let targetIdx = this._steps.findIndex(s => order.indexOf(s.id) > completedIdx);
 		if (targetIdx === -1) targetIdx = this._steps.length - 1;
 		this._goToStep(targetIdx);
+	}
+
+	_getArtificerPlanOpportunities (levels) {
+		return CharacterSheetArtificerPlanPicker.getOpportunitiesForLevels({
+			levels: (levels || []).map(level => ({
+				characterLevel: level.characterLevel,
+				className: level.className,
+				classSource: level.classSource,
+				classLevel: level.classLevel,
+				subclassShortName: level.subclass?.shortName || level.subclass?.name || null,
+				subclassSource: level.subclass?.source || null,
+			})),
+		});
+	}
+
+	_renderArtificerPlanStep (content, levels) {
+		const opportunities = this._getArtificerPlanOpportunities(levels);
+		const selectedById = new Map((this._selections.artificerPlanDecisions || [])
+			.map(decision => [decision.opportunityId, decision.selection]));
+		const required = opportunities.filter(opportunity => opportunity.required);
+		const selectedRequired = required.filter(opportunity => selectedById.get(opportunity.opportunityId)).length;
+		content.append(
+			e_({tag: "h3", txt: "Replicate Magic Item Plans"}),
+			e_({
+				tag: "p",
+				clazz: "ve-muted",
+				txt: "Choose gained plans and optionally replace one known plan at every Artificer level in this build. These are plan decisions only; Quick Build does not create any items.",
+			}),
+		);
+		const summary = e_({
+			tag: "div",
+			clazz: `ve-alert ${selectedRequired === required.length ? "ve-alert-success" : "ve-alert-warning"}`,
+			txt: `${selectedRequired}/${required.length} required plan choices complete.`,
+		});
+		const list = e_({tag: "div", clazz: "charsheet__artificer-plan-quick-summary"});
+		for (const opportunity of opportunities) {
+			const selection = selectedById.get(opportunity.opportunityId);
+			list.append(e_({
+				tag: "div",
+				clazz: "charsheet__artificer-plan-quick-row",
+				txt: opportunity.kind === "replacement"
+					? `Artificer ${opportunity.classLevel}: ${selection ? `${selection.previousPlan?.name} → ${selection.nextPlan?.name}` : "Keep current plans"}`
+					: `Artificer ${opportunity.classLevel}: ${selection ? `${selection.name} (${selection.source})` : "Plan required"}`,
+			}));
+		}
+		const choose = e_({tag: "button", clazz: "ve-btn ve-btn-primary mt-2", txt: "Configure Magic Item Plans"});
+		choose.type = "button";
+		choose.addEventListener("click", async () => {
+			const initialSelections = Object.fromEntries((this._selections.artificerPlanDecisions || [])
+				.filter(decision => decision.selection)
+				.map(decision => [decision.opportunityId, decision.selection]));
+			const result = await CharacterSheetArtificerPlanPicker.pGetUserDecisions({
+				page: this._page,
+				state: this._state,
+				opportunities,
+				initialSelections,
+				title: "Quick Build: Replicate Magic Item Plans",
+			});
+			if (result == null) return;
+			this._selections.artificerPlanDecisions = result;
+			this._renderCurrentStep();
+		});
+		content.append(summary, list, choose);
+	}
+
+	_validateArtificerPlanStep (levels) {
+		const opportunities = this._getArtificerPlanOpportunities(levels);
+		const selectedById = new Map((this._selections.artificerPlanDecisions || [])
+			.map(decision => [decision.opportunityId, decision.selection]));
+		const missing = opportunities.find(opportunity =>
+			opportunity.required && !selectedById.get(opportunity.opportunityId),
+		);
+		if (!missing) return true;
+		JqueryUtil.doToast({type: "warning", content: `Choose the required Artificer level ${missing.classLevel} magic item plan.`});
+		return false;
 	}
 
 	/**
@@ -5146,10 +5238,12 @@ class CharacterSheetQuickBuild {
 
 		// Apply spellbook spells
 		if (this._selections.spellbookSpells.length > 0) {
+			const wizardClass = this._classAllocations.find(a => a.className === "Wizard");
 			this._selections.spellbookSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Wizard Spellbook",
 					sourceClass: "Wizard",
+					sourceClassSource: wizardClass?.classSource || null,
 					inSpellbook: true,
 				}));
 			});
@@ -5159,26 +5253,28 @@ class CharacterSheetQuickBuild {
 
 		// Apply known spells (Sorcerer, Bard, Ranger, Warlock, etc.)
 		if (this._selections.knownSpells.length > 0) {
-			const knownClassName = this._classAllocations.find(a =>
+			const knownClass = this._classAllocations.find(a =>
 				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
-			)?.className;
+			);
 			this._selections.knownSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Spells Known",
-					sourceClass: knownClassName || "",
+					sourceClass: knownClass?.className || "",
+					sourceClassSource: knownClass?.classSource || null,
 				}));
 			});
 		}
 
 		// Apply known cantrips
 		if (this._selections.knownCantrips.length > 0) {
-			const knownClassName = this._classAllocations.find(a =>
+			const knownClass = this._classAllocations.find(a =>
 				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
-			)?.className;
+			);
 			this._selections.knownCantrips.forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
-					sourceClass: knownClassName || "",
+					sourceClass: knownClass?.className || "",
+					sourceClassSource: knownClass?.classSource || null,
 				}));
 			});
 		}
@@ -5193,14 +5289,15 @@ class CharacterSheetQuickBuild {
 
 		// Apply prepared spells (XPHB Warlock, etc.)
 		if (this._selections.preparedSpells?.length > 0) {
-			const prepClassName = this._classAllocations.find(a =>
+			const prepClass = this._classAllocations.find(a =>
 				a.classData?.preparedSpellsProgression
 				&& CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "prepared",
-			)?.className;
+			);
 			this._selections.preparedSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Prepared Spells",
-					sourceClass: prepClassName || "",
+					sourceClass: prepClass?.className || "",
+					sourceClassSource: prepClass?.classSource || null,
 					prepared: true,
 				}));
 			});
@@ -5208,14 +5305,15 @@ class CharacterSheetQuickBuild {
 
 		// Apply prepared cantrips
 		if (this._selections.preparedCantrips?.length > 0) {
-			const prepClassName = this._classAllocations.find(a =>
+			const prepClass = this._classAllocations.find(a =>
 				a.classData?.preparedSpellsProgression
 				&& CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "prepared",
-			)?.className;
+			);
 			this._selections.preparedCantrips.forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Prepared Spells",
-					sourceClass: prepClassName || "",
+					sourceClass: prepClass?.className || "",
+					sourceClassSource: prepClass?.classSource || null,
 				}));
 			});
 		}
@@ -5246,6 +5344,13 @@ class CharacterSheetQuickBuild {
 		// Resolve prose "either A or B" feature choices (e.g. Arcane Archer Lore)
 		if (this._page.processPendingFeatureChoices) {
 			await this._page.processPendingFeatureChoices();
+		}
+		if (this._page.reconcileFeatureCompanionGrants) {
+			await this._page.reconcileFeatureCompanionGrants({
+				state: this._state,
+				reason: "quickBuildFinalization",
+				allowPrompt: true,
+			});
 		}
 
 		// Final recalculations
@@ -5408,6 +5513,7 @@ class CharacterSheetQuickBuild {
 	}
 
 	_applyFeatureOptionsForLevel (analysis) {
+		let choiceIndex = 0;
 		analysis.featureOptions.forEach(optGroup => {
 			const levelKey = `${analysis.className}_${analysis.classLevel}_${optGroup.featureName}`;
 			const selected = this._selections.featureOptions[levelKey] || [];
@@ -5415,20 +5521,28 @@ class CharacterSheetQuickBuild {
 			selected.forEach(opt => {
 				if (!["classFeature", "subclassFeature", "optionalfeature"].includes(opt.type)) return;
 				const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, analysis.classLevel);
-				this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
+				CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+					state: this._state,
+					page: this._page,
+					characterLevel: analysis.characterLevel,
+					classLevel: analysis.classLevel,
 					className: analysis.className,
 					classSource: analysis.classSource,
-					acquisitionLevel: analysis.classLevel,
+					subclassName: subclass?.name,
+					subclassShortName: subclass?.shortName,
+					subclassSource: subclass?.source,
 					parentFeature: optGroup.featureName,
+					parentSource: optGroup.featureSource || null,
+					choiceIndex: choiceIndex++,
+					newOption: opt,
 					catalogs: {
 						classFeatures: this._page.getClassFeatures(),
 						subclassFeatures: this._page.getSubclassFeatures() || [],
 						optionalFeatures: this._page.getOptionalFeatures(),
 					},
-					subclassName: subclass?.name,
-					subclassShortName: subclass?.shortName,
-					subclassSource: subclass?.source,
-				}));
+					persistHistory: false,
+					recalculate: false,
+				});
 			});
 		});
 	}
@@ -5456,6 +5570,16 @@ class CharacterSheetQuickBuild {
 		if (analysis.className === "Wizard" && analysis.classLevel === 20 && this._selections.signatureSpells.length) {
 			entry.choices.signatureSpells = this._selections.signatureSpells.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
 		}
+		const artificerPlanDecisions = (this._selections.artificerPlanDecisions || []).filter(decision =>
+			decision.className === analysis.className
+				&& decision.classSource === analysis.classSource
+				&& Number(decision.classLevel) === Number(analysis.classLevel)
+				&& decision.selection,
+		);
+		Object.assign(
+			entry.choices,
+			globalThis.CharacterSheetArtificerPlans.toHistoryChoices(artificerPlanDecisions),
+		);
 
 		// ASI / Feat
 		const asiSel = this._selections.asi[levelKey];

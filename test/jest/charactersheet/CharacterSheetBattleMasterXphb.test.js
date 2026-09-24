@@ -330,6 +330,7 @@ describe("Battle Master (XPHB)", () => {
 		expect(combat.canUseBattleMasterAction("bonus")).toBe(false);
 		expect(combat.canUseBattleMasterManeuver(CharacterSheetState.BATTLE_MASTER_MANEUVERS["feinting attack"])).toBe(false);
 		expect(combat._pendingBattleMasterAttackAdvantage).toBe(true);
+		state.advanceRound();
 		combat._resetTurnActionUsage();
 		expect(combat.canUseBattleMasterAction("bonus")).toBe(true);
 		expect(combat._pendingBattleMasterDamage).toBeNull();

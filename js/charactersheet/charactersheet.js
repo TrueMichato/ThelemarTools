@@ -21,6 +21,7 @@ import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import "./charactersheet-respec-engine.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+import {CharacterSheetCompanionRules} from "./charactersheet-companion-rules.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
@@ -111,7 +112,7 @@ class CharacterSheetPage {
 		this._lastDamageType = null;
 		this._damageIntakeAmount = 0;
 		this._damageIntakePreviewIntent = "damage";
-		/** @type {?{characterId: string, kind: "damage"|"heal", damageType: ?string, requestedAmount: number, actualDelta: number, before: {currentHp: number, tempHp: number}, after: {currentHp: number, tempHp: number}}} */
+		/** @type {?{characterId: string, kind: "damage"|"heal", damageType: ?string, requestedAmount: number, actualDelta: number, before: {currentHp: number, tempHp: number, tempHpOwner: ?object}, after: {currentHp: number, tempHp: number, tempHpOwner: ?object}}} */
 		this._lastHpChange = null;
 		/** @type {?{text: string, tone: string}} */
 		this._lastHpOutcome = null;
@@ -349,7 +350,7 @@ class CharacterSheetPage {
 		// Load all necessary data in parallel
 		// Note: Using loadRawJSON for classes to get classFeature and subclassFeature arrays
 		// Also pre-cache class/subclass features in DataLoader so hover links work properly
-		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, itemMaterials, prereleaseData, brewData, variantComponents] = await Promise.all([
+		const [races, classes, backgrounds, spells, items, brewItems, prereleaseItems, actions, objects, feats, optFeatures, skills, conditionsData, languagesData, combatMethods, itemUpgrades, itemMaterials, prereleaseData, brewData, variantComponents] = await Promise.all([
 			DataUtil.race.loadJSON(),
 			DataUtil.class.loadRawJSON(),
 			DataUtil.loadJSON("data/backgrounds.json"),
@@ -361,6 +362,7 @@ class CharacterSheetPage {
 			DataUtil.item.loadBrew().then(d => d.item || []).catch(() => []),
 			DataUtil.item.loadPrerelease().then(d => d.item || []).catch(() => []),
 			DataUtil.action.loadJSON(),
+			DataUtil.loadJSON("data/objects.json"),
 			DataUtil.loadJSON("data/feats.json"),
 			DataUtil.loadJSON("data/optionalfeatures.json"),
 			DataUtil.loadJSON("data/skills.json"),
@@ -391,6 +393,8 @@ class CharacterSheetPage {
 		this._itemsData = [...(items || []), ...(prereleaseItems || []), ...(brewItems || []), ...(variantComponents.item || [])]
 			.filter(it => !it._isItemGroup);
 		this._actionsData = actions.action || [];
+		this._classSummonTemplatesData = objects.object || [];
+		this._state.setClassSummonTemplateCatalog(this._classSummonTemplatesData);
 		this._featsData = feats.feat || [];
 		this._optionalFeaturesData = optFeatures.optionalfeature || [];
 		this._combatMethodsData = (combatMethods.combatMethod || []).map(m => ({...m, _entityType: "combatMethod"}));
@@ -436,6 +440,11 @@ class CharacterSheetPage {
 		// Soul (Guidance). Run after _mergeBrewData so brew copies see brew parents,
 		// and BEFORE _setUpStateFromData consumes the merged data.
 		await this._pResolveCopyInheritance();
+
+		// Builder mutates the live state directly before any load-time class-feature
+		// reconciliation runs. Register the full catalog now so class-level
+		// `additionalSpells` grants are available on the first apply pass.
+		this._state.setClassCatalog(this._classes || []);
 
 		// Register the sheet's loaded (brew-merged + _copy-resolved) class,
 		// subclass, optional-feature and combat-method entities directly into the
@@ -1777,7 +1786,11 @@ class CharacterSheetPage {
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
 				|| transferResults.some(({result}) => result.applied.length)
-				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
+				|| (reconcileResult && (
+					reconcileResult.added > 0
+					|| reconcileResult.backfilled > 0
+					|| reconcileResult.featureCompanionChanged
+				));
 			if (needsSave && this._isCharacterTransactionCurrent({characterId: charId, loadGeneration})) {
 				const isSaved = await this._saveCurrentCharacter({
 					isReturnStatus: true,
@@ -2291,6 +2304,826 @@ class CharacterSheetPage {
 		} else {
 			JqueryUtil.doToast({type: "warning", content: "Familiar picker not available."});
 		}
+	}
+
+	static _getFeatureCompanionOwnerUid (descriptor) {
+		if (descriptor?.identity?.runtimeOwnerUid) return descriptor.identity.runtimeOwnerUid;
+		const parts = String(descriptor?.identity?.featureUid || "").split("|");
+		if (parts.length === 7) return parts.join("|");
+		if (parts.length !== 6 || !descriptor?.identity?.source) return null;
+		return [...parts, descriptor.identity.source].join("|");
+	}
+
+	static _isFeatureCompanionCreationActionAvailable (state) {
+		return state?.isActionTypeAvailable?.("action", {trackOnlyInCombat: true}) !== false;
+	}
+
+	_getFeatureCompanionDescriptor (companion) {
+		const featureUid = companion?.featureGrant?.uid || companion?.scaling?.featureUid;
+		return featureUid ? CharacterSheetCompanionRules.getDescriptor(featureUid) : null;
+	}
+
+	_getFeatureCompanionCreationModels () {
+		if (!this._state?.getFeatureCompanionCreationBoundary) return [];
+		return Object.values(CharacterSheetCompanionRules.getRegistry())
+			.filter(descriptor => descriptor?.creationPolicy)
+			.map(descriptor => {
+				const ownerUid = CharacterSheetPage._getFeatureCompanionOwnerUid(descriptor);
+				if (!ownerUid) return null;
+				const boundary = this._state.getFeatureCompanionCreationBoundary(ownerUid, {
+					classUid: descriptor.identity.classUid,
+					subclassUid: descriptor.identity.subclassUid,
+				});
+				if (!boundary?.available) return null;
+				const paymentOptions = CharacterSheetPage._getFeatureCompanionPaymentOptions(boundary);
+				const setupTransaction = boundary.setupChoices?.transaction || null;
+				const actionAvailable = CharacterSheetPage._isFeatureCompanionCreationActionAvailable(this._state);
+				const blockedReasons = new Set([
+					"activeCompanion",
+					"toolUnavailable",
+					"unavailablePayment",
+					"invalidFeature",
+					"invalidClass",
+					"invalidSubclass",
+					"creationUnsupported",
+					"ownerNotFound",
+				]);
+				return {
+					ownerUid,
+					descriptor,
+					boundary,
+					paymentOptions,
+					setupTransaction,
+					actionAvailable,
+					reason: actionAvailable ? boundary.reason : "actionUnavailable",
+					canAttempt: actionAvailable
+						&& !blockedReasons.has(boundary.reason)
+						&& boundary.focus?.eligibleReferences?.length > 0
+						&& paymentOptions.length > 0,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	static _getFeatureCompanionPaymentOptions (boundary) {
+		const out = [];
+		const free = boundary?.paymentOptions?.freeCreation;
+		if (free?.current > 0) {
+			out.push({
+				key: "freeCreation",
+				label: `Free creation (${free.current}/${free.max})`,
+				payment: {type: "freeCreation"},
+			});
+		}
+		for (const slot of boundary?.paymentOptions?.spellSlots || []) {
+			const isPact = slot.pool === "pact";
+			out.push({
+				key: `${isPact ? "pact" : "spell"}:${slot.slotLevel}`,
+				label: `Level ${slot.slotLevel} ${isPact ? "pact" : "spell"} slot (${slot.current}/${slot.max})`,
+				payment: {
+					type: "spellSlot",
+					pool: isPact ? "pact" : "spell",
+					slotLevel: slot.slotLevel,
+				},
+			});
+		}
+		return out;
+	}
+
+	static _buildFeatureCompanionCreationPayload ({
+		model,
+		focusReference,
+		payment,
+		selectedOptionIds = [],
+		appearance = "",
+	}) {
+		if (!model?.ownerUid || !model?.descriptor || !focusReference || !payment) {
+			throw new TypeError("Companion creation requires an exact owner, tool, and payment.");
+		}
+		const transaction = model.setupTransaction;
+		const selectedOptions = transaction
+			? selectedOptionIds.map(id => {
+				const option = transaction.options.find(candidate => candidate.id === id);
+				if (!option) throw new RangeError(`Companion creation option "${id}" is no longer available.`);
+				return MiscUtil.copyFast(option);
+			})
+			: [];
+		return {
+			featureUid: model.ownerUid,
+			classUid: model.descriptor.identity.classUid,
+			subclassUid: model.descriptor.identity.subclassUid,
+			focusReference: MiscUtil.copyFast(focusReference),
+			payment: MiscUtil.copyFast(payment),
+			setupChoices: transaction
+				? {
+					transactionId: transaction.transactionId,
+					selectedOptions,
+				}
+				: null,
+			appearance: String(appearance || "").trim() || null,
+		};
+	}
+
+	static _getFeatureCompanionCreationReasonMessage (reason, fallback = "") {
+		const messages = {
+			activeCompanion: "An active exact-owner companion already exists.",
+			actionUnavailable: "Your Magic action is unavailable right now.",
+			cancelled: "Creation was cancelled. No action, payment, or tool receipt was committed.",
+			coreCommitFailed: "Creation failed during the atomic commit. Nothing was spent.",
+			invalidChoice: "The modification choices are invalid. Review the current options.",
+			invalidChoiceName: "A modification changed. Review the current options.",
+			invalidChoiceSource: "A modification came from the wrong source. Review the current options.",
+			invalidTool: "The selected tool is no longer eligible.",
+			missingChoice: "Choose the required modifications for this generation.",
+			missingChoiceTransaction: "The modification review is stale. Reopen creation.",
+			staleChoiceTransaction: "The modification options changed. Review them again.",
+			toolUnavailable: "Equip an eligible XPHB Artisan's Tool you are proficient with.",
+			tooFewChoices: "Choose every required modification for this generation.",
+			tooManyChoices: "Choose only the required number of modifications.",
+			unavailablePayment: "No free creation, spell slot, or pact slot is currently available.",
+			unknownChoice: "A selected modification is no longer available.",
+		};
+		return messages[reason] || fallback || "Companion creation is not currently available.";
+	}
+
+	_getFeatureCompanionReadiness ({
+		companion,
+		status,
+		expectedOwnerUid,
+		hasExecutableRuntime,
+	}) {
+		if (status.key !== "active") {
+			return {
+				readiness: {action: "Unavailable", reaction: "Unavailable"},
+				source: "lifecycle",
+			};
+		}
+
+		const fallback = {
+			readiness: {
+				action: companion.turnUsage?.action ? "Used" : "Available",
+				reaction: companion.turnUsage?.reaction ? "Used" : "Available",
+			},
+			source: "legacyTurnUsage",
+		};
+		if (!hasExecutableRuntime || typeof this._state?.getCompanionOperationAvailability !== "function") return fallback;
+
+		const availability = this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"});
+		const canonicalStatus = availability?.status;
+		const ownerMatches = String(availability?.ownerUid || "").toLowerCase() === String(expectedOwnerUid || "").toLowerCase();
+		if (
+			!ownerMatches
+			|| typeof canonicalStatus?.actionAvailable !== "boolean"
+			|| typeof canonicalStatus?.reactionAvailable !== "boolean"
+		) return fallback;
+
+		return {
+			readiness: {
+				action: canonicalStatus.actionAvailable ? "Available" : "Unavailable",
+				reaction: canonicalStatus.reactionAvailable ? "Available" : "Unavailable",
+			},
+			source: "canonicalOperationStatus",
+		};
+	}
+
+	_getFeatureCompanionManagerModel (companion) {
+		const descriptor = this._getFeatureCompanionDescriptor(companion);
+		if (!descriptor) return null;
+
+		const expectedOwnerUid = CharacterSheetPage._getFeatureCompanionOwnerUid(descriptor);
+		const expectedIdentity = descriptor.identity;
+		const resolvedIdentity = companion.scaling?.resolved?.identity;
+		const diagnostics = [];
+		if (String(companion.featureGrant?.uid || "").toLowerCase() !== String(expectedOwnerUid || "").toLowerCase()) {
+			diagnostics.push("The feature owner does not match the registered source-qualified owner.");
+		}
+		if (companion.source !== expectedIdentity.source || companion.creatureSource !== expectedIdentity.source) {
+			diagnostics.push(`Expected companion source ${expectedIdentity.source}; found ${companion.source || companion.creatureSource || "none"}.`);
+		}
+		if (companion.name !== expectedIdentity.name || companion.creatureName !== expectedIdentity.name) {
+			diagnostics.push(`Expected ${expectedIdentity.name}; the stored companion identity does not match.`);
+		}
+		if (!resolvedIdentity) {
+			diagnostics.push("Resolved registry setup is missing.");
+		} else {
+			for (const key of ["companionUid", "classUid", "subclassUid"]) {
+				if (resolvedIdentity[key] !== expectedIdentity[key]) {
+					diagnostics.push(`Resolved ${key.replace(/Uid$/, " identity")} does not match the registry.`);
+				}
+			}
+		}
+
+		const modificationReceipt = companion.setup?.choices?.modifications || null;
+		if (descriptor.modifications) {
+			if (companion.scaling?.deferSetupChoices) {
+				diagnostics.push("Modification setup is deferred for this legacy generation.");
+			} else if (!modificationReceipt) {
+				diagnostics.push("The immutable modification receipt is missing.");
+			} else {
+				if (modificationReceipt.ownerUid !== expectedOwnerUid) {
+					diagnostics.push("The modification receipt belongs to a different source-qualified owner.");
+				}
+				if (modificationReceipt.rulesVersion !== descriptor.schemaVersion) {
+					diagnostics.push("The modification receipt uses a different rules version.");
+				}
+				if (
+					!Array.isArray(modificationReceipt.selectedOptionIds)
+					|| modificationReceipt.selectedOptionIds.length !== Number(modificationReceipt.requiredCount)
+				) {
+					diagnostics.push("The modification receipt has an invalid selection count.");
+				}
+			}
+		}
+
+		const lifecycleStatus = String(companion.lifecycle?.status || "").toLowerCase();
+		const isDead = lifecycleStatus === "dead" || Number(companion.hp?.current) <= 0;
+		const isExpired = ["expired", "dismissed", "inactive", "vanished"].includes(lifecycleStatus);
+		const status = diagnostics.length
+			? {key: "invalid", label: "Invalid setup", icon: "⚠️"}
+			: isDead
+				? {
+					key: "dead",
+					label: companion.lifecycle?.deathBurstEmitted ? "Dead · Death Burst emitted" : "Dead",
+					icon: "☠️",
+				}
+				: isExpired
+					? {key: "expired", label: "Expired", icon: "⌛"}
+					: {key: "active", label: "Active", icon: "●"};
+
+		const resolved = companion.scaling?.resolved || {};
+		const selectedModificationIds = modificationReceipt?.selectedOptionIds
+			|| resolved.modifications?.selected
+			|| [];
+		const modifications = selectedModificationIds.map(id =>
+			descriptor.modifications?.options?.[id]?.name || id);
+		const receipt = companion.lifecycle?.creationReceipt || null;
+		const tool = receipt?.tool
+			? `${receipt.tool.name || String(receipt.tool.itemUid || "").split("|")[0]} (${receipt.tool.source || String(receipt.tool.itemUid || "").split("|")[1] || "unknown source"})`
+			: "No creation tool receipt";
+		const payment = receipt?.payment?.type === "freeCreation"
+			? "Free creation"
+			: receipt?.payment?.type === "spellSlot"
+				? `Level ${receipt.payment.slotLevel} ${receipt.payment.pool === "pact" ? "pact" : "spell"} slot`
+				: "No creation payment receipt";
+		const senses = Array.isArray(companion.senses) && companion.senses.length
+			? companion.senses
+				.map(sense => String(sense).replace(/^[a-z]+/, match => match.toTitleCase()))
+				.join(", ")
+			: Object.entries(resolved.statistics?.senses || {})
+				.map(([sense, range]) => `${sense.toTitleCase()} ${range} ft.`)
+				.join(", ") || "—";
+		const hitDice = companion.hitDice || {};
+		const operationUi = this.getFeatureCompanionOperationSurfaceModel(companion, descriptor);
+		const readiness = this._getFeatureCompanionReadiness({
+			companion,
+			status,
+			expectedOwnerUid,
+			hasExecutableRuntime: !!operationUi || resolved.operations?.command?.status === "executable",
+		});
+
+		return {
+			companion,
+			descriptor,
+			expectedOwnerUid,
+			status,
+			diagnostics,
+			displayName: companion.customName
+				? `${companion.customName} — ${expectedIdentity.name}`
+				: expectedIdentity.name,
+			source: expectedIdentity.source,
+			stats: {
+				hp: `${Number(companion.hp?.current) || 0}/${Number(companion.hp?.max) || 0}`,
+				ac: companion.ac ?? resolved.statistics?.ac ?? "—",
+				hitDice: hitDice.max
+					? `${Number(hitDice.current) || 0}/${hitDice.max} ${hitDice.die || ""}`.trim()
+					: "—",
+				movement: this._getCompanionSpeedString(companion) || "—",
+				senses,
+			},
+			modifications,
+			provenance: {
+				tool,
+				payment,
+				appearance: companion.setup?.appearance || "",
+				generation: Number(companion.lifecycle?.generation) || 1,
+			},
+			readiness: readiness.readiness,
+			readinessSource: readiness.source,
+			operationUi,
+			isOverviewOnly: !operationUi || operationUi.renderInManager === true,
+		};
+	}
+
+	_getFeatureCompanionManagerModels () {
+		return (this._state.getCompanions?.() || [])
+			.map(companion => this._getFeatureCompanionManagerModel(companion))
+			.filter(Boolean);
+	}
+
+	_getFeatureCompanionManagerHtml (model, index) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const id = `charsheet-feature-companion-manager-${index}`;
+		const diagnosticsHtml = model.diagnostics.length
+			? `<div class="charsheet__feature-companion-diagnostics" role="alert">
+				<div class="bold">Source or setup mismatch</div>
+				<ul>${model.diagnostics.map(message => `<li>${escape(message)}</li>`).join("")}</ul>
+			</div>`
+			: "";
+		const modificationsHtml = model.modifications.length
+			? model.modifications.map(name => `<span class="charsheet__feature-companion-chip">${escape(name)}</span>`).join("")
+			: `<span class="ve-muted">None for this generation</span>`;
+		const appearanceHtml = model.provenance.appearance
+			? `<details class="charsheet__feature-companion-appearance">
+				<summary>Appearance</summary>
+				<div>${escape(model.provenance.appearance)}</div>
+			</details>`
+			: "";
+		const operationsHtml = model.operationUi?.renderInManager
+			? this._getFeatureCompanionOperationSurfaceHtml(model.operationUi)
+			: "";
+		return `<section class="charsheet__feature-companion-manager charsheet__feature-companion-manager--${model.status.key}"
+			data-feature-companion-owner="${escape(model.expectedOwnerUid)}"
+			aria-labelledby="${id}">
+			<header class="charsheet__feature-companion-manager-header">
+				<div>
+					<h4 id="${id}" class="charsheet__feature-companion-manager-title">${escape(model.displayName)}</h4>
+					<div class="ve-muted ve-small">${escape(model.descriptor.identity.name)} (${escape(model.source)}) · Generation ${model.provenance.generation}</div>
+				</div>
+				<span class="charsheet__feature-companion-status charsheet__feature-companion-status--${model.status.key}">
+					<span aria-hidden="true">${model.status.icon}</span> ${escape(model.status.label)}
+				</span>
+			</header>
+			<div class="charsheet__feature-companion-facts" role="group" aria-label="${escape(model.descriptor.identity.name)} statistics">
+				<div><span>HP</span><strong>${escape(model.stats.hp)}</strong></div>
+				<div><span>AC</span><strong>${escape(model.stats.ac)}</strong></div>
+				<div><span>Hit Dice</span><strong>${escape(model.stats.hitDice)}</strong></div>
+				<div><span>Movement</span><strong>${escape(model.stats.movement)}</strong></div>
+				<div><span>Senses</span><strong>${escape(model.stats.senses)}</strong></div>
+			</div>
+			<div class="charsheet__feature-companion-readiness" role="group" aria-label="Read-only turn availability">
+				<span><strong>Action:</strong> ${escape(model.readiness.action)}</span>
+				<span><strong>Reaction:</strong> ${escape(model.readiness.reaction)}</span>
+				<span class="ve-muted">${model.operationUi?.renderInManager ? "Canonical receipts; use the Operate controls below." : "Status only; use in-play controls where supported."}</span>
+			</div>
+			<div class="charsheet__feature-companion-manager-grid">
+				<div>
+					<div class="charsheet__feature-companion-label">Modifications</div>
+					<div class="charsheet__feature-companion-chips">${modificationsHtml}</div>
+				</div>
+				<div>
+					<div class="charsheet__feature-companion-label">Creation provenance</div>
+					<div>${escape(model.provenance.tool)}</div>
+					<div>${escape(model.provenance.payment)}</div>
+				</div>
+			</div>
+			${appearanceHtml}
+			${operationsHtml}
+			${diagnosticsHtml}
+		</section>`;
+	}
+
+	_getFeatureCompanionOperationSurfaceHtml (model) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const id = `charsheet-feature-companion-operations-${String(model.companionId || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		const reasons = model.controls
+			.filter(control => !control.available)
+			.map(control => `${control.label}: ${control.reason}`);
+		const controls = model.controls.map(control =>
+			`<button type="button" class="ve-btn ve-btn-xs ${control.tone === "danger" ? "ve-btn-danger" : control.tone === "primary" ? "ve-btn-primary" : "ve-btn-default"}"
+				data-feature-companion-operation="${escape(control.operation)}"
+				data-feature-companion-id="${escape(model.companionId)}"
+				data-feature-companion-owner="${escape(model.ownerUid)}"
+				data-companion-operation-key="${escape(this.getCompanionOperationFocusKey(model.companionId, control.operation, control.actionKey))}"
+				aria-describedby="${id}-status ${id}-reasons"
+				title="${escape(control.description || control.reason || control.label)}"
+				${control.available ? "" : "disabled"}>
+				${escape(control.label)}
+			</button>`,
+		).join("");
+		return `<section class="charsheet__feature-companion-operations" role="region" aria-labelledby="${id}-heading">
+			<div class="charsheet__feature-companion-operation-header">
+				<div>
+					<h5 id="${id}-heading" class="charsheet__feature-companion-operation-title">${escape(model.heading)}</h5>
+					<div class="ve-small ve-muted">${escape(model.summary)}</div>
+				</div>
+				<span class="charsheet__feature-companion-operation-mode">${escape(model.modeLabel)}</span>
+			</div>
+			<div id="${id}-status" class="charsheet__feature-companion-operation-status">${escape(model.statusText)}</div>
+			<div class="ve-small ve-muted">${escape(model.costText)}</div>
+			<div class="ve-small ve-muted">${escape(model.rangeText)}</div>
+			<div class="charsheet__feature-companion-operation-controls" role="group" aria-label="${escape(model.heading)}">
+				${controls}
+			</div>
+			<div id="${id}-reasons" class="charsheet__feature-companion-disabled-reasons ve-small ve-muted" role="status" aria-live="polite" aria-atomic="true">${escape(reasons.join(" "))}</div>
+			<div class="charsheet__feature-companion-live" data-feature-companion-operation-status role="status" aria-live="polite" aria-atomic="true"></div>
+		</section>`;
+	}
+
+	_getFeatureCompanionCreationSurfaceHtml (model, index) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const id = `charsheet-feature-companion-create-${index}`;
+		const reason = model.canAttempt
+			? `Ready to review the current tool, payment, and ${model.setupTransaction?.requiredCount || 0} required modification choice${model.setupTransaction?.requiredCount === 1 ? "" : "s"}.`
+			: CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model.reason);
+		return `<section class="charsheet__feature-companion-create" data-feature-companion-create-owner="${escape(model.ownerUid)}">
+			<div>
+				<h4 class="charsheet__feature-companion-manager-title">${escape(model.descriptor.identity.name)} (${escape(model.descriptor.identity.source)})</h4>
+				<div class="ve-small ve-muted">${escape(reason)}</div>
+			</div>
+			<button type="button" class="ve-btn ve-btn-primary charsheet__feature-companion-create-btn"
+				data-feature-companion-create="${escape(model.ownerUid)}"
+				${model.canAttempt ? "" : "disabled"}>
+				Create ${escape(model.descriptor.identity.name)}
+			</button>
+			<div id="${id}" class="charsheet__feature-companion-live" role="status" aria-live="polite"></div>
+		</section>`;
+	}
+
+	_bindFeatureCompanionCreationActions (root) {
+		root?.querySelectorAll?.("[data-feature-companion-create]").forEach(button => {
+			button.addEventListener("click", async () => {
+				const ownerUid = button.getAttribute("data-feature-companion-create");
+				const surface = button.closest("[data-feature-companion-create-owner]");
+				const status = surface?.querySelector("[role=status]");
+				await this._pCreateFeatureCompanionFromManager(ownerUid, {button, status});
+			});
+		});
+	}
+
+	_bindFeatureCompanionOperationActions (root) {
+		root?.querySelectorAll?.("[data-feature-companion-operation]").forEach(button => {
+			button.addEventListener("click", async () => {
+				const surface = button.closest(".charsheet__feature-companion-operations");
+				const status = surface?.querySelector("[data-feature-companion-operation-status]");
+				button.disabled = true;
+				button.setAttribute("aria-busy", "true");
+				if (status) status.textContent = `Resolving ${button.textContent.trim()}…`;
+				try {
+					const result = await this.pUseFeatureCompanionOperation({
+						featureUid: button.getAttribute("data-feature-companion-owner"),
+						companionId: button.getAttribute("data-feature-companion-id"),
+						operation: button.getAttribute("data-feature-companion-operation"),
+						focusKey: button.getAttribute("data-companion-operation-key"),
+					});
+					if (status?.isConnected) status.textContent = this._getFeatureCompanionOperationResultMessage(result);
+				} finally {
+					if (button.isConnected) {
+						button.disabled = false;
+						button.removeAttribute("aria-busy");
+					}
+				}
+			});
+		});
+	}
+
+	async _pCreateFeatureCompanionFromManager (ownerUid, {button = null, status = null} = {}) {
+		const model = this._getFeatureCompanionCreationModels()
+			.find(candidate => candidate.ownerUid === ownerUid);
+		if (!model?.canAttempt) {
+			const message = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model?.reason);
+			if (status) status.textContent = message;
+			return {ok: false, committed: false, reason: model?.reason || "featureUnavailable"};
+		}
+
+		const requiredCount = Number(model.setupTransaction?.requiredCount) || 0;
+		const requiresReview = model.boundary.focus.eligibleReferences.length !== 1
+			|| model.paymentOptions.length !== 1
+			|| requiredCount > 0;
+		let payload;
+		if (requiresReview) {
+			payload = await this._pShowFeatureCompanionCreationModal(model, {focusRestoreTarget: button});
+			if (!payload) {
+				if (status) status.textContent = "Creation cancelled. No state changed.";
+				return {ok: false, committed: false, reason: "cancelled"};
+			}
+		} else {
+			payload = CharacterSheetPage._buildFeatureCompanionCreationPayload({
+				model,
+				focusReference: model.boundary.focus.eligibleReferences[0],
+				payment: model.paymentOptions[0].payment,
+			});
+		}
+
+		if (button) {
+			button.disabled = true;
+			button.setAttribute("aria-busy", "true");
+		}
+		if (status) status.textContent = `Creating ${model.descriptor.identity.name}…`;
+		const result = await this._state.pCreateFeatureCompanion(payload);
+		if (!result?.ok || !result.committed) {
+			const message = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(result?.reason, result?.error);
+			if (status) status.textContent = message;
+			if (button) {
+				button.disabled = false;
+				button.removeAttribute("aria-busy");
+			}
+			JqueryUtil.doToast({type: "danger", content: message});
+			return result;
+		}
+
+		if (status) status.textContent = `${model.descriptor.identity.name} created.`;
+		await this.saveCharacter?.();
+		this.renderCharacter?.();
+		JqueryUtil.doToast({type: "success", content: `${model.descriptor.identity.name} created.`});
+		return result;
+	}
+
+	async _pShowFeatureCompanionCreationModal (model, {focusRestoreTarget = null} = {}) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `Create ${model.descriptor.identity.name}`,
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+		});
+		const toolOptions = model.boundary.focus.eligibleReferences;
+		const transaction = model.setupTransaction;
+		const requiredCount = Number(transaction?.requiredCount) || 0;
+		const toolHtml = toolOptions.map((tool, index) =>
+			`<option value="${index}">${escape(tool.name)} (${escape(tool.source)})</option>`).join("");
+		const paymentHtml = model.paymentOptions.map((option, index) =>
+			`<label class="charsheet__feature-companion-choice">
+				<input type="radio" name="feature-companion-payment" value="${index}" ${index === 0 ? "checked" : ""}>
+				<span>${escape(option.label)}</span>
+			</label>`).join("");
+		const modificationHtml = transaction?.options?.length
+			? transaction.options.map(option =>
+				`<label class="charsheet__feature-companion-choice">
+					<input type="checkbox" data-role="creation-modification" value="${escape(option.id)}">
+					<span>${escape(option.name)} <span class="ve-muted">(${escape(option.source)})</span></span>
+				</label>`).join("")
+			: `<div class="ve-muted ve-small">No modification choice is required for this generation.</div>`;
+
+		modalInner.innerHTML = `<form class="charsheet__feature-companion-create-modal" novalidate>
+			<p class="ve-muted">Review one atomic creation transaction. Nothing is spent until Create is confirmed and the state boundary accepts the current choices.</p>
+			<label class="ve-flex-col">
+				<span class="charsheet__feature-companion-label">Eligible equipped tool</span>
+				<select class="form-control input-xs" data-role="creation-tool">${toolHtml}</select>
+			</label>
+			<fieldset>
+				<legend class="charsheet__feature-companion-label">Payment</legend>
+				<div class="charsheet__feature-companion-choice-list">${paymentHtml}</div>
+			</fieldset>
+			<fieldset>
+				<legend class="charsheet__feature-companion-label">Immutable modifications</legend>
+				<div class="ve-small ve-muted mb-2">Choose exactly ${requiredCount}. These choices belong to this generation and cannot be changed after creation.</div>
+				<div class="charsheet__feature-companion-choice-list">${modificationHtml}</div>
+			</fieldset>
+			<label class="ve-flex-col">
+				<span class="charsheet__feature-companion-label">Appearance <span class="ve-muted">(optional)</span></span>
+				<textarea class="form-control" rows="3" data-role="creation-appearance"></textarea>
+			</label>
+			<div class="charsheet__feature-companion-review" role="group" aria-label="Final creation review">
+				<div class="charsheet__feature-companion-label">Final review</div>
+				<div data-role="creation-review"></div>
+			</div>
+			<div class="charsheet__feature-companion-live" data-role="creation-status" role="status" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="creation-cancel">Cancel</button>
+				<button type="submit" class="ve-btn ve-btn-primary" data-role="creation-confirm">Create ${escape(model.descriptor.identity.name)}</button>
+			</div>
+		</form>`;
+
+		const form = modalInner.querySelector("form");
+		const tool = modalInner.querySelector("[data-role=creation-tool]");
+		const appearance = modalInner.querySelector("[data-role=creation-appearance]");
+		const review = modalInner.querySelector("[data-role=creation-review]");
+		const status = modalInner.querySelector("[data-role=creation-status]");
+		const confirm = modalInner.querySelector("[data-role=creation-confirm]");
+		const getSelectedIds = () => [...modalInner.querySelectorAll("[data-role=creation-modification]:checked")]
+			.map(input => input.value);
+		const getPaymentIndex = () => Number(modalInner.querySelector("[name=feature-companion-payment]:checked")?.value);
+		const updateReview = () => {
+			const selectedIds = getSelectedIds();
+			const selectedNames = selectedIds.map(id =>
+				transaction?.options.find(option => option.id === id)?.name || id);
+			const paymentOption = model.paymentOptions[getPaymentIndex()];
+			const toolReference = toolOptions[Number(tool.value)];
+			const actionAvailable = CharacterSheetPage._isFeatureCompanionCreationActionAvailable(this._state);
+			const isValid = actionAvailable
+				&& selectedIds.length === requiredCount
+				&& !!paymentOption
+				&& !!toolReference;
+			confirm.disabled = !isValid;
+			status.textContent = !actionAvailable
+				? CharacterSheetPage._getFeatureCompanionCreationReasonMessage("actionUnavailable")
+				: isValid
+					? "Ready to create. The live boundary will validate these choices once more."
+					: `Choose exactly ${requiredCount} modification${requiredCount === 1 ? "" : "s"}.`;
+			review.innerHTML = `<dl>
+				<div><dt>Tool</dt><dd>${escape(toolReference ? `${toolReference.name} (${toolReference.source})` : "Not selected")}</dd></div>
+				<div><dt>Payment</dt><dd>${escape(paymentOption?.label || "Not selected")}</dd></div>
+				<div><dt>Modifications</dt><dd>${escape(selectedNames.join(", ") || "None")}</dd></div>
+				<div><dt>Appearance</dt><dd>${escape(appearance.value.trim() || "Not specified")}</dd></div>
+			</dl>`;
+		};
+		form.addEventListener("input", updateReview);
+		form.addEventListener("change", updateReview);
+		modalInner.querySelector("[data-role=creation-cancel]").addEventListener("click", () => doClose(null));
+		form.addEventListener("submit", event => {
+			event.preventDefault();
+			try {
+				const paymentOption = model.paymentOptions[getPaymentIndex()];
+				const focusReference = toolOptions[Number(tool.value)];
+				const payload = CharacterSheetPage._buildFeatureCompanionCreationPayload({
+					model,
+					focusReference,
+					payment: paymentOption?.payment,
+					selectedOptionIds: getSelectedIds(),
+					appearance: appearance.value,
+				});
+				const currentBoundary = this._state.getFeatureCompanionCreationBoundary(model.ownerUid, {
+					classUid: model.descriptor.identity.classUid,
+					subclassUid: model.descriptor.identity.subclassUid,
+					payment: payload.payment,
+					setupChoices: payload.setupChoices,
+				});
+				const actionAvailable = CharacterSheetPage._isFeatureCompanionCreationActionAvailable(this._state);
+				if (!actionAvailable || !currentBoundary.executable) {
+					confirm.disabled = true;
+					status.textContent = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(
+						actionAvailable ? currentBoundary.reason : "actionUnavailable",
+						currentBoundary.setupChoices?.error,
+					);
+					return;
+				}
+				doClose({payload});
+			} catch (error) {
+				status.textContent = error instanceof Error ? error.message : String(error);
+			}
+		});
+		updateReview();
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-role=creation-tool]"});
+		const [result] = await pGetResolved();
+		return result?.payload || null;
+	}
+
+	_getFeatureCompanionOperationUiModel (companion, descriptor) {
+		const resolved = companion?.scaling?.resolved;
+		const rend = resolved?.actions?.forceEmpoweredRend;
+		const repair = resolved?.actions?.repair;
+		const deflect = resolved?.reactions?.deflectAttack;
+		if (!descriptor || !rend || !repair || !deflect) return null;
+		return {
+			heading: `${descriptor.identity.name} command status`,
+			summary: `Uncommanded action: ${String(resolved.commandPolicy?.defaultAction || "dodge").toTitleCase()}; movement and reaction are autonomous.`,
+			rendLabel: rend.name || descriptor.actions?.forceEmpoweredRend?.name || "Attack",
+			repairLabel: repair.name || descriptor.actions?.repair?.name || "Repair",
+			deflectLabel: deflect.name || descriptor.reactions?.deflectAttack?.name || "Reaction",
+		};
+	}
+
+	getFeatureCompanionOperationSurfaceModel (companion, descriptor = null) {
+		const resolvedDescriptor = descriptor || this._getFeatureCompanionDescriptor(companion);
+		if (
+			this._isExactRhwReanimatorCompanion(companion)
+			&& companion.scaling?.resolved?.operations?.command?.status === "executable"
+		) {
+			return this._getRhwReanimatorOperationSurfaceModel(companion, resolvedDescriptor);
+		}
+		return this._getFeatureCompanionOperationUiModel(companion, resolvedDescriptor);
+	}
+
+	_getRhwReanimatorOperationSurfaceModel (companion, descriptor) {
+		if (!descriptor) return null;
+		const ownerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER;
+		const resolved = companion.scaling?.resolved || {};
+		const effects = resolved.modifications?.effects || {};
+		const lifecycleStatus = String(companion.lifecycle?.status || "").toLowerCase();
+		const isActive = companion.active !== false
+			&& Number(companion.hp?.current) > 0
+			&& !["dead", "dismissed", "expired", "inactive", "vanished"].includes(lifecycleStatus);
+		const lifecycleReason = isActive
+			? null
+			: lifecycleStatus === "dead" || Number(companion.hp?.current) <= 0
+				? "The current generation is dead."
+				: "The current generation is inactive or expired.";
+		const dodge = this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"});
+		const swipe = this.getCompanionOperationAvailability(companion.id, "dreadfulSwipe", {actionKey: "dreadfulSwipe"});
+		const ownerMagicActionAvailable = this._state.isActionTypeAvailable?.("action", {trackOnlyInCombat: true}) !== false;
+		const ownerBonusActionAvailable = this._state.isActionTypeAvailable?.("bonus", {trackOnlyInCombat: true}) !== false;
+		const ownerReactionAvailable = this._state.isActionTypeAvailable?.("reaction", {trackOnlyInCombat: true}) !== false;
+		const arcaneConduit = effects.arcaneConduit || null;
+		const arcaneReceipt = arcaneConduit?.damageRider?.turnReceipt?.key
+			? this._state.queryTurnReceipt?.(arcaneConduit.damageRider.turnReceipt.key)
+			: null;
+		const castableArcaneConduitSpells = arcaneConduit ? this._getRhwArcaneConduitCastableSpells() : [];
+		const deathBurstPending = companion.lifecycle?.deathBurstEmitted === true
+			&& companion.lifecycle?.deathBurstResolved !== true;
+		const hasLifeTransfer = this._state.getFeatureCalculations?.().hasRefinedReanimation === true;
+		const getManualAvailability = ({extraAvailable = true, reason = null} = {}) => ({
+			available: isActive && extraAvailable,
+			reason: isActive ? reason : lifecycleReason,
+		});
+		const controls = [
+			{
+				operation: "action",
+				actionKey: "dodge",
+				label: "Default Dodge",
+				available: dodge.available,
+				reason: dodge.message || "The companion Action is unavailable.",
+				description: `Use the descriptor default action (${resolved.commandPolicy?.defaultAction || "Dodge"}) without an owner command.`,
+			},
+			{
+				operation: "dreadfulSwipe",
+				actionKey: "dreadfulSwipe",
+				label: resolved.actions?.dreadfulSwipe?.name || "Dreadful Swipe",
+				available: swipe.available,
+				reason: swipe.message || "Dreadful Swipe is unavailable.",
+				description: `${resolved.actions?.dreadfulSwipe?.reachFeet || 5}-foot melee attack; confirm the target and result before costs commit.`,
+				tone: "primary",
+			},
+			{
+				operation: "damage",
+				label: "Damage / Lightning",
+				...getManualAvailability(),
+				description: "Apply typed damage canonically. Lightning damage is prevented and heals by the prevented amount.",
+			},
+			...(effects.gaunt ? [{
+				operation: "gaunt",
+				label: effects.gaunt.name || "Gaunt",
+				...getManualAvailability(),
+				description: `Resolve the chosen creature's Wisdom save within ${effects.gaunt.fearAura?.area?.radiusFeet || 10} feet.`,
+			}] : []),
+			...(effects.moist ? [{
+				operation: "moist",
+				label: effects.moist.name || "Moist",
+				...getManualAvailability(),
+				description: `Resolve acid retaliation against a creature that hit within ${effects.moist.acidRetaliation?.attackerMaximumRangeFeet || 10} feet; no Reaction is spent.`,
+			}] : []),
+			...(arcaneConduit ? [{
+				operation: "arcaneConduit",
+				label: arcaneConduit.name || "Arcane Conduit",
+				...getManualAvailability({
+					extraAvailable: !arcaneReceipt?.used && castableArcaneConduitSpells.length > 0,
+					reason: arcaneReceipt?.used
+						? "Arcane Conduit has already modified a damage roll this turn."
+						: !castableArcaneConduitSpells.length
+							? "No prepared exact EFA Artificer evocation or necromancy spell is available."
+							: null,
+				}),
+				description: `Cast from either space using the summoner's senses; add ${arcaneConduit.damageRider?.damageRollBonus || 0} to one resolved damage roll once per turn.`,
+			}] : []),
+			...(hasLifeTransfer ? [{
+				operation: "lifeTransfer",
+				label: "Life Transfer",
+				...getManualAvailability({
+					extraAvailable: ownerReactionAvailable,
+					reason: ownerReactionAvailable ? null : "The summoner Reaction is unavailable.",
+				}),
+				description: "After confirmed damage, spend the summoner Reaction, heal by the companion's current HP, then kill the companion and resolve Death Burst.",
+				tone: "danger",
+			}] : []),
+			...(deathBurstPending ? [{
+				operation: "deathBurst",
+				label: "Resolve Death Burst",
+				available: true,
+				reason: null,
+				description: "Record every target within the emanation, resolve Dexterity saves, and roll the generation's canonical damage.",
+				tone: "danger",
+			}] : []),
+			{
+				operation: "dismiss",
+				label: "Dismiss",
+				...getManualAvailability({
+					extraAvailable: ownerMagicActionAvailable,
+					reason: ownerMagicActionAvailable ? null : "The summoner Magic Action is unavailable.",
+				}),
+				description: "Spend the summoner Magic Action to dismiss this generation harmlessly without Death Burst.",
+				tone: "danger",
+			},
+		];
+		const commandText = swipe.commandMethods?.length
+			? swipe.commandMethods
+				.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
+				.join(" • ")
+			: swipe.message || "Dreadful Swipe uses the companion Action.";
+		const rangeParts = [
+			`Swipe ${resolved.actions?.dreadfulSwipe?.reachFeet || 5} ft.`,
+			effects.gaunt ? `Gaunt ${effects.gaunt.fearAura?.area?.radiusFeet || 10} ft.` : null,
+			effects.moist ? `Moist ${effects.moist.acidRetaliation?.attackerMaximumRangeFeet || 10} ft.` : null,
+			arcaneConduit ? `Conduit ${arcaneConduit.damageRider?.requiresCompanionWithinFeet || 120} ft.` : null,
+			"Manual confirmations are required where the sheet cannot measure the table.",
+		].filter(Boolean);
+		return {
+			kind: "rhwReanimator",
+			renderInManager: true,
+			companionId: companion.id,
+			ownerUid,
+			heading: "Operate Reanimated Companion",
+			modeLabel: "RHW · live",
+			summary: `Uncommanded action: ${String(resolved.commandPolicy?.defaultAction || "dodge").toTitleCase()}; movement and reaction remain autonomous.`,
+			statusText: [
+				dodge.status?.actionAvailable ? "Action ready" : "Action used",
+				dodge.status?.reactionAvailable ? "Companion Reaction ready" : "Companion Reaction used",
+				ownerMagicActionAvailable ? "Owner Magic Action ready" : "Owner Magic Action used",
+				ownerBonusActionAvailable ? "Owner Bonus Action ready" : "Owner Bonus Action used",
+				ownerReactionAvailable ? "Owner Reaction ready" : "Owner Reaction used",
+			].join(" • "),
+			costText: commandText,
+			rangeText: rangeParts.join(" • "),
+			controls,
+		};
 	}
 
 	/**
@@ -5080,9 +5913,9 @@ class CharacterSheetPage {
 	_onHealIntakeApply () {
 		const amount = Math.max(0, Math.floor(Number(this._damageIntakeAmount) || 0));
 		if (amount <= 0) return;
-		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		this._state.heal(amount);
-		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		const gained = after.currentHp - before.currentHp;
 		this._storeLastHpChange({kind: "heal", damageType: null, requestedAmount: amount, before, after});
 		this._lastHpOutcome = this._getHpOutcomePreview({
@@ -5152,6 +5985,7 @@ class CharacterSheetPage {
 		if (
 			this._state.getCurrentHp() !== snapshot.after.currentHp
 			|| this._state.getTempHp() !== snapshot.after.tempHp
+			|| JSON.stringify(this._state.getTempHpOwner()) !== JSON.stringify(snapshot.after.tempHpOwner)
 		) {
 			this._clearLastHpChange();
 			this._renderDamageIntakes();
@@ -5159,7 +5993,7 @@ class CharacterSheetPage {
 		}
 		this._lastHpChange = null;
 		this._lastHpOutcome = null;
-		this._state.setHp(snapshot.before.currentHp, undefined, snapshot.before.tempHp);
+		this._state.setHp(snapshot.before.currentHp, undefined, snapshot.before.tempHp, {tempHpOwner: snapshot.before.tempHpOwner});
 		this._saveCurrentCharacter();
 		this._renderHp();
 		this._renderConditions();
@@ -6640,6 +7474,223 @@ class CharacterSheetPage {
 		if (this._combat) this._combat.render();
 	}
 
+	_isExactEfaSteelDefenderLifecycleCompanion (companion) {
+		const expectedOwnerUid = this._state.constructor?.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		return !!expectedOwnerUid
+			&& String(companion?.featureGrant?.uid || "").toLowerCase() === expectedOwnerUid.toLowerCase()
+			&& String(companion?.name || "").trim().toLowerCase() === "steel defender"
+			&& String(companion?.source || "").trim().toUpperCase() === "EFA";
+	}
+
+	_isExactRhwReanimatorCompanion (companion) {
+		const expectedOwnerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS?.COMPANION_OWNER;
+		const resolvedIdentity = companion?.scaling?.resolved?.identity;
+		return !!expectedOwnerUid
+			&& companion?.featureGrant?.uid === expectedOwnerUid
+			&& companion?.name === "Reanimated Companion"
+			&& companion?.source === "RHW"
+			&& companion?.creatureName === "Reanimated Companion"
+			&& companion?.creatureSource === "RHW"
+			&& resolvedIdentity?.companionUid === "Reanimated Companion|RHW"
+			&& resolvedIdentity?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			&& resolvedIdentity?.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID;
+	}
+
+	isRhwReanimatorFeatureOwnedCompanion (companion) {
+		return companion?.featureGrant?.uid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS?.COMPANION_OWNER;
+	}
+
+	getFeatureCompanionLifecycleSurfaceCompanions () {
+		return (this._state.getCompanions?.() || []).filter(companion =>
+			companion?.active !== false
+			|| this._isExactEfaSteelDefenderLifecycleCompanion(companion)
+			|| (
+				this._isExactRhwReanimatorCompanion(companion)
+				&& companion.lifecycle?.deathBurstEmitted === true
+				&& companion.lifecycle?.deathBurstResolved !== true
+			),
+		);
+	}
+
+	getFeatureCompanionLifecycleFocusKey (companionId, operation) {
+		return ["feature-companion-lifecycle", companionId, operation]
+			.map(part => String(part || ""))
+			.join("::");
+	}
+
+	getFeatureCompanionLifecycleFocusTarget (focusKey) {
+		if (!focusKey || typeof document === "undefined") return null;
+		const targets = [...(document.querySelectorAll?.("[data-feature-companion-lifecycle-key]") || [])]
+			.filter(element => element.getAttribute?.("data-feature-companion-lifecycle-key") === focusKey);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	_getFeatureCompanionRevivalUiAvailability (companionId) {
+		const confirmationOptions = {
+			touchConfirmed: true,
+			deathWithinHourConfirmed: true,
+		};
+		const initial = this._state.getFeatureCompanionRevivalAvailability?.(companionId, confirmationOptions);
+		const spellSlots = initial?.spellSlots || [];
+		if (!spellSlots.length) return {...initial, spellSlots};
+		const firstSlot = spellSlots[0];
+		const selectedSpellSlot = {
+			kind: firstSlot.kind,
+			...(firstSlot.kind === "normal" ? {level: firstSlot.level} : {}),
+		};
+		return this._state.getFeatureCompanionRevivalAvailability(companionId, {
+			...confirmationOptions,
+			spellSlot: selectedSpellSlot,
+		});
+	}
+
+	getFeatureCompanionLifecyclePresentation (companion) {
+		if (!this._isExactEfaSteelDefenderLifecycleCompanion(companion)) return null;
+
+		const lifecycle = companion.lifecycle || {};
+		const status = lifecycle.status || (companion.active === false ? "vanished" : "alive");
+		const generation = Math.max(1, Math.floor(Number(lifecycle.generation) || 1));
+		const currentMinute = Number(this._state.getGameTimeMinutes?.()) || 0;
+		const revival = status === "dead"
+			? this._getFeatureCompanionRevivalUiAvailability(companion.id)
+			: null;
+		const timingKnown = revival?.deathTiming?.known === true;
+		const diedAtGameMinute = timingKnown ? revival.deathTiming.diedAtGameMinute : null;
+		const deadlineMinute = timingKnown ? revival.deathTiming.deadlineMinute : null;
+		const remainingMinutes = timingKnown ? revival.deathTiming.remainingMinutes : null;
+		const base = {
+			companionId: companion.id,
+			status,
+			generation,
+			isAlive: status === "alive",
+			currentMinute,
+			diedAtGameMinute: timingKnown ? diedAtGameMinute : null,
+			deadlineMinute,
+			remainingMinutes,
+			timingKnown,
+			tone: "info",
+			label: "Lifecycle unavailable",
+			summary: "This Steel Defender has an unsupported lifecycle state.",
+			guidance: "Use the Long Rest replacement option when State reports it is eligible.",
+			disabledReason: "Steel Defender operations are unavailable in this lifecycle state.",
+			revival: null,
+			canCompleteRevival: false,
+		};
+
+		switch (status) {
+			case "alive":
+				return {
+					...base,
+					tone: "success",
+					label: "Alive",
+					summary: `Generation ${generation} is operational at ${companion.hp?.current ?? 0}/${companion.hp?.max ?? 0} HP.`,
+					guidance: "If it dies, revival requires your Magic Action, touch, and one normal or Pact Magic spell slot within the one-hour window.",
+					disabledReason: null,
+				};
+			case "dead": {
+				const timing = timingKnown
+					? `Died at game minute ${diedAtGameMinute}. Revival is allowed through minute ${deadlineMinute} (${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"} remaining).`
+					: "The saved death time is unknown. The revival dialog requires a same-operation confirmation that it died within the last hour.";
+				return {
+					...base,
+					tone: "danger",
+					label: "Dead",
+					summary: timing,
+					guidance: "Begin revival before the window closes, or create a replacement after a completed Long Rest with exact Smith's Tools (XPHB) in hand.",
+					disabledReason: "This defender is dead. Ordinary actions, healing, rolls, and repairs cannot revive it.",
+					revival,
+				};
+			}
+			case "revivalPending": {
+				const dueAtGameMinute = Number(lifecycle.revivalPending?.dueAtGameMinute);
+				const canCompleteRevival = Number.isSafeInteger(dueAtGameMinute)
+					&& dueAtGameMinute <= currentMinute + 1;
+				return {
+					...base,
+					tone: "warning",
+					label: "Revival pending",
+					summary: Number.isSafeInteger(dueAtGameMinute)
+						? `Revival completes at game minute ${dueAtGameMinute}; current minute ${currentMinute}.`
+						: "Revival is pending canonical game-time completion.",
+					guidance: "Advance the shared game clock by 1 minute to complete revival at full HP.",
+					disabledReason: "This defender is awaiting revival completion. Ordinary operations remain unavailable.",
+					completionMinute: Number.isSafeInteger(dueAtGameMinute) ? dueAtGameMinute : null,
+					canCompleteRevival,
+				};
+			}
+			case "expired":
+				return {
+					...base,
+					tone: "danger",
+					label: "Revival window expired",
+					summary: lifecycle.expiredAtGameMinute != null
+						? `The defender expired at game minute ${lifecycle.expiredAtGameMinute}; the one-hour revival window has closed.`
+						: "The one-hour revival window has closed.",
+					guidance: "Create a replacement only through the optional Steel Defender fieldset when finishing a Long Rest.",
+					disabledReason: "The revival window expired. This generation cannot act or receive ordinary healing.",
+				};
+			case "vanished": {
+				const isOwnerDeath = lifecycle.vanishedReason === "summonerDeath";
+				return {
+					...base,
+					tone: "danger",
+					label: "Vanished",
+					summary: isOwnerDeath
+						? "This generation vanished when its owner died and does not return when the owner recovers."
+						: "This persisted generation has vanished and is no longer active.",
+					guidance: "After the owner is alive, create a replacement only through the optional Long Rest fieldset with exact Smith's Tools (XPHB) in hand.",
+					disabledReason: isOwnerDeath
+						? "This defender vanished when its owner died. This generation cannot act or be revived."
+						: "This defender has vanished. This generation cannot act or be revived.",
+				};
+			}
+			default:
+				return base;
+		}
+	}
+
+	_getFeatureCompanionLifecycleHtml (companion) {
+		const presentation = this.getFeatureCompanionLifecyclePresentation(companion);
+		if (!presentation) return "";
+		const id = `charsheet-feature-companion-lifecycle-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		const actions = [];
+		if (presentation.status === "dead") {
+			const focusKey = this.getFeatureCompanionLifecycleFocusKey(companion.id, "revival");
+			const disabledReason = presentation.revival?.available
+				? ""
+				: presentation.revival?.message || "Revival is unavailable.";
+			actions.push(`<button type="button" class="ve-btn ve-btn-xs ve-btn-primary btn-feature-companion-lifecycle"
+				data-feature-companion-lifecycle-operation="revival"
+				data-feature-companion-lifecycle-key="${CharacterSheetModal._escapeHtml(focusKey)}"
+				aria-describedby="${id}-summary ${id}-action-reason"
+				${presentation.revival?.available ? "" : "disabled"}>
+				Begin revival
+			</button>`);
+			actions.push(`<span class="ve-small ve-muted" id="${id}-action-reason">${CharacterSheetModal._escapeHtml(disabledReason || "Commits your Magic Action, touch confirmation, and one spell slot.")}</span>`);
+		} else if (presentation.status === "revivalPending") {
+			const focusKey = this.getFeatureCompanionLifecycleFocusKey(companion.id, "completeRevival");
+			actions.push(`<button type="button" class="ve-btn ve-btn-xs ve-btn-primary btn-feature-companion-lifecycle"
+				data-feature-companion-lifecycle-operation="completeRevival"
+				data-feature-companion-lifecycle-key="${CharacterSheetModal._escapeHtml(focusKey)}"
+				aria-describedby="${id}-summary"
+				${presentation.canCompleteRevival ? "" : "disabled"}>
+				Complete revival (+1 minute)
+			</button>`);
+		}
+
+		return `<section class="charsheet__feature-companion-lifecycle charsheet__feature-companion-lifecycle--${CharacterSheetModal._escapeHtml(presentation.tone)}"
+			role="status" aria-live="polite" aria-atomic="true" aria-labelledby="${id}-label" id="${id}">
+			<div class="charsheet__feature-companion-lifecycle-header">
+				<strong id="${id}-label">${CharacterSheetModal._escapeHtml(presentation.label)}</strong>
+				<span class="charsheet__feature-companion-lifecycle-generation">Generation ${presentation.generation}</span>
+			</div>
+			<div class="ve-small" id="${id}-summary">${CharacterSheetModal._escapeHtml(presentation.summary)}</div>
+			<div class="ve-small ve-muted">${CharacterSheetModal._escapeHtml(presentation.guidance)}</div>
+			${presentation.disabledReason ? `<div class="ve-small ve-muted charsheet__feature-companion-lifecycle-disabled-reason" id="${id}-disabled-reason">${CharacterSheetModal._escapeHtml(presentation.disabledReason)}</div>` : ""}
+			${actions.length ? `<div class="charsheet__feature-companion-lifecycle-actions">${actions.join("")}</div>` : ""}
+		</section>`;
+	}
+
 	_renderCompanions () {
 		// Derived state must exist before it is drawn. Bonding is guaranteed here as well
 		// as in `_reconcileClassFeatures` because the builder-completion and level-up
@@ -6656,19 +7707,39 @@ class CharacterSheetPage {
 
 		list.innerHTML = "";
 
-		const companions = this._state.getActiveCompanions?.() || [];
+		const companions = this.getFeatureCompanionLifecycleSurfaceCompanions();
+		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
+		const featureCompanionModels = this._getFeatureCompanionManagerModels();
+		const featureCompanionCreationModels = this._getFeatureCompanionCreationModels()
+			.filter(model => !model.boundary.activeCompanionIds?.length);
 
 		// Also render the overview indicator
 		this._renderCompanionsOverviewIndicator();
 
+		for (const setup of pendingSetups) {
+			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionSetupIncompleteHtml(setup));
+		}
+		this._bindFeatureCompanionSetupActions(list);
+
+		featureCompanionModels.forEach((model, index) => {
+			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionManagerHtml(model, index));
+		});
+		featureCompanionCreationModels.forEach((model, index) => {
+			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionCreationSurfaceHtml(model, index));
+		});
+		this._bindFeatureCompanionOperationActions(list);
+		this._bindFeatureCompanionCreationActions(list);
+
 		if (companions.length === 0) {
-			list.innerHTML = `
-				<div class="charsheet__companions-empty">
-					<div class="charsheet__companions-empty-icon">🦉</div>
-					<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
-					<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
-				</div>
-			`;
+			if (!featureCompanionModels.length && !featureCompanionCreationModels.length) {
+				list.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__companions-empty">
+						<div class="charsheet__companions-empty-icon">🦉</div>
+						<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
+						<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
+					</div>
+				`);
+			}
 			return;
 		}
 
@@ -6679,8 +7750,19 @@ class CharacterSheetPage {
 				return;
 			}
 
+			const featureCompanionModel = this._getFeatureCompanionManagerModel(companion);
+			if (featureCompanionModel?.isOverviewOnly) return;
+
+			const lifecyclePresentation = this.getFeatureCompanionLifecyclePresentation(companion);
+			const isLifecycleBlocked = !!lifecyclePresentation && !lifecyclePresentation.isAlive;
+			const lifecycleStatusId = lifecyclePresentation
+				? `charsheet-feature-companion-lifecycle-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`
+				: null;
+			const lifecycleDisabledAttrs = isLifecycleBlocked
+				? `disabled aria-describedby="${lifecycleStatusId}-summary ${lifecycleStatusId}-disabled-reason"`
+				: "";
 			const hp = companion.hp || {current: 1, max: 1};
-			const hpPercent = Math.round((hp.current / hp.max) * 100);
+			const hpPercent = hp.max > 0 ? Math.round((hp.current / hp.max) * 100) : 0;
 			const hpColor = hpPercent > 50 ? "#22c55e" : hpPercent > 25 ? "#f59e0b" : "#ef4444";
 			const hpBgColor = hpPercent > 50 ? "rgba(34, 197, 94, 0.15)" : hpPercent > 25 ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
 
@@ -6695,6 +7777,7 @@ class CharacterSheetPage {
 				familiar: {label: "Familiar", icon: "🦉", color: "#8b5cf6"},
 				beast_companion: {label: "Beast Companion", icon: "🐺", color: "#22c55e"},
 				steel_defender: {label: "Steel Defender", icon: "🤖", color: "#64748b"},
+				class_summon: {label: companion.name || "Class Companion", icon: "✨", color: "#64748b"},
 				drake: {label: "Drake", icon: "🐉", color: "#f59e0b"},
 				summon: {label: "Summon", icon: "✨", color: "#3b82f6"},
 				mount: {label: "Mount", icon: "🐴", color: "#a855f7"},
@@ -6726,12 +7809,15 @@ class CharacterSheetPage {
 				const condName = typeof c === "string" ? c : c.name;
 				const condDef = CharacterSheetState.getConditionEffects(condName);
 				const icon = condDef?.icon || "⚠️";
-				return `<span class="charsheet__companion-condition-badge" data-condition="${condName}" style="
+				return `<span class="charsheet__companion-condition-badge" data-condition="${condName}"
+					${isLifecycleBlocked ? `aria-disabled="true" aria-describedby="${lifecycleStatusId}-summary ${lifecycleStatusId}-disabled-reason"` : ""}
+					style="
 					display: inline-flex; align-items: center; gap: 4px;
 					padding: 2px 8px; background: rgba(239, 68, 68, 0.15);
 					border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px;
-					font-size: 0.8em; cursor: pointer;
-				" title="Click to remove">${icon} ${condName}<span style="margin-left: 4px; opacity: 0.7;">×</span></span>`;
+					font-size: 0.8em; cursor: ${isLifecycleBlocked ? "not-allowed" : "pointer"};
+					${isLifecycleBlocked ? "opacity: 0.55;" : ""}
+				" title="${isLifecycleBlocked ? CharacterSheetModal._escapeHtml(lifecyclePresentation.disabledReason) : "Click to remove"}">${icon} ${condName}<span style="margin-left: 4px; opacity: 0.7;">×</span></span>`;
 			}).join(" ");
 
 			// Get skill modifiers for quick checks
@@ -6744,9 +7830,43 @@ class CharacterSheetPage {
 			const initiativeMod = this._state.getCompanionInitiative?.(companion.id) || 0;
 			const initiativeStr = initiativeMod >= 0 ? `+${initiativeMod}` : `${initiativeMod}`;
 
-			// Check action economy state
-			const usedAction = companion.usedAction || false;
-			const usedReaction = companion.usedReaction || false;
+			const featureCompanionDescriptor = this._getFeatureCompanionDescriptor(companion);
+			const featureOperationUi = this._getFeatureCompanionOperationUiModel(companion, featureCompanionDescriptor);
+			const isFeatureOperationCompanion = !!featureOperationUi;
+			const dodgeAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"})
+				: null;
+			const rendAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "forceEmpoweredRend")
+				: null;
+			const repairAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "repair")
+				: null;
+			const deflectAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "deflectAttack")
+				: null;
+			const featureActionSpecs = [
+				{actionKey: "help", label: "🤝 Help", description: "Give an ally advantage on their next attack or ability check."},
+				{actionKey: "dash", label: "💨 Dash", description: "Double the defender's speed for this turn."},
+				{actionKey: "disengage", label: "🏃 Disengage", description: "The defender's movement does not provoke opportunity attacks this turn."},
+				{actionKey: "dodge", label: "🛡️ Dodge", description: "Attacks against the defender have disadvantage; its Dexterity saves have advantage."},
+				{actionKey: "hide", label: "🫥 Hide", description: "Make a Stealth check to become hidden."},
+				{actionKey: "search", label: "🔎 Search", description: "Make a Perception or Investigation check to find something."},
+			];
+			const featureActionAvailabilities = isFeatureOperationCompanion
+				? Object.fromEntries(featureActionSpecs.map(spec => [
+					spec.actionKey,
+					this.getCompanionOperationAvailability(companion.id, "action", {actionKey: spec.actionKey}),
+				]))
+				: {};
+
+			// Registry-backed companions use persisted turn receipts, not legacy flags.
+			const usedAction = isFeatureOperationCompanion
+				? !dodgeAvailability?.status?.actionAvailable
+				: companion.usedAction || false;
+			const usedReaction = isFeatureOperationCompanion
+				? !deflectAvailability?.status?.reactionAvailable
+				: companion.usedReaction || false;
 
 			// Get all attack actions from the companion's stat block
 			const attackActions = companion.actions?.filter(a =>
@@ -6754,7 +7874,7 @@ class CharacterSheetPage {
 			) || [];
 
 			// Build attack buttons HTML for all attacks
-			const attackButtonsHtml = attackActions.map(action => {
+			const attackButtonsHtml = isFeatureOperationCompanion ? "" : attackActions.map(action => {
 				const entry = action.entries?.find(e => typeof e === "string") || "";
 				const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
 				const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
@@ -6765,6 +7885,83 @@ class CharacterSheetPage {
 			}).join("");
 
 			const ferocityHtml = this._getCompanionFerocityHtml(companion);
+			const featureOperationHtml = isFeatureOperationCompanion ? (() => {
+				const repair = companion.uses?.repair || {current: 0, max: 0};
+				const hitDice = companion.hitDice || {die: "d8", current: 0, max: 0};
+				const operationId = `charsheet-feature-companion-operations-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+				const commandStatus = rendAvailability?.commandMethods
+					?.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
+					.join(" • ") || "No command method available.";
+				const disabledReasons = [
+					!rendAvailability?.available ? `Rend: ${rendAvailability?.message}` : null,
+					!repairAvailability?.available ? `Repair: ${repairAvailability?.message}` : null,
+					!deflectAvailability?.available ? `Deflect: ${deflectAvailability?.message}` : null,
+					...featureActionSpecs
+						.filter(spec => !featureActionAvailabilities[spec.actionKey]?.available)
+						.map(spec => `${spec.label.replace(/^[^\p{L}]+/u, "")}: ${featureActionAvailabilities[spec.actionKey]?.message}`),
+				].filter(Boolean);
+				const getButtonAttrs = (operation, availability, actionKey = null) => {
+					const focusKey = CharacterSheetModal._escapeHtml(this.getCompanionOperationFocusKey(companion.id, operation, actionKey));
+					return `${availability?.available ? "" : "disabled"} aria-describedby="${operationId}-status ${operationId}-reasons" data-companion-operation-key="${focusKey}"`;
+				};
+				return `
+					<section class="charsheet__feature-companion-operations mb-2" role="region" aria-labelledby="${operationId}-heading">
+						<div class="ve-small mb-1" id="${operationId}-heading"><strong>${CharacterSheetModal._escapeHtml(featureOperationUi.heading)}</strong> — ${CharacterSheetModal._escapeHtml(featureOperationUi.summary)}</div>
+						<div class="ve-muted ve-small mb-2 charsheet__feature-companion-command-status">${CharacterSheetModal._escapeHtml(commandStatus)}</div>
+						<div class="ve-muted ve-small mb-2">Rend: 5-foot reach. Repair: visible Construct or object within 5 feet. Deflect: visible attacker within 5 feet. The sheet asks you to confirm ranges it cannot verify.</div>
+						<div class="charsheet__feature-companion-operation-controls mb-2" role="group" aria-label="Steel Defender feature operations">
+							<button class="ve-btn ve-btn-xs ve-btn-danger btn-feature-companion-operation" data-operation="forceEmpoweredRend"
+								${getButtonAttrs("forceEmpoweredRend", rendAvailability)} title="${CharacterSheetModal._escapeHtml(rendAvailability?.message || "5-foot melee weapon attack using your spell attack bonus.")}">
+								⚔️ ${CharacterSheetModal._escapeHtml(featureOperationUi.rendLabel)}
+							</button>
+							<button class="ve-btn ve-btn-xs ve-btn-success btn-feature-companion-operation" data-operation="repair"
+								${getButtonAttrs("repair", repairAvailability)} title="${CharacterSheetModal._escapeHtml(repairAvailability?.message || "Visible Construct or object within 5 feet; confirm range manually.")}">
+								<span class="glyphicon glyphicon-heart"></span> ${CharacterSheetModal._escapeHtml(featureOperationUi.repairLabel)} ${repair.current}/${repair.max}
+							</button>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-feature-companion-operation" data-operation="deflectAttack"
+								${getButtonAttrs("deflectAttack", deflectAvailability)} title="${CharacterSheetModal._escapeHtml(deflectAvailability?.message || "Visible attacker within 5 feet; protects a different creature.")}">
+								↩ ${CharacterSheetModal._escapeHtml(featureOperationUi.deflectLabel)}
+							</button>
+						</div>
+						<div class="ve-small" id="${operationId}-status">
+							<strong>Hit Dice:</strong> ${hitDice.current}/${hitDice.max}${hitDice.die ? ` ${hitDice.die}` : ""}
+							<span class="ve-muted">— spend during Short Rest.</span>
+						</div>
+						<div class="ve-muted ve-small mt-1 charsheet__feature-companion-disabled-reasons" id="${operationId}-reasons" role="status" aria-live="polite" aria-atomic="true">${disabledReasons.length ? disabledReasons.map(CharacterSheetModal._escapeHtml).join(" ") : "All listed operations are available."}</div>
+					</section>
+				`;
+			})() : "";
+			const featureActionButtonsHtml = isFeatureOperationCompanion
+				? featureActionSpecs.map(spec => {
+					const availability = featureActionAvailabilities[spec.actionKey];
+					const focusKey = CharacterSheetModal._escapeHtml(this.getCompanionOperationFocusKey(companion.id, "action", spec.actionKey));
+					const operationId = `charsheet-feature-companion-operations-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+					return `<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="${spec.actionKey}"
+						data-companion-operation-key="${focusKey}" aria-describedby="${operationId}-reasons"
+						title="${CharacterSheetModal._escapeHtml(availability?.message || spec.description)}" ${availability?.available ? "" : "disabled"}>
+						${spec.label}
+					</button>`;
+				}).join("")
+				: `
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🤝 Help
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						💨 Dash
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🏃 Disengage
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🛡️ Dodge
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🫥 Hide
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🔎 Search
+					</button>
+				`;
 
 			const card = e_({outer: `
 				<div class="charsheet__companion-card" data-companion-id="${companion.id}" style="
@@ -6797,6 +7994,8 @@ class CharacterSheetPage {
 							<div class="ve-muted ve-small">from ${companion.origin || "Unknown origin"}</div>
 						</div>
 					</div>
+
+					${this._getFeatureCompanionLifecycleHtml(companion)}
 
 					<!-- Stats Grid -->
 					<div style="
@@ -6839,6 +8038,7 @@ class CharacterSheetPage {
 					</div>
 
 					${ferocityHtml}
+					${featureOperationHtml}
 
 					<!-- Senses -->
 					<div class="ve-muted ve-small mb-2" style="padding: 0 4px;">
@@ -6848,23 +8048,23 @@ class CharacterSheetPage {
 					<!-- Conditions -->
 					<div class="charsheet__companion-conditions mb-2" style="padding: 0 4px; min-height: 28px;">
 						${conditionsHtml}
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-add-condition" style="font-size: 0.75em; padding: 2px 8px; opacity: 0.8;">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-add-condition" style="font-size: 0.75em; padding: 2px 8px; opacity: 0.8;" ${lifecycleDisabledAttrs}>
 							➕ Condition
 						</button>
 					</div>
 
 					<!-- Quick Skill Checks -->
 					<div class="charsheet__companion-quick-rolls mb-2">
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-initiative" title="Roll initiative for ${companion.customName || companion.name}">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-initiative" title="Roll initiative for ${companion.customName || companion.name}" ${lifecycleDisabledAttrs}>
 							⚡ Initiative (${initiativeStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" title="Roll Perception check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" title="Roll Perception check" ${lifecycleDisabledAttrs}>
 							👁️ Perception (${perceptionStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" title="Roll Stealth check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" title="Roll Stealth check" ${lifecycleDisabledAttrs}>
 							🤫 Stealth (${stealthStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" title="Roll Investigation check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" title="Roll Investigation check" ${lifecycleDisabledAttrs}>
 							🔍 Investigation (${investigationStr})
 						</button>
 					</div>
@@ -6874,33 +8074,16 @@ class CharacterSheetPage {
 						<div class="ve-muted ve-small mb-1" style="display: flex; align-items: center; gap: 8px;">
 							<span><strong>Actions:</strong></span>
 							<span class="charsheet__companion-action-status" style="font-size: 0.9em; color: ${usedAction ? "#f59e0b" : "#22c55e"}">
-								${usedAction ? "⏳ Used" : "✅ Available"}
+								${isLifecycleBlocked ? "⛔ Unavailable" : usedAction ? "⏳ Used" : "✅ Available"}
 							</span>
 							<span class="ve-muted">|</span>
 							<span><strong>Reaction:</strong></span>
 							<span class="charsheet__companion-reaction-status" style="font-size: 0.9em; color: ${usedReaction ? "#f59e0b" : "#22c55e"}">
-								${usedReaction ? "⏳ Used" : "✅ Available"}
+								${isLifecycleBlocked ? "⛔ Unavailable" : usedReaction ? "⏳ Used" : "✅ Available"}
 							</span>
 						</div>
 						<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🤝 Help
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								💨 Dash
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🏃 Disengage
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🛡️ Dodge
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🫥 Hide
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🔎 Search
-							</button>
+							${featureActionButtonsHtml}
 						</div>
 						${attackButtonsHtml ? `
 						<div class="ve-flex mt-2" style="gap: 6px; flex-wrap: wrap;">
@@ -6911,10 +8094,10 @@ class CharacterSheetPage {
 
 					<!-- Action Buttons -->
 					<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
-						<button class="ve-btn ve-btn-xs ve-btn-success btn-companion-heal" style="flex: 1; min-width: 80px;">
+						<button class="ve-btn ve-btn-xs ve-btn-success btn-companion-heal" style="flex: 1; min-width: 80px;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-heart"></span> Heal
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-damage" style="flex: 1; min-width: 80px;">
+						<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-damage" style="flex: 1; min-width: 80px;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-flash"></span> Damage
 						</button>
 						<button class="ve-btn ve-btn-xs ${this._state.getCompanionNote?.(companion.id) ? "ve-btn-warning" : "ve-btn-default"} btn-companion-note" title="${this._state.getCompanionNote?.(companion.id) ? "Edit Note" : "Add Note"}">
@@ -6926,7 +8109,7 @@ class CharacterSheetPage {
 						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-view" title="View full stat block">
 							<span class="glyphicon glyphicon-list-alt"></span>
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-dismiss" title="Dismiss companion" style="color: #ef4444;">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-dismiss" title="Dismiss companion" style="color: #ef4444;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-remove"></span>
 						</button>
 					</div>
@@ -7000,13 +8183,14 @@ class CharacterSheetPage {
 			// Remove condition badges
 			card.querySelectorAll(".charsheet__companion-condition-badge").forEach(el => {
 				el.addEventListener("click", (evt) => {
+					if (isLifecycleBlocked) return;
 					const condName = evt.currentTarget.dataset.condition;
 					this._state.removeCompanionCondition?.(companion.id, condName);
 					this._saveCurrentCharacter();
 					this._renderCompanions();
 					JqueryUtil.doToast({type: "info", content: `Removed ${condName} from ${companion.name}`});
 				});
-				this._bindActivate(el, {label: `Remove ${el.dataset.condition || "condition"}`});
+				if (!isLifecycleBlocked) this._bindActivate(el, {label: `Remove ${el.dataset.condition || "condition"}`});
 			});
 
 			// Skill check buttons
@@ -7035,9 +8219,31 @@ class CharacterSheetPage {
 			});
 
 			// Action buttons
-			card.querySelectorAll(".btn-companion-action").forEach(el => el.addEventListener("click", (evt) => {
+			card.querySelectorAll(".btn-companion-action").forEach(el => el.addEventListener("click", async (evt) => {
 				const action = evt.currentTarget.dataset.action;
+				if (isFeatureOperationCompanion) {
+					await this.pUseCompanionOperation({
+						companionId: companion.id,
+						operation: "action",
+						actionKey: action,
+					});
+					return;
+				}
 				this._useCompanionAction(companion, action);
+			}));
+
+			card.querySelectorAll(".btn-feature-companion-operation").forEach(el => el.addEventListener("click", async evt => {
+				await this.pUseCompanionOperation({
+					companionId: companion.id,
+					operation: evt.currentTarget.dataset.operation,
+				});
+			}));
+
+			card.querySelectorAll(".btn-feature-companion-lifecycle").forEach(el => el.addEventListener("click", async evt => {
+				await this.pUseFeatureCompanionLifecycle({
+					companionId: companion.id,
+					operation: evt.currentTarget.dataset.featureCompanionLifecycleOperation,
+				});
 			}));
 
 			// Attack roll buttons
@@ -7055,9 +8261,10 @@ class CharacterSheetPage {
 		const section = document.getElementById("charsheet-companions-section");
 		if (!container || !section) return;
 
-		const companions = this._state.getActiveCompanions?.() || [];
+		const companions = this.getFeatureCompanionLifecycleSurfaceCompanions();
+		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
 
-		if (companions.length === 0) {
+		if (companions.length === 0 && pendingSetups.length === 0) {
 			container.style.display = "none";
 			section.style.display = "none";
 			return;
@@ -7066,6 +8273,11 @@ class CharacterSheetPage {
 		container.innerHTML = "";
 		container.style.display = "";
 		section.style.display = "";
+
+		for (const setup of pendingSetups) {
+			container.insertAdjacentHTML("beforeend", this._getFeatureCompanionSetupIncompleteHtml(setup));
+		}
+		this._bindFeatureCompanionSetupActions(container);
 
 		companions.forEach(companion => {
 			const hp = companion.hp || {current: 1, max: 1};
@@ -11228,7 +12440,7 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (applyBtn.disabled) return;
 				applyBtn.disabled = true;
-				if (tempHp > this._state.getTempHp()) this._state.setTempHp(tempHp);
+				this._state.grantTempHp(tempHp);
 				applyBtn.textContent = "✓ Applied to Self";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
@@ -11673,7 +12885,7 @@ class CharacterSheetPage {
 				if (applyBtn.disabled) return;
 				applyBtn.disabled = true;
 				const cur = this._state.getTempHp() || 0;
-				if (tempHp > cur) this._state.setTempHp(tempHp);
+				this._state.grantTempHp(tempHp);
 				applyBtn.textContent = "✓ Applied to Self";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
@@ -12130,7 +13342,7 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (btn.disabled) return;
 				btn.disabled = true;
-				this._state.setTempHp(Math.max(this._state.getTempHp() || 0, res.tempHp));
+				this._state.grantTempHp(res.tempHp);
 				btn.textContent = "✓ Applied to Self";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
@@ -12854,7 +14066,7 @@ class CharacterSheetPage {
 	 * consumption, or for an interdict boon: spend a seal + activate its named buff state),
 	 * and refreshes the features area so its use badge stays current.
 	 * @param {object} feature
-	 * @returns {Promise<boolean>} true if handled as an ability
+	 * @returns {Promise<boolean|object>} true if handled as an ability, or its atomic activation result
 	 */
 	async _pUseFeatureAbility (feature) {
 		const af = this._getActivatableAbilityForFeature(feature);
@@ -12864,9 +14076,9 @@ class CharacterSheetPage {
 		if (af.isActive && CharacterSheetState.isInterdictBoonEntry(af)) return true;
 		const stateType = af.activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[af.stateTypeId];
 		const resourceCost = af.resource?.cost ?? af.activationInfo?.resourceCost ?? stateType?.resourceCost ?? 1;
-		await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);
+		const activationResult = await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);
 		this._features?.render?.();
-		return true;
+		return activationResult == null ? true : activationResult;
 	}
 
 	/**
@@ -13582,6 +14794,12 @@ class CharacterSheetPage {
 			await this._pUseResource(triggerResource.id, {preselectedAugmentId: feature.id});
 			return;
 		}
+		if (
+			(feature?.name || "").toLowerCase() === "flash of genius"
+			&& String(feature.classSource || feature.source || "").toUpperCase() === "EFA"
+		) {
+			return this._pActivateEfaFlashOfGenius();
+		}
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
 			const calculations = this._state.getFeatureCalculations();
@@ -14001,6 +15219,13 @@ class CharacterSheetPage {
 
 		displayAttacks.forEach(attack => {
 			const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+			const abilityResolution = attackBreakdown?.abilityResolution
+				|| this._state.getWeaponAbilityResolution?.(attack)
+				|| {
+					modifier: this._state.getWeaponAbilityMod(attack),
+					ability: attack.abilityMod || "str",
+					source: null,
+				};
 			const weaponId = attack.riteWeaponId || attack.id;
 			const totalAttackBonus = attackBreakdown?.total ?? 0;
 			const totalDamageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
@@ -14034,11 +15259,14 @@ class CharacterSheetPage {
 			const attackNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(attack.sourceItem || attack);
 
 			const monkBadge = attack.isMonkWeapon ? ` <span class="badge badge-warning" title="Monk Weapon">Monk</span>` : "";
+			const abilityBadge = abilityResolution.source
+				? ` <span class="badge badge-info charsheet__attack-ability-source" title="${CharacterSheetClassUtils.escapeHtml(abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`)}">${CharacterSheetClassUtils.escapeHtml(abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`)}</span>`
+				: "";
 
 			const row = e_({outer: `
 				<div class="charsheet__attack-row">
 					<div class="charsheet__attack-info">
-						<span class="charsheet__attack-name">${attackNameHtml}${monkBadge}</span>
+						<span class="charsheet__attack-name">${attackNameHtml}${monkBadge}${abilityBadge}</span>
 						<span class="charsheet__attack-range ve-small ve-muted">${rangeStr} ${propsStr}</span>
 					</div>
 					<div class="charsheet__attack-stats">
@@ -14261,7 +15489,7 @@ class CharacterSheetPage {
 	 */
 	async _pApplyDamage (amount, {damageType = null, isMagicalDamage = false} = {}) {
 		const characterId = this._currentCharacterId;
-		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		const maxHp = this._state.getMaxHp();
 		const preview = this._state.applyDamageDefenses(amount, damageType, {isMagicalDamage});
 
@@ -14290,18 +15518,46 @@ class CharacterSheetPage {
 		this._flashHpBar(flashParts.join(" "), "damage");
 
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
-		await this._pOfferZeroHpIntervention();
+		if (preview.damage > 0) {
+			await this._pOfferZeroHpIntervention();
 
-		// Materials that react to being damaged. Until now `damageTaken` was matched by
-		// `isDegradationTriggered` but never fired by anything, so every authored
-		// damage-triggered material block — Rimeglass's fire degradation included — was dead.
-		await this._pOfferMaterialDamageReactions(damageType);
+			// Dropping to 0 HP, dying, or becoming incapacitated ends concentration before
+			// damage-specific concentration rules apply. Resolve the optional drop-to-1
+			// intervention first so a successful recovery can still retain protected concentration.
+			if (
+				this._state.isConcentrating?.()
+				&& (
+					this._state.getCurrentHp() <= 0
+					|| this._state.isDead?.()
+					|| this._state.isIncapacitated?.()
+				)
+			) {
+				this._state.breakConcentration();
+				this._combatModule?.renderCombatStates?.();
+				this._renderActiveStates?.();
+			}
 
-		// Prompt for concentration check if concentrating
-		if (this._state.isConcentrating?.()) {
-			await this._promptConcentrationCheck(preview.damage);
+			// Materials that react to being damaged. Until now `damageTaken` was matched by
+			// `isDegradationTriggered` but never fired by anything, so every authored
+			// damage-triggered material block — Rimeglass's fire degradation included — was dead.
+			await this._pOfferMaterialDamageReactions(damageType);
+
+			// Prompt for concentration check if concentrating
+			if (this._state.isConcentrating?.()) {
+				const protection = this._state.getDamageConcentrationProtection?.();
+				if (protection) {
+					const spellName = this._state.getConcentrationLabel?.() || "the spell";
+					this._showDiceResult(
+						"Concentration Protected",
+						"Protected",
+						`${protection.name}: taking damage can't end concentration on ${spellName}.`,
+					);
+				} else {
+					await this._promptConcentrationCheck(preview.damage);
+				}
+			}
 		}
-		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		if (characterId === this._currentCharacterId) {
 			this._storeLastHpChange({kind: "damage", damageType, requestedAmount: amount, before, after});
 			this._lastHpOutcome = this._getHpOutcomePreview({
@@ -14355,6 +15611,101 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Resolve a registry-provided custom zero-HP cost without knowing which feature owns it.
+	 *
+	 * The state re-validates every selected row at commit; this modal is only an accessible,
+	 * keyboard-native selection surface over the current descriptor options.
+	 *
+	 * @param {object} selectionCost
+	 * @param {object} intervention
+	 * @returns {Promise<string[]|null>}
+	 * @private
+	 */
+	async _pSelectZeroHpInterventionCost (selectionCost, intervention) {
+		if (selectionCost?.type !== "inventoryRows") return null;
+
+		let settled = false;
+		let resolveResult;
+		const pResult = new Promise(resolve => { resolveResult = resolve; });
+		const finish = value => {
+			if (settled) return;
+			settled = true;
+			resolveResult(value);
+		};
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: intervention?.name || "Choose Intervention Cost",
+			isMinHeight0: true,
+			isWidth100: true,
+			cbClose: () => finish(null),
+		});
+		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+		modalInner.style.overflowY = "auto";
+
+		const selected = new Set();
+		const fieldset = e_({tag: "fieldset", clazz: "charsheet__rest-section"});
+		fieldset.append(e_({
+			tag: "legend",
+			clazz: "charsheet__rest-section-title",
+			txt: selectionCost.selectionLabel || "Choose items",
+		}));
+		if (selectionCost.selectionDescription) {
+			fieldset.append(e_({tag: "p", clazz: "ve-muted ve-small", txt: selectionCost.selectionDescription}));
+		}
+
+		const status = e_({tag: "div", clazz: "ve-muted ve-small mt-2"});
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		const btnConfirm = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			txt: selectionCost.confirmLabel || "Confirm Selection",
+		});
+		const update = () => {
+			const count = selected.size;
+			btnConfirm.disabled = count < selectionCost.minSelections;
+			status.textContent = count < selectionCost.minSelections
+				? `Select at least ${selectionCost.minSelections} eligible item${selectionCost.minSelections === 1 ? "" : "s"}.`
+				: Number.isFinite(selectionCost.hpPerSelection)
+					? `${count} selected — ${selectionCost.hpPerSelection * count} hit points restored.`
+					: `${count} selected.`;
+		};
+
+		for (const option of selectionCost.options || []) {
+			const checkbox = e_({tag: "input"});
+			checkbox.type = "checkbox";
+			checkbox.value = option.itemId;
+			checkbox.setAttribute("aria-label", `Select ${option.name}, ${option.rarity}`);
+			checkbox.onChange(() => {
+				if (checkbox.checked) selected.add(option.itemId);
+				else selected.delete(option.itemId);
+				update();
+			});
+			const label = e_({tag: "label", clazz: "ve-flex-v-center mb-2"});
+			label.append(
+				checkbox,
+				e_({tag: "span", txt: `${option.name} — ${option.rarity} [${option.source}]`}),
+			);
+			fieldset.append(label);
+		}
+		fieldset.append(status);
+		modalInner.append(fieldset);
+
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		btnCancel.onClick(() => {
+			finish(null);
+			doClose(false);
+		});
+		btnConfirm.onClick(() => {
+			if (btnConfirm.disabled) return;
+			finish([...selected]);
+			doClose(true);
+		});
+		modalInner.append(ee`<div class="charsheet__modal-footer">${btnCancel}${btnConfirm}</div>`);
+		update();
+		return pResult;
+	}
+
+	/**
 	 * GENERIC: when damage has just taken the character to 0 hit points and they have a
 	 * "drop to 1 instead" feature, collect the facts the feature cares about (damage type,
 	 * critical hit), roll the save, and apply the result.
@@ -14367,7 +15718,25 @@ class CharacterSheetPage {
 		const pending = this._state.getPendingZeroHpIntervention?.();
 		if (!pending) return;
 
-		const candidate = pending.interventions.find(i => i.available) || pending.interventions[0];
+		let candidate = null;
+		if (pending.chooser?.required) {
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Choose a Zero-HP Intervention",
+				htmlDescription: "<div>More than one feature can intervene. Only the selected option will be committed.</div>",
+				values: pending.chooser.options,
+				fnDisplay: option => option.name,
+				isResolveItem: true,
+			});
+			if (!selected) {
+				this._state.cancelZeroHpIntervention?.();
+				return;
+			}
+			candidate = pending.interventions.find(intervention => intervention.id === selected.id);
+		} else {
+			const selectedId = pending.chooser?.options?.[0]?.id;
+			candidate = pending.interventions.find(intervention => intervention.id === selectedId)
+				|| pending.interventions[0];
+		}
 		if (!candidate) return;
 
 		// Ask only for the facts that actually gate this feature.
@@ -14380,7 +15749,7 @@ class CharacterSheetPage {
 				textYes: "Yes",
 				textNo: "No",
 			});
-			if (wasExcluded == null) { this._state.clearPendingZeroHpIntervention(); return; }
+			if (wasExcluded == null) { this._state.cancelZeroHpIntervention?.(candidate.id); return; }
 			if (wasExcluded) damageType = candidate.excludedDamageTypes[0];
 		}
 		if (candidate.excludeCritical && !isCritical) {
@@ -14390,7 +15759,7 @@ class CharacterSheetPage {
 				textYes: "Yes",
 				textNo: "No",
 			});
-			if (wasCrit == null) { this._state.clearPendingZeroHpIntervention(); return; }
+			if (wasCrit == null) { this._state.cancelZeroHpIntervention?.(candidate.id); return; }
 			isCritical = wasCrit;
 		}
 
@@ -14398,27 +15767,78 @@ class CharacterSheetPage {
 			.find(i => i.id === candidate.id);
 		if (!recheck?.available) {
 			if (recheck?.unavailableReason) JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: recheck.unavailableReason}));
-			this._state.clearPendingZeroHpIntervention();
+			this._state.cancelZeroHpIntervention?.(candidate.id);
+			return;
+		}
+
+		if (recheck.selectionCost) {
+			const selectedItemIds = await this._pSelectZeroHpInterventionCost(recheck.selectionCost, recheck);
+			if (!selectedItemIds) {
+				this._state.clearPendingZeroHpIntervention();
+				return;
+			}
+			const result = this._state.applyZeroHpIntervention(candidate.id, {
+				damageType,
+				isCritical,
+				selectedItemIds,
+			});
+			if (!result?.applied) {
+				if (result?.reason) JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: result.reason}));
+				return;
+			}
+
+			this._saveCurrentCharacter();
+			this._renderHp?.();
+			this._renderConditions?.();
+			this._renderResources?.();
+			this._features?.render?.();
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "success",
+				content: `💀 <strong>${result.name}</strong>: disintegrated ${result.selectedCount} item${result.selectedCount === 1 ? "" : "s"} and rose at <strong>${result.hp} hit points</strong>.`,
+			}));
 			return;
 		}
 
 		const abv = String(recheck.saveAbility || "").toUpperCase();
+		const hpLabel = `${recheck.hpOnSuccess} hit point${recheck.hpOnSuccess === 1 ? "" : "s"}`;
+		const usesLabel = Number.isFinite(recheck.usesRemaining) && recheck.usesMax != null
+			? ` (${recheck.usesRemaining}/${recheck.usesMax} uses)`
+			: "";
+		const promptDescription = recheck.saveAbility
+			? `<div>You dropped to 0 hit points. Make a <strong>${abv} saving throw (DC ${recheck.dc}</strong> = ${recheck.dcFormula}) to rise to <strong>${hpLabel}</strong> instead? Your ${abv} save is ${recheck.saveModifier >= 0 ? "+" : ""}${recheck.saveModifier}.${usesLabel}</div>`
+			: `<div>You dropped to 0 hit points. Use <strong>${recheck.name}</strong> to rise to <strong>${hpLabel}</strong> instead?</div>`;
 		const use = await InputUiUtil.pGetUserBoolean({
 			title: recheck.name,
-			htmlDescription: `<div>You dropped to 0 hit points. Make a <strong>${abv} saving throw (DC ${recheck.dc}</strong> = ${recheck.dcFormula}) to drop to <strong>1 hit point</strong> instead? Your ${abv} save is ${recheck.saveModifier >= 0 ? "+" : ""}${recheck.saveModifier}. (${recheck.usesRemaining}/${recheck.usesMax} uses)</div>`,
-			textYes: "Roll the save",
+			htmlDescription: promptDescription,
+			textYes: recheck.saveAbility ? "Roll the save" : "Use feature",
 			textNo: "Decline",
 		});
-		if (!use) { this._state.clearPendingZeroHpIntervention(); return; }
+		if (!use) { this._state.cancelZeroHpIntervention?.(candidate.id); return; }
 
-		const result = this._state.applyZeroHpIntervention(candidate.id, {damageType, isCritical});
-		if (!result?.applied) { this._state.clearPendingZeroHpIntervention(); return; }
+		let result;
+		try {
+			result = this._state.applyZeroHpIntervention(candidate.id, {damageType, isCritical});
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet State] Zero-HP intervention failed:", error);
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "danger",
+				content: error?.message || `${recheck.name} failed to apply.`,
+			}));
+			return;
+		}
+		if (!result?.applied) {
+			if (result?.error) JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: result.error}));
+			return;
+		}
 
-		this._rollHistory?.addRoll({
-			title: `${result.name} (${abv} save)`,
-			total: result.total,
-			breakdown: `d20 [${result.roll}] ${result.total - result.roll >= 0 ? "+" : ""}${result.total - result.roll} vs DC ${result.dc}`,
-		});
+		if (result.saveAbility) {
+			this._rollHistory?.addRoll({
+				title: `${result.name} (${abv} save)`,
+				total: result.total,
+				breakdown: `d20 [${result.roll}] ${result.total - result.roll >= 0 ? "+" : ""}${result.total - result.roll} vs DC ${result.dc}`,
+			});
+		}
 		this._saveCurrentCharacter();
 		this._renderHp?.();
 		this._renderConditions?.();
@@ -14427,9 +15847,17 @@ class CharacterSheetPage {
 		JqueryUtil.doToast(/** @type {*} */ ({
 			type: result.success ? "success" : "warning",
 			content: result.success
-				? `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you stay up at <strong>1 hit point</strong>.`
+				? result.saveAbility
+					? `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you stay up at <strong>${result.hp} hit point${result.hp === 1 ? "" : "s"}</strong>.`
+					: `💀 <strong>${result.name}</strong>: you stay up at <strong>${result.hp} hit point${result.hp === 1 ? "" : "s"}</strong>.`
 				: `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you drop to 0 hit points.`,
 		}));
+		if (result.success && result.postApplication?.message) {
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "info",
+				content: result.postApplication.message,
+			}));
+		}
 	}
 
 	/**
@@ -16070,7 +17498,7 @@ class CharacterSheetPage {
 	 *   `null` when no dice bonuses apply.
 	 */
 	_rollStateDiceBonuses (rollType) {
-		const dice = this._state.getRollBonusDiceFromStates?.(rollType) || [];
+		const dice = this._state.getRollBonusDice?.(rollType) || this._state.getRollBonusDiceFromStates?.(rollType) || [];
 		if (!dice.length) return null;
 		let total = 0;
 		const parts = [];
@@ -16271,6 +17699,264 @@ class CharacterSheetPage {
 		});
 	}
 
+	_getFeatureCompanionSetupIncompleteHtml (setup) {
+		const featureUid = CharacterSheetModal._escapeHtml(setup.ownerUid);
+		const missing = setup.missingChoices?.length
+			? setup.missingChoices.join(", ")
+			: "required defender details";
+		const statusId = `charsheet-feature-companion-setup-${String(setup.ownerUid || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		return `<section class="alert alert-warning charsheet__feature-companion-setup" role="region" aria-labelledby="${statusId}-title">
+			<div class="bold" id="${statusId}-title">Battle Smith setup incomplete</div>
+			<div class="ve-small mb-2" id="${statusId}-reason" role="status" aria-live="polite" aria-atomic="true">Missing: ${CharacterSheetModal._escapeHtml(missing)}.</div>
+			<button type="button" class="ve-btn ve-btn-primary ve-btn-xs btn-feature-companion-setup" data-feature-companion-setup="${featureUid}" aria-describedby="${statusId}-reason">
+				Finish setup
+			</button>
+		</section>`;
+	}
+
+	_bindFeatureCompanionSetupActions (root) {
+		root?.querySelectorAll?.("[data-feature-companion-setup]").forEach(button => {
+			button.addEventListener("click", async () => {
+				const featureUid = button.getAttribute("data-feature-companion-setup");
+				await this.pShowFeatureCompanionSetup(featureUid, {
+					focusRestoreTarget: button,
+					getFocusRestoreTarget: () => this.getFeatureCompanionSetupFocusTarget(featureUid),
+				});
+			});
+		});
+	}
+
+	_announceCompanionInteraction (message, {type = null, isToast = false} = {}) {
+		const text = String(message || "").trim();
+		if (!text) return;
+		const liveRegion = typeof document !== "undefined"
+			? document.getElementById?.("charsheet-companion-interaction-status")
+			: null;
+		if (liveRegion) {
+			liveRegion.textContent = "";
+			queueMicrotask(() => { liveRegion.textContent = text; });
+		}
+		if (isToast) JqueryUtil.doToast({type: type || "info", content: text});
+	}
+
+	getFeatureCompanionSetupFocusTarget (featureUid) {
+		if (typeof document === "undefined") return null;
+		const pending = [...(document.querySelectorAll?.("[data-feature-companion-setup]") || [])]
+			.filter(element => element.getAttribute?.("data-feature-companion-setup") === featureUid);
+		if (pending.length) return pending.find(element => element.offsetParent !== null) || pending[0];
+		const companionId = this._state.getFeatureCompanionSetupRecord?.(featureUid)?.companionId;
+		if (!companionId) return null;
+		const targets = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
+			.filter(element => element.getAttribute?.("data-companion-id") === companionId)
+			.map(card => card.querySelector?.("[data-companion-operation-key]:not([disabled]), button:not([disabled]), [role=button]:not([aria-disabled=true])"))
+			.filter(Boolean);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	async pShowFeatureCompanionSetup (featureUid, focusOptions = {}) {
+		const outcome = await this._pShowFeatureCompanionSetupModal(featureUid, focusOptions);
+		if (!outcome) return null;
+		try {
+			await this.saveCharacter();
+			this.renderCharacter();
+			const postRenderFocusTarget = focusOptions.getFocusRestoreTarget?.();
+			if (postRenderFocusTarget?.focus) {
+				queueMicrotask(() => {
+					if (postRenderFocusTarget.isConnected !== false) postRenderFocusTarget.focus();
+				});
+			}
+			this._announceCompanionInteraction(
+				outcome === "complete"
+					? "Steel Defender created and saved."
+					: "Steel Defender setup saved for later. No defender was created.",
+				{type: outcome === "complete" ? "success" : "info", isToast: true},
+			);
+			return outcome;
+		} catch (error) {
+			const message = error?.message || "Steel Defender setup changed in memory but could not be saved.";
+			this._announceCompanionInteraction(message, {type: "danger", isToast: true});
+			throw error;
+		}
+	}
+
+	async reconcileFeatureCompanionGrants ({
+		state = this._state,
+		reason = "reconcile",
+		allowPrompt = false,
+	} = {}) {
+		let result = state?.reconcileFeatureCompanionGrants?.({reason}) || {changed: false, pending: []};
+		if (!allowPrompt || state !== this._state) return result;
+		for (const pending of result.pending || []) {
+			// eslint-disable-next-line no-await-in-loop
+			await this._pShowFeatureCompanionSetupModal(pending.activeFeatureUid);
+		}
+		result = state.reconcileFeatureCompanionGrants?.({reason: `${reason}:afterPrompt`}) || result;
+		return result;
+	}
+
+	async _pShowFeatureCompanionSetupModal (
+		featureUid,
+		{
+			focusRestoreTarget = null,
+			getFocusRestoreTarget = null,
+		} = {},
+	) {
+		const record = this._state.getFeatureCompanionSetupRecord?.(featureUid);
+		if (!record) return null;
+		const toolState = this._state.getFeatureCompanionSetupToolState(featureUid);
+		let isSettled = false;
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: "Create your Steel Defender",
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+			cbClose: () => {
+				if (isSettled) return;
+				this._announceCompanionInteraction(
+					"Steel Defender setup closed. No unsaved choices were applied.",
+					{type: "info", isToast: true},
+				);
+			},
+		});
+
+		let toolHtml;
+		if (toolState.status === "pending") {
+			toolHtml = `<label class="ve-flex-col mb-3">
+				<span class="bold">Tools of the Trade</span>
+				<span class="ve-small ve-muted mb-1">You already know Smith's Tools. Choose the alternate artisan's tool granted by the feature.</span>
+				<select class="form-control input-xs" data-role="tool" required aria-required="true" aria-describedby="charsheet-steel-defender-setup-status">
+					<option value="">Choose an artisan's tool</option>
+					${toolState.options.map(option => `<option value="${CharacterSheetModal._escapeHtml(option)}">${CharacterSheetModal._escapeHtml(option)}</option>`).join("")}
+				</select>
+			</label>`;
+		} else if (toolState.status === "unresolved") {
+			toolHtml = `<div class="alert alert-warning ve-small mb-3">
+				Tools of the Trade has not been reconciled yet. Finish the class-feature acquisition before creating the defender.
+			</div>`;
+		} else {
+			toolHtml = `<div class="mb-3">
+				<div class="bold">Tools of the Trade</div>
+				<div class="ve-small">${CharacterSheetModal._escapeHtml(toolState.label)}</div>
+			</div>`;
+		}
+
+		modalInner.innerHTML = `<div class="charsheet__feature-companion-setup-modal" role="form" aria-labelledby="charsheet-steel-defender-setup-heading">
+			<h4 class="sr-only" id="charsheet-steel-defender-setup-heading">Steel Defender setup details</h4>
+			<p class="ve-muted mb-3">Describe the defender you build. Its number of legs changes its appearance only; there is no statistical difference.</p>
+			${toolHtml}
+			<label class="ve-flex-col mb-3">
+				<span class="bold">Nickname <span class="ve-muted ve-small">(optional)</span></span>
+				<input class="form-control input-xs" data-role="nickname" autocomplete="off">
+			</label>
+			<label class="ve-flex-col mb-3">
+				<span class="bold">Appearance</span>
+				<textarea class="form-control" data-role="appearance" rows="4" required aria-required="true" aria-describedby="charsheet-steel-defender-setup-status"></textarea>
+			</label>
+			<fieldset class="mb-3" aria-describedby="charsheet-steel-defender-setup-status">
+				<legend class="bold">Body shape</legend>
+				<div class="ve-flex charsheet__feature-companion-shape-options">
+					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="twoLegs" required> Two legs</label>
+					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="fourLegs"> Four legs</label>
+				</div>
+				<div class="ve-small ve-muted mt-1">There is no statistical difference between these choices.</div>
+			</fieldset>
+			<div id="charsheet-steel-defender-setup-status" class="ve-small mb-3" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="defer">Finish later</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="create" aria-describedby="charsheet-steel-defender-setup-status">Create defender</button>
+			</div>
+		</div>`;
+
+		const nickname = modalInner.querySelector("[data-role=nickname]");
+		const appearance = modalInner.querySelector("[data-role=appearance]");
+		const tool = modalInner.querySelector("[data-role=tool]");
+		const status = modalInner.querySelector("#charsheet-steel-defender-setup-status");
+		const create = modalInner.querySelector("[data-role=create]");
+		nickname.value = record.choices?.nickname || "";
+		appearance.value = record.choices?.appearance || "";
+		const existingLocomotion = record.choices?.locomotion;
+		if (existingLocomotion) {
+			const radio = modalInner.querySelector(`[name=steel-defender-locomotion][value="${existingLocomotion}"]`);
+			if (radio) radio.checked = true;
+		}
+
+		const getChoices = () => ({
+			...(nickname.value.trim() ? {nickname: nickname.value.trim()} : {}),
+			...(appearance.value.trim() ? {appearance: appearance.value.trim()} : {}),
+			...(modalInner.querySelector("[name=steel-defender-locomotion]:checked")?.value
+				? {locomotion: modalInner.querySelector("[name=steel-defender-locomotion]:checked").value}
+				: {}),
+		});
+		const getMissing = () => {
+			const missing = [];
+			if (!appearance.value.trim()) missing.push("appearance");
+			if (!modalInner.querySelector("[name=steel-defender-locomotion]:checked")) missing.push("two legs or four legs");
+			if (toolState.status === "pending" && !tool?.value) missing.push("alternate artisan's tool");
+			if (toolState.status === "unresolved") missing.push("Tools of the Trade reconciliation");
+			return missing;
+		};
+		const updateStatus = () => {
+			const missing = getMissing();
+			create.disabled = !!missing.length;
+			create.setAttribute("aria-disabled", String(!!missing.length));
+			create.title = missing.length ? `Missing: ${missing.join(", ")}` : "";
+			status.textContent = missing.length
+				? `Required before creation: ${missing.join(", ")}.`
+				: "Ready to create the defender.";
+			status.setAttribute("role", "status");
+			status.classList.toggle("text-danger", !!missing.length);
+		};
+		modalInner.addEventListener("input", updateStatus);
+		modalInner.addEventListener("change", updateStatus);
+		updateStatus();
+
+		modalInner.querySelector("[data-role=defer]").addEventListener("click", () => {
+			this._state.deferFeatureCompanionSetup(featureUid, getChoices());
+			isSettled = true;
+			this._announceCompanionInteraction(
+				"Steel Defender setup deferred. No defender was created.",
+			);
+			doClose("deferred");
+		});
+		create.addEventListener("click", () => {
+			if (getMissing().length) {
+				updateStatus();
+				return;
+			}
+			try {
+				if (toolState.status === "pending") {
+					const allSpells = this.getFilteredSpellData?.() || this.getSpells?.() || [];
+					if (!toolState.choiceId || !this._state.fulfillFeatureChoice(toolState.choiceId, tool.value, allSpells)) {
+						throw new Error("The alternate artisan's tool could not be recorded. Choose it again.");
+					}
+				}
+				this._state.completeFeatureCompanionSetup(featureUid, getChoices());
+				isSettled = true;
+				this._announceCompanionInteraction("Steel Defender setup complete. Saving changes.");
+				doClose("complete");
+			} catch (error) {
+				const message = error?.message || "Steel Defender setup could not be completed.";
+				status.textContent = message;
+				status.setAttribute("role", "alert");
+				status.classList.add("text-danger");
+				this._announceCompanionInteraction(message, {type: "danger", isToast: true});
+				status.focus();
+			}
+		});
+
+		const preferSelector = toolState.status === "pending"
+			? "[data-role=tool]"
+			: !appearance.value.trim()
+				? "[data-role=appearance]"
+				: !modalInner.querySelector("[name=steel-defender-locomotion]:checked")
+					? "[name=steel-defender-locomotion]"
+					: "[data-role=create]";
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector});
+		const [result] = await pGetResolved();
+		return result || null;
+	}
+
 	/**
 	 * Resolve any queued prose "either A or B" feature choices (e.g. Arcane Archer
 	 * Lore's skill-proficiency + cantrip picks). Generic: drives a single small
@@ -16323,22 +18009,27 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Show a small modal asking the player to pick ONE option for a pending feature
-	 * choice. Returns the selection (skill key string for kind "skill", or a
-	 * `{name, source}` object for kind "cantrip"/"subfeature"), or `null` if deferred.
+	 * Show a small modal asking the player to resolve a pending feature
+	 * choice. Tool choices return canonical name arrays so one- and multi-pick
+	 * decisions share the same durable shape.
 	 * @param {{id: string, featureName?: string, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array}} choice
-	 * @returns {Promise<string|{name: string, source: string}|null>}
+	 * @returns {Promise<string|Array<string>|{name: string, source: string}|null>}
 	 */
 	async _pPickFeatureChoice (choice) {
 		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
+		const count = Number(choice.count) || 1;
 		const isSkill = choice.kind === "skill";
 		const isTool = choice.kind === "tool";
 		const isSubfeature = choice.kind === "subfeature";
-		const kindLabel = isSkill ? "a Skill Proficiency" : isTool ? "an Artisan's Tool" : isSubfeature ? "an Option" : "a Cantrip";
+		const kindLabel = isSkill ? ["a Skill Proficiency", "Skill Proficiencies"]
+			: isTool ? ["an Artisan's Tool", "Artisan's Tools"]
+				: isSubfeature ? ["an Option", "Options"]
+					: ["a Cantrip", "Cantrips"];
+		const choiceLabel = count === 1 ? kindLabel[0] : `${count} ${kindLabel[1]}`;
 
 		const optionLabel = (opt) => {
 			if (isSkill) return this._formatSkillKeyLabel(opt);
-			if (isTool) return String(opt);
+			if (isTool) return CharacterSheetClassUtils.getCanonicalToolChoiceValue(opt);
 			const src = opt.source ? ` <span class="ve-muted ve-small">(${(Parser.sourceJsonToAbv?.(opt.source) || opt.source)})</span>` : "";
 			// Subfeature options carry a short description (Divine Order roles, specialties,
 			// principles, …) — surface it beneath the name so the pick is informed.
@@ -16346,6 +18037,11 @@ class CharacterSheetPage {
 				return `<span class="bold">${(opt.name || "")}</span>${src}<br><span class="ve-muted ve-small">${opt.description}</span>`;
 			}
 			return `${(opt.name || "")}${src}`;
+		};
+		const optionValue = opt => {
+			if (isSkill) return opt;
+			if (isTool) return CharacterSheetClassUtils.getCanonicalToolChoiceValue(opt);
+			return opt;
 		};
 
 		let resolveOuter = null;
@@ -16356,7 +18052,7 @@ class CharacterSheetPage {
 		// 10000+ values the QuickBuild flow uses for its own modals.
 		const isOverlayUp = typeof document !== "undefined" && document.body?.classList?.contains("has-quickbuild-overlay");
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
+			title: `${choice.featureName || "Feature"} — Choose ${choiceLabel}`,
 			isMinHeight0: true,
 			...(isOverlayUp ? {zIndex: 10001} : {}),
 			cbClose: () => {
@@ -16377,26 +18073,58 @@ class CharacterSheetPage {
 					${optionLabel(opt)}
 				</button>
 			`).join("");
+			const confirmHtml = count > 1
+				? `<button class="ve-btn ve-btn-primary" data-act="confirm" disabled>Choose 0/${count}</button>`
+				: "";
 
 			modalInner.innerHTML = `
 				<div class="charsheet__feature-choice">
 					<p class="ve-small ve-muted charsheet__feature-choice__lede">
-						This feature lets you choose ${kindLabel}. Pick one option below.
+						This feature lets you choose ${choiceLabel}. ${count > 1 ? "Pick distinct options, then confirm." : "Pick one option below."}
 					</p>
 					<div class="charsheet__feature-choice__opts">${btnsHtml}</div>
 					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
 						<button class="ve-btn ve-btn-default" data-act="defer">Decide later</button>
+						${confirmHtml}
 					</div>
 				</div>
 			`;
 
+			const selected = new Set();
+			const confirm = modalInner.querySelector(`[data-act="confirm"]`);
+			const updateConfirm = () => {
+				if (!confirm) return;
+				confirm.disabled = selected.size !== count;
+				confirm.textContent = `Choose ${selected.size}/${count}`;
+			};
 			modalInner.querySelectorAll(".charsheet__feature-choice-opt").forEach((/** @type {*} */ el) => {
 				el.addEventListener("click", () => {
 					const idx = Number(el.getAttribute("data-idx"));
 					const opt = choice.options[idx];
-					finalize(isSkill ? opt : {name: opt.name, source: opt.source});
-					doClose();
+					if (count === 1) {
+						const value = optionValue(opt);
+						finalize(value);
+						doClose();
+						return;
+					}
+					if (selected.has(idx)) {
+						selected.delete(idx);
+						el.classList.remove("ve-btn-primary");
+						el.classList.add("ve-btn-default");
+					} else {
+						if (selected.size >= count) return;
+						selected.add(idx);
+						el.classList.remove("ve-btn-default");
+						el.classList.add("ve-btn-primary");
+					}
+					updateConfirm();
 				});
+			});
+			confirm?.addEventListener("click", () => {
+				if (selected.size !== count) return;
+				const values = [...selected].map(idx => optionValue(choice.options[idx]));
+				finalize(values);
+				doClose();
 			});
 			modalInner.querySelector(`[data-act="defer"]`).addEventListener("click", () => {
 				finalize(null);
@@ -17012,10 +18740,8 @@ class CharacterSheetPage {
 			resultNote,
 		);
 
-		// Tactical Mind (XPHB Fighter L2): after a failed ability check, offer to expend a
-		// Second Wind use to add 1d10 (refunded if the check still fails). Player-driven,
-		// post-roll — the sheet has no DC, so the prompt is framed around failure.
-		await this._pMaybeApplyTacticalMind({
+		const abilityFlashResult = await this._pMaybeApplyEfaFlashOfGenius({
+			rollType: "abilityCheck",
 			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
 			mode: rollResult.mode,
 			stateEffectStr,
@@ -17028,6 +18754,27 @@ class CharacterSheetPage {
 				naturalRoll: rollResult.roll,
 				breakdown: acBreakdown,
 				outcome: resultNote,
+			}),
+		});
+
+		// Tactical Mind (XPHB Fighter L2): after a failed ability check, offer to expend a
+		// Second Wind use to add 1d10 (refunded if the check still fails). Player-driven,
+		// post-roll — the sheet has no DC, so the prompt is framed around failure.
+		await this._pMaybeApplyTacticalMind({
+			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			...(abilityFlashResult || {
+				baseTotal: total,
+				breakdown: acBreakdown,
+				resultNote,
+				rollFollowup: CharacterSheetModal.buildRollFollowup({
+					label: `${Parser.attAbvToFull(ability)} Check`,
+					total,
+					naturalRoll: rollResult.roll,
+					breakdown: acBreakdown,
+					outcome: resultNote,
+				}),
 			}),
 		});
 	}
@@ -17217,12 +18964,20 @@ class CharacterSheetPage {
 		// Blood Price (Hellspeaker L10): after a save is rolled, offer to spend a Hit Die and
 		// add the rolled value to the result. Reactive and player-driven — prompted here rather
 		// than auto-applied. Only offered when the feature is present and a Hit Die remains.
-		const saveFollowupContext = {
+		const baseSaveFollowupContext = {
 			baseTotal: totalWithDice,
 			breakdown: saveBreakdown,
 			resultNote,
 			rollFollowup,
 		};
+		const flashSaveResult = await this._pMaybeApplyEfaFlashOfGenius({
+			rollType: "savingThrow",
+			rollLabel: `${Parser.attAbvToFull(ability)} Save`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			...baseSaveFollowupContext,
+		});
+		const saveFollowupContext = flashSaveResult || baseSaveFollowupContext;
 		const bloodPriceResult = await this._pMaybeApplyBloodPrice({
 			ability,
 			mode: rollResult.mode,
@@ -17834,13 +19589,16 @@ class CharacterSheetPage {
 
 		// Tactical Mind (XPHB Fighter L2): skill checks are ability checks, so offer the
 		// same Second Wind +1d10 (refunded on continued failure) here too.
-		await this._pMaybeApplyTacticalMind({
+		const skillFlashResult = await this._pMaybeApplyEfaFlashOfGenius({
+			rollType: "abilityCheck",
 			rollLabel: `${skillName}${abilityLabel} Check`,
 			mode: rollResult.mode,
 			stateEffectStr,
 			baseTotal: totalWithDice,
 			breakdown: skillBreakdown,
 			resultNote,
+			isFailed: isSuccess == null ? null : !isSuccess,
+			dc,
 			rollFollowup: CharacterSheetModal.buildRollFollowup({
 				label: `${skillName}${abilityLabel} Check`,
 				total: totalWithDice,
@@ -17850,15 +19608,36 @@ class CharacterSheetPage {
 			}),
 		});
 
+		if (skillFlashResult?.isSuccess !== true) {
+			await this._pMaybeApplyTacticalMind({
+				rollLabel: `${skillName}${abilityLabel} Check`,
+				mode: rollResult.mode,
+				stateEffectStr,
+				...(skillFlashResult || {
+					baseTotal: totalWithDice,
+					breakdown: skillBreakdown,
+					resultNote,
+					rollFollowup: CharacterSheetModal.buildRollFollowup({
+						label: `${skillName}${abilityLabel} Check`,
+						total: totalWithDice,
+						naturalRoll: rollResult.roll,
+						breakdown: skillBreakdown,
+						outcome: resultNote,
+					}),
+				}),
+			});
+		}
+
+		const finalTotal = skillFlashResult?.baseTotal ?? totalWithDice;
 		return {
-			total: totalWithDice,
+			total: finalTotal,
 			roll: rollResult.roll,
 			mode: rollResult.mode,
-			isSuccess,
+			isSuccess: dc == null ? null : finalTotal >= dc,
 			isNat20: rollResult.roll === 20,
 			isNat1: rollResult.roll === 1,
-			breakdown: skillBreakdown,
-			resultNote,
+			breakdown: skillFlashResult?.breakdown || skillBreakdown,
+			resultNote: skillFlashResult?.resultNote || resultNote,
 		};
 	}
 
@@ -18015,7 +19794,12 @@ class CharacterSheetPage {
 			? classification.isMelee
 			: !!(attack.isMelee || attack.type === "melee" || attack.range === "melee"
 				|| (attack.range && !attack.range.includes("/")));
-		const abilityUsed = attack.abilityMod || attack.ability || (isMelee ? "str" : "dex");
+		const abilityResolution = this._state.getWeaponAbilityResolution?.(attack) || {
+			modifier: this._state.getWeaponAbilityMod(attack),
+			ability: attack.abilityMod || attack.ability || (isMelee ? "str" : "dex"),
+			source: null,
+		};
+		const abilityUsed = abilityResolution.ability;
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 
 		// Probe for conditional attack modifiers (e.g. "advantage on attacks
@@ -18082,31 +19866,23 @@ class CharacterSheetPage {
 			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
 		}
 
-		// Parse and roll damage
-		let damageRoll = attack.damage;
-
 		const standingDamage = this._state.getWeaponDisplayDamageBreakdown?.(attack);
 		const abilityDamage = attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack);
 		const totalBonusDamage = abilityDamage + (standingDamage?.total ?? (Number(attack.damageBonus) || 0));
-
-		let damageStr = attack.damage;
-		if (totalBonusDamage > 0) {
-			damageStr = `${attack.damage} + ${totalBonusDamage}`;
-		}
-
 		const damageResult = Renderer.dice.parseRandomise2(attack.damage);
 		const totalDamage = damageResult + totalBonusDamage;
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
+		const abilityDamageStr = abilityDamage
+			? ` + ${abilityDamage} (${String(abilityResolution.ability || abilityUsed).toUpperCase()}${abilityResolution.source ? ` via ${abilityResolution.source}` : ""})`
+			: "";
+		const baseDamageStr = standingDamage?.base ? ` + ${standingDamage.base} (weapon)` : "";
+		const featureDamageStr = standingDamage?.feature ? ` + ${standingDamage.feature} (features)` : "";
 		const rageDamageStr = standingDamage?.rage ? ` + ${standingDamage.rage} (rage)` : "";
 		const stateDamageStr = standingDamage?.state ? ` + ${standingDamage.state} (states)` : "";
-		const itemDamageStr = standingDamage?.externalItemContributions?.length
-			? standingDamage.externalItemContributions.map(it => ` + ${it.value} (${it.name})`).join("")
-			: "";
-		const abilitySubstitutionStr = attackBreakdown?.abilitySubstitution
-			? ` (${attackBreakdown.abilitySubstitution.name} substitution)`
-			: "";
+		const itemDamageStr = standingDamage?.item ? ` + ${standingDamage.item} (items)` : "";
+		const hybridDamageStr = standingDamage?.hybrid ? ` + ${standingDamage.hybrid} (hybrid)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		await this.pAnimateD20(rollResult);
@@ -18114,7 +19890,7 @@ class CharacterSheetPage {
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
 			`Attack: ${this._formatD20Breakdown(rollResult, standingAttackBonus + conditionalAttackBonus, exhaustionStr)}${diceBonusStr}
-			 Damage: ${attack.damage} + ${totalBonusDamage}${abilitySubstitutionStr} ${weaponDamageType || ""} = ${damageResult}${rageDamageStr}${stateDamageStr}${itemDamageStr}${totalBonusDamage !== 0 ? ` → ${totalDamage}` : ""}`,
+			 Damage: ${attack.damage} ${weaponDamageType || ""} = ${damageResult}${abilityDamageStr}${baseDamageStr}${featureDamageStr}${itemDamageStr}${stateDamageStr}${rageDamageStr}${hybridDamageStr}${totalBonusDamage ? ` → ${totalDamage}` : ""}`,
 			resultClass,
 			resultNote,
 		);
@@ -18452,6 +20228,299 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderDicePresets();
 		return true;
+	}
+
+	async _pActivateEfaFlashOfGenius () {
+		const cancelled = {
+			ok: false,
+			committed: false,
+			reason: "cancelled",
+			featureUid: CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+		};
+		const rollType = await InputUiUtil.pGetUserEnum({
+			title: "Flash of Genius — Failed Roll",
+			values: ["abilityCheck", "savingThrow"],
+			fnDisplay: value => value === "abilityCheck" ? "Ability check" : "Saving throw",
+			isResolveItem: true,
+		});
+		if (!rollType) return cancelled;
+
+		const failed = await CharacterSheetModal.pGetUserBoolean({
+			title: "Flash of Genius",
+			htmlDescription: "Confirm that the triggering roll failed.",
+			textYes: "The roll failed",
+			textNo: "Cancel",
+		});
+		if (!failed) return cancelled;
+
+		const targetType = await InputUiUtil.pGetUserEnum({
+			title: "Flash of Genius — Target",
+			values: ["self", "creature"],
+			fnDisplay: value => value === "self" ? "Self" : "Named visible creature within 30 feet",
+			isResolveItem: true,
+		});
+		if (!targetType) return cancelled;
+
+		let targetName = null;
+		let distanceFeet = 0;
+		if (targetType === "creature") {
+			targetName = await InputUiUtil.pGetUserString({title: "Visible target name", default: ""});
+			if (!String(targetName || "").trim()) return cancelled;
+			distanceFeet = await InputUiUtil.pGetUserNumber({
+				title: "Target distance (feet)",
+				default: 30,
+				min: 0,
+				max: 30,
+			});
+			if (distanceFeet == null) return cancelled;
+		}
+
+		return this._pCommitEfaFlashOfGenius({
+			rollType,
+			isFailed: true,
+			targetType,
+			targetName,
+			targetVisible: true,
+			distanceFeet,
+		});
+	}
+
+	async _pCommitEfaFlashOfGenius (opts) {
+		const unregisterIngeniousMovement = this._state.registerEfaCartographerIngeniousMovementHook?.(
+			committedResult => this._pResolveEfaCartographerIngeniousMovement(committedResult),
+		);
+		let committed;
+		try {
+			opts = {
+				...opts,
+				onCoreCommitted: () => this._saveCurrentCharacter(),
+			};
+			committed = await this._state.pUseFlashOfGenius(opts);
+		} finally {
+			unregisterIngeniousMovement?.();
+		}
+		if (!committed.ok) {
+			const messages = {
+				actionUnavailable: "Your Reaction is unavailable.",
+				insufficientResource: "No Flash of Genius uses remain.",
+				targetOutOfRange: "The target must be within 30 feet.",
+				targetNotVisible: "You must be able to see the target.",
+				invalidTarget: "Choose a named visible target.",
+			};
+			JqueryUtil.doToast({type: "warning", content: messages[committed.reason] || "Flash of Genius could not be used."});
+			return committed;
+		}
+		const {bonus, adjustedTotal, target} = committed.result;
+		const targetLabel = target.type === "self" ? "your roll" : `${target.name}'s roll`;
+		const ingeniousMovementFollowUp = committed.followUps.find(({hookId}) =>
+			hookId === CharacterSheetState.INGENIOUS_MOVEMENT_HOOK_ID);
+		const ingeniousMovementResult = ingeniousMovementFollowUp?.value;
+		let toastContent = `Flash of Genius added +${bonus} to ${targetLabel}.`;
+		let toastType = "success";
+		if (committed.commitBoundaryFailed) {
+			toastType = "danger";
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}, but the committed state could not be saved. No follow-up was opened.`;
+		} else if (ingeniousMovementFollowUp && !ingeniousMovementFollowUp.ok) {
+			toastType = "warning";
+			const error = ingeniousMovementResult?.error || ingeniousMovementFollowUp.error || "Ingenious Movement could not be resolved.";
+			const errorSentence = /[.!?]$/.test(error) ? error : `${error}.`;
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement: ${errorSentence} The Flash use remains committed.`;
+		} else if (ingeniousMovementResult?.declined) {
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement was skipped; the Flash use remains committed.`;
+		} else if (ingeniousMovementResult?.resolved) {
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement: ${ingeniousMovementResult.instruction}`;
+		} else if (committed.followUpFailed) {
+			toastType = "warning";
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}, but a follow-up effect failed.`;
+		}
+		JqueryUtil.doToast({
+			type: toastType,
+			content: toastContent,
+		});
+
+		const hasPersistentFollowUpMutation = committed.followUps.some(({ok, value}) =>
+			ok && value?.persistentStateChanged === true);
+		if (hasPersistentFollowUpMutation) await this._saveCurrentCharacter();
+		this._renderResources();
+		this._features?._renderResources?.();
+		this._renderActiveStates();
+		this._combat?.render?.();
+		this._renderCharacter();
+		return {...committed, adjustedTotal};
+	}
+
+	async _pResolveEfaCartographerIngeniousMovement (committedFlashResult) {
+		const resolve = confirmation => this._state.resolveEfaCartographerIngeniousMovement({
+			committedFlashResult,
+			...confirmation,
+		});
+		const useMovement = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement",
+			htmlDescription: "Flash of Genius is committed. As part of the same Reaction, teleport yourself or one willing creature you can see within 30 feet?",
+			textYes: "Choose teleport",
+			textNo: "Skip",
+		});
+		if (!useMovement) return resolve({declined: true});
+
+		const targetType = await CharacterSheetModal.pGetUserEnum({
+			title: "Ingenious Movement — Target",
+			values: ["self", "creature"],
+			fnDisplay: value => value === "self" ? "Self" : "Willing visible creature within 30 feet",
+			isResolveItem: true,
+		});
+		if (!targetType) return resolve({declined: true});
+
+		let targetName = null;
+		let targetWilling = true;
+		let targetVisible = true;
+		let targetDistanceFeet = 0;
+		if (targetType === "creature") {
+			targetName = await InputUiUtil.pGetUserString({title: "Creature name", default: ""});
+			if (targetName == null) return resolve({declined: true});
+			if (!String(targetName).trim()) return resolve({targetType, targetName});
+			targetWilling = await CharacterSheetModal.pGetUserBoolean({
+				title: "Ingenious Movement — Willing Target",
+				htmlDescription: `Confirm that ${String(targetName || "").trim() || "the creature"} is willing to teleport.`,
+				textYes: "Target is willing",
+				textNo: "Target is not willing",
+			});
+			if (targetWilling == null) return resolve({declined: true});
+			if (targetWilling === false) return resolve({targetType, targetName, targetWilling});
+			targetVisible = await CharacterSheetModal.pGetUserBoolean({
+				title: "Ingenious Movement — Visible Target",
+				htmlDescription: `Confirm that you can see ${String(targetName || "").trim() || "the creature"}.`,
+				textYes: "I can see the target",
+				textNo: "Target is not visible",
+			});
+			if (targetVisible == null) return resolve({declined: true});
+			if (targetVisible === false) return resolve({targetType, targetName, targetWilling, targetVisible});
+			targetDistanceFeet = await InputUiUtil.pGetUserNumber({
+				title: "Target distance from you (feet)",
+				default: 30,
+				min: 0,
+				max: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+			});
+			if (targetDistanceFeet == null) return resolve({declined: true});
+		}
+
+		const teleportDistanceFeet = await InputUiUtil.pGetUserNumber({
+			title: "Teleport distance from the target's current space (feet)",
+			default: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+			min: 1,
+			max: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+		});
+		if (teleportDistanceFeet == null) return resolve({declined: true});
+		const destinationVisible = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement — Visible Destination",
+			htmlDescription: "Confirm that you can see the destination. The sheet does not track map coordinates or line of sight.",
+			textYes: "I can see the destination",
+			textNo: "Destination is not visible",
+		});
+		if (destinationVisible == null) return resolve({declined: true});
+		if (destinationVisible === false) {
+			return resolve({
+				targetType,
+				targetName,
+				targetWilling,
+				targetVisible,
+				targetDistanceFeet,
+				teleportDistanceFeet,
+				destinationVisible,
+			});
+		}
+		const destinationUnoccupied = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement — Unoccupied Destination",
+			htmlDescription: "Confirm that the destination space is unoccupied. The sheet does not track battle-map occupancy.",
+			textYes: "Destination is unoccupied",
+			textNo: "Destination is occupied",
+		});
+		if (destinationUnoccupied == null) return resolve({declined: true});
+
+		return resolve({
+			targetType,
+			targetName,
+			targetWilling,
+			targetVisible,
+			targetDistanceFeet,
+			teleportDistanceFeet,
+			destinationVisible,
+			destinationUnoccupied,
+		});
+	}
+
+	async _pMaybeApplyEfaFlashOfGenius ({
+		rollType,
+		rollLabel,
+		baseTotal,
+		breakdown,
+		resultNote,
+		mode,
+		stateEffectStr = "",
+		isFailed = null,
+		dc = null,
+		rollFollowup = null,
+	} = {}) {
+		const resource = (this._state.getResources?.() || []).find(it =>
+			it.featureUid === CharacterSheetState.EFA_FLASH_OF_GENIUS_UID);
+		const isReactionUnavailable = this._state.isInCombat?.()
+			&& !this._state.isActionTypeAvailable?.("reaction");
+		if (!resource || resource.current <= 0 || isReactionUnavailable) return null;
+		if (isFailed === false) return null;
+
+		const useFlash = await CharacterSheetModal.pGetUserBoolean({
+			title: "Flash of Genius",
+			htmlDescription: isFailed === true
+				? `The ${rollLabel} failed with a total of <strong>${baseTotal}</strong>. Use your Reaction to add your Intelligence modifier?`
+				: `If the ${rollLabel} failed, use your Reaction to add your Intelligence modifier to the total of <strong>${baseTotal}</strong>?`,
+			textYes: "Use Flash of Genius",
+			textNo: "Keep the roll",
+			rollFollowup,
+		});
+		if (!useFlash) return null;
+
+		const committed = await this._pCommitEfaFlashOfGenius({
+			rollType,
+			isFailed: true,
+			rollTotal: baseTotal,
+			targetType: "self",
+			context: {rollLabel},
+		});
+		if (!committed?.committed) return null;
+
+		const bonus = committed.result.bonus;
+		const adjustedTotal = committed.result.adjustedTotal;
+		const flashNote = `Flash of Genius: +${bonus} → ${adjustedTotal}`;
+		const noteLines = String(resultNote || "")
+			.split("\n")
+			.filter(line => !/^(?:Success|Failure) vs DC\b/.test(line.trim()))
+			.filter(Boolean);
+		const adjustedSuccess = dc == null ? null : adjustedTotal >= dc;
+		const mergedNoteLines = [...noteLines, flashNote];
+		if (dc != null) {
+			mergedNoteLines.push(`${adjustedSuccess ? "Success" : "Failure"} vs DC ${dc} after Flash of Genius`);
+		}
+		const mergedNote = mergedNoteLines.join("\n");
+		const adjustedBreakdown = `${breakdown} + ${bonus} (Flash of Genius)`;
+		this._showDiceResult(
+			`${rollLabel}${this._getModeLabel(mode)}${stateEffectStr}`,
+			adjustedTotal,
+			adjustedBreakdown,
+			"",
+			mergedNote,
+		);
+		return {
+			baseTotal: adjustedTotal,
+			isSuccess: adjustedSuccess,
+			breakdown: adjustedBreakdown,
+			resultNote: mergedNote,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: rollLabel,
+				total: adjustedTotal,
+				breakdown: adjustedBreakdown,
+				outcome: mergedNote,
+			}),
+		};
 	}
 
 	/**
@@ -21305,6 +23374,7 @@ class CharacterSheetPage {
 			try {
 				const json = await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/crafting.json`);
 				this._state.setCraftingCatalog(this.constructor._getCraftingCatalogWithBrew(json, this._craftingMaterialsBrewData));
+				this._installCraftingResultItems(this._state.getCraftingCatalog());
 				return this._state.getCraftingCatalog();
 			} catch (e) {
 				// Non-fatal: the crafting surfaces show an empty state rather than breaking the sheet
@@ -21331,12 +23401,1481 @@ class CharacterSheetPage {
 		return out;
 	}
 
+	_installCraftingResultItems (catalog) {
+		const existing = new Set((this._itemsData || [])
+			.map(item => `${String(item.name || "").toLowerCase()}|${String(item.source || "").toLowerCase()}`));
+		for (const recipe of catalog?.recipes || []) {
+			const [uidName, uidSource] = String(recipe.itemUid || "").split("|");
+			const name = recipe.name || uidName;
+			const source = recipe.source || uidSource;
+			const key = `${String(name || "").toLowerCase()}|${String(source || "").toLowerCase()}`;
+			if (!name || !source || existing.has(key)) continue;
+			const resultItem = recipe.resultItem || {};
+			this._itemsData.push({
+				...MiscUtil.copyFast(resultItem),
+				name,
+				source,
+				page: recipe.page,
+				entries: recipe.entries || [],
+				rarity: recipe.rarity || resultItem.rarity || "unknown",
+				...(recipe.reqAttune ? {reqAttune: recipe.reqAttune} : {}),
+				_isCraftedItem: true,
+				_isCraftingCatalogItem: true,
+			});
+			existing.add(key);
+		}
+	}
+
 	/** Whether crafting surfaces should be offered at all. */
 	isCraftingEnabled () { return (/** @type {*} */ (this._state.getSettings()))?.enableCrafting !== false; }
 
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
+	openAdventurersAtlasLongRest () { return this._rest?.openAdventurersAtlasLongRest?.(); }
+	resetTurnEconomy () {
+		this._state.resetTurnEconomy();
+		this._combat?.resetTurnAttackUsage?.();
+		this._renderCompanions?.();
+		this._playMode?._refreshOpenDrawer?.("companions");
+	}
+
+	startCombat () {
+		this._state.startCombat();
+		this._combat?.resetTurnAttackUsage?.();
+	}
+
+	advanceCombatRound () {
+		const expired = this._state.advanceRound();
+		this._combat?.resetTurnAttackUsage?.();
+		return expired;
+	}
+
+	endCombat () {
+		this._state.endCombat();
+		this._combat?.resetTurnAttackUsage?.();
+	}
+
+	_getCompanionAttackReplacementBridge () {
+		const availability = this._combat?.getAttackActionReplacementAvailability?.() || {
+			available: false,
+			reason: "The Attack-action tracker is unavailable.",
+		};
+		return {
+			availability,
+			adapter: {
+				consume: options => this._combat?.consumeAttackActionReplacement?.(options) || {
+					ok: false,
+					reason: "attackReplacementUnavailable",
+				},
+				rollback: receipt => this._combat?.rollbackAttackActionReplacement?.(receipt) || {
+					ok: false,
+					reason: "attackReplacementRollbackUnavailable",
+				},
+			},
+		};
+	}
+
+	getCompanionOperationAvailability (companionId, operation, options = {}) {
+		const attackBridge = this._getCompanionAttackReplacementBridge();
+		return this._state.getCompanionOperationAvailability(companionId, operation, {
+			...options,
+			attackReplacement: attackBridge.availability,
+		});
+	}
+
+	getCompanionOperationFocusKey (companionId, operation, actionKey = null) {
+		return [companionId, operation, actionKey || ""].map(part => String(part || "")).join("::");
+	}
+
+	getCompanionOperationFocusTarget (focusKey) {
+		if (!focusKey || typeof document === "undefined") return null;
+		const targets = [...(document.querySelectorAll?.("[data-companion-operation-key]") || [])]
+			.filter(element => element.getAttribute?.("data-companion-operation-key") === focusKey);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	_restoreCompanionOperationFocus (focusKey, companionId = null) {
+		if (!focusKey) return;
+		queueMicrotask(() => {
+			const exact = this.getCompanionOperationFocusTarget(focusKey);
+			const target = exact && !exact.disabled
+				? exact
+				: companionId ? this._getCompanionOperationPostRenderFocusTarget(companionId) : null;
+			target?.focus?.();
+		});
+	}
+
+	_renderCompanionOperationSurfaces () {
+		this._renderCompanions();
+		if (this._state.getViewMode?.() !== "play") return;
+		this._playMode?.render();
+		this._playMode?._refreshOpenDrawer?.("companions");
+	}
+
+	_getCompanionOperationPostRenderFocusTarget (companionId) {
+		if (!companionId || typeof document === "undefined") return null;
+		const targets = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
+			.filter(card => card.getAttribute?.("data-companion-id") === companionId)
+			.map(card => card.querySelector?.("[data-companion-operation-key]:not([disabled])"))
+			.filter(Boolean);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	_getFeatureCompanionPostRenderFocusTarget (companionId, focusKey) {
+		const exact = this.getFeatureCompanionLifecycleFocusTarget(focusKey);
+		if (exact && !exact.disabled) return exact;
+		if (typeof document === "undefined") return null;
+		const cards = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
+			.filter(card => card.getAttribute?.("data-companion-id") === companionId);
+		const targets = cards
+			.map(card => card.querySelector?.(
+				"[data-feature-companion-lifecycle-key]:not([disabled]), "
+				+ "[data-companion-operation-key]:not([disabled]), "
+				+ "button:not([disabled])",
+			))
+			.filter(Boolean);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	async _persistFeatureCompanionLifecycleResult (result, {
+		companionId,
+		focusKey = null,
+		successMessage,
+	} = {}) {
+		if (!result?.committed) {
+			this._announceCompanionInteraction(
+				result?.message || "Steel Defender lifecycle operation made no changes.",
+				{type: result?.reason === "cancelled" ? "info" : "warning", isToast: true},
+			);
+			return result;
+		}
+
+		await this.saveCharacter();
+		this._renderCompanions();
+		if (this._state.getViewMode?.() === "play") this._playMode?.render();
+		const postRenderFocusTarget = this._getFeatureCompanionPostRenderFocusTarget(companionId, focusKey);
+		if (postRenderFocusTarget?.focus) {
+			queueMicrotask(() => {
+				if (postRenderFocusTarget.isConnected !== false) postRenderFocusTarget.focus();
+			});
+		}
+		this._announceCompanionInteraction(successMessage, {type: "success", isToast: true});
+		this._playMode?._logActivity?.("companion", successMessage);
+		return result;
+	}
+
+	async pUseFeatureCompanionLifecycle ({companionId, operation} = {}) {
+		const trigger = typeof document !== "undefined"
+			? document.activeElement?.closest?.("button, [role=button]")
+			: null;
+		const focusKey = trigger?.getAttribute?.("data-feature-companion-lifecycle-key")
+			|| this.getFeatureCompanionLifecycleFocusKey(companionId, operation);
+		const getFocusRestoreTarget = () => this._getFeatureCompanionPostRenderFocusTarget(companionId, focusKey);
+
+		if (operation === "revival") {
+			const result = await this._pShowFeatureCompanionRevivalModal(companionId, {
+				focusRestoreTarget: trigger,
+				getFocusRestoreTarget,
+			});
+			if (!result) return null;
+			const slot = result.costs?.spellSlot;
+			const slotLabel = slot?.kind === "pact" ? `one level ${slot.level} Pact Magic slot` : `one level ${slot?.level} spell slot`;
+			return this._persistFeatureCompanionLifecycleResult(result, {
+				companionId,
+				focusKey,
+				successMessage: `Steel Defender revival begun. Spent the owner's Action and ${slotLabel}; the defender remains at 0 HP until game minute ${result.completionMinute}.`,
+			});
+		}
+
+		if (operation === "completeRevival") {
+			const presentation = this.getFeatureCompanionLifecyclePresentation(this._state.getCompanion?.(companionId));
+			if (presentation?.status !== "revivalPending" || !presentation.canCompleteRevival) {
+				const result = {
+					ok: false,
+					committed: false,
+					operation,
+					companionId,
+					reason: "revivalNotPending",
+					message: presentation?.status === "revivalPending"
+						? "This pending revival is not due within the next canonical minute."
+						: "This Steel Defender has no pending revival to complete.",
+					rollback: null,
+					error: null,
+				};
+				return this._persistFeatureCompanionLifecycleResult(result, {companionId, focusKey});
+			}
+			const receipt = this._state.advanceGameTimeMinutes(1, {
+				reason: "efa-steel-defender-revival-completion",
+				identity: companionId,
+			});
+			const transition = receipt?.updated?.find(update =>
+				update?.kind === "featureCompanion"
+				&& update.companionId === companionId
+				&& update.transition === "revivalCompleted",
+			);
+			const result = receipt?.ok && transition
+				? {
+					...receipt,
+					committed: true,
+					operation,
+					companionId,
+					transition,
+					message: "Steel Defender revival completed through canonical game time.",
+				}
+				: {
+					...receipt,
+					ok: false,
+					committed: false,
+					operation,
+					companionId,
+					reason: receipt?.code || "revivalCompletionFailed",
+					message: receipt?.message || "Advancing 1 minute did not complete this Steel Defender revival.",
+				};
+			return this._persistFeatureCompanionLifecycleResult(result, {
+				companionId,
+				focusKey,
+				successMessage: `Advanced game time from minute ${receipt.priorMinute} to ${receipt.newMinute}. Steel Defender revival completed at ${transition?.hp} HP.`,
+			});
+		}
+
+		const result = {
+			ok: false,
+			committed: false,
+			operation,
+			companionId,
+			reason: "unsupportedLifecycleOperation",
+			message: "That Steel Defender lifecycle operation is unsupported.",
+			rollback: null,
+			error: null,
+		};
+		return this._persistFeatureCompanionLifecycleResult(result, {companionId, focusKey});
+	}
+
+	async _pShowFeatureCompanionRevivalModal (
+		companionId,
+		{
+			focusRestoreTarget = null,
+			getFocusRestoreTarget = null,
+		} = {},
+	) {
+		const presentation = this.getFeatureCompanionLifecyclePresentation(this._state.getCompanion?.(companionId));
+		const availability = presentation?.revival;
+		if (!presentation || presentation.status !== "dead" || !availability?.spellSlots?.length) {
+			return {
+				ok: false,
+				committed: false,
+				operation: "Revival",
+				companionId,
+				reason: availability?.reason || "revivalUnavailable",
+				message: availability?.message || "Steel Defender revival is unavailable.",
+				rollback: null,
+				error: null,
+			};
+		}
+
+		let resolveOuter = null;
+		let isSettled = false;
+		let isBusy = false;
+		const cancel = () => this._state.beginFeatureCompanionRevival({
+			companionId,
+			cancelled: true,
+		});
+		const modal = await CharacterSheetModal.pGetShow({
+			title: "Revive Steel Defender",
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+			cbClose: () => {
+				if (!resolveOuter || isSettled || isBusy) return;
+				isSettled = true;
+				resolveOuter(cancel());
+			},
+		});
+		const {eleModal: modalShell, eleModalInner: modalInner} = modal;
+		const doCloseRaw = modal.doClose;
+		modal.doClose = (...args) => {
+			if (isBusy) return;
+			return doCloseRaw?.(...args);
+		};
+		const doClose = modal.doClose;
+
+		return new Promise(resolve => {
+			resolveOuter = resolve;
+			const statusId = `charsheet-steel-defender-revival-status-${String(companionId || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+			const costId = `${statusId}-cost`;
+			const unknownTiming = presentation.timingKnown === false;
+			const optionsHtml = availability.spellSlots.map(slot => {
+				const value = slot.kind === "pact" ? "pact" : `normal:${slot.level}`;
+				const label = slot.kind === "pact"
+					? `Pact Magic slot — level ${slot.level} (${slot.current}/${slot.max})`
+					: `Level ${slot.level} spell slot (${slot.current}/${slot.max})`;
+				return `<option value="${CharacterSheetModal._escapeHtml(value)}">${CharacterSheetModal._escapeHtml(label)}</option>`;
+			}).join("");
+
+			modalInner.innerHTML = `<div class="charsheet__feature-companion-revival" role="form" aria-describedby="${costId} ${statusId}">
+				<p class="ve-muted mb-3">This protected commit spends your Magic Action and one eligible spell slot, records touch, and starts the defender's 1-minute return delay.</p>
+				<fieldset class="charsheet__feature-companion-revival-fields">
+					<legend class="bold">Revival requirements</legend>
+					<label class="ve-flex-col">
+						<span class="bold">Spell slot</span>
+						<select class="form-control input-sm" data-role="spell-slot" required aria-required="true" aria-describedby="${costId} ${statusId}">
+							<option value="">Choose a slot</option>
+							${optionsHtml}
+						</select>
+					</label>
+					<label class="charsheet__rest-option">
+						<input type="checkbox" data-role="touch" required aria-required="true" aria-describedby="${statusId}">
+						<span>I am touching the Steel Defender.</span>
+					</label>
+					${unknownTiming ? `<label class="charsheet__rest-option">
+						<input type="checkbox" data-role="death-window" required aria-required="true" aria-describedby="${statusId}">
+						<span>I confirm in this operation that the defender died within the last hour.</span>
+					</label>` : ""}
+				</fieldset>
+				<div class="charsheet__feature-companion-revival-cost" id="${costId}">
+					<strong>Cost before commit:</strong> select a slot, spend your Action, and confirm touch${unknownTiming ? " plus the unknown death-time window" : ""}.
+				</div>
+				<div class="ve-small mb-3" id="${statusId}" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
+				<div class="charsheet__modal-actions">
+					<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+					<button type="button" class="ve-btn ve-btn-primary" data-role="commit" aria-describedby="${costId} ${statusId}">Begin revival</button>
+				</div>
+			</div>`;
+
+			const slot = modalInner.querySelector("[data-role=spell-slot]");
+			const touch = modalInner.querySelector("[data-role=touch]");
+			const deathWindow = modalInner.querySelector("[data-role=death-window]");
+			const status = modalInner.querySelector(`#${statusId}`);
+			const cost = modalInner.querySelector(`#${costId}`);
+			const buttons = [...modalInner.querySelectorAll("button")];
+			const closeButton = modalShell?.querySelector?.(".cs-modal__btn-close");
+			const parseSlot = () => {
+				if (!slot.value) return null;
+				if (slot.value === "pact") return {kind: "pact"};
+				const [, levelRaw] = slot.value.split(":");
+				return {kind: "normal", level: Number(levelRaw)};
+			};
+			const setBusy = value => {
+				isBusy = value;
+				buttons.forEach(button => { button.disabled = value; });
+				slot.disabled = value;
+				touch.disabled = value;
+				if (deathWindow) deathWindow.disabled = value;
+				if (closeButton) closeButton.disabled = value;
+				modalShell?.setAttribute?.("aria-busy", String(value));
+				status.textContent = value
+					? "Committing revival. Keep this dialog open."
+					: "";
+			};
+			const updateCost = () => {
+				const selected = availability.spellSlots.find(option => {
+					const choice = parseSlot();
+					return choice?.kind === option.kind && (option.kind === "pact" || choice.level === option.level);
+				});
+				const slotLabel = selected
+					? selected.kind === "pact" ? `one level ${selected.level} Pact Magic slot` : `one level ${selected.level} spell slot`
+					: "one selected spell slot";
+				cost.innerHTML = `<strong>Cost before commit:</strong> owner Action + ${CharacterSheetModal._escapeHtml(slotLabel)} + touch confirmation${unknownTiming ? " + died-within-hour confirmation" : ""}. The defender remains at 0 HP until minute ${presentation.currentMinute + 1}.`;
+			};
+			const showValidation = (message, target) => {
+				status.textContent = message;
+				status.setAttribute("role", "alert");
+				status.classList.add("text-danger");
+				target?.focus?.();
+			};
+			const validate = () => {
+				if (!parseSlot()) {
+					showValidation("Choose one normal or Pact Magic spell slot.", slot);
+					return false;
+				}
+				if (touch.checked !== true) {
+					showValidation("Confirm that you are touching the Steel Defender.", touch);
+					return false;
+				}
+				if (unknownTiming && deathWindow?.checked !== true) {
+					showValidation("Confirm that the defender died within the last hour.", deathWindow);
+					return false;
+				}
+				return true;
+			};
+			slot.addEventListener("change", updateCost);
+			updateCost();
+			modalShell?.addEventListener?.("keydown", event => {
+				if (!isBusy || event.key !== "Escape") return;
+				event.preventDefault();
+				event.stopImmediatePropagation?.();
+				status.textContent = "Revival is still resolving. Wait for the result before closing.";
+			}, true);
+			modalInner.querySelector("[data-role=cancel]").addEventListener("click", () => {
+				if (isBusy) return;
+				isSettled = true;
+				resolve(cancel());
+				doClose(false);
+			});
+			modalInner.querySelector("[data-role=commit]").addEventListener("click", () => {
+				if (isBusy || !validate()) return;
+				setBusy(true);
+				try {
+					const result = this._state.beginFeatureCompanionRevival({
+						companionId,
+						spellSlot: parseSlot(),
+						touchConfirmed: touch.checked,
+						deathWithinHourConfirmed: deathWindow?.checked === true,
+					});
+					if (!result.ok) {
+						setBusy(false);
+						const focusByReason = {
+							spellSlotRequired: slot,
+							spellSlotUnavailable: slot,
+							touchNotConfirmed: touch,
+							deathTimeConfirmationRequired: deathWindow,
+						};
+						showValidation(result.message || "Revival could not begin.", focusByReason[result.reason] || status);
+						return;
+					}
+					isSettled = true;
+					resolve(result);
+					doCloseRaw?.(true);
+				} catch (error) {
+					setBusy(false);
+					showValidation(error?.message || "Revival could not begin.", status);
+				}
+			});
+			queueMicrotask(() => CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-role=spell-slot]"}));
+		});
+	}
+
+	commitFeatureCompanionReplacementAfterLongRest ({
+		companionId,
+		toolItemId,
+		inHandConfirmed,
+	} = {}) {
+		const result = this._state.replaceFeatureCompanionAfterLongRest({
+			companionId,
+			toolItemId,
+			inHandConfirmed,
+		});
+		if (!result?.committed) {
+			this._announceCompanionInteraction(
+				result?.message || "Steel Defender replacement made no changes.",
+				{type: "warning"},
+			);
+			return result;
+		}
+		const name = this._state.getCompanion?.(companionId)?.customName || "Steel Defender";
+		const message = `${name} replacement committed as generation ${result.generation.generation} at ${result.hp.current}/${result.hp.max} HP.`;
+		this._announceCompanionInteraction(message);
+		this._playMode?._logActivity?.("companion", message);
+		return result;
+	}
+
+	async _pGetCompanionCommandMethod (availability, commandMethod = null) {
+		if (commandMethod) return commandMethod;
+		if (availability.availableCommandMethods.length === 1) return availability.availableCommandMethods[0].id;
+		if (!availability.availableCommandMethods.length) return null;
+		return InputUiUtil.pGetUserEnum({
+			title: "Command Steel Defender",
+			htmlDescription: "Choose the owner cost before committing it together with the defender's action. Cancel spends neither resource.",
+			values: availability.availableCommandMethods.map(it => it.id),
+			fnDisplay: id => availability.availableCommandMethods.find(it => it.id === id)?.label || id,
+			isResolveItem: true,
+		});
+	}
+
+	async _pGetCompanionRepairTarget () {
+		const modeledTargets = (this._state.getCompanions?.() || [])
+			.filter(companion => String(companion.creatureType || "").toLowerCase() === "construct")
+			.map(companion => ({
+				id: `companion:${companion.id}`,
+				label: `${companion.customName || companion.name} (${companion.hp.current}/${companion.hp.max} HP)`,
+				target: {companionId: companion.id, confirmed: true},
+			}));
+		const options = [
+			...modeledTargets,
+			{id: "external:construct", label: "External Construct (manual HP)", target: {external: true, kind: "construct", confirmed: true}},
+			{id: "external:object", label: "External object (manual HP)", target: {external: true, kind: "object", confirmed: true}},
+		];
+		const selectedId = await InputUiUtil.pGetUserEnum({
+			title: "Repair Target",
+			htmlDescription: "Repair can affect the defender, another Construct, or an object it can see within 5 feet.",
+			values: options.map(it => it.id),
+			fnDisplay: id => options.find(it => it.id === id)?.label || id,
+			isResolveItem: true,
+		});
+		if (!selectedId) return null;
+		const selected = options.find(it => it.id === selectedId);
+		if (!selected?.target?.external) return selected?.target || null;
+		const name = await InputUiUtil.pGetUserString({title: "External target name", default: ""});
+		if (!String(name || "").trim()) return null;
+		return {...selected.target, name: String(name).trim()};
+	}
+
+	async _publishEfaArcaneJoltResult (result) {
+		const roll = result?.rolls?.effect;
+		if (!result?.ok || !roll) return false;
+		if (result.effect === "destructive") {
+			this._showDiceResult(
+				"Arcane Jolt — Destructive Energy",
+				roll.total,
+				`${roll.dice} Force damage to ${result.target.name}`,
+			);
+			this._playMode?._logActivity?.(
+				"combat",
+				`Arcane Jolt dealt ${roll.total} Force damage to ${result.target.name}`,
+			);
+			this._announceCompanionInteraction(`Arcane Jolt dealt ${roll.total} Force damage to ${result.target.name}.`);
+			return true;
+		}
+
+		const targetName = result.target?.name || "the recipient";
+		const healingNote = result.hp?.manualApplication
+			? `Apply ${roll.total} HP manually to ${targetName}.`
+			: `${targetName}: ${result.hp.before} → ${result.hp.after} HP.`;
+		this._showDiceResult(
+			"Arcane Jolt — Restorative Energy",
+			roll.total,
+			`${roll.dice} healing — ${healingNote}`,
+		);
+		this._playMode?._logActivity?.(
+			"combat",
+			`Arcane Jolt restored ${roll.total} HP to ${targetName}${result.hp?.manualApplication ? " (manual target)" : ""}`,
+		);
+		this._announceCompanionInteraction(`Arcane Jolt restored ${roll.total} HP to ${targetName}.`);
+		return true;
+	}
+
+	async pOfferEfaArcaneJolt ({
+		trigger,
+		rollFollowup = null,
+		focusRestoreTarget = null,
+		getFocusRestoreTarget = null,
+	} = {}) {
+		const triggerStatus = this._state.getEfaArcaneJoltTriggerStatus?.(trigger);
+		if (!triggerStatus?.available) {
+			this._announceCompanionInteraction(
+				triggerStatus?.message || "Arcane Jolt is unavailable.",
+				{type: "warning", isToast: true},
+			);
+			return {
+				ok: false,
+				committed: false,
+				reason: triggerStatus?.reason || "featureUnavailable",
+				message: triggerStatus?.message || "Arcane Jolt is unavailable.",
+				rollback: null,
+				error: null,
+			};
+		}
+
+		const escapeHtml = value => String(value ?? "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;");
+		const modeledTargets = (this._state.getCompanions?.() || [])
+			.filter(companion =>
+				companion.active !== false
+				&& !["dead", "vanished"].includes(companion.lifecycle?.status)
+				&& (Number(companion.hp?.current) || 0) > 0,
+			)
+			.map(companion => {
+				const isObject = String(companion.creatureType || "").toLowerCase() === "object";
+				return {
+					value: `${isObject ? "object" : "companion"}:${companion.id}`,
+					label: `${companion.customName || companion.name} (${companion.hp.current}/${companion.hp.max} HP)`,
+				};
+			});
+		const targetOptions = [
+			{value: "character", label: `${this._state.getName?.() || "Character"} (self)`},
+			...modeledTargets,
+			{value: "external:creature", label: "External creature (manual HP)"},
+			{value: "external:object", label: "External object (manual HP)"},
+		];
+		const attackTargetName = triggerStatus.originatingHit?.targetName || "";
+		const statusText = `${triggerStatus.resource.current}/${triggerStatus.resource.max} uses`
+			+ ` · ${triggerStatus.usedThisTurn ? "used this turn" : "available this turn"}`
+			+ ` · ${triggerStatus.damageDice} damage / ${triggerStatus.healingDice} healing`;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		let isBusy = false;
+		const cancelledResult = {
+			ok: false,
+			committed: false,
+			reason: "cancelled",
+			message: "Arcane Jolt skipped before any resource or receipt was spent.",
+			rollback: null,
+			error: null,
+		};
+		const modalOptions = {
+			title: "Arcane Jolt",
+			isMinHeight0: true,
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+			cbClose: () => {
+				if (!resolveOuter || isResolved || isBusy) return;
+				isResolved = true;
+				this._announceCompanionInteraction(cancelledResult.message, {type: "info", isToast: true});
+				resolveOuter(cancelledResult);
+			},
+		};
+		const modal = rollFollowup
+			? await CharacterSheetModal.pGetRollFollowup({...modalOptions, rollFollowup})
+			: await CharacterSheetModal.pGetShow(modalOptions);
+		const {eleModal: modalShell, eleModalInner: modalInner, doClose} = modal;
+		modalInner.classList.add("cs-combat-target-modal");
+		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+		modalInner.style.overflowY = "auto";
+		modalInner.style.boxSizing = "border-box";
+		modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
+
+		return new Promise(resolve => {
+			resolveOuter = resolve;
+			const finish = result => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(result);
+			};
+			modalInner.innerHTML = `
+				<div class="ve-flex-col cs-combat-target-effect charsheet__arcane-jolt" role="form" aria-label="Arcane Jolt options">
+					<div class="ve-small ve-muted mb-2 charsheet__arcane-jolt-status" data-jolt-status role="status" aria-live="polite" aria-atomic="true">${escapeHtml(statusText)}</div>
+					<label class="mb-2 ve-form-label">
+						<span class="ve-small bold">Target hit by the attack</span>
+						<input class="form-control input-sm w-100" type="text" data-jolt-attack-target value="${escapeHtml(attackTargetName)}" autocomplete="off">
+					</label>
+					<fieldset class="ve-flex-col mb-2 charsheet__arcane-jolt-restorative">
+						<legend class="ve-small bold">Restorative recipient</legend>
+						<select class="form-control input-sm w-100" data-jolt-recipient aria-label="Restorative recipient">
+							${targetOptions.map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
+						</select>
+						<label class="ve-form-label mt-1" data-jolt-external-label hidden>
+							<span>External target name</span>
+							<input class="form-control input-sm w-100" type="text" data-jolt-external-name autocomplete="off">
+						</label>
+						<label class="ve-flex-v-center mt-1">
+							<input type="checkbox" data-jolt-visible>
+							<span class="ml-1">I can see the recipient</span>
+						</label>
+						<label class="ve-form-label mt-1">
+							<span>Distance from the attack target (feet)</span>
+							<input class="form-control input-sm" type="number" min="0" max="30" inputmode="numeric" data-jolt-distance>
+						</label>
+					</fieldset>
+					<div class="ve-small text-danger mb-2" data-jolt-error role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
+					<div class="ve-flex-v-center ve-flex-wrap cs-combat-target-modal__footer">
+						<button type="button" class="ve-btn ve-btn-default mr-2 mb-1" data-jolt-action="skip" aria-describedby="charsheet-arcane-jolt-action-help">Skip</button>
+						<button type="button" class="ve-btn ve-btn-danger mr-2 mb-1" data-jolt-action="destructive" aria-describedby="charsheet-arcane-jolt-action-help">Destructive</button>
+						<button type="button" class="ve-btn ve-btn-success mb-1" data-jolt-action="restorative" aria-describedby="charsheet-arcane-jolt-action-help">Restorative</button>
+					</div>
+					<div class="ve-small ve-muted mt-1" id="charsheet-arcane-jolt-action-help">Skip spends nothing. Destructive damages the hit target. Restorative requires sight and a target-relative distance.</div>
+				</div>
+			`;
+
+			const attackTargetEl = modalInner.querySelector("[data-jolt-attack-target]");
+			const recipientEl = modalInner.querySelector("[data-jolt-recipient]");
+			const externalLabelEl = modalInner.querySelector("[data-jolt-external-label]");
+			const externalNameEl = modalInner.querySelector("[data-jolt-external-name]");
+			const visibleEl = modalInner.querySelector("[data-jolt-visible]");
+			const distanceEl = modalInner.querySelector("[data-jolt-distance]");
+			const errorEl = modalInner.querySelector("[data-jolt-error]");
+			const statusEl = modalInner.querySelector("[data-jolt-status]");
+			const buttons = [...modalInner.querySelectorAll("[data-jolt-action]")];
+			const closeButton = modalShell?.querySelector?.(".cs-modal__btn-close");
+			const setBusy = value => {
+				isBusy = value;
+				buttons.forEach(button => { button.disabled = value; });
+				if (closeButton) closeButton.disabled = value;
+				modalShell?.setAttribute?.("aria-busy", String(value));
+				statusEl.textContent = value ? "Resolving Arcane Jolt. Keep this dialog open." : statusText;
+			};
+			const showError = (message, {focus = false} = {}) => {
+				errorEl.textContent = message || "";
+				if (message && focus) errorEl.focus();
+			};
+			const updateRecipientUi = () => {
+				const isExternal = recipientEl.value.startsWith("external:");
+				externalLabelEl.hidden = !isExternal;
+				externalNameEl.required = isExternal;
+				externalNameEl.setAttribute("aria-required", String(isExternal));
+			};
+			recipientEl.addEventListener("change", updateRecipientUi);
+			updateRecipientUi();
+			modalShell?.addEventListener?.("keydown", event => {
+				if (!isBusy || event.key !== "Escape") return;
+				event.preventDefault();
+				event.stopImmediatePropagation?.();
+				statusEl.textContent = "Arcane Jolt is still resolving. Wait for the result before closing.";
+			}, true);
+			queueMicrotask(() => CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-jolt-attack-target]"}));
+
+			const resolveUse = async effect => {
+				if (isBusy) return;
+				showError("");
+				const attackTarget = String(attackTargetEl.value || "").trim();
+				if (!attackTarget) {
+					showError("Name the target hit by the triggering attack.");
+					attackTargetEl.focus();
+					return;
+				}
+
+				let target;
+				if (effect === "destructive") {
+					target = {type: "attackTarget", name: attackTarget};
+				} else {
+					const selected = String(recipientEl.value || "");
+					const distanceFeet = Number(distanceEl.value);
+					if (visibleEl.checked !== true) {
+						showError("Confirm that the Artificer can see the restorative recipient.");
+						visibleEl.focus();
+						return;
+					}
+					if (!Number.isFinite(distanceFeet) || distanceFeet < 0 || distanceFeet > 30) {
+						showError("Enter a target-relative distance from 0 to 30 feet.");
+						distanceEl.focus();
+						return;
+					}
+					if (selected === "character") {
+						target = {type: "character", visible: true, distanceFeet};
+					} else if (selected.startsWith("companion:") || selected.startsWith("object:")) {
+						const [type, companionId] = selected.split(":");
+						target = {type, companionId, visible: true, distanceFeet};
+					} else {
+						const [, kind] = selected.split(":");
+						const name = String(externalNameEl.value || "").trim();
+						if (!name) {
+							showError("Name the external restorative recipient.");
+							externalNameEl.focus();
+							return;
+						}
+						target = {type: "external", kind, name, visible: true, distanceFeet};
+					}
+				}
+
+				setBusy(true);
+				try {
+					const dice = effect === "destructive" ? triggerStatus.damageDice : triggerStatus.healingDice;
+					const diceCount = Number(String(dice).match(/^(\d+)d6$/)?.[1]) || 0;
+					const result = await this._state.pUseEfaArcaneJolt({
+						trigger,
+						effect,
+						target,
+						rolls: {effectDice: this.rollDice(diceCount, 6)},
+						publishResult: published => this._publishEfaArcaneJoltResult(published),
+					});
+					if (!result.ok) {
+						setBusy(false);
+						showError(result.message || "Arcane Jolt could not be resolved.", {focus: true});
+						return;
+					}
+					await this.saveCharacter();
+					this._renderResources?.();
+					this._features?._renderResources?.();
+					this._combat?.renderCombatResources?.();
+					this._renderCompanions?.();
+					if (this._state.getViewMode?.() === "play") this._playMode?.render();
+					finish(result);
+					doClose();
+				} catch (error) {
+					setBusy(false);
+					const message = error?.message || "Arcane Jolt could not be resolved.";
+					showError(message, {focus: true});
+					this._announceCompanionInteraction(message, {type: "danger", isToast: true});
+				}
+			};
+
+			modalInner.querySelector("[data-jolt-action=\"skip\"]").addEventListener("click", () => {
+				this._announceCompanionInteraction(cancelledResult.message, {type: "info", isToast: true});
+				finish(cancelledResult);
+				doClose();
+			});
+			modalInner.querySelector("[data-jolt-action=\"destructive\"]").addEventListener("click", () => void resolveUse("destructive"));
+			modalInner.querySelector("[data-jolt-action=\"restorative\"]").addEventListener("click", () => void resolveUse("restorative"));
+		});
+	}
+
+	_getFeatureCompanionOperationResultMessage (result) {
+		if (result?.reason === "cancelled") return "Operation cancelled. No companion cost or receipt was committed.";
+		if (result?.reason === "spellDealtNoDamage") return "The spell resolved without an eligible damage roll; Arcane Conduit was not spent.";
+		if (!result?.ok) {
+			const messages = {
+				actionUnavailable: "The required action is unavailable.",
+				alreadyUsed: "That once-per-turn operation has already been used.",
+				companionInactive: "The current companion generation is inactive.",
+				companionOutOfRange: "The companion is outside the required range.",
+				companionUnavailable: "The exact active companion generation is unavailable.",
+				featureUnavailable: "The exact Reanimator feature is unavailable.",
+				invalidFeature: "The source-qualified Reanimator owner does not match.",
+				modificationUnavailable: "That modification is not selected for this generation.",
+				ownerMismatch: "The companion is not owned by the exact RHW Reanimator runtime.",
+				reactionUnavailable: "The summoner Reaction is unavailable.",
+				transactionRolledBack: "The operation failed late and was rolled back without committing its costs.",
+				unsupportedOperation: "That operation is not supported by the RHW runtime dispatcher.",
+			};
+			return result?.message || messages[result?.reason] || "The companion operation could not be resolved.";
+		}
+		if (result.operation === "gauntFearAura") {
+			return result.condition
+				? `${result.target.name} failed the DC ${result.save.dc} Wisdom save; apply Frightened manually.`
+				: `${result.target.name} succeeded on the DC ${result.save.dc} Wisdom save.`;
+		}
+		if (result.operation === "moistAcidRetaliation") {
+			return result.damage
+				? `Apply ${result.damage.total} ${result.damage.type} damage to ${result.attacker.name}.`
+				: "The attack missed; Moist dealt no damage.";
+		}
+		if (result.operation === "arcaneConduitDamageRider") {
+			return `Arcane Conduit added ${result.application.bonus} damage (${result.application.before} → ${result.application.after}); its generation receipt is now spent.`;
+		}
+		if (result.operation === "deathBurst" || result.result?.operation === "deathBurst") {
+			const resolution = result.result || result;
+			return `Death Burst resolved for ${resolution.targets?.length || 0} target${resolution.targets?.length === 1 ? "" : "s"}; apply damage manually.`;
+		}
+		if (result.healing?.actual != null && result.absorptionApplied) {
+			return `Lightning Absorption prevented the damage and restored ${result.healing.actual} HP.`;
+		}
+		if (result.damageType && result.actualDamage != null) {
+			return `Applied ${result.actualDamage} ${result.damageType} damage.${result.death ? " The companion died." : ""}`;
+		}
+		if (result.healing && result.death) {
+			return `Life Transfer restored ${result.healing.actual} HP and killed the companion.`;
+		}
+		if (result.receipt?.cause === "earlyDismissal") return "The companion was dismissed harmlessly without Death Burst.";
+		return result.message || "Companion operation resolved.";
+	}
+
+	async _pDispatchFeatureCompanionOperation (payload) {
+		return this._state.pDispatchFeatureCompanionOperation(payload);
+	}
+
+	_getRhwArcaneConduitCastableSpells () {
+		const schoolAliases = {v: "evocation", n: "necromancy"};
+		return (this._state.getSpells?.() || []).filter(spell => {
+			if (this._state.resolveSpellCastingClassIdentity?.(spell)?.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return false;
+			if (Number(spell.level) > 0 && spell.prepared === false && spell.alwaysPrepared !== true) return false;
+			const spellData = this._spells?._allSpells?.find(candidate =>
+				candidate.name === spell.name && candidate.source === spell.source);
+			const rawSchool = String(spellData?.school || spell.school || "").trim().toLowerCase();
+			return ["evocation", "necromancy"].includes(schoolAliases[rawSchool] || rawSchool);
+		});
+	}
+
+	_rollDiceValues (count, faces) {
+		return Array.from({length: count}, () => this.rollDice(1, faces));
+	}
+
+	async _pGetRhwDeathBurstResolution (companion, {title = "Resolve Death Burst"} = {}) {
+		const rule = companion?.scaling?.resolved?.traits?.deathBurst;
+		const diceMatch = String(rule?.damage?.dice || "").match(/^(\d+)d(\d+)$/i);
+		if (!rule || !diceMatch) return null;
+		const targetCount = await InputUiUtil.pGetUserNumber({
+			title: `${title} — target count`,
+			htmlDescription: `Count every creature within the ${rule.area.radiusFeet}-foot emanation. The sheet records save totals and manual damage; it does not apply damage to external targets.`,
+			default: 0,
+			min: 0,
+			isInt: true,
+		});
+		if (!Number.isInteger(targetCount) || targetCount < 0) return null;
+
+		const targets = [];
+		for (let i = 0; i < targetCount; i++) {
+			const name = await InputUiUtil.pGetUserString({
+				title: `${title} — target ${i + 1} name`,
+				default: "",
+			});
+			if (!String(name || "").trim()) return null;
+			const distanceFeet = await InputUiUtil.pGetUserNumber({
+				title: `${name} distance from companion`,
+				default: Math.min(5, rule.area.radiusFeet),
+				min: 0,
+				max: rule.area.radiusFeet,
+			});
+			if (!Number.isFinite(distanceFeet)) return null;
+			const dexSaveTotal = await InputUiUtil.pGetUserNumber({
+				title: `${name} Dexterity save total (DC ${rule.save.dc})`,
+				default: rule.save.dc,
+				min: -100,
+				max: 100,
+				isInt: true,
+			});
+			if (!Number.isFinite(dexSaveTotal)) return null;
+			targets.push({
+				id: `manual-${i + 1}-${String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+				name: String(name).trim(),
+				distanceFeet,
+				dexSaveTotal,
+			});
+		}
+
+		return {
+			targets,
+			rolls: {
+				damageDice: this._rollDiceValues(Number(diceMatch[1]), Number(diceMatch[2])),
+			},
+		};
+	}
+
+	async _pUseRhwArcaneConduit ({featureUid, companion}) {
+		const originOptions = this._state.getRhwArcaneConduitSpellOriginOptions?.(companion.id);
+		if (!originOptions?.available) {
+			return this._pDispatchFeatureCompanionOperation({
+				featureUid,
+				companionId: companion.id,
+				operation: "arcaneConduit",
+				cancelled: false,
+			});
+		}
+		const originId = await InputUiUtil.pGetUserEnum({
+			title: "Arcane Conduit casting origin",
+			htmlDescription: "Choose the spell's origin. Either option uses the summoner's senses and the spell's normal casting cost.",
+			values: originOptions.options.map(option => option.id),
+			fnDisplay: id => id === "companion" ? "Reanimated Companion's space" : "Summoner's space",
+			isResolveItem: true,
+		});
+		if (!originId) return {ok: false, committed: false, reason: "cancelled"};
+
+		const spells = this._getRhwArcaneConduitCastableSpells();
+		const spellId = await InputUiUtil.pGetUserEnum({
+			title: "Cast with Arcane Conduit",
+			htmlDescription: "Choose a prepared exact EFA Artificer evocation or necromancy spell. Normal spell casting, slot, focus, and action-economy validation still applies.",
+			values: spells.map(spell => spell.id),
+			fnDisplay: id => {
+				const spell = spells.find(candidate => candidate.id === id);
+				return spell ? `${spell.name} (${spell.source})` : id;
+			},
+			isResolveItem: true,
+		});
+		if (!spellId) return {ok: false, committed: false, reason: "cancelled"};
+
+		const hookId = `rhw-arcane-conduit-ui:${companion.id}:${Number(companion.lifecycle?.generation) || 1}`;
+		const unregister = this._state.registerCommittedSpellCastHook(
+			CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			async receipt => {
+				const damageRolls = (receipt?.cast?.rolls || [])
+					.filter(roll => roll?.kind === "damage" && roll.status === "resolved" && Number(roll.total) > 0);
+				if (!damageRolls.length) {
+					const result = await this._pDispatchFeatureCompanionOperation({
+						featureUid,
+						companionId: companion.id,
+						operation: "arcaneConduit",
+						spellCastReceipt: receipt,
+						selectedRollId: null,
+						companionDistanceFeet: 0,
+					});
+					return {
+						...result,
+						ok: result.reason === "spellDealtNoDamage",
+						originId,
+					};
+				}
+				let selectedRollId = damageRolls[0]?.rollId || null;
+				if (damageRolls.length > 1) {
+					selectedRollId = await InputUiUtil.pGetUserEnum({
+						title: "Arcane Conduit damage roll",
+						htmlDescription: "Choose the resolved damage roll that receives the once-per-turn Intelligence modifier.",
+						values: damageRolls.map(roll => roll.rollId),
+						fnDisplay: id => {
+							const roll = damageRolls.find(candidate => candidate.rollId === id);
+							return roll ? `${roll.total} ${roll.damageType || "damage"} (${id})` : id;
+						},
+						isResolveItem: true,
+					});
+				}
+				if (!selectedRollId) return {ok: true, committed: false, reason: "cancelled", originId};
+				const companionDistanceFeet = await InputUiUtil.pGetUserNumber({
+					title: "Companion distance from summoner",
+					htmlDescription: "Confirm the exact distance when the spell dealt damage.",
+					default: 30,
+					min: 0,
+					max: 120,
+				});
+				if (!Number.isFinite(companionDistanceFeet)) {
+					return {ok: true, committed: false, reason: "cancelled", originId};
+				}
+				const result = await this._pDispatchFeatureCompanionOperation({
+					featureUid,
+					companionId: companion.id,
+					operation: "arcaneConduit",
+					spellCastReceipt: receipt,
+					selectedRollId,
+					companionDistanceFeet,
+				});
+				return {...result, originId};
+			},
+			{hookId},
+		);
+
+		let receipt;
+		try {
+			receipt = await this._spells?._castSpell?.(spellId);
+		} finally {
+			unregister();
+		}
+		if (!receipt) return {ok: false, committed: false, reason: "cancelled"};
+		const followUp = receipt.followUps?.find(candidate => candidate.hookId === hookId);
+		const result = followUp?.value || {
+			ok: false,
+			committed: false,
+			reason: followUp?.error ? "transactionRolledBack" : "spellDealtNoDamage",
+			error: followUp?.error || null,
+		};
+		if (result.committed) {
+			await this.saveCharacter();
+			this._renderCompanionOperationSurfaces();
+		}
+		this._announceCompanionInteraction(this._getFeatureCompanionOperationResultMessage(result), {
+			type: result.reason === "cancelled" || result.reason === "spellDealtNoDamage"
+				? "info"
+				: result.ok ? "success" : "warning",
+			isToast: true,
+		});
+		return result;
+	}
+
+	async pUseFeatureCompanionOperation ({
+		featureUid,
+		companionId,
+		operation,
+		focusKey: requestedFocusKey = null,
+	} = {}) {
+		const focusKey = requestedFocusKey || (typeof document !== "undefined"
+			? document.activeElement?.closest?.("[data-companion-operation-key]")
+				?.getAttribute?.("data-companion-operation-key")
+			: null);
+		const companion = this._state.getCompanion?.(companionId);
+		if (
+			featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+			|| !this._isExactRhwReanimatorCompanion(companion)
+		) {
+			const result = await this._pDispatchFeatureCompanionOperation({featureUid, companionId, operation});
+			this._announceCompanionInteraction(this._getFeatureCompanionOperationResultMessage(result), {type: "danger", isToast: true});
+			return result;
+		}
+		const surface = this.getFeatureCompanionOperationSurfaceModel(companion);
+		const control = surface?.controls?.find(candidate => candidate.operation === operation);
+		if (!control?.available) {
+			const result = {
+				ok: false,
+				committed: false,
+				reason: "operationUnavailable",
+				message: control?.reason || "That operation is unavailable.",
+			};
+			this._announceCompanionInteraction(this._getFeatureCompanionOperationResultMessage(result), {type: "warning", isToast: true});
+			return result;
+		}
+		if (operation === "action" || operation === "dreadfulSwipe") {
+			return this.pUseCompanionOperation({
+				featureUid,
+				companionId,
+				operation,
+				actionKey: operation === "action" ? "dodge" : "dreadfulSwipe",
+			});
+		}
+		if (operation === "arcaneConduit") {
+			const result = await this._pUseRhwArcaneConduit({featureUid, companion});
+			if (result.committed) this._restoreCompanionOperationFocus(focusKey, companion.id);
+			return result;
+		}
+
+		let payload = {featureUid, companionId, operation};
+		if (operation === "damage") {
+			const amount = await InputUiUtil.pGetUserNumber({
+				title: "Apply companion damage",
+				htmlDescription: "Enter the incoming damage before immunity and temporary HP. Lightning damage is prevented and converted to healing.",
+				default: 1,
+				min: 1,
+				isInt: true,
+			});
+			const damageType = Number.isInteger(amount)
+				? await InputUiUtil.pGetUserEnum({
+					title: "Damage type",
+					values: ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"],
+					fnDisplay: value => value.toTitleCase(),
+					isResolveItem: true,
+				})
+				: null;
+			if (!Number.isInteger(amount) || !damageType) payload.cancelled = true;
+			else {
+				payload = {...payload, amount, damageType};
+				const wouldDie = damageType !== "lightning"
+					&& amount >= (Number(companion.hp?.current) || 0) + (Number(companion.hp?.temp) || 0);
+				if (wouldDie && companion.scaling?.resolved?.traits?.deathBurst) {
+					const deathBurstResolution = await this._pGetRhwDeathBurstResolution(companion, {title: "Damage-triggered Death Burst"});
+					if (!deathBurstResolution) payload.cancelled = true;
+					else payload.deathBurstResolution = deathBurstResolution;
+				}
+			}
+		} else if (operation === "gaunt") {
+			const rule = companion.scaling?.resolved?.modifications?.effects?.gaunt?.fearAura;
+			const name = await InputUiUtil.pGetUserString({title: "Gaunt chosen creature", default: ""});
+			const startedTurn = String(name || "").trim()
+				? await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Gaunt trigger",
+					htmlDescription: "Confirm this is the chosen creature and it started its turn within the Gaunt emanation.",
+					textYes: "Trigger confirmed",
+					textNo: "Cancel",
+				})
+				: false;
+			const rangeFeet = startedTurn
+				? await InputUiUtil.pGetUserNumber({
+					title: `${name} distance`,
+					default: Math.min(5, rule?.area?.radiusFeet || 10),
+					min: 0,
+					max: rule?.area?.radiusFeet || 10,
+				})
+				: null;
+			const wisdomSaveTotal = Number.isFinite(rangeFeet)
+				? await InputUiUtil.pGetUserNumber({
+					title: `${name} Wisdom save total (DC ${rule?.save?.dc || "—"})`,
+					default: rule?.save?.dc || 10,
+					min: -100,
+					max: 100,
+					isInt: true,
+				})
+				: null;
+			payload = !String(name || "").trim() || !startedTurn || !Number.isFinite(rangeFeet) || !Number.isFinite(wisdomSaveTotal)
+				? {...payload, cancelled: true}
+				: {
+					...payload,
+					target: {id: String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: String(name).trim(), chosen: true, startedTurn: true, isCreature: true},
+					rangeFeet,
+					wisdomSaveTotal,
+				};
+		} else if (operation === "moist") {
+			const rule = companion.scaling?.resolved?.modifications?.effects?.moist?.acidRetaliation;
+			const name = await InputUiUtil.pGetUserString({title: "Moist attacker", default: ""});
+			const outcome = String(name || "").trim()
+				? await InputUiUtil.pGetUserEnum({
+					title: "Triggering attack result",
+					values: ["hit", "miss", "cancel"],
+					fnDisplay: value => ({hit: "Hit", miss: "Miss", cancel: "Cancel"})[value],
+					isResolveItem: true,
+				})
+				: "cancel";
+			const rangeFeet = outcome === "hit"
+				? await InputUiUtil.pGetUserNumber({
+					title: `${name} distance`,
+					default: Math.min(5, rule?.attackerMaximumRangeFeet || 10),
+					min: 0,
+					max: rule?.attackerMaximumRangeFeet || 10,
+				})
+				: 0;
+			payload = !String(name || "").trim() || !outcome || outcome === "cancel" || !Number.isFinite(rangeFeet)
+				? {...payload, cancelled: true}
+				: {
+					...payload,
+					attacker: {id: String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: String(name).trim(), isCreature: true},
+					attackHit: outcome === "hit",
+					rangeFeet,
+				};
+		} else if (operation === "lifeTransfer") {
+			const target = await InputUiUtil.pGetUserEnum({
+				title: "Life Transfer damage trigger",
+				htmlDescription: "Choose who just took confirmed damage. The triggering damage must already be applied.",
+				values: ["summoner", "companion"],
+				fnDisplay: value => value === "summoner" ? "Summoner" : "Reanimated Companion",
+				isResolveItem: true,
+			});
+			const damageAmount = target
+				? await InputUiUtil.pGetUserNumber({title: "Confirmed triggering damage", default: 1, min: 1, isInt: true})
+				: null;
+			const confirmed = Number.isFinite(damageAmount)
+				? await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Life Transfer",
+					htmlDescription: "This spends the summoner Reaction, heals the summoner by the companion's current HP, kills the companion, and resolves Death Burst.",
+					textYes: "Transfer life",
+					textNo: "Cancel",
+				})
+				: false;
+			const deathBurstResolution = confirmed
+				? await this._pGetRhwDeathBurstResolution(companion, {title: "Life Transfer Death Burst"})
+				: null;
+			payload = !target || !Number.isFinite(damageAmount) || !confirmed || !deathBurstResolution
+				? {...payload, cancelled: true}
+				: {
+					...payload,
+					trigger: {
+						confirmed: true,
+						eventId: `rhw-life-transfer-ui:${CryptUtil.uid()}`,
+						target,
+						damageAmount,
+						...(target === "companion" ? {companionId} : {}),
+					},
+					deathBurstResolution,
+				};
+		} else if (operation === "deathBurst") {
+			const resolution = await this._pGetRhwDeathBurstResolution(companion);
+			if (!resolution) return {ok: false, committed: false, reason: "cancelled"};
+			payload = {...payload, ...resolution};
+		} else if (operation === "dismiss") {
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: "Dismiss Reanimated Companion?",
+				htmlDescription: "Spend the summoner Magic Action to collapse this generation harmlessly. Dismissal does not trigger Death Burst.",
+				textYes: "Dismiss",
+				textNo: "Cancel",
+			});
+			if (!confirmed) payload.cancelled = true;
+		}
+
+		const result = await this._pDispatchFeatureCompanionOperation(payload);
+		const message = this._getFeatureCompanionOperationResultMessage(result);
+		this._announceCompanionInteraction(message, {
+			type: result.ok ? "success" : result.reason === "cancelled" ? "info" : "danger",
+			isToast: true,
+		});
+		if (result.committed) {
+			await this.saveCharacter();
+			this._renderCompanionOperationSurfaces();
+			this._restoreCompanionOperationFocus(focusKey, companionId);
+		}
+		this._playMode?._logActivity?.("companion", message);
+		return result;
+	}
+
+	async pUseCompanionOperation ({
+		featureUid = null,
+		companionId,
+		operation,
+		actionKey = null,
+		commandMethod = null,
+	} = {}) {
+		const operationFocusTarget = typeof document !== "undefined"
+			? document.activeElement?.closest?.("button, [role=button]")
+			: null;
+		const operationFocusKey = operationFocusTarget?.getAttribute?.("data-companion-operation-key") || null;
+		const getFocusRestoreTarget = operationFocusKey
+			? () => this.getCompanionOperationFocusTarget(operationFocusKey)
+			: null;
+		const initialAvailability = this.getCompanionOperationAvailability(companionId, operation, {actionKey});
+		const pDispatch = payload => featureUid
+			? this._pDispatchFeatureCompanionOperation({featureUid, ...payload})
+			: Promise.resolve(this._state.performCompanionOperation(payload));
+		if (!initialAvailability.available) {
+			const unavailable = await pDispatch({
+				companionId,
+				operation,
+				actionKey,
+				attackReplacement: this._getCompanionAttackReplacementBridge().availability,
+			});
+			this._announceCompanionInteraction(
+				unavailable.message || initialAvailability.message || "That companion operation is unavailable.",
+				{type: "warning", isToast: true},
+			);
+			return unavailable;
+		}
+
+		const selectedCommandMethod = await this._pGetCompanionCommandMethod(initialAvailability, commandMethod);
+		if (initialAvailability.availableCommandMethods.length && !selectedCommandMethod) {
+			const cancelled = await pDispatch({companionId, operation, actionKey, cancelled: true});
+			this._showCompanionOperationResult(cancelled);
+			return cancelled;
+		}
+
+		const bridge = this._getCompanionAttackReplacementBridge();
+		const payload = {
+			companionId,
+			operation,
+			actionKey,
+			commandMethod: selectedCommandMethod,
+			attackReplacement: bridge.availability,
+			attackReplacementAdapter: bridge.adapter,
+			target: null,
+			rangeConfirmed: false,
+			attackerVisibleConfirmed: false,
+			hitConfirmed: false,
+			rolls: {},
+		};
+
+		if (operation === "forceEmpoweredRend" || operation === "rend" || operation === "dreadfulSwipe") {
+			const isDreadfulSwipe = operation === "dreadfulSwipe";
+			const operationLabel = isDreadfulSwipe ? "Dreadful Swipe" : "Force-Empowered Rend";
+			const targetName = await InputUiUtil.pGetUserString({title: `${operationLabel} target`, default: ""});
+			if (!String(targetName || "").trim()) payload.cancelled = true;
+			else {
+				payload.target = {name: String(targetName).trim()};
+				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: `Confirm ${operationLabel} range`,
+					htmlDescription: `${initialAvailability.availableCommandMethods.find(it => it.id === selectedCommandMethod)?.label || "The selected owner command"} and the companion's Action will be spent together. The sheet cannot verify distance; confirm the target is within ${initialAvailability.rules.action.reachFeet}-foot reach.`,
+					textYes: `Within ${initialAvailability.rules.action.reachFeet} feet`,
+					textNo: "Cancel",
+				});
+				if (!payload.rangeConfirmed) payload.cancelled = true;
+			}
+			if (!payload.cancelled) {
+				payload.rolls.attackD20 = this.rollDice(1, 20);
+				const outcome = await InputUiUtil.pGetUserEnum({
+					title: `${operationLabel} attack total: ${payload.rolls.attackD20 + initialAvailability.rules.action.attackBonus}`,
+					htmlDescription: "Confirm whether the attack hit before committing the companion Action.",
+					values: ["hit", "miss", "cancel"],
+					fnDisplay: value => ({hit: "Hit — roll damage", miss: "Miss", cancel: "Cancel without spending"})[value],
+					isResolveItem: true,
+				});
+				if (!outcome || outcome === "cancel") payload.cancelled = true;
+				else {
+					payload.hitConfirmed = outcome === "hit";
+					if (payload.hitConfirmed) {
+						if (isDreadfulSwipe) {
+							const match = String(initialAvailability.rules.action.damage.dice).match(/^(\d+)d(\d+)$/i);
+							const diceCount = Number(match?.[1]) * (payload.rolls.attackD20 === 20 ? 2 : 1);
+							payload.rolls.damageDice = this._rollDiceValues(diceCount, Number(match?.[2]));
+							if (initialAvailability.rules.action.riders?.some(rider => rider.id === "bloatedPush")) {
+								const targetSize = await InputUiUtil.pGetUserEnum({
+									title: "Dreadful Swipe target size",
+									htmlDescription: "Bloated uses the target's normalized size to determine whether the manual push rider applies.",
+									values: ["S", "M", "L", "H", "G"],
+									fnDisplay: value => ({S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"})[value],
+									isResolveItem: true,
+								});
+								if (!targetSize) payload.cancelled = true;
+								else payload.target.size = targetSize;
+							}
+						} else {
+							payload.rolls.damageDie = this.rollDice(payload.rolls.attackD20 === 20 ? 2 : 1, 8);
+						}
+					}
+				}
+			}
+		} else if (operation === "repair") {
+			payload.target = await this._pGetCompanionRepairTarget();
+			if (!payload.target) payload.cancelled = true;
+			else {
+				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Repair Target",
+					htmlDescription: `${initialAvailability.availableCommandMethods.find(it => it.id === selectedCommandMethod)?.label || "The selected owner command"}, the defender's action, and one Repair use will be spent together. The sheet cannot verify sight or distance; confirm the defender can see the Construct or object within 5 feet.`,
+					textYes: "Target confirmed",
+					textNo: "Cancel",
+				});
+				if (!payload.rangeConfirmed) payload.cancelled = true;
+			}
+			if (!payload.cancelled) payload.rolls.healingDice = this.rollDice(2, 8);
+		} else if (operation === "deflectAttack" || operation === "deflect") {
+			const attackerName = await InputUiUtil.pGetUserString({title: "Visible attacker name", default: ""});
+			const protectedTargetName = attackerName
+				? await InputUiUtil.pGetUserString({title: "Protected creature (not the defender)", default: ""})
+				: null;
+			if (!String(attackerName || "").trim() || !String(protectedTargetName || "").trim()) payload.cancelled = true;
+			else {
+				payload.target = {
+					attackerName: String(attackerName).trim(),
+					protectedTargetName: String(protectedTargetName).trim(),
+					protectedTargetIsCompanion: false,
+				};
+				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Deflect Attack Trigger",
+					htmlDescription: "The defender's reaction will be spent. The sheet cannot verify sight or distance; confirm the visible attacker is within 5 feet of the defender and hit a different creature.",
+					textYes: "Trigger confirmed",
+					textNo: "Cancel",
+				});
+				payload.attackerVisibleConfirmed = payload.rangeConfirmed;
+				if (!payload.rangeConfirmed) payload.cancelled = true;
+			}
+			if (!payload.cancelled && initialAvailability.rules.reaction?.improvedDamage) {
+				payload.rolls.retaliationDie = this.rollDice(1, 4);
+			}
+		}
+
+		const result = await pDispatch(payload);
+		this._showCompanionOperationResult(result);
+		if (result.committed) {
+			await this.saveCharacter();
+			this._renderCompanionOperationSurfaces();
+			this._restoreCompanionOperationFocus(operationFocusKey, companionId);
+			if (result.operation === "forceEmpoweredRend") {
+				const arcaneJoltTrigger = {
+					type: "steelDefenderRend",
+					operationResult: result,
+				};
+				if (this._state.getEfaArcaneJoltTriggerStatus?.(arcaneJoltTrigger)?.available) {
+					await this.pOfferEfaArcaneJolt({
+						trigger: arcaneJoltTrigger,
+						focusRestoreTarget: operationFocusTarget,
+						getFocusRestoreTarget,
+					});
+				}
+			}
+		}
+		return result;
+	}
+
+	_showCompanionOperationResult (result) {
+		if (!result?.ok) {
+			const isCancelled = result?.reason === "cancelled";
+			const message = result?.message || (isCancelled
+				? "Companion operation cancelled. No action or resource was spent."
+				: "Companion operation failed.");
+			this._announceCompanionInteraction(message, {
+				type: isCancelled ? "info" : "danger",
+				isToast: true,
+			});
+			return;
+		}
+		const companion = this._state.getCompanion(result.companionId);
+		const name = companion?.customName || companion?.name || "Companion";
+		const costSummary = [
+			result.costs?.ownerAction === "bonus" ? "owner Bonus Action" : null,
+			result.costs?.ownerAction === "replaceOneAttack" ? "one owner Attack" : null,
+			result.costs?.companionAction
+				? result.ownerUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+					? "companion Action"
+					: "defender action"
+				: null,
+			result.costs?.companionReaction
+				? result.ownerUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+					? "companion Reaction"
+					: "defender reaction"
+				: null,
+			result.costs?.repairUses ? `${result.costs.repairUses} Repair use${result.costs.repairUses === 1 ? "" : "s"}` : null,
+		].filter(Boolean).join(", ");
+		const costSuffix = costSummary ? ` Spent: ${costSummary}.` : "";
+		let activity = `${name}: ${result.operation}`;
+		if (result.rolls?.attack) {
+			const attack = result.rolls.attack;
+			const isDreadfulSwipe = result.operation === "dreadfulSwipe";
+			const operationLabel = isDreadfulSwipe ? "Dreadful Swipe" : "Force-Empowered Rend";
+			const damageType = result.rolls.damage?.type || "force";
+			const manualRiders = (result.riders || [])
+				.filter(rider => rider.applies && rider.manualResolution)
+				.map(rider => rider.id === "bloatedPush"
+					? `Push the eligible target ${rider.distanceFeet} feet manually.`
+					: rider.id === "preventOpportunityAttacks"
+						? "The target cannot take opportunity attacks until the start of its next turn."
+						: "Apply the operation rider manually.")
+				.join(" ");
+			this._showDiceResult(
+				`${name} — ${operationLabel}`,
+				attack.total,
+				`d20 (${attack.d20}) + ${attack.bonus}`,
+				attack.critical ? "critical" : attack.fumble ? "fumble" : "",
+				result.rolls.damage ? `${result.rolls.damage.total} ${damageType} damage${manualRiders ? ` · ${manualRiders}` : ""}` : "Miss",
+			);
+			activity = `${name} used ${operationLabel} against ${result.target?.name || "the target"} (${attack.total} to hit${result.rolls.damage ? `, ${result.rolls.damage.total} ${damageType}` : ", miss"}).${manualRiders ? ` ${manualRiders}` : ""}${costSuffix}`;
+			this._announceCompanionInteraction(activity);
+		} else if (result.operation === "repair") {
+			const healing = result.rolls.healing.total;
+			const target = result.target?.external ? `${result.target.name} (manual)` : this._state.getCompanion(result.hp?.companionId)?.customName || this._state.getCompanion(result.hp?.companionId)?.name;
+			const hpSummary = result.hp?.manualApplication
+				? " Apply the healing manually."
+				: ` HP: ${result.hp?.before} → ${result.hp?.after}.`;
+			JqueryUtil.doToast({type: "success", content: `${name} repairs ${target || "the target"} for ${healing} HP.${costSuffix}`});
+			activity = `${name} used Repair on ${target || "the target"} for ${healing} HP.${hpSummary}${costSuffix}`;
+			this._announceCompanionInteraction(activity);
+		} else if (result.operation === "deflectAttack") {
+			const retaliation = result.rolls.retaliation;
+			JqueryUtil.doToast({
+				type: "info",
+				content: `Deflect Attack: resolve the triggering attack with disadvantage.${retaliation ? ` ${retaliation.total} force damage to the attacker.` : ""}${costSuffix}`,
+			});
+			activity = `${name} used Deflect Attack against ${result.target?.attackerName || "the attacker"} to protect ${result.target?.protectedTargetName || "the target"}${retaliation ? ` (${retaliation.total} force)` : ""}.${costSuffix}`;
+			this._announceCompanionInteraction(activity);
+		} else {
+			JqueryUtil.doToast({type: "success", content: `${name} used ${result.actionKey || result.operation}.${costSuffix}`});
+			activity = `${name} used ${result.actionKey || result.operation}.${costSuffix}`;
+			this._announceCompanionInteraction(activity);
+		}
+		this._playMode?._logActivity?.("companion", activity);
+	}
+
 	hasCurrentCharacter () { return !!this._currentCharacterId; }
 	getLevelUpHelper () { return this._levelUp; }
 
@@ -21391,6 +24930,10 @@ class CharacterSheetPage {
 			// ferocity control, exploit and bond feature keys off the companion record.
 			// Guarantee one exists once the brew roster is loaded. Idempotent.
 			this._ensureBeastheartCompanionBonded();
+			const featureCompanionResult = this._state.reconcileFeatureCompanionGrants?.({
+				reason: "classFeatureReconcile",
+			});
+			result.featureCompanionChanged = !!featureCompanionResult?.changed;
 		} catch (e) {
 			// Reconciliation is best-effort; never block render on a bad save.
 			// eslint-disable-next-line no-console

@@ -54,6 +54,194 @@ class CharacterSheetClassUtils {
 		];
 	}
 
+	static getCanonicalToolChoiceValue (value) {
+		if (value == null) return "";
+		const raw = typeof value === "object"
+			? (value.name || value.uid || value.value || value.label || "")
+			: value;
+		return `${raw}`.split("|")[0].trim();
+	}
+
+	static getNormalizedToolChoiceSelection (selection, {count = 1, options = []} = {}) {
+		const values = (Array.isArray(selection) ? selection : [selection])
+			.map(it => this.getCanonicalToolChoiceValue(it))
+			.filter(Boolean);
+		const uniqueValues = [...new Map(values.map(it => [it.toLowerCase(), it])).values()];
+		const legalOptions = new Map(
+			(options || [])
+				.map(it => this.getCanonicalToolChoiceValue(it))
+				.filter(Boolean)
+				.map(it => [it.toLowerCase(), it]),
+		);
+
+		if (uniqueValues.length !== Number(count || 1)) return null;
+		if (legalOptions.size && uniqueValues.some(it => !legalOptions.has(it.toLowerCase()))) return null;
+		return uniqueValues.map(it => legalOptions.get(it.toLowerCase()) || it);
+	}
+
+	static _getEntryStrings (value, out = []) {
+		if (typeof value === "string") out.push(value);
+		else if (Array.isArray(value)) value.forEach(it => this._getEntryStrings(it, out));
+		else if (value && typeof value === "object") Object.values(value).forEach(it => this._getEntryStrings(it, out));
+		return out;
+	}
+
+	static getConditionalToolProficiencyGrant (feature, state) {
+		const text = this._getEntryStrings(feature?.entries).join(" ");
+		const duplicateClause = /If you already have (?:proficiency with (?:either|the) tool|one of these proficiencies|this (?:tool )?proficiency)/i;
+		if (!duplicateClause.test(text)) return null;
+		if (!/(?:different|one other) type of (?:\{@item )?Artisan'?s Tools/i.test(text)) return null;
+
+		const fixedSection = text.match(/gain proficiency with (.+?)\.\s*If you already have (?:proficiency|one of these proficiencies|this (?:tool )?proficiency)/i)?.[1] || "";
+		const catalogByName = new Map(this.getChoiceToolCatalog().map(it => [it.toLowerCase(), it]));
+		const fixedTools = [...fixedSection.matchAll(/\{@item ([^|}]+)(?:\|([^|}]+))?/gi)]
+			.map(([, name, source]) => ({
+				name: catalogByName.get(this.getCanonicalToolChoiceValue(name).toLowerCase()) || this.getCanonicalToolChoiceValue(name),
+				source: `${source || "XPHB"}`.trim(),
+			}))
+			.filter(it => it.name && !/^Artisan'?s Tools$/i.test(it.name));
+		if (!fixedTools.length) return null;
+
+		const currentToolProficiencies = state?.getToolProficiencies?.() || [];
+		const currentByName = new Set(
+			currentToolProficiencies
+				.map(it => this.getCanonicalToolChoiceValue(it).toLowerCase())
+				.filter(Boolean),
+		);
+		const acquisitionFacts = Object.fromEntries(
+			fixedTools.map(it => [`${it.name}|${it.source}`, currentByName.has(it.name.toLowerCase())]),
+		);
+		const requiredCount = Object.values(acquisitionFacts).filter(Boolean).length;
+		const excludedTools = [...new Set([
+			...currentToolProficiencies.map(it => this.getCanonicalToolChoiceValue(it)),
+			...fixedTools.map(it => it.name),
+		].filter(Boolean))];
+
+		return {
+			version: 1,
+			fixedTools,
+			fixedGrants: fixedTools.map(it => `${it.name}|${it.source}`),
+			acquisitionFacts,
+			excludedTools,
+			requiredCount,
+			selections: [],
+		};
+	}
+
+	static getConditionalToolChoiceOptions (grant) {
+		const excluded = new Set(
+			(grant?.excludedTools || [])
+				.map(it => this.getCanonicalToolChoiceValue(it).toLowerCase())
+				.filter(Boolean),
+		);
+		return this.CHOICE_TOOL_CATALOGS.artisan.filter(it => !excluded.has(it.toLowerCase()));
+	}
+
+	static isExactEfaArtificerConditionalToolGrant (feature) {
+		return `${feature?.source || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.className || ""}`.toLowerCase() === "artificer"
+			&& `${feature?.classSource || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.subclassSource || ""}`.toUpperCase() === "EFA";
+	}
+
+	static getFixedProficiencyGrantContract (feature, {ownedTools = []} = {}) {
+		if (!this.isExactEfaArtificerConditionalToolGrant(feature)) return null;
+		const grant = this.getConditionalToolProficiencyGrant(feature, {
+			getToolProficiencies: () => ownedTools,
+		});
+		if (!grant) return null;
+		return {
+			fixed: grant.fixedTools.map(it => it.name),
+			replacements: this.getConditionalToolChoiceOptions(grant),
+			count: grant.requiredCount,
+		};
+	}
+
+	static isExactEfaAlchemistToolsOfTheTrade (feature) {
+		return `${feature?.name || ""}`.toLowerCase() === "tools of the trade"
+			&& `${feature?.source || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.className || ""}`.toLowerCase() === "artificer"
+			&& `${feature?.classSource || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.subclassShortName || feature?.subclassName || ""}`.toLowerCase() === "alchemist"
+			&& `${feature?.subclassSource || ""}`.toUpperCase() === "EFA"
+			&& Number(feature?.level) === 3;
+	}
+
+	static isExactEfaExperimentalElixir (feature) {
+		return `${feature?.name || ""}`.toLowerCase() === "experimental elixir"
+			&& `${feature?.source || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.className || ""}`.toLowerCase() === "artificer"
+			&& `${feature?.classSource || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.subclassShortName || feature?.subclassName || ""}`.toLowerCase() === "alchemist"
+			&& `${feature?.subclassSource || ""}`.toUpperCase() === "EFA"
+			&& Number(feature?.level) === 3;
+	}
+
+	static _isSameFeatureIdentity (a, b) {
+		const norm = value => `${value || ""}`.trim().toLowerCase();
+		return norm(a?.name) === norm(b?.name)
+			&& norm(a?.source) === norm(b?.source)
+			&& norm(a?.className) === norm(b?.className)
+			&& norm(a?.classSource) === norm(b?.classSource)
+			&& norm(a?.subclassShortName || a?.subclassName) === norm(b?.subclassShortName || b?.subclassName)
+			&& norm(a?.subclassSource) === norm(b?.subclassSource)
+			&& Number(a?.level || 0) === Number(b?.level || 0);
+	}
+
+	static getSourceAwareFeatureOwnerUid (feature) {
+		if (!feature?.name) return "";
+		const parts = [feature.name, feature.className, feature.classSource];
+		if (feature.subclassShortName || feature.subclassName || feature.subclassSource) {
+			parts.push(feature.subclassShortName || feature.subclassName, feature.subclassSource);
+		}
+		parts.push(feature.level, feature.source);
+		return parts.map(value => String(value ?? "").trim()).join("|");
+	}
+
+	/**
+	 * Parse feature-derived crafting-time modifiers without coupling the
+	 * crafting flow to a feature name.
+	 *
+	 * @param {*} feature
+	 * @returns {Array<{id: string, owner: {kind: string, name: string, source: string, uid: string}, multiplier: number, filter: {resultCategories: string[]}}>}
+	 */
+	static getCraftingTimeModifiers (feature) {
+		const text = this._getEntryStrings(feature?.entries).join(" ");
+		const out = [];
+		for (const match of text.matchAll(/when you (?:scribe|craft) (?:a|an) \{@item ([^|}]+)(?:\|([^}]+))?\}[\s\S]*?amount of time required to craft it is (halved|doubled)/gi)) {
+			const resultCategory = match[1].trim().toLowerCase() === "spell scroll"
+				? "spell-scroll"
+				: null;
+			if (!resultCategory) continue;
+
+			const ownerUid = this.getSourceAwareFeatureOwnerUid(feature);
+			if (!ownerUid || !feature?.source) continue;
+
+			const multiplier = match[3].toLowerCase() === "halved" ? 0.5 : 2;
+			out.push({
+				id: [
+					"feature-crafting-time",
+					ownerUid,
+					resultCategory,
+					multiplier,
+				].join("|").toLowerCase().replace(/[^a-z0-9|]+/g, "-"),
+				owner: {
+					kind: feature?.subclassShortName ? "subclassFeature" : feature?.className ? "classFeature" : "feature",
+					name: feature.name,
+					source: feature.source,
+					uid: ownerUid,
+				},
+				multiplier,
+				filter: {resultCategories: [resultCategory]},
+			});
+		}
+		return out;
+	}
+
+	static getRuntimeFeature (feature, state) {
+		return state?.getFeatures?.().find(it => this._isSameFeatureIdentity(feature, it)) || null;
+	}
+
 	static getChoiceSkillCatalog () {
 		return [
 			"acrobatics", "animal handling", "arcana", "athletics", "deception",
@@ -627,16 +815,37 @@ class CharacterSheetClassUtils {
 		};
 		collectFeatureRefs(classData.classFeatures || []);
 
-		const featuresAtLevel = featureRefs.filter(ref => {
-			if (typeof ref === "string") return Number(ref.split("|").at(-1)) === level;
-			if (typeof ref?.classFeature === "string") return Number(ref.classFeature.split("|").at(-1)) === level;
-			return Number(ref?.level) === level;
-		});
-		const getFeatureName = ref => {
-			if (typeof ref === "string") return ref.split("|")[0];
-			if (typeof ref?.classFeature === "string") return ref.classFeature.split("|")[0];
-			return ref?.name || "";
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const getFeatureMeta = ref => {
+			const rawRef = typeof ref === "string"
+				? ref
+				: typeof ref?.classFeature === "string" ? ref.classFeature : null;
+			if (rawRef != null) {
+				const parts = rawRef.split("|");
+				// Class feature refs are four-part UIDs, with an optional fifth
+				// feature-source field used by source-qualified data such as EFA.
+				if (![4, 5].includes(parts.length)) return null;
+				const [name, className, classSourceRaw, levelRaw, featureSource] = parts;
+				const classSource = classSourceRaw || classData.source;
+				const featureLevel = Number(levelRaw);
+				if (!name || !className || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
+				if (parts.length === 5 && !featureSource) return null;
+				if (normalize(className) !== normalize(classData.name)) return null;
+				if (normalize(classSource) !== normalize(classData.source)) return null;
+				return {name, level: featureLevel};
+			}
+
+			if (!ref || typeof ref !== "object") return null;
+			const className = ref.className || classData.name;
+			const classSource = ref.classSource || classData.source;
+			const featureLevel = Number(ref.level);
+			if (!ref.name || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
+			if (normalize(className) !== normalize(classData.name)) return null;
+			if (normalize(classSource) !== normalize(classData.source)) return null;
+			return {name: ref.name, level: featureLevel};
 		};
+		const featureMetas = featureRefs.map(getFeatureMeta).filter(Boolean);
+		const featuresAtLevel = featureMetas.filter(feature => feature.level === level);
 
 		const epicProgressions = (classData.featProgression || []).filter(progression => {
 			if (!Array.isArray(progression?.category) || !progression.category.includes("EB")) return false;
@@ -646,7 +855,7 @@ class CharacterSheetClassUtils {
 				: Number(map?.[String(level)]) > 0;
 		});
 		const hasEpicBoon = epicProgressions.length > 0
-			|| featuresAtLevel.some(ref => /(?:^|\s)epic boon(?:\s|$)/i.test(getFeatureName(ref)));
+			|| featuresAtLevel.some(feature => /(?:^|\s)epic boon(?:\s|$)/i.test(feature.name));
 		if (hasEpicBoon) {
 			return {
 				kind: "feat",
@@ -657,7 +866,7 @@ class CharacterSheetClassUtils {
 			};
 		}
 
-		const hasAsi = featuresAtLevel.some(ref => /^ability score improvement$/i.test(getFeatureName(ref)));
+		const hasAsi = featuresAtLevel.some(feature => /^ability score improvement$/i.test(feature.name));
 		const hasCompleteFeatureData = featureRefs.length > 0;
 		if (!hasAsi && (hasCompleteFeatureData || !CharacterSheetClassUtils.levelGrantsAsi(classData, level))) return null;
 
@@ -2394,11 +2603,11 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Canonical prepared-spells count. Counts leveled spells (level > 0) that are
-	 * prepared or always prepared. Signature Spells and XPHB Spell Mastery are
-	 * always-prepared overlays which do not inflate this display count. PHB Spell
-	 * Mastery remains a normal prepared spell and therefore counts. Cantrips are
-	 * excluded (they have their own counter).
+	 * Canonical prepared-spells capacity count. Counts leveled spells (level > 0)
+	 * that the player prepared. Always-prepared grants (subclass spells, Signature
+	 * Spells, XPHB Spell Mastery, etc.) are available without consuming capacity.
+	 * PHB Spell Mastery remains a normal prepared spell and therefore counts.
+	 * Cantrips are excluded (they have their own counter).
 	 * @param {Array<*>} spells
 	 * @param {object} [opts]
 	 * @param {number} [opts.max] - If supplied, returned `isOver`/`isAt` flags are populated.
@@ -2407,9 +2616,8 @@ class CharacterSheetClassUtils {
 	static countPreparedSpells (spells, {max = null} = {}) {
 		const leveled = (spells || []).filter(s => s && s.level > 0);
 		const current = leveled.filter(s =>
-			(s.prepared || s.alwaysPrepared)
-			&& !s.isSignatureSpell
-			&& !(s.isSpellMastery && s.alwaysPrepared),
+			s.prepared
+			&& !s.alwaysPrepared,
 		).length;
 		const numericMax = typeof max === "number" ? max : null;
 		return {
@@ -2436,10 +2644,18 @@ class CharacterSheetClassUtils {
 	 * @param {object|null} opts.info    - The spellcasting info from `getSpellcastingInfo()`.
 	 * @param {Array<*>|null} [opts.classes] - Optional `getClasses()` snapshot for wizard/spellbook detection.
 	 * @param {object|null} [opts.targetClass] - Authoritative class entry the spell is being added for (per-class card or multiclass picker prompt).
-	 * @returns {{sourceFeature: string|null, sourceClass: string|null, sourceSubclass: string|null}}
+	 * @returns {{sourceFeature: string|null, sourceClass: string|null, sourceClassSource: string|null, sourceSubclass: string|null, sourceSubclassSource: string|null}}
 	 */
 	static pickAddedSpellAttribution (/** @type {*} */ {spell, info, classes = null, targetClass = null} = {}) {
-		if (!spell) return {sourceFeature: null, sourceClass: null, sourceSubclass: null};
+		if (!spell) {
+			return {
+				sourceFeature: null,
+				sourceClass: null,
+				sourceClassSource: null,
+				sourceSubclass: null,
+				sourceSubclassSource: null,
+			};
+		}
 
 		const isCantrip = spell.level === 0;
 
@@ -2452,7 +2668,11 @@ class CharacterSheetClassUtils {
 				&& /^tgtt$/i.test(targetClass.subclass?.source || "");
 			const isWizardTarget = /^wizard$/i.test(targetClass.name || "");
 			const sourceClass = isGamblerTarget ? "Gambler" : (targetClass.name || null);
+			const sourceClassSource = isGamblerTarget
+				? (targetClass.subclass?.source || targetClass.source || null)
+				: (targetClass.source || null);
 			const sourceSubclass = isGamblerTarget ? "Gambler" : null;
+			const sourceSubclassSource = isGamblerTarget ? (targetClass.subclass?.source || null) : null;
 
 			let sourceFeature;
 			if (isCantrip) sourceFeature = "Cantrips Known";
@@ -2464,10 +2684,18 @@ class CharacterSheetClassUtils {
 				const castingType = entry?.type || info?.type;
 				sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
 			}
-			return {sourceFeature, sourceClass, sourceSubclass};
+			return {sourceFeature, sourceClass, sourceClassSource, sourceSubclass, sourceSubclassSource};
 		}
 
-		if (!info) return {sourceFeature: null, sourceClass: null, sourceSubclass: null};
+		if (!info) {
+			return {
+				sourceFeature: null,
+				sourceClass: null,
+				sourceClassSource: null,
+				sourceSubclass: null,
+				sourceSubclassSource: null,
+			};
+		}
 
 		let sourceClass = null;
 		const byClass = Array.isArray(info.byClass) ? info.byClass : null;
@@ -2489,14 +2717,19 @@ class CharacterSheetClassUtils {
 		// any Wizard leveled spell on a Wizard/Gambler character got mis-stamped
 		// as a Gambler spell (and rolled Gambler dice at cast time).
 		let sourceSubclass = null;
-		const resolvedEntry = classes?.find(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase());
+		const resolvedEntries = classes?.filter(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase()) || [];
+		const resolvedEntry = resolvedEntries.length === 1 ? resolvedEntries[0] : null;
+		let sourceClassSource = resolvedEntry?.source || null;
+		let sourceSubclassSource = null;
 		if (resolvedEntry
 			&& /^rogue$/i.test(resolvedEntry.name || "")
 			&& /^tgtt$/i.test(resolvedEntry.source || "")
 			&& /^gambler$/i.test(resolvedEntry.subclass?.name || "")
 			&& /^tgtt$/i.test(resolvedEntry.subclass?.source || "")) {
 			sourceClass = "Gambler";
+			sourceClassSource = resolvedEntry.subclass.source || resolvedEntry.source || null;
 			sourceSubclass = "Gambler";
+			sourceSubclassSource = resolvedEntry.subclass.source || null;
 		}
 
 		let sourceFeature = null;
@@ -2510,7 +2743,7 @@ class CharacterSheetClassUtils {
 			sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
 		}
 
-		return {sourceFeature, sourceClass, sourceSubclass};
+		return {sourceFeature, sourceClass, sourceClassSource, sourceSubclass, sourceSubclassSource};
 	}
 
 	/**
@@ -3381,6 +3614,78 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Get the maximum spell level available to an Artificer at a class level.
+	 *
+	 * Artificer is a rounded-up half caster, but its class table advances spell
+	 * levels at 1/5/9/13/17. Keep that table boundary in one shared resolver so
+	 * Builder, Level Up, Quick Build, and the live sheet cannot drift.
+	 *
+	 * @param {number} classLevel - Current Artificer class level
+	 * @returns {number} Maximum Artificer spell level, or 0 before level 1
+	 */
+	static getMaxArtificerSpellLevel (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 1) return 0;
+		return Math.min(5, Math.floor((level - 1) / 4) + 1);
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer prepared-spell table.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerPreparedSpells (/** @type {*} */ classLevel) {
+		const progression = [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15];
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 1) return 0;
+		const boundedLevel = Math.min(20, level);
+		return progression[boundedLevel - 1];
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer cantrip table.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerCantrips (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 1) return 0;
+		if (level >= 14) return 4;
+		if (level >= 10) return 3;
+		return 2;
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer Replicate Magic Item plans known.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerPlansKnown (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 2) return 0;
+		if (level >= 18) return 8;
+		if (level >= 14) return 7;
+		if (level >= 10) return 6;
+		if (level >= 6) return 5;
+		return 4;
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer simultaneous created magic-item cap.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerCreatedMagicItemsMax (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 2) return 0;
+		if (level >= 18) return 6;
+		if (level >= 14) return 5;
+		if (level >= 10) return 4;
+		if (level >= 6) return 3;
+		return 2;
+	}
+
+	/**
 	 * Get the maximum spell level a class can cast at a given level.
 	 * @param {string} className - Class name
 	 * @param {number} classLevel - Current class level
@@ -3388,10 +3693,13 @@ class CharacterSheetClassUtils {
 	 */
 	static getMaxSpellLevelForClass (/** @type {*} */ className, /** @type {*} */ classLevel) {
 		const fullCasters = ["Wizard", "Cleric", "Druid", "Bard", "Sorcerer", "Warlock"];
-		const halfCasters = ["Paladin", "Ranger", "Artificer"];
+		const halfCasters = ["Paladin", "Ranger"];
 
 		if (fullCasters.includes(className)) {
 			return Math.min(9, Math.ceil(classLevel / 2));
+		}
+		if (className === "Artificer") {
+			return CharacterSheetClassUtils.getMaxArtificerSpellLevel(classLevel);
 		}
 		if (halfCasters.includes(className)) {
 			return Math.min(5, Math.ceil((classLevel + 1) / 4));
@@ -3543,6 +3851,9 @@ class CharacterSheetClassUtils {
 	 * @returns {number|null} Cantrip count, or null if no cantrip progression
 	 */
 	static getCantripsAtLevel (/** @type {*} */ classData, /** @type {*} */ className, /** @type {*} */ classLevel) {
+		if (className === "Artificer" && String(classData?.source || "").toUpperCase() === "EFA") {
+			return CharacterSheetClassUtils.getEfaArtificerCantrips(classLevel);
+		}
 		const prog = classData.cantripProgression || (/** @type {*} */ (CharacterSheetClassUtils._CANTRIP_TABLES))[className];
 		if (!prog) return null;
 		return prog[classLevel - 1] || 0;
@@ -3564,7 +3875,7 @@ class CharacterSheetClassUtils {
 		} else if (casterProgression === "pact") {
 			return Math.min(5, Math.ceil(classLevel / 2));
 		} else if (casterProgression === "artificer") {
-			return Math.min(5, Math.ceil(classLevel / 4));
+			return CharacterSheetClassUtils.getMaxArtificerSpellLevel(classLevel);
 		}
 		return Math.min(9, Math.ceil(classLevel / 2));
 	}
@@ -3849,7 +4160,7 @@ class CharacterSheetClassUtils {
 	 * than silently presenting a read-only row.
 	 *
 	 * @param {*} entity
-	 * @param {{sourcePath?: string, occurrenceStart?: number, className?: string, classSource?: string}} [opts]
+	 * @param {{sourcePath?: string, occurrenceStart?: number, className?: string, classSource?: string, state?: object}} [opts]
 	 * @returns {Array<object>}
 	 */
 	static getChoiceDescriptors (/** @type {*} */ entity, /** @type {*} */ opts = {}) {
@@ -3985,6 +4296,28 @@ class CharacterSheetClassUtils {
 			`${String(entity?.name || "")} ${String(opts.sourcePath || "")}`,
 		);
 		const hasStructuredSpellGrants = entity.additionalSpells != null;
+		const runtimeFeature = this.getRuntimeFeature(entity, opts.state);
+		const conditionalToolGrant = entity?._conditionalToolGrant || runtimeFeature?._conditionalToolGrant;
+		if (conditionalToolGrant?.requiredCount > 0) {
+			const conditionalToolOwner = runtimeFeature || entity;
+			add({
+				kind: "tool",
+				type: "nestedTool",
+				label: "Replacement Artisan's Tools",
+				count: conditionalToolGrant.requiredCount,
+				options: this.getConditionalToolChoiceOptions(conditionalToolGrant),
+				sourcePath: `${sourcePath || entity.name}.conditionalToolGrant.tools`,
+				grantKey: "conditionalToolGrant.tools",
+				rules: {
+					identityMode: "opportunity",
+					ownerUid: this.getSourceAwareFeatureOwnerUid(conditionalToolOwner),
+					parentSemanticKey: conditionalToolOwner.sourceDecisionKey || null,
+					fixedGrants: [...(conditionalToolGrant.fixedGrants || [])],
+					acquisitionFacts: {...(conditionalToolGrant.acquisitionFacts || {})},
+					selectedValues: [...(conditionalToolGrant.selections || [])],
+				},
+			});
+		}
 		const addProseDescriptors = (node, path) => {
 			const text = getText(node.entries || node.entry || "");
 			const lower = text.toLowerCase();
@@ -4488,6 +4821,8 @@ class CharacterSheetClassUtils {
 			addProseDescriptors(node, path);
 		};
 		visit(entity, sourcePath || entity.name || "entity");
+		const fixedProficiencyFallback = opts.state?.getFixedProficiencyFallbackChoiceDescriptor?.(entity);
+		if (fixedProficiencyFallback) add(fixedProficiencyFallback);
 		return descriptors;
 	}
 
@@ -4782,6 +5117,237 @@ class CharacterSheetClassUtils {
 				parentFeature,
 			},
 		);
+	}
+
+	/**
+	 * Apply or replace one structured feature option as a single state transaction.
+	 * Acquisition flows can omit `oldChoice`/`persistHistory`; Respec and future
+	 * switch-at-rest flows pass the existing choice so runtime state, compatibility
+	 * history, replay data, chosenSubfeatures, derived effects, and the canonical
+	 * decision remain synchronized.
+	 *
+	 * @param {{
+	 *   state:*,
+	 *   page?:*,
+	 *   characterLevel:number,
+	 *   classLevel:number,
+	 *   className:string,
+	 *   classSource:string,
+	 *   subclassName?:string,
+	 *   subclassShortName?:string,
+	 *   subclassSource?:string,
+	 *   parentFeature:string,
+	 *   parentSource?:string,
+	 *   choiceIndex?:number,
+	 *   oldChoice?:*,
+	 *   newOption:*,
+	 *   catalogs?:{classFeatures?:Array<*>,subclassFeatures?:Array<*>,optionalFeatures?:Array<*>},
+	 *   decision?:*,
+	 *   sourceDecisionKey?:string,
+	 *   persistHistory?:boolean,
+	 *   recalculate?:boolean,
+	 *   syncCanonical?:boolean,
+	 * }} config
+	 * @returns {{feature:*, choice:*, replay:*, selection:Array<*>}}
+	 */
+	static replaceStructuredFeatureChoice ({
+		state,
+		page = null,
+		characterLevel,
+		classLevel,
+		className,
+		classSource,
+		subclassName = null,
+		subclassShortName = null,
+		subclassSource = null,
+		parentFeature,
+		parentSource = null,
+		choiceIndex = 0,
+		oldChoice = null,
+		newOption,
+		catalogs = null,
+		decision = null,
+		sourceDecisionKey = null,
+		persistHistory = false,
+		recalculate = true,
+		syncCanonical = false,
+	} = {}) {
+		if (!state || !parentFeature || !newOption?.name) throw new Error("A state, parent feature, and replacement option are required.");
+
+		const snapshot = state.toJson();
+		const norm = value => String(value || "").trim().toLowerCase();
+		const acquisitionLevel = Number(
+			oldChoice?.acquisitionLevel
+				|| classLevel
+				|| newOption?.acquisitionLevel
+				|| newOption?.level,
+		) || 1;
+		const optionCatalogs = catalogs || {
+			classFeatures: page?.getClassFeatures?.() || [],
+			subclassFeatures: page?.getSubclassFeatures?.() || [],
+			optionalFeatures: page?.getOptionalFeatures?.() || [],
+		};
+		const parentDefinition = [
+			...(optionCatalogs.classFeatures || []),
+			...(optionCatalogs.subclassFeatures || []),
+		].find(feature =>
+			norm(feature?.name) === norm(parentFeature)
+				&& (!className || norm(feature?.className) === norm(className))
+				&& (!classSource || norm(feature?.classSource) === norm(classSource))
+				&& Number(feature?.level) === acquisitionLevel);
+		const effectiveParentSource = parentSource || parentDefinition?.source || null;
+		const semanticKey = sourceDecisionKey
+			|| decision?.semanticKey
+			|| globalThis.CharacterSheetProgression?.getSemanticKey?.({
+				className,
+				classSource,
+				classLevel: acquisitionLevel,
+				type: "featureChoice",
+				sourceKey: parentFeature,
+				slot: choiceIndex,
+			})
+			|| null;
+
+		try {
+			const matchesScope = item =>
+				norm(item?.parentFeature) === norm(parentFeature)
+				&& (!className || norm(item?.className) === norm(className))
+				&& (!classSource || norm(item?.classSource) === norm(classSource))
+				&& Number(item?.acquisitionLevel || item?.level) === acquisitionLevel;
+			const matchesOld = item =>
+				!oldChoice
+				|| (
+					norm(item?.name) === norm(oldChoice.choice || oldChoice.name)
+					&& (!oldChoice.source || norm(item?.source) === norm(oldChoice.source))
+				);
+
+			if (oldChoice) {
+				const oldFeatures = (state._data?.features || []).filter(item => matchesScope(item) && matchesOld(item));
+				oldFeatures.forEach(item => state.removeFeature(item.id || item.name, item.source));
+				if (!oldFeatures.length && oldChoice.choice) state.removeModifiersByName?.(oldChoice.choice);
+
+				state._data.chosenSubfeatures = (state._data.chosenSubfeatures || []).filter(record =>
+					!(
+						norm(record.parent) === norm(parentFeature)
+						&& (!effectiveParentSource || norm(record.parentSource) === norm(effectiveParentSource))
+						&& (!className || norm(record.parentClass) === norm(className))
+						&& (!classSource || norm(record.parentClassSource) === norm(classSource))
+						&& Number(record.level) === acquisitionLevel
+						&& norm(record.name) === norm(oldChoice.choice || oldChoice.name)
+						&& (!oldChoice.source || norm(record.source) === norm(oldChoice.source))
+					),
+				);
+			}
+
+			const materialized = CharacterSheetClassUtils.materializeFeatureOption(newOption, {
+				className,
+				classSource,
+				acquisitionLevel,
+				parentFeature,
+				catalogs: optionCatalogs,
+				subclassName,
+				subclassShortName,
+				subclassSource,
+			});
+			if (semanticKey) materialized.sourceDecisionKey = semanticKey;
+			state.addFeature(materialized, semanticKey ? {sourceDecisionKey: semanticKey} : {});
+			const appliedFeature = (state._data?.features || []).find(item =>
+				matchesScope(item)
+				&& norm(item.name) === norm(materialized.name)
+				&& norm(item.source) === norm(materialized.source));
+			if (!appliedFeature) throw new Error(`Failed to materialize feature choice "${newOption.name}".`);
+
+			state._recordChosenSubfeature?.({
+				parent: parentFeature,
+				parentSource: effectiveParentSource,
+				parentClass: className || null,
+				parentClassSource: classSource || null,
+				level: acquisitionLevel,
+				characterLevel,
+				name: appliedFeature.name,
+				source: appliedFeature.source,
+				sourceDecisionKey: semanticKey,
+			});
+
+			const resolved = CharacterSheetClassUtils.resolveFeatureOptionData(newOption, optionCatalogs);
+			const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
+				newOption,
+				optionCatalogs.classFeatures || [],
+				{
+					optionalFeatures: optionCatalogs.optionalFeatures || [],
+					resolvedData: resolved,
+				},
+			);
+			autoEffects.forEach(effect => {
+				state.addNamedModifier({
+					name: newOption.name,
+					type: effect.type,
+					value: effect.value,
+					note: effect.note || `From specialty: ${newOption.name}`,
+					enabled: true,
+					sourceFeatureId: appliedFeature.id,
+					...(semanticKey ? {sourceDecisionKey: semanticKey} : {}),
+				});
+			});
+
+			const choice = {
+				featureName: parentFeature,
+				choice: newOption.name,
+				source: newOption.source || appliedFeature.source,
+				acquisitionLevel,
+				ref: newOption.ref || appliedFeature.ref,
+				type: newOption.type || appliedFeature.type,
+			};
+			const replay = CharacterSheetClassUtils.buildHistoryFeatureSnapshot(appliedFeature, {
+				type: newOption.type || "featureOption",
+				parentFeature,
+				includeEntries: true,
+			});
+
+			if (persistHistory) {
+				const history = state.getLevelHistoryEntry?.(characterLevel);
+				if (!history) throw new Error(`No level-history entry exists for character level ${characterLevel}.`);
+				const featureChoices = [...(history.choices?.featureChoices || [])];
+				const replayData = {...(history.choices?.replayData || {})};
+				const replayChoices = [...(replayData.featureChoices || featureChoices.map(() => null))];
+				featureChoices[choiceIndex] = choice;
+				replayChoices[choiceIndex] = replay;
+				replayData.featureChoices = replayChoices;
+				history.choices = {...(history.choices || {}), featureChoices, replayData};
+				history.timestamp = Date.now();
+				if (!decision) {
+					const refreshed = globalThis.CharacterSheetProgression?.refreshDecisionSelectionsFromChoices?.(history);
+					if (refreshed) Object.assign(history, refreshed);
+				}
+				const canonicalDecision = (history.decisions || []).find(item =>
+					item.semanticKey === semanticKey
+					|| (
+						item.type === "featureChoice"
+						&& item.sourceKey === parentFeature
+						&& Number(item.slot || 0) === Number(choiceIndex)
+					));
+				if (canonicalDecision) {
+					canonicalDecision.selection = [choice];
+					canonicalDecision.status = "resolved";
+					// The previous receipt describes the removed option. Invalidate it
+					// so the canonical sync rebuilds every live effect generically.
+					canonicalDecision.receipt = null;
+				}
+			}
+
+			if (recalculate) {
+				state.applyClassFeatureEffects?.();
+				state.calculateSpellSlots?.();
+			}
+			if (syncCanonical) {
+				globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({page, state});
+			}
+
+			return {feature: appliedFeature, choice, replay, selection: [choice]};
+		} catch (error) {
+			state.loadFromJson(snapshot);
+			throw error;
+		}
 	}
 
 	/**
@@ -5619,6 +6185,11 @@ class CharacterSheetClassUtils {
 		const searchEntriesForRefs = (/** @type {*} */ entries) => {
 			if (!Array.isArray(entries)) return;
 			for (/** @type {*} */ const entry of entries) {
+				// Explicit option groups describe legal player choices. Their refs are
+				// definitions, not automatic grants; the picker materializes only the
+				// selected option. Learn-all wrappers use ordinary nested entries and
+				// continue through the recursive path below.
+				if (entry?.type === "options") continue;
 				if (/** @type {*} */ entry?.type === "refSubclassFeature" && entry.subclassFeature) {
 					// Parse "FeatureName|ClassName|ClassSource|SubclassShortName|SubclassSource|Level"
 					const parts = entry.subclassFeature.split("|");
@@ -7407,7 +7978,16 @@ class CharacterSheetClassUtils {
 	 * @param {boolean} [opts.inSpellbook=false] - Whether spell is in spellbook
 	 * @returns {*} Spell state object
 	 */
-	static buildSpellStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, prepared = false, inSpellbook = false, ability = null}) {
+	static buildSpellStateObject (/** @type {*} */ spell, {
+		sourceFeature,
+		sourceClass,
+		sourceClassSource = null,
+		sourceSubclass = null,
+		sourceSubclassSource = null,
+		prepared = false,
+		inSpellbook = false,
+		ability = null,
+	}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -7419,6 +7999,9 @@ class CharacterSheetClassUtils {
 			inSpellbook,
 			sourceFeature,
 			sourceClass,
+			sourceClassSource,
+			sourceSubclass,
+			sourceSubclassSource,
 			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
@@ -7437,13 +8020,23 @@ class CharacterSheetClassUtils {
 	 * @param {string|null} [opts.ability] - Per-cantrip spellcasting ability override (e.g. a racial cantrip whose ability is chosen by the player)
 	 * @returns {*} Cantrip state object
 	 */
-	static buildCantripStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, ability = null}) {
+	static buildCantripStateObject (/** @type {*} */ spell, {
+		sourceFeature,
+		sourceClass,
+		sourceClassSource = null,
+		sourceSubclass = null,
+		sourceSubclassSource = null,
+		ability = null,
+	}) {
 		return {
 			name: spell.name,
 			source: spell.source,
 			school: spell.school,
 			sourceFeature,
 			sourceClass,
+			sourceClassSource,
+			sourceSubclass,
+			sourceSubclassSource,
 			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
@@ -8239,12 +8832,16 @@ class CharacterSheetClassUtils {
 
 			Object.entries(slots).forEach(([level, count]) => {
 				if (!spellcasting.spellSlots[level]) {
-					spellcasting.spellSlots[level] = {current: count, max: count};
+					state.setSpellSlots(level, count, count, {isExpenditure: false});
 				} else {
 					const diff = count - spellcasting.spellSlots[level].max;
 					if (/** @type {*} */ diff > 0) {
-						spellcasting.spellSlots[level].max = count;
-						spellcasting.spellSlots[level].current += diff;
+						state.setSpellSlots(
+							level,
+							count,
+							spellcasting.spellSlots[level].current + diff,
+							{isExpenditure: false},
+						);
 					}
 				}
 			});

@@ -7794,6 +7794,40 @@ class CharacterSheetNpcExporter {
 		);
 	}
 
+	static classifyInventoryItemForNpcExport (state, itemOrWrapper) {
+		const classification = state?.classifyEfaExperimentalElixir?.(itemOrWrapper);
+		if (classification?.status === "valid") {
+			return {
+				status: "exclude",
+				reason: "transient-efa-experimental-elixir",
+				classification,
+			};
+		}
+		if (classification?.status === "stale") {
+			return {
+				status: "exclude",
+				reason: "repair-required-efa-experimental-elixir",
+				classification,
+			};
+		}
+		return {status: "include", reason: "ordinary-inventory-item", classification};
+	}
+
+	static getInventoryItemsForNpcExport (state, {warnings = null} = {}) {
+		const inventory = state?.getItems?.() || state?.getInventory?.() || state?._data?.inventory || [];
+		return inventory.filter(itemOrWrapper => {
+			const result = this.classifyInventoryItemForNpcExport(state, itemOrWrapper);
+			if (result.status !== "exclude") return true;
+			if (result.reason !== "repair-required-efa-experimental-elixir" || !Array.isArray(warnings)) return false;
+
+			const item = itemOrWrapper?.item || itemOrWrapper;
+			const itemName = this._getSafeInlineText(item?.name || "Experimental Elixir", {maxLen: 80}) || "Experimental Elixir";
+			const warning = `${itemName} was excluded from NPC export because its EFA Experimental Elixir provenance requires repair (${result.classification?.reason || "unsupported provenance"}).`;
+			if (!warnings.includes(warning)) warnings.push(warning);
+			return false;
+		});
+	}
+
 	static _getItemTag (item) {
 		const safeName = this._getSafeInlineText(item?.name || "Item", {maxLen: 80}) || "Item";
 		// A sheet-authored item resolves nowhere, so it travels with the statblock as a
@@ -7949,6 +7983,7 @@ class CharacterSheetNpcExporter {
 	 */
 	static buildCompanionItems (monster, state, {sourceJson, warnings} = {}) {
 		const source = this._getSafeSourceJson(sourceJson || monster?.source || CharacterSheetNpcExporter._companionItemSource);
+		const inventory = this.getInventoryItemsForNpcExport(state, {warnings});
 		const tagged = this._collectItemTagNames(monster, source);
 		if (!tagged.size) {
 			// Still worth saying. A character can carry a material-bearing item that the
@@ -7964,7 +7999,6 @@ class CharacterSheetNpcExporter {
 		// not actually own: Mikase's Angelic Plate is AC 18 stored and AC 21 as worn, and
 		// Arthur's Cataclysm is 2d6 stored and 2d8 as forged. Bundling the raw entry shipped a
 		// weaker item than the statblock was built from, so the hover contradicted the block.
-		const inventory = state?.getItems?.() || state?.getInventory?.() || state?._data?.inventory || [];
 		const out = [];
 		const seen = new Set();
 		const provenanceWarned = new Set();
@@ -8713,7 +8747,7 @@ class CharacterSheetNpcExporter {
 	 * equipped-only gate — a stowed item is worth *listing* but grants no ability.
 	 */
 	static _getSpecialEquipmentBlock (state) {
-		const carried = (state.getItems?.() || []).filter(it => !!it);
+		const carried = this.getInventoryItemsForNpcExport(state).filter(it => !!it);
 		const magic = carried.filter(it => this._isMagicItem(it));
 		const poisonLine = this._getCarriedPoisonEntries(carried);
 
@@ -9325,13 +9359,14 @@ class CharacterSheetNpcExporter {
 	 * action to attack again" and do it. So an economy the sheet had to decline is still an
 	 * economy here, which is why the prose fallback earns its keep.
 	 */
-	static _getMaterialPowerEntries (state, {npcName = "The NPC", claimedMaterialPowerIds = null, claimedInstabilityMaterials = null} = {}) {
+	static _getMaterialPowerEntries (state, {npcName = "The NPC", claimedMaterialPowerIds = null, claimedInstabilityMaterials = null, excludedItemIds = null} = {}) {
 		const powers = typeof state?.getItemPowers === "function"
 			? (state.getItemPowers({activeOnly: true}) || [])
 			: [];
 		const out = [];
 
 		powers.filter(power => power?.materialPower).forEach(power => {
+			if (power?.itemId && excludedItemIds?.has(power.itemId)) return;
 			// A condensate only has its affinity while it holds the role that affinity was
 			// written for; a dormant one is a fact about the item, not about the fight.
 			if (power.isDormant) return;
@@ -9391,11 +9426,18 @@ class CharacterSheetNpcExporter {
 
 	static _getMagicItemUseBlocks (state, {npcName = "The NPC", claimedMaterialPowerIds = null, claimedInstabilityMaterials = null} = {}) {
 		const out = {trait: [], action: [], bonus: [], reaction: []};
-		const items = (state.getItems?.() || [])
+		const inventory = state.getItems?.() || [];
+		const exportableInventory = this.getInventoryItemsForNpcExport(state);
+		const exportableItemIds = new Set(exportableInventory.map(it => it?.id).filter(Boolean));
+		const excludedItemIds = new Set(inventory
+			.map(it => it?.id)
+			.filter(id => id && !exportableItemIds.has(id)));
+		const items = exportableInventory
 			.filter(it => !!it)
 			.filter(it => this._isActiveItem(it))
 			.filter(it => this._isMagicItem(it));
-		const spells = state.getItemGrantedSpells?.() || [];
+		const spells = (state.getItemGrantedSpells?.() || [])
+			.filter(sp => !sp?.itemId || !excludedItemIds.has(sp.itemId));
 		const ownedItemKeys = new Set(items.map(it => this._normalizeFeatureKey(it?.name)).filter(Boolean));
 		const seenNames = new Set();
 		const seenBodies = new Set();
@@ -9465,7 +9507,7 @@ class CharacterSheetNpcExporter {
 		// `_isMagicItem` gates this loop, and a plain steel-and-Yellowwood longbow is not
 		// magical. Routed through the same `pushEntry` so it dedupes against magic-item
 		// entries rather than beside them.
-		this._getMaterialPowerEntries(state, {npcName, claimedMaterialPowerIds, claimedInstabilityMaterials}).forEach(({section, entry}) => pushEntry(section, entry));
+		this._getMaterialPowerEntries(state, {npcName, claimedMaterialPowerIds, claimedInstabilityMaterials, excludedItemIds}).forEach(({section, entry}) => pushEntry(section, entry));
 
 		// Group item-granted spells into one entry per item (bestiary style) instead
 		// of one action per spell, and never leak raw `name|source` UIDs.

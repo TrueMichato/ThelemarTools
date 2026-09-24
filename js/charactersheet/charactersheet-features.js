@@ -3,6 +3,7 @@
  * Handles class features, racial traits, feats, and other abilities
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
@@ -1008,6 +1009,9 @@ class CharacterSheetFeatures {
 			return;
 		}
 
+		const atlasCard = this._renderAdventurersAtlasCard();
+		if (atlasCard) container.append(atlasCard);
+
 		if (!features.length) {
 			container.append(e_({outer: `<div class="ve-muted ve-text-center py-2">No class features yet</div>`}));
 			return;
@@ -1214,6 +1218,536 @@ class CharacterSheetFeatures {
 		});
 
 		container.append(summary);
+	}
+
+	_getAdventurersAtlasCardModel () {
+		if (!this._state.hasAdventurersAtlasFeature?.()) return null;
+		const atlas = this._state.getAdventurersAtlas();
+		const status = this._state.getAdventurersAtlasStatus();
+		const selfHolder = atlas.holders.find(holder => holder.isSelf) || null;
+		const initiativeDie = this._state.getAdventurersAtlasInitiativeDie();
+		const safeHavenOptions = this._state.hasAdventurersAtlasSafeHavenFeature?.()
+			? this._state.getAdventurersAtlasSafeHavenExternalHolderOptions?.() || []
+			: [];
+		const safeHavenHolders = safeHavenOptions.filter(holder => holder.available);
+		const mappingMagic = this._state.getCartographerMappingMagicSnapshot?.() || null;
+		const reasonLabels = {
+			"character-death": "Character death",
+			"subclass-removed": "Cartographer subclass removed",
+		};
+		return {
+			status,
+			statusLabel: status === "not-created"
+				? "Not created"
+				: status === "invalidated"
+					? `Invalidated — ${reasonLabels[atlas.invalidatedReason] || atlas.invalidatedReason}`
+					: "Active",
+			generation: atlas.generation,
+			createdAt: atlas.createdAt,
+			createdLabel: atlas.createdAt ? new Date(atlas.createdAt).toLocaleString() : null,
+			capacityAtCreation: atlas.capacityAtCreation,
+			nextCapacity: this._state.getAdventurersAtlasCapacity(),
+			activeHolders: atlas.holders.filter(holder => holder.status === "active"),
+			destroyedHolders: atlas.holders.filter(holder => holder.status === "destroyed"),
+			selfStatus: !selfHolder ? "Not mapped" : selfHolder.status === "active" ? "Active map" : "Map destroyed",
+			awarenessLabel: initiativeDie ? `${initiativeDie.dice} to Initiative` : "Inactive",
+			mappingMagic,
+			hasTools: this._state.hasCartographersToolsForAtlas(),
+			actionLabel: atlas.generation ? "Plan Atlas recreation" : "Plan Atlas creation",
+			safeHaven: this._state.hasAdventurersAtlasSafeHavenFeature?.()
+				? {
+					hitPoints: this._state.getAdventurersAtlasSafeHavenHitPoints(),
+					externalHolders: safeHavenHolders,
+					unavailableReason: safeHavenHolders.length
+						? null
+						: safeHavenOptions.find(holder => holder.unavailableReason)?.unavailableReason
+							|| "No active external map holder can use Safe Haven.",
+				}
+				: null,
+		};
+	}
+
+	async _pResolveAdventurersAtlasSafeHavenExternal (holderId) {
+		const option = this._state.getAdventurersAtlasSafeHavenExternalHolderOptions?.()
+			.find(holder => holder.id === holderId);
+		if (!option?.available) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: option?.unavailableReason || "Choose an active external map holder.",
+			});
+			return null;
+		}
+
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: `Resolve Safe Haven for ${option.name}?`,
+			htmlDescription: `<div>Confirm that this creature reached 0 hit points without being killed outright.</div><div class="ve-muted ve-small mt-1">This permanently destroys that creature's current Atlas map until the Atlas is recreated.</div>`,
+			textYes: "Confirm and destroy map",
+			textNo: "Cancel",
+		});
+		if (!confirmed) return {ok: false, committed: false, cancelled: true};
+
+		const result = this._state.resolveAdventurersAtlasSafeHavenForExternalHolder(holderId, {
+			confirmedReducedToZero: true,
+			killedOutright: false,
+		});
+		if (!result?.ok) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: result?.errors?.join(" ") || "Safe Haven could not be resolved.",
+			});
+			return result;
+		}
+
+		this._page.saveCharacter?.();
+		this.render();
+		JqueryUtil.doToast({
+			type: "success",
+			content: `${option.name}'s map is destroyed. Set that creature to ${result.hp} hit points, then place it in an unoccupied space within 5 feet of a listed destination.`,
+		});
+		return result;
+	}
+
+	_queueAdventurersAtlasActionFocus (actionId) {
+		const restore = () => document.querySelector(`[data-atlas-action="${actionId}"]`)?.focus();
+		if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+		else setTimeout(restore, 0);
+	}
+
+	async _pCastCartographerFeatureSpell (grantId, actionId) {
+		if (!this._page._spells?.pCastFeatureSpellGrant) {
+			JqueryUtil.doToast({type: "warning", content: "The spellcasting controller is not available."});
+			return;
+		}
+		await this._page._spells.pCastFeatureSpellGrant(grantId);
+		this._queueAdventurersAtlasActionFocus(actionId);
+	}
+
+	async _pUseCartographerPortalJump () {
+		const portal = this._state.getCartographerPortalJumpState?.();
+		if (!portal?.available) {
+			JqueryUtil.doToast({type: "warning", content: portal?.reason || "Portal Jump is not available."});
+			return;
+		}
+		const directLabel = "Visible unoccupied space within 10 feet";
+		const holderLabel = "Visible unoccupied space within 5 feet of an active map holder";
+		const values = [directLabel];
+		if (portal.destinations.holder.holders.length) values.push(holderLabel);
+		const modeChoice = await InputUiUtil.pGetUserEnum({
+			title: "Portal Jump — Destination",
+			htmlDescription: `<div>Spend <strong>${portal.movementCost} feet</strong> of movement (half your current Speed of ${portal.speed}, rounded down).</div><div class="ve-muted ve-small mt-1">Choose a legal visible, unoccupied destination. The sheet records your confirmation; it does not invent coordinates or line of sight.</div>`,
+			values,
+			fnDisplay: value => value,
+			isResolveItem: true,
+		});
+		if (modeChoice == null) {
+			this._queueAdventurersAtlasActionFocus("portal-jump");
+			return;
+		}
+
+		let holder = null;
+		if (modeChoice === holderLabel) {
+			const duplicateNames = new Set(portal.destinations.holder.holders
+				.filter((holder, ix, holders) => holders.findIndex(it => it.name === holder.name) !== ix)
+				.map(holder => holder.name));
+			const holderOptions = portal.destinations.holder.holders.map((holder, ix) => ({
+				holder,
+				label: duplicateNames.has(holder.name) ? `${holder.name} — map ${ix + 1}` : holder.name,
+			}));
+			const holderChoice = await InputUiUtil.pGetUserEnum({
+				title: "Portal Jump — Map Holder",
+				htmlDescription: "Choose the active mapped creature whose position anchors the destination.",
+				values: holderOptions.map(it => it.label),
+				fnDisplay: value => value,
+				isResolveItem: true,
+			});
+			if (holderChoice == null) {
+				this._queueAdventurersAtlasActionFocus("portal-jump");
+				return;
+			}
+			holder = holderOptions.find(it => it.label === holderChoice)?.holder || null;
+			if (!holder) {
+				JqueryUtil.doToast({type: "warning", content: "That Atlas holder is no longer active."});
+				this._queueAdventurersAtlasActionFocus("portal-jump");
+				return;
+			}
+		}
+
+		const isDirect = modeChoice === directLabel;
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: "Confirm Portal Jump",
+			htmlDescription: isDirect
+				? `<div>Confirm the destination is <strong>unoccupied</strong>, <strong>visible to you</strong>, and <strong>within 10 feet</strong>.</div><div class="ve-muted ve-small mt-1">${portal.movementCost} feet of movement is spent only after confirmation.</div>`
+				: `<div>Confirm <strong>${holder.name}</strong> is an active Atlas holder within <strong>30 feet</strong>, and the destination is an <strong>unoccupied</strong> space <strong>visible to you</strong> within <strong>5 feet</strong> of them.</div><div class="ve-muted ve-small mt-1">Positioning's sight and cover exception applies to targeting map holders, not to Portal Jump's destination. ${portal.movementCost} feet of movement is spent only after confirmation.</div>`,
+			textYes: `Teleport and spend ${portal.movementCost} ft`,
+			textNo: "Cancel",
+		});
+		if (!confirmed) {
+			this._queueAdventurersAtlasActionFocus("portal-jump");
+			return;
+		}
+
+		const result = this._state.useCartographerPortalJump({
+			destinationMode: isDirect ? "direct" : "holder",
+			holderId: holder?.id || null,
+			confirmedVisible: true,
+			confirmedWithin10Feet: isDirect,
+			confirmedHolderWithin30Feet: !isDirect,
+			confirmedWithin5FeetOfHolder: !isDirect,
+			confirmedUnoccupied: true,
+		});
+		if (!result.ok) {
+			JqueryUtil.doToast({type: "warning", content: result.error || result.reason || "Portal Jump could not be committed."});
+			this._queueAdventurersAtlasActionFocus("portal-jump");
+			return;
+		}
+		this._page.saveCharacter?.();
+		this.render();
+		this._page._combat?.renderCombatMovement?.();
+		JqueryUtil.doToast({
+			type: "info",
+			content: isDirect
+				? `Portal Jump: teleported to the confirmed visible space; spent ${result.movementCost} feet of movement.`
+				: `Portal Jump: teleported to the confirmed visible space beside ${result.destination.holder.name}; spent ${result.movementCost} feet of movement.`,
+		});
+		this._queueAdventurersAtlasActionFocus("portal-jump");
+	}
+
+	async _pResolveCartographerPositioning () {
+		const positioning = this._state.getCartographerMappingMagicSnapshot?.().positioning;
+		if (!positioning?.available) {
+			JqueryUtil.doToast({type: "warning", content: positioning?.reason || "Positioning is not available."});
+			return;
+		}
+		const duplicateNames = new Set(positioning.holders
+			.filter((holder, ix, holders) => holders.findIndex(it => it.name === holder.name) !== ix)
+			.map(holder => holder.name));
+		const holderOptions = positioning.holders.map((holder, ix) => ({
+			holder,
+			label: duplicateNames.has(holder.name) ? `${holder.name} — map ${ix + 1}` : holder.name,
+		}));
+		const holderChoice = await InputUiUtil.pGetUserEnum({
+			title: "Positioning — Atlas Holder",
+			htmlDescription: "Choose the active external map holder you want to target with a spell or other effect.",
+			values: holderOptions.map(it => it.label),
+			fnDisplay: value => value,
+			isResolveItem: true,
+		});
+		if (holderChoice == null) {
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		const holder = holderOptions.find(it => it.label === holderChoice)?.holder || null;
+		if (!holder) {
+			JqueryUtil.doToast({type: "warning", content: "That Atlas holder is no longer active."});
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: `Use Positioning on ${holder.name}?`,
+			htmlDescription: `<div>Confirm <strong>${holder.name}</strong> is on the <strong>same plane</strong>, remains <strong>within the effect's normal range</strong>, and is otherwise an <strong>eligible target</strong>.</div><div class="ve-muted ve-small mt-1">Positioning bypasses only sight and cover. It does not extend range or waive components, target type, or other casting requirements.</div>`,
+			textYes: "Confirm sight and cover exception",
+			textNo: "Cancel",
+		});
+		if (!confirmed) {
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		const result = this._state.resolveTargetingException({
+			descriptorId: positioning.id,
+			targetHolderId: holder.id,
+			effectRequiresSight: true,
+			confirmedSamePlane: true,
+			confirmedWithinRange: true,
+			confirmedTargetEligibility: true,
+		});
+		if (!result.ok || !result.applies) {
+			JqueryUtil.doToast({type: "warning", content: result.error || result.reason || "Positioning could not be confirmed."});
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		JqueryUtil.doToast({
+			type: "info",
+			content: `Positioning confirmed for ${holder.name}: ignore sight and cover; normal range and all other targeting rules still apply.`,
+		});
+		this._queueAdventurersAtlasActionFocus("positioning");
+	}
+
+	_renderAdventurersAtlasCard () {
+		const model = this._getAdventurersAtlasCardModel();
+		if (!model) return null;
+
+		const card = e_({
+			tag: "article",
+			clazz: `charsheet__atlas-card charsheet__atlas-card--${model.status}`,
+			attrs: {"aria-labelledby": "charsheet-atlas-card-title"},
+		});
+		const header = e_({tag: "header", clazz: "charsheet__atlas-card-header"});
+		const headingGroup = e_({tag: "div"});
+		headingGroup.append(
+			e_({tag: "div", clazz: "charsheet__atlas-card-kicker", txt: "Cartographer feature"}),
+			e_({tag: "h3", clazz: "charsheet__atlas-card-title", attrs: {id: "charsheet-atlas-card-title"}, txt: "Adventurer's Atlas"}),
+		);
+		header.append(
+			headingGroup,
+			e_({
+				tag: "span",
+				clazz: "charsheet__atlas-card-status",
+				attrs: {"aria-label": `Atlas status: ${model.statusLabel}`},
+				txt: model.statusLabel,
+			}),
+		);
+		card.append(header);
+		card.append(e_({
+			tag: "p",
+			clazz: "charsheet__atlas-card-summary",
+			txt: "The Atlas records its map holders and freezes its capacity when created. An active self map grants Awareness and enables the current-sheet Mapping Magic controls below.",
+		}));
+
+		const facts = e_({tag: "dl", clazz: "charsheet__atlas-card-facts"});
+		const appendFact = (term, detail) => {
+			facts.append(e_({
+				tag: "div",
+				clazz: "charsheet__atlas-card-fact",
+				children: [
+					e_({tag: "dt", txt: term}),
+					e_({tag: "dd", txt: detail}),
+				],
+			}));
+		};
+		appendFact("Capacity at creation", model.capacityAtCreation == null ? "Not set" : `${model.capacityAtCreation} holders`);
+		appendFact("Self map", model.selfStatus);
+		appendFact("Awareness", model.awarenessLabel);
+		if (model.generation) {
+			appendFact("Created", model.createdLabel);
+			appendFact("Generation", `${model.generation}`);
+		}
+		card.append(facts);
+
+		if (!model.generation) {
+			card.append(e_({
+				tag: "p",
+				clazz: "charsheet__atlas-card-empty",
+				txt: `No Atlas has been created. If created now, it can hold ${model.nextCapacity} maps.`,
+			}));
+		} else {
+			const rosters = e_({tag: "div", clazz: "charsheet__atlas-card-rosters"});
+			const buildRoster = (title, holders, isDestroyed) => {
+				const roster = e_({tag: "section", clazz: "charsheet__atlas-card-roster"});
+				roster.append(e_({tag: "h4", txt: `${title} (${holders.length})`}));
+				if (!holders.length) {
+					roster.append(e_({tag: "p", clazz: "charsheet__atlas-card-none", txt: "None"}));
+					return roster;
+				}
+				const list = e_({tag: "ul"});
+				holders.forEach(holder => {
+					const detail = isDestroyed && holder.destroyedBy
+						? ` — destroyed by ${holder.destroyedBy}`
+						: "";
+					list.append(e_({
+						tag: "li",
+						children: [
+							e_({tag: "span", clazz: "charsheet__atlas-card-holder-name", txt: holder.name}),
+							e_({tag: "span", clazz: "charsheet__atlas-card-holder-detail", txt: `${holder.isSelf ? " (you)" : ""}${detail}`}),
+						],
+					}));
+				});
+				roster.append(list);
+				return roster;
+			};
+			rosters.append(
+				buildRoster("Active holders", model.activeHolders, false),
+				buildRoster("Destroyed holders", model.destroyedHolders, true),
+			);
+			card.append(rosters);
+		}
+
+		if (model.safeHaven) {
+			const safeHaven = e_({
+				tag: "section",
+				clazz: "charsheet__atlas-card-safe-haven",
+				attrs: {"aria-labelledby": "charsheet-atlas-safe-haven-title"},
+			});
+			safeHaven.append(
+				e_({
+					tag: "h4",
+					attrs: {id: "charsheet-atlas-safe-haven-title"},
+					txt: "Safe Haven",
+				}),
+				e_({
+					tag: "p",
+					clazz: "charsheet__atlas-card-safe-haven-copy",
+					attrs: {id: "charsheet-atlas-safe-haven-help"},
+					txt: `When an external map holder reaches 0 hit points without being killed outright, destroy that map to set the creature to ${model.safeHaven.hitPoints} hit points and require its teleport placement.`,
+				}),
+			);
+
+			const controls = e_({tag: "div", clazz: "charsheet__atlas-card-safe-haven-controls"});
+			const field = e_({tag: "div", clazz: "charsheet__atlas-card-safe-haven-field"});
+			const selectId = "charsheet-atlas-safe-haven-holder";
+			const select = e_({
+				tag: "select",
+				clazz: "form-control input-sm",
+				attrs: {
+					id: selectId,
+					"aria-describedby": "charsheet-atlas-safe-haven-help charsheet-atlas-safe-haven-status",
+				},
+			});
+			for (const holder of model.safeHaven.externalHolders) {
+				select.append(e_({
+					tag: "option",
+					attrs: {value: holder.id},
+					txt: holder.name,
+				}));
+			}
+			if (model.safeHaven.externalHolders[0]) select.value = model.safeHaven.externalHolders[0].id;
+			select.disabled = !model.safeHaven.externalHolders.length;
+			field.append(
+				e_({tag: "label", attrs: {for: selectId}, txt: "External map holder"}),
+				select,
+			);
+
+			const btnResolve = e_({
+				tag: "button",
+				clazz: "ve-btn ve-btn-warning charsheet__atlas-card-action",
+				attrs: {
+					type: "button",
+					"aria-describedby": "charsheet-atlas-safe-haven-help charsheet-atlas-safe-haven-status",
+				},
+				txt: "Resolve Safe Haven",
+			});
+			btnResolve.disabled = !model.safeHaven.externalHolders.length;
+			btnResolve.addEventListener("click", () => this._pResolveAdventurersAtlasSafeHavenExternal(select.value));
+			controls.append(field, btnResolve);
+			safeHaven.append(controls);
+			safeHaven.append(e_({
+				tag: "p",
+				clazz: `charsheet__atlas-card-safe-haven-status${model.safeHaven.unavailableReason ? " charsheet__atlas-card-safe-haven-status--unavailable" : ""}`,
+				attrs: {
+					id: "charsheet-atlas-safe-haven-status",
+					role: "status",
+				},
+				txt: model.safeHaven.unavailableReason
+					|| "The selected map is consumed only after confirmation. This sheet reports the result but does not move or edit the external creature.",
+			}));
+			card.append(safeHaven);
+		}
+
+		if (model.mappingMagic) {
+			const magic = e_({
+				tag: "section",
+				clazz: "charsheet__atlas-magic",
+				attrs: {"aria-labelledby": "charsheet-atlas-magic-title"},
+			});
+			magic.append(
+				e_({tag: "h4", clazz: "charsheet__atlas-magic-title", attrs: {id: "charsheet-atlas-magic-title"}, txt: "Mapping Magic"}),
+				e_({
+					tag: "p",
+					clazz: "charsheet__atlas-magic-copy",
+					txt: "Operate from the Atlas: cast its exact feature spells, spend live movement for Portal Jump, or confirm Positioning without inventing geometry.",
+				}),
+			);
+			const actions = e_({tag: "div", clazz: "charsheet__atlas-magic-actions"});
+			const appendAction = ({id, title, meta, detail, available, reason, buttonLabel, onClick}) => {
+				const detailId = `charsheet-atlas-magic-${id}-detail`;
+				const row = e_({tag: "article", clazz: `charsheet__atlas-magic-action${available ? "" : " charsheet__atlas-magic-action--unavailable"}`});
+				const copy = e_({tag: "div", clazz: "charsheet__atlas-magic-action-copy"});
+				copy.append(
+					e_({
+						tag: "div",
+						clazz: "charsheet__atlas-magic-action-heading",
+						children: [
+							e_({tag: "h5", txt: title}),
+							e_({tag: "span", clazz: "charsheet__atlas-magic-meta", txt: meta}),
+						],
+					}),
+					e_({tag: "p", clazz: "charsheet__atlas-magic-detail", attrs: {id: detailId}, txt: available ? detail : reason}),
+				);
+				const button = e_({
+					tag: "button",
+					clazz: `ve-btn ${available ? "ve-btn-primary" : "ve-btn-default"} charsheet__atlas-magic-button`,
+					attrs: {
+						type: "button",
+						"aria-describedby": detailId,
+						"data-atlas-action": id,
+					},
+					txt: buttonLabel,
+				});
+				button.disabled = !available;
+				button.addEventListener("click", onClick);
+				row.append(copy, button);
+				actions.append(row);
+			};
+
+			const {illuminatedCartography, portalJump, positioning, unerringPath} = model.mappingMagic;
+			appendAction({
+				id: "illuminated-cartography",
+				title: "Illuminated Cartography",
+				meta: `${illuminatedCartography.usesCurrent}/${illuminatedCartography.usesMax} ${illuminatedCartography.usesMax === 1 ? "use" : "uses"} · Long Rest`,
+				detail: "Cast Faerie Fire|XPHB with Intelligence as an action. Uses equal your Intelligence modifier (minimum 1); no preparation or spell slot.",
+				available: illuminatedCartography.available,
+				reason: illuminatedCartography.reason,
+				buttonLabel: "Cast Faerie Fire",
+				onClick: () => void this._pCastCartographerFeatureSpell(illuminatedCartography.id, "illuminated-cartography"),
+			});
+			appendAction({
+				id: "portal-jump",
+				title: "Portal Jump",
+				meta: `${portalJump.movementCost} ft cost · ${portalJump.movementRemaining} ft left`,
+				detail: "Teleport to a confirmed visible, unoccupied space within 10 feet, or within 5 feet of an active holder who is within 30 feet.",
+				available: portalJump.available,
+				reason: portalJump.reason,
+				buttonLabel: "Choose destination",
+				onClick: () => void this._pUseCartographerPortalJump(),
+			});
+			appendAction({
+				id: "positioning",
+				title: "Positioning",
+				meta: `${positioning.holders.length} external holder${positioning.holders.length === 1 ? "" : "s"}`,
+				detail: "Confirm a same-plane holder in normal range, then bypass sight and cover only.",
+				available: positioning.available,
+				reason: positioning.reason,
+				buttonLabel: "Confirm target",
+				onClick: () => void this._pResolveCartographerPositioning(),
+			});
+			appendAction({
+				id: "unerring-path",
+				title: "Unerring Path",
+				meta: `${unerringPath.usesCurrent}/${unerringPath.usesMax} ${unerringPath.usesMax === 1 ? "use" : "uses"} · Long Rest`,
+				detail: "Cast Find the Path|XPHB with Intelligence. No preparation, slot, or components; casting time remains 1 minute.",
+				available: unerringPath.available,
+				reason: unerringPath.reason,
+				buttonLabel: "Cast Find the Path",
+				onClick: () => void this._pCastCartographerFeatureSpell(unerringPath.id, "unerring-path"),
+			});
+			magic.append(actions);
+			card.append(magic);
+		}
+
+		const footer = e_({tag: "footer", clazz: "charsheet__atlas-card-footer"});
+		const context = e_({
+			tag: "p",
+			clazz: "charsheet__atlas-card-context",
+			attrs: {id: "charsheet-atlas-card-action-context"},
+			txt: model.hasTools
+				? "Cartographer's Tools are available. The roster is committed only when the Long Rest finishes."
+				: "Add Cartographer's Tools|XPHB to inventory before creating or recreating the Atlas.",
+		});
+		const btnPlan = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-primary charsheet__atlas-card-action",
+			attrs: {
+				type: "button",
+				"aria-describedby": "charsheet-atlas-card-action-context",
+			},
+			txt: model.actionLabel,
+		});
+		btnPlan.addEventListener("click", () => {
+			const opened = this._page.openAdventurersAtlasLongRest?.();
+			if (!opened) JqueryUtil.doToast({type: "warning", content: "The Long Rest planner is not available."});
+		});
+		footer.append(context, btnPlan);
+		card.append(footer);
+		return card;
 	}
 
 	_renderRaceFeatures () {
@@ -1741,6 +2275,10 @@ class CharacterSheetFeatures {
 
 	_renderFeature (feature) {
 		const isExpanded = this._expandedFeatures.has(feature.id);
+		const isEfaExperimentalElixir = CharacterSheetClassUtils.isExactEfaExperimentalElixir(feature);
+		const efaExperimentalElixirUi = isEfaExperimentalElixir
+			? CharacterSheetEfaExperimentalElixirUi.renderFeatureStatusHtml(this._state)
+			: null;
 		const hasUses = feature.uses && feature.uses.max > 0;
 		// (R21) Classified limited-use abilities (e.g. Healing Hands, Guided Strike, Forked
 		// Tongue) get a working Use button here even when they carry no `uses` pool of their
@@ -2060,7 +2598,9 @@ class CharacterSheetFeatures {
 					${derivedEffectBadge}
 					${provenanceBadge}
 					${intransigentBadge}
+					${efaExperimentalElixirUi?.headerHtml || ""}
 					<div class="charsheet__feature-actions">
+						${efaExperimentalElixirUi?.actionHtml || ""}
 						${featureUtility ? `<button class="ve-btn ve-btn-xs ve-btn-info charsheet__feature-utility" data-utility="${featureUtility}">${featureUtilityLabel}</button>` : ""}
 						${showUseBtn ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="${isAbility ? "Use this ability" : "Use Feature"}">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">
@@ -2071,6 +2611,7 @@ class CharacterSheetFeatures {
 						</button>
 					</div>
 				</div>
+				${efaExperimentalElixirUi ? `<div class="charsheet__efa-elixir-feature-status">${efaExperimentalElixirUi.reasonHtml}</div>` : ""}
 				<div class="charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
 					${wizardCapstoneHtml}
 					${primalFocusHtml}
@@ -2084,6 +2625,13 @@ class CharacterSheetFeatures {
 		featureEl.querySelector(".charsheet__feature-utility")?.addEventListener("click", evt => {
 			evt.stopPropagation();
 			if (featureUtility === "magicalAging") this._page?._pResolveMagicalAging?.(feature);
+		});
+		featureEl.querySelector(".charsheet__efa-elixir-create")?.addEventListener("click", evt => {
+			evt.stopPropagation();
+			CharacterSheetEfaExperimentalElixirUi.pShowCreateModal({
+				state: this._state,
+				page: this._page,
+			});
 		});
 
 		// Add Primal Focus switch button handlers

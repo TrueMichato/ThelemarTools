@@ -2,19 +2,24 @@ import "./setup.js";
 import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-progression.js";
+import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 describe("CS-BUG-017 recurring feature-choice respec", () => {
 	test("replaces only the selected acquisition-level instance and updates replayData", async () => {
-		const features = [
-			{id: "early", name: "Divine Sentinel", source: "TGTT", className: "Paladin", level: 3, isFeatureOption: true, parentFeature: "Specialties"},
-			{id: "later", name: "Divine Sentinel", source: "TGTT", className: "Paladin", level: 5, isFeatureOption: true, parentFeature: "Specialties"},
+		const state = new CharacterSheetState();
+		state._data.classes = [{name: "Paladin", source: "TGTT", level: 5}];
+		state._data.features = [
+			{id: "early", name: "Divine Sentinel", source: "TGTT", className: "Paladin", classSource: "TGTT", level: 3, acquisitionLevel: 3, isFeatureOption: true, parentFeature: "Specialties"},
+			{id: "later", name: "Divine Sentinel", source: "TGTT", className: "Paladin", classSource: "TGTT", level: 5, acquisitionLevel: 5, definitionLevel: 3, isFeatureOption: true, parentFeature: "Specialties"},
 		];
-		const history = {
+		state.recordLevelChoice({
 			level: 5,
 			class: {name: "Paladin", source: "TGTT"},
+			classLevel: 5,
 			choices: {
 				featureChoices: [{
 					featureName: "Specialties",
@@ -32,24 +37,9 @@ describe("CS-BUG-017 recurring feature-choice respec", () => {
 					definitionLevel: 3,
 				}]},
 			},
-		};
-		const state = {
-			getFeatures: jest.fn(() => features),
-			getLevelHistory: jest.fn(() => [
-				{level: 1, class: history.class},
-				{level: 2, class: history.class},
-				{level: 3, class: history.class},
-				{level: 4, class: history.class},
-				history,
-			]),
-			removeFeature: jest.fn(),
-			removeModifiersByName: jest.fn(),
-			addFeature: jest.fn(),
-			addNamedModifier: jest.fn(),
-			updateLevelChoice: jest.fn(),
-			applyClassFeatureEffects: jest.fn(),
-			calculateSpellSlots: jest.fn(),
-		};
+			complete: true,
+		});
+		const history = state.getLevelHistoryEntry(5);
 		const classFeatures = [{
 			name: "Mounted Warden",
 			source: "TGTT",
@@ -57,6 +47,7 @@ describe("CS-BUG-017 recurring feature-choice respec", () => {
 			level: 3,
 			entries: ["Mounted rules."],
 		}];
+		state.setClassFeatureCatalog(classFeatures, [], []);
 		const respec = Object.create(CharacterSheetRespec.prototype);
 		respec._state = state;
 		respec._page = {
@@ -75,18 +66,32 @@ describe("CS-BUG-017 recurring feature-choice respec", () => {
 			ref: "Mounted Warden|Paladin|TGTT|3",
 		});
 
-		expect(state.removeFeature).toHaveBeenCalledWith("later");
-		expect(state.removeFeature).not.toHaveBeenCalledWith("early");
-		expect(state.addFeature).toHaveBeenCalledWith(expect.objectContaining({
-			name: "Mounted Warden",
-			level: 5,
-			definitionLevel: 3,
-			acquisitionLevel: 5,
-		}));
-		expect(state.updateLevelChoice).toHaveBeenCalledWith(5, expect.objectContaining({
+		expect(state.getFeatures()).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "early", name: "Divine Sentinel", acquisitionLevel: 3}),
+			expect.objectContaining({
+				name: "Mounted Warden",
+				level: 5,
+				definitionLevel: 3,
+				acquisitionLevel: 5,
+			}),
+		]));
+		expect(state.getFeatures()).not.toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "later"}),
+		]));
+		expect(state.getChosenSubfeatures()).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				parent: "Specialties",
+				name: "Mounted Warden",
+				level: 5,
+			}),
+		]));
+		expect(state.getLevelHistoryEntry(5).choices).toEqual(expect.objectContaining({
 			featureChoices: [expect.objectContaining({choice: "Mounted Warden", acquisitionLevel: 5})],
 			replayData: expect.objectContaining({
-				featureChoices: [expect.objectContaining({name: "Mounted Warden", acquisitionLevel: 5})],
+				featureChoices: [expect.objectContaining({
+					name: "Mounted Warden",
+					acquisitionLevel: 5,
+				})],
 			}),
 		}));
 	});

@@ -4,9 +4,69 @@ let CharacterSheetState;
 let CharacterSheetPdf;
 
 beforeAll(async () => {
+	await import("../../../js/charactersheet/charactersheet-companion-rules.js");
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 	CharacterSheetPdf = (await import("../../../js/charactersheet/charactersheet-pdf.js")).CharacterSheetPdf;
 });
+
+const EFA_STEEL_DEFENDER_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
+const TCE_STEEL_DEFENDER_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
+const REANIMATOR_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
+
+const getBattleSmithClass = (source, level) => ({
+	name: "Artificer",
+	source,
+	level,
+	subclass: {
+		name: "Battle Smith",
+		shortName: "Battle Smith",
+		source,
+	},
+});
+
+const getEfaFeature = (name, level, description = "") => ({
+	name,
+	source: "EFA",
+	className: "Artificer",
+	classSource: "EFA",
+	subclassName: "Battle Smith",
+	subclassShortName: "Battle Smith",
+	subclassSource: "EFA",
+	level,
+	featureType: "Subclass",
+	isSubclassFeature: true,
+	description,
+});
+
+const getEfaSteelDefenderPdfState = () => {
+	const state = new CharacterSheetState();
+	state.loadFromJson({
+		name: "Mira",
+		abilities: {str: 10, dex: 10, con: 10, int: 20, wis: 10, cha: 10},
+		classes: [getBattleSmithClass("EFA", 15)],
+		languages: ["Common", "Draconic"],
+	});
+	state.addFeature(getEfaFeature(
+		"Tools of the Trade",
+		3,
+		"You gain proficiency with Smith's Tools. If you already have this proficiency, you gain proficiency with one other type of Artisan's Tools of your choice.",
+	));
+	state.addFeature(getEfaFeature("Steel Defender", 3));
+	state.addFeature(getEfaFeature("Arcane Jolt", 9));
+	state.addFeature(getEfaFeature("Improved Defender", 15));
+	state.reconcileFeatureCompanionGrants({reason: "pdfTest"});
+	const companion = state.completeFeatureCompanionSetup(EFA_STEEL_DEFENDER_UID, {
+		nickname: "Rivet",
+		appearance: "A broad-shouldered iron hound with etched brass plates.",
+		locomotion: "fourLegs",
+	});
+	companion.hp.current = 37;
+	companion.uses.repair.current = 2;
+	companion.hitDice.current = 6;
+	const arcaneJolt = state.getEfaArcaneJoltStatus();
+	state.setResourceCurrent(arcaneJolt.resource.id, 3);
+	return state;
+};
 
 describe("CharacterSheetPdf", () => {
 	let state;
@@ -538,6 +598,7 @@ describe("CharacterSheetPdf", () => {
 				abilities: {str: 12, dex: 15, con: 12, int: 3, wis: 12, cha: 6},
 				traits: [{name: "Keen Hearing and Smell", description: "Advantage on Perception checks using hearing or smell."}],
 				actions: [{name: "Bite", description: "Melee Weapon Attack: +4 to hit, 2d4+2 piercing."}],
+				reactions: [{name: "Skitter Away", description: "The companion moves up to half its speed."}],
 			}];
 			const html = new CharacterSheetPdf(state).generate();
 			expect(html).toContain("Companions");
@@ -545,6 +606,154 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("beast");
 			expect(html).toContain("Keen Hearing and Smell");
 			expect(html).toContain("Bite");
+			expect(html).toContain("<div class=\"pdf-comp__section pdf-comp__section--reactions\"><strong>Reactions</strong>");
+			expect(html).toContain("Skitter Away");
+		});
+
+		test("should render the exact EFA Steel Defender from reconciled companion and State APIs", () => {
+			state = getEfaSteelDefenderPdfState();
+			const html = new CharacterSheetPdf(state).generate();
+
+			expect(html).toContain("pdf-companion--efa-steel-defender");
+			expect(html).toContain("Rivet");
+			expect(html).toContain("Steel Defender • EFA");
+			expect(html).toContain("A broad-shouldered iron hound with etched brass plates.");
+			expect(html).toContain("<strong>Body</strong> Four legs");
+			expect(html).toContain("<strong>AC</strong> 17");
+			expect(html).toContain("<strong>HP</strong> 37/80");
+			expect(html).toContain("<strong>Speed</strong> 40 ft.");
+			expect(html).toContain("14 (+2)");
+			expect(html).toContain("4 (-3)");
+			expect(html).toContain("STR +7, DEX +6, CON +7, INT +2, WIS +5, CHA +3");
+			expect(html).toContain("Athletics +7");
+			expect(html).toContain("Perception +5");
+			expect(html).toContain("darkvision 60 ft., passive Perception 10");
+			expect(html).toContain("<strong>Damage Immunities</strong> poison");
+			expect(html).toContain("<strong>Condition Immunities</strong> charmed, exhaustion, poisoned");
+			expect(html).toContain("Understands Common, Draconic; can't speak");
+			expect(html).toContain("<strong>Hit Dice</strong> 6/15 d8");
+			expect(html).toContain("<strong>Repair</strong> 2/3 uses; Long Rest recharge");
+			expect(html).toContain("<strong>Arcane Jolt</strong> 3/5 uses; 4d6 force damage or healing; healing recipient within 30 ft. of the target; once per turn; Long Rest recharge");
+			expect(html).toContain("<strong>Force-Empowered Rend</strong> Melee Weapon Attack: +10 to hit, reach 5 ft., one target. Hit: 1d8 + 7 force damage.");
+			expect(html).toContain("<strong>Repair</strong> Restores 2d8 + 5 HP to itself, a Construct, or an object within 5 ft.; 2/3 uses remaining.");
+			expect(html).toContain("<strong>Deflect Attack</strong>");
+			expect(html).toContain("Improved Deflection: the attacker takes 1d4 + 5 force damage.");
+			expect(html).toContain("Command &amp; Action Economy");
+			expect(html).toContain("Your Bonus Action can command it to take another action.");
+			expect(html).toContain("You can forgo one Attack-action attack to command Force-Empowered Rend.");
+			expect(html).not.toContain("[object Object]");
+		});
+
+		test("should render exact EFA lifecycle generation, timing, pending, expired, vanished, and guidance", () => {
+			const renderLifecycle = (lifecycle, {minute = 0} = {}) => {
+				const candidate = getEfaSteelDefenderPdfState();
+				if (minute) candidate.advanceGameTimeMinutes(minute, {reason: "pdf-lifecycle", identity: "test"});
+				const companion = candidate.getFeatureOwnedCompanions(EFA_STEEL_DEFENDER_UID)[0];
+				companion.lifecycle = lifecycle;
+				companion.active = lifecycle.status === "alive";
+				if (lifecycle.status !== "alive") companion.hp.current = 0;
+				return new CharacterSheetPdf(candidate).generate();
+			};
+
+			const alive = renderLifecycle({status: "alive", generation: 4});
+			expect(alive).toContain("<strong>Lifecycle</strong> Alive");
+			expect(alive).toContain("<strong>Generation</strong> 4");
+			expect(alive).toContain("revival uses the exact one-hour death window");
+
+			const deadKnown = renderLifecycle({
+				status: "dead",
+				generation: 4,
+				diedAtGameMinute: 120,
+				timingKnown: true,
+			}, {minute: 135});
+			expect(deadKnown).toContain("<strong>Lifecycle</strong> Dead");
+			expect(deadKnown).toContain("<strong>Death minute</strong> 120");
+			expect(deadKnown).toContain("<strong>Revival deadline</strong> Game minute 180; 45 minutes remaining");
+			expect(deadKnown).toContain("take the Magic Action, touch the defender, and expend one normal or Pact Magic spell slot");
+			expect(deadKnown).toContain("after a completed Long Rest");
+
+			const deadUnknown = renderLifecycle({
+				status: "dead",
+				generation: 2,
+				diedAtGameMinute: null,
+				timingKnown: false,
+			});
+			expect(deadUnknown).toContain("<strong>Death timing</strong> Unknown; confirm it died within the last hour");
+
+			const pending = renderLifecycle({
+				status: "revivalPending",
+				generation: 2,
+				revivalPending: {dueAtGameMinute: 31},
+			}, {minute: 30});
+			expect(pending).toContain("<strong>Lifecycle</strong> Revival pending");
+			expect(pending).toContain("<strong>Pending completion</strong> Game minute 31");
+			expect(pending).toContain("Advance canonical game time by 1 minute");
+
+			const expired = renderLifecycle({
+				status: "expired",
+				generation: 2,
+				expiredAtGameMinute: 61,
+			}, {minute: 61});
+			expect(expired).toContain("<strong>Expired at</strong> Game minute 61");
+			expect(expired).toContain("one-hour revival window expired");
+
+			const vanished = renderLifecycle({
+				status: "vanished",
+				generation: 2,
+				vanishedAtGameMinute: 80,
+				vanishedReason: "summonerDeath",
+			}, {minute: 80});
+			expect(vanished).toContain("<strong>Vanished at</strong> Game minute 80");
+			expect(vanished).toContain("vanished when its owner died and does not return");
+			expect(vanished).toContain("Smith's Tools (XPHB)");
+		});
+
+		test("should keep EFA presentation isolated from name-only, TCE, and RHW companions", () => {
+			const nameOnly = new CharacterSheetState();
+			nameOnly.addCompanion({
+				name: "Steel Defender",
+				source: "EFA",
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				creatureType: "construct",
+				reactions: [{name: "Name-Only Deflect", description: "Generic reaction."}],
+			});
+
+			const tce = new CharacterSheetState();
+			tce.loadFromJson({
+				abilities: {str: 10, dex: 10, con: 10, int: 20, wis: 10, cha: 10},
+				classes: [getBattleSmithClass("TCE", 15)],
+			});
+			const tceId = tce.addCompanion({
+				name: "Steel Defender",
+				source: "TCE",
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				creatureType: "construct",
+				hp: {max: 82, current: 82},
+				featureGrant: {uid: TCE_STEEL_DEFENDER_UID},
+			});
+			tce.reconcileFeatureOwnedCompanion(tceId, {
+				summonerContext: tce.getFeatureCompanionSummonerContext(TCE_STEEL_DEFENDER_UID),
+			});
+
+			const reanimator = new CharacterSheetState();
+			reanimator.addCompanion({
+				name: "Reanimated Companion",
+				source: "RHW",
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				creatureType: "undead",
+				featureGrant: {uid: REANIMATOR_UID},
+			});
+
+			for (const candidate of [nameOnly, tce, reanimator]) {
+				const html = new CharacterSheetPdf(candidate).generate();
+				expect(html).not.toContain("pdf-companion--efa-steel-defender");
+				expect(html).not.toContain("Command &amp; Action Economy");
+				expect(html).not.toContain("<strong>Arcane Jolt</strong>");
+				expect(html).not.toContain("<strong>Lifecycle</strong>");
+				expect(html).not.toContain("<strong>Generation</strong>");
+				expect(html).not.toContain("[object Object]");
+			}
+			expect(new CharacterSheetPdf(tce).generate()).toContain("<strong>Deflect Attack</strong>");
 		});
 	});
 

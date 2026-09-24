@@ -430,7 +430,18 @@ void globalThis;
  *   skills?: string[],
  *   optionalFeatures?: Array<{name: string, source: SourceCode, type?: string}>,
  *   featureChoices?: Array<{featureName: string, choice: *}>,
- *   expertise?: string[]
+ *   expertise?: string[],
+ *   artificerPlans?: Array<{
+ *     opportunityId: string,
+ *     slotId: string,
+ *     acquisitionLevel: number,
+ *     selection: ArtificerPlanSelection
+ *   }>,
+ *   artificerPlanReplacements?: Array<{
+ *     opportunityId: string,
+ *     replacementLevel: number,
+ *     selection: ArtificerPlanReplacementSelection
+ *   }>
  * }} [choices]
  * @property {number} [ledgerVersion]
  * @property {number} [manifestVersion]
@@ -455,6 +466,87 @@ void globalThis;
  * }>} [decisions]
  * @property {boolean} [complete]
  * @property {number} [timestamp]
+ */
+
+/**
+ * Versioned exact provenance carried by a generated inventory item's nested
+ * item payload. Generated rows stay in the ordinary inventory collection.
+ *
+ * @typedef {object} GeneratedFeatureItemProvenance
+ * @property {1} version
+ * @property {{featureUid: string, classUid: string, subclassUid: string|null, featureSource: SourceCode}} owner
+ * @property {Object<string, *>} metadata
+ * @property {{
+ *   plan: {slotId: string|null, acquisitionLevel?: number, lineage?: Array<*>, selection: ArtificerPlanSelection},
+ *   resolvedItem: {itemUid: string, name: string, source: SourceCode, variantName?: string|null, baseItem?: string|null, category?: string|null}
+ * }|null} catalog
+ * @property {{order: number, receiptId: string, event: string|null, batchId: string|null}} creation
+ * @property {{
+ *   version: 1,
+ *   state: "active"|"unresolved",
+ *   deathExpiryDaysRemaining: number|null,
+ *   deathExpiryAssignedReceiptId: string|null,
+ *   expiryRecords: Array<{
+ *     version: 1,
+ *     policyId: string,
+ *     trigger: string,
+ *     assignedReceiptId: string,
+ *     roll: {formula: string, result: number|null},
+ *     daysRemaining: number|null,
+ *     repairRequired?: boolean,
+ *     repairReason?: string
+ *   }>,
+ *   callbacks: Object<string, string>,
+ *   metadata: Object<string, *>
+ * }} lifecycle
+ * @property {Array<Object<string, *>>} extensions
+ */
+
+/**
+ * Exact Replicate Magic Item plan identity. `itemUid`/`planUid` identify the
+ * plan; they are not inventory wrapper IDs.
+ *
+ * @typedef {object} ArtificerPlanSelection
+ * @property {1} version
+ * @property {string} planUid
+ * @property {string} itemUid
+ * @property {string} name
+ * @property {SourceCode} source
+ * @property {"fixed"|"wildcard"} planKind
+ * @property {string} catalogEntryId
+ * @property {string|null} categoryId
+ * @property {string|null} categoryLabel
+ * @property {number} tableLevel
+ * @property {boolean} repeatableCategory
+ * @property {string} displayName
+ */
+
+/**
+ * Optional every-Artificer-level replacement receipt.
+ *
+ * @typedef {object} ArtificerPlanReplacementSelection
+ * @property {string} targetSlotId
+ * @property {ArtificerPlanSelection} previousPlan
+ * @property {ArtificerPlanSelection} nextPlan
+ * @property {string|null} priorReplacementSemanticKey
+ */
+
+/**
+ * Configuration-only progression receipt for an acquired or replaced plan.
+ *
+ * @typedef {object} ArtificerPlanDecisionReceipt
+ * @property {1} version
+ * @property {"artificer-plan"} family
+ * @property {string|null} sourceDecisionKey
+ * @property {string|null} opportunityId
+ * @property {object|null} owner
+ * @property {number|null} decisionLevel
+ * @property {number|null} acquisitionLevel
+ * @property {number|null} replacementLevel
+ * @property {string|null} slotId
+ * @property {ArtificerPlanSelection} selection
+ * @property {{previousPlan: ArtificerPlanSelection, nextPlan: ArtificerPlanSelection, priorReplacementSemanticKey: string|null}|null} lineage
+ * @property {Array<{type: "configuration", key: "artificer-plan", value: "acquisition"|"replacement"}>} effects
  */
 
 /**

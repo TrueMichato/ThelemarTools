@@ -21,6 +21,17 @@ candidate until Apply succeeds. An untouched candidate refreshes if the live
 character changes before editing begins; a dirty candidate is never replaced
 silently.
 
+Feature-companion setup follows the same isolation rule. Subclass replacement
+runs `reconcileFeatureCompanionGrants({reason: "respecCandidate"})` against the
+candidate only. A legal exact-owner setup and companion retain their stable
+identity; a compatible EFA/TCE Battle Smith change uses
+`rebindFeatureOwnedCompanion()`; losing the exact grant marks the candidate
+companion inactive with lifecycle status `vanished` and leaves its setup
+record inactive rather than deleting either. Atomic Apply reruns the same
+idempotent reconciliation on the newly loaded live candidate before save.
+Cancel therefore cannot deactivate, rebind, or otherwise mutate the live
+companion.
+
 ## Progression Manifest and Ledger
 
 `levelHistory` remains the chronological source of class assignment, but each
@@ -50,9 +61,12 @@ history has no corresponding property. This is how skipped skills, tools,
 languages, expertise, spell picks, subclasses, ASIs, feats, and other deferred
 choices become repairable.
 
-Legal option catalogs exist only on the in-memory manifest. They are re-derived
-when Respec opens and are not serialized into `levelHistory`, preventing full
-spell, feat, and feature entities from inflating character saves.
+Most legal option catalogs exist only on the in-memory manifest. They are
+re-derived when Respec opens and are not serialized into `levelHistory`,
+preventing full spell, feat, and feature entities from inflating character
+saves. Compatibility choices which are seeded directly from acquired feature
+prose may retain a compact string option list until a generic descriptor owns
+their discovery; they never persist full catalog entities.
 
 ### Nested decisions
 
@@ -140,12 +154,85 @@ prototypes, including the concrete editor and family-specific apply/reverse
 entry points. A module which is not loaded cannot make the closure check pass
 vacuously.
 
+### EFA Artificer Replicate Magic Item plans
+
+Exact `Artificer|EFA` Replicate Magic Item plans are normal progression
+decisions, not inventory entries. `charactersheet-artificer-plans.js` parses the
+authoritative feature tables from `data/class/class-artificer.json`:
+
+- fixed `{@item ...}` rows use the tag's canonical `name|source` identity;
+  display aliases do not change identity;
+- the starred level-2 common-item, level-10 uncommon-Wondrous-Item, and level-14
+  rare-Wondrous-Item rows are repeatable wildcard categories;
+- every wildcard pick still binds one exact source-qualified item, and that
+  exact item cannot occupy another known-plan slot;
+- stable acquisition slots are created at Artificer levels 2/6/10/14/18 for
+  cumulative totals 4/5/6/7/8;
+- an optional replacement opportunity exists at every Artificer level from
+  level 2 onward. It records the target slot, previous plan, next plan, and
+  prior replacement semantic key.
+
+The decision types are `artificerPlan` and `artificerPlanReplacement`. Their
+compatibility projections are `choices.artificerPlans[]` and
+`choices.artificerPlanReplacements[]`. Each persisted receipt uses
+`family: "artificer-plan"` and contains the opportunity, exact owner,
+`decisionLevel`, acquisition-only `acquisitionLevel`, replacement-only
+`replacementLevel`, stable slot, source-qualified plan selection, and
+replacement lineage. Its only effect is a `configuration` receipt; Respec
+apply/reverse is intentionally inventory-free.
+
+Builder's higher-level handoff, Level Up, Quick Build, and Respec all use
+`CharacterSheetArtificerPlanPicker`. The picker keeps edits local until
+validation succeeds, supports search and fixed/wildcard filtering, disables
+duplicate exact items, shows source/eligibility badges, and presents the old
+and new plan together before a replacement commit. Cancel and invalid commit
+paths do not change live or candidate state. The current target plan is also
+disabled with an accessible explanation: choosing it is not a replacement, so
+the player must use **Keep Current Plans** for the non-mutating path.
+
+Legacy plan evidence with no exact source-qualified catalog identity is
+preserved as `ambiguous` and remains repairable in Respec. It is never guessed
+from a display name. `CharacterSheetState.getEfaArtificerPlanDecisions()`,
+`getEfaArtificerPlanProjection()`, and `getEfaArtificerPlans()` expose the
+ledger and current stable-slot projection for later consumers. These APIs
+include only decisions owned by exact `Artificer|EFA`: at least one complete
+top-level or `meta.owner` class pair must be exact, and every supplied class
+name/source field across both locations must agree. Subclass and feature source
+fields remain independent for mixed-source extensions.
+
+This milestone stops at plan decisions. It does not create, grant, mutate,
+remove, or expire replicated inventory items; those item-instance effects are
+reserved for the separate M3 transaction layer.
+
 Pending feature/spell queues remain compatibility caches, not a second ledger.
 An item which existed when a draft opened but is not yet represented by a
 decision is preserved and shown as a warning. A mutation which creates a new
 unrepresented pending item is rejected and rolled back immediately. Once a
 queue item has a source decision key, removing that decision consumes only the
 matching queue item.
+
+### Structured feature-choice replacement
+
+Permanent structured feature options use
+`CharacterSheetClassUtils.replaceStructuredFeatureChoice()` as their shared
+mutation boundary. The transaction removes the exact prior materialized
+feature and its owned effects, applies the replacement, updates
+`chosenSubfeatures`, and rewrites both `choices.featureChoices` and its replay
+snapshot. Acquisition flows may run it before the level-history row exists;
+Respec supplies the existing decision and performs the call inside
+`stageGraphMutation()`, which writes the replacement receipt and rolls the
+candidate back on failure. A future rules-driven switch flow can use the same
+transaction with history persistence and canonical synchronization instead of
+maintaining a second model-specific state path.
+
+Fixed-proficiency fallback features ("gain X; if already proficient, choose
+Y") expose their pending/resolved transaction as a normal `nestedTool`
+decision. The descriptor carries the full feature/class/subclass source UID,
+an exact acquisition key, and the subclass decision parent. Respec replacement
+updates the transaction, pending queue, fulfillment marker, progression
+ownership, and feature grant ledger atomically. It never matches by feature
+label, and removing or replacing one owner preserves the same tool proficiency
+when another exact owner or preserved source still requires it.
 
 ## Legacy Reconstruction
 
@@ -197,11 +284,26 @@ mechanics, ownership lookup, reversal, and reconciliation resolve them as
 stores, keeps the highest proficiency level, unions owners, and preserves
 meaningful custom skill punctuation.
 
+Conditional feature-granted tool choices use the same rule. EFA Artillerist
+**Tools of the Trade** records a `nestedTool` decision only when the character
+already had Woodcarver's Tools at acquisition time. The pending choice carries
+the full `Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA` UID, persists
+the original legal artisan-tool options, and claims progression ownership for
+the selected replacement. Respec therefore removes only the old decision-owned
+tool and preserves an overlapping manual, origin, or class grant.
+
 Materialized feature/resource rows carry their decision provenance where the
 feature path can provide it. Descendant teardown runs deepest-first and also
 clears chosen-subfeature records, resources, active states, and once-per-turn
 resource usage through the normal state removal APIs. Runtime uses are not
 treated as progression ownership and are not recreated by a manifest refresh.
+
+Subclass replacement treats an explicit `subclassSource` as authoritative.
+Legacy source-less subclass features are removable only when their class,
+subclass name, and entity source exactly identify the outgoing subclass.
+Weaker legacy provenance blocks the candidate change with a repair diagnostic
+instead of leaving a stale feature or guessing ownership; explicit rows owned
+by another source remain untouched.
 
 ## Historical Class Changes
 
@@ -223,6 +325,15 @@ Starting equipment and ordinary inventory are not reconstructed by a class
 change. Inventory, notes, identity, layout, favorites, custom data, and other
 non-progression state remain attached to the candidate.
 
+Generated `class_summon` companions are also runtime state, not progression
+decisions. The candidate receives the live state's runtime-only authoritative
+template catalog before its snapshot is loaded. Class reconstruction defers
+summon reconciliation until the complete class set has been rebuilt, avoiding
+false retirement while `_data.classes` is temporarily empty or partial. The
+finished candidate then reconciles exact owner source, subclass, level, slot,
+HP, and duration normally; a staged EFA↔TCE change therefore retires only the
+candidate's EFA cannon.
+
 ## Improvements and Feats
 
 ASI and feat opportunities are derived from the loaded class data instead of a
@@ -235,6 +346,12 @@ level 19 receive a feat-only opportunity:
 - a legacy level-19 ASI is marked invalid and must be repaired;
 - the editor can move both directions between ASI and feat when the opportunity
   genuinely permits both.
+
+Fallback discovery from `classFeatures` accepts canonical four-part UIDs and
+source-qualified five-part UIDs. It validates the referenced class name and
+class source against the containing class before treating the feature as an
+improvement, so a wrong-source or malformed reference cannot create an Epic
+Boon opportunity.
 
 Feat prerequisites are evaluated against the candidate for level, ability
 scores, spellcasting, race, background, armor/weapon proficiency, prior feats,
@@ -298,6 +415,11 @@ proficiency/expertise, decision ownership, resolved status, and receipt are all
 already complete. The guard runs before descendant reversal, so it neither
 dirties the draft nor consumes Undo. Missing mechanics, ownership, or receipts
 fall through the normal transaction and are repaired.
+
+Because generated-summon ownership and revision state is part of the serialized
+candidate, Apply commits its reconciled runtime result atomically and Undo
+restores the pre-Apply summon. Candidate retirement never mutates the live
+character before Apply.
 
 Apply is disabled while any required decision is missing, invalid, or ambiguous,
 or while an optional decision contains an invalid/ambiguous selection.
@@ -370,6 +492,17 @@ source-keyed receipt. Legal catalogs are recomputed transiently; they are never
 stored in the ledger. Origin nodes are stored under `characterBase.decisions`,
 while class and subclass nodes remain in their level-history entry.
 
+Conditional fixed proficiency grants capture their duplicate facts before any
+fixed grant is applied. EFA Alchemist `Tools of the Trade` records whether
+`Alchemist's Supplies|XPHB` and `Herbalism Kit|XPHB` were already owned, gives
+both fixed tools under the feature's source receipt, and creates exactly zero,
+one, or two replacement Artisan's Tool opportunities from that acquisition-time
+snapshot. Replacement selections are canonical tool-name arrays even for one
+pick; two-pick decisions require distinct legal values. Fixed and replacement
+sources reverse independently, preserving any pre-existing proficiency.
+Removing and replaying the subclass recomputes the duplicate snapshot from the
+candidate state rather than reusing stale counts.
+
 The descriptor census covers structured options, unions, recurring pools,
 object and string spell filters, `featProgression`, and reviewed prose
 fallbacks. Runtime-only data is classified separately from supported
@@ -383,8 +516,9 @@ Feature, modifier, spell, resource, and configuration effects carry the source
 decision receipt. Ownership claims preserve overlapping race/background/manual
 grants and remove only orphaned progression-owned values. Source-identical
 resources retain spent uses (clamped to the new maximum); same-named resources
-from different sources do not share uses. Triggered pools such as Cruel clear
-their `resourceTurnUsage` entries when removed.
+from different sources do not share uses. Triggered pools such as Cruel restore
+their stable-key `turnReceipts` entry across a same-owner rebuild and prune that
+exact owner/source receipt when removed.
 
 The nested editor is rendered inline in the level editor rather than opening a
 second modal. Rows expose graph depth and resolved/deferred/missing/invalid/
@@ -423,9 +557,9 @@ descendants deepest-first, reverses source-keyed receipts/ownership, applies
 the replacement, rediscovers children, retains only exact legal identities,
 and persists one refreshed manifest. Receipt reversal covers set ownership,
 features, modifiers, resources, spells, scalar ability changes, and reversible
-configuration. Resource cleanup also removes stale `resourceTurnUsage` entries;
-same-source resources preserve current uses while unrelated same-name resources
-do not inherit them.
+configuration. Resource cleanup also prunes exact stable-key `turnReceipts`;
+same-source resources preserve current uses and current-turn receipt state while
+unrelated same-name resources do not inherit either.
 
 The census now rejects reachable required `choose`/`options` nodes which do not
 produce a legal descriptor or an explicit reviewed runtime/non-Respec

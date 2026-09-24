@@ -19,6 +19,7 @@ import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-npc-exporter.js";
 
 const CharacterSheetNpcExporter = globalThis.CharacterSheetNpcExporter;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 const SCHEMA_PATH = path.resolve(process.cwd(), "node_modules/5etools-utils/schema/site/items.json");
 const hasSchema = fs.existsSync(SCHEMA_PATH);
@@ -407,6 +408,84 @@ describe("v20 — the collector ships exactly what the statblock names", () => {
 	it("survives an empty or malformed monster", () => {
 		expect(CharacterSheetNpcExporter.buildCompanionItems(null, mkState([CUSTOM]))).toEqual([]);
 		expect(CharacterSheetNpcExporter.buildCompanionItems({source: "CSHEET"}, null)).toEqual([]);
+	});
+
+	it("filters exact and repair-required EFA Elixirs while preserving same-name customs and unrelated generated items", () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Alchemist", shortName: "Alchemist", source: "EFA"},
+		});
+
+		const exact = state.createEfaExperimentalElixirSpellSlotVial({
+			effectKey: "healing",
+			batchId: "companion-exact",
+			spentSlotLevel: 1,
+		});
+		const stale = state.createEfaExperimentalElixirSpellSlotVial({
+			effectKey: "flight",
+			batchId: "companion-stale",
+			spentSlotLevel: 1,
+		});
+		expect(exact.ok).toBe(true);
+		expect(stale.ok).toBe(true);
+		for (const itemId of [exact.itemId, stale.itemId]) {
+			Object.assign(state.getInventory().find(it => it.id === itemId).item, {
+				_isCustom: true,
+				rarity: "rare",
+			});
+		}
+		state.getInventory().find(it => it.id === stale.itemId).item._generatedItemProvenance.metadata.metadataSchemaVersion = 999;
+
+		state.addItem({
+			name: "Experimental Elixir (Healing)",
+			source: "EFA",
+			type: "P",
+			rarity: "rare",
+			_isCustom: true,
+			entries: ["An independent custom potion."],
+		});
+		const unrelated = state.createGeneratedFeatureItem({
+			item: {
+				name: "Alchemical Homunculus Battery",
+				source: "EFA",
+				type: "P",
+				rarity: "rare",
+				_isCustom: true,
+				entries: ["An unrelated generated item."],
+			},
+			owner: {
+				featureUid: "Alchemical Homunculus|Artificer|EFA|Alchemist|EFA|3|EFA",
+				featureSource: "EFA",
+				classUid: "Artificer|EFA",
+				subclassUid: "Alchemist|Artificer|EFA|EFA",
+			},
+		});
+		expect(unrelated.ok).toBe(true);
+
+		const monster = {
+			source: "CSHEET",
+			trait: [{
+				name: "Gear",
+				entries: [
+					"{@item Experimental Elixir (Healing)|CSHEET}",
+					"{@item Experimental Elixir (Flight)|CSHEET}",
+					"{@item Alchemical Homunculus Battery|CSHEET}",
+				],
+			}],
+		};
+		const warnings = [];
+		const out = CharacterSheetNpcExporter.buildCompanionItems(monster, state, {warnings});
+
+		expect(out.map(it => it.name).sort()).toEqual([
+			"Alchemical Homunculus Battery",
+			"Experimental Elixir (Healing)",
+		]);
+		expect(warnings).toEqual([
+			expect.stringMatching(/Experimental Elixir \(Flight\).*excluded.*requires repair.*unsupported-efa-experimental-elixir-metadata-version/i),
+		]);
 	});
 });
 

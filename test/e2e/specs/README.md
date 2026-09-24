@@ -33,7 +33,11 @@ Full reference: [`docs/charactersheet/15-spawn-test-characters.md`](../../../doc
 
 ## TGTT comprehensive player-build coverage
 
-Eighteen spec files (`tgtt-*.spec.ts`) drive the full builder → level-up → loadout → toggle-effect flow for every TGTT character class/race combination actually played in the Thelemar campaign. They are deliberately exhaustive — the goal is to catch ~95% of player-facing bugs before a session.
+The `tgtt-*.spec.ts` comprehensive files drive the full builder → level-up →
+loadout → usage → matrix flow for campaign and regression builds. They are
+deliberately exhaustive — the goal is to catch ~95% of player-facing bugs before
+a session. The maintained catalog is
+[`docs/e2e/test-suite-catalog.md`](../../../docs/e2e/test-suite-catalog.md).
 
 | # | File | Build | Levels |
 |---|------|-------|--------|
@@ -57,6 +61,8 @@ Eighteen spec files (`tgtt-*.spec.ts`) drive the full builder → level-up → l
 |18 | `tgtt-horror-warlock-theocracian.spec.ts`       | Horror Warlock Theocracian                         | 1→20 |
 |19 | `tgtt-creation-bard.spec.ts`                    | College of Creation Bard Changeling                | 1→20 |
 |20 | `tgtt-wicked-witch-sorcerer.spec.ts`            | Wicked Witch Sorcerer Dwarf (Ar8 via TGTT `_copy`) | 1→20 |
+|21 | `tgtt-efa-cartographer-artificer.spec.ts`       | EFA Cartographer Artificer Dwarf                   | 1→20 |
+|22 | `tgtt-efa-artillerist-artificer.spec.ts`         | EFA Artillerist Artificer Human                    | 1→20 |
 
 The `tgtt-player-party.spec.ts` file is a separate party-import smoke test (not part of the comprehensive build standard).
 
@@ -64,13 +70,16 @@ See [`docs/e2e/comprehensive-test-standard.md`](../../../docs/e2e/comprehensive-
 
 Each spec calls one of two factories from `../utils/characterSpecFactory.ts`:
 
-- `describeCharacter(spec)` — emits 5 tests:
+- `describeCharacter(spec)` — emits 8 tests:
   1. **L1 creation** via builder wizard
   2. **L3 subclass arrival** + signature feature/toggle
   3. **L5 milestone** (Extra Attack / 3rd-level slots / prof +3)
   4. **Mid-tier loadout** (L7) — installs representative magic items, picks signature spells, asserts AC/attack/DC propagation, fires the signature toggle and asserts derived-stat delta.
   5. **MEGA L1→20 walkthrough** with milestone assertions at L1/3/5/11/17/20.
-  6. **Persistence smoke** — export → re-import.
+  6. **MEGA feature matrix** — gated by `RUN_MATRIX=1`.
+  7. **USE probes** — spell slot, resource, attack, rests, rolls, concentration,
+     death saves, conditions, and explicit inapplicable-surface skips.
+  8. **Persistence smoke** — export → re-import.
 
 - `describeMulticlassCharacter(spec)` — emits one walkthrough that levels primary class to the split point, opens the in-sheet `#charsheet-btn-multiclass` dialog, and continues levelling through the secondary class.
 

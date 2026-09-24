@@ -36,8 +36,9 @@ class CharacterSheetRespecEngine {
 		this._candidateState = new CharacterSheetState();
 		this._candidateState.setItemMaterialCatalog?.(this._liveState.getItemMaterialCatalog?.() || []);
 		this._candidateState.setDraconicResonanceCatalog?.(this._liveState.getDraconicResonanceCatalog?.() || []);
-		this._candidateState.setSpellData?.(this._page.getSpells?.() || []);
+		this._candidateState.setSpellData?.(this._page.getSpells?.() || this._liveState._allSpells || []);
 		this._candidateState.setClassCatalog?.(this._page.getClasses?.() || []);
+		this._candidateState.setClassSummonTemplateCatalog?.(this._liveState.getClassSummonTemplateCatalog?.() || []);
 		if (this._candidateState.loadFromJson(this._originalSnapshot) === false) {
 			throw new Error("Could not initialize the Respec draft.");
 		}
@@ -649,6 +650,7 @@ class CharacterSheetRespecEngine {
 		}
 		const candidate = this._candidateState.toJson();
 		if (this._liveState.loadFromJson(candidate) === false) throw new Error("The rebuilt character could not be loaded.");
+		this._liveState.reconcileFeatureCompanionGrants?.({reason: "respecApply"});
 
 		try {
 			await this._page.saveCharacter();
@@ -659,7 +661,7 @@ class CharacterSheetRespecEngine {
 		}
 
 		this._undoSnapshot = beforeApply;
-		this._originalSnapshot = candidate;
+		this._originalSnapshot = this._liveState.toJson();
 		this._candidateState = null;
 		this._manifest = null;
 		this._originalManifest = null;

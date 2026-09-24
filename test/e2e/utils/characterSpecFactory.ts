@@ -2,7 +2,16 @@ import * as fs from "fs";
 import * as path from "path";
 import {fileURLToPath} from "url";
 import {test, expect, TestInfo, Page} from "@playwright/test";
-import {CharacterSheetPage} from "../pages/CharacterSheetPage";
+import {
+	CharacterSheetPage,
+	FeatureCompanionDeathRevivalProbeOptions,
+	FeatureCompanionIdentity,
+	FeatureCompanionIsolationCompanion,
+	FeatureCompanionOperationProbe,
+	FeatureCompanionReplacementProbeOptions,
+	FeatureCompanionSetupExpectation,
+} from "../pages/CharacterSheetPage";
+import {FeatureCompanionSetupOptions} from "../pages/LevelUpPage";
 import {gotoWithThelemar, clearHomebrewStorage} from "./homebrewLoader";
 import {
 	createCharacterViaWizard,
@@ -19,6 +28,27 @@ import {
 	FeatureCheck,
 	InventoryItemRef,
 } from "./comprehensiveBuildHelpers";
+
+export interface FeatureCompanionLifecycleExtension {
+	deathAndRevival?: {
+		spellSlotLevel?: number;
+		probeUnknownLegacyTiming?: boolean;
+	};
+	replacement?: {
+		toolUid: string;
+		excludedToolUids?: string[];
+	};
+	vanishedState?: boolean;
+	isolationCompanions?: FeatureCompanionIsolationCompanion[];
+	pdfExport?: boolean;
+}
+
+export interface FeatureCompanionSpec {
+	identity: FeatureCompanionIdentity;
+	setup: FeatureCompanionSetupOptions;
+	l5Operation?: FeatureCompanionOperationProbe;
+	lifecycle?: FeatureCompanionLifecycleExtension;
+}
 
 /**
  * Shared describe-block factory for the comprehensive per-character mega
@@ -45,6 +75,8 @@ export interface CharacterSpec {
 	signatureToggle?: string | RegExp;
 	/** Explicit opt-out when the build has no toggle online at the L5 checkpoint. */
 	signatureToggleSkip?: {skip: true; reason: string};
+	/** Source-qualified class companion setup/operation coverage. */
+	featureCompanion?: FeatureCompanionSpec;
 	/**
 	 * Confirm-button label for a PROMPT-GATED signature toggle. Without this the
 	 * probe clicks Activate, the handler opens an `InputUiUtil` dialog and returns
@@ -70,10 +102,14 @@ export interface CharacterSpec {
 	milestones?: Partial<Record<number, MilestoneExpect>>;
 	/** Optional MEGA checkpoint levels; defaults to the shared 3/5/11/17/20 sample. */
 	megaCheckpoints?: number[];
+	/** Optional timeout for focused L3/L5 tests when required level-up pickers extend the walk. */
+	midTierTimeoutMs?: number;
 	/** Optional timeout for each MEGA test when extra checkpoints materially extend the walk. */
 	megaTimeoutMs?: number;
 	/** Run the feature matrix only in its dedicated MEGA test, avoiding duplicate long probes. */
 	featureMatrixDedicatedOnly?: boolean;
+	/** Prepare one final state fixture before the automatic successful MEGA export is captured. */
+	prepareFinalExport?: (charSheet: CharacterSheetPage) => Promise<void>;
 	/** Set true to skip the L1→20 mega test (e.g. for multiclass cases handled separately). */
 	skipMega?: boolean;
 	/**
@@ -135,16 +171,16 @@ export interface CharacterSpec {
 		 * Pass `{skip: true}` to keep the standard checklist visible
 		 * but skip on builds where the mechanic isn't applicable.
 		 */
-		skillRoll?: {name: string; expectBonusAtLeast?: number} | {skip: true};
+		skillRoll?: {name: string; expectBonusAtLeast?: number} | {skip: true; reason?: string};
 		/**
 		 * Take a short rest and assert that a named SR-restoring resource
 		 * (Warlock pact slots, Monk Discipline Points, Battle Master
 		 * superiority dice, etc.) is restored to the expected value.
-		 * The probe first spends one charge so the restoration delta is
-		 * observable; if the resource isn't online (max=0), the probe
-		 * is a no-op rather than a failure.
+		 * The probe spends one charge by default, or the full live pool when
+		 * `spend: "all"` is requested, so restoration deltas are observable.
+		 * If the resource isn't online (max=0), the probe is a no-op.
 		 */
-		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number} | {skip: true};
+		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number | "all"} | {skip: true; reason?: string};
 		/**
 		 * Concentration probe. Starts concentration on the named spell,
 		 * triggers `thenAction` (raw damage or activating Rage), then
@@ -160,28 +196,28 @@ export interface CharacterSpec {
 			thenAction: "damage" | "rage";
 			damageAmount?: number;
 			expectActive: boolean;
-		} | {skip: true};
+		} | {skip: true; reason?: string};
 		/**
 		 * Death save tracker probe. Marks one success and one failure,
 		 * asserts both counters advanced, then resets. Works for every
 		 * character — there's no "skip cleanly" reason except a known
 		 * product bug, which the {skip:true} sentinel covers.
 		 */
-		deathSaves?: true | {skip: true};
+		deathSaves?: true | {skip: true; reason?: string};
 		/**
 		 * Apply a condition (e.g. "poisoned"), assert it shows up in
 		 * `hasCondition()`, then remove it. Smoke-tests the
 		 * condition→render→state pipeline. `expectEffect` is optional;
 		 * when provided we also assert a derived stat changed.
 		 */
-		applyCondition?: {name: string; expectEffect?: "advantage" | "disadvantage" | "speed-0"} | {skip: true};
+		applyCondition?: {name: string; expectEffect?: "advantage" | "disadvantage" | "speed-0"} | {skip: true; reason?: string};
 		/**
 		 * Optional feat-toggle probe — same shape as `signatureToggle`
 		 * but specifically targeted at feat-driven abilities (Lucky,
 		 * GWM, Sharpshooter, Crossbow Expert). Skipped if the build
 		 * doesn't take the feat.
 		 */
-		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true};
+		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true; reason?: string};
 		/** Reminder-first Chained Fury flow plus optional creature bookkeeping. */
 		optionalChainTracking?: {skip: true; reason?: string} | {
 			targetName?: string;
@@ -225,12 +261,30 @@ const MIDTIER_TIMEOUT_MS = 180_000;
 const L7_TIMEOUT_MS = 600_000;
 
 export function describeCharacter (spec: CharacterSpec): void {
-	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
+	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, featureCompanion, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
-		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource, namedSubclassChoice: preset.namedSubclassChoice, preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
+		? {
+			subclassName: preset.subclassName,
+			subclassSource: preset.subclassSource,
+			namedSubclassChoice: preset.namedSubclassChoice,
+			preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern,
+			preferredFeatureChoices: preset.preferredFeatureChoices,
+		}
 		: preset.preferredFeatProgressionPattern
 			? {preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
 			: undefined;
+	const progressionOpts = {
+		...subclassOpts,
+		signatureSpells: preset.signatureSpells,
+		featureCompanionSetup: featureCompanion?.setup,
+	};
+	const featureCompanionSetupExpectation: FeatureCompanionSetupExpectation | null = featureCompanion
+		? {
+			nickname: featureCompanion.setup.nickname || "",
+			appearance: featureCompanion.setup.appearance,
+			locomotion: featureCompanion.setup.locomotion,
+		}
+		: null;
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {
@@ -268,29 +322,82 @@ export function describeCharacter (spec: CharacterSpec): void {
 			await charSheet.expectLevel(1);
 			const m1 = milestones[1];
 			if (m1) await assertMilestone(charSheet, m1);
+			if (featureCompanion) await charSheet.expectFeatureCompanionAbsent(featureCompanion.identity.ownerUid);
 		});
 
 		// ── L3 subclass arrival ─────────────────────────────────────────
 		const l3Test = skipL3 ? test.skip : test;
 		l3Test(`L3: subclass arrives and registers feature`, async ({page}) => {
-			test.setTimeout(MIDTIER_TIMEOUT_MS);
+			test.setTimeout(spec.midTierTimeoutMs || MIDTIER_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
-			await levelUpTo(page, 3, {...subclassOpts, signatureSpells: preset.signatureSpells});
+			await levelUpTo(page, 3, progressionOpts);
 			await charSheet.expectLevel(3);
 			const m3 = milestones[3];
 			if (m3) await assertMilestone(charSheet, m3);
+			if (featureCompanion) {
+				await charSheet.expectFeatureCompanionOperationSurface(featureCompanion.identity);
+			}
 		});
 
 		// ── L5 mid-game milestone ──────────────────────────────────────
 		const l5Test = skipL5 ? test.skip : test;
 		l5Test(`L5: extra attack / 3rd-level slots / prof +3`, async ({page}) => {
-			test.setTimeout(MIDTIER_TIMEOUT_MS);
+			test.setTimeout(spec.midTierTimeoutMs || MIDTIER_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
-			await levelUpTo(page, 5, {...subclassOpts, signatureSpells: preset.signatureSpells});
+			await levelUpTo(page, 5, progressionOpts);
 			await charSheet.expectLevel(5);
 			const m5 = milestones[5];
 			if (m5) await assertMilestone(charSheet, m5);
+			if (featureCompanion) {
+				await charSheet.expectFeatureCompanionOperationSurface(featureCompanion.identity, {expectRendReplacement: true});
+				if (featureCompanion.l5Operation) {
+					await charSheet.commitFeatureCompanionOperation(featureCompanion.identity, featureCompanion.l5Operation);
+				}
+			}
 		});
+
+		if (featureCompanion?.lifecycle?.deathAndRevival && featureCompanionSetupExpectation) {
+			test(`L3 companion lifecycle: death, revival, timing, and owner death`, async ({page}) => {
+				test.setTimeout(L7_TIMEOUT_MS);
+				const {charSheet} = await createCharacterViaWizard(page, preset);
+				await levelUpTo(page, 3, progressionOpts);
+				await charSheet.expectLevel(3);
+				const lifecycle = featureCompanion.lifecycle!;
+				const probe: FeatureCompanionDeathRevivalProbeOptions = {
+					setup: featureCompanionSetupExpectation,
+					preferredSpellSlotLevel: lifecycle.deathAndRevival?.spellSlotLevel,
+					probeUnknownLegacyTiming: lifecycle.deathAndRevival?.probeUnknownLegacyTiming === true,
+					assertOwnerVanishing: lifecycle.vanishedState === true,
+					isolationCompanions: lifecycle.isolationCompanions,
+				};
+				await charSheet.probeFeatureCompanionDeathAndRevival(featureCompanion.identity, probe);
+			});
+		}
+
+		if (featureCompanion?.lifecycle?.replacement && featureCompanionSetupExpectation) {
+			test(`L3 companion lifecycle: Long Rest replacement, undo, round-trip, and PDF`, async ({page}) => {
+				test.setTimeout(L7_TIMEOUT_MS);
+				const {charSheet} = await createCharacterViaWizard(page, preset);
+				await levelUpTo(page, 3, progressionOpts);
+				await charSheet.expectLevel(3);
+				const lifecycle = featureCompanion.lifecycle!;
+				const replacement = lifecycle.replacement!;
+				const inventoryUids = [replacement.toolUid, ...(replacement.excludedToolUids || [])];
+				await addInventoryItems(page, inventoryUids.map(uid => {
+					const [name, source] = uid.split("|");
+					if (!name || !source) throw new Error(`Feature companion replacement item UID must be name|source, got "${uid}"`);
+					return {name, source, strictSource: true};
+				}));
+				const probe: FeatureCompanionReplacementProbeOptions = {
+					setup: featureCompanionSetupExpectation,
+					toolUid: replacement.toolUid,
+					excludedToolUids: replacement.excludedToolUids,
+					isolationCompanions: lifecycle.isolationCompanions,
+					assertPdf: lifecycle.pdfExport === true,
+				};
+				await charSheet.probeFeatureCompanionReplacementPersistence(featureCompanion.identity, probe);
+			});
+		}
 
 		// ── Mid-tier loadout & toggle delta ────────────────────────────
 		// Targets L5 — the same tier where Extra Attack and 3rd-level
@@ -303,7 +410,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 			test(`L5 loadout: installs gear + signature toggle produces its mechanical effect`, async ({page}) => {
 				test.setTimeout(L7_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
-				await levelUpTo(page, 5, {...subclassOpts, signatureSpells: preset.signatureSpells});
+				await levelUpTo(page, 5, progressionOpts);
 				await charSheet.expectLevel(5);
 
 				if (midTierLoadout?.length) {
@@ -412,7 +519,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 			let cursor = 1;
 			for (const cp of checkpoints) {
 				if (cp <= cursor) continue;
-				await levelUpTo(page, cp, {...subclassOpts, signatureSpells: preset.signatureSpells});
+				await levelUpTo(page, cp, progressionOpts);
 				cursor = cp;
 				await charSheet.expectLevel(cp);
 				const m = milestones[cp];
@@ -422,6 +529,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 				}
 			}
+			if (spec.prepareFinalExport) await spec.prepareFinalExport(charSheet);
 		});
 
 		// ── Features-matrix-only MEGA (Phase 6) ────────────────────────
@@ -448,7 +556,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 				let cursor = 1;
 				for (const cp of checkpoints) {
 					if (cp <= cursor) continue;
-					await levelUpTo(page, cp, {...subclassOpts, signatureSpells: preset.signatureSpells});
+					await levelUpTo(page, cp, progressionOpts);
 					cursor = cp;
 					await charSheet.expectLevel(cp);
 					await charSheet.triggerLongRest();
@@ -469,9 +577,21 @@ export function describeCharacter (spec: CharacterSpec): void {
 				test.setTimeout(L7_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
 				if (atLevel > 1) {
-					await levelUpTo(page, atLevel, {...subclassOpts, signatureSpells: preset.signatureSpells});
+					await levelUpTo(page, atLevel, progressionOpts);
 				}
 				await charSheet.expectLevel(atLevel);
+				for (const [label, configured] of Object.entries({
+					skillRoll: usage.skillRoll,
+					shortRestRestores: usage.shortRestRestores,
+					concentrationCheck: usage.concentrationCheck,
+					deathSaves: usage.deathSaves,
+					applyCondition: usage.applyCondition,
+					featAbility: usage.featAbility,
+				})) {
+					if ((configured as any)?.skip) {
+						console.log(`[usage probe] ${label} skipped — ${(configured as any).reason || "no reason supplied"}`);
+					}
+				}
 
 				// Install the declared loadout before probing. Without this
 				// the attack probe can only ever see preset-granted gear —
@@ -560,10 +680,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 				//   short rest), since exact post-rest values are caster/level
 				//   dependent and brittle for spec-author guesses.
 				if (usage.shortRestRestores && !(usage.shortRestRestores as any).skip) {
-					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number; spend?: number};
+					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number; spend?: number | "all"};
 					const before = await charSheet.getResource(sr.resourceName).catch(() => null);
 					if (before && before.max > 0) {
-						await charSheet.useResourceByName(sr.resourceName, sr.spend || 1).catch(() => null);
+						const spend = sr.spend === "all" ? before.current : sr.spend || 1;
+						await charSheet.useResourceByName(sr.resourceName, spend).catch(() => null);
 						await charSheet.triggerShortRest();
 						const after = await charSheet.getResource(sr.resourceName).catch(() => ({current: -1, max: -1}));
 						if (sr.expectAfter != null) {
@@ -693,15 +814,32 @@ export function describeCharacter (spec: CharacterSpec): void {
 				return cs?._state?.toJson?.() ?? null;
 			});
 			expect(exported, "state.toJson()").toBeTruthy();
+			expect(
+				exported.classes?.some((it: any) =>
+					it?.name === preset.className
+					&& it?.source === preset.classSource,
+				),
+				`export should preserve exact class identity ${preset.className}|${preset.classSource}`,
+			).toBe(true);
 
 			const reimported = await page.evaluate((json) => {
 				const cs: any = (globalThis as any).charSheet;
 				if (!cs?._state?.loadFromJson) return null;
 				cs._state.loadFromJson(json);
 				cs.render?.();
-				return cs._state._data?.name || cs._state.getName?.() || null;
+				return {
+					name: cs._state._data?.name || cs._state.getName?.() || null,
+					classes: cs._state.getClasses?.() || cs._state._data?.classes || [],
+				};
 			}, exported);
-			expect(reimported).toBe(preset.name);
+			expect(reimported?.name).toBe(preset.name);
+			expect(
+				reimported?.classes?.some((it: any) =>
+					it?.name === preset.className
+					&& it?.source === preset.classSource,
+				),
+				`re-import should preserve exact class identity ${preset.className}|${preset.classSource}`,
+			).toBe(true);
 			await charSheet.expectLevel(1);
 		});
 	});

@@ -1,7 +1,7 @@
 import {Page} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {BuilderWizardPage} from "../pages/BuilderWizardPage";
-import {LevelUpPage} from "../pages/LevelUpPage";
+import {FeatureCompanionSetupOptions, LevelUpPage} from "../pages/LevelUpPage";
 
 /**
  * Character build presets for use across E2E tests.
@@ -29,14 +29,20 @@ export interface CharacterPreset {
 	name: string;
 	quickBuildTargetLevel?: number;
 	skillCount?: number;
+	/** Exact class-skill choices to make before filling any remaining required slots. */
+	preferredSkills?: string[];
 	masteryCount?: number;
 	optFeatCount?: number;
+	/** Starting-equipment branch. Defaults to gold for historical presets. */
+	equipmentOption?: "equipment" | "gold";
 	divineSoulAffinity?: string;
 	namedSubclassChoice?: {title: string; name: string};
 	/** Subclass to select on level-up (e.g. "Bladesinging"). */
 	subclassName?: string;
 	/** Subclass source ("TGTT", "TGTT-2014", "TGTT-2024", ...). */
 	subclassSource?: string;
+	/** Exact embedded feature-option picks made during level-up, keyed by parent feature name. */
+	preferredFeatureChoices?: Record<string, string>;
 	/**
 	 * Optional signature spells to deterministically pick during creation /
 	 * level-up wizards instead of relying on auto-fill. See pickSignatureSpells.
@@ -63,6 +69,63 @@ export interface CharacterPreset {
 	abilityPriority?: string[];
 	/** Additional homebrew JSON URLs required by this build. */
 	homebrewUrls?: string[];
+}
+
+export const EFA_ARTIFICER_BASE_PRESET_CONFIG = Object.freeze({
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA"],
+	skillCount: 2,
+	preferredSkills: ["Arcana", "Investigation"],
+	equipmentOption: "equipment" as const,
+	abilityPriority: ["int", "con", "dex", "wis", "str", "cha"],
+	signatureSpells: ["Acid Splash", "Cure Wounds"],
+});
+
+export type EfaArtificerSubclassPresetInput =
+	& Pick<CharacterPreset, "race" | "raceSource" | "background" | "bgSource" | "name">
+	& Required<Pick<CharacterPreset, "subclassName" | "subclassSource">>
+	& Partial<Omit<CharacterPreset,
+		| "race"
+		| "raceSource"
+		| "background"
+		| "bgSource"
+		| "name"
+		| "subclassName"
+		| "subclassSource"
+		| "className"
+		| "classSource"
+	>>;
+
+/**
+ * Source-safe EFA Artificer base preset for a real subclass consumer.
+ *
+ * Requiring the subclass identity is intentional: the EFA chassis gains its
+ * subclass at level 3, so this helper must not be used to publish a
+ * subclass-free comprehensive L1→20 build.
+ */
+export function buildEfaArtificerPreset (input: EfaArtificerSubclassPresetInput): CharacterPreset {
+	if (!input?.subclassName || !input?.subclassSource) {
+		throw new Error("buildEfaArtificerPreset requires an accepted EFA subclass name and source.");
+	}
+	return {
+		...EFA_ARTIFICER_BASE_PRESET_CONFIG,
+		...input,
+		className: "Artificer",
+		classSource: "EFA",
+		prioritySources: [...new Set([
+			...EFA_ARTIFICER_BASE_PRESET_CONFIG.prioritySources,
+			...(input.prioritySources || []),
+			input.raceSource,
+			input.bgSource,
+			input.subclassSource,
+		])],
+		skillCount: EFA_ARTIFICER_BASE_PRESET_CONFIG.skillCount,
+		preferredSkills: [...EFA_ARTIFICER_BASE_PRESET_CONFIG.preferredSkills],
+		equipmentOption: EFA_ARTIFICER_BASE_PRESET_CONFIG.equipmentOption,
+		abilityPriority: [...EFA_ARTIFICER_BASE_PRESET_CONFIG.abilityPriority],
+		signatureSpells: [...EFA_ARTIFICER_BASE_PRESET_CONFIG.signatureSpells],
+	};
 }
 
 // NOTE: All legacy PRESETs use `classSource: "TGTT"` because the character-sheet
@@ -168,6 +231,96 @@ export const PRESET_FULL_XPHB_DEVOTION_PALADIN: CharacterPreset = {
 	subclassSource: "PHB'24",
 	signatureSpells: ["Bless", "Divine Smite", "Shield of Faith"],
 };
+
+/** Exact Eberron: Forge of Artifice Battle Smith. */
+export const PRESET_FULL_EFA_BATTLE_SMITH_ARTIFICER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA", "XPHB", "PHB"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB",
+	name: "Kelda Ironward",
+	skillCount: 2,
+	subclassName: "Battle Smith",
+	subclassSource: "EFA",
+	abilityPriority: ["int", "con", "dex", "wis", "str", "cha"],
+	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
+/** Exact EFA Artificer with the RHW Reanimator subclass. */
+export const PRESET_FULL_EFA_REANIMATOR_ARTIFICER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["RHW", "EFA", "XPHB"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Mara Gravewright",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Reanimator",
+	subclassSource: "RHW",
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
+/** Exact-source EFA Alchemist Artificer. The subclass arrives at level 3. */
+export const PRESET_FULL_EFA_ALCHEMIST: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA", "XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Mira Vialkeeper",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Alchemist",
+	subclassSource: "EFA",
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
+/** Exploring Eberron Artificer (2024 chassis), specialized as an EFA Artillerist. */
+export const PRESET_FULL_EFA_ARTILLERIST_ARTIFICER: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Mara Cannonsmith",
+	skillCount: 2,
+	optFeatCount: 1,
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+	subclassName: "Artillerist",
+	subclassSource: "EFA",
+	signatureSpells: ["Fire Bolt", "Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
+/** Exact-source EFA Armorer Artificer; the required Armor Model resolves to Dreadnaught first. */
+export const PRESET_FULL_EFA_ARMORER_ARTIFICER = buildEfaArtificerPreset({
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Kelda Ironmantle",
+	optFeatCount: 1,
+	subclassName: "Armorer",
+	subclassSource: "EFA",
+	preferredFeatureChoices: {"Armor Model": "Dreadnaught"},
+	prioritySources: ["XPHB"],
+});
 
 /** Bard — spellcaster with known spells */
 export const PRESET_BARD: CharacterPreset = {
@@ -1080,6 +1233,31 @@ export const PRESET_FULL_SPELLFIRE_SORCERER: CharacterPreset = {
 };
 
 /**
+ * EFA Cartographer Artificer on the exact EFA 2024 chassis.
+ *
+ * `Artificer` also exists in TCE, so both the source priority and exact class /
+ * subclass sources are load-bearing. Dwarf avoids the 2024 Human's additional
+ * Origin-Feat picker, while the INT-first array makes every Cartographer-scaled
+ * pool and rider representative.
+ */
+export const PRESET_FULL_EFA_CARTOGRAPHER_ARTIFICER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA", "XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Mira Wayfinder",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Cartographer",
+	subclassSource: "EFA",
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+};
+
+/**
  * Wicked Witch Sorcerer (Arcadia 8 subclass re-parented onto the TGTT Sorcerer chassis).
  *
  * The subclass reaches the sheet as a `_copy` in `homebrew/TravelersGuidetoThelemar.json`
@@ -1180,8 +1358,11 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 	PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER,
 	PRESET_FULL_SPELLFIRE_SORCERER,
+	PRESET_FULL_EFA_CARTOGRAPHER_ARTIFICER,
+	PRESET_FULL_EFA_REANIMATOR_ARTIFICER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 	PRESET_FULL_LUNAR_SORCERY_SORCERER,
+	PRESET_FULL_EFA_ARTILLERIST_ARTIFICER,
 ];
 
 /**
@@ -1259,8 +1440,14 @@ export async function createCharacterViaWizard (
 	if (preset.subclassName && await builder.hasLevel1SubclassSelection()) {
 		await builder.selectLevel1Subclass(preset.subclassName, preset.subclassSource);
 	}
+	if (preset.preferredSkills?.length) {
+		for (const skill of preset.preferredSkills.slice(0, preset.skillCount ?? preset.preferredSkills.length)) {
+			await builder.selectSkillProficiency(skill);
+		}
+	}
 	if (preset.skillCount) {
-		await builder.selectFirstAvailableSkills(preset.skillCount);
+		const remainingSkillCount = Math.max(0, preset.skillCount - (preset.preferredSkills?.length ?? 0));
+		if (remainingSkillCount) await builder.selectFirstAvailableSkills(remainingSkillCount);
 	}
 	// Presets' `skillCount` can under-count what the class grants; top up from
 	// the live counter so the picker never silently gates Next.
@@ -1305,8 +1492,9 @@ export async function createCharacterViaWizard (
 	await builder.assignStandardArrayDefaults(preset.abilityPriority);
 	await builder.clickNext();
 
-	// Step 5: Equipment — take gold (simplest)
-	await builder.selectEquipmentOption("gold");
+	// Step 5: Equipment — historical presets take gold; feature probes can
+	// opt into the class package when an exact starting tool/item is load-bearing.
+	await builder.selectEquipmentOption(preset.equipmentOption ?? "gold");
 	await builder.clickNext();
 
 	// Step 6: Spells (renders for every class; only spellcasters have a
@@ -1433,7 +1621,16 @@ export async function pHandleLevelUpClassPicker (page: Page, targetClassName?: s
 export async function levelUpTo (
 	page: Page,
 	targetLevel: number,
-	opts?: {subclassName?: string; subclassSource?: string; namedSubclassChoice?: {title: string; name: string}; signatureSpells?: string[]; targetClassName?: string; preferredFeatProgressionPattern?: RegExp},
+	opts?: {
+		subclassName?: string;
+		subclassSource?: string;
+		namedSubclassChoice?: {title: string; name: string};
+		preferredFeatureChoices?: Record<string, string>;
+		signatureSpells?: string[];
+		targetClassName?: string;
+		preferredFeatProgressionPattern?: RegExp;
+		featureCompanionSetup?: FeatureCompanionSetupOptions;
+	},
 ): Promise<void> {
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
@@ -1462,6 +1659,7 @@ export async function levelUpTo (
 		// A feature-choice prompt left over from the previous level blocks this
 		// one's wizard from closing — clear it before opening the next.
 		await levelUp.resolvePendingFeatureChoices();
+		await levelUp.resolvePendingFeatureCompanionSetup(opts?.featureCompanionSetup);
 
 		// When `opts.targetClassName` is provided, bypass the Level Up
 		// button entirely and call the production API directly. This
@@ -1548,9 +1746,18 @@ export async function levelUpTo (
 			signatureSpells: opts?.signatureSpells,
 		});
 
+		// Nested Artificer plan pickers and other auto-fill surfaces may re-render
+		// the wizard. Apply caller-pinned feature options to the final live group.
+		if (await levelUp.isAccordionVisible("featoptions")) {
+			for (const [featureName, optionName] of Object.entries(opts?.preferredFeatureChoices || {})) {
+				await levelUp.selectFeatureOption(featureName, optionName);
+			}
+		}
+
 		// Finish this level
 		await levelUp.finish();
 		await levelUp.resolvePendingFeatureChoices();
+		await levelUp.resolvePendingFeatureCompanionSetup(opts?.featureCompanionSetup);
 		await levelUp.expectModalClosed();
 		await page.waitForTimeout(100);
 

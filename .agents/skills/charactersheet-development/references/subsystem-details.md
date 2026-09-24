@@ -12,6 +12,14 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+- Generated Feature Items and EFA Replicate Magic Item
+- EFA Tinker's Magic and Magic Item Tinker
+- Stable-Key Per-Turn Receipts
+- Committed Feature Uses and EFA Flash of Genius
+- RHW Reanimator R2a State and Ownership
+- Fixed Proficiency with Fallback Transactions
+- Feature-Companion Acquisition and Setup
+- EFA Steel Defender Lifecycle Surfaces
 
 ## Gemstone Empowerment
 
@@ -36,6 +44,1637 @@ standing flat-damage line. Chalice storage uses
 `getGemstoneSpellStorage`/`storeGemstoneSpell`/`castGemstoneStoredSpell`/
 `removeGemstoneStoredSpell`; its two-level capacity is gem-scoped and persists
 across unsocket/resocket.
+
+## Generated Feature Items and EFA Replicate Magic Item
+
+Generated items remain ordinary inventory rows with exact versioned provenance;
+there is no feature-specific parallel inventory. Use the existing public
+surface:
+
+```javascript
+state.createGeneratedFeatureItem({
+    item,
+    owner,       // exact featureUid/classUid/subclassUid/featureSource
+    metadata,
+    catalog,     // exact plan selection + resolved catalog item
+    creation,    // stable order/receipt/event/batch
+    lifecycle,   // versioned state/callback metadata
+    extensions,
+    equipped,
+    attuned,
+});
+state.classifyGeneratedFeatureItem(itemOrWrapper);
+state.getGeneratedFeatureItemRows(owner);
+state.removeGeneratedFeatureItemsByOwner(owner);
+state.getGeneratedFeatureItemManagementRows();
+state.reconcileGeneratedFeatureItemDeathTransition({reason?});
+state.advanceGeneratedFeatureItemLifecycleDays(days);
+```
+
+Generated lifecycles consume the shared persisted game-time contract:
+
+```javascript
+state.getGameTimeMinutes();
+state.advanceGameTimeMinutes(positiveWholeMinutes, {reason, identity?});
+state.advanceTime(hours); // compatibility wrapper; hours must resolve to whole minutes
+state.advanceRestTime("short" | "long", {identity?});
+```
+
+`gameTime: {version: 1, minute, lastLongRestMinute}` is character state, not
+wall-clock time. The only normal mutation boundary is
+`advanceGameTimeMinutes`; it validates the entire request before mutation and
+returns one receipt with `priorMinute`, `newMinute`, `deltaMinutes`, `reason`,
+`identity`, and `receiptId`. Lifecycle updates/removals are part of that same
+transaction. A teardown failure restores the state snapshot and returns a
+failure receipt rather than a success-shaped result. Public time APIs accept
+only non-array object option bags; malformed bags return
+`invalid-game-time-options` or `invalid-rest-time-options` without mutation.
+Exact EFA Steel Defender due-times participate in this same transaction:
+known-time dead defenders expire at death minute +61, while a pending revival
+completes at its recorded due minute before dead-state expiry is considered.
+There is no companion wall clock, timer pass, or subclass-owned time state.
+
+Every generated row is custom, quantity 1, and has a unique wrapper id and
+`_generatedItemId`, so it never stacks with ordinary or generated rows.
+`replaceItem`, save/export/import, containers, notes, favorites, equipment,
+attunement, charges, item effects, attacks, and item powers continue to use
+normal inventory behavior. Removal goes through `removeItem`; deleting a
+generated container therefore spills its surviving contents normally.
+
+The persisted `_generatedItemProvenance` shape is:
+
+```javascript
+{
+    version: 1,
+    owner: {featureUid, classUid, subclassUid, featureSource},
+    metadata: {sourceFeatureUid?, temporary?, ...},
+    catalog: {
+        plan: {slotId, acquisitionLevel?, lineage?, selection},
+        resolvedItem: {itemUid, name, source, variantName?, baseItem?, category?},
+    } | null,
+    creation: {order, receiptId, event, batchId},
+    lifecycle: {
+        version: 1,
+        state: "active" | "unresolved",
+        // Backward-compatible mirrors of the death record below.
+        deathExpiryDaysRemaining: null | number,
+        deathExpiryAssignedReceiptId: null | string,
+        expiryRecords: [{
+            version: 1,
+            policyId: "expire-after-1d4-days",
+            trigger: "death",
+            assignedReceiptId,
+            roll: {formula: "1d4", result: number | null},
+            assignedMinute: number,
+            expiryMinute: number,
+            minutesRemaining: number,
+            daysRemaining: number | null,
+            repairRequired?,
+            repairReason?,
+        }],
+        callbacks: {},
+        metadata: {},
+    },
+    extensions: [],
+}
+```
+
+Load migration only upgrades rows that already carry valid exact generated
+ownership. It assigns missing creation/lifecycle defaults idempotently and
+never claims name-only legacy items. Unsupported provenance/lifecycle
+versions, duplicate generated ids, malformed owners, legacy owners without an
+exact `featureSource` (including six-part subclass feature UIDs), and missing/ambiguous
+catalog identities stay in inventory and surface through
+`getGeneratedFeatureItemManagementRows()` plus the inventory's **Repair
+required** badge.
+
+Death transition state is persisted once per character:
+
+```javascript
+generatedFeatureItemLifecycle: {
+    version: 1,
+    deathTransition: {
+        version: 1,
+        isFinalizedDead,
+        receiptId,
+    },
+}
+```
+
+Only authoritative mutations reconcile that marker. Passive `isDead()`,
+`getHp()`, rendering, serialization, and management getters remain pure. A
+raw pending zero-HP intervention defers finalization until
+`clearPendingZeroHpIntervention()` resolves success, failure, or decline.
+Every valid generated row whose lifecycle registers
+`onDeath: "expire-after-1d4-days"` receives one persisted roll for that
+finalized death receipt only when its exact owner, including `featureSource`,
+matches `EFA_REPLICATE_MAGIC_ITEM_OWNER`. Reconciliation, save/load, revival,
+and passive reads never reroll or reset a record; valid Replicate rows created
+while the owner remains dead use the same generic creation callback. Pending
+zero-HP intervention prompts are transient and are not exported or restored;
+only a currently actionable live prompt defers reconciliation. Legacy valid
+death-expiry mirrors migrate into one canonical expiry record without rerolling.
+Legacy `daysRemaining` is anchored once at the loaded shared clock minute as an
+absolute `expiryMinute`; subsequent loads preserve that due minute. The
+whole-day display mirror is always `ceil(minutesRemaining / 1440)`, while exact
+expiry/removal uses the absolute minute. This migration runs only after valid
+generated classification and an exact Replicate owner match (including
+`featureSource`); the expiry-minute migration does not normalize or update
+foreign or malformed lifecycle records.
+The public `serialize()`/`CharacterSheetState.deserialize()` round trip delegates
+to the same `toJson()`/`loadFromJson()` path, so it cannot bypass cleanup,
+migration, or authoritative death reconciliation.
+
+Zero-HP interventions may declare a generic `selectionCost` of type
+`inventoryRows`. The descriptor owns exact generated-item provenance, allowed
+rarities, active/unexpired lifecycle gates, minimum count, copy, and consume
+policy; the damage UI only renders that contract and contains no
+Artificer-specific branch. Selection options are advisory. The state
+re-resolves them at commit and rejects empty, foreign, copied/ambiguous, stale,
+inactive, expired, wrong-rarity, or missing rows. Removal is one transaction:
+snapshot, ordinary `removeItem()` teardown, verify every row is gone, and full
+rollback on any failure. Success sets the descriptor-derived HP, resets death
+saves/massive-death state, and clears the pending trigger while alive; decline
+or invalid commit clears it while dead so the existing Replicate expiry
+finalization still runs. Pending prompts remain runtime-only.
+
+Lifecycle days advance only through
+`advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. It is a
+compatibility wrapper over
+`advanceGameTimeMinutes(positiveWholeDays * 1440, ...)`, so it advances the
+same clock rather than maintaining a parallel counter. The minute transaction
+validates before mutation, updates registered pending records, and removes due
+exact-owner Replicate rows through ordinary `removeItem` teardown.
+Foreign generated-item owners are ignored even if malformed data copies the
+same callback IDs. A long rest is not a lifecycle-day shortcut and never calls
+this API; committed rests instead consume the current
+`getRestRequirements()` duration (short 60, long 480 minutes) through
+`advanceRestTime`. The dormant Warder's Duty `longRestHours` calculation is not
+yet consumed by the rest-duration API. The Inventory tab's **Generated
+Items** manager shows exact ownership, plan/resolved item, creation order,
+roll/days, and repair state; **Advance Day** requires confirmation and reports
+the result through an ARIA live region.
+
+EFA Replicate Magic Item uses exact owner
+`Replicate Magic Item|Artificer|EFA|2` / `Artificer|EFA`, with required,
+independent `featureSource: "EFA"` included in the owner key. Its production APIs
+are:
+
+```javascript
+state.getEfaReplicateMagicItemProductionOptions();
+state.commitEfaReplicateMagicItemsAtLongRest({selections, extensions?});
+state.getEfaReplicateMagicItemLifecycleDescriptors({extensions?});
+state.getGeneratedFeatureItemCapacitySnapshot({owner, rows?, descriptors});
+state.commitGeneratedFeatureItemPlanLineage({owner, removedPlan, slotId?});
+state.reconcileEfaReplicateMagicItems({reason?});
+```
+
+Direct plans resolve one exact source-qualified catalog entity. A fixed generic
+variant such as `+1 Weapon|XDMG` resolves the enhanced specific variants whose
+`_variantName` and variant source match; the player must choose one exact
+specific item. Missing or ambiguous resolution fails before inventory
+mutation.
+
+Long-rest production is optional and atomic. It requires equipped
+`Tinker's Tools|XPHB`, accepts at most the EFA simultaneous-created-item
+maximum, and requires a different known plan for every item in the batch. A
+blank/cancelled or unresolved production request does not mutate inventory;
+the surrounding long rest still commits. When the cap would be exceeded, the
+oldest exact-owner rows are evicted by persisted creation order. Immediate
+self-attunement is optional: requirement/cap failure is reported but does not
+cancel a valid creation. Slot-exempt items use the shared attunement policy and
+never consume the ordinary cap.
+
+Capacity extensions use the same structured descriptor path as the base cap.
+Overlapping constrained descriptors are assigned with maximum matching, so
+capacity is independent of descriptor registration order.
+Descriptors declare exact allowed owners, allowed item kinds, optional
+category/generated predicates, lifecycle callback metadata, and extension
+metadata. This is the reusable seam for subclass and feature consumers.
+
+EFA Armorer Armor Replication is the first registered subclass consumer. Exact
+`Artificer|EFA` + `Armorer|EFA` at level 9 contributes one descriptor owned by
+`Improved Armorer|Artificer|EFA|Armorer|EFA|9|EFA`. The descriptor adds one
+capacity slot which matches only canonical `armor` or `shield` item kinds. The
+base cap remains unchanged; a fourth non-Armor replica therefore fails capacity
+matching instead of consuming an unconstrained `+1`. Descriptor derivation is
+read-only from the exact class/subclass identity, so downgrade, Respec, source
+loss, save/load, and reconciliation need no persisted Armorer ledger.
+Experimental Elixir and Reanimator consumers are not registered by the base
+Replicate implementation.
+
+EFA Armorer Improved Arsenal uses the ordinary generated-weapon effective-bonus
+path rather than mutating the generated item. At exact EFA Armorer level 9+,
+`getEffectiveItemBonuses(itemId)` adds +1 attack and +1 damage only when the
+row's permanent `_efaArmorerWeaponId` matches the active model of the currently
+worn, bound Arcane Armor. `_resolveGeneratedFeatureItemAttack()` consumes those
+folded totals through `getEffectiveWeaponDamage()`, then composes any
+player-authored `customAttackBonus`/`customDamageBonus`. Dormant model rows,
+same-named user items, doffed/unbound armor, death, unresolved models,
+downgrades, Respec/source loss, and TCE/mixed-source Armorers receive no bonus.
+No `bonusWeapon` value or separate persisted ledger is written, so model
+switches and save/load preserve wrapper IDs and customization.
+
+Committed M2 plan replacement calls the generic plan-lineage hook; class/source
+loss reconciles only the exact EFA owner. Equipped live Replicate-generated
+Wands and Weapons are additional legal focuses for exact `Artificer|EFA`
+casting. Spell-cast focus references preserve wrapper id, catalog item UID,
+generated id, exact owner, and creation receipt.
+
+**Operate-mode interaction brief.** The audience is a player finishing a long
+rest under table-time pressure. Recovery remains the primary hierarchy;
+Replicate production is a later optional fieldset showing current/capacity,
+up to the exact cap of labelled native selects, optional attunement, and a live
+status message. Blank rows mean "skip." Duplicate plans, unavailable catalog
+rows, and missing specific variants explain that the rest will still finish
+while production remains non-mutating. The controls use keyboard-native
+selects/checkboxes, fieldset/legend grouping, explicit labels, an `aria-live`
+status, existing Rest modal styling, and a single-column mobile layout.
+Anti-goals are a nested modal, forced creation, Replicate-only inventory,
+long-rest expiry, or subclass-specific mechanics.
+
+Base Replicate rows deliberately do not expire on long rest. Death countdown
+assignment and explicit lifecycle-day advancement are reserved for the
+follow-up milestone; passive death/HP reads must remain mutation-free, and a
+pending zero-HP intervention must defer any future death finalization until
+the intervention is cleared.
+
+## EFA Spell-Storing Item
+
+Exact `Artificer|EFA` level 11+ characters can commit one Spell-Storing Item
+choice at the end of a long rest. The selection is optional: a blank,
+incomplete, cancelled, or unresolved selection leaves the existing storage
+unchanged while the rest still completes. Host choices are live held Simple or
+Martial weapons plus rows accepted by the existing EFA focus resolver,
+including active Replicate-generated Wands and Weapons. Spell choices are
+exact source-qualified EFA Artificer level 1-3 spells with an Action casting
+time and no consumed Material component; preparation is irrelevant.
+
+Storage is a versioned `_spellStorage` descriptor on the exact host item
+payload, not a parallel feature ledger:
+
+```javascript
+{
+    version: 1,
+    storageId,
+    featureUid: "Spell-Storing Item|Artificer|EFA|11|EFA",
+    ownerClassUid: "Artificer|EFA",
+    host: {inventoryItemId, itemUid, generatedFeatureItem?},
+    spell: {uid, name, source, level, data},
+    casting: {
+        owner: {characterId, name, classUid: "Artificer|EFA"},
+        ability: "int",
+        abilityMod,
+        proficiencyBonus,
+        saveDc,
+        attackBonus,
+    },
+    usesMax,
+    usesCurrent,
+    createdAt,
+    repair: {status: "active" | "stale" | "expired", reasons, lastCheckedReason},
+}
+```
+
+Use `getEfaSpellStoringItemOptions()`,
+`commitEfaSpellStoringItemAtLongRest()`,
+`reconcileEfaSpellStoringItem()`, `prepareEfaSpellStoringItemUse()`,
+`reserveEfaSpellStoringItemUse()`,
+`releaseEfaSpellStoringItemUseReservation()`, and
+`commitEfaSpellStoringItemUse()`. The runtime-only reservation serializes the
+exact storage/host/holder while target/effect resolution is pending, while all
+holders' active reservations count against the shared remaining-use capacity.
+The exact holder remains separate for per-turn receipts and effect ownership.
+Reservations are released on cancellation or failure; the persisted use and
+turn receipt still commit only after the effect succeeds. Reuse replaces prior
+storage and prunes only its exact current-turn receipts. Host removal, host
+identity replacement, or loss of exact EFA level/source ownership cleans
+storage. Generated hosts must still resolve their full accepted focus
+reference: generated id, exact owner, catalog item, and creation receipt.
+Missing catalogs, unsupported versions, malformed owner/casting identities,
+and generated identity mismatch remain visible as stale repair states and are
+never guessed.
+
+The stored effect is projected as a generic `kind: "storedSpell"` item power.
+`CharacterSheetSpells.pUseEfaSpellStoringItem()` resolves the normal core spell
+effect with the snapshotted Artificer modifier/DC/attack, but does not publish
+a committed-class-cast receipt, run the focus gate, consume slots/components,
+end cast-sensitive states, or apply/consume caster-only damage and on-cast
+riders. The item use and turn receipt commit only after the effect succeeds;
+cancellation spends nothing, and a resource commit failure rolls back that
+exact receipt.
+
+In combat, the accepted stable-key turn ledger gates the exact
+storage/host/holder identity until that holder's next turn. Out of combat no
+turn receipt is created. The Inventory prompt requires an explicit acting
+holder; external holder identities own both their receipt and concentration,
+so replacing one holder's concentration does not clear another holder's entry
+or effects. Concentration-created states, companions, and temporary attacks can
+persist `effectOwnerId`/`effectHolderUid`; teardown matches the removed
+concentration entry's exact owner before falling back to legacy spell-name
+matching. Self-only effects used by an external holder are reported as an
+explicit external resolution and never mutate the Artificer's HP, conditions,
+or active states.
+
+**Operate-mode interaction brief.** Long Rest adds one optional fieldset with
+labelled native host/spell selects and an `aria-live` status. Inventory,
+Combat, and Play Mode reuse the item-power surfaces and show host, spell, uses,
+DC/attack, repair/depleted state, and the disabled reason. The holder picker is
+keyboard-native and requires a stable external name/ID instead of silently
+assigning the Artificer. Existing single-column modal flow remains mobile-safe.
+
+## EFA Tinker's Magic and Magic Item Tinker
+
+The bounded base-Artificer M4 surface is owned by exact `Artificer|EFA` level
+gates: Tinker's Magic at level 1 and Magic Item Tinker at level 6. Mending
+remains part of normal spell progression. Feature calculations expose
+`hasTinkersMagic`, `tinkersMagicUses`, and `hasMagicItemTinker`; Tinker's Magic
+uses are the Intelligence modifier, minimum 1.
+
+All four operations use one preview/commit transaction surface:
+
+```javascript
+state.getEfaArtificerTinkerOptions();
+state.previewEfaArtificerTinkerTransaction(request);
+state.commitEfaArtificerTinkerTransaction(request);
+state.reconcileEfaArtificerTinker({reason?});
+state.applyEfaArtificerTinkerLongRestTransition();
+```
+
+Requests are versioned, source-qualified, and contain only stable state
+identities:
+
+```javascript
+{version: 1, operation: "tinkersMagic", itemUid}
+{version: 1, operation: "charge", itemId, slotLevel, slotPool: "ordinary" | "pact"}
+{version: 1, operation: "drain", itemId}
+{version: 1, operation: "transmute", itemId, targetPlanSlotId, resolvedItemUid}
+```
+
+Preview is pure. Commit snapshots the complete character state, consumes an
+Action or Bonus Action only while combat is active, performs the normal item
+and spell-slot mutations, and restores the snapshot plus item effects on any
+failure. Cancellation, stale identity, catalog resolution failure, unavailable
+action economy, capacity failure, attunement failure, and item-creation failure
+therefore spend nothing. Out-of-combat use never leaves a persistent Action or
+Bonus Action lock.
+
+Tinker's Magic resolves only the exact published 31-item `XPHB` list and
+requires an equipped exact `Tinker's Tools|XPHB` row accepted by the existing
+spell-focus/proficiency pipeline. Every creation uses
+`createGeneratedFeatureItem` with exact owner
+`Tinker's Magic|Artificer|EFA|1` / `Artificer|EFA` /
+`featureSource: "EFA"`. Rows remain distinct, use normal inventory teardown,
+and carry lifecycle callbacks `onLongRest: "remove"` and
+`onOwnerRemoved: "remove"`.
+
+Magic Item Tinker accepts only active generated rows whose owner exactly
+matches base EFA Replicate Magic Item:
+
+- **Charge** spends one available ordinary or Pact Magic slot of level 1 or
+  higher and restores exactly the paid slot level, clamped to the item's
+  maximum. The selected pool is explicit when both pools exist at the same
+  level, and commit dispatches through `useSpellSlot()` or `usePactSlot()`. It
+  never calls the item's random `rechargeItemCharges` path.
+- **Drain** destroys the item through `removeItem`; Common creates one
+  temporary level-1 slot, while Uncommon or Rare creates one temporary level-2
+  slot. Other rarities fail before mutation. The slot uses the normal named
+  modifier path with exact source feature
+  `Magic Item Tinker|Artificer|EFA|6|EFA`, decision key
+  `efa-magic-item-tinker:drain`, and `sourceType:
+  "classFeatureTransaction"` so ordinary class-effect rebuilds do not delete a
+  valid committed transaction.
+- **Transmute** replaces the target with a different resolved item from another
+  currently known Replicate plan. It preserves exact owner, plan metadata,
+  creation order/receipt/batch, lifecycle, extensions, equipment, and valid
+  attunement while assigning fresh inventory/generated-item identities. Same
+  plan and same resolved item are rejected. Attunement preflight projects
+  slot-exempt and slot-consuming items separately; commit creates the
+  replacement unattuned, then uses normal `attune()` after teardown so any
+  attunement failure rolls back the complete transaction.
+
+Persisted state is additive and defaults safely for older saves:
+
+```javascript
+efaArtificerTinker: {
+    version: 1,
+    tinkersMagicUsesSpent: 0,
+    drainUsed: false,
+    transmuteUsed: false,
+    drainSlotLevel: null, // 1 | 2 | null
+    drainSlotAvailable: false,
+}
+```
+
+Load normalization clamps use counts, booleans, Drain slot level, and the
+temporary-slot availability marker.
+Reconciliation removes Tinker's rows only on exact EFA class/source loss,
+removes forged, duplicate, disabled, mismatched, or under-level Drain
+modifiers, rebases stale persisted slot totals even when the modifier is
+missing, and never claims other generated owners or modifiers. The availability
+marker is consumed by canonical ordinary-slot decrements: cleanup subtracts the
+temporary current slot only while it is still available, preserving both the
+unspent `2/4 -> 3/5 -> 2/4` case and the already-spent `4/5 -> 4/4` case.
+`setSpellSlots()`, `setSpellSlotCurrent()`, and `useSpellSlot()` share the same
+current-slot mutation path, but genuine spends must explicitly set
+`isExpenditure: true` (or call `useSpellSlot()`). Spells-tab/Play Mode casts,
+manual pips, feature-use conversions, slot-to-Stamina, and
+slot-to-sorcery-points use that mode. Recalculation, maximum clamping,
+rest/recovery, refunds, progression, Drain cleanup, and slot creation
+explicitly use the non-consuming mode, so they neither spend nor re-arm the
+marker. Mutations at other slot levels leave it intact. Genuine expenditures
+return an ephemeral ordinary-slot receipt; the Spells-tab cast flow uses that
+receipt to restore both current and `drainSlotAvailable` after target
+cancellation or a thrown result failure. The receipt pins the slot maximum,
+per-level mutation revision, and exact Drain modifier IDs. Source/level cleanup
+or any later same-level mutation therefore invalidates it, and a rejected
+receipt never falls back to incrementing the live slot. Only the matching
+receipt can re-arm the marker, so ordinary recovery/refund calls remain non-consuming. Derived
+maximum recalculation separately preserves `max(0, current - oldMax)` temporary
+availability (for example a Font of Magic-created slot), preventing Drain
+addition or cleanup from clamping an unrelated above-max slot away.
+`applyEfaArtificerTinkerLongRestTransition()` is idempotent and is called by
+both `state.onLongRest()` and the active Finish Long Rest controller after its
+undo snapshot. A committed long rest therefore removes all exact-owner
+Tinker's rows, refills its use pool, removes the Drain slot, and resets
+Drain/Transmute use state through either entry point.
+
+**Operate-mode interaction brief.** Players need quick, exact table-time
+operations rather than a second inventory manager. Inventory exposes one
+level-gated Tinker's Magic toolbar action and compact Charge/Drain/Transmute
+buttons only on exact live Replicate rows; Combat Actions mirrors the same four
+operations. Both surfaces delegate to one protected modal and the same state
+transactions. Charge labels ordinary and Pact Magic pools separately, and
+Inventory/Combat enablement derives from the canonical `chargeSlots` options
+rather than scanning only ordinary slots. Native labelled selects, explicit
+disabled reasons, confirmation copy,
+`role="status"`/`aria-live="polite"` feedback, focus restoration, Escape, and
+an auto-fit single-column layout preserve keyboard and mobile use.
+Anti-goals are subclass mechanics, Spell-Storing Item, levels 10/14/18/20,
+random recharge, a parallel item ledger, or broad state refactors.
+
+### Transient generated items at the NPC export boundary
+
+NPC export must classify source-owned transient inventory before applying
+ordinary equipment rules. The reusable EFA Experimental Elixir boundary is:
+
+```javascript
+CharacterSheetNpcExporter.classifyInventoryItemForNpcExport(state, itemOrWrapper);
+CharacterSheetNpcExporter.getInventoryItemsForNpcExport(state, {warnings});
+```
+
+Both supported exact-owner vials and stale repair-required EFA Elixir
+provenance are excluded. The same filtered inventory feeds Special Equipment,
+Consumables, magic-item use blocks, and companion item bundling. Item-granted
+spells are filtered only by an excluded row's exact inventory ID; name-only
+spell ownership remains ambiguous and is preserved.
+
+When companion export receives a warnings array, stale rows emit one
+repository-standard validation warning rather than silently becoming
+permanent gear. Ordinary same-name custom items, wrong-source compatibility
+items, and unrelated generated feature items remain eligible under their
+existing exporter rules.
+
+## Stable-Key Per-Turn Receipts
+
+Once-per-turn mechanics that need to work across multiple routes use the
+serialized `turnReceipts` ledger on `CharacterSheetState`. Its `turnId` is an
+opaque sequence advanced by an explicit receipt boundary; it is not a combat
+round, timestamp, or UI-local flag:
+
+```javascript
+turnReceipts: {
+    version: 1,
+    turnId: 12, // opaque sequence; never a combat round
+    receipts: {
+        "<caller key>": {
+            receiptVersion: 1,
+            receiptId,
+            key,
+            ownerUid,
+            sourceUid,
+            actionUid,
+            turnId: 12,
+            metadata: {},
+        },
+    },
+}
+```
+
+Callers supply exact stable identities. Entity UIDs must include their source;
+do not key on a display label, DOM id, or `combatRound`. Public APIs are:
+
+```javascript
+state.queryTurnReceipt(key, {trackOnlyInCombat?});
+state.commitTurnReceipt(
+    {key, ownerUid, sourceUid, actionUid, metadata?},
+    {trackOnlyInCombat?},
+);
+state.rollbackTurnReceipt(receipt);
+state.pruneTurnReceipts({ownerUid, sourceUid, actionUid?});
+state.advanceTurnReceiptBoundary();
+state.resetTurnEconomy();
+```
+
+`commitTurnReceipt` returns `{ok, committed, duplicate, reason, key, turnId,
+receipt}`. A duplicate returns the original receipt with
+`reason: "alreadyUsed"` and does not mutate it. `rollbackTurnReceipt` accepts
+the exact committed receipt: receipt id, key, owner, source, action, and turn id
+must all match. A mismatch is explicit (`reason: "receiptMismatch"`) and leaves
+the live receipt in place. This makes the retry rule deterministic: retry is
+legal only after the matching rollback, exact owner/source prune, or
+`resetTurnEconomy()`.
+
+`pruneTurnReceipts` requires both `ownerUid` and `sourceUid`; broad owner-only
+or source-only teardown is rejected. This prevents removing an unrelated
+same-named feature, companion, item, or class implementation. Consumers that
+commit before a later mutation must verify that mutation. On failure, return an
+explicit failed result containing the matching `rollbackTurnReceipt` outcome;
+never return success or silently leave a receipt committed.
+
+With `trackOnlyInCombat: true`, an out-of-combat commit succeeds without writing
+a receipt (`tracked: false`, `receipt: null`), and its matching query remains
+unused. This is the policy for mechanics whose out-of-combat turn boundaries
+cannot be represented durably.
+
+`advanceTurnReceiptBoundary()` advances only the turn identity and clears
+receipts. Use it for another creature's distinct turn in the same combat round;
+it deliberately preserves the character's Action, Bonus Action, Reaction, and
+movement usage. `resetTurnEconomy()` delegates to that boundary and additionally
+resets the shared action and movement ledgers. `startCombat()`, `advanceRound()`,
+`endCombat()`, rests, and Play Mode's **Reset turn** continue to use the full
+reset.
+
+Default receipts still work identically outside combat: a committed use remains
+blocked until an explicit boundary or reset. Combat's `_resetTurnActionUsage()`
+resets only module-local caches after these state lifecycle calls; lazy local
+initialization must never restore state action slots or advance/clear the
+receipt ledger.
+
+Current consumers are:
+
+- Cruel's triggered die pool, keyed by the exact
+  `Cruel|TalDoreiCampaignSettingReborn` feat and stable `cruelty-die` effect id.
+- Deferred spell-damage riders such as Summer's Defiant Blood, keyed by exact
+  class and subclass sources. Consuming or clearing the armed rider does not
+  release its receipt.
+- EFA Cartographer Guided Precision, which shares one receipt across its
+  Cartographer-spell and attack routes:
+  - key/source: `Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA`
+  - owner: `Cartographer|Artificer|EFA|EFA`
+  - action: `guided-precision:damage-rider`
+
+Guided Precision's shared receipt preserves the authored “once per turn”
+ceiling while allowing a qualifying reaction on another creature's turn in the
+same round. Guided Precision receipts are combat-only: out-of-combat uses do not
+persist or block later casts, including after save/load. Save/load within combat
+preserves the current turn and receipt. Removing the exact EFA Cartographer
+source prunes the receipt.
+- Registry-backed feature companions, with separate
+  `Companion Action|<source-qualified companion UID>|<stable companion ID>` and
+  matching Reaction receipts. The stable ID lets teardown use exact
+  owner/source/action pruning without refunding a sibling; the defender
+  reaction never consumes the summoner's Reaction.
+- EFA Battle Smith Arcane Jolt, with one exact subclass/feature key shared by
+  summoner magic-weapon hits and committed EFA Steel Defender Rend hits.
+  `combatRound` is never consulted, so switching trigger source cannot bypass
+  the once-per-turn gate.
+- EFA Arcane Firearm's once-per-committed-cast `1d8`, keyed by the exact
+  `Artillerist|Artificer|EFA|EFA` owner, source-qualified Arcane Firearm feature
+  UID, stable damage action UID, and committed cast receipt ID. The receipt
+  commits only after that cast used the live carved wrapper and produced a
+  damage roll. Save failure rolls back that exact receipt; binding
+  removal/respec prunes only that scope.
+
+Load migration is idempotent. A current-round legacy `resourceTurnUsage`
+entry becomes a receipt only when it represented the live combat turn; stale
+round values remain unused. `pendingSpellDamageBonusUsedKeys` and the pending
+descriptor's `oncePerRoundKey` migrate to the exact deferred-rider receipt.
+`deferredFlatDamageRiderTurnUsage` likewise migrates only when it represented
+the current combat turn. All legacy fields are removed after migration, so
+they never remain a second source of truth.
+
+## EFA Battle Smith Arcane Jolt
+
+The exact runtime identities are:
+
+```javascript
+classUid = "Artificer|EFA";
+subclassUid = "Battle Smith|Artificer|EFA|EFA";
+featureUid = "Arcane Jolt|Artificer|EFA|Battle Smith|EFA|9|EFA";
+```
+
+`_ensureEfaArcaneJoltResource()` maintains one exact resource with a Long Rest
+recharge and `max(1, INT modifier)` uses. The resource persists `spentUses`
+separately from the current maximum. Reconciliation therefore preserves three
+spent uses when the maximum falls below three, then restores only the
+unexpended uses if the maximum later rises. Load migration derives
+`spentUses` once from a legacy exact pool's `max - current`; repeated reads,
+load, level changes, and Respec do not refill it. Source loss removes only this
+exact pool and prunes only its receipt. Same-label TCE, RHW, and unrelated
+resources remain isolated.
+
+The public runtime surface is:
+
+```javascript
+state.getEfaArcaneJoltStatus();
+state.getEfaArcaneJoltTriggerStatus(trigger);
+state.canOfferEfaArcaneJoltForAttack(attack);
+await state.pUseEfaArcaneJolt({
+    trigger,
+    effect: "destructive" | "restorative",
+    target,
+    cancelled?,
+    rolls: {effectDice},
+    publishResult?,
+});
+```
+
+The player trigger is
+`{type: "summonerMagicWeaponHit", hitConfirmed: true, attack}`. The attack must
+carry a live exact `sourceItem.id`; State resolves the inventory row and calls
+the canonical magic-weapon classifier. The defender trigger is
+`{type: "steelDefenderRend", operationResult}`. State revalidates the complete
+M4 contract: `ok`, `committed`, exact owner/source/operation UIDs, confirmed
+attack hit, damage result, and a live exact EFA defender. Callers must not
+replace either check with name or damage-type inference.
+
+A committed result has this shape:
+
+```javascript
+{
+    ok: true,
+    committed: true,
+    effect,
+    featureUid,
+    classUid,
+    subclassUid,
+    trigger: {type, attackId?, sourceItemId?, companionId?, operationUid?, targetName?},
+    resource: {id, cost: 1, before, after, max},
+    turnReceipt,
+    rolls: {effect: {dice, dieRoll, total, type}},
+    target,
+    damage: {target, amount, dice, type: "force", originatingHit} | null,
+    hp: {type, before, after, max, requested, actual, manualApplication?} | null,
+    rollback: null,
+    error: null,
+}
+```
+
+Cancellation and preflight failures return `committed: false` and spend
+nothing. The transaction commits the shared receipt and resource together,
+then applies modeled healing and optional publication. A late failure returns
+`reason: "transactionRolledBack"` plus explicit `rollback.resource`,
+`rollback.turnReceipt`, and `rollback.hp` results. Restorative range is measured
+from the attack target, not the summoner. External creature/object targets are
+manual; dead/vanished modeled companions are rejected without implementing
+revival.
+
+Both trigger sources use the same `CharacterSheetPage.pOfferEfaArcaneJolt()`
+dialog. It begins focus on the triggering target field, uses the shared modal
+focus trap/Escape handling, and receives both the original invoker and a
+replacement-target getter because the triggering operation can re-render
+before the dialog closes. Skip/Escape announce that nothing was spent; errors
+remain in the open dialog, focus the assertive error region, and never return a
+success-shaped result. The status is polite/atomic, the resolving state is
+`aria-busy`, and the shared combat-target classes provide the existing
+single-column, 44px mobile controls.
+
+Long Rest uses the existing generic resource recovery path, resetting this
+exact pool's `spentUses` to zero. It does not heal/revive registry-backed Steel
+Defenders. Improved Defender changes only Arcane Jolt's `2d6` to `4d6` and
+preserves EFA Deflect retaliation at `1d4 + INT` Force damage; EFA gains no AC
+increase, while the separate TCE rules remain unchanged.
+
+## Committed Feature Uses and EFA Flash of Genius
+
+Source-qualified feature follow-ups use the runtime-only committed-use API on
+`CharacterSheetState`:
+
+```javascript
+const unsubscribe = state.registerCommittedFeatureUseHook(
+    "Flash of Genius|Artificer|EFA",
+    async committedResult => { /* subclass follow-up */ },
+    {hookId: "stable-consumer-id"},
+);
+
+const committedResult = await state.pCommitFeatureUse({
+    featureUid,
+    classUid,
+    actionType,
+    resourceId,
+    resourceCost,
+    context,
+    result,
+    onCoreCommitted,
+});
+```
+
+Hooks are keyed by the exact source-qualified `featureUid`, not by subclass
+names. They run only after the resource cost and any combat-tracked action have
+committed. Action economy is validated and consumed only while the character is
+in combat; out-of-combat uses spend the resource without persisting a Reaction
+lock.
+
+`onCoreCommitted` is the generic persistence boundary. When supplied, it is
+awaited after the core action/resource mutation and committed result are built,
+but before any follow-up hook runs. A boundary failure remains an explicit
+committed in-memory result (`commitBoundaryFailed`) and skips follow-ups rather
+than rolling back the core use. Controllers should save again after hooks only
+when a successful hook returns `persistentStateChanged: true`.
+
+Cancellation, invalid context, an unavailable action, or insufficient resource
+returns `{ok: false, committed: false, reason}` and invokes no hook. A hook
+failure does not roll back the valid core use; the return remains
+`{ok: true, committed: true}` with `followUpFailed: true` and a failed entry in
+`followUps`.
+
+The committed result fields are:
+
+```javascript
+{
+    ok,
+    committed,
+    featureUid,
+    classUid,
+    actionType,
+    resourceId,
+    resourceName,
+    resourceCost,
+    remainingUses,
+    context,
+    result,
+    followUps: [{hookId, ok, value?, error?}],
+    followUpFailed,
+    commitBoundaryFailed?, // true only if onCoreCommitted failed
+    commitBoundaryError?,
+}
+```
+
+EFA Flash of Genius uses:
+
+- class UID `Artificer|EFA`
+- feature UID `Flash of Genius|Artificer|EFA`
+- `pUseFlashOfGenius({rollType, isFailed, rollTotal, targetType, targetName,
+  targetVisible, distanceFeet, cancelled, context, onCoreCommitted})`
+
+The call accepts only failed `abilityCheck` or `savingThrow` contexts. A target
+is either `self` or a named creature with explicit visibility and a finite
+distance from 0 through 30 feet. A valid use spends
+one Reaction and one canonical Flash resource use, then returns
+`result: {bonus, originalTotal, adjustedTotal, target}`. The bonus and maximum
+uses are the Intelligence modifier, minimum 1.
+
+The canonical resource is `contextualOnly`, uses the `Reaction` action label,
+recharges on a Long Rest, and mirrors the EFA Flash feature's `uses` object.
+Direct Features/Combat activation returns the committed result; cancelling any
+prompt returns the uncommitted `cancelled` result, so outer activation paths do
+not spend or double-spend the Reaction.
+
+Advanced Artifice adds `shortRestRecovery: 1`; Magical Guidance restores the
+pool fully on a committed Short Rest when the level-20 EFA Artificer has at
+least one actually attuned, structurally valid magic item. Without one, the
+level-14 restore-one behavior remains in force. Both `state.onShortRest()` and
+the active Rest dialog use the same resource metadata followed by the
+level-20 upgrade, so Flash recovers exactly once; opening/cancelling does
+nothing, and the existing full-snapshot undo restores the spent value.
+`efaFlashOfGeniusResourceV1` initializes an existing EFA level-7+ save at
+maximum exactly once; subsequent reconciliation preserves spent uses. No
+Replicate Magic Item plan is inferred by this migration.
+
+EFA Cartographer Ingenious Movement is registered only for exact
+`Artificer|EFA` + `Cartographer|EFA` level 9+ through
+`registerEfaCartographerIngeniousMovementHook`. The controller registers the
+one-shot hook around the canonical Flash commit and removes it immediately
+afterward. The controller persists Flash through `onCoreCommitted` before
+opening any Ingenious prompt. Its resolver requires the committed Flash result,
+explicit target eligibility and destination confirmations, and returns an immutable
+`requires-external-relocation` instruction. It never spends another Reaction or
+resource, invents coordinates/line of sight, mutates another sheet, persists
+movement state, or depends on Adventurer's Atlas holders. Declines return an
+explicit non-failure; validation failures set `followUpFailed` without rolling
+back Flash. Escape/X at any confirmation is a decline; an explicit No is the
+corresponding validation failure.
+
+## RHW Reanimator R2a State and Ownership
+
+R2a is source-locked to `Artificer|EFA` and
+`Reanimator|Artificer|EFA|RHW`. The fixed spell list uses exact XPHB identities
+and the existing subclass spell-owner ledger. Ledger owners may now include an
+exact `grantOwnerUid` and optional `alternateCast` metadata; their key appends
+the lowercased feature owner UID to the class/subclass base key.
+
+The `Reanimator Spells|Artificer|EFA|Reanimator|RHW|3` owner always prepares
+the cumulative 3/5/9/13/17 spell tiers without consuming prepared capacity.
+The `Refined Reanimation|Artificer|EFA|Reanimator|RHW|15` owner independently
+adds `Raise Dead|XPHB` at level 15 as an unprepared alternate cast with zero
+slot cost and ignored material components. At level 17 both owners coexist on
+one spell identity, and the fixed owner keeps it prepared. Removing either
+owner preserves the other; final removal restores player metadata. Wrong
+sources and same-label owners are never removed by RHW teardown. Legacy
+source-label pruning applies only when no owner ledger exists; once a ledger is
+present, exact owner keys are authoritative.
+
+`pUseRhwReanimatorJoltToLife()` validates exact
+`Spare the Dying|XPHB` plus the exact Reanimator Spells owner before calling
+`pCommitFeatureUse()`. Rejections and cancellation spend nothing. A successful
+free-action commit spends one long-rest Jolt resource and returns a JSON-safe
+resolution containing EFA Artificer-level healing, Dexterity save at the EFA
+spell DC, 10-foot emanation, and the level-scaled Lightning dice. The resource
+maximum is `max(0, current INT modifier)` with no minimum of 1.
+
+Facilitated Revival has a separate one-use long-rest resource.
+`getRhwFacilitatedRevivalBoundary()` is read-only and returns `executable: true`
+only when the exact level-15 owner, an available use, and at least one equipped
+proficient `AT|XPHB` inventory row are all present. It exposes the shared focus
+requirement, status, and stable eligible focus references without reconciling or
+mutating state.
+
+`pUseRhwFacilitatedRevival()` validates the exact feature, class, subclass,
+`Raise Dead|XPHB` owner, resource, and selected shared focus reference before
+committing. The cast spends no slot, waives Material components, spends the
+feature resource once, and publishes one standard committed spell-cast receipt.
+The receipt carries exact EFA/RHW attribution plus stable focus wrapper/entity
+IDs. Cancellation and every pre-commit rejection are byte-for-byte no-ops.
+Committed spell-hook failures remain committed and are surfaced in `followUps`.
+Short rests do not restore the use; long rests do.
+
+`applyClassFeatureEffects()` owns reconciliation across add, level change,
+load, subclass teardown, and Respec. Respec drafts must install the spell
+catalog before `loadFromJson()` so newly unlocked grants retain canonical
+levels and metadata. Reconciliation is idempotent and source-owned resources
+are removed below threshold or when the exact subclass identity disappears.
+
+The Reanimator calculation descriptor exposes the live transaction without
+mutating it: exact owner UID, acquisition `mode`, `status`, fixed proficiency,
+selection, and pending/resolved booleans. It never activates for
+`Artificer|TCE`, a non-RHW Reanimator, or a name-only feature.
+## EFA Replicate Magic Item Plan Decisions
+
+`CharacterSheetArtificerPlans` is the shared class-catalog contract for exact
+`Artificer|EFA` Replicate Magic Item plans. It recursively parses the
+authoritative level-gated tables rather than duplicating plan names:
+
+- fixed rows keep the canonical item-tag `name|source`; aliases are display
+  text only;
+- only the three starred filter rows are repeatable wildcard categories;
+- a wildcard repetition selects a different exact source-qualified item;
+- fixed and wildcard routes share exact item uniqueness;
+- cumulative known-plan counts are 4/5/6/7/8 at levels 2/6/10/14/18.
+
+Progression emits required `artificerPlan` acquisition decisions and optional
+`artificerPlanReplacement` decisions at every Artificer level from 2 onward.
+Selections persist acquisition level, stable slot/opportunity IDs, catalog and
+category provenance, exact item UID, and replacement lineage. Receipts use the
+`artificer-plan` family with `decisionLevel`, mutually exclusive
+`acquisitionLevel`/`replacementLevel`, and a configuration-only effect.
+
+Public APIs:
+
+- `CharacterSheetArtificerPlans.parseCatalog({feature, items})`
+- `isExactDecisionOwner(decision)` requires at least one complete exact
+  `Artificer|EFA` owner pair and rejects any conflicting supplied top-level or
+  `meta.owner` class name/source field
+- `getProgressionOpportunities({className, classSource, classLevel, extensions})`
+- `getEligibleCandidates({catalog, classLevel, constraints})`
+- `validateDraft({catalog, decisions, initialSlots})`
+- `projectDecisions({decisions, initialSlots})`
+- `toHistoryChoices(decisions)`
+- `getExtensionDescriptor(...)` for independently sourced future class/subclass
+  consumers
+- `state.getEfaArtificerPlanDecisions()`
+- `state.getEfaArtificerPlanProjection()`
+- `state.getEfaArtificerPlans()`
+
+The extension descriptor keeps class, subclass, and feature sources independent;
+it never assumes `subclassSource === classSource`. The shared picker is used by
+Level Up, Quick Build (including Builder handoff), and Respec. Cancellation and
+invalid validation paths are non-mutating. Replacements must select a different
+exact plan identity; the current target is disabled in the picker and
+`same-plan-replacement` is rejected by model/progression validation. Public EFA
+state projections discard same-type decisions whose base owner is not exact
+`Artificer|EFA`.
+
+Acquire extensions receive stable extension-owned slot IDs. Slot constraints are
+projected with the acquisition and reapplied whenever a later base replacement
+targets that slot. EFA Armorer Armor Replication registers one required level-9
+acquisition constrained by canonical item kinds `armor` and `shield`; both fixed
+and wildcard catalog candidates are classified from item type/variant
+requirements, never display names or wildcard labels. Replacing that slot at a
+later Artificer level therefore remains Armor-only while **Keep Current Plans**
+and same-plan rejection retain the base behavior.
+
+This contract distinguishes a known plan from a replicated item instance.
+Milestone 2 has no item creation, inventory mutation, or expiration behavior;
+those effects belong to Milestone 3.
+## Fixed Proficiency with Fallback Transactions
+
+Features whose rule is "gain fixed proficiency X; if already proficient, choose
+fallback Y" use the source-aware transaction registry on
+`CharacterSheetState`; they must not add subclass/name branches to the prose
+parser.
+
+Register an exact owner with
+`CharacterSheetState.registerFixedProficiencyFallback()`. The owner UID is:
+
+```text
+feature name|class name|class source|subclass short name|subclass source|level|feature source
+```
+
+Class, subclass, and feature sources are independent. For example,
+`Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW` is valid and must
+not be normalized to an EFA subclass source.
+
+State persists
+`fixedProficiencyFallbacks: {version: 1, transactions: {<lowercase owner UID>:
+transaction}}`. A transaction records the exact owner fields, fixed
+proficiency, fallback catalog, acquisition mode (`fixed` or `fallback`), status
+(`pending` or `resolved`), selection, exact grant source, parent decision key,
+resolved decision key, feature ID, and acquisition character level.
+
+During Level Up/Quick Build, the class level is committed before its history row
+is appended. Acquisition therefore prefers an existing exact class-level history
+match (replay/catch-up), then uses the current total character level when that
+new row is not present yet. The source-qualified subclass parent semantic key is
+deterministic from the active exact class/subclass identity and does not require
+the history row to exist first.
+
+Acquisition snapshots `hasToolProficiency(fixedProficiency)` before prose or
+structured proficiency parsing. Fixed mode claims the fixed value immediately;
+fallback mode queues the existing `kind: "tool"` feature-choice modal. The
+fixed tool is claimed so later generic parsers cannot double-grant it.
+
+Public integration points:
+
+- `getFixedProficiencyFallbackTransaction(featureOrUid)`
+- `getFixedProficiencyFallbackChoiceDescriptor(entity)`
+- `setFixedProficiencyFallbackSelection(featureOrUid, selection, opts)`
+
+The descriptor feeds the normal `nestedTool` progression path. Respec updates
+the transaction and exact ownership ledger together. Removal deletes only the
+matching owner's pending choice, decision, fixed/fallback grant, and
+fulfillment marker; overlapping feature/progression/manual evidence is
+preserved.
+
+Load migration adopts only exact owner evidence. A resolved exact-owner
+`nestedTool` decision is retained; accepted legacy fixed/fallback markers are
+translated; a markerless save that already contains the fixed proficiency is
+left as a pending fallback rather than guessing whether that proficiency was
+pre-existing or feature-owned.
+
+## Feature-Companion Acquisition and Setup
+
+Feature-companion setup is persisted separately from `_data.companions[]` in
+`_data.featureCompanionSetups = {version: 1, records: {}}`, keyed by the lower
+case full source-qualified feature owner UID. This separation is load-bearing:
+`Finish later` must preserve pending setup without creating an incomplete
+creature record.
+
+Use `CharacterSheetState.registerFeatureCompanionGrant()` for narrow
+source-specific setup descriptors and
+`state.reconcileFeatureCompanionGrants({reason})` for orchestration. Builder,
+Level Up, Quick Build, load, and Respec all call the same operation. Completion
+must go through `completeFeatureCompanionSetup()`, which validates registered
+required fields, consumes the existing fixed-proficiency fallback transaction,
+creates or reuses one stable companion, and delegates every derived statistic
+to `resolveFeatureCompanionRules()` /
+`reconcileFeatureOwnedCompanion()`.
+
+For EFA Battle Smith, pending setup requires appearance, a two-leg/four-leg
+choice (cosmetic only), and any unresolved alternate artisan-tool choice owned
+by Tools of the Trade. Nickname is optional and absent when blank. Compatible
+EFA/TCE owner changes use `rebindFeatureOwnedCompanion()`; loss of the exact
+grant deactivates with lifecycle status `vanished`. Never infer setup across a
+same-label source, and never claim mixed-source Reanimator companions.
+
+Desktop and Play Mode both open pending setup through
+`CharacterSheetPage.pShowFeatureCompanionSetup()`. The modal focuses the first
+missing field, uses native required inputs and a body-shape
+`fieldset`/`legend`, announces validation/defer/error outcomes, and restores
+focus to the pending setup control or the created companion's first available
+operation after re-render. Play Mode suppresses its legacy Steel Defender
+summon button only when the exact EFA setup record exists; TCE and unrelated
+Artificer paths remain unchanged. The remaining generic add button is itself
+source-qualified: only an Artificer whose class source and exact Battle Smith
+subclass source are both `TCE` may use it. EFA Battle Smith, EFA
+non-Battle-Smith, unrelated Artificer, and wrong-source/name-only subclass
+records never route through `_addBuiltinCompanion("steel-defender")`.
+
+## Feature-Companion Operations
+
+Desktop and Play Mode use `CharacterSheetPage.pUseCompanionOperation()`, which
+supplies prompts/rolls and delegates one prepared payload to
+`CharacterSheetState.performCompanionOperation()`. Focused State wrappers are:
+
+```javascript
+state.commandCompanionAction(options);
+state.useCompanionRepair(options);
+state.useCompanionReaction(options);
+state.spendCompanionHitDie(options);
+```
+
+Availability is queried through
+`getCompanionOperationAvailability(companionId, operation, options)`. Its
+command methods come only from `CharacterSheetCompanionRules`: the defender's
+default action is Dodge, normal non-default commands spend the owner's Bonus
+Action, an incapacitated owner imposes no owner cost, and the EFA level-5
+Attack replacement appears only for Force-Empowered Rend. Combat exposes
+`getAttackActionReplacementAvailability()`,
+`consumeAttackActionReplacement()`, and
+`rollbackAttackActionReplacement()` over its existing Attack-action tracker;
+there is no second attack counter.
+
+`performCompanionOperation()` preflights ownership, active/alive state, target
+and 5-foot acknowledgements, uses/Hit Dice, exact companion receipt, and owner
+command cost before mutation. Success returns the structured family:
+
+```javascript
+{
+    ok, committed, operation, actionKey, companionId,
+    ownerUid, sourceUid, operationUid, commandMethod,
+    costs, receipts, rolls, target, hp, riders,
+    rollback: null,
+    error: null,
+}
+```
+
+Failure returns the same identity with `committed: false`, a stable `reason`
+and player-facing `message`. A late failure rolls back the exact companion
+receipt, owner Bonus Action or Combat replacement receipt, resource current,
+and HP snapshot, and publishes each rollback outcome under `rollback`.
+
+Rend uses the resolved spell attack bonus, 5-foot melee-weapon reach, and exact
+source damage formula. Repair can mutate a modeled Construct's HP or return a
+manual-application result for a confirmed external Construct/object; neither
+path spends before target/range confirmation. Deflect commits only the
+companion Reaction and returns manual disadvantage resolution plus the EFA
+level-15 force retaliation roll when present. Companion Hit Dice use the
+companion Constitution modifier and never touch player Hit Dice. Long rest
+restores descriptor-owned `longRest` Repair uses and half the companion Hit
+Dice (rounded up) without healing or resurrecting the feature companion.
+
+Reanimated Companion Dreadful Swipe uses this same command transaction. Dodge
+is the no-owner-cost default; other actions consume the companion Action plus
+the owner's Bonus Action unless the exact summoner is Incapacitated. It never
+offers Battle Smith's Attack replacement. Swipe uses the exact EFA spell attack
+modifier, doubles only dice on a critical, and returns manual no-Opportunity-
+Attack and eligible Bloated-push riders.
+Registry-backed command execution first requires the descriptor's canonical
+seven-part runtime owner and an exact source-qualified record, so six-part or
+malformed collisions never reach the resolver. The shared non-attack action set
+is Dash, Disengage, Dodge, Help, Hide, Influence, Magic, Ready, Search, Study,
+and Utilize; Attack remains available only through a registered operation.
+
+RHW Reanimated Companion uses the same generic creation boundary but has no
+pending incomplete creature. `getFeatureCompanionCreationBoundary()` publishes
+a versioned choice transaction derived from the pure rules; the caller returns
+that transaction ID plus exact `{id,name,source}` option references.
+`pCreateFeatureCompanion()` validates the transaction, count, uniqueness,
+unlock level, source/name identity, and resolver output before action/payment/
+tool commit. The canonical receipt is stored on the created generation:
+
+```javascript
+setup.choices.modifications = {
+    version: 1,
+    transactionId,
+    ownerUid,
+    rulesVersion,
+    acquisitionLevel,
+    requiredCount,
+    selectedOptionIds,
+}
+```
+
+The same receipt is copied into `lifecycle.creationReceipt.setupChoices`.
+Reconciliation always validates selected options against the immutable
+acquisition level while recalculating current HP/Hit Dice maxima, INT/PB/DC,
+and the current-level Improved Reanimation feature. It preserves companion ID,
+HP, Hit Dice current, uses, turn flags, payment/tool/action/lifecycle receipts,
+and the selected IDs. Legacy R3 deferred generations stay explicit and are
+never assigned invented options.
+
+`scaling.resolved` is the runtime metadata surface for State execution and
+later Manager/Play work.
+Arcane Conduit carries its spell-origin rules and a stable per-generation
+turn-receipt key with exact owner/source/action UIDs and stable companion ID +
+generation components. The generic runtime projector handles any
+`keyScope: "companionGeneration"` operation. R4b commits Arcane Conduit through
+the canonical turn-receipt API only after exact EFA class, school, damage-roll,
+range, active-generation, and user-selection validation; late roll mutation
+failure rolls back only that receipt.
+
+The bounded R4b State surface is:
+
+```javascript
+state.applyFeatureCompanionDamage(payload);
+state.resolveFeatureCompanionDeathBurst(payload);
+state.resolveRhwReanimatorGauntTrigger(payload);
+state.resolveRhwReanimatorMoistTrigger(payload);
+state.getRhwArcaneConduitSpellOriginOptions(companionId);
+state.applyRhwArcaneConduitDamageRider(payload);
+state.performRhwLifeTransfer(payload);
+```
+
+Lightning damage heals the exact active companion instead of damaging it;
+other damage consumes temp HP/current HP and routes a zero-HP transition
+through `killFeatureOwnedCompanion()`. That lifecycle persists one Death Burst
+event and can attach one validated manual per-target resolution. Gaunt and
+Moist are receipt-free triggered resolutions. Life Transfer consumes the
+summoner Reaction only when combat action economy is tracked, heals by current
+post-trigger companion HP (including a valid zero actual heal at full HP), then
+kills the companion through the ordinary lifecycle. Its late failure restores
+summoner HP, Reaction state, companion HP/lifecycle, and Death Burst receipt.
+Summoner death prevalidates its required Death Burst resolution and removes the
+companion only after the result is attached; omitted or invalid inputs preserve
+the live state. Explicit range, save, damage, and trigger amounts must be actual
+finite numbers, never numeric strings, booleans, arrays, objects, null, or
+blank values.
+
+Generation-scoped receipts are pruned by exact projected keys on replacement,
+dismissal/removal, exact source loss, and Respec Apply. Six-part/malformed
+collisions, TCE/EFA Battle Smith receipts, and foreign receipts remain
+untouched. `resetTurnEconomy()` is the only turn boundary which releases an
+otherwise live Arcane Conduit use.
+## EFA Steel Defender Lifecycle
+
+`CharacterSheetCompanionRules` owns the EFA lifecycle policy, including the
+60-minute death window, canonical owner Action cost, one-minute return delay,
+spell-slot minimum, exact replacement tool UID, and summoner-death fate. State
+consumes the resolved policy and persists one lifecycle object on the existing
+stable companion:
+
+```javascript
+{
+    status: "alive" | "dead" | "revivalPending" | "expired" | "vanished",
+    generation,
+    diedAtGameMinute?,
+    timingKnown?,
+    revivalPending?: {startedAtGameMinute, dueAtGameMinute, deathTiming, spellSlot},
+    expiredAtGameMinute?,
+    vanishedAtGameMinute?,
+    generationHistory?,
+}
+```
+
+Unknown JSON-safe lifecycle fields survive migration, reconciliation, and
+round-trip. An exact EFA legacy defender already at 0 HP but without a
+trustworthy death minute becomes `dead` with `timingKnown: false`; State never
+invents a timestamp or heals it. TCE, RHW, generic, name-only, and
+foreign-source companions are not claimed by this migration.
+
+Public revival APIs are:
+
+```javascript
+state.getFeatureCompanionRevivalAvailability(companionId, {
+    spellSlot: {kind: "normal", level} | {kind: "pact"},
+    touchConfirmed,
+    deathWithinHourConfirmed?, // required in the same operation for unknown-time legacy death
+});
+state.beginFeatureCompanionRevival(options);
+```
+
+Revival remains legal through death minute +60. The atomic begin operation
+requires the exact dead defender, explicit touch, an available owner Action,
+and one selected normal or Pact Magic slot. It prevalidates every cost, records
+`revivalPending` due at current minute +1, and spends nothing on cancellation
+or validation failure. Only canonical time advancement returns the defender
+alive at full HP. A late failure restores the exact Action, selected slot, HP,
+active flag, and lifecycle and reports each rollback result.
+Availability also returns authoritative read-only `deathTiming` display data
+(`known`, `diedAtGameMinute`, `deadlineMinute`, and `remainingMinutes`) on
+post-identity validation results. Manager and PDF surfaces consume that
+projection rather than copying the one-hour deadline formula.
+
+Ordinary `healCompanion`, Repair, Arcane Jolt restoration, companion Hit Dice,
+Short Rest, and Long Rest never revive a non-alive generation. Existing
+companion action/reaction/Repair/Hit Die availability reports explicit
+`companionDead`, `companionRevivalPending`, `companionExpired`, or
+`companionVanished` reasons. Finalized owner-death mutations use the existing
+death-transition seam; actionable zero-HP interventions defer the transition.
+Once finalized, only the exact EFA defender becomes persisted `vanished`,
+inactive, and 0 HP, and later owner recovery does not restore that generation.
+
+Long-rest replacement is optional and explicit:
+
+```javascript
+state.getFeatureCompanionReplacementAvailability(companionId, {
+    toolItemId,
+    inHandConfirmed,
+});
+state.replaceFeatureCompanionAfterLongRest(options);
+```
+
+It requires a completed canonical Long Rest and a positive-quantity persisted
+inventory row for exact `Smith's Tools|XPHB`; proficiency, editable name-only,
+wrong-source, custom, and generated rows do not qualify. One replacement may
+use each completed Long Rest. Commit keeps the companion ID and setup choices,
+records the prior generation as vanished, increments `generation`, restores
+full HP/Repair/Hit Dice, and clears transient operation/turn/lifecycle data.
+An alive defender is also eligible, and a dead owner is not.
+
+### Lifecycle surfaces
+
+Manager and Play Mode consume the same Page projection and coordinator:
+
+```javascript
+page.getFeatureCompanionLifecycleSurfaceCompanions();
+page.getFeatureCompanionLifecyclePresentation(companion);
+page.pUseFeatureCompanionLifecycle({companionId, operation: "revival" | "completeRevival"});
+page.commitFeatureCompanionReplacementAfterLongRest(options);
+```
+
+The surface projection is deliberately narrower than changing
+`getActiveCompanions()`: it returns ordinary active companions plus only the
+exact persisted inactive `Steel Defender|EFA` owned by
+`Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA`. This preserves dead,
+pending, expired, and owner-death vanished tombstones without exposing
+unrelated inactive companions. Desktop and Play Mode show the same status,
+generation, timing/deadline or pending-completion copy, guidance, stable focus
+keys, visible disabled reasons, and lifecycle actions. Routine companion
+operations remain on `pUseCompanionOperation()`.
+
+The revival modal is a native `fieldset`/`legend` form. Its slot choices come
+from State availability, and commit requires touch plus the same-operation
+died-within-hour confirmation only for unknown-time migrated deaths. It shows
+the Action/slot/touch cost before commit, focuses the first invalid field,
+blocks close/Escape while State is resolving, returns focus to the lifecycle
+control after render, and persists/logs only a `committed` result. The explicit
+**Complete revival (+1 minute)** action calls
+`advanceGameTimeMinutes(1, ...)`; there is no subclass timer.
+
+The existing Long Rest dialog stages optional replacement before confirmation.
+`getFeatureCompanionReplacementToolRows(companionId)` is a detached read-only
+projection of eligible exact inventory rows; State remains final authority.
+The selected request is committed only after canonical Long Rest time and
+recovery establish `lastLongRestMinute`. Blank selection and rest cancellation
+do nothing. The pre-rest full snapshot therefore covers replacement undo.
+
+Exact EFA PDF presentation includes lifecycle status, generation, known death
+minute/deadline/remaining window or unknown timing, pending completion minute,
+expired/vanished notes, and revival/replacement guidance. Generic, TCE, RHW,
+name-only, and wrong-source companion output must not gain these rows.
+
+The shared Page operation also owns interaction feedback. Desktop buttons and
+Play Mode controls expose the same stable operation focus key, so Arcane Jolt
+can restore focus after either renderer replaces its controls. Disabled reasons
+are visible and linked with `aria-describedby`; action/reaction/Hit Dice/Repair
+status is non-color text in polite regions. Play Mode uses native Dodge and
+other-action controls and an owner-cost selector when Rend has multiple legal
+command paths, but all mutations still call `pUseCompanionOperation()`.
+Cancellation explicitly reports that nothing was spent, while success
+summaries name every owner/companion cost, roll/target, and modeled HP delta.
+Range prompts state that the sheet cannot verify map distance.
+
+## Exact-Owner Existing-Inventory Bindings
+
+`inventoryItemBindings` is the generic persisted contract for a feature which
+binds an existing player-owned inventory row:
+
+```javascript
+inventoryItemBindings: {
+    version: 1,
+    bindings: {
+        "<stable binding key>": {
+            version: 1,
+            bindingKey,
+            owner: {classUid, subclassUid, featureUid},
+            sourceUid,
+            inventoryItemId, // stable live wrapper ID; the only item identity
+            eligibility: {anyOf: [/* serializable structural selectors */]},
+            lastKnownItem: {name, source, type}, // display/recovery only
+        },
+    },
+    statuses: {
+        "<stable binding key>": {code, message, lastKnownItem},
+    },
+}
+```
+
+Use `setInventoryItemBinding`, `getInventoryItemBinding`,
+`reconcileInventoryItemBinding`, and `clearInventoryItemBinding`. A binding
+never creates a second inventory record and never re-resolves by editable name.
+Reconciliation validates the exact source-qualified owner, positive quantity,
+live wrapper, and structural eligibility. Missing, zero-quantity, replaced, or
+source-mismatched rows clear the binding and retain an actionable status
+instead of silently selecting a same-named row.
+
+EFA Arcane Firearm is the first consumer. Its adapter accepts only `RD`, `ST`,
+`WD`, or a canonically detected ranged weapon with
+`weaponCategory: "martial"`. The exact
+`Arcane Firearm|Artificer|EFA|Artillerist|EFA|5|EFA` owner must be present.
+The binding may remain while the row is unequipped, but focus/damage use
+requires that same positive-quantity wrapper to be equipped. Long Rest is the
+only player-facing carve/re-carve surface; cancellation and failed persistence
+restore the pre-rest snapshot, and rest undo restores the prior binding.
+
+R5a adds the descriptor-driven Companions-tab Manager foundation. Registry
+companions are summarized from `CharacterSheetCompanionRules` plus their
+detached `scaling.resolved` snapshot: exact source-qualified identity,
+lifecycle state, AC/HP/Hit Dice, movement/senses, immutable modifications,
+tool/payment provenance, and read-only Action/Reaction availability. A record
+whose exact owner, creature source, resolved identity, or modification receipt
+does not match the descriptor renders an explicit invalid/setup diagnostic; do
+not hide or name-adopt it.
+
+Derive `isOverviewOnly` structurally: a registry-backed companion with no
+dedicated safe `_getFeatureCompanionOperationUiModel()` must not reach the
+legacy generic card's direct HP/dismiss/`usedAction` handlers. Do not key this
+to `resolved.operations.command.status`; R4b replaces the deferred marker.
+EFA/TCE Steel Defenders keep their supported operation card, while RHW stays
+Manager-only until a dedicated safe UI exists. Name-only ordinary companions
+have no descriptor and continue through the generic card.
+
+For an executable runtime, read Manager Action/Reaction status from
+`getCompanionOperationAvailability(id, "action", {actionKey: "dodge"}).status`
+so canonical turn receipts outrank stale `turnUsage`. Use legacy `turnUsage`
+only as an explicit R4a/deferred fallback when no executable runtime or
+canonical status exists; lifecycle-invalid companions remain unavailable.
+
+RHW creation UI must consume, never reproduce,
+`getFeatureCompanionCreationBoundary()` and `pCreateFeatureCompanion()`. If the
+live boundary has one tool, one payment, and zero required modification
+choices, the Manager may create directly. Otherwise use one atomic review
+modal containing the boundary's eligible focus references, free/spell/pact
+payments, exact versioned modification transaction, optional appearance, and a
+final review. Re-read the boundary with the completed payload before commit.
+Cancel and validation failure never save. Use `CharacterSheetModal` for focus
+trap/restoration and a polite live region for validation/result text.
+
+The generic creation boundary does not include transient combat action
+economy. Manager UI must separately consult
+`isActionTypeAvailable("action", {trackOnlyInCombat: true})`: when false,
+surface `actionUnavailable`, disable creation, and do not open the modal or
+dispatch `pCreateFeatureCompanion()`. Repeat that shared gate in the modal's
+final live validation so a turn-state change cannot close or commit the review.
+
+Do not route this flow through Battle Smith
+`completeFeatureCompanionSetup()`: Battle Smith's appearance/locomotion/Tools
+of the Trade setup remains a distinct persisted acquisition transaction.
+Likewise, R5a Manager status must not grow RHW command buttons or Play Mode
+execution. Those operation transactions remain R4b/R5b/R6 work.
+
+## Source-qualified Spell Focus and Committed Cast Receipts
+
+Stored player/class/subclass spell attribution carries
+`sourceClassSource` and `sourceSubclassSource` beside the existing display
+names. `resolveSpellCastingClassIdentity(spell)` only returns an owner when the
+class name **and** source resolve to a current class entry. Name-only legacy
+rows remain ambiguous by design and do not activate source-specific casting
+rules.
+
+`getSpellCastFocusRequirement(spell, castMeta)` contributes the EFA Artificer
+source-specific rule: every exact `Artificer|EFA` spell gains a material
+component and requires an equipped, proficient Thieves' Tools, Tinker's Tools,
+or Artisan's Tools inventory wrapper. An active EFA Armorer Arcane Armor binding
+is another eligible wrapper and flows through the same focus selection and cast
+receipt APIs. While exact EFA Battle Ready is active,
+the same requirement OR-composes
+`weapon:{category:"any", requiresProficiency:true}` and is attributed to
+`efa-battle-ready-tools-or-proficient-weapon` /
+`Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA`. The canonical live wrapper,
+equipped, positive-quantity, weapon, and `_isWeaponProficient` checks remain in
+`getEligibleSpellCastFocusInventoryRows`; do not duplicate them in a subclass
+branch. TCE Battle Smith and ambiguous name-only Artificer rows never qualify.
+This applies even when the spell's source data has no `M` component.
+`ignoresMaterialComponents`,
+`ignoreMaterialComponents`, `waiveMaterialComponents`, or
+`materialComponentsRequired: false` are explicit cast-vehicle waivers for
+innate/item magic. A waiver suppresses the ordinary EFA tools requirement but
+does not suppress committed exact-class receipt publication. Generic focuses,
+pouches, unheld tools, and ambiguous `sourceClass: "Artificer"` rows never
+satisfy or activate the EFA rule.
+
+Cast metadata can replace the ordinary class focus rule with an exact,
+source-qualified focus requirement:
+
+```javascript
+spellcastingFocusRequirement: {
+    required: true,
+    ruleId: "feature-focus-rule",
+    sourceFeatureUid: "Feature Name|Class Name|Class Source|Level|Feature Source",
+    filter: {
+        itemUids: ["Alchemist's Supplies|XPHB"],
+        itemTypes: ["AT"],
+        itemSources: ["XPHB"],
+        requiresProficiency: true,
+    },
+    ui: {
+        title: "Choose Spellcasting Focus",
+        description: "Choose the equipped focus used for this cast.",
+        unavailableMessage: "This cast requires equipped Alchemist's Supplies.",
+    },
+}
+```
+
+`getSpellCastFocusRequirement(spell, castMeta)` is the public normalization API.
+It returns a serializable descriptor with exact `ruleId`, `sourceFeatureUid`,
+`classUid`, `castingClass`, `addsMaterialComponent`, normalized `filter`, and
+`ui`. `sourceFeatureUid` is optional only for backward compatibility; if a
+caller supplies it, it must be source-qualified (contain `|`) or the focus gate
+has no eligible rows. New rules must always supply the exact owner UID.
+
+The normalized filter supports these OR-composed selectors:
+
+```javascript
+filter: {
+    inventoryItemIds: ["stable-live-wrapper-id"],
+    inventoryItemIdsBypassProficiency: ["feature-authorized-wrapper-id"],
+    preferredInventoryItemIds: ["stable-live-wrapper-id"],
+    itemUids: ["Alchemist's Supplies|XPHB"],
+    itemNames: ["Alchemist's Supplies"],
+    itemTypes: ["AT"],
+    itemSources: ["XPHB"],
+    weapon: {
+        category: "any",
+        requiresProficiency: true,
+    },
+    requiresProficiency: true,
+}
+```
+
+Every candidate is resolved from the live inventory and must still be equipped
+with positive quantity. `inventoryItemIds` is for an explicitly authorized
+stable wrapper; it is not a snapshot of all currently eligible inventory.
+Top-level `requiresProficiency` still applies to ID/UID/name/type selectors.
+When a feature structurally authorizes one exact wrapper independent of tool
+proficiency, it repeats that ID in `inventoryItemIdsBypassProficiency`;
+Arcane Firearm uses this narrow exception. `preferredInventoryItemIds` never
+expands eligibility; it only supplies a default among already legal candidates.
+`weapon.category: "any"` accepts only a real weapon which passes the canonical
+`_isWeaponProficient(item)` resolver.
+
+The override is evaluated before the material-component waiver, so a feature
+can waive ordinary Material components while still requiring its named focus.
+The ordinary EFA rule is owned by
+`Spellcasting|Artificer|EFA|1|EFA` and continues to accept equipped,
+proficient Thieves' Tools, Tinker's Tools, and Artisan's Tools.
+The inventory filter can match exact `name|source` UIDs, names, or base item
+types. `itemSources` narrows every match to exact sources. The wrapper must be
+equipped and have positive quantity. `requiresProficiency` defaults to false.
+
+Callers select from the live wrappers returned by
+`getEligibleSpellCastFocusInventoryRows(requirement)` before any slot,
+resource, metamagic, or component mutation. The cast-result metadata stores
+only `getSpellCastFocusReference(wrapper)`:
+
+```javascript
+{
+    inventoryItemId, // stable inventory wrapper id
+    itemUid,         // exact "name|source" entity uid
+    name,
+    source,
+}
+```
+
+After target cancellation/refund handling and all core costs have committed,
+the cast path calls:
+
+```javascript
+const unsubscribe = state.registerCommittedSpellCastHook(
+    "Artificer|EFA",
+    async receipt => { /* exact-source consumer */ },
+    {hookId: "stable-consumer-id"},
+);
+
+const receipt = await state.pPublishCommittedSpellCast({
+    spell,
+    spellData,
+    focusInventoryRow,
+    focusRequirement,
+    damageEvidence,
+    cast: {type, slotLevel, resourceId, itemInventoryId, itemUid},
+});
+```
+
+The pre-cost selection result's normalized `focusRequirement` must be passed
+unchanged to `pPublishCommittedSpellCast`. Publication normalizes it again and
+revalidates the selected live wrapper after all core costs commit.
+
+Feature-backed casts may pass an optional `pCommit` callback. The publisher
+first validates and snapshots exact spell/focus identity, then runs the core
+commit, then publishes the receipt and invokes spell hooks. A rejected core
+commit publishes nothing; a committed core use is never rolled back for a
+downstream hook failure.
+
+The serializable receipt remains `receiptVersion: 1` and additively exposes
+the exact rule owner at all stable consumer surfaces:
+
+```javascript
+{
+    ruleId,
+    sourceFeatureUid,
+    focusRule: {ruleId, sourceFeatureUid} | null,
+    cast: {
+        // existing cast fields...
+        ruleId,
+        sourceFeatureUid,
+    },
+}
+```
+
+The full receipt also contains `receiptId`, `ok`, `committed`,
+`castingClassUid`, parent-qualified `castingSubclassUid`, `spellEntryId`,
+`spellUid`, `spell`, `castType`, `slotLevel`, `focusInventoryItemId`,
+`focusItemUid`, `focus`, `materialComponentsWaived`, optional `featureCommit`,
+`damageEvidence`, `followUps`, and `followUpFailed`. The `cast` record also
+carries the serializable per-cast roll records used by exact committed
+follow-ups. The receipt never stores a DOM node or live data object. A saved
+receipt can re-resolve its live focus after export/import with
+`resolveCommittedSpellCastReceiptFocus(receipt)`, which verifies both wrapper
+id and item UID.
+
+`cast.rolls` is the generic per-cast roll surface for committed follow-ups. Each
+plain record carries a stable `rollId`, `kind` (`"damage"` or `"healing"`),
+formula, original/working total, resolution status, and damage type where
+applicable. A follow-up may annotate one record with its source UID, bonus,
+original/final formula and totals, and consumed/armed/declined state. These
+records belong to the receipt only; never mirror a pending per-cast modifier
+into character save data.
+
+`damageEvidence` is an optional, cast-bounded normalized payload:
+
+```javascript
+{
+    version: 1,
+    resolution: "confirmed" | "target-confirmation-required" | "manual" | "unavailable",
+    damage: [{damageType, amount}], // final positive damage components only
+    targets: [{
+        targetId,                   // stable tracker id when available
+        targetName,
+        outcome: "damaged" | "unconfirmed" | "miss" | "noDamage",
+    }],
+}
+```
+
+The spell resolver publishes final post-transformation damage types and
+current combat/target-tracker identities. A rolled damage formula is not proof
+that a creature was hit: consumers must require `damaged`, explicitly confirm
+an `unconfirmed` tracked target, or report that target evidence is unavailable.
+Unknown fields, non-positive amounts, and malformed target rows are discarded
+at the state boundary.
+
+Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
+blocked, refunded, or source-ambiguous cast publishes no receipt. A committed,
+exactly attributed EFA cast with waived components publishes a receipt with
+null focus identity and null focus-rule ownership unless an explicit focus
+override selected a legal live wrapper. Hook errors are captured in
+`followUps`; they leave
+`ok: true, committed: true`, set `followUpFailed: true`, and never roll back the
+valid cast.
+
+EFA Alchemical Savant is the reference consumer. The spell module registers a
+stable `efa-alchemical-savant` hook for an active level-5+
+`Alchemist|Artificer|EFA|EFA`. At commit time it revalidates exact
+`Alchemist's Supplies|XPHB`, permits one healing or Acid/Fire/Poison damage
+roll, and marks the receipt before returning so a duplicate hook invocation
+cannot consume a second roll. Multiple candidates use the existing enum modal
+with an explicit decline option.
+
+For exact `Artificer|EFA` casts, a live equipped Arcane Firearm binding is
+added to `filter.inventoryItemIds` alongside the ordinary proficient tool
+selectors. Damaging spells place it in `preferredInventoryItemIds`, so the
+picker defaults to the firearm while still allowing another legal tool to
+decline the bonus. Waived, TCE, ambiguous, missing, zero-quantity, or unequipped
+bindings never enter the candidate list.
+
+After receipt publication, the spell pipeline passes its single aggregate
+damage result to `commitEfaArcaneFirearmDamage`. The adapter re-resolves the
+receipt's focus, checks it is the same live bound wrapper, queries the exact
+cast-keyed turn receipt, and adds one rolled `1d8` to the aggregate total.
+Multi-projectile, multi-component, and upcast spells therefore receive one die
+total per committed cast; separate qualifying casts in the same turn each
+qualify. Deferred weapon-channel damage carries the same committed cast/focus
+receipt into the later weapon damage roll. Spells without a real damage roll
+receive none. Feedback and roll history include the die, combined total, exact
+Arcane Firearm source, and selected focus.
+
+Executable source-owned innate grants use the same contract rather than a
+parallel feature-cast path. Their stored row carries exact class/subclass/feature
+provenance, an explicit `spellcastingFocusRequirement`, and the linked resource
+identity. `_castInnateSpell` validates that canonical live row, resolves focus
+and the normal spell-result pipeline before spending, decrements the linked
+innate/resource pool exactly once, then publishes the committed receipt. A
+focus/target cancellation spends nothing; a post-commit hook failure stays spent
+and cannot be retried. The cast refreshes the Spells, Overview Resources,
+Features resources, and Combat resources surfaces immediately.
+
+Committed-spell follow-ups that are limited per turn must use the stable-key
+turn receipt APIs above. Commit only after the player accepts and target
+evidence is validated, but before rolling or rendering the follow-up. Once the
+follow-up begins, do not roll back that receipt when its roll, feedback, or hook
+fails: the original cast remains committed, `followUpFailed` reports the
+failure, and the same-turn use stays spent. Features whose out-of-combat turn
+boundary cannot be proved may require explicit manual resolution instead of
+writing a receipt.
+
+EFA Alchemical Eruption is the reference damage-evidence consumer. It requires
+exact `Artificer|EFA` casting ownership, the active
+`Alchemist|Artificer|EFA|EFA` subclass, and positive Acid, Fire, or Poison
+damage evidence for the selected target. In tracked combat it commits
+`efa-alchemist:chemical-mastery:alchemical-eruption` before rolling the `2d8`
+Force follow-up. Removing and re-adding the feature does not refresh the same
+turn receipt. Outside tracked combat, the user must name the damaged target and
+accept manual responsibility for the once-per-turn limit.
 
 ## Active States / Toggle Abilities
 
@@ -106,12 +1745,42 @@ Each state type defines:
     active: true,
     customEffects: null,          // Overrides stateType.effects if set
     roundsRemaining: 10,          // Decremented each round
+    sourceContext: null,           // Optional exact owner/provenance snapshot
+    durationTracking: null,        // Optional deterministic expiry policy
     grantsConditions: ["frightened"], // Conditions this state grants to targets
     isCondition: false,           // true = this state IS a condition
     isSpellEffect: false,         // true = from a spell (concentration-breakable)
     concentration: false,
 }
 ```
+
+Source-owned consumable effects can persist an exact `sourceContext` and a
+`durationTracking` object alongside the ordinary active-state fields. The EFA
+Experimental Elixir contract stores the consumed generated-item identity,
+exact seven-part EFA feature owner, immutable creation metadata, resolved total
+rounds, Short/Long Rest expiry flags, and whether remaining rounds survive a
+combat boundary. Reconciliation must fail closed and remove malformed or
+source-lost effects; valid inactive effects can remain as ordinary historical
+state rows. Rest cleanup reads the serialized duration policy, while normal
+round advancement remains the sole round-expiry mechanism.
+
+External EFA Experimental Elixir administration does not create one of these
+states. `previewEfaExperimentalElixirOtherHandoff()` is the read-only validation
+and projection boundary for a later Operate-mode UI: it requires the exact live
+EFA owner, supported generated-item and metadata versions, quantity one, a
+nonblank named external target, and explicit within-5-feet confirmation. It
+returns the exact formula or mechanics, current Intelligence modifier,
+creation-snapshotted values, provenance, duration rounds, and rest-expiry policy
+without spending or randomly rolling unless deterministic Healing rolls were
+provided.
+
+`consumeEfaExperimentalElixir({target: "other", confirmed: true, ...})`
+revalidates that preview against live state, consumes the shared Bonus Action
+only in combat and the exact vial in one full-state transaction, then returns
+`result: {type: "externalHandoff", handoff}`. It never changes local HP or active
+states and never claims to mutate the named creature. Failed action consumption
+or item removal restores the pre-use snapshot; out-of-combat use leaves action
+economy available.
 
 ### Mutual Exclusivity
 
@@ -122,6 +1791,18 @@ Hard-coded: Rage ↔ Bladesong. Enforced in `activateState()` — activating one
 `getBonusFromStates(type)` checks effects hierarchically:
 - `"check:str:athletics"` → also checks `"check:str"` → also checks `"check"`
 - Returns sum of all matching `value` fields + resolved `abilityMod` fields
+
+Random roll bonuses and penalties use the parallel dice pipeline:
+
+- `CharacterSheetState.getRollBonusDice(rollType)` returns matching
+  `rollBonus`/`rollPenalty` descriptors without rolling them.
+- `CharacterSheetPage._rollStateDiceBonuses(rollType)` is the single dice
+  roller/formatter. Consumers add its `total` once and append its
+  source-labeled `breakdownStr`.
+- Main-sheet and dedicated Combat-tab attacks pass the concrete scoped attack
+  type (`attack:melee|ranged:<ability>`); the Combat quick spell attack passes
+  `attack:spell`. Stored, temporary, and active-state-granted Combat attacks all
+  share the same `_rollAttack` insertion point.
 
 ### Concentration Breaking Cascade
 
@@ -149,8 +1830,90 @@ on load. Entries are `{id, kind: "spell"|"power"|"ability", name, order, modeNam
   when nothing was concentrated on — callers rely on that defensively.
 - `_teardownConcentration()` removes the matching active manifestation for a power,
   so the "concentration ended ⇒ power stopped" invariant holds however it was dropped.
+- Spell concentration records carry `spellSource` when the cast route knows it. Damage-only
+  exceptions must use `getDamageConcentrationProtection()` from the real damage intake
+  consumers; they must not alter `breakConcentration()`, replacement, incapacitation, death,
+  or rest teardown. Source-specific providers fail closed for legacy source-less records.
 
 See `docs/charactersheet/17-talent-psionics.md` for the psionic side.
+
+### Deferred Flat-Damage Riders
+
+Optional flat bonuses which resolve on a damage roll use the state-level
+`getDeferredFlatDamageRiderOptions()` / `consumeDeferredFlatDamageRider()` contract.
+Spell and attack consumers may own prompts for facts the sheet cannot know (such as whether
+the target is affected by the caster's own spell), but state owns source qualification,
+resolution-time ability modifiers, and the shared persisted turn receipt.
+
+The receipt key is the stable source-feature UID. This is required when one feature can trigger
+through multiple modules: Guided Precision's Cartographer-spell and attack routes both use
+`Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA`, so accepting one blocks the other
+until `resetTurnEconomy()` starts the next turn. Combat start/round advance/end and Play Mode's
+Reset Turn control all use that canonical reset; save/load during the same turn preserves the
+receipt. Declining or cancelling never calls the consume method and therefore never writes a
+receipt. Subclass/class teardown prunes source-owned receipts.
+
+### Cartographer Atlas Safe Haven
+
+Superior Atlas — Safe Haven is registered in `ZERO_HP_INTERVENTIONS` as
+`safeHavenEfaCartographer`; it does not add a parallel damage path. The generic
+availability, validation, consumption, HP-outcome, and post-application callbacks
+recheck the versioned Atlas, destroy exactly the triggering self map, set HP to
+twice the current EFA Artificer level, and return an immutable placement
+requirement. Massive-damage death remains blocked before the registry is armed.
+
+External holders use
+`resolveAdventurersAtlasSafeHavenForExternalHolder(holderId, confirmation)`.
+That manual resolver requires an active named external holder plus explicit
+confirmation that it reached 0 HP without being killed outright. It returns the
+same HP and teleport-result shape without editing another character sheet or
+claiming coordinates/occupancy were resolved. The teleport anchors are the
+Cartographer (even for an ally-only Atlas) and other active holders, excluding
+the creature whose map is consumed.
+
+### Feature-Granted Spell Transactions and Targeting Exceptions
+
+Feature-owned casts which are not prepared spells use immutable descriptors from
+`getFeatureSpellCastGrant()` and the atomic
+`commitFeatureSpellCast()` / `rollbackFeatureSpellCast()` receipt contract. The
+Spells controller still resolves the canonical spell entity and owns casting
+constraints, targeting/effects, concentration, and committed-cast triggers. It
+commits the feature use and action before resolving the spell, then rolls both
+back when targeting is cancelled or resolution throws. This keeps feature casts
+distinct from spell slots while preserving the real spell's source, casting
+ability, duration, and concentration. Feature casts and ordinary prepared/known
+spells share the same state action transaction, so an action spell blocks another
+action spell regardless of which route cast it. The Spells controller derives
+the transaction from the effective casting time (including Quickened Spell),
+leaves longer casting times untracked, and rolls the action back when targeting
+is cancelled or resolution throws.
+
+EFA Cartographer Mapping Magic is the first consumer. Its state is versioned in
+`cartographerMappingMagic`; Long Rest resets both limited casts, and full rest
+snapshot undo restores the prior uses/receipts. Portal Jump spends
+`Math.floor(liveSpeed / 2)` through `spendMovement()` with a structured
+destination receipt during combat, so save/load and `resetTurnEconomy()` use the
+same movement ledger as every other movement feature. Positive Speed 1 has the
+authored zero-foot cost and succeeds without manufacturing a receipt. Outside
+combat, the same validation and structured result run without persisting a
+transient turn receipt. Both its direct and Atlas-holder routes require an
+explicitly confirmed visible, unoccupied destination; the holder route additionally
+confirms the holder is within 30 feet and the destination is within 5 feet of them.
+
+The exact EFA progression is data-authoritative: Mapping Magic, Portal Jump, and
+Adventurer's Atlas Positioning begin at Cartographer level 3. Illuminated
+Cartography tracks expended casts against the current Intelligence modifier
+(minimum 1), preserving the expended count across ability changes so lowering
+and later restoring Intelligence never refreshes uses without a Long Rest.
+
+Targeting rules which waive only selected requirements use
+`getTargetingExceptionDescriptors()` / `resolveTargetingException()`. Positioning
+requires an active self-held Atlas map plus explicit same-plane, normal-range,
+and otherwise-eligible-target confirmations. Its resolver waives sight and cover
+only; range, target eligibility, components, and other casting requirements remain
+intact. This targeting exception does not waive Portal Jump's destination visibility.
+The sheet records adjudication facts but does not invent coordinates, line of sight,
+planes, or DM Screen/Journey state.
 
 ### Subclass-Scoped State Effects
 
@@ -299,6 +2062,21 @@ that increases melee reach must not rewrite a spell's authored range.
 
 ### Standing Weapon Damage Display
 
+`CharacterSheetState.getWeaponAbilityResolution(attack)` is the single
+attack/damage ability resolver. It returns the normal ability result plus the
+winning alternate ability's `source`, exact `sourceFeatureUid`, and
+`attribution`. `getWeaponAbilityMod()` is only its numeric compatibility
+wrapper. Combat, Overview, and Play Mode must consume the resolution instead of
+re-implementing finesse or feature swaps; both attack and damage therefore use
+the same ability and show the same attribution.
+
+Battle Ready is represented as a generic class-feature `attackAbility` effect.
+Its magic-weapon gate delegates to `CharacterSheetItemUtils.isMagicWeapon`
+through state, including exact generated-item classification. EFA validates
+`Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA`; TCE validates its own UID.
+Do not set legacy `hasBattleReady` for EFA, and do not persist the resolved
+ability on inventory rows.
+
 `CharacterSheetState.getWeaponDisplayDamageBonus(attack)` is the shared source for
 the non-ability flat bonus shown in Combat, Overview, and Play Mode, and for the
 standing-flat portion of `_rollDamage`. It includes the attack's authoritative
@@ -324,7 +2102,35 @@ riders remain roll-time concerns and must not appear in the standing formula.
 
 ### Action Economy Tracking
 
-`_turnActionUsage`: tracks `{action, bonus, reaction}` booleans per turn. Reset on turn advance.
+`CharacterSheetState.actionEconomyUsage` tracks `{action, bonus, reaction}`
+consumption for state-owned callers such as Play Mode and feature interactions.
+Use `consumeActionType`, `restoreActionType`, and `resetActionEconomy`; combat's
+attack-count tracker remains separate. `commitActionEconomy` /
+`rollbackActionEconomy` provide the atomic receipt-shaped contract used by spell
+casting. Callers whose cost exists only within a turn pass
+`{trackOnlyInCombat: true}`; outside combat the cost is validated but not written,
+so save/load cannot strand an action between narrative interactions.
+
+`movementEconomyUsage` is the parallel persisted movement ledger. It stores
+source-tagged atomic receipts rather than a frozen allowance:
+
+- `spendMovement(amount, {source, scope?, trackOnlyInCombat?})` validates against live walking Speed
+  and returns a receipt which can be refunded with `refundMovement` or
+  `rollbackMovement`. A zero-cost spend succeeds with `receipt: null`; a
+  combat-only spend outside combat likewise returns a validated result without
+  persisting a turn receipt.
+- `getMovementEconomyState({scope?, trackOnlyInCombat?})` recalculates total/remaining movement from
+  `getSpeed("walk")` on every read, so conditions and temporary Speed modifiers
+  immediately change the allowance without rewriting receipts.
+- `grantMovementAllowance` adds a Speed-relative allowance receipt. A scoped
+  grant is visible only to that mechanic; Chained Fury uses scope
+  `"chained-fury"` so its bonus-action doubling remains chain-only.
+- `resetTurnEconomy` clears action and movement usage together. Combat start,
+  round advance, and Play Mode's Reset Turn route through this shared reset.
+
+Legacy `chainedMovementUsage` saves migrate to generic spend/allowance receipts
+on load. Malformed ledgers are rejected as a unit and reset rather than
+partially salvaged.
 
 ### Critical Hit Range Scoping
 
@@ -367,7 +2173,41 @@ natural-20-only behavior via the `natRange` default of `20`. Thelemar's
 generic crit-roll homebrew is suppressed on death-save rolls (`isAttack: true`)
 since death saves already hardcode their own nat-1/nat-20(+widened) cases.
 
+### Zero-HP Intervention Transactions
 
+`CharacterSheetState.ZERO_HP_INTERVENTIONS` is the generic registry for optional
+"damage reduced you to 0 HP, but not killed outright" effects. `takeDamage()`
+arms a pending transaction only after Death Ward and massive-damage exclusion.
+`getPendingZeroHpIntervention()` returns the live descriptors plus deterministic
+`chooser.options` in registry order; consumers must commit only the selected id.
+
+Registry entries retain the legacy save/use fields and may additionally provide:
+
+- `availability`: callback or `{resolve}` descriptor returning
+  `{available, unavailableReason?}`
+- `armWhenUnavailable`: defaults to `true` so legacy consumers can inspect why
+  an owned intervention is unavailable; set it to `false` for externally
+  resolved features such as an ally-only Cartographer Safe Haven, which must not
+  create an empty automatic prompt
+- `validation`: callback or `{validate}` descriptor returning
+  `{valid, cancelled?, error?}` before commit
+- `consumption`: callback or `{consume}` descriptor for a custom state-owned cost;
+  omitting it preserves the feature-use/resource deduction
+- `hpOutcome`: number, declarative HP descriptor, callback, or `{calculate}`
+- `postApplicationResult`: static structured payload, callback, or `{build}`
+
+Validation and `cancelZeroHpIntervention()` happen before the commit point and
+spend nothing. Commit snapshots `_data`, calculates the HP outcome, consumes once,
+applies HP/death-save state, and builds the optional result. Any commit-phase
+exception or `{ok: false}` rolls the snapshot back and throws; callers must surface
+that error rather than treating it as a declined or successful intervention.
+
+Cartographer Safe Haven always includes the Cartographer (`you`) as a legal
+five-foot teleport anchor. If the Cartographer's own map triggered the
+intervention, the immutable placement result represents that anchor independently
+of the now-destroyed map (`holderId: null`, `isActiveMapHolder: false`); other
+active holders remain additional choices. External-holder resolution uses the
+same contract without mutating another sheet or inventing coordinates.
 
 Class and subclass calculations can append attack descriptors to
 `calculations.grantedAttacks`. `getFeatureGrantedAttacks()` marks them as
@@ -504,6 +2344,15 @@ tuple is adopted only when the stored spell has no ownership attribution at all.
 Changing ownership is an explicit reattribution operation, never a side effect of
 adding the same spell again.
 
+**Fixed subclass-grant ownership.** A fixed subclass `additionalSpells` overlay
+persists `subclassSpellGrantOwners[]`, whose `key` is the exact lowercased
+`class name|class source|subclass name|subclass source` identity. Exact cleanup
+must build the owner with `state.getSubclassSpellGrantOwner(classEntry,
+{sourceFeature})` and pass that object to `state.removeSubclassSpells(owner)`;
+never remove a ledger-backed grant by the display label alone, since same-named
+subclasses exist across sources. The string overload is intentionally limited to
+ledger-less legacy saves, where `sourceFeature` is the only surviving provenance.
+
 ### Innate Spells
 ```javascript
 {
@@ -526,7 +2375,9 @@ adding the same spell again.
 }
 ```
 
-**Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.useSpellSlot(level)` (decrement `current`); clicking the rightmost used pip calls `state.setSpellSlots(level, current + 1)` (restore one). The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
+**Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.setSpellSlots(level, max, current - 1, {isExpenditure: true})`; clicking the rightmost used pip calls `state.setSpellSlots(level, max, current + 1)` in the default non-consuming mode. The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
+
+**Prepared capacity excludes always-prepared grants.** `CharacterSheetClassUtils.countPreparedSpells()` counts only player-prepared leveled spells. Subclass/class overlays with `alwaysPrepared: true` remain available and render as locked prepared spells, but never consume the class's preparation capacity. Preserve their exact `name|source` identity when populating, saving, loading, Quick Building, or changing a subclass in Respec.
 
 ### Divine Soul affinity spell (swappable subclass grant)
 
@@ -560,6 +2411,109 @@ A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cur
 }
 ```
 
+**Crafting-time calculation.** `CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state, items})`
+is the only reusable workweek calculator: resolve the crafted item by `name|source`, calculate the
+Complete Crafter baseline, then multiply by `state.getCraftingTimeMultiplier({item})`. EFA
+Artillerist Tools of the Trade returns `0.5` only for the structural wand type `WD`; never infer
+the benefit from display names or apply it to TCE Artillerists.
+
+### EFA Artillerist generated Eldritch Cannon state
+
+EFA Eldritch Cannons reuse `_data.companions[]` with
+`COMPANION_TYPES.CLASS_SUMMON`; there is no cannon-specific parallel store and
+no inventory row. A generated summon carries source-qualified
+`generatedClassSummon` ownership metadata (`templateUid`, class/subclass/feature
+UIDs, slot, and generation version) plus only the legal mutable runtime fields.
+The canonical Milestone 2 identities are:
+
+- template `Eldritch Cannon|EFA`;
+- owner class `Artificer|EFA`;
+- owner subclass `Artillerist|Artificer|EFA|EFA`;
+- feature `Eldritch Cannon|Artificer|EFA|Artillerist|EFA|3|EFA`.
+
+`CharacterSheetPage` installs the authoritative `data/objects.json` catalog
+before save load. `getClassSummon()`/`listClassSummons()` then project AC,
+maximum HP, immunities, spell attack/save values, and form calculations from the
+template and current EFA Artificer level. Reconciliation runs after load and
+owner class/subclass/level changes: it retires invalid/source-crossed/ownerless
+records, removes stale slot 1 below level 15, deduplicates each ownership slot
+by newest legal revision, and clamps HP down without healing.
+
+Compact generated records are intentionally hidden from generic companion
+listing/getter/render APIs. Generic companion controls assume a full legacy
+statblock and must not expose or mutate a generated summon; lifecycle reads and
+retirement go through the dedicated class-summon APIs. Serialization still
+keeps the compact record in `_data.companions[]`. Carried cannons require
+`mobility: null` and zero owner distance; deployed cannons require either
+`"legs"` or `"wheels"`.
+
+Duration is game time, not wall time. `advanceClassSummonGameTime(minutes)`
+reduces the persisted 60-minute duration and retires at zero. Finishing either
+a 60-minute Short Rest or a 480-minute Long Rest expires every EFA cannon
+through the same retirement path; Rest Undo restores the full pre-rest snapshot.
+
+Milestone 3 adds one-active-cannon creation and base operation without changing
+the compact record contract:
+
+- `pCreateEfaEldritchCannon()` validates before spending and atomically rolls
+  back Action/resource/slot/revision/summon state if its persistence callback
+  fails. In combat it consumes the canonical `action` slot and reports the
+  "Magic Action" subtype.
+- `Eldritch Cannon Creation` is a contextual, exact-feature resource with one
+  Long Rest use. An explicit normal or Pact spell slot is the alternative.
+  Resource-less Milestone 2 saves initialize that use as spent only when a
+  surviving exact-owner cannon records `createdWith: "freeUse"`; explicit
+  resources remain authoritative.
+- `validateEfaEldritchCannonActivation()` /
+  `activateEfaEldritchCannon()` require the owner within 60 feet, consume the
+  canonical `bonus` slot only in combat, and allow a deployed cannon to move up
+  to 15 feet before or after activation. Carried cannons remain at zero.
+- Flamethrower, Force Ballista, and Protector read all dice, attack/DC, and
+  ranges from the projection. Protector uses `max(1, INT modifier)` and only
+  applies temporary-HP replacement directly when the target is self.
+- Dedicated methods own position updates, HP damage/healing, `mending` (`2d6`,
+  capped), Magic Action dismissal, and explicit duration ending.
+
+Milestone 4 extends the same compact lifecycle:
+
+- Creation requires an equipped, positive-quantity, proficient Smith's Tools or
+  Woodcarver's Tools wrapper resolved through the reusable spell-focus inventory
+  filter. New records store an optional stable creation-tool receipt; legacy
+  records without one remain valid and later tool removal does not retire them.
+- `pCreateEfaEldritchCannons()` creates one cannon in the next free slot or two
+  at once when a level-15 owner has no active cannon. One free use pays for both;
+  slot payment requires one selected normal/Pact slot per cannon with aggregate
+  validation and full rollback. The singular API delegates compatibly.
+- `activateEfaEldritchCannons()` prevalidates both requests and rolls, then
+  resolves both with one canonical Bonus Action. Individual activation remains.
+- Surviving in-range damage at level 9 can arm one transient Explosive Cannon
+  Reaction. Accepting retires the exact revision as `detonated` and reports
+  `3d10` force, 20-foot radius, Dexterity save against spell-save DC, half on
+  success. The canonical Reaction is spent only while combat tracking is
+  active; outside combat the operation remains legal and reports the action as
+  untracked. Decline spends nothing; save failure restores both the damaged
+  cannon and the immediate detonation opportunity.
+- Level-15 Shimmering Field Projection uses the generic nonstacking cover
+  projection shared by Smite of Protection and Cover of Darkness. Half Cover
+  contributes +2 AC/+2 Dexterity saves once, exposes all equal-grade
+  source/range data, and drops immediately when the last in-range cannon leaves.
+  Ally cover is descriptive only.
+
+The Combat tab owns the canonical creation, individual/dual activation, and
+Explosive Cannon dialogs. Play Mode adds a compact command surface for the same
+operations, but delegates every mutation and persistence boundary to Combat's
+canonical handlers; it does not introduce a second cannon state or expose
+compact records through generic companion APIs. The Play Mode card also reports
+the exact Arcane Firearm binding and nonstacking Shimmering Field status. PDF
+remains read-only. Arcane Firearm uses the exact inventory-binding and
+committed-cast receipt pipeline documented above rather than any
+cannon-specific state.
+
+Short Rest is an awaited persistence transaction. It snapshots the full state
+and the existing Rest Undo entry before applying rest effects and cannon expiry.
+On save failure it reloads the snapshot, restores the previous undo entry,
+attempts to persist that rollback, and leaves the rest dialog open for recovery.
+
 Catalog adds preserve both type layers: inventory grouping continues to use the coarse
 `type`, while rules logic reads `typeCode` first and strips any `|source` suffix.
 `CharacterSheetInventory.setItems()` injects the enhanced catalog into state;
@@ -575,6 +2529,54 @@ feature provenance, then resolve any Combat attack from the live item by wrapper
 ID so materials, upgrades, bonuses, attack notes, and edits remain
 authoritative. Editable names are not ownership keys.
 
+New transient generated items use the versioned
+`CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION` contract:
+
+```javascript
+{
+	_isGeneratedFeatureItem: true,
+	_generatedItemId: "<unique generated instance id>",
+	_generatedItemProvenance: {
+		version: 1,
+		owner: {
+			featureUid: "Feature|Class|ClassSource|Subclass|SubclassSource|Level|FeatureSource",
+			featureSource: "FeatureSource",
+			classUid: "Class|ClassSource",
+			subclassUid: "Subclass|Class|ClassSource|SubclassSource",
+		},
+		metadata: {...featureSpecificData},
+	},
+}
+```
+
+The canonical subclass-feature identity is the seven-part source-aware UID
+returned by `CharacterSheetState._getSourceAwareSubclassFeatureUid()`. Owner
+UIDs are validated together, the trailing feature source is checked against an
+optional `featureSource` receipt, and matching is case-insensitive over the
+complete UIDs; display names or partial source matches never establish
+ownership. The standard six-part 5etools subclass-feature UID is accepted only
+when reading provenance written by the first generic-contract revision: it is
+classified `stale`/repair-required, preserved through editing, and is never
+listed or removed as an exact owner. New writes require the seven-part form.
+`createGeneratedFeatureItem()` creates one `_isCustom` quantity-1 row with
+separate stable wrapper and generated-instance IDs, so repeated calls never
+stack. `classifyGeneratedFeatureItem()` returns `valid`, `stale`, or `ordinary`;
+unsupported integer versions are `stale` with `repairRequired: true`, while
+partial/malformed markers remain ordinary inventory. Exact-owner lifecycle code
+uses `getGeneratedFeatureItemRows(owner)` and
+`removeGeneratedFeatureItemsByOwner(owner)`. The removal API delegates to
+`removeItem()` so containers, effects, bonuses, and equipment reconciliation use
+the normal cleanup path. `replaceItem()` preserves valid provenance and instance
+identity, and also carries unsupported-version metadata forward without trying
+to interpret it. Existing fixed generated systems may retain their dedicated
+legacy identities until explicitly migrated; never adopt them by name.
+
+`CharacterSheetItemUtils.isMagicItem()` / `isMagicWeapon()` also treat generated
+markers as a fail-closed provenance envelope. Only a `valid` exact
+`Replicate Magic Item|Artificer|EFA|2` owner is intrinsically magic; stale,
+malformed, wrong-owner, and unrelated generated rows remain nonmagical even if
+their editable rarity or display name claims otherwise.
+
 Reconciliation must be idempotent: preserve the wrapper ID and player-owned
 fields, update only untouched generated/scaling fields, collapse duplicate
 generated rows, and remove owned artifacts when the granting feature is lost.
@@ -583,6 +2585,143 @@ path. If the equipment persists while its attack is conditional, put
 `requiresState`/`requiresStates` on the generated item/attack and let Combat
 hide the attack rather than deleting and recreating the inventory row. TGTT
 Chained Fury's Spectral Chains are the reference implementation.
+
+When a feature owns several mutually exclusive generated rows, give each row a
+dedicated permanent metadata identity in addition to `_generatedItemId`. EFA
+Armorer uses `_efaArmorerWeaponId` for Force Demolisher, Thunder Pulse, and
+Lightning Launcher. All three wrappers survive model switches and preserve
+player edits; `getItemAttackId()` gives the active row the same deterministic ID
+in both the state-granted and Combat auto-weapon paths. The inactive wrappers
+remain persistent inventory artifacts but `isItemAttackAvailable()` and the item
+effect/proficiency activation gate must agree that they are mechanically inert.
+Their wrapper equip state is derived rather than user-owned: only the selected
+row is equipped while Arcane Armor is active and worn, while all other rows are
+forced unequipped. Generic equip attempts reconcile back without changing model
+activation. Inventory suppresses the generic Equip control and derives
+`Active Armor Model Weapon` versus `Dormant: <Model>` from
+`_efaArmorerWeaponId` plus the current binding/model.
+
+Persist equipment bindings by inventory wrapper `id`, never by display name or a
+derived AC snapshot. EFA Arcane Armor stores
+`efaArmorer.arcaneArmorItemId` and routes bind, clear, load, equipment mutation,
+death, and source-loss handling through `reconcileEfaArmorerState()`. Doffing
+preserves the wrapper binding in a suspended status; another equipped body armor,
+a missing/non-armor bound row, exact source/model loss, or death clears it.
+Smith's Tools proficiency and a canonical PHB/XPHB Smith's Tools item are
+binding/transformation prerequisites, not ongoing active-status requirements:
+losing either does not suspend a worn, already-bound Arcane Armor.
+
+Short and Long Rest use one `_buildEfaArmorModelSection()` staged selector. It
+surfaces only for the exact `Artificer|EFA` Armorer with a canonical model, reads
+the three exact level-3 EFA model definitions, and keeps the selector disabled
+with prerequisite-specific text when binding or tools are missing. Doffed armor
+remains switchable. A durable text preview follows the native select and updates
+on change without mutating state. `apply()` revalidates, then routes through
+`CharacterSheetClassUtils.replaceStructuredFeatureChoice()` with canonical
+decision synchronization before save/render. The previous decision receipt is
+invalidated so progression synchronization rebuilds all live receipt effects
+instead of reducing them to the materialized feature. The structured outcome
+drives a full old-model/new-model/bound-armor success suffix or the unchanged
+stale-prerequisite warning. Because application occurs after the full pre-rest
+snapshot, Undo Rest restores every durable choice store and the previously
+active stable generated row.
+
+The three EFA model rows store their level-3 weapon baseline in
+`_generatedItemBase`: Force Demolisher (`1d10` Force, Reach, 10 ft.), Thunder
+Pulse (`1d8` Thunder, 5 ft.), and Lightning Launcher (`1d6` Lightning, 90/300
+ft.). Each is Simple and defaults to Intelligence for both attack and damage.
+Reconciliation advances untouched generated fields while preserving any field
+that differs from the previous base. Stable `_generatedEffectId` entries apply
+Infiltrator's `speed:walk +5` and `skill:stealth` advantage through the ordinary
+equipped-item effect pipeline; switching model, doffing, clearing the binding,
+death, source loss, or ambiguous model evidence unregisters them immediately.
+This is why armor-imposed Stealth disadvantage cancels Dampening Field instead
+of being removed.
+
+At exact EFA Armorer level 15, only the active worn/bound model row advances its
+generated baseline: Force Demolisher becomes `2d6`, Thunder Pulse becomes
+`1d10`, and Lightning Launcher becomes `2d6`. Model switches, doffing, binding
+loss, death, and level downgrade reconcile the untouched field back to its
+previous generated baseline while preserving wrapper IDs, editable names, and
+any player damage override.
+
+Model actions remain exact-source and exact-attack mechanics:
+
+- Force Demolisher post-hit movement resolves only from
+  `efa-armorer:dreadnaught:force-demolisher`, verifies the target is at least one
+  size smaller, and returns a structured push/pull receipt without storing a
+  fabricated target position.
+- Giant Stature is a Bonus Action item power with a Long Rest resource equal to
+  the Intelligence modifier (minimum 1). Its active state always grants +5-foot
+  reach and grants only the size steps needed to reach Large when room allows.
+  Perfected Armor upgrades that same transaction/state to +10-foot reach, a
+  Large/Huge player choice, and Advantage on Strength checks and Strength saving
+  throws. The chosen size is serialized with the state; level downgrade
+  reprojects the live state to the level-3 Large/+5 contract rather than
+  cancelling or refunding it.
+  The action/resource/state transaction revalidates model and wrapper binding;
+  lifecycle reconciliation removes an invalid state without refunding a valid
+  committed use. The resource's `metadata.efaGiantStature.spentUses` preserves
+  total spend across temporary Intelligence-maximum reductions and resets only
+  when the Long Rest restores the pool.
+- Thunder Pulse uses the generic owner-tagged target-effect store. Re-hitting
+  the same target refreshes its disadvantage-against-others effect until the
+  start of the Armorer owner's next turn.
+- Defensive Field is an unlimited Bloodied-only Bonus Action. It grants owned
+  temporary HP equal to exact EFA Artificer level; doff/model/source/death
+  cleanup removes it only while that feature still owns the current temp HP.
+- Lightning Launcher's optional `1d6` Lightning rider uses the shared
+  `queryTurnReceipt` / `commitTurnReceipt` / `rollbackTurnReceipt` /
+  `pruneTurnReceipts` contract. Never route it through Combat's legacy
+  round-keyed `_lastRiderRoundUsed` map.
+- Perfected Guardian is a Reaction item power with a dedicated exact-owned Long
+  Rest resource equal to Intelligence modifier (minimum 1). Visibility,
+  Huge-or-smaller size, 30-foot range, the confirmed failed Artificer spell-save
+  DC Strength save, and a 0–25-foot direct pull are validated before
+  `pCommitFeatureUse()`. Adjacency returns eligible melee weapon descriptors as
+  an optional post-commit follow-up; selecting or failing that follow-up never
+  consumes another Reaction or refunds the valid core use.
+- Perfected Lightning Launcher glimmer is applied only after the exact stable
+  Launcher damage path completes. Its distinct target-effect source stores
+  5-foot dim light plus disadvantage on attacks against the Armorer owner,
+  uses an opaque target ID (select that existing target to refresh it), expires
+  through the shared turn-receipt boundary at owner-turn start, and tears down
+  with model/source/binding, death, or combat loss.
+- Perfected Infiltrator flight is a dedicated Bonus Action item power with its
+  own Intelligence-modifier Long Rest resource. The active state grants a live
+  `walkMultiplier: 2` Fly Speed so later Speed changes are reflected at the read
+  site; that final walking Speed is doubled without applying global movement
+  modifiers a second time. `resetTurnEconomy()` expires it at the
+  end-current-turn boundary. Model/source/binding/death reconciliation remains
+  authoritative.
+
+Combat selectors must match `attackIds` against stable attack/generated-item
+metadata before considering legacy `attackSourceFeature` labels. Editable names
+and another weapon carrying the same display source must not qualify. The
+canonical Dreadnaught/Guardian/Infiltrator level-3 subclass-feature entities are
+structured model choices, so `detectActivatableFeature()` suppresses only their
+exact seven-part EFA UIDs; their real actions stay on the armor row and Combat
+hooks rather than appearing as inert generic toggles.
+
+Arcane Armor lifecycle controls are synthetic `itemPowers`, not parallel state:
+the real armor row exposes `Transform` as a Magic action and `Don` / `Doff` as
+Utilize actions. Use distinct stable power IDs per transition so a stale Doff
+button cannot become a Don after state changes. Inventory invokes directly;
+Combat checks action availability first and consumes one Action only after the
+state transaction commits. The bound row's visible status must distinguish
+ready, blocked (with remediation), worn, and doffed/suspended using icon + text,
+and must include the reference rule that the armor cannot be removed against the
+player's will.
+
+The worn binding also supplies two state-owned benefits:
+
+- Carry the inventory wrapper `itemId` into `_data.ac.armor`; only an active
+  binding with the same ID ignores that armor's Strength requirement.
+- Add feature-provided spellcasting foci through a generic class-scoped
+  candidate contract. Component/focus consumers pass the spell into
+  `getSpellcastingFocusStatus({spell})`; EFA Arcane Armor scopes to
+  `Artificer|EFA`, while ordinary foci and component pouches retain their
+  existing unscoped behavior.
 
 ### Usable adventuring gear
 
@@ -2330,20 +4469,76 @@ Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog va
 
 ## Rest Mechanics
 
+### Source-Owned Temporary HP
+
+`CharacterSheetState` owns both the current pool and its optional source receipt:
+
+```javascript
+hp: {
+    temp: 10,
+    tempOwner: {
+        id: "feature:source-shield",
+        kind: "classFeature",
+        name: "Source Shield",
+        source: "HB",
+        uid: "Source Shield|Example Class|HB|3",
+    },
+}
+```
+
+The receipt is generic, not feature-specific. `id` (or the input alias `key`), `kind`, and
+`name` are required; `source` and `uid` are persisted as nullable identity fields. Use
+`grantOwnedTempHp(value, owner)` for a source-owned grant, `grantTempHp(value)` for an
+unowned grant, and `clearOwnedTempHp(owner)` for exact-owner teardown. Lower or equal grants
+are no-ops and cannot steal ownership; a higher grant replaces value and owner atomically.
+
+`setTempHp(value)` is the compatibility/manual replacement API and clears ownership whenever
+it replaces the pool, even if the numeric value is unchanged. Damage must use
+`consumeTempHp(value)`: partial absorption preserves the receipt, while consuming the pool to 0
+clears it. `setHp(..., temp)` and reset or long-rest clear paths are replacements and therefore
+cannot leave a stale receipt. Save/load normalization preserves a valid receipt only while
+`temp > 0`; legacy, zero-pool, and malformed receipts load as unowned.
+
 ### Short Rest
 - **Hit Dice**: d{classHitDie} + CON mod per die spent; minimum 1 HP healed
 - **Arcane Recovery** (Wizard): Select slot levels to recover, capped by LEVEL SUM (not count). "Max 5 levels" means any combo summing ≤5. No 6th+ slots.
 - **Natural Recovery** (Land Druid): Same mechanic as Arcane Recovery
 - **Sorcerous Restoration** (Sorcerer 20): Auto-applies via `state.applySorcerousRestoration()`, not manual
 - **Stamina pool** (TGTT): Restores on BOTH short and long rest
+- **EFA Armor Model**: Optional staged switch through the canonical structured-choice transaction; a canonical model keeps the dialog available even when no Hit Dice/HP work remains.
+- **Feature companions**: `applyFeatureCompanionRest("short")` is an explicit no-op for companion lifecycle and creation payment.
 
 ### Long Rest
 - Full HP + half hit dice recovered (minimum 1 per die type)
 - All spell slots 1-9 restored
 - Class resources with `recharge: "long"` restored
 - Exhaustion reduced by 1
-- Temp HP reset, death saves reset to 0/0
+- `onLongRest()` preserves temp HP by default (including its owner receipt); the explicit
+  house-rule clear resets both value and owner. The current long-rest dialog preselects that
+  clear option. Death saves reset to 0/0.
 - Concentration optionally broken
+- **EFA Armor Model**: Uses the same staged/revalidated selector and transaction as Short Rest.
+- **Feature companions**: `applyFeatureCompanionRest("long")` applies registry rest policies. RHW Reanimated Companion exact-owner instances expire and their persisted free-creation resource restores to maximum; foreign and same-label records are untouched.
+
+### Transactional Long Rest Feature Drafts
+
+EFA Experimental Elixir is the reference state/controller transaction layered
+over the existing rest and undo contracts. The controller calls
+`prepareEfaExperimentalElixirLongRestDraft()` before mutation, then
+`commitEfaExperimentalElixirLongRestDraft()` captures the ordinary full-state
+rest snapshot, runs `state.onLongRest()`, and commits the exact-owner batch
+replacement. Invalid selected production fails before the rest; any later
+failure restores the captured snapshot. Missing exact held
+`Alchemist's Supplies|XPHB` demotes requested production to a committed empty
+replacement rather than blocking the rest. Existing `_onUndoRest()` therefore
+restores the prior generated-item wrapper IDs, generated IDs, metadata, and all
+other pre-rest state through the same load boundary.
+
+Slot-funded vial creation stays state-owned:
+`commitEfaExperimentalElixirSpellSlotVial()` reuses the canonical exact-focus
+filter, spell-slot ledger, action-economy API, and generated-feature-item
+factory. It validates every cost before mutation, tracks the Magic action only
+in combat, and restores the full state snapshot if item creation fails.
 
 ### Item Charge Restoration
 Recognizes recharge types: `restLong`, `dawn`, `dusk`, `midnight` (on long rest), `restShort` (short rest only). Parses `rechargeAmount` dice notation (e.g., `"1d6 + 1"`) and rolls if present.

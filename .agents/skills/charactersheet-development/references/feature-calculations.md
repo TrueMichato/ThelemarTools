@@ -13,6 +13,8 @@
 - Post-Roll d20 Intervention API
 - Attack Rider Notes
 - Subclass Cantrip Choice Slots
+- EFA/TCE Artificer Source Separation
+- RHW Reanimator Projection
 
 ## Overview
 
@@ -56,6 +58,221 @@ These prefixes are used consistently and should be followed:
 | `{feature}Range` | `number` (feet) | `auraRange: 10`, `shadowStepRange: 60` |
 | `{feature}Count` | `number` | `experimentalElixirCount: 2`, `metamagicCount: 2` |
 | `{feature}Die` | `string` | `bardicInspirationDie: "d8"`, `superioritybDie: "d10"` |
+
+## EFA/TCE Artificer Source Separation
+
+Artificer rules are source-qualified. Treat an `Artificer|EFA` class entry as a
+different rules implementation from the legacy/TCE Artificer; never key these
+differences on the class name alone.
+
+`CharacterSheetClassUtils` is the progression authority:
+
+- `getMaxArtificerSpellLevel(classLevel)` returns the 1/5/9/13/17 spell-level
+  breakpoints. `getMaxSpellLevelForClass("Artificer", level)` and
+  `getMaxSpellLevelFromProgression("artificer", level)` delegate to it.
+- `getEfaArtificerPreparedSpells(classLevel)` and
+  `getEfaArtificerCantrips(classLevel)` are the lean-save fallbacks for the EFA
+  class tables.
+- `getEfaArtificerPlansKnown(classLevel)` and
+  `getEfaArtificerCreatedMagicItemsMax(classLevel)` project the Replicate Magic
+  Item progression without making plan choices or creating inventory.
+
+EFA calculation fields are:
+
+```javascript
+{
+    hasEfaArtificerSpellcasting,
+    hasReplicateMagicItem,
+    artificerPlansKnown,
+    artificerCreatedMagicItemsMax,
+    hasMagicItemTinker,
+    hasFlashOfGenius,
+    flashOfGeniusUses,
+    flashOfGeniusBonus,
+    hasIngeniousMovement,
+    ingeniousMovementRange,
+    ingeniousMovementSourceFeatureUid,
+    hasMagicItemAdept,
+    hasSpellStoringItem,
+    hasAdvancedArtifice,
+    hasRefreshedGenius,
+    hasMagicItemMaster,
+    hasEfaSoulOfArtifice,
+    hasMagicalGuidance,
+    magicItemAttunementLimit,
+    hasEfaAlchemicalSavant,
+    efaAlchemicalSavantBonus,
+}
+```
+
+`hasEfaAlchemicalSavant` and `efaAlchemicalSavantBonus` are emitted only for
+the exact `Alchemist|Artificer|EFA|EFA` subclass at Artificer level 5+. The
+bonus is `max(1, Intelligence modifier)`; committed cast/focus/roll validation
+is owned by the spell-receipt subsystem rather than this calculation.
+
+EFA does **not** set the TCE-only `hasToolExpertise`, `infusionSlots`,
+`infusionsKnown`, `hasRitualCasting`, `hasSoulOfArtifice`, or
+`soulOfArtificeSaveBonus` fields. Its Magic Item Savant effect has five
+attunement slots but `ignoreRequirements: false`. The source-aware
+`FeatureEffectRegistry` entries for `Magic Item Savant|EFA` and
+`Soul of Artifice|EFA` prevent same-named stored EFA features from falling back
+to TCE effects.
+
+Ritual checks must honor a stored spell's `sourceClass` (and class source when
+present). An EFA Artificer spell cannot borrow ritual authorization from a
+Cleric, Druid, or other multiclass leg; unattributed legacy spells retain the
+existing multiclass fallback.
+
+Cartographer is source-qualified as `Artificer|EFA` + `Cartographer|EFA`.
+Ingenious Movement unlocks at Artificer level 9 with a 30-foot target and
+teleport range. It is an event-only post-commit Flash of Genius follow-up, not
+durable movement state and not an Adventurer's Atlas holder benefit.
+
+The legacy Artificer subclass calculation switch remains exact-source only:
+the subclass source must equal the class source, and EFA subclasses do not enter
+the legacy/TCE switch merely because their names match.
+
+### EFA Battle Smith passive contract
+
+The EFA Battle Smith passive branch requires the exact tuple
+`Artificer|EFA` + `Battle Smith|EFA` and the published class level. Public
+source-qualified identities are exposed as
+`CharacterSheetState.EFA_BATTLE_SMITH_SUBCLASS_UID` and
+`CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS`.
+
+Its calculation output is intentionally EFA-prefixed where a legacy field would
+activate runtime behavior outside the passive milestone:
+
+```javascript
+{
+    hasEfaBattleSmithToolsOfTheTrade,
+    efaBattleSmithToolsOfTheTradeFeatureUid,
+    hasEfaBattleReady,
+    efaBattleReadyFeatureUid,
+    efaBattleReadyAttackAbility,
+    efaBattleReadyWeaponRequirement,
+    efaBattleReadyAttackMod,
+    hasEfaSteelDefenderGrant,
+    efaSteelDefenderFeatureUid,
+    hasExtraAttack,
+    attackCount,
+    efaBattleSmithExtraAttackFeatureUid,
+    hasEfaArcaneJolt,
+    efaArcaneJoltFeatureUid,
+    efaArcaneJoltDamage,
+    efaArcaneJoltHealing,
+    efaArcaneJoltUses,
+    efaArcaneJoltRecharge,
+    efaArcaneJoltOncePerTurn,
+    efaArcaneJoltHealingRange,
+    hasEfaImprovedDefender,
+    efaImprovedDefenderFeatureUid,
+    efaImprovedDefenderArcaneJoltDice,
+    efaImprovedDefenderDeflectAttackDamageDice,
+    efaImprovedDefenderDeflectAttackDamageBonus,
+    efaImprovedDefenderDeflectAttackDamageType,
+}
+```
+
+Do not replace `hasEfaSteelDefenderGrant` with legacy `hasSteelDefender`; that
+field is consumed by companion-creation UI and would start the separate
+companion acquisition milestone. Defender HP, AC, Rend, Repair, reactions, and
+lifecycle remain owned by `CharacterSheetCompanionRules`. Likewise, EFA uses
+`hasEfaBattleReady`, not legacy `hasBattleReady`, because the latter feeds the
+TCE `attackAbility` effect. `Battle Ready|EFA` is an explicit empty
+source-aware registry entry so a stored EFA feature cannot fall back to the TCE
+effect.
+
+The fixed Smith's Tools and Martial Weapons grants use the normal
+calculation-based class-feature effect lifecycle. Weapon-proficiency comparisons
+normalize `simple weapon(s)` and `martial weapon(s)` to category tokens, so the
+published plural label reaches actual attack proficiency without a
+Battle-Smith-only check. The additional artisan-tool choice is deferred: the
+existing Builder `_renderClassToolProficiencyChoice`, Level Up
+`_renderFeatChoicesUI`, Quick Build `_renderFeatSelector`, and Respec
+`_applyFixedTools`/`_claimOriginProficiency` paths do not provide a shared
+source-feature decision receipt. The required reusable contract is a choice
+keyed by feature-owner UID and progression/timeline leg, with apply/revoke
+proficiency receipts keyed by owner UID plus decision ID.
+
+Battle Ready's Intelligence eligibility is metadata only until inventory and
+Replicate Magic Item expose a canonical, source-qualified magic-weapon
+provenance predicate. The future predicate must be consumed by
+`getWeaponAbilityMod()` and `updateAttackFromWeapon()` and return stable item and
+grant-owner identities; names, labels, rarity, `magical: true`, and custom item
+metadata are not substitutes.
+
+A proficient weapon acting as an Artificer spellcasting focus is also deferred.
+The reusable focus contract must connect `getSpellcastingFocusStatus()`,
+`_getSpellFocusNote()`, `_getMaterialComponentBlock()`, and `_castSpell()` to
+class/feature-qualified focus candidates and commit a cast receipt containing
+the selected item ID, class UID, and source-feature UID.
+
+The EFA Battle Smith spell table continues through the exact subclass-spell
+ledger rather than calculation flags. It grants XPHB Heroism/Shield at 3,
+Shining Smite/Warding Bond at 5, Aura of Vitality/Conjure Barrage at 9, Aura of
+Purity/Fire Shield at 13, and Banishing Smite/Mass Cure Wounds at 17. Call
+`getSubclassSpellGrantOwner(cls, {sourceFeature: "Battle Smith Spells"})` and
+remove with `removeSubclassSpells(owner)`; never remove by the display label
+when EFA and TCE owners can coexist.
+
+## RHW Reanimator Projection
+
+Reanimator calculations activate only for the complete mixed-source identity
+`Artificer|EFA` + `Reanimator|Artificer|EFA|RHW`. A same-named subclass from
+another source, an RHW Reanimator attached to TCE Artificer, or a source-less
+legacy name must not activate these calculations or fixed spell grants.
+
+`_getRhwReanimatorCalculations()` publishes the R2a availability contract:
+
+- level 3: `hasReanimatorSpells`, `hasJoltToLife`,
+  `hasReanimatorsToolsRequirement`, and
+  `hasReanimatedCompanionOwnership`;
+- level 5: `hasStrangeModifications` and modification count 1;
+- level 9: `hasImprovedReanimation`, `hasMacabreModifications`, and
+  modification count 2;
+- level 15: `hasRefinedReanimation`, `hasSuperiorModifications`,
+  `hasFacilitatedRevival`, `hasLifeTransfer`, and modification count 3.
+
+Every descriptor carries the exact RHW feature UID. Reanimator's Tools reports
+the live generic fixed-proficiency fallback transaction for the exact mixed
+owner `Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW`: acquisition
+mode, pending/resolved status, fixed proficiency, and current selection. The
+descriptor is read-only; authoritative feature ingestion and the shared
+transaction own grants and choices. Reanimated Companion publishes both its
+six-part registry UID and canonical seven-part runtime owner
+`Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW`.
+
+R3 implements generic State creation and lifecycle transactions for that exact
+owner. R4a extends the same boundary with atomic, versioned setup-choice
+validation and persists the immutable creation receipt with the companion.
+Level 3 records zero choices; levels 5/9/15 require 1/2/3 exact unique choices.
+The active generation is projected at
+`reanimatedCompanion.activeCompanion`, including its creation-level receipt and
+the detached `scaling.resolved` rules snapshot. Current level, Intelligence,
+PB, spell attack, and spell DC can reconcile without healing or repicking.
+Improved Reanimation is current-level global scaling; Superior Modifications
+changes only new generations.
+
+Arcane Conduit, Ferocity, Bloated, Gaunt, and Moist publish their complete
+derived metadata through the pure resolver. R4b marks the resolved operation
+statuses executable and keeps the full active companion projection intact.
+`runtimeImplemented` is true; `lifeTransfer` reports its Reaction cost,
+companion-death/Death-Burst outcome, and whether an exact active companion is
+currently available. Runtime callers still consume the persisted generation
+choice receipt rather than resolving choice-dependent rules from current level
+alone. UI and Play Mode integration remain later milestones.
+
+Jolt to Life uses the exact EFA Artificer level, not total character level. Its
+calculation exposes uses `max(0, current INT modifier)`, exact
+`Spare the Dying|XPHB` ownership, EFA spell save DC, 10-foot emanation,
+Artificer-level healing, and Lightning damage `2d4`/`3d4` at EFA 11/`4d4` at
+EFA 17.
+
+EFA subclass calculations land only in bounded, source-exact milestones.
+Alchemical Savant is implemented; do not infer the remaining EFA Alchemist
+features or project TCE subclass mechanics onto an EFA subclass merely because
+the names match.
 
 ## Adding a New Subclass
 
@@ -180,6 +397,15 @@ Two ways a swap is created, both flowing through `_processFeatureModifiers` → 
 ### FeatureEffectRegistry
 Maps feature names to effect objects. When a feature is added to the character (during build/levelup), the registry is consulted to auto-apply effects like resistances, proficiencies, and senses.
 
+Source-sensitive passives use a source-qualified registry key. If the feature
+must also prove its complete class/subclass owner, put the canonical seven-part
+subclass-feature UID in `effect.ownerUid`. `_getStoredFeatureEffects()` then
+requires both the stored feature identity and an active matching class,
+subclass, and minimum class level before applying the effect. Chemical Mastery
+uses `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA`; the same-named TCE
+feature and stale features after down-level/respec therefore cannot borrow the
+EFA defenses.
+
 ### Deferred damage maximization and damage-triggered effects
 
 Features which modify a future damage roll use `armDamageMaximization()` rather than spending
@@ -192,6 +418,68 @@ one effect description.
 
 ### Items
 Magic items can provide bonuses that stack with or override feature calculations. Item bonuses are tracked separately in state and aggregated during AC/save/skill computation.
+
+### Crafting-time modifiers
+
+Features which alter crafting duration append machine-readable descriptors to
+`calculations.craftingTimeModifiers`:
+
+```js
+{
+  id: "stable-id",
+  owner: {kind: "subclassFeature", name, source, uid},
+  multiplier: 0.5,
+  filter: {itemTypes: ["LA", "MA", "HA"]},
+}
+```
+
+Consumers call
+`state.getCraftingTimeCalculation({baseWorkweeks, quantity, recipe, item, category})`; they do not
+branch on a class or feature name. Supported structured filters are `itemTypes`,
+`recipeCategories`, and `resultCategories`. The state validates exact owner/source attribution,
+rejects duplicate IDs and non-positive/non-finite multipliers, filters the descriptors against the
+recipe context, sorts by stable ID, and multiplies every applicable contribution. The result
+contains `baselineWorkweeks`, `effectiveWorkweeks`, `multiplier`, and `sourceBreakdown`, and is the
+single value both crafting preview and outcome render.
+
+The calculation resolves its baseline in strict order: explicit caller `baseWorkweeks`, the
+existing value-derived formula when `recipe.value` is present, the XPHB p. 233 **Spell Scroll
+Costs** table for `SC` outputs with a structured `spellScrollLevel`, then the XDMG p. 221 **Magic
+Item Crafting Time and Cost** rarity table for value-less `item`/`potion` recipes. The scroll table
+uses 1/1/3/5/10/25/40/50/60/120 days for levels 0-9. The XDMG table is
+Common/Uncommon/Rare/Very Rare/Legendary = 1/2/10/25/50 workweeks; its non-scroll consumable
+footnote halves those values for the `potion` recipe category and one-use `A`/`AF`/`Oil`/`P` item
+types. `SC` outputs without a structured spell level, unsupported recipe categories, and
+unrecognized rarities return `{isSupported: false, reason}` so UI/tooling must surface the reason
+rather than hide the missing duration.
+
+The EFA Armorer's Tools of the Trade descriptor is source-gated to Artificer `EFA` + Armorer `EFA`
+at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. The EFA
+Alchemist's same-named feature uses the same channel with
+`filter: {recipeCategories: ["potion"]}` and also requires the exact active EFA feature, so feature
+removal/respec disables the contribution immediately. Same-named TCE subclasses never qualify.
+
+The exact EFA Armorer progression publishes `hasEfaPerfectedArmor` at level 15
+without reusing the legacy TCE `hasPerfectedArmor` flag. While the bound Arcane
+Armor is active, model-specific calculation flags are
+`hasEfaPerfectedDreadnaught`, `hasEfaPerfectedGuardian`, and
+`hasEfaPerfectedInfiltrator`; glimmer and flight additionally expose
+`hasEfaLightningLauncherGlimmer` and `hasEfaPerfectedArmorFlight`. Generated
+damage dice, resources, active states, target effects, and transactions remain
+runtime projections beside the EFA Armorer binding logic rather than passive
+calculation values. TCE and mixed-source Armorers never qualify.
+
+The EFA Battle Smith's Tools of the Trade descriptor is source-gated to Artificer `EFA` +
+Battle Smith `EFA` at level 3, is owned by
+`Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA`, and filters on `M`/`R`.
+`A`/`AF` ammunition remains on the XDMG non-scroll consumable baseline and does not receive the
+weapon-crafting multiplier.
+
+Feature prose of the form “When you scribe/craft a {@item Spell Scroll ...}, the amount of time
+required to craft it is halved/doubled” is parsed into a `spell-scroll` result-category descriptor.
+The EFA Cartographer's Tools of the Trade therefore halves the structured XPHB scroll baseline and
+publishes the exact owner `Tools of the Trade|Artificer|EFA|Cartographer|EFA|3|EFA`; removal or
+respec removes the descriptor immediately.
 
 ### Reading a subclass's progression table (do NOT hardcode)
 

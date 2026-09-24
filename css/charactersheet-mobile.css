@@ -23,6 +23,78 @@
 		padding: 0.625rem;
 	}
 
+	.charsheet__efa-cannon-section-header {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__arcane-firearm-header {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.charsheet__arcane-firearm-rest-select {
+		font-size: 1rem;
+		min-height: 44px;
+		width: 100%;
+	}
+
+	.charsheet__efa-cannon-create,
+	.charsheet__efa-cannon-activate {
+		width: 100%;
+		min-height: 44px;
+	}
+
+	.charsheet__efa-cannon-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-cannon-dual-toolbar {
+		display: block;
+	}
+
+	.charsheet__efa-cannon-vitals,
+	.charsheet__efa-cannon-meta,
+	.charsheet__efa-cannon-actions,
+	.charsheet__efa-cannon-modal-actions {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__efa-cannon-secondary,
+	.charsheet__efa-cannon-radio-grid,
+	.charsheet__efa-cannon-form-row {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-cannon-control > div {
+		flex-wrap: wrap;
+	}
+
+	.charsheet__efa-cannon-control input {
+		flex: 1 1 8rem;
+	}
+
+	.charsheet__efa-cannon-control button {
+		flex: 1 1 100%;
+		min-height: 44px;
+		justify-content: center;
+	}
+
+	.charsheet__efa-cannon-actions .cs-combat-btn,
+	.charsheet__efa-cannon-modal-actions .ve-btn {
+		flex: 0 0 auto;
+		width: 100%;
+		min-height: 44px;
+		justify-content: center;
+	}
+
+	.charsheet__efa-cannon-field input,
+	.charsheet__efa-cannon-field select {
+		min-height: 44px;
+		font-size: 1rem;
+	}
+
 	.cs-roll-followup__result {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1663,6 +1735,32 @@
 		min-width: 0;
 	}
 
+	.charsheet__artificer-plan-picker {
+		grid-template-columns: 1fr;
+		min-height: 0;
+	}
+
+	.charsheet__artificer-plan-opportunities {
+		max-height: 12rem;
+		border-right: 0;
+		border-bottom: 1px solid var(--cs-border, var(--rgb-border-grey));
+		padding-right: 0;
+		padding-bottom: var(--cs-space-sm, 0.5rem);
+	}
+
+	.charsheet__artificer-plan-filters {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__artificer-plan-results {
+		grid-template-columns: 1fr;
+		max-height: 42vh;
+	}
+
+	.charsheet__artificer-plan-actions {
+		bottom: calc(var(--charsheet-mobile-nav-height, 56px) + env(safe-area-inset-bottom));
+	}
+
 	.charsheet__level-history {
 		padding: var(--cs-space-md, 0.75rem);
 	}
@@ -1812,6 +1910,57 @@
 		padding: 0.5rem 0.75rem;
 	}
 
+	.charsheet__atlas-card {
+		padding: var(--cs-space-md, 0.75rem);
+	}
+
+	.charsheet__atlas-card-header,
+	.charsheet__atlas-card-footer {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__atlas-card-status {
+		align-self: flex-start;
+	}
+
+	.charsheet__atlas-card-facts,
+	.charsheet__atlas-card-rosters,
+	.charsheet__atlas-rest-modes {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__atlas-card-safe-haven-controls,
+	.charsheet__atlas-magic-action {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__atlas-card-safe-haven-field {
+		max-width: none;
+	}
+
+	.charsheet__atlas-magic-button {
+		width: 100%;
+	}
+
+	.charsheet__atlas-card-action {
+		width: 100%;
+	}
+
+	.charsheet__atlas-rest-holder {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__atlas-rest-holder-field {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__atlas-rest-holder-field .ve-btn {
+		align-self: flex-start;
+	}
+
 	/* ====================================================================
 	   Tab-Specific: Companions — Card Layout
 	   ==================================================================== */
@@ -1821,6 +1970,88 @@
 
 	.charsheet__companion-quick-rolls {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.charsheet__feature-companion-setup {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__feature-companion-facts {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.charsheet__feature-companion-facts > div:last-child {
+		grid-column: 1 / -1;
+	}
+
+	.charsheet__feature-companion-manager-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__feature-companion-manager-header,
+	.charsheet__feature-companion-create {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__feature-companion-operation-header {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__feature-companion-setup .btn-feature-companion-setup,
+	.charsheet__feature-companion-lifecycle-actions .ve-btn,
+	.charsheet__feature-companion-operation-controls .ve-btn,
+	.charsheet__companion-card .btn-companion-action {
+		width: 100%;
+		min-height: 44px;
+	}
+
+	.charsheet__feature-companion-operation-controls {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		width: 100%;
+	}
+
+	.charsheet__feature-companion-lifecycle-actions,
+	.charsheet__feature-companion-revival .charsheet__modal-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		align-items: stretch;
+		width: 100%;
+	}
+
+	.charsheet__feature-companion-revival select,
+	.charsheet__steel-defender-replacement select {
+		min-height: 44px;
+		font-size: 1rem;
+	}
+
+	.charsheet__feature-companion-revival .charsheet__rest-option,
+	.charsheet__steel-defender-replacement-confirm {
+		min-height: 44px;
+	}
+
+	.charsheet__feature-companion-shape-options {
+		display: grid;
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__feature-companion-shape-options label {
+		min-height: 44px;
+		padding: 0.65rem 0.75rem;
+	}
+
+	.charsheet__feature-companion-status,
+	.charsheet__feature-companion-operation-mode,
+	.charsheet__feature-companion-create-btn {
+		align-self: flex-start;
+	}
+
+	.charsheet__feature-companion-review dl > div {
+		grid-template-columns: 1fr;
+		gap: 0;
 	}
 }
 
@@ -2149,6 +2380,10 @@
 		min-height: 44px;
 	}
 
+	.cs-combat-target-modal .charsheet__arcane-jolt-restorative label {
+		min-height: 44px;
+	}
+
 	.cs-combat-target-modal .cs-combat-target-effect > .ve-flex-h-right,
 	.cs-combat-target-modal .cs-combat-target-effect .ve-flex-h-right {
 		display: grid !important;
@@ -2194,5 +2429,43 @@
 	.cs-combat-target-warning {
 		color: var(--cs-warning);
 		font-weight: 600;
+	}
+
+	.charsheet__efa-elixir-create,
+	.charsheet__efa-elixir-consume,
+	.charsheet__efa-elixir-modal-actions,
+	.charsheet__efa-elixir-modal-actions > button {
+		width: 100%;
+	}
+
+	.charsheet__efa-elixir-modal-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-elixir-rest-roll {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-elixir-choice {
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
+	.charsheet__efa-elixir-field .form-control,
+	.charsheet__efa-elixir-rest .form-control,
+	.charsheet__efa-elixir-handoff {
+		width: 100%;
+		min-width: 0;
+		font-size: max(1rem, var(--cs-text-base, 1rem));
+	}
+}
+
+@media (pointer: coarse) {
+	.charsheet__feature-companion-lifecycle-action,
+	.charsheet__feature-companion-revival select,
+	.charsheet__feature-companion-revival .charsheet__rest-option,
+	.charsheet__steel-defender-replacement select,
+	.charsheet__steel-defender-replacement-confirm {
+		min-height: 44px;
 	}
 }

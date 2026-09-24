@@ -11,10 +11,18 @@
  * - Both TCE (Classic) and EFA (2024) versions are handled properly
  * - Spellcasting mechanics (half-caster, prepared, INT-based) work correctly
  */
+import fs from "node:fs";
+import path from "node:path";
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const ARTIFICER_DATA = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "data/class/class-artificer.json"), "utf8"));
+const CARTOGRAPHER_TOOLS = ARTIFICER_DATA.subclassFeature.find(feature =>
+	feature.name === "Tools of the Trade"
+	&& feature.subclassShortName === "Cartographer"
+	&& feature.source === "EFA");
 
 // ==========================================================================
 // PART 1: CORE ARTIFICER CLASS FEATURES (TCE)
@@ -1146,24 +1154,24 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	describe("Replicate Magic Item (Level 2)", () => {
 		it("should be available at level 2", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().hasReplicateMagicItem).toBe(true);
 		});
 
 		it("should know 4 plans at level 2", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(4);
 		});
 
 		it("should create 2 magic items at level 2", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().artificerCreatedMagicItemsMax).toBe(2);
 		});
 	});
 
 	describe("Magic Item Tinker (Level 6)", () => {
 		it("should be available at level 6", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 6 });
-			expect(state.getTotalLevel()).toBe(6);
+			expect(state.getFeatureCalculations().hasMagicItemTinker).toBe(true);
 		});
 
 		it("should allow charging magic items with spell slots", () => {
@@ -1183,43 +1191,56 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	});
 
 	describe("Flash of Genius (Level 7)", () => {
-		it("should work the same as TCE version", () => {
+		it("should materialize the EFA source-qualified spendable pool", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 7 });
 			state.setAbilityBase("int", 18);
-			expect(state.getAbilityMod("int")).toBe(4);
+			const resource = state.getResources().find(it => it.featureUid === "Flash of Genius|Artificer|EFA");
+			expect(resource).toEqual(expect.objectContaining({current: 4, max: 4, recharge: "long"}));
 		});
 	});
 
 	describe("Magic Item Adept (Level 10)", () => {
 		it("should allow attuning to 4 magic items", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 10 });
-			expect(state.getTotalLevel()).toBe(10);
+			expect(state.getMaxAttunement()).toBe(4);
+			expect(state.getFeatureCalculations().hasMagicItemAdept).toBe(true);
 		});
 	});
 
 	describe("Spell-Storing Item (Level 11)", () => {
 		it("should store level 1, 2, or 3 spells", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 11 });
-			expect(state.getTotalLevel()).toBe(11);
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasSpellStoringItem).toBe(true);
+			expect(calculations.spellStoringItemUses).toBe(2);
 		});
 	});
 
 	describe("Advanced Artifice (Level 14)", () => {
 		it("should allow attuning to 5 magic items", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 14 });
-			expect(state.getTotalLevel()).toBe(14);
+			expect(state.getMaxAttunement()).toBe(5);
+			expect(state.getFeatureCalculations()).toEqual(expect.objectContaining({
+				hasAdvancedArtifice: true,
+				hasRefreshedGenius: true,
+			}));
 		});
 
 		it("should regain 1 Flash of Genius use on short rest", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 14 });
-			expect(state.getTotalLevel()).toBe(14);
+			state.setAbilityBase("int", 18);
+			const resource = state.getResources().find(it => it.featureUid === "Flash of Genius|Artificer|EFA");
+			state.setResourceCurrent(resource.id, 1);
+			state.onShortRest();
+			expect(state.getResources().find(it => it.id === resource.id).current).toBe(2);
 		});
 	});
 
 	describe("Magic Item Master (Level 18)", () => {
 		it("should allow attuning to 6 magic items", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 18 });
-			expect(state.getTotalLevel()).toBe(18);
+			expect(state.getMaxAttunement()).toBe(6);
+			expect(state.getFeatureCalculations().hasMagicItemMaster).toBe(true);
 		});
 	});
 
@@ -1231,9 +1252,13 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	});
 
 	describe("Soul of Artifice (Level 20)", () => {
-		it("should allow disintegrating items to avoid death", () => {
+		it("should expose the EFA capstone flags without the TCE save bonus", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 20 });
-			expect(state.getTotalLevel()).toBe(20);
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasEfaSoulOfArtifice).toBe(true);
+			expect(calculations.hasMagicalGuidance).toBe(true);
+			expect(calculations.hasSoulOfArtifice).toBeUndefined();
+			expect(calculations.soulOfArtificeSaveBonus).toBeUndefined();
 		});
 
 		it("should regain all Flash of Genius uses on short rest with attunement", () => {
@@ -1245,106 +1270,94 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	describe("Plans Progression (EFA)", () => {
 		it("should know 4 plans at level 2-5", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(4);
 		});
 
 		it("should know 5 plans at level 6-9", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 6 });
-			expect(state.getTotalLevel()).toBe(6);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(5);
 		});
 
 		it("should know 6 plans at level 10-13", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 10 });
-			expect(state.getTotalLevel()).toBe(10);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(6);
 		});
 
 		it("should know 7 plans at level 14-17", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 14 });
-			expect(state.getTotalLevel()).toBe(14);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(7);
 		});
 
 		it("should know 8 plans at level 18-20", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 18 });
-			expect(state.getTotalLevel()).toBe(18);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(8);
 		});
 	});
 });
 
 // ==========================================================================
-// PART 8: ARMORER DREADNAUGHT MODEL (EFA)
+// PART 8: ARMORER SOURCE-QUALIFIED PROGRESSION
 // ==========================================================================
-describe("Armorer Dreadnaught (EFA 2024)", () => {
+describe("Armorer source-qualified progression", () => {
 	let state;
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
 
-	describe("Dreadnaught Model (Level 3)", () => {
-		it("should be available at level 3", () => {
-			state.addClass({
-				name: "Artificer",
+	it("keeps exact EFA Perfected Armor inert through level 14", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 14,
+			subclass: {
+				name: "Armorer",
+				shortName: "Armorer",
 				source: "EFA",
-				level: 3,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(3);
+				className: "Artificer",
+				classSource: "EFA",
+			},
 		});
-
-		it("should provide Force Demolisher (1d10 force damage with reach)", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 3,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(3);
-		});
-
-		it("should provide Giant Stature (INT mod uses)", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 3,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			state.setAbilityBase("int", 18);
-			expect(state.getAbilityMod("int")).toBe(4);
-		});
+		const calculations = state.getFeatureCalculations();
+		expect(calculations.hasEfaArmorer).toBe(true);
+		expect(calculations.hasEfaPerfectedArmor).toBe(false);
+		expect(calculations.hasPerfectedArmor).not.toBe(true);
 	});
 
-	describe("Improved Armorer (Level 9)", () => {
-		it("should grant +1 to attack and damage with armor weapons", () => {
-			state.addClass({
-				name: "Artificer",
+	it("publishes the EFA-only Perfected Armor gate at level 15 without leaking the TCE contract", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 15,
+			subclass: {
+				name: "Armorer",
+				shortName: "Armorer",
 				source: "EFA",
-				level: 9,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(9);
+				className: "Artificer",
+				classSource: "EFA",
+			},
 		});
+		const calculations = state.getFeatureCalculations();
+		expect(calculations.hasEfaPerfectedArmor).toBe(true);
+		expect(calculations.hasPerfectedArmor).not.toBe(true);
 	});
 
-	describe("Perfected Dreadnaught (Level 15)", () => {
-		it("should increase Force Demolisher to 2d6", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 15,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(15);
+	it("preserves the legacy TCE Perfected Armor contract without publishing EFA mechanics", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "TCE",
+			level: 15,
+			subclass: {
+				name: "Armorer",
+				shortName: "Armorer",
+				source: "TCE",
+				className: "Artificer",
+				classSource: "TCE",
+			},
 		});
-
-		it("should allow size increase to Huge", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 15,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(15);
-		});
+		const calculations = state.getFeatureCalculations();
+		expect(calculations.hasPerfectedArmor).toBe(true);
+		expect(calculations.hasEfaPerfectedArmor).not.toBe(true);
 	});
 });
 
@@ -1367,6 +1380,153 @@ describe("Cartographer (EFA 2024)", () => {
 				subclass: { name: "Cartographer", shortName: "Cartographer", source: "EFA" },
 			});
 			expect(state.getTotalLevel()).toBe(3);
+		});
+
+		it("migrates a pre-integration save with fixed grants and only the unresolved replacement count", () => {
+			const legacy = new CharacterSheetState();
+			legacy.addClass({name: "Artificer", source: "EFA", level: 3});
+			for (let level = 1; level <= 3; level++) {
+				legacy.recordLevelChoice({
+					level,
+					class: {name: "Artificer", source: "EFA"},
+					choices: {},
+				});
+			}
+			legacy.addToolProficiency("Calligrapher's Supplies");
+			legacy._data.features.push({
+				id: "legacy-cartographer-tools",
+				...structuredClone(CARTOGRAPHER_TOOLS),
+			});
+
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+			expect(loaded.getToolProficiencies()).toEqual(expect.arrayContaining([
+				"Calligrapher's Supplies",
+				"Cartographer's Tools",
+			]));
+			expect(loaded.getPendingFeatureChoices()).toEqual([
+				expect.objectContaining({
+					featureId: "legacy-cartographer-tools",
+					kind: "tool",
+					count: 1,
+				}),
+			]);
+
+			const reloaded = new CharacterSheetState();
+			expect(reloaded.loadFromJson(loaded.toJson())).not.toBe(false);
+			expect(reloaded.getPendingFeatureChoices()).toHaveLength(1);
+			expect(reloaded._data.grantedProficiencies.tools.calligrapherssupplies).toEqual([
+				"base",
+				"feature:legacy-cartographer-tools",
+			]);
+			expect(reloaded._data.grantedProficiencies.tools.cartographerstools).toEqual([
+				"feature:legacy-cartographer-tools",
+			]);
+		});
+
+		it("adopts valid legacy replacement selections without duplicate prompts or receipts", () => {
+			const legacy = new CharacterSheetState();
+			legacy.addClass({name: "Artificer", source: "EFA", level: 3});
+			for (let level = 1; level <= 3; level++) {
+				legacy.recordLevelChoice({
+					level,
+					class: {name: "Artificer", source: "EFA"},
+					choices: {},
+				});
+			}
+			for (const tool of [
+				"Calligrapher's Supplies",
+				"Cartographer's Tools",
+				"Alchemist's Supplies",
+				"Brewer's Supplies",
+			]) legacy.addToolProficiency(tool);
+			legacy._data.features.push({
+				id: "legacy-cartographer-tools",
+				...structuredClone(CARTOGRAPHER_TOOLS),
+				_choices: [
+					{type: "tool", value: "Alchemist's Supplies"},
+					{type: "tool", value: "Brewer's Supplies"},
+				],
+			});
+
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+			expect(loaded.getPendingFeatureChoices()).toHaveLength(0);
+			expect(loaded._data.grantedProficiencies.tools.alchemistssupplies).toContain("feature-choice:legacy-cartographer-tools");
+			expect(loaded._data.grantedProficiencies.tools.brewerssupplies).toContain("feature-choice:legacy-cartographer-tools");
+			const decisions = loaded.getLevelHistoryEntry(3).decisions.filter(decision =>
+				decision.type === "nestedTool"
+				&& decision.provenance?.ownerUid === CharacterSheetProgression.getFeatureOwnerUid(CARTOGRAPHER_TOOLS),
+			);
+			expect(decisions).toHaveLength(1);
+			expect(decisions[0]).toMatchObject({
+				selection: ["Alchemist's Supplies", "Brewer's Supplies"],
+				receipt: {
+					effects: [{
+						type: "ownership",
+						ownership: [
+							{type: "tools", value: "Alchemist's Supplies"},
+							{type: "tools", value: "Brewer's Supplies"},
+						],
+					}],
+				},
+			});
+
+			const reloaded = new CharacterSheetState();
+			expect(reloaded.loadFromJson(loaded.toJson())).not.toBe(false);
+			expect(reloaded.getPendingFeatureChoices()).toHaveLength(0);
+			expect(reloaded.getLevelHistoryEntry(3).decisions.filter(decision =>
+				decision.type === "nestedTool"
+				&& decision.provenance?.ownerUid === CharacterSheetProgression.getFeatureOwnerUid(CARTOGRAPHER_TOOLS),
+			)).toHaveLength(1);
+		});
+
+		it("normalizes mixed-case tool ledgers and preserves proficiency until the final owner is removed", () => {
+			const legacy = new CharacterSheetState();
+			legacy.addToolProficiency("Smith's Tools");
+			legacy._data.features.push(
+				{id: "feature-a", name: "Owner A", source: "EFA"},
+				{id: "feature-b", name: "Owner B", source: "TCE"},
+			);
+			legacy._data.grantedProficiencies.tools = {
+				"Smith's Tools": ["feature:feature-a"],
+				"smiths tools": ["feature:feature-b", "feature:feature-a"],
+			};
+			legacy._data.progressionOwnership = {
+				version: 1,
+				initialized: true,
+				values: {
+					tools: {
+						"Smith's Tools": {
+							value: "Smith's Tools",
+							sources: ["decision:a"],
+							preserved: false,
+						},
+						smithstools: {
+							value: "smiths tools",
+							sources: ["decision:b", "decision:a"],
+							preserved: true,
+						},
+					},
+				},
+			};
+
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+			expect(loaded._data.grantedProficiencies.tools).toEqual({
+				smithstools: ["feature:feature-a", "feature:feature-b"],
+			});
+			expect(loaded._data.progressionOwnership.values.tools).toEqual({
+				smithstools: expect.objectContaining({
+					sources: ["decision:a", "decision:b"],
+					preserved: true,
+				}),
+			});
+
+			loaded.removeFeature("feature-a");
+			expect(loaded.hasToolProficiency("Smith's Tools")).toBe(true);
+			loaded.removeFeature("feature-b");
+			expect(loaded.hasToolProficiency("Smith's Tools")).toBe(false);
 		});
 	});
 

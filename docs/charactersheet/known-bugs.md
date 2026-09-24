@@ -271,8 +271,8 @@ fly-speed states. Then flip the spec row back from `kind: "passive"` to
 
 ### CS-BUG-105 — Class-level always-prepared spells never reach a character built in the wizard
 
-**Status**: Open. Product bug, **not fixed here** — surfaced by a harness
-sweep (CS-BUG-016) and filed rather than patched.
+**Status**: Fixed. The fully merged class catalog is now registered during
+initial data loading, before Builder can mutate state.
 
 **Note on the id**: filed as CS-BUG-103 and renumbered to 105 on merge — 103
 was already claimed on `character-sheet-wip`. See the note under CS-BUG-106.
@@ -335,12 +335,22 @@ every TGTT Ranger lacks Hunter's Mark. Saving and reloading the character
 repairs it (the load path sets the catalog and the reconcile is
 idempotent), which makes the bug look intermittent.
 
-**Suggested fix**: call `_reconcileClassFeatures()` (or at minimum
-`setClassCatalog()` + `applyClassFeatureEffects()`) on the builder-wizard
-finish path and after level-up, not only on load/import/duplicate.
+**Fix**: `_pLoadData()` registers `this._classes` on
+`CharacterSheetState` immediately after brew merge and `_copy` resolution.
+Builder and later progression passes therefore share the same full class
+catalog as load/import reconciliation. The existing reconcile call remains
+idempotent and continues to repair older saves.
 
-**Blocked assertion**: `tgtt-bastion-paladin-bugbear.spec.ts` L2
-`{kind: "spellInList", spell: "Divine Smite"}` is skipped with this id.
+**Regression coverage**:
+- `CharacterSheetClassAlwaysPreparedSpells.test.js` loads the real
+  `Artificer|EFA` class data and proves `mending|xphb` is one class-owned
+  cantrip, is absent from ordinary/innate storage, disappears on exact source
+  loss, and cannot appear when catalog registration is removed.
+- The same suite pins catalog registration before Builder state mutation.
+- `tgtt-bastion-paladin-bugbear.spec.ts` again requires Divine Smite from the
+  base-class grant with no skip.
+- The EFA base matrix requires Mending and the resulting L10/L14 total cantrip
+  counts through a real Builder-to-level-20 browser build.
 
 ---
 
@@ -444,6 +454,27 @@ issue numbers stay stable.
 ---
 
 ## Resolved
+
+### CS-BUG-176 — EFA Artificer level-4 ASI was absent — FIXED
+
+**Status**: Fixed in `907ec2ce`.
+**Surfaced by**: the Cartographer comprehensive E2E matrix at Artificer level 4.
+
+**Symptom.** The level-up/Quick Build improvement step did not recognize the
+EFA Artificer's level-4 Ability Score Improvement. The canonical ASI placeholder
+was then filtered from ordinary feature ingestion, so no choice was applied and
+no ASI tracking feature appeared on the live sheet.
+
+**Root cause.** `getImprovementOpportunity()` read a packed class-feature UID's
+last field as its level. EFA refs include the optional feature-source field
+(`Ability Score Improvement|Artificer|EFA|4|EFA`), so the parser read `EFA`
+instead of canonical field 3 (`4`) and returned no opportunity.
+
+**Fix and guard.** Improvement detection now reads the canonical class-feature
+level field shared by the existing feature resolver. The regression test uses
+the authoritative EFA class data, proves the helper surfaces the level-4
+opportunity, applies the ASI through Quick Build's real shared apply method,
+and asserts both the ability increase and the source-qualified live feature.
 
 ### CS-BUG-108 — The level-up "Swap a Known Spell" list was empty for every known caster
 

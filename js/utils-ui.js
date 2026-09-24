@@ -480,6 +480,7 @@ class UiUtil {
 	 * @param {boolean} [opts.isIndestructible] If the modal elements should be detached, not removed.
 	 * @param {boolean} [opts.isClosed] If the modal should start off closed.
 	 * @param {boolean} [opts.isEmpty] If the modal should contain no content.
+	 * @param {function} [opts.fnCanClose] Dynamic close guard. Return false to keep the modal open.
 	 * @param {number} [opts.headerType]
 	 * @param {boolean} [opts.hasFooter] If the modal has a footer.
 	 * @returns {object}
@@ -500,6 +501,7 @@ class UiUtil {
 
 		// if the user closed the modal by clicking the "cancel" background, isDataEntered is false
 		const pHandleCloseClick = async (isDataEntered, ...args) => {
+			if (opts.fnCanClose && opts.fnCanClose({isDataEntered, args}) === false) return false;
 			if (opts.cbClose) await opts.cbClose(isDataEntered, ...args);
 			resolveModal([isDataEntered, ...args]);
 

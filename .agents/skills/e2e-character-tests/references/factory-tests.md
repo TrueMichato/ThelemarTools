@@ -2,7 +2,7 @@
 
 `test/e2e/utils/characterSpecFactory.ts` is the heart of the E2E
 suite.  A `CharacterSpec` (or `MulticlassCharacterSpec`) declaratively
-describes a build; the factory generates the canonical 7-test set.
+describes a build; the factory generates the canonical 8-test set.
 This document maps each generated test back to a coverage check.
 
 ## Single-class — `describeCharacter(spec)`
@@ -16,6 +16,13 @@ This document maps each generated test back to a coverage check.
 | `MEGA L1→20: cast / attack / resource / rest milestones` | #6 | 3-6 min | `skipMega` set or `RUN_MEGA` env unset |
 | `USE: cast/attack/resource/rest at L${atLevel}` | #7-#16 | 30-120 s | `usage` omitted; individual probes when `{skip: true}` |
 | `L1 export round-trip preserves identity` | #17 | 20-30 s | never |
+| `MATRIX: every feature threshold has behavioral coverage` | #19-#22 | 2-10 min | `featuresMatrix` omitted, `RUN_MATRIX` env unset, or `featureMatrixDedicatedOnly` with a non-matrix run |
+
+`RUN_MEGA=1` enables both the MEGA and MATRIX tests unless
+`RUN_MATRIX=0` is set explicitly. `RUN_MATRIX=1` can run the matrix without
+enabling MEGA. Specs with `featureMatrixDedicatedOnly: true` keep expensive
+scenario probes in the dedicated MATRIX test rather than repeating them in
+L3/L5/MEGA assertions.
 
 ## Multiclass — `describeMulticlassCharacter(spec)`
 
@@ -121,6 +128,17 @@ effects for the auto-picker's deterministic first choice.  See
 (auto-generated) and
 [`tgttFeatureEffects.ts`](../../../test/e2e/utils/tgttFeatureEffects.ts)
 (hand-written).
+
+### Source-isolated multi-step subclass probes
+
+Use a dedicated EffectCheck dispatcher only when a mechanic needs several
+ordered production transactions or real UI steps that `stateCall` cannot
+express. `cartographerProbe` is the reference implementation: its spec stays
+declarative, `CharacterSheetPage.probeCartographerFlow()` owns the browser/state
+work, and each state-driven scenario restores the original character in a
+`finally` block so later matrix rows are deterministic. Spell-tier probes also
+accept an authored threshold (3/5/9/13/17) and execute only at that exact matrix
+checkpoint.
 
 ## Adding a new probe category
 

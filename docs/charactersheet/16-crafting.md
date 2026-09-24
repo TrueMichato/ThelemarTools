@@ -19,6 +19,97 @@ books contain.
 | **Cook** (19 dishes) | Wisdom (Cooking) vs `craftDC` | Meets DC → Success · +5 → Delicious · natural 20 on a success → Extra Delicious. Adds the dish to inventory at that tier; the benefit lands when somebody *eats* it |
 | **Craft** (437 items) | *none* | A commit dialog: materials, tool advisory, workweeks → consume → produce |
 
+## Feature-contributed crafting time
+
+Crafting time is a state calculation, not dialog policy:
+
+```js
+state.getCraftingTimeCalculation({
+  baseWorkweeks, // optional explicit structured baseline
+  quantity,
+  recipe,
+  item,
+  category,
+});
+```
+
+Features publish descriptors through `getFeatureCalculations().craftingTimeModifiers`:
+
+```js
+{
+  id: "stable-id",
+  owner: {kind: "subclassFeature", name, source, uid},
+  multiplier: 0.5,
+  filter: {
+    itemTypes: ["LA", "MA", "HA"],
+    // recipeCategories: ["potion"],
+    // resultCategories: ["armor"],
+    // rarities: ["common", "uncommon"],
+  },
+}
+```
+
+Filter keys are ANDed, values within one key are ORed, and applicable descriptors are sorted by
+stable ID before their multipliers are composed. Every descriptor must carry an exact owner UID and
+source; missing ownership, unknown filter keys, duplicate IDs, and zero/non-finite multipliers fail
+explicitly instead of creating an impossible duration. Every configured filter must be a non-empty
+array of non-empty strings. Rarity matching trims and normalizes both the recipe/item rarity and
+filter values to lowercase; it does not change the stored recipe. The returned calculation contains
+baseline and effective workweeks, the effective multiplier, and a render-ready source breakdown.
+Both the commit confirmation and outcome consume that same object.
+
+Baseline precedence is:
+
+1. A caller-provided structured `baseWorkweeks`.
+2. Existing recipe-value behavior when `recipe.value` exists: copper pieces are converted to GP,
+   divided by 50, rounded, and clamped to at least one workweek.
+3. For `SC` outputs with a structured `spellScrollLevel`, the XPHB p. 233 **Spell Scroll Costs**
+   table: levels 0-9 require 1/1/3/5/10/25/40/50/60/120 days respectively.
+4. For value-less magic `item`/`potion` recipes with a recognized rarity, the XDMG p. 221
+   **Magic Item Crafting Time and Cost** table: Common 1, Uncommon 2, Rare 10, Very Rare 25, and
+   Legendary 50 workweeks (five eight-hour crafting days per workweek). The XDMG footnote halves
+   these baselines for non-scroll consumables. The sheet projects its one-use item taxonomy here:
+   ammunition (`A`), firearm ammunition (`AF`), oils (`Oil`), and potions (`P`), plus the `potion`
+   recipe category. Spell Scrolls remain excluded from this XDMG consumable shortcut.
+
+Spell Scrolls without a structured spell level, unsupported categories, and unsupported rarities
+return `isSupported: false` with a reason. The workbench shows that reason in both preview and
+outcome rather than silently omitting time. It never guesses from a recipe name. Feature prose that
+explicitly halves or doubles Spell Scroll crafting emits a generic `spell-scroll` modifier; the
+EFA Cartographer's Tools of the Trade uses this path and is attributed to its exact feature UID.
+
+Generated recipes preserve the output's existing 5etools `itemType`. Armor is exactly `LA`, `MA`,
+or `HA`; shields remain `S`, so they do not become armor merely because both contribute AC. A
+resolved catalog item can provide the same context, and an explicit result category supports future
+non-item crafting surfaces. The generated catalog also carries a compact authoritative `resultItem`
+projection, which the lazy Character Sheet loader installs in `CharacterSheetPage.getItems()` so
+type-sensitive modifiers use the shipped item type even when the full item catalog is not loaded.
+
+`Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA` contributes a `0.5` multiplier for armor at
+Artificer 3+. The class and subclass sources must both be `EFA`; the TCE Armorer's same-named
+feature does not qualify. Mundane and magic armor use the same item taxonomy, while weapons,
+potions, adventuring gear, and shields remain unchanged.
+
+The EFA Artillerist's **Tools of the Trade** returns `0.5` only for magic wands, identified by the
+structural `WD` item type. TCE Artillerists, non-wand items, and unresolved recipe items remain at
+their unmodified duration. This uses the same exact-owner descriptor channel as Armorer, not a
+parallel crafting ledger or timer.
+
+`Tools of the Trade|Artificer|EFA|Alchemist|EFA|3|EFA` contributes a separate `0.5` multiplier
+only for `recipeCategory: "potion"`. The exact EFA class, subclass, and active feature must all be
+present, so changing subclass, removing the feature, or using the TCE Alchemist removes the
+modifier. The shared XDMG baseline is derived first and the feature multiplier is applied after it:
+an uncommon value-less potion is 1 workweek after the XDMG consumable adjustment and 0.5
+workweeks for this Alchemist. Preview and committed outcome render that same calculation object.
+
+`Magic Item Adept|Artificer|EFA|10|EFA` contributes a `0.25` multiplier only when both filters
+match: the recipe category is `item` or `potion`, and its normalized rarity is `common` or
+`uncommon`. Quantity is applied to the source-grounded baseline first, then feature multipliers are
+composed without rounding. A Common potion therefore goes from `0.5` to `0.125` workweeks, while
+an Uncommon ordinary item goes from `2` to `0.5`; Rare recipes and unrelated categories are
+unchanged. This is time-only: the current workbench has no generic feature-contributed gold-cost
+contract.
+
 ## The two invariants
 
 ### 1. Materials are inventory items, not a parallel ledger

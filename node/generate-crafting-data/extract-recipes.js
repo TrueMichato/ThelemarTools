@@ -16,6 +16,18 @@ const OUTCOME_TIERS = [
 	{tier: "extraDelicious", pattern: /^Extra Delicious/i},
 ];
 
+const _getResultItem = (item) => {
+	const {
+		name,
+		source,
+		page,
+		entries,
+		customProperties,
+		...resultItem
+	} = item;
+	return resultItem;
+};
+
 /**
  * Hamund craftables are ordinary `item` entries that carry `customProperties.crafter` and
  * `customProperties.ingredients`.
@@ -37,7 +49,9 @@ export function extractHamundRecipes (bookDatas, {fnDeriveEffectTags, report}) {
 				craftDC: null,
 				ingredients: parseIngredientList(cp.ingredients, {defaultSource: item.source}),
 				itemUid: getUid(item.name, item.source),
+				...(item.type ? {itemType: item.type} : {}),
 				entries: item.entries || [],
+				resultItem: _getResultItem(item),
 			};
 
 			if (item.rarity && item.rarity !== "none" && item.rarity !== "unknown") ent.rarity = item.rarity;
@@ -98,9 +112,11 @@ export function extractArcadiaRecipes (arcadia11Data, {fnDeriveEffectTags, repor
 			...(componentGroups.length > 1 ? {componentGroups} : {}),
 			outcomes,
 			itemUid: getUid(item.name, item.source),
+			...(item.type ? {itemType: item.type} : {}),
 			// Only the flavour text: the ingredient lists and outcome ladder are structured above,
 			// and repeating them verbatim would render the whole recipe twice.
 			entries: otherEntries,
+			resultItem: _getResultItem(item),
 		};
 
 		ent.effectTags = fnDeriveEffectTags({
@@ -184,7 +200,9 @@ export function extractCompleteCrafterRecipes (completeCrafterData, {fnDeriveEff
 			craftDC: null,
 			ingredients: [],
 			itemUid: getUid(item.name, item.source),
+			...(item.type ? {itemType: item.type} : {}),
 			entries: item.entries || [],
+			resultItem: _getResultItem(item),
 		};
 
 		if (item.rarity && item.rarity !== "none" && item.rarity !== "unknown") ent.rarity = item.rarity;

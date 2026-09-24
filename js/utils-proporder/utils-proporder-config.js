@@ -2202,7 +2202,7 @@ const PROPORDER_CRAFTING_RECIPE = [
 	"name", "source", "page",
 	"recipeCategory", "crafter", "craftDC", "complexity", "rarity", "reqAttune",
 	"ingredients", "componentGroups", "outcomes",
-	"itemUid", "value", "entries",
+	"itemUid", "itemType", "value", "entries",
 	"effectTags", "hasMechanicalEffect", "uniqueId",
 ];
 

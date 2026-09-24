@@ -134,9 +134,10 @@ function log (...args) { if (!QUIET) console.log(...args); }
 function warn (...args) { console.warn(...args); }
 
 /**
- * The MEGA matrix only evaluates the features matrix at a fixed set of
- * levels. Read them out of the factory rather than hard-coding, so this
- * audit cannot silently drift if the checkpoint list changes.
+ * The MEGA matrix only evaluates the features matrix at configured
+ * checkpoint levels. Read the factory default here; individual specs may
+ * override it with a literal `megaCheckpoints` array, which auditSpec reads
+ * separately.
  *
  * Every fallback path here is LOUD. The regex only matches a literal digit
  * array, so any refactor that makes the list a variable, a constant import
@@ -165,11 +166,12 @@ function readCheckpoints () {
 		return bail(`unreadable (${e.message})`);
 	}
 
-	const found = [...src.matchAll(/const\s+checkpoints\s*=\s*\[([\d,\s]+)\]/g)]
+	const code = blankComments(src);
+	const found = [...code.matchAll(/const\s+checkpoints\s*=\s*(?:spec\.megaCheckpoints\s*\|\|\s*)?\[([\d,\s]+)\]/g)]
 		.map(m => m[1].split(",").map(s => Number(s.trim())).filter(Number.isFinite))
 		.filter(nums => nums.length);
 
-	if (!found.length) return bail("no `const checkpoints = [<digits>]` declaration matched");
+	if (!found.length) return bail("no literal factory checkpoint declaration matched");
 
 	const distinct = [...new Set(found.map(nums => nums.join(",")))];
 	if (distinct.length > 1) return bail(`the factory declares disagreeing checkpoint lists (${distinct.map(d => `[${d}]`).join(" vs ")})`);
@@ -178,6 +180,23 @@ function readCheckpoints () {
 }
 
 const CHECKPOINTS = readCheckpoints();
+
+function readSpecCheckpoints (src, fileName) {
+	const code = blankComments(src);
+	const found = [...code.matchAll(/\bmegaCheckpoints\s*:\s*\[([\d,\s]+)\]/g)]
+		.map(m => m[1].split(",").map(s => Number(s.trim())).filter(Number.isFinite))
+		.filter(nums => nums.length);
+
+	if (!found.length) return CHECKPOINTS;
+
+	const distinct = [...new Set(found.map(nums => nums.join(",")))];
+	if (distinct.length === 1) return found[0];
+
+	warn(`[audit] WARNING: ${fileName} declares disagreeing literal megaCheckpoints (${distinct.map(d => `[${d}]`).join(" vs ")}).`);
+	warn("[audit]          Using their union for inert-row detection; coverage may be overstated.");
+	if (STRICT) process.exitCode = 1;
+	return [...new Set(found.flat())].sort((a, b) => a - b);
+}
 
 /** Extract the balanced `{...}` literal that starts at `start`. */
 function readObjectLiteral (src, start) {
@@ -197,7 +216,7 @@ function readObjectLiteral (src, start) {
  * to grep for. Without this check such rows still count towards
  * `effects`, so the audit would launder them as covered.
  */
-function findInertRows (src) {
+function findInertRows (src, checkpoints) {
 	const out = [];
 	const re = /\{\s*level:\s*(\d+)/g;
 	let m;
@@ -208,7 +227,7 @@ function findInertRows (src) {
 		if (!until) continue; // open-ended windows always reach the last checkpoint
 		const lo = Number(m[1]);
 		const hi = Number(until[1]);
-		if (CHECKPOINTS.some(c => c >= lo && c <= hi)) continue;
+		if (checkpoints.some(c => c >= lo && c <= hi)) continue;
 		out.push({
 			line: src.slice(0, m.index).split("\n").length,
 			window: `L${lo}-${hi}`,
@@ -718,6 +737,7 @@ function listSpecs () {
 function auditSpec (specPath) {
 	const src = fs.readFileSync(specPath, "utf8");
 	const fileName = path.basename(specPath);
+	const checkpoints = readSpecCheckpoints(src, fileName);
 
 	// Count `kind:` occurrences inside FeatureCheck-like object literals.
 	// Heuristic: a FeatureCheck row begins with `{level: <n>` and closes
@@ -751,7 +771,7 @@ function auditSpec (specPath) {
 	const skipReasonCount = skipReasonMatches.length;
 
 	// Helper-driven coverage (build*Checks helpers contribute checks too).
-	const helperUsage = src.match(/\b(buildSpecialtyChecks|buildBattleTacticChecks|buildMetamagicChecks|buildInvocationChecks|buildJesterActChecks|buildTricksterTrickChecks|buildPreciseStrikeChecks|buildDreamwalkerChecks|buildWeaponMasteryChecks|buildAnyInvocationChecks|buildAnyMetamagicChecks|buildAnyManeuverChecks|buildAnyArcaneShotChecks|buildAnyPactBoonChecks|buildCatalogChecks|buildZodiacFormChecks)\b/g) || [];
+	const helperUsage = src.match(/\b(buildSpecialtyChecks|buildBattleTacticChecks|buildMetamagicChecks|buildInvocationChecks|buildJesterActChecks|buildTricksterTrickChecks|buildPreciseStrikeChecks|buildDreamwalkerChecks|buildWeaponMasteryChecks|buildAnyInvocationChecks|buildAnyMetamagicChecks|buildAnyManeuverChecks|buildAnyArcaneShotChecks|buildAnyPactBoonChecks|buildCatalogChecks|buildZodiacFormChecks|buildEfaArtificerBaseChecks)\b/g) || [];
 	const helperCount = new Set(helperUsage).size;
 
 	// "Effective" coverage: hand-written effects + reason comments +
@@ -759,7 +779,7 @@ function auditSpec (specPath) {
 	// that's been deliberately accounted for). Rows sitting in an inert
 	// level window are subtracted back out — they carry probes that can
 	// never execute, so counting them would overstate coverage.
-	const inertRows = findInertRows(src);
+	const inertRows = findInertRows(src, checkpoints);
 	const inertWithProbes = inertRows.filter(r => r.hasProbes).length;
 	const unreachablePicks = findUnreachablePicks(src);
 	const vacuousSpellMatches = findVacuousSpellMatches(src);
@@ -791,6 +811,7 @@ function auditSpec (specPath) {
 		reasonCount,
 		skipCount,
 		helperCount,
+		checkpoints,
 		inertRows,
 		inertWithProbes,
 		unreachablePicks,
@@ -1014,12 +1035,12 @@ function main () {
 	const inertSpecs = results.filter(r => r.inertRows.length);
 	const totalInertProbes = results.reduce((a, r) => a + r.inertWithProbes, 0);
 	if (inertSpecs.length) {
-		log(`  ⚠ Inert level windows — never evaluated at any checkpoint [${CHECKPOINTS.join(", ")}]:`);
+		log("  ⚠ Inert level windows — never evaluated at the spec's effective checkpoints:");
 		log("");
 		for (const r of inertSpecs) {
 			for (const row of r.inertRows) {
 				const tag = row.hasProbes ? "probes NEVER RUN" : "no probes attached";
-				log(`      ${padR(r.fileName, 46)} ${padR(row.window, 8)} line ${padR(row.line, 5)} ${padR(row.name, 40)} ${tag}`);
+				log(`      ${padR(r.fileName, 46)} ${padR(row.window, 8)} line ${padR(row.line, 5)} ${padR(row.name, 40)} ${tag} checkpoints=[${r.checkpoints.join(",")}]`);
 			}
 		}
 		log("");

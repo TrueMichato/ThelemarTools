@@ -652,6 +652,14 @@ See [18-npc-export.md](./18-npc-export.md).
 Page 1: header, abilities, saves, skills, combat, **resources**, attacks, actions, footer (defenses/senses/profs/conditions/carry)  
 Later pages: features (compact), spellcasting, equipment, **custom abilities**, **character notes/appearance/portrait**, TGTT, companions, feature details appendix
 
+Companion statblocks share one presentation path for identity, core statistics,
+abilities, traits, actions, and a distinct reactions section. The exact
+source-qualified EFA Steel Defender adds a rules-backed presentation from its
+reconciled companion overlay and State APIs: setup choices, saves/skills,
+senses/immunities/languages, Hit Dice, Repair, command policy, Arcane Jolt, and
+Improved Deflection. Name-only, TCE, RHW, and generic companions do not enter
+the EFA-specific path.
+
 ### Key Methods
 
 ```javascript

@@ -72,7 +72,7 @@ load books ─┬─ extract-hamund-materials     ─┐
 | `extract-herbs-and-ingredients.js` | Herbalism herbs and Arcadia 11 base ingredients |
 | `extract-variant-components.js` | Arcadia 8 spell components (reads the already-converted file) |
 | `extract-complete-crafter.js` | Named materials + the "Parts by Creature" tables |
-| `extract-recipes.js` | Hamund craftables, Arcadia dishes, Complete Crafter items |
+| `extract-recipes.js` | Hamund craftables, Arcadia dishes, Complete Crafter items; preserves each output's existing item type for downstream taxonomy |
 | `extract-rules.js` | Crafting-relevant `variantrule` / `skill` / `itemProperty` entries |
 | `extract-item-materials.js` | The 72 Thelemar `itemMaterial` entities — a **pass-through**, since they are authored already-structured in the TGTT brew. See [05-item-materials.md](05-item-materials.md) |
 | `build-graph.js` | Material ↔ recipe linking and duplicate marking |

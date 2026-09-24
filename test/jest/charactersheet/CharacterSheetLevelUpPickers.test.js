@@ -37,9 +37,11 @@ const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 describe("CS-BUG-017 level-up option-pool wiring", () => {
 	const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-levelup.js"), "utf8");
 
-	test("single-class and multiclass application use acquisition-level materialization", () => {
+	test("single-class replacement and multiclass materialization use acquisition-level state", () => {
+		expect(source).toMatch(/CharacterSheetClassUtils\.replaceStructuredFeatureChoice\s*\(/);
+		expect(source).toMatch(/classLevel:\s*newLevel/);
 		const calls = source.match(/CharacterSheetClassUtils\.materializeFeatureOption\s*\(/g) || [];
-		expect(calls.length).toBeGreaterThanOrEqual(5);
+		expect(calls.length).toBeGreaterThanOrEqual(3);
 		expect(source).toMatch(/acquisitionLevel:\s*newLevel/);
 		expect(source).toMatch(/acquisitionLevel:\s*1/);
 	});

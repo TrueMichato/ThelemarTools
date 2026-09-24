@@ -24,6 +24,40 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 
 **Total TGTT Tests**: 737 passing
 
+### EFA Armorer level-3 armor models
+
+The EFA Armorer is source-qualified as `Artificer|EFA` plus `Armorer|EFA`.
+TCE or mixed-source collisions never activate these mechanics. The chosen
+Dreadnaught, Guardian, or Infiltrator model remains in structured feature-choice
+state, while the active worn Arcane Armor remains bound to its inventory wrapper
+ID. Generated model weapons use stable `_efaArmorerWeaponId` identities, so
+renaming or customizing a row does not break its attacks and a same-named weapon
+cannot impersonate it.
+
+- **Dreadnaught:** Force Demolisher offers a structured push/pull result only
+  after an eligible hit against a smaller creature. Giant Stature is a real
+  Bonus Action, lasts 1 minute, grants +5-foot reach, becomes Large when room
+  allows, has Intelligence-modifier uses (minimum 1), and recharges only on a
+  Long Rest.
+- **Guardian:** Thunder Pulse records an owner-tagged target effect until the
+  start of the Armorer's next turn. Defensive Field is an unlimited,
+  Bloodied-only Bonus Action granting temporary HP equal to EFA Artificer level;
+  cleanup removes only temp HP still owned by that feature.
+- **Infiltrator:** Lightning Launcher can add `1d6` Lightning damage once on
+  each owner turn. Its gate uses the shared exact turn-receipt API rather than a
+  model-specific counter or Combat's older round map.
+
+Model powers use the existing armor item-power and Combat surfaces. Doffing,
+model/source loss, death, respec, rest, combat reset, save/load, and migration
+all reconcile through the same binding/resource/active-state/target-effect
+paths. The three model child entities are suppressed from generic activation so
+their prose cannot create duplicate inert custom toggles.
+
+At EFA Armorer level 9+, Improved Arsenal adds +1 attack and +1 damage only to
+the active generated model weapon. The bonus follows `_efaArmorerWeaponId`,
+composes with player item/custom bonuses, and moves with the canonical model
+without rewriting the generated row or its wrapper identity.
+
 ### Gambler Rogue lifecycle
 
 The TGTT Gambler is source-qualified as `Rogue|TGTT` plus
@@ -505,7 +539,7 @@ built from the real Ar2 text.
 |---|---|---|---|
 | 1 / 3 | **Child of the Sun Bloodline** | Spells tab | `light` cantrip granted by `populateSubclassSpells()`, **outside** the counted picks. The builder's spell pickers now receive it in `knownSpellIds`, so it cannot also be picked manually and eat a choice. |
 | 1 / 3 | **Glimpse of the Sun** | Features tab → **Action**, 1 Sorcery Point | `useGlimpseOfTheSunFlare({targets})` spends the point and returns `{dc, saveAbility: "dex", range, condition: "blinded", duration, multiTarget}`. `glimpseBlindSaveDc` resolves from your spell save DC (it was `null` before). Gated at character level 3 per the prose. |
-| 1 / 3 | **Summer's Defiant Blood** | Features tab → free action | `armSummersDefiantBlood()` arms a generic `pendingSpellDamageBonus` of +CHA. The next spell damage roll consumes it **at any spell level** and names it in the breakdown. Once per round, released by `applyTurnStartEffects()`; an unspent arm lapses after your next turn. |
+| 1 / 3 | **Summer's Defiant Blood** | Features tab → free action | `armSummersDefiantBlood()` arms a generic `pendingSpellDamageBonus` of +CHA. The next spell damage roll consumes it **at any spell level** and names it in the breakdown. Its exact class/subclass-source receipt permits one use per turn in or out of combat; only `resetTurnEconomy()` releases it. An unspent arm lapses after your next turn in combat. |
 | 3 (TGTT only) | **Sun Spells** | Spells tab | `additionalSpells.known` at sorcerer 3/5/7/9 lands as `alwaysPrepared: true` with `sourceFeature: "Child of the Sun Bloodline Spells"`. Removed by `removeSubclassSpells()` on respec / subclass change. |
 | 6 | **Sunlit Path** | Speed readout · Resistances · Speed breakdown modal | +15 ft walking speed and `radiant` resistance (both were already live). The overland-travel clause is now rendered too — a secondary total in the speed modal driven by the generic `getTravelPaceBonus()` descriptor. Classified `passive` via `FEATURE_CLASSIFICATION_OVERRIDES`. |
 | 14 | **Grasping the Sun** | Features tab → **Reaction** | `useGraspingTheSun({damage, fromMeleeAttack})` returns `{reduction, damageTaken, radiantDamage}`; reduction and retaliation both equal your sorcerer level, clamped at 0. Previously returned `null` from detection and was completely invisible. |
@@ -525,10 +559,12 @@ feature for a wrong one.**
 
 **`pendingDamageMaximization` generalised into `pendingSpellDamageBonus`.** Any
 "add X to the damage of your next spell" rider can now arm and consume through
-the same family (`armPendingSpellDamageBonus` / `consumePendingSpellDamageBonus`
-/ `resetPendingSpellDamageBonusCooldowns`) instead of growing a third bespoke
-flag. `_getCantripDamageBonus()` was not reusable here because it hard-returns
-for `level !== 0`.
+the same family (`armPendingSpellDamageBonus` /
+`consumePendingSpellDamageBonus`). Once-per-turn safety is not a parallel
+cooldown array: the caller supplies an exact stable descriptor to
+`commitTurnReceipt`, and `resetTurnEconomy()` owns the lifecycle. Consuming or
+clearing the armed bonus does not release that receipt. `_getCantripDamageBonus()`
+was not reusable here because it hard-returns for `level !== 0`.
 
 ### ✅ Warlock Patrons
 

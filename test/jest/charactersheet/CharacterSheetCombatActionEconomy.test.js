@@ -1,9 +1,16 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 const CharacterSheetState = globalThis.CharacterSheetState;
+const LOCAL_RESET_RECEIPT = Object.freeze({
+	key: "feature:Combat Integration|TEST:owner:Combat Integration|TEST:action:local-reset",
+	ownerUid: "feature:Combat Integration|TEST",
+	sourceUid: "owner:Combat Integration|TEST",
+	actionUid: "local-reset",
+});
 
 describe("CharacterSheetCombat action economy gating", () => {
 	let combat;
@@ -41,6 +48,9 @@ describe("CharacterSheetCombat action economy gating", () => {
 				actionUsage.action = false;
 				actionUsage.bonus = false;
 				actionUsage.reaction = false;
+			},
+			resetTurnEconomy () {
+				this.resetActionEconomy();
 			},
 			getFeatures: () => featureList,
 			canUseCustomAbility: () => true,
@@ -103,10 +113,11 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(toasts.some(t => t.type === "warning" && /bonus action/i.test(t.content))).toBe(true);
 	});
 
-	it("resets per-turn action economy on round reset", () => {
+	it("resets per-turn action economy through the state lifecycle reset", () => {
 		combat._consumeActionType("bonus");
 		expect(combat._isActionTypeAvailable("bonus")).toBe(false);
 
+		combat._state.resetTurnEconomy();
 		combat._resetTurnActionUsage();
 		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
 	});
@@ -114,10 +125,73 @@ describe("CharacterSheetCombat action economy gating", () => {
 	it("keeps Combat and CharacterSheetState bonus-action ledgers synchronized", () => {
 		combat._state.consumeActionType("bonus");
 		expect(combat._isActionTypeAvailable("bonus")).toBe(false);
+		combat._state.resetTurnEconomy();
 		combat._resetTurnActionUsage();
 		expect(combat._isActionTypeAvailable("bonus")).toBe(true);
 		combat._consumeActionType("bonus");
 		expect(combat._state.isActionTypeAvailable("bonus")).toBe(false);
+	});
+
+	it("does not let lazy local initialization reset state action economy or receipts", () => {
+		const state = new CharacterSheetState();
+		state.startCombat();
+		state.consumeActionType("bonus");
+		const committed = state.commitTurnReceipt(LOCAL_RESET_RECEIPT);
+		const turnId = committed.turnId;
+		const resetActionEconomy = jest.spyOn(state, "resetActionEconomy");
+		const integratedCombat = Object.create(CharacterSheetCombat.prototype);
+		integratedCombat._state = state;
+
+		integratedCombat._recordAttackForTurn({name: "Longsword", actionType: "action"});
+		expect(integratedCombat._turnAttackUsage).toMatchObject({
+			hasAttackAction: true,
+			attackActionCount: 1,
+		});
+		delete integratedCombat._turnActionUsage;
+		state.consumeActionType = undefined;
+		integratedCombat._consumeActionType("action");
+
+		expect(resetActionEconomy).not.toHaveBeenCalled();
+		expect(state.isActionTypeAvailable("bonus")).toBe(false);
+		expect(state.queryTurnReceipt(LOCAL_RESET_RECEIPT.key)).toMatchObject({
+			ok: true,
+			used: true,
+			turnId,
+			receipt: committed.receipt,
+		});
+		expect(integratedCombat._turnActionUsage.action).toBe(true);
+	});
+
+	it("resets state turn economy exactly once through combat start, advance, and end", () => {
+		const state = new CharacterSheetState();
+		const integratedCombat = Object.create(CharacterSheetCombat.prototype);
+		integratedCombat._state = state;
+		const resetActionEconomy = jest.spyOn(state, "resetActionEconomy");
+		const resetTurnEconomy = jest.spyOn(state, "resetTurnEconomy");
+
+		const primeTurn = () => {
+			state.consumeActionType("reaction");
+			expect(state.commitTurnReceipt(LOCAL_RESET_RECEIPT).ok).toBe(true);
+		};
+		const expectReset = count => {
+			integratedCombat._resetTurnActionUsage();
+			expect(resetTurnEconomy).toHaveBeenCalledTimes(count);
+			expect(resetActionEconomy).toHaveBeenCalledTimes(count);
+			expect(state.isActionTypeAvailable("reaction")).toBe(true);
+			expect(state.queryTurnReceipt(LOCAL_RESET_RECEIPT.key).used).toBe(false);
+		};
+
+		primeTurn();
+		state.startCombat();
+		expectReset(1);
+
+		primeTurn();
+		state.advanceRound();
+		expectReset(2);
+
+		primeTurn();
+		state.endCombat();
+		expectReset(3);
 	});
 
 	it("restores only the requested action slot", () => {
@@ -170,10 +244,12 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(combat._getActivationButtonText({activationInfo: null})).toBe("Use");
 	});
 
-	it("forwards activationInfo through combat activation helper", () => {
+	it("forwards activationInfo and the atomic activation result through combat activation helper", async () => {
 		let callArgs = null;
+		const activationResult = {ok: false, committed: false, reason: "cancelled"};
 		combat._page._activateFeatureState = (...args) => {
 			callArgs = args;
+			return activationResult;
 		};
 		combat._page._renderActiveStates = () => {};
 		combat.renderCombatStates = () => {};
@@ -185,7 +261,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		const resourceCost = 1;
 		const activationInfo = {interactionMode: "trigger", effects: [{type: "extraDamage", value: "2d6"}]};
 
-		combat._activateCombatFeature(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
+		const result = await combat._activateCombatFeature(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 
 		expect(callArgs).not.toBeNull();
 		expect(callArgs[0]).toBe(feature);
@@ -194,6 +270,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(callArgs[3]).toBe(resource);
 		expect(callArgs[4]).toBe(resourceCost);
 		expect(callArgs[5]).toBe(activationInfo);
+		expect(result).toBe(activationResult);
 	});
 });
 

@@ -1263,6 +1263,106 @@ Semantics worth knowing:
 - `scaling` survives `toJson()` / `loadFromJson()`, so a saved character
   re-derives correctly on the next level-up.
 
+### Persisted generated-summon lifecycle
+
+Reusable class deployables which need ownership, retirement, duration, and
+deduplication semantics still use the same `CLASS_SUMMON` companion type, but
+store a `generatedClassSummon` metadata envelope instead of persisting a full
+derived statblock. The generic state APIs are:
+
+- `getClassSummon()` / `listClassSummons()` for catalog-backed projections;
+- `setClassSummonCurrentHp()` for clamped HP updates and zero-HP destruction;
+- `dismissClassSummon()`, `destroyClassSummon()`, and
+  `retireClassSummon()` for explicit retirement;
+- `advanceClassSummonGameTime()` for game-time duration expiration;
+- `reconcileClassSummons()` for load and owner-change validation.
+
+The EFA Eldritch Cannon is the first registered definition. Its compact runtime
+record derives AC 18 and poison/psychic immunities from `Eldritch Cannon|EFA`,
+maximum HP as five times the exact `Artificer|EFA` level, and attack/save/form
+formulas from current character state. Its 60-minute duration is advanced only
+through explicit game-time/rest APIs. Artificer 15 permits persisted generated
+slots 0 and 1.
+
+`pCreateEfaEldritchCannons()` owns the creation cost and transaction for one or
+two cannons. Creation requires a selected equipped, positive-quantity,
+proficient Smith's Tools or Woodcarver's Tools inventory wrapper. The
+source-qualified `Eldritch Cannon Creation` resource recharges on a Long Rest
+and creates one or both cannons with one use; slot-funded creation spends one
+selected normal/Pact slot per cannon only after aggregate pool validation.
+Creation/dismissal consume the canonical Action slot in combat while displaying
+the source's "Magic Action" subtype. The creation transaction restores its
+entire snapshot, including both records and revision cursors, when persistence
+fails. `pCreateEfaEldritchCannon()` remains the single-request delegate.
+
+`activateEfaEldritchCannon()` resolves the derived form contract without
+persisting any duplicate combat numbers:
+
+- Flamethrower reports a 15-foot cone, current Artificer spell-save DC,
+  `2d8`/`3d8` fire damage, and half on a successful Dexterity save.
+- Force Ballista uses the current Artificer spell-attack modifier at 120 feet,
+  rolls `2d8`/`3d8` force damage, and reports the 5-foot push.
+- Protector rolls `1d8`/`2d8 + max(1, INT modifier)` within 10 feet and applies
+  normal temporary-HP replacement to self. Other targets are report-only.
+
+All forms require the owner within 60 feet and may move a deployed cannon up to
+15 feet before or after activation. `mending` restores `2d6` up to derived max
+HP. `activateEfaEldritchCannons()` validates two complete activation/roll
+requests before committing both with one Bonus Action; the one-cannon API is
+unchanged. Game-time decrement/end controls remain explicit, and either a Short
+Rest or Long Rest expires all active EFA cannons through canonical retirement.
+The dedicated Play Mode card projects this same state and delegates creation,
+activation, HP, movement, duration, dismissal, and detonation through Combat's
+canonical transactional handlers. It never exposes compact cannon records
+through generic companion controls. Play Mode also reports Arcane Firearm
+binding and Shimmering Field cover without persisting duplicate effect state.
+
+Short Rest now uses the same awaited save boundary as Long Rest. If persistence
+fails after cannon expiry, the complete pre-rest snapshot is reloaded and the
+previous Rest Undo snapshot remains available; the failed rest cannot strand a
+retired cannon or replace the player's last valid undo point.
+
+Explosive Cannon is a damage-triggered, one-shot level-9 Reaction opportunity.
+Only a surviving exact-owner cannon within 60 feet can arm it. Acceptance
+spends the state-owned Reaction during tracked combat, retires that revision as
+`detonated`, and reports `3d10` force damage in a 20-foot radius with a
+Dexterity save against the owner's spell-save DC for half. Outside combat the
+Reaction is reported as untracked. Decline spends nothing. Persistence failure
+restores the post-damage cannon and its immediate detonation opportunity.
+
+At level 15, each active EFA cannon projects Shimmering Field Half Cover while
+the owner is within 10 feet. The generic nonstacking cover primitive applies
+only the highest cover grade once (+2 AC/+2 Dexterity saves for Half Cover) and
+preserves every source/range in breakdowns. Smite of Protection and Cover of
+Darkness use the same primitive. Ally cover is reported, not applied to another
+character's state.
+
+### EFA Arcane Firearm
+
+Arcane Firearm is an exact-source operational mechanic rather than a flat item
+bonus. At EFA Artificer 5, Long Rest exposes an optional accessible carve or
+re-carve choice for a live positive-quantity rod, staff, wand, or martial
+ranged weapon. The versioned generic inventory binding stores only the stable
+inventory wrapper ID plus exact class/subclass/feature owner UIDs; editable
+names are display metadata and never identity. Item removal, zero quantity,
+ineligible replacement, source change, level loss, load, and Respec reconcile
+idempotently to an actionable unbound status. A legal binding may remain while
+unequipped.
+
+An equipped live binding becomes an exact `inventoryItemIds` alternative in
+the accepted EFA focus requirement while normal proficient tools remain legal.
+Damaging spells prefer the firearm in the picker but permit another legal
+focus. After a committed exact EFA cast receipt confirms that the bound wrapper
+was actually used and produced damage, the spell pipeline rolls one `1d8` and
+adds it once to that cast's aggregate damage result. Deferred weapon-channel
+spells carry the committed cast/focus identity into the later weapon damage
+roll. The feature uses the shared exact turn-receipt ledger with the committed
+cast receipt ID in its stable key, so separate qualifying casts in one turn
+each apply once while retries of the same cast remain idempotent. Failed
+persistence rolls back the receipt, removal/Respec prunes only its exact
+owner/source/action scope, and `resetTurnEconomy()` releases all current-turn
+cast receipts.
+
 ## College of Creation (Bard, TCE)
 
 | Level | Feature | Calculation keys | What actually happens |
@@ -1485,6 +1585,14 @@ strengthOfTheGraveRhw: {
 
 `_resolveZeroHpInterventionHp()` resolves the descriptor, defaults to a flat 1
 and clamps into `[1, maxHp]`.
+
+The registry also accepts callback-backed `availability`, `validation`,
+`consumption`, `hpOutcome`, and `postApplicationResult` descriptors. Cartographer
+Safe Haven is the reference implementation: the transaction revalidates the
+versioned Atlas at commit time, destroys only the selected map, derives HP from
+the current source-qualified Artificer level, and returns a structured teleport
+placement requirement. Callback failures roll the complete transaction back;
+cancelled or unavailable choices spend nothing.
 
 > **The stored feature is `Power of Shadow`, not `Strength of the Grave`.**
 > Eyes of the Dark and Strength of the Grave are *nested named entries* inside

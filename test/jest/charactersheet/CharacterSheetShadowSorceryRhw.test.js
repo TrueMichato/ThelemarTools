@@ -240,7 +240,7 @@ describe("Shadow Sorcery (RHW) — seeing through your own spell Darkness", () =
 
 describe("Shadow Sorcery (RHW) — Strength of the Grave restores CHA mod + Sorcerer level", () => {
 	/** Take the character to exactly 0 and resolve the intervention with a guaranteed success. */
-	const dropAndSave = (state, {damage = 40, damageType = "necrotic", isCritical = false} = {}) => {
+	const dropAndSave = (state, {damage = 10, damageType = "necrotic", isCritical = false} = {}) => {
 		state.setCurrentHp(10);
 		state.takeDamage(damage, {damageType, isCritical});
 		const pending = state.getPendingZeroHpIntervention();
@@ -346,7 +346,7 @@ describe("Shadow Sorcery (RHW) — Strength of the Grave restores CHA mod + Sorc
 		const state = makeShadowSorcery(20, {cha: 20});
 		state.setHp(12, 12);
 		state.setCurrentHp(5);
-		state.takeDamage(30, {damageType: "necrotic"});
+		state.takeDamage(5, {damageType: "necrotic"});
 		state.applyZeroHpIntervention("strengthOfTheGraveRhw", {total: 999});
 		expect(state.getHp().current).toBe(12);
 	});

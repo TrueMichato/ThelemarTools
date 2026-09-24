@@ -161,10 +161,12 @@ describe("Fighter: Shadow Knight (TGS4)", () => {
 
 	it("applies Cover of Darkness as real half-cover bonuses at level 18", () => {
 		const state = makeShadowKnight(18);
-		const baseAcStateBonus = state.getBonusFromStates("ac");
+		const baseAc = state.getAc();
+		const baseDexSave = state.getSaveMod("dex");
 		expect(state.setShadowKnightDimLightActive(true)).toBe(true);
-		expect(state.getBonusFromStates("ac") - baseAcStateBonus).toBe(2);
-		expect(state.getBonusFromStates("save:dex")).toBe(2);
+		expect(state.getAc() - baseAc).toBe(2);
+		expect(state.getSaveMod("dex") - baseDexSave).toBe(2);
+		expect(state.getCoverProjection()).toMatchObject({cover: "half", acBonus: 2, dexSaveBonus: 2});
 		expect(state.hasAdvantageFromStates("save:dex")).toBe(true);
 	});
 });

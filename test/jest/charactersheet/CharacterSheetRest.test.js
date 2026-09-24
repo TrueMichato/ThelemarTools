@@ -625,6 +625,32 @@ describe("Rest Mechanics", () => {
 			expect(state.getItem("item5").chargesCurrent).toBe(1);
 		});
 
+		it("should recharge dusk and midnight items during a long rest", () => {
+			state.addItem({
+				id: "long-rest-dusk",
+				name: "Dusk Lantern",
+				charges: 3,
+				chargesCurrent: 0,
+				recharge: "dusk",
+			});
+			state.addItem({
+				id: "long-rest-midnight",
+				name: "Midnight Bell",
+				charges: 2,
+				chargesCurrent: 0,
+				recharge: "midnight",
+			});
+
+			const result = state.onLongRest();
+
+			expect(state.getItem("long-rest-dusk").chargesCurrent).toBe(3);
+			expect(state.getItem("long-rest-midnight").chargesCurrent).toBe(2);
+			expect(result.rechargedItems.map(it => it.itemId)).toEqual(expect.arrayContaining([
+				"long-rest-dusk",
+				"long-rest-midnight",
+			]));
+		});
+
 		it("should recharge magic items at midnight", () => {
 			state.addItem({
 				id: "item6",

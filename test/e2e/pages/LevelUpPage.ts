@@ -1,6 +1,70 @@
 import {Locator, Page, expect} from "@playwright/test";
 import {fillSpellPickers} from "./spellPickerFill";
 
+async function fillRequiredArtificerPlans (page: Page): Promise<void> {
+	const openPicker = page.locator(".charsheet__levelup-wizard button", {hasText: "Choose or Replace Plans"}).first();
+	if (!await openPicker.isVisible().catch(() => false)) return;
+
+	await openPicker.click();
+	const picker = page.locator(".charsheet__artificer-plan-picker");
+	await expect(picker).toBeVisible({timeout: 5000});
+
+	const count = picker.locator(".charsheet__artificer-plan-count");
+	const getCounts = async (): Promise<{selected: number; required: number}> => {
+		const text = (await count.textContent())?.trim() || "";
+		const match = text.match(/^(\d+)\/(\d+)\s+required plans selected$/i);
+		if (!match) throw new Error(`Replicate Magic Item plan picker exposed an unreadable required-count label: "${text}".`);
+		return {selected: Number(match[1]), required: Number(match[2])};
+	};
+
+	for (let pass = 0; pass < 50; pass++) {
+		const before = await getCounts();
+		if (before.selected >= before.required) break;
+
+		const opportunity = picker.locator(".charsheet__artificer-plan-opportunity:not(.complete)", {hasText: "Choose a plan"}).first();
+		if (!await opportunity.isVisible().catch(() => false)) {
+			throw new Error(
+				`Replicate Magic Item plan picker still needs ${before.required - before.selected} required selection(s), `
+				+ "but exposes no incomplete required plan opportunity.",
+			);
+		}
+		await opportunity.click();
+
+		const candidate = picker.locator(".charsheet__artificer-plan-result:not(:disabled)").first();
+		if (!await candidate.isVisible().catch(() => false)) {
+			throw new Error(
+				`Replicate Magic Item plan picker still needs ${before.required - before.selected} required selection(s), `
+				+ "but exposes no eligible plan candidate.",
+			);
+		}
+		await candidate.click();
+		await expect.poll(async () => (await getCounts()).selected, {
+			message: "Replicate Magic Item plan selection did not update the required-count ledger.",
+			timeout: 3000,
+		}).toBeGreaterThan(before.selected);
+	}
+
+	const completed = await getCounts();
+	if (completed.selected < completed.required) {
+		throw new Error(
+			`Replicate Magic Item plan auto-fill stopped at ${completed.selected}/${completed.required} required selections.`,
+		);
+	}
+
+	const pickerModal = page.locator(".ve-ui-modal__inner:visible").filter({has: picker}).last();
+	await pickerModal.locator("button", {hasText: "Review & Commit Plans"}).click();
+	await expect(picker).not.toBeVisible({timeout: 5000});
+}
+
+export interface FeatureCompanionSetupOptions {
+	ownerUid: string;
+	nickname?: string;
+	appearance: string;
+	locomotion: "twoLegs" | "fourLegs";
+	/** Exercise the production "Finish later" persistence path before creation. */
+	deferOnce?: boolean;
+}
+
 /**
  * Page Object Model for the Level-Up wizard modal
  * Provides methods to complete level-up choices
@@ -179,6 +243,38 @@ export class LevelUpPage {
 			(await accordion.getAttribute("class"))?.includes("completed") || false;
 	}
 
+	private async _autoFillArtificerPlans (): Promise<void> {
+		const accordion = this.page.locator('[data-accordion-id="artificer-plans"]');
+		if (!await accordion.isVisible().catch(() => false)) return;
+		if (await accordion.getAttribute("class").then(it => it?.includes("completed"))) return;
+
+		await accordion.getByRole("button", {name: /choose or replace plans/i}).click();
+		const picker = this.page.locator(".charsheet__artificer-plan-picker");
+		await expect(picker).toBeVisible();
+
+		for (let pass = 0; pass < 20; pass++) {
+			const progress = (await picker.locator(".charsheet__artificer-plan-count").textContent()) || "";
+			const match = progress.match(/(\d+)\s*\/\s*(\d+)\s+required/i);
+			if (!match) throw new Error(`Artificer plan picker did not report required progress: ${progress}`);
+			if (Number(match[1]) >= Number(match[2])) break;
+
+			const incomplete = picker.locator(".charsheet__artificer-plan-opportunity:not(.complete)").filter({hasText: /choose a plan/i}).first();
+			await expect(incomplete, "an unresolved required Artificer plan opportunity").toBeVisible();
+			await incomplete.click();
+
+			const candidate = picker.locator(".charsheet__artificer-plan-result:not([disabled])").first();
+			await expect(candidate, "an eligible exact Artificer plan").toBeVisible();
+			await candidate.click();
+		}
+
+		const progress = (await picker.locator(".charsheet__artificer-plan-count").textContent()) || "";
+		const match = progress.match(/(\d+)\s*\/\s*(\d+)\s+required/i);
+		expect(match, `Artificer plan picker progress: ${progress}`).not.toBeNull();
+		expect(Number(match![1]), "all required Replicate Magic Item plans selected").toBe(Number(match![2]));
+		await this.page.getByRole("button", {name: /review & commit plans/i}).click();
+		await expect(picker).not.toBeVisible();
+	}
+
 	// ========== HP SECTION ==========
 
 	/**
@@ -300,6 +396,23 @@ export class LevelUpPage {
 		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}. Visible options: ${JSON.stringify(optionTexts)}`);
 	}
 
+	async selectFeatureOption (featureName: string, optionName: string): Promise<void> {
+		const accordion = this.page.locator('[data-accordion-id="featoptions"]');
+		await accordion.waitFor({state: "visible", timeout: 10000});
+		const group = accordion.locator(".charsheet__levelup-feat-opt-group")
+			.filter({has: this.page.locator("strong", {hasText: featureName})})
+			.first();
+		await group.waitFor({state: "visible", timeout: 10000});
+		const option = group.locator("label.charsheet__levelup-feat-opt-item")
+			.filter({has: this.page.locator(".feat-opt-name", {hasText: optionName})})
+			.first();
+		await option.waitFor({state: "visible", timeout: 10000});
+		const checkbox = option.locator("input[type='checkbox']");
+		if (!await checkbox.isChecked()) await option.click();
+		await expect(checkbox).toBeChecked();
+		await expect(group.locator(".feat-opt-count")).toHaveText("1");
+	}
+
 	// ========== KNOWN SPELLS SECTION ==========
 
 	/**
@@ -362,6 +475,75 @@ export class LevelUpPage {
 	}
 
 	/**
+	 * Resolve every required Replicate Magic Item plan opportunity currently
+	 * shown by the level-up wizard. Optional replacement opportunities are
+	 * deliberately left unchanged.
+	 */
+	async selectRequiredEfaArtificerPlans (): Promise<number> {
+		const accordion = this.page.locator(
+			".charsheet__levelup-wizard [data-accordion-id='artificer-plans']",
+		).first();
+		if (!await accordion.isVisible().catch(() => false)) return 0;
+
+		const readRequiredCount = async (scope: Locator): Promise<{selected: number; required: number}> => {
+			const text = await scope.textContent().catch(() => "");
+			const match = String(text || "").match(/(\d+)\s*\/\s*(\d+)\s+required(?:\s+plans?)?\s+selected/i);
+			return match
+				? {selected: Number(match[1]), required: Number(match[2])}
+				: {selected: 0, required: 0};
+		};
+
+		const initial = await readRequiredCount(accordion);
+		if (initial.required <= initial.selected) return 0;
+
+		await accordion.getByRole("button", {name: "Choose or Replace Plans"}).click();
+		const picker = this.page.locator(".charsheet__artificer-plan-picker").last();
+		await expect(picker).toBeVisible();
+
+		let selectedThisPass = 0;
+		for (let guard = 0; guard < initial.required + 5; guard++) {
+			const count = await readRequiredCount(picker.locator(".charsheet__artificer-plan-count"));
+			if (count.required > 0 && count.selected >= count.required) break;
+
+			const opportunities = picker.locator("button.charsheet__artificer-plan-opportunity");
+			const opportunityCount = await opportunities.count();
+			let unresolved: Locator | null = null;
+			for (let i = 0; i < opportunityCount; i++) {
+				const opportunity = opportunities.nth(i);
+				const text = await opportunity.textContent();
+				if (/Choose a plan/i.test(text || "")) {
+					unresolved = opportunity;
+					break;
+				}
+			}
+			if (!unresolved) {
+				throw new Error(
+					`selectRequiredEfaArtificerPlans: ${count.selected}/${count.required} required plans selected, but no unresolved required opportunity is visible.`,
+				);
+			}
+
+			await unresolved.click();
+			const candidate = picker.locator("button.charsheet__artificer-plan-result:not([disabled])").first();
+			await expect(candidate).toBeVisible();
+			await candidate.click();
+			selectedThisPass++;
+			await this.page.waitForTimeout(200);
+		}
+
+		const completed = await readRequiredCount(picker.locator(".charsheet__artificer-plan-count"));
+		if (completed.required <= 0 || completed.selected < completed.required) {
+			throw new Error(
+				`selectRequiredEfaArtificerPlans: selected ${completed.selected}/${completed.required} required plans.`,
+			);
+		}
+
+		await this.page.getByRole("button", {name: "Review & Commit Plans"}).click();
+		await expect(picker).not.toBeVisible();
+		await expect(accordion).not.toContainText(/⚠️\s*Required/i);
+		return selectedThisPass;
+	}
+
+	/**
 	 * Auto-fill all remaining required selections in the level-up wizard.
 	 * Uses jQuery to find and check unchecked checkboxes in sections that need more selections.
 	 *
@@ -385,6 +567,17 @@ export class LevelUpPage {
 			for (const acc of accordions) acc.classList.add("expanded");
 		});
 		await this.page.waitForTimeout(300);
+		await this._autoFillArtificerPlans();
+
+		// Replicate Magic Item progression is edited in a nested modal rather
+		// than inline controls, so the generic counter/radio passes below
+		// cannot satisfy its required opportunities.
+		await fillRequiredArtificerPlans(this.page);
+
+		// EFA Artificer plan opportunities live in their own modal rather than
+		// checkbox/radio counters, so they must be resolved before the generic
+		// selection passes below can finish the level-up.
+		await this.selectRequiredEfaArtificerPlans();
 
 		// A subclass whose data defines a persisted named branch (Divine
 		// Soul Affinity, and anything else `hasNamedSubclassChoice`
@@ -1104,7 +1297,7 @@ export class LevelUpPage {
 	async resolvePendingFeatureChoices (maxPrompts = 10): Promise<number> {
 		let resolved = 0;
 		for (let i = 0; i < maxPrompts; i++) {
-			const clicked = await this.page.evaluate(() => {
+			const status = await this.page.evaluate(() => {
 				// Resolve the TOP-MOST prompt first. Some picks chain (PHB'14 Fighting
 				// Style → "Blessed Warrior" → a cantrip chooser), and the chained modal
 				// stacks ABOVE its parent, so always clearing the first-in-DOM prompt
@@ -1112,21 +1305,212 @@ export class LevelUpPage {
 				// subsequent click on the sheet.
 				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".charsheet__feature-choice, .spell-choice-list"));
 				const wrp = prompts[prompts.length - 1];
-				if (!wrp) return false;
-				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
-					// The chained spell chooser has no "defer" — pick the first
-					// still-selectable spell so the modal actually closes.
-					|| wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+				if (!wrp) {
+					const state: any = (globalThis as any).charSheet?._state;
+					return state?.hasPendingFeatureChoices?.() ? "wait" : "done";
+				}
+
+				const featureOptions = Array.from(wrp.querySelectorAll<HTMLButtonElement>(".charsheet__feature-choice-opt"));
+				const confirm = wrp.querySelector<HTMLButtonElement>('[data-act="confirm"]');
+				if (featureOptions.length) {
+					if (confirm) {
+						for (const option of featureOptions) {
+							if (!confirm.disabled) break;
+							if (!option.classList.contains("active")) option.click();
+						}
+						if (!confirm.disabled) confirm.click();
+						return "clicked";
+					}
+					featureOptions[0].click();
+					return "clicked";
+				}
+
+				// The chained spell chooser has no "defer" — pick the first
+				// still-selectable spell so the modal actually closes.
+				const btn = wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
 					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
-				if (!btn) return false;
+				if (!btn) return "wait";
 				btn.click();
-				return true;
-			}).catch(() => false);
-			if (!clicked) break;
+				return "clicked";
+			}).catch(() => "wait");
+			if (status === "done") break;
+			if (status === "wait") {
+				await this.page.waitForTimeout(250);
+				continue;
+			}
 			resolved++;
 			await this.page.waitForTimeout(250);
 		}
+
+		// The Features renderer can own the production choice lock without the modal
+		// becoming observable before the level-up helper returns. Do not leave that
+		// required decision silently missing: use the same public fulfillment API as
+		// the modal, with deterministic first-option picks, then sync the canonical
+		// progression ledger. This is the established picker-bypass fallback, not an
+		// alternate character-building path.
+		const bypassed = await this.page.evaluate(async (maxRounds) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			const allSpells = cs?.getFilteredSpellData?.() || cs?.getSpells?.() || [];
+			let count = 0;
+			for (let round = 0; round < maxRounds; round++) {
+				const pending = state?.getPendingFeatureChoices?.() || [];
+				if (!pending.length) break;
+				let roundCount = 0;
+				for (const choice of pending) {
+					const options = choice.options || [];
+					const wanted = Math.max(1, Number(choice.count) || 1);
+					let selection: any = null;
+					if (choice.kind === "tool" || choice.kind === "skill") {
+						const values = options.slice(0, wanted).map((it: any) => it?.name ?? it);
+						selection = wanted > 1 ? values : values[0];
+					} else {
+						const first = options[0];
+						if (first) selection = {name: first.name, source: first.source};
+					}
+					if (selection != null && state.fulfillFeatureChoice(choice.id, selection, allSpells)) {
+						count++;
+						roundCount++;
+					}
+				}
+				if (!roundCount) break;
+				state.applyClassFeatureEffects?.();
+			}
+			if (count) {
+				(globalThis as any).CharacterSheetProgression?.syncCanonicalDecisions?.({page: cs, state});
+				await cs.saveCharacter?.();
+				cs.renderCharacter?.();
+			}
+			return count;
+		}, maxPrompts);
+		if (bypassed) {
+			resolved += bypassed;
+			console.log(`[picker bypass] resolved ${bypassed} pending feature choice(s) through the production fulfillment API`);
+		}
+
+		// A deterministic feature pick can enqueue a chained spell pick. Give the
+		// production spell-choice UI one final bounded drain after the bypass.
+		for (let i = 0; i < maxPrompts; i++) {
+			const status = await this.page.evaluate(() => {
+				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".spell-choice-list"));
+				const wrp = prompts[prompts.length - 1];
+				if (!wrp) {
+					const state: any = (globalThis as any).charSheet?._state;
+					return state?.hasPendingSpellChoices?.() ? "wait" : "done";
+				}
+				const btn = wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
+				if (!btn) return "wait";
+				btn.click();
+				return "clicked";
+			}).catch(() => "wait");
+			if (status === "done") break;
+			if (status === "clicked") resolved++;
+			await this.page.waitForTimeout(250);
+		}
+
+		const remaining = await this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const summarize = (choice: any) => ({
+				id: choice?.id,
+				kind: choice?.kind,
+				featureName: choice?.featureName,
+				count: choice?.count,
+				optionCount: choice?.options?.length,
+			});
+			return {
+				featureChoices: (state?.getPendingFeatureChoices?.() || []).map(summarize),
+				spellChoices: (state?.getPendingSpellChoices?.() || []).map(summarize),
+			};
+		});
+		if (remaining.featureChoices.length || remaining.spellChoices.length) {
+			throw new Error(`Required level-up choices remain unresolved after bounded picker drain: ${JSON.stringify(remaining)}`);
+		}
 		return resolved;
+	}
+
+	/**
+	 * Resolve a source-qualified feature-companion setup prompt raised after
+	 * level-up. This deliberately drives the production modal rather than
+	 * completing setup through state, so required appearance/locomotion/tool
+	 * choices and the optional deferred-setup path stay covered.
+	 */
+	async resolvePendingFeatureCompanionSetup (options?: FeatureCompanionSetupOptions): Promise<boolean> {
+		if (!options) return false;
+
+		const getStatus = () => this.page.evaluate((ownerUid) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const record = state?.getFeatureCompanionSetupRecord?.(ownerUid) || null;
+			const companions = state?.getFeatureOwnedCompanions?.(ownerUid) || [];
+			return {
+				status: record?.status || null,
+				choices: record?.choices || {},
+				companionCount: companions.length,
+			};
+		}, options.ownerUid);
+
+		const initial = await getStatus();
+		if (initial.status === "complete" && initial.companionCount === 1) return false;
+		if (!initial.status) return false;
+
+		const modal = this.page.locator(".charsheet__feature-companion-setup-modal").last();
+		const openModal = async () => {
+			if (await modal.isVisible().catch(() => false)) return;
+			await this.page.evaluate((ownerUid) => {
+				const cs: any = (globalThis as any).charSheet;
+				if (typeof cs?.pShowFeatureCompanionSetup !== "function") {
+					throw new Error("charSheet.pShowFeatureCompanionSetup is unavailable");
+				}
+				Promise.resolve(cs.pShowFeatureCompanionSetup(ownerUid)).catch((error: unknown) => {
+					(window as unknown as {__e2eFeatureCompanionSetupError?: string}).__e2eFeatureCompanionSetupError = String(error);
+				});
+			}, options.ownerUid);
+			await modal.waitFor({state: "visible", timeout: 10000});
+		};
+		const fillRequiredChoices = async () => {
+			const tool = modal.locator('[data-role="tool"]');
+			if (await tool.count() && await tool.isVisible()) {
+				const values = await tool.locator("option").evaluateAll(options =>
+					options.map(option => (option as HTMLOptionElement).value).filter(Boolean));
+				if (!values.length) throw new Error("feature companion setup requires an alternate tool but offered no choices");
+				await tool.selectOption(values[0]);
+			}
+			await modal.locator('[data-role="nickname"]').fill(options.nickname || "");
+			await modal.locator('[data-role="appearance"]').fill(options.appearance);
+			await modal.locator(`input[name="steel-defender-locomotion"][value="${options.locomotion}"]`).check();
+		};
+
+		await openModal();
+		await fillRequiredChoices();
+
+		if (options.deferOnce && initial.status !== "complete") {
+			await modal.locator('[data-role="defer"]').click();
+			await modal.waitFor({state: "hidden", timeout: 10000});
+			const deferred = await getStatus();
+			expect(deferred.status, "Finish later should preserve a pending setup").toBe("pending");
+			expect(deferred.companionCount, "Finish later must not create a placeholder companion").toBe(0);
+			expect(deferred.choices.appearance, "deferred appearance should persist").toBe(options.appearance);
+			expect(deferred.choices.locomotion, "deferred locomotion should persist").toBe(options.locomotion);
+			await openModal();
+			await expect(modal.locator('[data-role="appearance"]')).toHaveValue(options.appearance);
+			await expect(modal.locator(`input[name="steel-defender-locomotion"][value="${options.locomotion}"]`)).toBeChecked();
+			await fillRequiredChoices();
+		}
+
+		const create = modal.locator('[data-role="create"]');
+		await expect(create).toBeEnabled();
+		await create.click();
+		await modal.waitFor({state: "hidden", timeout: 10000});
+		await this.page.waitForFunction(
+			(ownerUid) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return state?.getFeatureCompanionSetupRecord?.(ownerUid)?.status === "complete"
+					&& state?.getFeatureOwnedCompanions?.(ownerUid)?.length === 1;
+			},
+			options.ownerUid,
+			{timeout: 10000},
+		);
+		return true;
 	}
 
 	/**

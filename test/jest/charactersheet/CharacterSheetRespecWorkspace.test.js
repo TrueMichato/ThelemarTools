@@ -1,12 +1,22 @@
 import "./setup.js";
 import fs from "node:fs";
 import {jest} from "@jest/globals";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
+const CharacterSheetProgression = globalThis.CharacterSheetProgression;
+const ARTIFICER_DATA = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
+const CARTOGRAPHER_TOOLS = ARTIFICER_DATA.subclassFeature.find(feature =>
+	feature.name === "Tools of the Trade"
+	&& feature.className === "Artificer"
+	&& feature.classSource === "EFA"
+	&& feature.subclassShortName === "Cartographer"
+	&& feature.subclassSource === "EFA");
 
 describe("CharacterSheetRespec workspace", () => {
 	const fighter = {
@@ -65,6 +75,101 @@ describe("CharacterSheetRespec workspace", () => {
 		expect(state.getSkillProficiency("athletics")).toBe(0);
 		expect(respec._state.getSkillProficiency("athletics")).toBe(1);
 		expect(respec._engine.getValidation().isValid).toBe(true);
+	});
+
+	it("replays and reverses multi-tool nested decisions without touching manual tools", () => {
+		const candidate = respec._state;
+		const semanticKey = "nested:cartographer-tools:replacement";
+		const previous = ["Alchemist's Supplies", "Brewer's Supplies"];
+		const next = ["Smith's Tools", "Tinker's Tools"];
+		for (const tool of [...previous, "Calligrapher's Supplies", "Painter's Supplies"]) candidate.addToolProficiency(tool);
+		for (const tool of previous) candidate.claimProgressionOwnership("tools", tool, semanticKey);
+
+		const decision = {
+			type: "nestedTool",
+			semanticKey,
+			selection: previous,
+			count: 2,
+		};
+		respec._applyDecisionMechanicsProficiencies(decision, next, [...previous, ...next], candidate);
+
+		expect(candidate.getToolProficiencies()).toEqual(expect.arrayContaining([
+			...next,
+			"Calligrapher's Supplies",
+			"Painter's Supplies",
+		]));
+		expect(candidate.getToolProficiencies()).not.toEqual(expect.arrayContaining(previous));
+
+		respec._applyDecisionMechanicsProficiencies({...decision, selection: next}, previous, [...previous, ...next], candidate);
+		expect(candidate.getToolProficiencies()).toEqual(expect.arrayContaining([
+			...previous,
+			"Calligrapher's Supplies",
+			"Painter's Supplies",
+		]));
+		expect(candidate.getToolProficiencies()).not.toEqual(expect.arrayContaining(next));
+	});
+
+	it("transfers Cartographer feature-choice ownership through Respec and tears down the current tools after reload", () => {
+		const candidate = respec._state;
+		const feature = {
+			id: "cartographer-tools",
+			...structuredClone(CARTOGRAPHER_TOOLS),
+			_choices: [
+				{type: "tool", value: "Alchemist's Supplies"},
+				{type: "tool", value: "Brewer's Supplies"},
+			],
+		};
+		candidate._data.features.push(feature);
+		const featureSource = `feature:${feature.id}`;
+		const choiceSource = `feature-choice:${feature.id}`;
+		for (const tool of ["Calligrapher's Supplies", "Cartographer's Tools"]) {
+			candidate.addToolProficiency(tool);
+			candidate._trackGrantedProficiency("tools", tool, "base");
+			candidate._trackGrantedProficiency("tools", tool, featureSource);
+		}
+
+		const previous = ["Alchemist's Supplies", "Brewer's Supplies"];
+		const next = ["Smith's Tools", "Tinker's Tools"];
+		const semanticKey = "nested:cartographer-tools:replacement";
+		for (const tool of previous) {
+			candidate.addToolProficiency(tool);
+			candidate._trackGrantedProficiency("tools", tool, choiceSource);
+			candidate.claimProgressionOwnership("tools", tool, semanticKey);
+		}
+		candidate.addToolProficiency("Smith's Tools");
+		candidate._trackGrantedProficiency("tools", "Smith's Tools", "base");
+		candidate.claimProgressionOwnership("tools", "Smith's Tools", "manual:smith");
+
+		const decision = {
+			type: "nestedTool",
+			semanticKey,
+			selection: previous,
+			count: 2,
+			provenance: {
+				ownerType: "feature",
+				ownerUid: CharacterSheetProgression.getFeatureOwnerUid(feature),
+			},
+		};
+		respec._applyDecisionMechanicsProficiencies(decision, next, [...previous, ...next], candidate);
+
+		expect(candidate._data.grantedProficiencies.tools.alchemistssupplies || []).not.toContain(choiceSource);
+		expect(candidate._data.grantedProficiencies.tools.brewerssupplies || []).not.toContain(choiceSource);
+		expect(candidate._data.grantedProficiencies.tools.smithstools).toEqual(["base", choiceSource]);
+		expect(candidate._data.grantedProficiencies.tools.tinkerstools).toEqual([choiceSource]);
+		expect(candidate.getFeatures().find(it => it.id === feature.id)?._choices).toEqual([
+			{type: "tool", value: "Smith's Tools"},
+			{type: "tool", value: "Tinker's Tools"},
+		]);
+
+		const loaded = new CharacterSheetState();
+		expect(loaded.loadFromJson(candidate.toJson())).not.toBe(false);
+		expect(loaded.getPendingFeatureChoices()).toHaveLength(0);
+		loaded.removeFeature(feature.id);
+
+		expect(loaded.hasToolProficiency("Alchemist's Supplies")).toBe(false);
+		expect(loaded.hasToolProficiency("Brewer's Supplies")).toBe(false);
+		expect(loaded.hasToolProficiency("Smith's Tools")).toBe(true);
+		expect(loaded.hasToolProficiency("Tinker's Tools")).toBe(false);
 	});
 
 	it("ships persistent draft controls and non-hover-only level actions", () => {
@@ -220,7 +325,6 @@ describe("CharacterSheetRespec workspace", () => {
 		const resource = respec._state.getResources().find(item => item.name === "Cruel");
 		expect(resource).toBeTruthy();
 		respec._state.setResourceCurrent(resource.id, 1);
-		respec._state._data.resourceTurnUsage[resource.id] = 7;
 
 		const decision = {
 			semanticKey: cruel.sourceDecisionKey,
@@ -228,7 +332,6 @@ describe("CharacterSheetRespec workspace", () => {
 		};
 		respec._state.reverseProgressionFeatureReceipt(decision);
 		expect(respec._state.getResources().some(item => item.name === "Cruel")).toBe(false);
-		expect(respec._state._data.resourceTurnUsage[resource.id]).toBeUndefined();
 
 		respec._state.addFeature({...cruel, sourceDecisionKey: "nested:feat:other:occ0:slot0"}, {
 			sourceDecisionKey: "nested:feat:other:occ0:slot0",
@@ -255,14 +358,18 @@ describe("CharacterSheetRespec workspace", () => {
 		]));
 		expect(respec._state.spendTriggeredFeatDie(resource.id, "damage", {}).ok).toBe(true);
 		expect(respec._state.spendTriggeredFeatDie(resource.id, "damage", {}).ok).toBe(false);
-		expect(respec._state._data.resourceTurnUsage[resource.id]).toBe(1);
+		expect(respec._state.queryTurnReceipt(resource.triggeredDiePool.turnReceipt.key)).toMatchObject({
+			ok: true,
+			used: true,
+			turnId: expect.any(Number),
+		});
 
 		respec._state.reverseProgressionFeatureReceipt({
 			semanticKey: sourceDecisionKey,
 			receipt: {sourceDecisionKey, effects: []},
 		});
 		expect(respec._state.getResources().some(item => item.sourceDecisionKey === sourceDecisionKey)).toBe(false);
-		expect(respec._state._data.resourceTurnUsage[resource.id]).toBeUndefined();
+		expect(respec._state.queryTurnReceipt(resource.triggeredDiePool.turnReceipt.key).used).toBe(false);
 		expect(respec._state.getFeats().some(feat => feat.sourceDecisionKey === sourceDecisionKey)).toBe(false);
 	});
 

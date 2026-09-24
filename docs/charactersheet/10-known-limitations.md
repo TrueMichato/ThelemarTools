@@ -10,16 +10,47 @@ While the character sheet has extensive functionality and test coverage, several
 
 ## Implementation Status
 
-### Fully Implemented Subclasses ✅
+### Implemented and Partial Subclasses
 
-The following classes have **complete** mechanical calculations for all subclasses:
+The following classes have substantial mechanical calculations. Entries marked
+partial still have explicitly deferred runtime mechanics.
 
-#### Artificer Subclasses ✅
-All Artificer subclasses are fully implemented with mechanical calculations:
+#### Artificer Subclasses
 - **Alchemist**: `experimentalElixirCount`, `alchemicalSavantBonus`, `restorativeReagentsUses`, `restorativeReagentsTempHp`
-- **Armorer**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
-- **Artillerist**: `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `maxCannons`, `arcaneFirearmDamage`
+- **Armorer (TCE legacy calculations)**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
+- **Armorer (EFA)**: active-bound Arcane Armor lifecycle and inventory controls; level-3 model weapons, Intelligence substitution, model riders/resources, Infiltrator `+5` Speed and Stealth advantage; level-9 Armor Replication plan/capacity extensions and Improved Arsenal's active-model `+1` attack/damage; level-15 Perfected Armor damage, Giant Stature, Guardian pull/follow-up, Lightning Launcher glimmer, and Infiltrator flight. Deferred: dedicated NPC/PDF export coverage and E2E.
+- **Artillerist**: EFA cannon creation tools, one/two-cannon lifecycle, dedicated Combat and Play Mode controls, dual activation, Explosive Cannon, Shimmering Field Half Cover, transactional Short/Long Rest expiry and undo, Arcane Firearm carving/focus/damage, plus `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `arcaneFirearmDamage`, and `maxCannons`.
 - **Battle Smith**: `steelDefenderHp`, `arcaneJoltDamage`, `arcaneJoltUses`, `deflectAttackDamage`
+- **Cartographer (EFA), Adventurer's Atlas + Mapping Magic milestones**: versioned persistent
+  Atlas state, Long Rest creation/recreation with held-tool confirmation,
+  creation-time capacity freezing, death/subclass invalidation, rest undo,
+  authoritative Features rendering, ally-only or optional-self rosters, and the
+  self-holder Awareness initiative die are supported. External holder initiative
+  is exposed through an immutable integration snapshot. The Atlas card now owns
+  Illuminated Cartography (`Faerie Fire|XPHB`, no slot/preparation, Intelligence,
+  Intelligence-modifier uses per Long Rest, minimum 1) and Portal Jump
+  (live-Speed movement receipts in combat; validated without a persistent turn
+  ledger outside combat, including the legal zero-foot cost at Speed 1; both
+  direct and Atlas-holder routes require a confirmed visible, unoccupied
+  destination) from level 3. Ordinary and feature-granted spells share action/bonus/reaction
+  casting-time transactions in combat. Positioning is available to an
+  active self map holder from level 3 and confirms same-plane/range targeting
+  while bypassing only sight and cover. Unerring Path remains level 15
+  (`Find the Path|XPHB`, no slot/preparation/components, 1/Long Rest).
+  Guided Precision uses its source-isolated shared turn receipt, and Ingenious
+  Movement follows only a committed EFA Flash of Genius transaction. Superior
+  Atlas — Safe Haven uses the generic zero-HP transaction for the Cartographer's
+  own map and an explicit resolver for external holders; both destroy the exact
+  map and return the `2 × Artificer level` HP result plus placement requirements.
+  The Cartographer is always a legal five-foot anchor, including when the
+  Cartographer's own map triggered and was consumed; other active map holders are
+  additional anchor choices.
+  The complete `Artificer|EFA` / `Cartographer|EFA` L1→20 player lifecycle is
+  covered by `test/e2e/specs/tgtt-efa-cartographer-artificer.spec.ts`, including
+  the real Long Rest Atlas UI, every authored spell threshold, feature-use
+  transactions, exact-source teardown, usage probes, and JSON export round-trip.
+  Cross-sheet mutation, coordinates, and DM Screen/Journey map geometry remain
+  table/integration boundaries rather than simulated Character Sheet state.
 
 #### Druid Circles ✅
 All Druid circles are fully implemented:

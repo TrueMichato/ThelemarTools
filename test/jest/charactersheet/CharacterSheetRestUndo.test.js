@@ -19,12 +19,22 @@
  * player actually cares about round-tripping.
  */
 
+import fs from "node:fs";
+
 import "./setup.js";
 
 let CharacterSheetState;
 let CharacterSheetRest;
+const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
+const objectData = JSON.parse(fs.readFileSync("data/objects.json", "utf8")).object;
+const EFA_ARTILLERIST = artificerData.subclass.find(it =>
+	it.name === "Artillerist"
+	&& it.source === "EFA"
+	&& it.classSource === "EFA",
+);
 
 beforeAll(async () => {
+	await import("../../../js/charactersheet/charactersheet-companion-rules.js");
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 	CharacterSheetRest = (await import("../../../js/charactersheet/charactersheet-rest.js")).CharacterSheetRest;
 });
@@ -68,10 +78,38 @@ function makeWornCaster () {
 	return state;
 }
 
+async function makeArtilleristWithCannons () {
+	const state = new CharacterSheetState();
+	state.setClassSummonTemplateCatalog(objectData);
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 15,
+		hd: {number: 1, faces: 8},
+		subclass: {
+			name: EFA_ARTILLERIST.name,
+			shortName: EFA_ARTILLERIST.shortName,
+			source: EFA_ARTILLERIST.source,
+		},
+	});
+	state.addItem({id: "rest-cannon-tool", name: "Smith's Tools", source: "PHB", type: "AT", _isCustom: true}, 1, true);
+	state.addToolProficiency("Smith's Tools");
+	const created = await state.pCreateEfaEldritchCannons({
+		requests: [
+			{form: "forceBallista", size: "S", placement: "deployed", mobility: "wheels", distanceFromOwnerFt: 5, createdWith: "freeUse"},
+			{form: "protector", size: "T", placement: "carried", mobility: null, distanceFromOwnerFt: 0, createdWith: "freeUse"},
+		],
+	});
+	state.damageEfaEldritchCannon(created.instanceIds[0], 6);
+	state.advanceClassSummonGameTime(15);
+	return {state, created};
+}
+
 /** Curated snapshot of the user-visible state a rest touches, for round-trip asserts. */
 function fields (state) {
 	const hitDice = state.getHitDiceByType?.() || {};
 	return {
+		gameMinute: state.getGameTimeMinutes?.() || 0,
 		hpCurrent: state.getHp().current,
 		hpTemp: state.getHp().temp,
 		slots: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(l => state.getSpellSlotsCurrent(l)),
@@ -166,6 +204,153 @@ describe("#8 — Undo rest (full-snapshot capture/restore)", () => {
 			expect(state.getSpellSlotsCurrent(1)).toBe(1);
 			expect(state.getSpellSlotsCurrent(2)).toBe(0);
 			expect(state.getConditionNames()).toContain("poisoned");
+		});
+
+		it("restores canonical time and exact lifecycle removals from the pre-rest snapshot", () => {
+			const state = makeWornCaster();
+			state.addClass({name: "Artificer", source: "EFA", level: 2});
+			const {rest} = makeRest(state);
+			const originalRandomise = globalThis.RollerUtil.randomise;
+			globalThis.RollerUtil.randomise = () => 1;
+			try {
+				const created = state.createGeneratedFeatureItem({
+					item: {name: "Replicated Satchel", source: "TST", type: "W"},
+					owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+					metadata: {sourceFeatureUid: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER.featureUid, temporary: true},
+					creation: {order: 1, receiptId: "rest-undo", event: "test", batchId: null},
+					lifecycle: {
+						version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+						state: "active",
+						deathExpiryDaysRemaining: null,
+						deathExpiryAssignedReceiptId: null,
+						expiryRecords: [],
+						callbacks: {
+							onLongRest: "retain",
+							onDeath: "expire-after-1d4-days",
+							onLifecycleDay: "decrement-expiry",
+						},
+						metadata: {},
+					},
+				});
+				state.setDeathSaveFailures(3);
+				rest._captureRestSnapshot("long");
+
+				expect(state.advanceGameTimeMinutes(1440, {
+					reason: "test-rest",
+					identity: "rest-undo",
+				}).removed).toEqual([{itemId: created.itemId, name: "Replicated Satchel"}]);
+				expect(state.getGameTimeMinutes()).toBe(1440);
+				expect(state.getInventory().some(row => row.id === created.itemId)).toBe(false);
+
+				expect(rest._onUndoRest()).toBe(true);
+				expect(state.getGameTimeMinutes()).toBe(0);
+				expect(state.getInventory().some(row => row.id === created.itemId)).toBe(true);
+				expect(state.getInventory()
+					.find(row => row.id === created.itemId)
+					.item._generatedItemProvenance.lifecycle.expiryRecords[0]).toMatchObject({
+					expiryMinute: 1440,
+					minutesRemaining: 1440,
+					daysRemaining: 1,
+				});
+			} finally {
+				if (originalRandomise === undefined) delete globalThis.RollerUtil.randomise;
+				else globalThis.RollerUtil.randomise = originalRandomise;
+			}
+		});
+
+		it("restores the exact Steel Defender generation replaced after the Long Rest", () => {
+			const state = new CharacterSheetState();
+			state.loadFromJson({
+				abilities: {int: 18},
+				classes: [{
+					name: "Artificer",
+					source: "EFA",
+					level: 3,
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+				}],
+			});
+			const companionId = state.addCompanion({
+				name: "Steel Defender",
+				source: "EFA",
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				origin: "Battle Smith",
+				hp: {max: 20, current: 0, temp: 0},
+				featureGrant: {uid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER},
+				lifecycle: {status: "dead", generation: 1, diedAtGameMinute: 0, timingKnown: true},
+			});
+			state.reconcileFeatureOwnedCompanion(companionId, {
+				summonerContext: state.getFeatureCompanionSummonerContext(
+					CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER,
+				),
+			});
+			const toolItemId = "smith-tools-row";
+			state.addItem({id: toolItemId, name: "Smith's Tools", source: "XPHB", type: "AT"}, 1);
+			const {rest} = makeRest(state);
+
+			rest._captureRestSnapshot("long");
+			state.onLongRest();
+			expect(state.replaceFeatureCompanionAfterLongRest({
+				companionId,
+				toolItemId,
+				inHandConfirmed: true,
+			})).toMatchObject({ok: true, committed: true});
+			expect(state.getCompanion(companionId).lifecycle).toMatchObject({
+				status: "alive",
+				generation: 2,
+				lastReplacementLongRestMinute: 480,
+			});
+
+			expect(rest._onUndoRest()).toBe(true);
+			expect(state.getGameTimeMinutes()).toBe(0);
+			expect(state.getCompanion(companionId)).toMatchObject({
+				active: false,
+				hp: {current: 0, max: 20},
+				lifecycle: {
+					status: "dead",
+					generation: 1,
+					diedAtGameMinute: 0,
+				},
+			});
+		});
+	});
+
+	describe("EFA cannon rest expiry undo", () => {
+		it("wires both rest dialogs through the canonical expiry helper and reports the count", () => {
+			const source = fs.readFileSync("js/charactersheet/charactersheet-rest.js", "utf8");
+			expect(source).toContain("listEfaEldritchCannons?.() || []");
+			expect(source).toContain("expireEfaEldritchCannonsForRest?.({minutes: 60})");
+			expect(source).toContain("expireEfaEldritchCannonsForRest?.({minutes: 480})");
+			expect(source).toContain("Eldritch Cannon$" + "{efaCannonExpiry.count === 1 ? \"\" : \"s\"} expired.");
+		});
+
+		it.each([
+			["short", 60],
+			["long", 480],
+		])("restores both cannons, HP, duration, revisions, resources, and cover after undoing a %s rest", async (restType, minutes) => {
+			const {state, created} = await makeArtilleristWithCannons();
+			const {rest} = makeRest(state);
+			const before = {
+				cannons: state.listEfaEldritchCannons(),
+				revisions: state.toJson().generatedClassSummonRevisions,
+				creationResource: state.getEfaEldritchCannonCreationState().freeUse,
+				cover: state.getCoverProjection(),
+			};
+
+			rest._captureRestSnapshot(restType);
+			const expired = state.expireEfaEldritchCannonsForRest({minutes});
+			expect(expired.count).toBe(2);
+			expect(state.listEfaEldritchCannons()).toEqual([]);
+			expect(state.getCoverProjection()).toBeNull();
+
+			expect(rest._onUndoRest()).toBe(true);
+			expect(state.listEfaEldritchCannons()).toEqual(before.cannons);
+			expect(state.toJson().generatedClassSummonRevisions).toEqual(before.revisions);
+			expect(state.getEfaEldritchCannonCreationState().freeUse).toEqual(before.creationResource);
+			expect(state.getCoverProjection()).toEqual(before.cover);
+			expect(state.getEfaEldritchCannon(created.instanceIds[0])).toMatchObject({
+				hp: {current: 69, max: 75},
+				durationRemainingMinutes: 45,
+			});
 		});
 	});
 

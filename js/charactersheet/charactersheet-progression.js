@@ -1,4 +1,5 @@
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetArtificerPlans} from "./charactersheet-artificer-plans.js";
 
 /**
  * Shared progression analysis and history-ledger helpers.
@@ -39,6 +40,8 @@ class CharacterSheetProgression {
 		scholar: {discovery: "class-features", editor: "scholar", validation: "skill-option", mechanics: "skill-expertise", projection: ["choices.scholarSkill"]},
 		spellMastery: {discovery: "class-features", editor: "spell-mastery", validation: "spell-mastery-levels", mechanics: "spell-mastery", projection: ["choices.spellMasterySpells"]},
 		signatureSpells: {discovery: "class-features", editor: "signature-spells", validation: "signature-spell-levels", mechanics: "signature-spells", projection: ["choices.signatureSpells"]},
+		artificerPlan: {discovery: "class-catalog", editor: "class-plan", validation: "artificer-plan", mechanics: "configuration", projection: ["choices.artificerPlans"]},
+		artificerPlanReplacement: {discovery: "class-catalog", editor: "class-plan", validation: "artificer-plan-replacement", mechanics: "configuration", projection: ["choices.artificerPlanReplacements"]},
 		hp: {discovery: "class-level", editor: "hit-points", validation: "hit-point-method", mechanics: "hit-points", projection: ["choices.hpRoll"]},
 		nestedEntity: {discovery: "nested-descriptor", editor: "nested-choice", validation: "entity-option", mechanics: "nested-entity", projection: []},
 		nestedSkill: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-proficiencies", projection: []},
@@ -97,6 +100,7 @@ class CharacterSheetProgression {
 			scholar: "_editManifestOptions",
 			"spell-mastery": "_editManifestOptions",
 			"signature-spells": "_editManifestOptions",
+			"class-plan": "_editArtificerPlanDecision",
 			"hit-points": "_editHpDecision",
 			"nested-choice": "_editManifestOptions",
 		};
@@ -176,6 +180,28 @@ class CharacterSheetProgression {
 	static getEntityUid (entity) {
 		if (!entity?.name) return "";
 		return `${CharacterSheetProgression._normalize(entity.name)}|${CharacterSheetProgression._normalize(entity.source)}`;
+	}
+
+	static getFeatureOwnerUid (entity) {
+		if (!entity?.name) return "";
+		const parts = [
+			entity.name,
+			entity.className,
+			entity.classSource,
+		];
+		if (entity.subclassShortName || entity.subclassName || entity.subclassSource) {
+			parts.push(entity.subclassShortName || entity.subclassName, entity.subclassSource);
+		}
+		parts.push(entity.level, entity.source);
+		return parts.map(value => String(value ?? "").trim()).join("|");
+	}
+
+	static _matchesFeatureEntity (candidate, entity) {
+		for (const prop of ["name", "source", "className", "classSource", "subclassShortName", "subclassSource", "level"]) {
+			if (entity?.[prop] == null) continue;
+			if (CharacterSheetProgression._normalize(candidate?.[prop]) !== CharacterSheetProgression._normalize(entity[prop])) return false;
+		}
+		return true;
 	}
 
 	static getClassUid (nameOrEntity, source) {
@@ -426,6 +452,14 @@ class CharacterSheetProgression {
 			if (!Array.isArray(selection) || selection.length !== 2) return false;
 			if (!selection.every(spell => Number(spell.level) === 3)) return false;
 		}
+		if (type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE) {
+			return CharacterSheetArtificerPlans.isExactSelection(selection);
+		}
+		if (type === CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE) {
+			return !!selection?.targetSlotId
+				&& CharacterSheetArtificerPlans.isExactSelection(selection?.previousPlan)
+				&& CharacterSheetArtificerPlans.isExactSelection(selection?.nextPlan);
+		}
 		if (!Array.isArray(options) || !options.length) return true;
 		options = options.filter(option => option?._selectable !== false);
 		const getOptionKeys = option => {
@@ -451,6 +485,58 @@ class CharacterSheetProgression {
 		const optionKeys = new Set(options.flatMap(option => [...getOptionKeys(option)]));
 		const selectedValues = Array.isArray(selection) ? selection : [selection];
 		return selectedValues.every(value => [...getOptionKeys(value)].some(key => optionKeys.has(key)));
+	}
+
+	static _getPreFeatureProficiencySnapshot ({entity, state}) {
+		const currentTools = (state?.getToolProficiencies?.() || [])
+			.map(tool => String(tool?.name ?? tool ?? "").trim())
+			.filter(Boolean);
+		const fixedContract = CharacterSheetClassUtils.getFixedProficiencyGrantContract?.(entity, {ownedTools: []});
+		if (!fixedContract) return {tools: currentTools};
+
+		const ownerUid = CharacterSheetProgression.getFeatureOwnerUid(entity);
+		const storedFeature = (state?.getFeatures?.() || [])
+			.find(feature => CharacterSheetProgression._matchesFeatureEntity(feature, entity));
+		if (!storedFeature?.id) return {tools: currentTools};
+
+		const fixedSource = `feature:${storedFeature.id}`;
+		const choiceSource = `feature-choice:${storedFeature.id}`;
+		const selectedByOwner = new Set([
+			...(state?.getCharacterBase?.()?.decisions || []),
+			...(state?.getLevelHistory?.() || []).flatMap(entry => entry.decisions || []),
+		]
+			.filter(decision => decision.type === "nestedTool"
+				&& [
+					CharacterSheetProgression._normalize(ownerUid),
+					CharacterSheetProgression.getEntityUid(entity),
+				].includes(CharacterSheetProgression._normalize(decision.provenance?.ownerUid)))
+			.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+			.map(value => state?._getProgressionOwnershipKey?.("tools", value?.name ?? value)
+				|| CharacterSheetProgression._slug(value?.name ?? value))
+			.filter(Boolean));
+		const trackedTools = state?._data?.grantedProficiencies?.tools || {};
+		const getSources = tool => {
+			const key = state?._getProgressionOwnershipKey?.("tools", tool)
+				|| CharacterSheetProgression._slug(tool);
+			return key ? trackedTools[key] || [] : [];
+		};
+		const fixedKeys = new Set(fixedContract.fixed.map(tool =>
+			state?._getProgressionOwnershipKey?.("tools", tool) || CharacterSheetProgression._slug(tool),
+		));
+
+		return {
+			tools: currentTools.filter(tool => {
+				const sources = getSources(tool);
+				const toolKey = state?._getProgressionOwnershipKey?.("tools", tool)
+					|| CharacterSheetProgression._slug(tool);
+				if (fixedKeys.has(toolKey)
+					&& sources.length
+					&& sources.every(source => source === fixedSource)) return false;
+				if (sources.length && sources.every(source => source === choiceSource)) return false;
+				if (selectedByOwner.has(toolKey)) return false;
+				return true;
+			}),
+		};
 	}
 
 	static _getEntityChoiceDescriptors (entity, opts = {}) {
@@ -540,9 +626,14 @@ class CharacterSheetProgression {
 		type = "skills",
 	} = {}) {
 		const normalizedOwner = CharacterSheetProgression._normalize(ownerUid);
-		const normalizeValue = value => type === "skills"
-			? String(value || "").trim().toLowerCase().replace(/['\s]+/g, "")
-			: CharacterSheetProgression._slug(value);
+		const normalizeValue = value => {
+			if (type === "skills") return String(value || "").trim().toLowerCase().replace(/['\s]+/g, "");
+			if (type === "tools") {
+				return state?._getProgressionOwnershipKey?.("tools", value)
+					|| CharacterSheetProgression._slug(value);
+			}
+			return CharacterSheetProgression._slug(value);
+		};
 		const optionByKey = new Map(options.map(option => {
 			const value = option?.value ?? option?.name ?? option;
 			return [normalizeValue(value), value];
@@ -563,6 +654,7 @@ class CharacterSheetProgression {
 					featureId: feature.id,
 					sourceId,
 					type,
+					trackedKey: value,
 				});
 			}
 		}
@@ -570,6 +662,9 @@ class CharacterSheetProgression {
 	}
 
 	static _getSelectedDescriptorValue ({descriptor, entity, state, parentDecision = null, legacyChoices = null}) {
+		if (descriptor?.rules?.selectedValues != null) {
+			return CharacterSheetProgression._copy(descriptor.rules.selectedValues);
+		}
 		const values = [];
 		const choices = [
 			legacyChoices,
@@ -658,6 +753,21 @@ class CharacterSheetProgression {
 			});
 			if (evidence) return evidence.value;
 		}
+		if (descriptor.kind === "tool") {
+			const storedFeature = (state?.getFeatures?.() || [])
+				.find(feature => CharacterSheetProgression._matchesFeatureEntity(feature, entity));
+			const sourceId = storedFeature?.id ? `feature-choice:${storedFeature.id}` : null;
+			if (sourceId) {
+				const selected = (descriptor.options || [])
+					.map(option => option?.value ?? option?.name ?? option)
+					.filter(value => {
+						const key = state?._getProgressionOwnershipKey?.("tools", value)
+							|| CharacterSheetProgression._slug(value);
+						return key && (state._data.grantedProficiencies.tools[key] || []).includes(sourceId);
+					});
+				if (selected.length === descriptor.count) return descriptor.count === 1 ? selected[0] : selected;
+			}
+		}
 		if (descriptor.kind === "skillBonus") {
 			const optionSkills = new Set((descriptor.options || [])
 				.map(option => CharacterSheetProgression._normalize(option?.value ?? option?.name ?? option))
@@ -745,6 +855,13 @@ class CharacterSheetProgression {
 	}
 
 	static _getNestedSelectionFallback ({descriptor, entity, state}) {
+		const fixedProficiencyFallbackOwnerUid = descriptor.rules?.fixedProficiencyFallback
+			? descriptor.rules?.ownerUid
+			: null;
+		if (fixedProficiencyFallbackOwnerUid) {
+			const transaction = state?.getFixedProficiencyFallbackTransaction?.(fixedProficiencyFallbackOwnerUid);
+			if (transaction?.status === "resolved" && transaction.selection) return transaction.selection;
+		}
 		const selected = CharacterSheetProgression._getSelectedDescriptorValue({descriptor, entity, state});
 		if (selected != null && (!Array.isArray(selected) || selected.length)) return selected;
 		if (descriptor.kind === "entity") {
@@ -835,7 +952,7 @@ class CharacterSheetProgression {
 					ownerUid: CharacterSheetProgression.getEntityUid(entity),
 				});
 			}
-			const descriptorAcquisitionKey = acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
+			const descriptorAcquisitionKey = descriptor.rules?.acquisitionKey || acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
 				ownerType: "feature",
 				ownerUid: CharacterSheetProgression.getEntityUid(entity),
 				classLevel: levelInfo?.classLevel,
@@ -864,14 +981,15 @@ class CharacterSheetProgression {
 			const nextVisited = new Set(visited);
 			nextVisited.add(visitedKey);
 			const type = CharacterSheetProgression.getDecisionTypeForDescriptor(descriptor);
-			const parentSemanticKey = parentDecision?.semanticKey || null;
+			const parentSemanticKey = parentDecision?.semanticKey || descriptor.rules?.parentSemanticKey || null;
+			const pickSlot = descriptor.rules?.pickSlot ?? descriptorIx;
 			const semanticKey = CharacterSheetProgression.getNestedSemanticKey({
 				parentSemanticKey,
 				acquisitionKey: descriptorAcquisitionKey,
 				grantKey: descriptor.grantKey,
 				selectedGrantKey: selectedKeys.join("|"),
 				occurrence: descriptor.occurrence,
-				slot: descriptorIx,
+				slot: pickSlot,
 				identityMode: descriptor.rules?.identityMode,
 			});
 			const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
@@ -891,7 +1009,7 @@ class CharacterSheetProgression {
 				type,
 				label: descriptor.label,
 				sourceKey: descriptor.grantKey,
-				slot: descriptorIx,
+				slot: pickSlot,
 				required: descriptor.required,
 				count: descriptor.count,
 				options: descriptor.options,
@@ -902,19 +1020,19 @@ class CharacterSheetProgression {
 				meta: {descriptorRules: descriptor.rules},
 				scope,
 				parentSemanticKey,
-				rootSemanticKey: rootSemanticKey || semanticKey,
+				rootSemanticKey: rootSemanticKey || descriptor.rules?.rootSemanticKey || parentSemanticKey || semanticKey,
 				depth,
 				semanticKeyOverride: semanticKey,
 				provenance: {
 					ownerType: parentEntity?.featureType || "classFeature",
-					ownerUid: CharacterSheetProgression.getEntityUid(entity),
+					ownerUid: descriptor.rules?.ownerUid || CharacterSheetProgression.getEntityUid(entity),
 					acquisitionKey: descriptorAcquisitionKey,
 					selectedGrantKey: selectedKeys.join("|") || null,
 					grantKind: descriptor.kind,
 					grantKey: descriptor.grantKey,
 					sourcePath: descriptor.sourcePath,
 					occurrence: descriptor.occurrence,
-					pickSlot: descriptorIx,
+					pickSlot,
 				},
 			});
 			decisions.push(decision);
@@ -1901,6 +2019,8 @@ class CharacterSheetProgression {
 			spellSwap: ["spellSwap"],
 			spellMastery: ["spellMasterySpells"],
 			signatureSpells: ["signatureSpells"],
+			artificerPlan: [CharacterSheetArtificerPlans.CHOICE_KEY_ACQUIRE],
+			artificerPlanReplacement: [CharacterSheetArtificerPlans.CHOICE_KEY_REPLACE],
 			scholar: ["scholarSkill"],
 			hp: ["hpRoll"],
 		};
@@ -1953,6 +2073,21 @@ class CharacterSheetProgression {
 				case "spellSwap": choices.spellSwap = CharacterSheetProgression._copy(selection); break;
 				case "spellMastery": choices.spellMasterySpells = CharacterSheetProgression._copy(selection); break;
 				case "signatureSpells": choices.signatureSpells = CharacterSheetProgression._copy(selection); break;
+				case "artificerPlan":
+					append(CharacterSheetArtificerPlans.CHOICE_KEY_ACQUIRE, [{
+						opportunityId: decision.meta?.opportunityId,
+						slotId: decision.meta?.slotId,
+						acquisitionLevel: decision.classLevel,
+						selection,
+					}]);
+					break;
+				case "artificerPlanReplacement":
+					append(CharacterSheetArtificerPlans.CHOICE_KEY_REPLACE, [{
+						opportunityId: decision.meta?.opportunityId,
+						replacementLevel: decision.classLevel,
+						selection,
+					}]);
+					break;
 				case "scholar": choices.scholarSkill = selection; break;
 				case "hp":
 					if (selection.method === "roll" && Number.isFinite(Number(selection.value))) choices.hpRoll = Number(selection.value);
@@ -2085,6 +2220,20 @@ class CharacterSheetProgression {
 			case "spellSwap": return choices.spellSwap || null;
 			case "spellMastery": return choices.spellMasterySpells || null;
 			case "signatureSpells": return choices.signatureSpells || null;
+			case "artificerPlan": {
+				const values = choices[CharacterSheetArtificerPlans.CHOICE_KEY_ACQUIRE] || [];
+				const matched = values.find(value =>
+					value?.opportunityId === sourceKey
+						|| value?.slotId === sourceKey
+						|| Number(value?.slot) === Number(slot),
+				);
+				return matched?.selection || matched || null;
+			}
+			case "artificerPlanReplacement": {
+				const values = choices[CharacterSheetArtificerPlans.CHOICE_KEY_REPLACE] || [];
+				const matched = values.find(value => value?.opportunityId === sourceKey);
+				return matched?.selection || matched || null;
+			}
 			case "scholar": return choices.scholarSkill || null;
 			case "hp": return choices.hpRoll != null ? {method: "roll", value: choices.hpRoll} : {method: "average"};
 			default: return null;
@@ -2497,6 +2646,10 @@ class CharacterSheetProgression {
 		decisions.push(...base.decisions);
 		const spellPools = CharacterSheetProgression._getClassSpellPools(state, page, normalizedHistory);
 		const spellPoolCursors = new Map();
+		const artificerPlanCatalog = CharacterSheetArtificerPlans.parseCatalog({
+			feature: CharacterSheetArtificerPlans.findFeature({classFeatures: page?.getClassFeatures?.() || []}),
+			items: page?.getItems?.() || [],
+		});
 
 		const addDecision = (levelInfo, config) => {
 			const semanticKey = CharacterSheetProgression.getSemanticKey({
@@ -2655,6 +2808,39 @@ class CharacterSheetProgression {
 				isValid: !multiclassRequirementIssues.length,
 				meta: {multiclassRequirementIssues},
 			});
+
+			for (const opportunity of CharacterSheetArtificerPlans.getProgressionOpportunities({
+				className: classData.name,
+				classSource: classData.source,
+				classLevel: levelInfo.classLevel,
+				subclassShortName: subclass?.shortName || subclass?.name || null,
+				subclassSource: subclass?.source || null,
+			})) {
+				const options = CharacterSheetArtificerPlans.getEligibleCandidates({
+					catalog: artificerPlanCatalog,
+					classLevel: levelInfo.classLevel,
+					constraints: opportunity.constraints,
+				});
+				addDecision(levelInfo, {
+					type: opportunity.kind === "replacement"
+						? CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE
+						: CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+					label: opportunity.kind === "replacement" ? "Replace a Magic Item Plan" : "Magic Item Plan",
+					sourceKey: opportunity.opportunityId,
+					slot: opportunity.slot,
+					required: opportunity.required,
+					count: 1,
+					options,
+					meta: {
+						kind: opportunity.kind,
+						opportunityId: opportunity.opportunityId,
+						slotId: opportunity.slotId || null,
+						owner: opportunity.owner,
+						constraints: opportunity.constraints || {},
+						catalogVersion: artificerPlanCatalog.version,
+					},
+				});
+			}
 
 			if (levelInfo.classLevel === 1) {
 				const isFirstClass = levelInfo.characterLevel === 1;
@@ -3318,6 +3504,66 @@ class CharacterSheetProgression {
 			storedBasePool: baseStoredPool,
 		});
 
+		const artificerPlanDecisions = decisions
+			.filter(decision => [
+				CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+				CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE,
+			].includes(decision.type))
+			.map(decision => ({
+				...decision,
+				kind: decision.meta?.kind,
+				opportunityId: decision.meta?.opportunityId,
+				slotId: decision.meta?.slotId,
+				owner: decision.meta?.owner,
+				constraints: decision.meta?.constraints || {},
+			}));
+		for (const decision of artificerPlanDecisions) {
+			const plan = decision.type === CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE
+				? decision.selection?.nextPlan
+				: decision.selection;
+			if (decision.selection != null && !CharacterSheetArtificerPlans.isExactSelection(plan)) {
+				const original = decisions.find(it => it.id === decision.id);
+				original.status = "ambiguous";
+				decision.status = "ambiguous";
+				original.meta = {
+					...(original.meta || {}),
+					validationMessage: "This legacy plan choice lacks an exact source-qualified catalog identity. Repair it in Respec.",
+				};
+			}
+		}
+		const planValidation = CharacterSheetArtificerPlans.validateDraft({
+			catalog: artificerPlanCatalog,
+			decisions: artificerPlanDecisions.filter(decision => decision.status !== "ambiguous"),
+		});
+		for (const issue of planValidation.issues) {
+			const original = decisions.find(decision => decision.meta?.opportunityId === issue.opportunityId);
+			if (original) {
+				original.status = "invalid";
+				original.meta = {...(original.meta || {}), validationMessage: issue.message};
+			}
+			issues.push({
+				level: original?.characterLevel || 0,
+				severity: "error",
+				code: issue.code,
+				message: issue.message,
+				decisionId: original?.id,
+				semanticKey: original?.semanticKey,
+			});
+		}
+		const hasEfaPlanProgression = resolvedTimeline.some(entry =>
+			CharacterSheetArtificerPlans.isExactOwner(entry) && Number(entry.classLevel) >= 2,
+		);
+		if (hasEfaPlanProgression) {
+			for (const issue of artificerPlanCatalog.issues || []) {
+				issues.push({
+					level: 0,
+					severity: "error",
+					code: issue.code,
+					message: issue.message,
+				});
+			}
+		}
+
 		return {
 			version: CharacterSheetProgression.MANIFEST_VERSION,
 			base,
@@ -3461,6 +3707,19 @@ class CharacterSheetProgression {
 		};
 		for (const decision of manifest.decisions || []) {
 			if (decision.selection == null || decision.receipt) continue;
+			if ([
+				CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+				CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE,
+			].includes(decision.type)) {
+				decision.receipt = CharacterSheetArtificerPlans.getDecisionReceipt({
+					...decision,
+					kind: decision.meta?.kind,
+					opportunityId: decision.meta?.opportunityId,
+					slotId: decision.meta?.slotId,
+					owner: decision.meta?.owner,
+				});
+				continue;
+			}
 			decision.receipt = {
 				version: 1,
 				sourceDecisionKey: decision.semanticKey,
@@ -3558,6 +3817,12 @@ class CharacterSheetProgression {
 			}).join(", ");
 		}
 		if (typeof selection === "object") {
+			if (decision?.type === CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE) {
+				return `${selection.previousPlan?.name || "Unknown plan"} → ${selection.nextPlan?.name || "Unknown plan"}`;
+			}
+			if (decision?.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE) {
+				return `${selection.name || "Unknown plan"}${selection.source ? ` (${selection.source})` : ""}`;
+			}
 			if (selection.mode === "asi") {
 				return Object.entries(selection.asi || {}).map(([ability, amount]) => `${ability.toUpperCase()} +${amount}`).join(", ");
 			}

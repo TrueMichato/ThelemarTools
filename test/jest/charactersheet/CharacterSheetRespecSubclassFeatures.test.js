@@ -210,3 +210,198 @@ describe("CharacterSheetRespec subclass change — multiclass safety (Bug #2)", 
 		expect(state.getFeatures().some(f => f.name === "Training in War and Song")).toBe(true);
 	});
 });
+
+describe("CharacterSheetRespec subclass change — exact source isolation", () => {
+	test("matches old subclass features by exact subclass source", () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+		});
+		for (const source of ["RHW", "TCE"]) {
+			state.addFeature({
+				name: "Reanimated Companion",
+				source,
+				level: 3,
+				className: "Artificer",
+				classSource: "EFA",
+				subclassName: "Reanimator",
+				subclassShortName: "Reanimator",
+				subclassSource: source,
+				isSubclassFeature: true,
+				entries: [],
+			});
+		}
+		const respec = makeRespec(state);
+
+		expect(respec._getSubclassFeatures(
+			{name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+			{name: "Artificer", source: "EFA"},
+		)).toEqual([
+			expect.objectContaining({name: "Reanimated Companion", subclassSource: "RHW"}),
+		]);
+	});
+
+	test("removes an exact-provenance source-less legacy feature while preserving an explicit wrong-source owner", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+		});
+		state.addFeature({
+			name: "Reanimated Companion",
+			source: "RHW",
+			level: 3,
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Reanimator",
+			subclassShortName: "Reanimator",
+			isSubclassFeature: true,
+			entries: [],
+		});
+		state.addFeature({
+			name: "Reanimated Companion",
+			source: "TCE",
+			level: 3,
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Reanimator",
+			subclassShortName: "Reanimator",
+			subclassSource: "TCE",
+			isSubclassFeature: true,
+			entries: [],
+		});
+		const respec = makeRespec(state, []);
+
+		await respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+			{name: "Armorer", shortName: "Armorer", source: "EFA", subclassFeatures: []},
+		);
+
+		expect(state.getFeatures().filter(feature => feature.name === "Reanimated Companion")).toEqual([
+			expect.objectContaining({source: "TCE", subclassSource: "TCE"}),
+		]);
+	});
+
+	test("rejects an ambiguous source-less legacy feature before mutating the candidate", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+		});
+		state.addFeature({
+			name: "Reanimated Companion",
+			source: "TST",
+			level: 3,
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Reanimator",
+			subclassShortName: "Reanimator",
+			isSubclassFeature: true,
+			entries: [],
+		});
+		const before = state.toJson();
+		const respec = makeRespec(state, []);
+
+		await expect(respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+			{name: "Armorer", shortName: "Armorer", source: "EFA", subclassFeatures: []},
+		)).rejects.toThrow(/missing subclassSource.*remove them manually/i);
+		expect(state.toJson()).toEqual(before);
+	});
+
+	test("updates only level-history rows for the exact class and subclass source", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Wizard",
+			source: "XPHB",
+			level: 6,
+			subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"},
+		});
+		state.addClass({
+			name: "Fighter",
+			source: "PHB",
+			level: 3,
+			subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"},
+		});
+		addOldEvocationFeature(state);
+		state.recordLevelChoice({
+			level: 3,
+			class: {name: "Wizard", source: "XPHB"},
+			choices: {subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"}},
+		});
+		state.recordLevelChoice({
+			level: 4,
+			class: {name: "Fighter", source: "PHB"},
+			choices: {subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"}},
+		});
+		const respec = makeRespec(state);
+
+		await respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Wizard", source: "XPHB"}},
+			{name: "School of Evocation", shortName: "Evocation", source: "PHB"},
+			bladesingerSubclass(),
+		);
+
+		expect(state.getLevelHistoryEntry(3).choices.subclass).toMatchObject({
+			name: "Bladesinger",
+			source: "FRHoF",
+		});
+		expect(state.getLevelHistoryEntry(4).choices.subclass).toMatchObject({
+			name: "School of Evocation",
+			source: "PHB",
+		});
+	});
+});
+
+describe("CharacterSheetRespec subclass change — exact subclass lifecycle cleanup", () => {
+	test("invalidates an active EFA Cartographer Atlas while preserving snapshot-based Undo", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 15,
+			subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+		});
+		state.addItem({
+			name: "Cartographer's Tools",
+			source: "XPHB",
+			type: "AT",
+			quantity: 1,
+		});
+		expect(state.createAdventurersAtlas(
+			[
+				{name: "Self", isSelf: true, status: "active"},
+				{name: "Ally", isSelf: false, status: "active"},
+			],
+			{isHoldingTools: true, createdAt: 1},
+		).ok).toBe(true);
+		const undoSnapshot = state.toJson();
+		const respec = makeRespec(state, []);
+
+		await respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+			{name: "Armorer", shortName: "Armorer", source: "EFA", subclassFeatures: []},
+		);
+
+		expect(state.getAdventurersAtlasStatus()).toBe("invalidated");
+		expect(state.getAdventurersAtlas().invalidatedReason).toBe("subclass-removed");
+
+		expect(state.loadFromJson(undoSnapshot)).not.toBe(false);
+		expect(state.getAdventurersAtlasStatus()).toBe("active");
+		expect(state.getAdventurersAtlas().holders.map(it => it.name)).toEqual(["Self", "Ally"]);
+	});
+});

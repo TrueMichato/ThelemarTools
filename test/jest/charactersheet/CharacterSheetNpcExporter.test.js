@@ -288,6 +288,119 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(out.action.some(a => /shield/i.test(a.name || "") || /shield/i.test((a.entries || []).join(" ")))).toBe(true);
 	});
 
+	it("excludes exact EFA Experimental Elixirs without name-matching ordinary or unrelated generated items", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Alchemist", shortName: "Alchemist", source: "EFA"},
+		});
+
+		const hardenForExporter = itemId => {
+			const row = state.getInventory().find(it => it.id === itemId);
+			row.equipped = true;
+			Object.assign(row.item, {
+				rarity: "rare",
+				_isCustom: true,
+				activation: [{type: "action", cost: 1}],
+				entries: ["As an action, the creature can activate this item."],
+			});
+		};
+
+		const exact = state.createEfaExperimentalElixirSpellSlotVial({
+			effectKey: "healing",
+			batchId: "npc-exact",
+			spentSlotLevel: 1,
+		});
+		expect(exact.ok).toBe(true);
+		hardenForExporter(exact.itemId);
+
+		const stale = state.createEfaExperimentalElixirSpellSlotVial({
+			effectKey: "flight",
+			batchId: "npc-stale",
+			spentSlotLevel: 1,
+		});
+		expect(stale.ok).toBe(true);
+		hardenForExporter(stale.itemId);
+		state.getInventory().find(it => it.id === stale.itemId).item._generatedItemProvenance.metadata.metadataSchemaVersion = 999;
+
+		state.addItem({
+			name: "Experimental Elixir (Healing)",
+			source: "EFA",
+			type: "P",
+			rarity: "rare",
+			_isCustom: true,
+			activation: [{type: "action", cost: 1}],
+			entries: ["As an action, the creature can use this independent custom potion."],
+		});
+		const customId = state.getItems().find(it =>
+			it.name === "Experimental Elixir (Healing)"
+			&& !it._generatedItemProvenance,
+		).id;
+		state.setItemEquipped(customId, true);
+
+		const unrelated = state.createGeneratedFeatureItem({
+			item: {
+				name: "Alchemical Homunculus Battery",
+				source: "EFA",
+				type: "P",
+				rarity: "rare",
+				_isCustom: true,
+				activation: [{type: "action", cost: 1}],
+				entries: ["As an action, the creature can discharge this unrelated generated item."],
+			},
+			owner: {
+				featureUid: "Alchemical Homunculus|Artificer|EFA|Alchemist|EFA|3|EFA",
+				featureSource: "EFA",
+				classUid: "Artificer|EFA",
+				subclassUid: "Alchemist|Artificer|EFA|EFA",
+			},
+		});
+		expect(unrelated.ok).toBe(true);
+		state.setItemEquipped(unrelated.itemId, true);
+
+		state.setItemGrantedSpells([
+			{name: "fireball|XPHB", sourceItem: "Experimental Elixir (Healing)", itemId: exact.itemId, usageType: "will"},
+			{name: "shield|XPHB", sourceItem: "Experimental Elixir (Healing)", itemId: customId, usageType: "will"},
+		]);
+		state.getItemPowers = () => [
+			{
+				id: "exact-elixir-power",
+				itemId: exact.itemId,
+				materialPower: true,
+				actionType: "action",
+				name: "Forbidden Elixir Power",
+				description: "The transient vial releases a forbidden permanent power.",
+			},
+			{
+				id: "unrelated-generated-power",
+				itemId: unrelated.itemId,
+				materialPower: true,
+				actionType: "action",
+				name: "Battery Surge",
+				description: "The unrelated generated item releases a surge.",
+			},
+		];
+
+		const specialEquipmentText = CharacterSheetNpcExporter._getSpecialEquipmentBlock(state)?.entries.join(" ") || "";
+		const itemUseBlocks = CharacterSheetNpcExporter._getMagicItemUseBlocks(state);
+		const useBlockText = Object.values(itemUseBlocks)
+			.flat()
+			.flatMap(it => [it.name || "", ...(it.entries || [])])
+			.join(" ");
+
+		expect(specialEquipmentText).toContain("Experimental Elixir (Healing)");
+		expect(specialEquipmentText).not.toContain("×2");
+		expect(specialEquipmentText).not.toContain("Experimental Elixir (Flight)");
+		expect(specialEquipmentText).toContain("Alchemical Homunculus Battery");
+		expect(useBlockText).toMatch(/shield/i);
+		expect(useBlockText).not.toMatch(/fireball/i);
+		expect(useBlockText).not.toContain("Experimental Elixir (Flight)");
+		expect(useBlockText).toContain("Alchemical Homunculus Battery");
+		expect(useBlockText).not.toContain("Forbidden Elixir Power");
+		expect(useBlockText).toContain("Battery Surge");
+	});
+
 	it("should export magic-item defenses in persistent mode", () => {
 		state._data.itemDefenses = {
 			resist: [{type: "fire"}],

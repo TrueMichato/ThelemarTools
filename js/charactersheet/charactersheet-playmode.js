@@ -9,6 +9,7 @@
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
+import {CharacterSheetModal} from "./charactersheet-modal.js";
 
 function csRestoreModalFocus (trigger) {
 	if (trigger?.isConnected && typeof trigger.focus === "function") {
@@ -208,7 +209,7 @@ export class CharacterSheetPlayMode {
 		this._state = page.getState();
 
 		// UI state (not persisted — resets on load)
-		const actionEconomy = {action: true, reaction: true, movement: true};
+		const actionEconomy = {action: true, reaction: true};
 		Object.defineProperty(actionEconomy, "bonus", {
 			enumerable: true,
 			get: () => this._state.isBonusActionAvailable?.() !== false,
@@ -557,7 +558,7 @@ export class CharacterSheetPlayMode {
 			if (isNaN(val) || val < 0) return;
 			const current = this._state.getTempHp();
 			// Temp HP doesn't stack — take the higher value
-			this._state.setTempHp(Math.max(val, current));
+			this._state.grantTempHp(val);
 			close();
 			this._logActivity("shield", `Set temp HP to ${Math.max(val, current)}`);
 			this._renderStatusBar();
@@ -644,7 +645,7 @@ export class CharacterSheetPlayMode {
 			{icon: "notes", label: "Reference", onClick: () => this._openDrawerByType("reference")},
 			{icon: "edit", label: "Notes", onClick: () => this._openDrawerByType("notes")},
 		];
-		if (this._state.getCompanions().length) {
+		if ((this._page.getFeatureCompanionLifecycleSurfaceCompanions?.() || this._state.getCompanions()).length) {
 			items.push({icon: "companion", label: "Companions", onClick: () => this._openDrawerByType("companions")});
 		}
 		items.push(
@@ -794,7 +795,7 @@ export class CharacterSheetPlayMode {
 			nextBtn.replaceChildren(document.createTextNode("Next Round "), this._icon("chevron"));
 			nextBtn.setAttribute("aria-label", `Advance to round ${combatRound + 1}`);
 			nextBtn.addEventListener("click", () => {
-				const expired = this._state.advanceRound?.() || [];
+				const expired = this._page.advanceCombatRound?.() || [];
 				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				if (expired.length > 0) {
 					const names = expired.map(e => e.name || "Effect").join(", ");
@@ -811,7 +812,7 @@ export class CharacterSheetPlayMode {
 			endBtn.textContent = "End Combat";
 			endBtn.setAttribute("aria-label", "End combat encounter");
 			endBtn.addEventListener("click", () => {
-				this._state.endCombat?.();
+				this._page.endCombat?.();
 				this._logActivity("flag", "Combat ended");
 				this._renderStatusBar();
 			});
@@ -820,7 +821,7 @@ export class CharacterSheetPlayMode {
 			this._setIconLabel(startBtn, "attack", " Start Combat");
 			startBtn.setAttribute("aria-label", "Start combat encounter");
 			startBtn.addEventListener("click", () => {
-				this._state.startCombat?.();
+				this._page.startCombat?.();
 				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				this._logActivity("attack", "Combat started");
 				this._logTurnStartEffects();
@@ -1246,6 +1247,7 @@ export class CharacterSheetPlayMode {
 
 		this._renderFavoritesBar();
 		this._renderActionEconomy();
+		this._renderEfaEldritchCannons();
 		this._renderActiveStates();
 		this._renderChainedTargets();
 		this._renderCombatMethods();
@@ -1256,6 +1258,264 @@ export class CharacterSheetPlayMode {
 		this._renderFeaturesQuick();
 		this._renderCrafting();
 		this._renderResources();
+	}
+
+	_renderEfaEldritchCannons () {
+		const creation = this._state.getEfaEldritchCannonCreationState?.();
+		if (!creation?.available) return;
+
+		const combat = this._page?._combat;
+		const card = this._makeCard(this._elActionsHub, "prof", "Eldritch Cannons");
+		card.classList?.add?.("pm-efa-cannons");
+		const header = card.querySelector?.(".pm-card__header") || card.children?.[0];
+		if (header) {
+			const badge = this._ce("span", "pm-card__badge pm-efa-cannons__badge", header);
+			badge.textContent = `${creation.activeCannons.length}/${creation.maxCannons} active`;
+		}
+
+		const feedback = this._ce("div", "pm-efa-cannons__feedback", card);
+		feedback.setAttribute("role", "status");
+		feedback.setAttribute("aria-live", "polite");
+		feedback.setAttribute("aria-atomic", "true");
+		const setFeedback = (message, {isError = false} = {}) => {
+			feedback.textContent = message || "";
+			feedback.classList.toggle("pm-efa-cannons__feedback--error", !!isError);
+		};
+		const reportFailure = result => {
+			const message = result?.reason === "saveFailed"
+				? "The character could not be saved, so the cannon change was rolled back."
+				: result?.reason === "actionUnavailable"
+					? "The required Action or Bonus Action is already spent."
+					: result?.reason === "triggerUnavailable"
+						? "That cannon opportunity is no longer available."
+						: "The cannon could not be updated. Check the value and try again.";
+			setFeedback(message, {isError: true});
+		};
+		const finish = (message, icon = "prof") => {
+			combat?._refreshEfaCannonSurfaces?.();
+			if (!combat?._refreshEfaCannonSurfaces) {
+				this._renderActionsHub();
+				this._renderStatusBar();
+			}
+			this._logActivity(icon, message);
+			JqueryUtil?.doToast?.({type: "info", content: message});
+		};
+		const pCommit = async mutate => {
+			if (!combat?._pCommitEfaCannonMutation) return {ok: false, reason: "combatUnavailable"};
+			return combat._pCommitEfaCannonMutation(mutate);
+		};
+		const pGetNumber = async ({title, min = 0, max = null, defaultValue = 1, int = true} = {}) => {
+			const value = await CharacterSheetModal.pGetUserNumber({
+				title,
+				inputMode: int ? "numeric" : "decimal",
+				min,
+				...(max == null ? {} : {max}),
+				int,
+				default: defaultValue,
+			});
+			return value == null || typeof value === "symbol" ? null : Number(value);
+		};
+
+		const toolbar = this._ce("div", "pm-efa-cannons__toolbar", card);
+		const createButton = this._ce("button", "pm-efa-cannons__button pm-efa-cannons__button--primary", toolbar);
+		this._setIconLabel(createButton, "add", creation.activeCannons.length ? " Create Another" : " Create Cannon");
+		createButton.disabled = !creation.canCreate;
+		createButton.title = creation.canCreate
+			? creation.canCreateTwo ? "Create one or two cannons with one Magic Action" : "Create a cannon in the next available slot"
+			: CharacterSheetCombat._getEfaCannonCreationReason(creation);
+		createButton.addEventListener("click", () => void combat?._pShowEfaEldritchCannonCreationModal?.());
+
+		if (creation.activeCannons.length === 2) {
+			const activateBoth = this._ce("button", "pm-efa-cannons__button pm-efa-cannons__button--primary", toolbar);
+			this._setIconLabel(activateBoth, "cantrip", " Activate Both");
+			activateBoth.title = "Activate both cannons with one Bonus Action";
+			activateBoth.addEventListener("click", () => void combat?._pShowEfaEldritchCannonsActivationModal?.(
+				creation.activeCannons.map(cannon => cannon.instanceId),
+			));
+		}
+
+		const firearm = this._state.getEfaArcaneFirearmStatus?.();
+		if (firearm?.available) {
+			const firearmStatus = this._ce(
+				"div",
+				`pm-efa-cannons__firearm pm-efa-cannons__firearm--${firearm.active ? "active" : "attention"}`,
+				card,
+			);
+			this._setIconLabel(
+				firearmStatus,
+				"fire",
+				firearm.active
+					? ` Arcane Firearm: ${firearm.item?.name || "carved item"}`
+					: ` Arcane Firearm: ${firearm.code === "unequipped" ? "equip the carved item" : "choose an eligible item after a Long Rest"}`,
+			);
+		}
+
+		if (!creation.activeCannons.length) {
+			const empty = this._ce("div", "pm-efa-cannons__empty", card);
+			const title = this._ce("strong", null, empty);
+			title.textContent = "No active cannon";
+			const payment = this._ce("span", null, empty);
+			payment.textContent = creation.freeUse.available
+				? "Free creation use ready."
+				: creation.spellSlots.length
+					? "Free use spent; an available spell slot can create one."
+					: "Free use spent and no spell slot is available.";
+			const tool = this._ce("span", null, empty);
+			tool.textContent = creation.tools.length
+				? `Creation tool ready: ${creation.tools.map(({reference}) => reference.name).join(" or ")}.`
+				: creation.toolRequirement.ui.unavailableMessage;
+			return;
+		}
+
+		const cover = this._state.getCoverProjection?.();
+		const grid = this._ce("div", "pm-efa-cannons__grid", card);
+		for (const cannon of creation.activeCannons) {
+			const slotNumber = cannon.generatedClassSummon.generatedSlot + 1;
+			const formLabel = CharacterSheetCombat._getEfaCannonFormLabel(cannon.form);
+			const cannonCard = this._ce("article", "pm-efa-cannon", grid);
+			cannonCard.setAttribute("aria-label", `Cannon ${slotNumber}, ${formLabel}`);
+
+			const identity = this._ce("div", "pm-efa-cannon__identity", cannonCard);
+			const heading = this._ce("h4", "pm-efa-cannon__name", identity);
+			heading.textContent = `Cannon ${slotNumber} · ${formLabel}`;
+			const placement = this._ce("span", "pm-efa-cannon__placement", identity);
+			placement.textContent = `${CharacterSheetCombat._getEfaCannonPlacementLabel(cannon)} · ${cannon.distanceFromOwnerFt} ft`;
+
+			const vitals = this._ce("div", "pm-efa-cannon__vitals", cannonCard);
+			for (const [label, value] of [
+				["HP", `${cannon.hp.current}/${cannon.hp.max}`],
+				["AC", cannon.ac],
+				["Duration", CharacterSheetCombat._formatEfaCannonDuration(cannon.durationRemainingMinutes)],
+			]) {
+				const vital = this._ce("div", "pm-efa-cannon__vital", vitals);
+				const valueEl = this._ce("strong", null, vital);
+				valueEl.textContent = value;
+				const labelEl = this._ce("span", null, vital);
+				labelEl.textContent = label;
+			}
+
+			const operation = this._ce("div", "pm-efa-cannon__operation", cannonCard);
+			operation.textContent = cannon.form === "flamethrower"
+				? `DC ${cannon.calculations.saveDc} Dex · ${cannon.calculations.damageDice} fire · 15-ft cone · half on success`
+				: cannon.form === "forceBallista"
+					? `+${cannon.calculations.attackBonus} spell attack · ${cannon.calculations.damageDice} force · 120 ft · push 5 ft`
+					: `${cannon.calculations.tempHpDice} + ${cannon.calculations.tempHpBonus} temporary HP · 10-ft range`;
+
+			if (creation.artificerLevel >= 15) {
+				const coverSource = cover?.sources?.find(source => source.id === `efa-cannon:${cannon.instanceId}`);
+				const coverStatus = this._ce(
+					"div",
+					`pm-efa-cannon__cover${coverSource ? " pm-efa-cannon__cover--active" : ""}`,
+					cannonCard,
+				);
+				coverStatus.textContent = coverSource
+					? "Shimmering Field active: Half Cover (+2 AC and Dex saves)"
+					: "Shimmering Field out of range: move within 10 ft";
+			}
+
+			const primary = this._ce("div", "pm-efa-cannon__primary", cannonCard);
+			const activate = this._ce("button", "pm-efa-cannons__button pm-efa-cannons__button--primary", primary);
+			this._setIconLabel(activate, "cantrip", ` Activate Cannon ${slotNumber}`);
+			activate.addEventListener("click", () => void combat?._pShowEfaEldritchCannonActivationModal?.(cannon.instanceId));
+
+			const actions = this._ce("div", "pm-efa-cannon__actions", cannonCard);
+			const addAction = (label, icon, handler, {danger = false} = {}) => {
+				const button = this._ce(
+					"button",
+					`pm-efa-cannons__button${danger ? " pm-efa-cannons__button--danger" : ""}`,
+					actions,
+				);
+				this._setIconLabel(button, icon, ` ${label}`);
+				button.addEventListener("click", handler);
+				return button;
+			};
+
+			addAction("Damage", "damage", async () => {
+				const amount = await pGetNumber({title: `Damage Cannon ${slotNumber}`, min: 1});
+				if (amount == null) return;
+				const result = await pCommit(() => this._state.damageEfaEldritchCannon(cannon.instanceId, amount));
+				if (!result.ok) return reportFailure(result);
+				finish(result.action === "retired"
+					? `Cannon ${slotNumber} was destroyed at 0 HP.`
+					: `Cannon ${slotNumber} took ${result.amount} damage; ${result.currentHp} HP remains.`, "damage");
+				if (result.detonationOpportunity) void combat?._pShowEfaCannonDetonationModal?.(result.detonationOpportunity);
+			});
+			addAction("Heal", "heal", async () => {
+				const amount = await pGetNumber({title: `Heal Cannon ${slotNumber}`, min: 1});
+				if (amount == null) return;
+				const result = await pCommit(() => this._state.healEfaEldritchCannon(cannon.instanceId, amount));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber} healed ${result.healed}; ${result.currentHp}/${result.maxHp} HP.`, "heal");
+			});
+			addAction("Mending", "spell", async () => {
+				const roll = combat?._rollEfaCannonFormula?.("2d6");
+				if (!roll) return reportFailure({reason: "combatUnavailable"});
+				const result = await pCommit(() => this._state.mendEfaEldritchCannon(cannon.instanceId, {roll: roll.total}));
+				if (!result.ok) return reportFailure(result);
+				void this._page.pAnimateDamageDice?.(roll.groups);
+				this._page.showDiceResult?.({
+					title: `Mending — Cannon ${slotNumber}`,
+					roll: roll.total,
+					modifier: 0,
+					total: result.healed,
+					subtitle: `2d6: ${roll.breakdown}. Restored ${result.healed} HP, capped at ${result.maxHp}.`,
+				});
+				finish(`Mending restored ${result.healed} HP to Cannon ${slotNumber}.`, "heal");
+			});
+			addAction("Move", "speed", async () => {
+				const distance = await pGetNumber({
+					title: `Set Cannon ${slotNumber} Distance`,
+					min: 0,
+					defaultValue: cannon.distanceFromOwnerFt,
+				});
+				if (distance == null) return;
+				const result = await pCommit(() => this._state.setEfaEldritchCannonPosition(cannon.instanceId, {distanceFromOwnerFt: distance}));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber} is now ${result.distanceFromOwnerFt} ft from you.`);
+			});
+			addAction("Time", "turn", async () => {
+				const minutes = await pGetNumber({
+					title: `Advance Cannon ${slotNumber} Game Time`,
+					min: 0.5,
+					defaultValue: 1,
+					int: false,
+				});
+				if (minutes == null) return;
+				const result = await pCommit(() => {
+					const [advance] = this._state.advanceClassSummonGameTime(minutes)
+						.filter(it => it.instanceId === cannon.instanceId);
+					return advance ? {ok: true, ...advance} : {ok: false, reason: "notFound"};
+				});
+				if (!result.ok) return reportFailure(result);
+				finish(result.action === "retired"
+					? `Cannon ${slotNumber}'s duration expired.`
+					: `Cannon ${slotNumber} has ${CharacterSheetCombat._formatEfaCannonDuration(result.details.durationRemainingMinutes)} remaining.`);
+			});
+			addAction("End", "close", async () => {
+				const confirmed = await CharacterSheetModal.pGetUserBoolean({
+					title: `End Cannon ${slotNumber} Duration?`,
+					htmlDescription: "The cannon expires immediately without spending an Action.",
+					textYes: "End Duration",
+					textNo: "Keep Cannon",
+				});
+				if (!confirmed) return;
+				const result = await pCommit(() => this._state.endEfaEldritchCannonDuration(cannon.instanceId));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber}'s duration ended.`);
+			});
+			addAction("Dismiss", "close", async () => {
+				const confirmed = await CharacterSheetModal.pGetUserBoolean({
+					title: `Dismiss Cannon ${slotNumber}?`,
+					htmlDescription: `${this._state.isInCombat() ? "This spends your Action. " : ""}The cannon will be removed.`,
+					textYes: "Dismiss Cannon",
+					textNo: "Keep Cannon",
+				});
+				if (!confirmed) return;
+				const result = await pCommit(() => this._state.dismissEfaEldritchCannonWithMagicAction(cannon.instanceId));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber} was dismissed.`);
+			}, {danger: true});
+		}
 	}
 
 	_renderChainedTargets () {
@@ -1474,13 +1734,13 @@ export class CharacterSheetPlayMode {
 				meta.textContent = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
 					: power.usesMax
-						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
+						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses${power.spellSaveDc ? ` · DC ${power.spellSaveDc}` : ""}${power.spellAttackBonus != null ? ` · ${power.spellAttackBonus >= 0 ? "+" : ""}${power.spellAttackBonus} attack` : ""}`
 						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
 				if (power.isReferenceOnly) {
 					CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 					continue;
 				}
-				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
+				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"} ${power.name}`, async () => {
 					if (power.chargesCostMax > power.chargesCost) {
 						await this._page._inventory?._showItemPowersModal?.(power.itemId);
 						return;
@@ -1492,7 +1752,7 @@ export class CharacterSheetPlayMode {
 						const current = this._state.getActionEconomyState?.();
 						this._actionEconomy[group.key] = current ? current[group.key] : false;
 					}
-					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : "Invoked"} ${power.name} from ${power.itemName}`);
+					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Used" : "Invoked"} ${power.name} from ${power.itemName}`);
 					this._renderActionsHub();
 				});
 				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
@@ -1628,12 +1888,24 @@ export class CharacterSheetPlayMode {
 			});
 		});
 
-		// Movement
-		const walkSpeed = this._state.getSpeed("walk") || 30;
-		const mvEl = this._ce("div", `pm-economy__slot pm-economy__slot--${this._actionEconomy.movement ? "available" : "used"}`, row);
-		mvEl.replaceChildren(this._icon("speed"), document.createTextNode(` ${this._fmtSpeed(walkSpeed)}`));
-		this._makeClickable(mvEl, `${this._actionEconomy.movement ? "Use" : "Restore"} Movement`, () => {
-			this._actionEconomy.movement = !this._actionEconomy.movement;
+		// Movement is numeric and state-owned: the displayed total follows live Speed,
+		// while source-tagged receipts preserve partial spends across re-renders/saves.
+		const movement = this._state.getMovementEconomyState?.() || {
+			allowance: Math.max(0, Number(this._state.getSpeed?.("walk")) || 0),
+			used: 0,
+			remaining: Math.max(0, Number(this._state.getSpeed?.("walk")) || 0),
+		};
+		const canSpendMovement = movement.remaining > 0;
+		const hasSpentMovement = movement.used > 0;
+		const mvEl = this._ce("div", `pm-economy__slot pm-economy__slot--${canSpendMovement ? "available" : "used"}`, row);
+		mvEl.replaceChildren(this._icon("speed"), document.createTextNode(` ${movement.remaining}/${movement.allowance} ft.`));
+		const movementLabel = canSpendMovement ? "Use Movement" : hasSpentMovement ? "Restore Movement" : "Movement unavailable";
+		this._makeClickable(mvEl, movementLabel, () => {
+			if (movement.remaining > 0) {
+				this._state.spendMovement?.(movement.remaining, {source: "play-mode:manual"});
+			} else if (movement.used > 0) {
+				this._state.resetMovementEconomy?.();
+			}
 			this._renderActionEconomy();
 		});
 
@@ -1642,7 +1914,12 @@ export class CharacterSheetPlayMode {
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
 			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
-			this._state.resetActionEconomy?.();
+			if (this._page.resetTurnEconomy) this._page.resetTurnEconomy();
+			else if (this._state.resetTurnEconomy) this._state.resetTurnEconomy();
+			else {
+				this._state.resetActionEconomy?.();
+				this._state.resetMovementEconomy?.();
+			}
 			this._renderActionEconomy();
 			this._logActivity("turn", "New turn started");
 		});
@@ -1849,6 +2126,13 @@ export class CharacterSheetPlayMode {
 
 		attacks.forEach(attack => {
 			const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+			const abilityResolution = attackBreakdown?.abilityResolution
+				|| this._state.getWeaponAbilityResolution?.(attack)
+				|| {
+					modifier: this._state.getWeaponAbilityMod(attack),
+					ability: attack.abilityMod || "str",
+					source: null,
+				};
 			const weaponId = attack.riteWeaponId || attack.id;
 			const totalBonus = attackBreakdown?.total ?? 0;
 			const totalDmgBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
@@ -1863,6 +2147,11 @@ export class CharacterSheetPlayMode {
 			icon.textContent = attack.isMelee ? "weapon-melee" : "weapon-ranged";
 			const name = this._ce("span", "pm-attack__name", row);
 			name.textContent = attack.name;
+			if (abilityResolution.source) {
+				const abilitySource = this._ce("span", "pm-attack__ability-source", row);
+				abilitySource.textContent = abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`;
+				abilitySource.title = abilitySource.textContent;
+			}
 			const bonus = this._ce("span", "pm-attack__bonus", row);
 			bonus.textContent = this._fmtMod(totalBonus);
 			const dmg = this._ce("span", "pm-attack__damage", row);
@@ -2025,7 +2314,7 @@ export class CharacterSheetPlayMode {
 						const cur = this._state.getSpellSlotsCurrent(lvl);
 						const max = this._state.getSpellSlotsMax(lvl);
 						if (i < cur) {
-							this._state.setSpellSlotCurrent(lvl, cur - 1);
+							this._state.setSpellSlotCurrent(lvl, cur - 1, {isExpenditure: true});
 						} else {
 							this._state.setSpellSlotCurrent(lvl, Math.min(max, cur + 1));
 						}
@@ -2166,12 +2455,12 @@ export class CharacterSheetPlayMode {
 					e.stopPropagation();
 					if (spell.concentration && this._state.isConcentrating?.()) {
 						this._promptConcentrationBreak(spell, () => {
-							if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+							if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 							this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 							this._renderStatusBar();
 						});
 					} else {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 						this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 						this._renderStatusBar();
 					}
@@ -2206,7 +2495,7 @@ export class CharacterSheetPlayMode {
 				{separator: true},
 			];
 			if (spell.level > 0) menuItems.push({label: "Cast Spell", icon: "concentration", onClick: () => this._castSpell(spell)});
-			if (spell.ritual) menuItems.push({label: "Cast as Ritual", icon: "ritual", onClick: () => { if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level}); this._logActivity("ritual", `Cast ${spell.name} as ritual`); this._renderStatusBar(); }});
+			if (spell.ritual) menuItems.push({label: "Cast as Ritual", icon: "ritual", onClick: () => { if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source}); this._logActivity("ritual", `Cast ${spell.name} as ritual`); this._renderStatusBar(); }});
 			if (spell.level > 0 && !spell.alwaysPrepared && showPreparedToggle) menuItems.push({label: spell.prepared ? "Unprepare" : "Prepare", icon: "check", onClick: () => { this._state.setSpellPrepared?.(spell.id, !spell.prepared); this._openDrawerByType("spells"); }});
 			menuItems.push({label: "Add Note", icon: "edit", onClick: () => this._showEntityNoteModal("spell", spell.id, spell.name, () => { this._renderSpellsQuick(); if (this._openDrawer === "spells") this._openDrawerByType("spells"); })});
 			menuItems.push({label: spellIsFav ? "Remove Favorite" : "Add Favorite", icon: "inspiration", onClick: () => this._toggleFavorite({id: `spell:${spell.name}`, type: "spell", name: spell.name, icon: "spell", detail: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`, ref: spell})});
@@ -2555,6 +2844,15 @@ export class CharacterSheetPlayMode {
 		this._elDrawer?.removeAttribute("role");
 		this._elDrawer?.removeAttribute("aria-modal");
 		this._elDrawer?.removeAttribute("aria-labelledby");
+	}
+
+	_refreshOpenDrawer (type = this._openDrawer) {
+		if (!type || this._openDrawer !== type || !this._elDrawer) return false;
+		const content = this._elDrawer.querySelector(".pm-drawer__content");
+		if (!content) return false;
+		content.innerHTML = "";
+		this._renderDrawerContent(type, content);
+		return true;
 	}
 
 	_renderDrawerContent (type, container) {
@@ -3030,13 +3328,60 @@ export class CharacterSheetPlayMode {
 		const hasDruid = classNames.includes("druid");
 		const hasRanger = classNames.includes("ranger");
 		const hasWarlock = classNames.includes("warlock");
-		const hasArtificer = classNames.includes("artificer");
 		const hasPaladin = classNames.includes("paladin");
 		const hasWizard = classNames.includes("wizard");
 		const hasSubclassMoon = classes.some(c => c.subclass?.name?.toLowerCase().includes("moon"));
 		const hasSubclassDrake = classes.some(c => c.subclass?.name?.toLowerCase().includes("drake"));
-		const hasSubclassSteel = classes.some(c => c.subclass?.name?.toLowerCase().includes("steel"));
+		const hasLegacyTceBattleSmith = classes.some(cls =>
+			String(cls?.name || "").trim().toLowerCase() === "artificer"
+			&& String(cls?.source || "").trim().toUpperCase() === "TCE"
+			&& ["name", "shortName"].some(prop =>
+				String(cls?.subclass?.[prop] || "").trim().toLowerCase() === "battle smith",
+			)
+			&& String(cls?.subclass?.source || "").trim().toUpperCase() === "TCE",
+		);
 		const hasSubclassBeast = classes.some(c => c.subclass?.name?.toLowerCase().includes("beast"));
+		const efaSteelDefenderUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		const efaSteelDefenderSetup = efaSteelDefenderUid
+			? this._state.getFeatureCompanionSetupRecord?.(efaSteelDefenderUid)
+			: null;
+		const hasEfaSteelDefenderSetup = efaSteelDefenderSetup?.eligibility === "active";
+		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
+
+		pendingSetups.forEach(setup => {
+			const callout = this._ce("section", "pm-companion-setup", container);
+			callout.setAttribute("role", "region");
+
+			const heading = this._ce("div", "pm-companion-setup__heading", callout);
+			heading.textContent = "Battle Smith setup incomplete";
+			const headingId = `pm-companion-setup-heading-${String(setup.ownerUid || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+			heading.id = headingId;
+			callout.setAttribute("aria-labelledby", headingId);
+
+			const missing = Array.isArray(setup.missingChoices) && setup.missingChoices.length
+				? `Missing: ${setup.missingChoices.join(", ")}.`
+				: "Choose your defender's appearance and body shape.";
+			const reason = this._ce("div", "pm-companion-setup__reason", callout);
+			reason.textContent = `${missing} You can defer without losing progress.`;
+			const reasonId = `pm-companion-setup-reason-${String(setup.ownerUid || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+			reason.id = reasonId;
+			reason.setAttribute("role", "status");
+			reason.setAttribute("aria-live", "polite");
+			reason.setAttribute("aria-atomic", "true");
+
+			const setupBtn = this._ce("button", "pm-companion-setup__btn", callout);
+			setupBtn.type = "button";
+			setupBtn.textContent = "Finish setup";
+			setupBtn.setAttribute("data-feature-companion-setup", setup.ownerUid);
+			setupBtn.setAttribute("aria-describedby", reasonId);
+			setupBtn.addEventListener("click", () => this._page.pShowFeatureCompanionSetup?.(
+				setup.ownerUid,
+				{
+					focusRestoreTarget: setupBtn,
+					getFocusRestoreTarget: () => this._page.getFeatureCompanionSetupFocusTarget?.(setup.ownerUid),
+				},
+			));
+		});
 
 		const toolbar = this._ce("div", "pm-companion-toolbar", container);
 
@@ -3051,7 +3396,7 @@ export class CharacterSheetPlayMode {
 		addCompBtn("eagle", "Familiar", hasWarlock || hasWizard, () => this._addBuiltinCompanion("familiar"));
 		addCompBtn("bear", "Beast Companion", hasRanger || hasSubclassBeast, () => this._addBuiltinCompanion("beast-companion"));
 		addCompBtn("dragon", "Drake", hasSubclassDrake, () => this._addBuiltinCompanion("drake"));
-		addCompBtn("settings", "Steel Defender", hasSubclassSteel || hasArtificer, () => this._addBuiltinCompanion("steel-defender"));
+		addCompBtn("settings", "Steel Defender", hasLegacyTceBattleSmith && !hasEfaSteelDefenderSetup, () => this._addBuiltinCompanion("steel-defender"));
 		addCompBtn("lion", "Wild Shape", hasDruid, () => this._addBuiltinCompanion("wild-shape"));
 		addCompBtn("nature", "Wild Companion", hasDruid, () => this._addBuiltinCompanion("wild-companion"));
 		addCompBtn("horse", "Find Steed", hasPaladin, () => this._addBuiltinCompanion("find-steed"));
@@ -3061,14 +3406,35 @@ export class CharacterSheetPlayMode {
 		customBtn.title = "Add a custom companion";
 		customBtn.addEventListener("click", () => this._showCustomCompanionModal());
 
-		const companions = this._state.getCompanions();
+		const companions = this._page.getFeatureCompanionLifecycleSurfaceCompanions?.()
+			|| this._state.getCompanions();
 		if (!companions.length) {
-			this._renderEmptyState(container, "companion", "No companions yet. Use the buttons above to add one.");
+			this._renderEmptyState(
+				container,
+				"companion",
+				pendingSetups.length
+					? "Complete the Battle Smith setup above to create your Steel Defender."
+					: "No companions yet. Use the buttons above to add one.",
+			);
 			return;
 		}
 
 		companions.forEach(comp => {
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
+			card.setAttribute("data-companion-id", comp.id);
+			const featureOperationModel = this._page.getFeatureCompanionOperationSurfaceModel?.(comp) || null;
+			const isRhwReanimator = featureOperationModel?.kind === "rhwReanimator"
+				|| this._page.isRhwReanimatorFeatureOwnedCompanion?.(comp) === true;
+			const isRhwLifecycleBlocked = isRhwReanimator
+				&& (comp.active === false || Number(comp.hp?.current) <= 0);
+			const lifecycle = this._page.getFeatureCompanionLifecyclePresentation?.(comp) || null;
+			const lifecycleReasonId = this._renderFeatureCompanionLifecycle(card, comp, lifecycle);
+			const isLifecycleBlocked = !!lifecycle && !lifecycle.isAlive;
+			const applyLifecycleDisabled = button => {
+				if (!isLifecycleBlocked || !button) return;
+				button.disabled = true;
+				button.setAttribute("aria-describedby", lifecycleReasonId);
+			};
 
 			// ── Interactive controls (B4) ────────────────────────────
 			const controls = this._ce("div", "pm-companion__controls", card);
@@ -3078,18 +3444,24 @@ export class CharacterSheetPlayMode {
 			this._setIconLabel(initiativeBtn, "initiative", ` Initiative ${this._fmtMod(initiative)}`);
 			initiativeBtn.title = `Roll initiative for ${comp.customName || comp.name || "companion"}`;
 			initiativeBtn.addEventListener("click", () => this._page._rollCompanionInitiative?.(comp));
+			applyLifecycleDisabled(initiativeBtn);
+			if (isRhwLifecycleBlocked) initiativeBtn.disabled = true;
 
-			// Heal button
-			const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
-			this._setIconLabel(healBtn, "heal", " Heal");
-			healBtn.title = "Heal companion";
-			healBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "heal", container));
+			if (!isRhwReanimator) {
+				// Heal button
+				const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
+				this._setIconLabel(healBtn, "heal", " Heal");
+				healBtn.title = "Heal companion";
+				healBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "heal", container));
+				applyLifecycleDisabled(healBtn);
 
-			// Damage button
-			const dmgBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--damage", controls);
-			this._setIconLabel(dmgBtn, "damage", " Damage");
-			dmgBtn.title = "Damage companion";
-			dmgBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "damage", container));
+				// Damage button
+				const dmgBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--damage", controls);
+				this._setIconLabel(dmgBtn, "damage", " Damage");
+				dmgBtn.title = "Damage companion";
+				dmgBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "damage", container));
+				applyLifecycleDisabled(dmgBtn);
+			}
 
 			// Statblock button
 			const statblockBtn = this._ce("button", "pm-companion__ctrl-btn", controls);
@@ -3107,17 +3479,20 @@ export class CharacterSheetPlayMode {
 				this._openDrawerByType("companions");
 			}));
 
-			// Dismiss button
-			const dismissBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--dismiss", controls);
-			this._setIconLabel(dismissBtn, "close", " Dismiss");
-			dismissBtn.title = "Remove this companion";
-			dismissBtn.addEventListener("click", () => {
-				if (!confirm(`Remove ${comp.name || "this companion"}?`)) return;
-				this._state.removeCompanion(comp.id);
-				this._persistCompanionMutation();
-				this._logActivity("companion", `Dismissed ${comp.name || "companion"}`);
-				this._openDrawerByType("companions");
-			});
+			if (!isRhwReanimator) {
+				// Dismiss button
+				const dismissBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--dismiss", controls);
+				this._setIconLabel(dismissBtn, "close", " Dismiss");
+				dismissBtn.title = "Remove this companion";
+				dismissBtn.addEventListener("click", () => {
+					if (!confirm(`Remove ${comp.name || "this companion"}?`)) return;
+					this._state.removeCompanion(comp.id);
+					this._persistCompanionMutation();
+					this._logActivity("companion", `Dismissed ${comp.name || "companion"}`);
+					this._openDrawerByType("companions");
+				});
+				applyLifecycleDisabled(dismissBtn);
+			}
 
 			// ── HP inline edit ──────────────────────────────────────
 			if (comp.hp?.max) {
@@ -3125,20 +3500,27 @@ export class CharacterSheetPlayMode {
 				const hpLabel = this._ce("span", "pm-companion__hp-label", hpRow);
 				hpLabel.textContent = "HP";
 
-				const hpInput = this._ce("input", "pm-companion__hp-input", hpRow);
-				hpInput.type = "number";
-				hpInput.min = "0";
-				hpInput.max = String(comp.hp.max);
-				hpInput.value = String(comp.hp.current ?? comp.hp.max);
-				hpInput.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
-				hpInput.addEventListener("change", () => {
-					const val = parseInt(hpInput.value);
-					if (!isNaN(val)) {
-						this._state.setCompanionHp(comp.id, val);
-						this._persistCompanionMutation();
-						this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
-					}
-				});
+				if (isRhwReanimator) {
+					const hpValue = this._ce("output", "pm-companion__hp-value", hpRow);
+					hpValue.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
+					hpValue.textContent = String(comp.hp.current ?? comp.hp.max);
+				} else {
+					const hpInput = this._ce("input", "pm-companion__hp-input", hpRow);
+					hpInput.type = "number";
+					hpInput.min = "0";
+					hpInput.max = String(comp.hp.max);
+					hpInput.value = String(comp.hp.current ?? comp.hp.max);
+					hpInput.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
+					hpInput.addEventListener("change", () => {
+						const val = parseInt(hpInput.value);
+						if (!isNaN(val)) {
+							this._state.setCompanionHp(comp.id, val);
+							this._persistCompanionMutation();
+							this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
+						}
+					});
+					applyLifecycleDisabled(hpInput);
+				}
 
 				const hpMax = this._ce("span", "pm-companion__hp-max", hpRow);
 				hpMax.textContent = `/ ${comp.hp.max}`;
@@ -3150,6 +3532,16 @@ export class CharacterSheetPlayMode {
 				hpBarFill.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
 				if (pct <= 25) hpBarFill.classList.add("pm-companion__hp-bar-fill--critical");
 				else if (pct <= 50) hpBarFill.classList.add("pm-companion__hp-bar-fill--bloodied");
+			}
+
+			if (comp.featureGrant?.uid && comp.scaling?.resolved) {
+				if (isRhwReanimator && !featureOperationModel) {
+					const warning = this._ce("div", "pm-companion-operations__reasons", card);
+					warning.setAttribute("role", "alert");
+					warning.textContent = "RHW operations are disabled because the source-qualified owner, creature identity, or resolved setup does not match. Review the Companions Manager diagnostics.";
+				} else {
+					this._renderFeatureCompanionOperations(card, comp, featureOperationModel);
+				}
 			}
 
 			// ── Stats row ───────────────────────────────────────────
@@ -3256,6 +3648,317 @@ export class CharacterSheetPlayMode {
 				});
 			}
 		});
+	}
+
+	_renderFeatureCompanionLifecycle (card, companion, presentation) {
+		if (!presentation) return null;
+		const id = `pm-feature-companion-lifecycle-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		const region = this._ce(
+			"section",
+			`pm-companion-lifecycle pm-companion-lifecycle--${presentation.tone}`,
+			card,
+		);
+		region.id = id;
+		region.setAttribute("role", "status");
+		region.setAttribute("aria-live", "polite");
+		region.setAttribute("aria-atomic", "true");
+		region.setAttribute("aria-labelledby", `${id}-label`);
+
+		const header = this._ce("div", "pm-companion-lifecycle__header", region);
+		const label = this._ce("strong", null, header);
+		label.id = `${id}-label`;
+		label.textContent = presentation.label;
+		const generation = this._ce("span", "pm-companion-lifecycle__generation", header);
+		generation.textContent = `Generation ${presentation.generation}`;
+		const summary = this._ce("div", "pm-companion-lifecycle__summary", region);
+		summary.id = `${id}-summary`;
+		summary.textContent = presentation.summary;
+		const guidance = this._ce("div", "pm-companion-lifecycle__guidance", region);
+		guidance.textContent = presentation.guidance;
+		const disabledReason = presentation.disabledReason
+			? this._ce("div", "pm-companion-lifecycle__disabled-reason", region)
+			: null;
+		const disabledReasonId = disabledReason ? `${id}-disabled-reason` : `${id}-summary`;
+		if (disabledReason) {
+			disabledReason.id = disabledReasonId;
+			disabledReason.textContent = presentation.disabledReason;
+		}
+
+		if (presentation.status === "dead") {
+			const actionRow = this._ce("div", "pm-companion-lifecycle__actions", region);
+			const revive = this._ce("button", "pm-companion__ctrl-btn", actionRow);
+			revive.type = "button";
+			revive.textContent = "Begin revival";
+			revive.disabled = !presentation.revival?.available;
+			revive.setAttribute("aria-describedby", `${id}-summary ${disabledReasonId} ${id}-action-reason`);
+			revive.setAttribute(
+				"data-feature-companion-lifecycle-key",
+				this._page.getFeatureCompanionLifecycleFocusKey?.(companion.id, "revival") || "",
+			);
+			revive.addEventListener("click", () => this._page.pUseFeatureCompanionLifecycle?.({
+				companionId: companion.id,
+				operation: "revival",
+			}));
+			const reason = this._ce("span", "pm-companion-lifecycle__action-reason", actionRow);
+			reason.id = `${id}-action-reason`;
+			reason.textContent = presentation.revival?.available
+				? "Commits your Magic Action, touch confirmation, and one spell slot."
+				: presentation.revival?.message || "Revival is unavailable.";
+		}
+
+		if (presentation.status === "revivalPending") {
+			const actionRow = this._ce("div", "pm-companion-lifecycle__actions", region);
+			const complete = this._ce("button", "pm-companion__ctrl-btn", actionRow);
+			complete.type = "button";
+			complete.textContent = "Complete revival (+1 minute)";
+			complete.disabled = !presentation.canCompleteRevival;
+			complete.setAttribute("aria-describedby", `${id}-summary ${disabledReasonId}`);
+			complete.setAttribute(
+				"data-feature-companion-lifecycle-key",
+				this._page.getFeatureCompanionLifecycleFocusKey?.(companion.id, "completeRevival") || "",
+			);
+			complete.addEventListener("click", () => this._page.pUseFeatureCompanionLifecycle?.({
+				companionId: companion.id,
+				operation: "completeRevival",
+			}));
+		}
+
+		return disabledReasonId;
+	}
+
+	_renderFeatureCompanionOperations (card, companion, surfaceModel = null) {
+		if (surfaceModel?.kind === "rhwReanimator") {
+			this._renderRhwReanimatorOperations(card, surfaceModel);
+			return;
+		}
+		const rend = this._page.getCompanionOperationAvailability?.(companion.id, "forceEmpoweredRend");
+		const repair = this._page.getCompanionOperationAvailability?.(companion.id, "repair");
+		const deflect = this._page.getCompanionOperationAvailability?.(companion.id, "deflectAttack");
+		if (!rend || !repair || !deflect) return;
+		const otherActionSpecs = [
+			{actionKey: "help", label: "Help"},
+			{actionKey: "dash", label: "Dash"},
+			{actionKey: "disengage", label: "Disengage"},
+			{actionKey: "hide", label: "Hide"},
+			{actionKey: "search", label: "Search"},
+		];
+		const dodge = this._page.getCompanionOperationAvailability?.(companion.id, "action", {actionKey: "dodge"});
+		const otherActions = Object.fromEntries(otherActionSpecs.map(spec => [
+			spec.actionKey,
+			this._page.getCompanionOperationAvailability?.(companion.id, "action", {actionKey: spec.actionKey}),
+		]));
+
+		const header = this._ce("div", "pm-card__header", card);
+		const title = this._ce("span", "pm-card__badge", header);
+		title.textContent = "Operate";
+		const operationId = `pm-companion-operations-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		title.id = `${operationId}-heading`;
+
+		const operationRegion = this._ce("section", "pm-companion-operations", card);
+		operationRegion.setAttribute("role", "region");
+		operationRegion.setAttribute("aria-labelledby", title.id);
+
+		const status = this._ce("div", "pm-feature__desc pm-companion-operations__status", operationRegion);
+		status.style.display = "block";
+		status.id = `${operationId}-status`;
+		status.textContent = `${rend.status.actionAvailable ? "Action ready" : "Action used"} • ${deflect.status.reactionAvailable ? "Reaction ready" : "Reaction used"} • default Dodge`;
+
+		const costs = this._ce("div", "pm-feature__desc", operationRegion);
+		costs.style.display = "block";
+		costs.textContent = rend.commandMethods.length
+			? rend.commandMethods
+				.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
+				.join(" • ")
+			: rend.message;
+		const ranges = this._ce("div", "pm-feature__desc", operationRegion);
+		ranges.style.display = "block";
+		ranges.textContent = "Rend: 5-foot reach • Repair: visible Construct/object within 5 feet • Deflect: visible attacker within 5 feet. Confirm ranges the sheet cannot verify.";
+		let rendCommandMethod = rend.availableCommandMethods[0]?.id || null;
+		if (rend.availableCommandMethods.length > 1) {
+			const commandLabel = this._ce("label", "pm-companion-operations__other-label", operationRegion);
+			commandLabel.textContent = "Rend owner cost";
+			const commandSelect = this._ce("select", "pm-companion-operations__select", commandLabel);
+			commandSelect.setAttribute("aria-describedby", `${operationId}-status`);
+			rend.availableCommandMethods.forEach(method => {
+				const option = this._ce("option", null, commandSelect);
+				option.value = method.id;
+				option.textContent = `${method.label}${method.available ? "" : ` — ${method.reason}`}`;
+				option.disabled = !method.available;
+			});
+			commandSelect.value = rendCommandMethod;
+			commandSelect.addEventListener("change", () => { rendCommandMethod = commandSelect.value; });
+		}
+
+		const controls = this._ce("div", "pm-companion__controls pm-companion-operations__controls", operationRegion);
+		controls.setAttribute("role", "group");
+		controls.setAttribute("aria-label", "Steel Defender feature operations");
+		const specs = [
+			{operation: "forceEmpoweredRend", label: "Rend", availability: rend},
+			{operation: "repair", label: `Repair ${companion.uses?.repair?.current || 0}/${companion.uses?.repair?.max || 0}`, availability: repair},
+			{operation: "deflectAttack", label: "Deflect", availability: deflect},
+			{operation: "action", actionKey: "dodge", label: "Dodge", availability: dodge},
+		];
+		specs.forEach(spec => {
+			const btn = this._ce("button", "pm-companion__ctrl-btn", controls);
+			btn.type = "button";
+			btn.textContent = spec.label;
+			btn.disabled = !spec.availability.available;
+			btn.setAttribute("aria-describedby", `${operationId}-status ${operationId}-reasons`);
+			btn.setAttribute(
+				"data-companion-operation-key",
+				this._page.getCompanionOperationFocusKey?.(companion.id, spec.operation, spec.actionKey) || "",
+			);
+			btn.title = spec.availability.message || (
+				spec.operation === "repair"
+					? "Confirm a visible Construct or object within 5 feet."
+					: spec.operation === "deflectAttack"
+						? "Confirm a visible attacker within 5 feet and a protected creature other than the defender."
+						: "5-foot melee weapon attack using your spell attack bonus."
+			);
+			btn.addEventListener("click", async () => {
+				const request = {
+					companionId: companion.id,
+					operation: spec.operation,
+					actionKey: spec.actionKey,
+				};
+				if (spec.operation === "forceEmpoweredRend" && rendCommandMethod) request.commandMethod = rendCommandMethod;
+				const result = await this._page.pUseCompanionOperation?.(request);
+				return result;
+			});
+		});
+
+		const otherActionGroup = this._ce("div", "pm-companion-operations__other", operationRegion);
+		const otherActionLabel = this._ce("label", "pm-companion-operations__other-label", otherActionGroup);
+		otherActionLabel.textContent = "Other action";
+		const otherActionSelect = this._ce("select", "pm-companion-operations__select", otherActionLabel);
+		otherActionSpecs.forEach(spec => {
+			const option = this._ce("option", null, otherActionSelect);
+			option.value = spec.actionKey;
+			option.textContent = spec.label;
+			option.disabled = !otherActions[spec.actionKey]?.available;
+		});
+		const otherActionBtn = this._ce("button", "pm-companion__ctrl-btn", otherActionGroup);
+		otherActionBtn.type = "button";
+		otherActionBtn.textContent = "Use action";
+		otherActionBtn.setAttribute("aria-describedby", `${operationId}-status ${operationId}-reasons`);
+		const updateOtherAction = () => {
+			const availability = otherActions[otherActionSelect.value];
+			otherActionBtn.disabled = !availability?.available;
+			otherActionBtn.title = availability?.message || `Use ${otherActionSelect.selectedOptions[0]?.textContent || "selected action"}.`;
+			otherActionBtn.setAttribute(
+				"data-companion-operation-key",
+				this._page.getCompanionOperationFocusKey?.(companion.id, "action", otherActionSelect.value) || "",
+			);
+		};
+		otherActionSelect.addEventListener("change", updateOtherAction);
+		otherActionBtn.addEventListener("click", () => this._page.pUseCompanionOperation?.({
+			companionId: companion.id,
+			operation: "action",
+			actionKey: otherActionSelect.value,
+		}));
+		updateOtherAction();
+
+		const resources = this._ce("div", "pm-feature__desc", operationRegion);
+		resources.style.display = "block";
+		resources.textContent = `Hit Dice ${companion.hitDice?.current || 0}/${companion.hitDice?.max || 0} ${companion.hitDice?.die || "d8"} • spend during Short Rest`;
+
+		const reasons = [
+			...specs
+				.filter(spec => !spec.availability.available)
+				.map(spec => `${spec.label}: ${spec.availability.message}`),
+			...otherActionSpecs
+				.filter(spec => !otherActions[spec.actionKey]?.available)
+				.map(spec => `${spec.label}: ${otherActions[spec.actionKey]?.message}`),
+		];
+		const reason = this._ce("div", "pm-feature__desc pm-companion-operations__reasons", operationRegion);
+		reason.style.display = "block";
+		reason.id = `${operationId}-reasons`;
+		reason.setAttribute("role", "status");
+		reason.setAttribute("aria-live", "polite");
+		reason.setAttribute("aria-atomic", "true");
+		reason.textContent = reasons.length ? reasons.join(" ") : "All listed operations are available.";
+	}
+
+	_renderRhwReanimatorOperations (card, model) {
+		const header = this._ce("div", "pm-card__header", card);
+		const title = this._ce("span", "pm-card__badge", header);
+		title.textContent = "Operate";
+		const operationId = `pm-companion-operations-${String(model.companionId || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		title.id = `${operationId}-heading`;
+
+		const region = this._ce("section", "pm-companion-operations pm-companion-operations--rhw", card);
+		region.setAttribute("role", "region");
+		region.setAttribute("aria-labelledby", title.id);
+		region.setAttribute("data-feature-companion-owner", model.ownerUid);
+
+		const summary = this._ce("div", "pm-feature__desc", region);
+		summary.style.display = "block";
+		summary.textContent = model.summary;
+		const status = this._ce("div", "pm-feature__desc pm-companion-operations__status", region);
+		status.style.display = "block";
+		status.id = `${operationId}-status`;
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		status.setAttribute("aria-atomic", "true");
+		status.textContent = model.statusText;
+		const costs = this._ce("div", "pm-feature__desc", region);
+		costs.style.display = "block";
+		costs.textContent = model.costText;
+		const ranges = this._ce("div", "pm-feature__desc", region);
+		ranges.style.display = "block";
+		ranges.textContent = model.rangeText;
+
+		const controls = this._ce("div", "pm-companion__controls pm-companion-operations__controls", region);
+		controls.setAttribute("role", "group");
+		controls.setAttribute("aria-label", model.heading);
+		model.controls.forEach(control => {
+			const btn = this._ce(
+				"button",
+				`pm-companion__ctrl-btn${control.tone === "danger" ? " pm-companion__ctrl-btn--damage" : ""}`,
+				controls,
+			);
+			btn.type = "button";
+			btn.textContent = control.label;
+			btn.disabled = !control.available;
+			btn.title = control.description || control.reason || control.label;
+			btn.setAttribute("aria-describedby", `${operationId}-status ${operationId}-reasons`);
+			btn.setAttribute(
+				"data-companion-operation-key",
+				this._page.getCompanionOperationFocusKey?.(model.companionId, control.operation, control.actionKey) || "",
+			);
+			btn.setAttribute("data-feature-companion-operation", control.operation);
+			btn.addEventListener("click", async () => {
+				if (btn.disabled) return;
+				btn.disabled = true;
+				btn.setAttribute("aria-busy", "true");
+				status.textContent = `Resolving ${control.label}…`;
+				try {
+					const result = await this._page.pUseFeatureCompanionOperation?.({
+						featureUid: model.ownerUid,
+						companionId: model.companionId,
+						operation: control.operation,
+						focusKey: btn.getAttribute("data-companion-operation-key"),
+					});
+					if (status.isConnected) status.textContent = this._page._getFeatureCompanionOperationResultMessage?.(result) || model.statusText;
+				} finally {
+					if (btn.isConnected) {
+						btn.disabled = false;
+						btn.removeAttribute("aria-busy");
+					}
+				}
+			});
+		});
+
+		const reasons = model.controls
+			.filter(control => !control.available)
+			.map(control => `${control.label}: ${control.reason}`);
+		const reason = this._ce("div", "pm-feature__desc pm-companion-operations__reasons", region);
+		reason.style.display = "block";
+		reason.id = `${operationId}-reasons`;
+		reason.setAttribute("role", "status");
+		reason.setAttribute("aria-live", "polite");
+		reason.setAttribute("aria-atomic", "true");
+		reason.textContent = reasons.length ? reasons.join(" ") : "All listed operations are available.";
 	}
 
 	/** D7: Delegate to existing companion/summon pickers, or show add-custom fallback */
@@ -3412,14 +4115,14 @@ export class CharacterSheetPlayMode {
 			// Cantrip concentration check
 			if (spell.concentration && this._state.isConcentrating?.()) {
 				this._promptConcentrationBreak(spell, () => {
-					this._state.setConcentration?.({name: spell.name, level: 0});
+					this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source});
 					this._logActivity("spell", `Cast ${spell.name} (cantrip, concentration)`);
 					this._renderStatusBar();
 				});
 				return;
 			}
 			if (spell.concentration) {
-				this._state.setConcentration?.({name: spell.name, level: 0});
+				this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source});
 			}
 			this._logActivity("spell", `Cast ${spell.name} (cantrip)`);
 			if (spell.concentration) this._renderStatusBar();
@@ -3471,12 +4174,12 @@ export class CharacterSheetPlayMode {
 		if (slot.isPact) {
 			this._state.setPactSlotsCurrent(slot.current - 1);
 		} else {
-			this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
+			this._state.setSpellSlotCurrent(slot.level, slot.current - 1, {isExpenditure: true});
 		}
 
 		// Set concentration
 		if (spell.concentration) {
-			this._state.setConcentration?.({name: spell.name, level: slot.level});
+			this._state.setConcentration?.({name: spell.name, level: slot.level, source: spell.source});
 		}
 
 		const slotLabel = slot.isPact ? `pact slot (lvl ${slot.level})` : (slot.level === spell.level ? `level ${slot.level}` : `upcast level ${slot.level}`);
@@ -3708,14 +4411,14 @@ export class CharacterSheetPlayMode {
 		cancelBtn.addEventListener("click", close);
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
-		const apply = () => {
+		const apply = async () => {
 			const val = parseInt(input.value);
 			if (isNaN(val) || val <= 0) return;
 			const dtype = dmgTypeSelect?.value === "other"
 				? (customDmgInput?.value.trim().toLowerCase() || "")
 				: (dmgTypeSelect?.value || "");
 			close();
-			this._applyHpChange(mode, val, dtype);
+			await this._applyHpChange(mode, val, dtype);
 		};
 
 		applyBtn.addEventListener("click", apply);
@@ -3728,7 +4431,7 @@ export class CharacterSheetPlayMode {
 		input.focus();
 	}
 
-	_applyHpChange (mode, val, damageType = "") {
+	async _applyHpChange (mode, val, damageType = "") {
 		if (mode === "heal") {
 			const current = this._state.getCurrentHp();
 			const max = this._state.getMaxHp();
@@ -3736,46 +4439,38 @@ export class CharacterSheetPlayMode {
 			this._state.setCurrentHp(newHp);
 			this._logActivity("heal", `Healed ${newHp - current} HP (${current} → ${newHp})`);
 		} else {
-			// Apply resistance/immunity/vulnerability through the model's single source of
-			// truth (CS-BUG-100), so the preview above, this application and
-			// `CharacterSheetState.takeDamage()` cannot disagree about the number.
+			const beforeHp = this._state.getCurrentHp();
+			const beforeTemp = this._state.getTempHp();
 			const defenses = this._state.applyDamageDefenses(val, damageType);
-			const effective = defenses.damage;
+			if (typeof this._page._pApplyDamage === "function") {
+				await this._page._pApplyDamage(val, {damageType});
+			} else {
+				this._state.takeDamage(val, {damageType});
+				await this._page._pOfferZeroHpIntervention?.();
+				if (this._state.isConcentrating?.()) {
+					const protection = this._state.getDamageConcentrationProtection?.();
+					if (protection) {
+						const spellName = this._state.getConcentrationLabel?.() || "the spell";
+						this._logActivity("shield", `${protection.name}: damage can't end concentration on ${spellName}`);
+					} else {
+						this._doConcentrationCheck(defenses.damage);
+					}
+				}
+			}
+			const afterHp = this._state.getCurrentHp();
+			const afterTemp = this._state.getTempHp();
+
 			if (defenses.applied === "immunity") {
 				this._logActivity("shield", `Immune to ${val} ${damageType} damage`);
-				this._renderStatusBar();
-				return;
-			}
-
-			let remaining = effective;
-			const temp = this._state.getTempHp();
-
-			// Absorb with temp HP first
-			if (temp > 0) {
-				const absorbed = Math.min(temp, remaining);
-				this._state.setTempHp(temp - absorbed);
-				remaining -= absorbed;
-			}
-
-			if (remaining > 0) {
-				const current = this._state.getCurrentHp();
-				const newHp = Math.max(0, current - remaining);
-				this._state.setCurrentHp(newHp);
-				// `effective < val` used to be read as "resistance" unconditionally, which
-				// became wrong the moment flat damage reduction started applying: a reduced
-				// hit is also smaller than the raw amount. Name the steps that actually ran.
+			} else {
 				const steps = [];
 				if (defenses.reduction) steps.push(`−${defenses.reduction} reduction`);
 				if (defenses.applied) steps.push(defenses.applied);
-				const suffix = steps.length ? ` (${val} ${damageType} → ${effective} after ${steps.join(", then ")})` : "";
-				this._logActivity("damage", `Took ${effective} damage${suffix} → ${newHp} HP`);
-			} else {
-				this._logActivity("shield", `Temp HP absorbed ${effective} damage`);
-			}
-
-			// Concentration auto-check
-			if (this._state.isConcentrating?.()) {
-				this._doConcentrationCheck(effective);
+				const suffix = steps.length ? ` (${val} ${damageType} → ${defenses.damage} after ${steps.join(", then ")})` : "";
+				const hpLost = Math.max(0, beforeHp - afterHp);
+				const tempLost = Math.max(0, beforeTemp - afterTemp);
+				if (!hpLost && tempLost) this._logActivity("shield", `Temp HP absorbed ${tempLost} damage`);
+				else this._logActivity("damage", `Took ${defenses.damage} damage${suffix} → ${afterHp} HP`);
 			}
 		}
 
@@ -3997,12 +4692,12 @@ export class CharacterSheetPlayMode {
 				overlay.remove();
 				if (spell.concentration && this._state.isConcentrating?.()) {
 					this._promptConcentrationBreak(spell, () => {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 						this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 						this._renderStatusBar();
 					});
 				} else {
-					if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+					if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 					this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 					this._renderStatusBar();
 				}

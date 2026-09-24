@@ -1,5 +1,6 @@
 import {Page, expect} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
+import type {StateTransactionStep} from "../pages/CharacterSheetPage";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -26,6 +27,8 @@ import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 export interface InventoryItemRef {
 	name: string;
 	source?: string;
+	/** If true, do not fall back to an equivalent item from another edition/source. */
+	strictSource?: boolean;
 	/** If true, equip the item after adding it. */
 	equipped?: boolean;
 	/** If true and the item has charges, treat as attuned magic item. */
@@ -44,7 +47,7 @@ export interface InventoryItemRef {
 export async function addInventoryItems (page: Page, items: InventoryItemRef[]): Promise<void> {
 	for (const item of items) {
 		if (page.isClosed()) throw new Error("addInventoryItems: page closed mid-loop (earlier failure?)");
-		const result = await page.evaluate(async ({name, source, equipped, attune}) => {
+		const result = await page.evaluate(async ({name, source, strictSource, equipped, attune}) => {
 			const cs: any = (globalThis as any).charSheet;
 			if (!cs?._state) return {ok: false, reason: "charSheet not initialised"};
 
@@ -59,11 +62,13 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 
 			// Try DMG ↔ XDMG fallback for magic items that moved books.
 			const sourceVariants = new Set<string>([source || "PHB"]);
-			if (!source) sourceVariants.add("XPHB");
-			else if (source.toUpperCase() === "DMG") sourceVariants.add("XDMG");
-			else if (source.toUpperCase() === "XDMG") sourceVariants.add("DMG");
-			else if (source.toUpperCase() === "PHB") sourceVariants.add("XPHB");
-			else if (source.toUpperCase() === "XPHB") sourceVariants.add("PHB");
+			if (!strictSource) {
+				if (!source) sourceVariants.add("XPHB");
+				else if (source.toUpperCase() === "DMG") sourceVariants.add("XDMG");
+				else if (source.toUpperCase() === "XDMG") sourceVariants.add("DMG");
+				else if (source.toUpperCase() === "PHB") sourceVariants.add("XPHB");
+				else if (source.toUpperCase() === "XPHB") sourceVariants.add("PHB");
+			}
 
 			// Attempt 1: use the public addItemByUid helper if available.
 			if (typeof cs._state.addItemByName === "function") {
@@ -94,9 +99,22 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 			if (!entry) {
 				// Fall back to scanning the global brew + site combined cache
 				const all = await DL.pCacheAndGetAllSite?.("item").catch(() => []) || [];
-				for (const nm of nameVariants) {
-					entry = all.find((it: any) => it.name?.toLowerCase() === nm.toLowerCase());
-					if (entry) break;
+				if (!strictSource) {
+					for (const nm of nameVariants) {
+						entry = all.find((it: any) => it.name?.toLowerCase() === nm.toLowerCase());
+						if (entry) break;
+					}
+				} else {
+					for (const src of sourceVariants) {
+						for (const nm of nameVariants) {
+							entry = all.find((it: any) =>
+								it.name?.toLowerCase() === nm.toLowerCase()
+								&& it.source?.toUpperCase() === src.toUpperCase(),
+							);
+							if (entry) break;
+						}
+						if (entry) break;
+					}
 				}
 			}
 			if (!entry) return {ok: false, reason: `item not found: ${[...nameVariants].join("/")}|${[...sourceVariants].join("/")}`};
@@ -147,7 +165,13 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 			cs._state.markChanged?.();
 			cs.render?.();
 			return {ok: true, via: "manual-push"};
-		}, {name: item.name, source: item.source, equipped: item.equipped, attune: item.attune});
+		}, {
+			name: item.name,
+			source: item.source,
+			strictSource: item.strictSource,
+			equipped: item.equipped,
+			attune: item.attune,
+		});
 
 		if (!result?.ok) {
 			throw new Error(`addInventoryItems: failed to add "${item.name}|${item.source || "*"}" — ${result?.reason}`);
@@ -460,6 +484,8 @@ export interface MilestoneExpect {
 	pactSlots?: {level?: number; max?: number};
 	/** Names of feature toggles that must be present on the Features tab. */
 	expectToggles?: (string | RegExp)[];
+	/** Exact source-qualified class/subclass feature UIDs that must be present. */
+	expectFeatureUids?: string[];
 	/** Resource trackers that must exist with max≥value. */
 	expectResources?: Record<string, number>;
 }
@@ -515,6 +541,12 @@ export async function assertMilestone (charSheet: CharacterSheetPage, expected: 
 		for (const want of expected.expectToggles) {
 			const re = want instanceof RegExp ? want : new RegExp(want, "i");
 			expect(features.some(f => re.test(f)), `expected toggle matching ${re}`).toBe(true);
+		}
+	}
+
+	if (expected.expectFeatureUids?.length) {
+		for (const uid of expected.expectFeatureUids) {
+			expect(await charSheet.hasClassFeatureUid(uid), `expected exact feature ${uid}`).toBe(true);
 		}
 	}
 
@@ -685,6 +717,8 @@ export interface FeatureCheck {
 	untilLevel?: number;
 	/** Display name on the sheet (regex preferred for resilience). */
 	name: string | RegExp;
+	/** Exact source-qualified class-feature UID, when source identity is load-bearing. */
+	featureUid?: string;
 	/** Check kind. */
 	kind: "toggle" | "resource" | "spells" | "passive" | "pick";
 	/**
@@ -733,6 +767,8 @@ export interface FeatureCheck {
 	 * handler so a feature that's not even present fails fast.
 	 */
 	effects?: EffectCheck[];
+	/** Explicit standard-#22 reason for a deliberately existence-only narrative row. */
+	effectReason?: string;
 	/**
 	 * Active-state ids that must be ON before this entry's TOGGLE effects can
 	 * be probed, for toggles declaring `requiresStates` in `ACTIVE_STATE_TYPES`
@@ -758,6 +794,15 @@ type SpeedType = "walk" | "fly" | "swim" | "climb" | "burrow";
 interface _EffectCommon {
 	skip?: boolean;
 	skipReason?: string;
+}
+
+interface ProjectionExpectation {
+	path: string;
+	exact?: number | string | boolean | null;
+	min?: number;
+	contains?: string;
+	equalsPath?: string;
+	offset?: number;
 }
 
 /**
@@ -793,6 +838,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
+	| {kind: "attunementCap"; exact: number}
 	| {kind: "combatActionEconomyText"; includes: string[]}
 	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean; isNull?: boolean}
 	// Assert a `getFeatureCalculations()` number is DERIVED from a live
@@ -803,7 +849,7 @@ export type EffectCheck = _EffectCommon & (
 	//   spellSaveDc       → getSpellSaveDcForAbility(ability)
 	//   spellAttackBonus  → getSpellAttackBonusForAbility(ability)
 	//   proficiencyBonus  → getProficiencyBonus()
-	| {kind: "featureCalculationDerivedFrom"; property: string; equals: "abilityMod" | "spellSaveDc" | "spellAttackBonus" | "proficiencyBonus"; ability?: AblKey; offset?: number}
+	| {kind: "featureCalculationDerivedFrom"; property: string; equals: "abilityMod" | "spellSaveDc" | "spellAttackBonus" | "proficiencyBonus"; ability?: AblKey; multiplier?: number; offset?: number}
 	// Generic escape hatch: call a `CharacterSheetState` method and assert on the
 	// returned value. Use when a feature's mechanic is exposed through a bespoke
 	// state API rather than a flat calculation field (e.g. a computed cost, a
@@ -832,7 +878,16 @@ export type EffectCheck = _EffectCommon & (
 		 */
 		isNull?: boolean;
 	}
+	| {kind: "stateTransaction"; steps: StateTransactionStep[]; restore?: boolean}
 	| {kind: "gamblerProbe"; probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"}
+	| {
+		kind: "cartographerProbe";
+		probe: "tools" | "toolPersistence" | "spells" | "atlas" | "mappingMagic" | "guidedPrecision" | "guidedPrecisionSpell" | "ingeniousMovement" | "superiorAtlas" | "lifecycle" | "lifecycleSpellCleanup" | "progression";
+		spellThreshold?: 3 | 5 | 9 | 13 | 17;
+	}
+	| {kind: "efaArtilleristProbe"; probe: "baseCannon" | "arcaneFirearm" | "explosiveCannon" | "fortifiedPosition"}
+	| {kind: "efaArmorerProbe"; probe: "core" | "models" | "improved" | "perfected" | "progression"}
+	| {kind: "rhwReanimatorProbe"; probe: "l3Lifecycle" | "arcaneConduit" | "macabreModifications" | "refinedReanimation" | "roundTripRespec"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {
@@ -881,8 +936,87 @@ export type EffectCheck = _EffectCommon & (
 	// and only verify that ≥1 spell of that level surfaces — useful
 	// when the spell list mechanism is the thing under test, not any
 	// specific spell name.
-	| {kind: "spellInList"; spell: string; spellMatchMode?: "first-party" | "tgtt-flavor" | "any"; level?: number}
+	| {kind: "spellInList"; spell: string; source?: string; spellMatchMode?: "first-party" | "tgtt-flavor" | "any"; level?: number}
 	| {kind: "cantripCount"; min: number}
+	/**
+	 * Assert one exact stored class/subclass feature identity and reject
+	 * source-qualified same-name alternatives. The UID shape is:
+	 * Name|Class|ClassSource|Subclass|SubclassSource|Level|FeatureSource.
+	 */
+	| {kind: "sourceQualifiedFeature"; uid: string; excludedUids?: string[]}
+	/**
+	 * Project a feature-owned companion through the source-qualified State
+	 * APIs and assert paths on both its persisted runtime row and canonical
+	 * resolved rules. Generic enough for any registry-backed class companion.
+	 */
+	| {
+		kind: "featureCompanionProjection";
+		ownerUid: string;
+		excludedOwnerUids?: string[];
+		checks: ProjectionExpectation[];
+	}
+	| {
+		kind: "toolProficiencies";
+		includes: string[];
+		feature?: {
+			name: string;
+			source: string;
+			className: string;
+			classSource: string;
+			subclassName?: string;
+			subclassSource?: string;
+			level: number;
+		};
+		excludedFeatureSources?: string[];
+		conditionalGrantKey?: string;
+	}
+	| {
+		kind: "preparedSpellGrants";
+		sourceFeature: string;
+		className: string;
+		classSource: string;
+		subclassName: string;
+		subclassSource: string;
+		grants: Array<{level: number; name: string; source: string}>;
+		expectPreparedAllowanceFilled?: boolean;
+	}
+	| {
+		kind: "craftingTimeCalculation";
+		recipeCategory: string;
+		rarity: string;
+		expectValueAbsent?: boolean;
+		baselineWorkweeks: number;
+		effectiveWorkweeks: number;
+		multiplier: number;
+		sourceUid: string;
+		sourceMultiplier?: number;
+		allowAdditionalSources?: boolean;
+	}
+	| {
+		kind: "sourceQualifiedRoundTrip";
+		className: string;
+		classSource: string;
+		subclassName: string;
+		subclassSource: string;
+		featureUids: Array<{level: number; uid: string}>;
+		spellGrants?: Array<{level: number; name: string; source: string}>;
+		spellGrantSourceFeature?: string;
+		incompatibleSubclassSources?: string[];
+	}
+	| {kind: "efaArtificerPlans"}
+	| {kind: "efaExperimentalElixirUi"}
+	| {
+		kind: "sourceQualifiedInnateSpellFlow";
+		spellName: string;
+		spellSource: string;
+		ownerUid: string;
+		classUid: string;
+		sourceFeatureUid: string;
+		expectedMax: number | "abilityMod";
+		expectedSlotLevel: number;
+		ability?: AblKey;
+	}
+	| {kind: "efaAlchemistCastFollowUp"; probe: "savant" | "eruption"}
 
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
 	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey; floor?: number}
@@ -1252,7 +1386,7 @@ function _hasDamageType (list: string[], dt: string): boolean {
 	return list.some(x => x.toLowerCase().includes(t));
 }
 
-async function _runPassiveOrRollEffect (
+export async function runEffectCheck (
 	charSheet: CharacterSheetPage,
 	e: EffectCheck,
 	currentLevel?: number,
@@ -1323,6 +1457,11 @@ async function _runPassiveOrRollEffect (
 		case "initiative": {
 			const v = await charSheet.getInitiativeBonusFromState();
 			_checkNumeric(v, e, `init`);
+			return;
+		}
+		case "attunementCap": {
+			const cap = await charSheet.getMaxAttunement();
+			if (cap !== e.exact) throw new Error(`attunement cap=${cap}, expected ${e.exact}`);
 			return;
 		}
 		case "featureCalculation": {
@@ -1487,9 +1626,9 @@ async function _runPassiveOrRollEffect (
 				return {err: null as string | null, actual: calc[cfg.property], expected};
 			}, {property: e.property, equals: e.equals, ability: e.ability});
 			if (res.err) throw new Error(`featureCalculationDerivedFrom: ${res.err}`);
-			const want = Number(res.expected) + (e.offset ?? 0);
+			const want = Number(res.expected) * (e.multiplier ?? 1) + (e.offset ?? 0);
 			if (Number(res.actual) !== want) {
-				throw new Error(`featureCalculation.${e.property}=${res.actual}, expected ${e.equals}(${e.ability ?? ""})${e.offset ? ` + ${e.offset}` : ""} = ${want}`);
+				throw new Error(`featureCalculation.${e.property}=${res.actual}, expected ${e.equals}(${e.ability ?? ""})${e.multiplier && e.multiplier !== 1 ? ` × ${e.multiplier}` : ""}${e.offset ? ` + ${e.offset}` : ""} = ${want}`);
 			}
 			return;
 		}
@@ -1537,6 +1676,127 @@ async function _runPassiveOrRollEffect (
 			}
 			return;
 		}
+		case "sourceQualifiedFeature": {
+			const result = await charSheet.page.evaluate(({uid, excludedUids}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const normalizeUid = (value: string) => {
+					const parts = String(value).split("|");
+					if (parts.length !== 5) return value;
+					const [name, className, classSource, level, featureSource] = parts;
+					return [name, className, classSource, "", "", level, featureSource].join("|");
+				};
+				const toUid = (feature: any) => [
+					feature?.name,
+					feature?.className,
+					feature?.classSource,
+					feature?.subclassShortName,
+					feature?.subclassSource,
+					feature?.level,
+					feature?.source,
+				].map(value => String(value ?? "")).join("|");
+				const uids = (state?.getFeatures?.() || []).map(toUid);
+				const lower = new Set(uids.map((it: string) => it.toLowerCase()));
+				const expectedUid = normalizeUid(uid);
+				const expectedExcludedUids = (excludedUids || []).map(normalizeUid);
+				return {
+					present: lower.has(expectedUid.toLowerCase()),
+					excludedPresent: expectedExcludedUids.filter((it: string) => lower.has(it.toLowerCase())),
+					uids,
+				};
+			}, {uid: e.uid, excludedUids: e.excludedUids || []});
+			if (!result.present) {
+				throw new Error(`source-qualified feature "${e.uid}" missing. seen=[${result.uids.join(", ")}]`);
+			}
+			if (result.excludedPresent.length) {
+				throw new Error(`source leakage: excluded feature UID(s) present [${result.excludedPresent.join(", ")}]`);
+			}
+			return;
+		}
+		case "featureCompanionProjection": {
+			const projection = await charSheet.page.evaluate(({ownerUid, excludedOwnerUids}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (!state) return {__error: "no state"};
+				const companions = state.getFeatureOwnedCompanions?.(ownerUid) || [];
+				const companion = companions[0] || null;
+				const context = state.getFeatureCompanionSummonerContext?.(ownerUid) || null;
+				const rules = context ? state.resolveFeatureCompanionRules?.(ownerUid, context) || null : null;
+				const runtimeResolved = companion?.scaling?.resolved || null;
+				return {
+					count: companions.length,
+					setup: state.getFeatureCompanionSetupRecord?.(ownerUid) || null,
+					companion: companion ? {
+						id: companion.id,
+						name: companion.name,
+						source: companion.source,
+						ownerUid: companion.featureGrant?.uid || null,
+						hpMax: companion.hp?.max ?? companion.maxHp ?? null,
+						ac: companion.ac ?? null,
+						repairUsesMax: companion.uses?.repair?.max ?? null,
+						hitDiceMax: companion.hitDice?.max ?? null,
+						resolved: runtimeResolved,
+					} : null,
+					context,
+					rules,
+					matchesResolved: companion && rules ? {
+						hp: (companion.hp?.max ?? companion.maxHp ?? null) === rules.statistics?.maxHp,
+						ac: companion.ac === rules.statistics?.ac,
+						repairUses: companion.uses?.repair?.max === rules.actions?.repair?.uses?.max,
+						hitDice: companion.hitDice?.max === rules.statistics?.hitDice?.count,
+						identity: companion.name === rules.identity?.name
+							&& companion.source === rules.identity?.source
+							&& companion.featureGrant?.uid === ownerUid,
+					} : null,
+					excludedCounts: Object.fromEntries((excludedOwnerUids || []).map((uid: string) => [
+						uid,
+						state.getFeatureOwnedCompanions?.(uid)?.length || 0,
+					])),
+				};
+			}, {ownerUid: e.ownerUid, excludedOwnerUids: e.excludedOwnerUids || []});
+			if ((projection as any).__error) throw new Error(`featureCompanionProjection(${e.ownerUid}): ${(projection as any).__error}`);
+
+			const readPath = (root: any, path: string): any =>
+				path.split(".").reduce((cursor, segment) => cursor == null ? null : cursor[segment], root);
+			for (const check of e.checks) {
+				const actual = readPath(projection, check.path);
+				const label = `featureCompanionProjection(${e.ownerUid}).${check.path}`;
+				if (check.exact !== undefined && actual !== check.exact) {
+					throw new Error(`${label}=${JSON.stringify(actual)}, expected ${JSON.stringify(check.exact)}`);
+				}
+				if (check.min !== undefined && (typeof actual !== "number" || actual < check.min)) {
+					throw new Error(`${label}=${JSON.stringify(actual)}, expected >= ${check.min}`);
+				}
+				if (check.contains !== undefined) {
+					const rendered = Array.isArray(actual) ? actual.map(it => JSON.stringify(it)) : [String(actual)];
+					if (!rendered.some(it => it.toLowerCase().includes(check.contains!.toLowerCase()))) {
+						throw new Error(`${label}=${JSON.stringify(actual)}, expected to contain "${check.contains}"`);
+					}
+				}
+				if (check.equalsPath) {
+					const expected = readPath(projection, check.equalsPath);
+					const want = typeof expected === "number" ? expected + (check.offset || 0) : expected;
+					if (actual !== want) {
+						throw new Error(`${label}=${JSON.stringify(actual)}, expected ${check.equalsPath}${check.offset ? ` + ${check.offset}` : ""} = ${JSON.stringify(want)}`);
+					}
+				}
+				if (
+					check.exact === undefined
+					&& check.min === undefined
+					&& check.contains === undefined
+					&& !check.equalsPath
+					&& actual == null
+				) {
+					throw new Error(`${label} is absent`);
+				}
+			}
+			for (const uid of e.excludedOwnerUids || []) {
+				const count = (projection as any).excludedCounts?.[uid] ?? 0;
+				if (count !== 0) throw new Error(`source leakage: ${count} companion(s) owned by excluded UID "${uid}"`);
+			}
+			return;
+		}
+		case "stateTransaction":
+			await charSheet.runStateTransaction(e.steps, {restore: e.restore !== false});
+			return;
 		case "gamblerProbe": {
 			// The MEGA matrix rechecks the L3 row at every later level. Run the
 			// expensive real-browser lifecycle once per matrix invocation; later
@@ -1547,6 +1807,46 @@ async function _runPassiveOrRollEffect (
 			const result = await charSheet.probeGamblerFlow(e.probe);
 			if (!result?.ok) throw new Error(`Gambler ${e.probe} probe failed: ${result?.error || "unknown error"}`);
 			if (e.probe === "ui") _gamblerUiProbeCompleted = true;
+			return;
+		}
+		case "cartographerProbe": {
+			const owningLevel = e.probe === "tools" || e.probe === "toolPersistence" || e.probe === "atlas" || e.probe === "mappingMagic"
+				? 3
+				: e.probe === "guidedPrecision" || e.probe === "guidedPrecisionSpell"
+					? 5
+					: e.probe === "ingeniousMovement"
+						? 9
+						: e.probe === "superiorAtlas"
+							? 15
+							: e.probe === "lifecycle" || e.probe === "lifecycleSpellCleanup"
+								? 17
+								: e.probe === "progression"
+									? 19
+									: e.spellThreshold;
+			if (owningLevel != null && currentLevel != null && currentLevel !== owningLevel) return;
+			await charSheet.probeCartographerFlow(e.probe, e.spellThreshold);
+			return;
+		}
+		case "efaArtilleristProbe": {
+			const result = await charSheet.probeEfaArtilleristFlow(e.probe);
+			if (!result?.ok) throw new Error(`EFA Artillerist ${e.probe} probe failed: ${result?.error || "unknown error"}`);
+			return;
+		}
+		case "efaArmorerProbe": {
+			const owningLevel = e.probe === "core" || e.probe === "models"
+				? 3
+				: e.probe === "improved"
+					? 9
+					: e.probe === "perfected"
+						? 15
+						: 19;
+			if (currentLevel != null && currentLevel !== owningLevel) return;
+			await charSheet.probeEfaArmorerFlow(e.probe);
+			return;
+		}
+		case "rhwReanimatorProbe": {
+			const result = await charSheet.probeRhwReanimatorFlow(e.probe);
+			if (!result?.ok) throw new Error(`RHW Reanimator ${e.probe} probe failed: ${result?.error || "unknown error"}`);
 			return;
 		}
 		case "proficiency": {
@@ -1864,12 +2164,23 @@ async function _runPassiveOrRollEffect (
 			// review; the runtime check is identical.
 			// Cantrips live in their own list on the sheet, so a subclass that
 			// grants one through `additionalSpells` only shows up once both
-			// lists are unioned.
+			// lists are unioned. Innate grants are stored separately again, so
+			// include them as well for species and feature spell grants.
 			const cantrips = await charSheet.getCantripNames().catch(() => [] as string[]);
-			const pool = [...known, ...cantrips];
+			const innate = await charSheet.getInnateSpellNames().catch(() => [] as string[]);
+			const pool = [...known, ...cantrips, ...innate];
 			const want = e.spell.toLowerCase();
 			if (!pool.some(n => n.toLowerCase() === want)) {
 				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${pool.slice(0, 30).join(", ")}…`);
+			}
+			if (e.source) {
+				const exact = await charSheet.page.evaluate(({name, source}) => {
+					const spells = (globalThis as any).charSheet?._state?.getSpells?.() || [];
+					return spells.some((spell: any) =>
+						String(spell?.name || "").toLowerCase() === name.toLowerCase()
+						&& String(spell?.source || "").toLowerCase() === source.toLowerCase());
+				}, {name: e.spell, source: e.source});
+				if (!exact) throw new Error(`spell "${e.spell}|${e.source}" not in source-qualified spellbook`);
 			}
 			return;
 		}
@@ -1879,6 +2190,30 @@ async function _runPassiveOrRollEffect (
 			if (count < e.min) throw new Error(`cantrip count ${count} < ${e.min}`);
 			return;
 		}
+		case "toolProficiencies":
+			await charSheet.probeToolProficiencies(e);
+			return;
+		case "preparedSpellGrants":
+			await charSheet.probePreparedSpellGrants({...e, currentLevel: currentLevel ?? 0});
+			return;
+		case "craftingTimeCalculation":
+			await charSheet.probeCraftingTimeCalculation(e);
+			return;
+		case "sourceQualifiedRoundTrip":
+			await charSheet.probeSourceQualifiedRoundTrip({...e, currentLevel: currentLevel ?? 0});
+			return;
+		case "efaArtificerPlans":
+			await charSheet.probeEfaArtificerPlans();
+			return;
+		case "efaExperimentalElixirUi":
+			await charSheet.probeEfaExperimentalElixirUi();
+			return;
+		case "sourceQualifiedInnateSpellFlow":
+			await charSheet.probeSourceQualifiedInnateSpellFlow(e);
+			return;
+		case "efaAlchemistCastFollowUp":
+			await charSheet.probeEfaAlchemistCastFollowUp(e.probe);
+			return;
 		case "rollAbilityCheck": {
 			const r = await charSheet.clickAbilityRoll(e.ability, "check");
 			// Dismiss BEFORE asserting: a thrown assertion must not leave a
@@ -3272,6 +3607,9 @@ export async function assertFeaturesMatrix (
 		const visibleToggleable = fc.requiresStates?.length ? gatedToggleable : toggleable;
 
 		try {
+			if (fc.featureUid && !await charSheet.hasClassFeatureUid(fc.featureUid)) {
+				throw new Error(`source-qualified feature UID "${fc.featureUid}" not present`);
+			}
 			switch (fc.kind) {
 				case "passive": {
 					if (!visibleFeatures.some(f => re.test(f))) {
@@ -3564,7 +3902,10 @@ export async function assertFeaturesMatrix (
 				// per-pick effects.
 				const expandedEffects: EffectCheck[] = [];
 				for (const eff of fc.effects) {
-					if (eff.skip) continue;
+					if (eff.skip) {
+						console.log(`[features matrix] ${label} effect ${eff.kind} skipped — ${eff.skipReason || "no reason supplied"}`);
+						continue;
+					}
 					if (eff.kind === "pickedFeatureGrants") {
 						const pickRe = eff.pickName instanceof RegExp
 							? eff.pickName
@@ -3585,7 +3926,7 @@ export async function assertFeaturesMatrix (
 				const toggleEffects = expandedEffects.filter(e => _TOGGLE_EFFECT_KINDS.has(e.kind));
 
 				for (const eff of passiveOrRoll) {
-					try { await _runPassiveOrRollEffect(charSheet, eff, currentLevel); }
+					try { await runEffectCheck(charSheet, eff, currentLevel); }
 					catch (eErr: any) { errors.push(`${label} effect ${eff.kind}: ${eErr.message}`); }
 				}
 

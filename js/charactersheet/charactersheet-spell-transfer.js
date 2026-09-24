@@ -136,6 +136,7 @@ export class CharacterSheetSpellTransfer {
 			});
 			if (isSubclassSpell && subclass?.name && attribution.sourceClass !== "Gambler") {
 				attribution.sourceSubclass = subclass.shortName || subclass.name;
+				attribution.sourceSubclassSource = subclass.source || null;
 			}
 
 			return {

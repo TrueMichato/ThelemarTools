@@ -1137,6 +1137,25 @@
 							</div>
 						</div>
 
+						<!-- EFA Artillerist Eldritch Cannon (dedicated generated class-summon surface) -->
+						<div class="charsheet__section charsheet__efa-cannon-section" id="charsheet-combat-efa-cannon-section" style="display: none;" role="region" aria-labelledby="charsheet-combat-efa-cannon-title">
+							<div class="charsheet__efa-cannon-section-header">
+								<h4 class="charsheet__section-title" id="charsheet-combat-efa-cannon-title">💥 Eldritch Cannon</h4>
+								<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__efa-cannon-create" id="charsheet-combat-efa-cannon-create">Create Cannon</button>
+							</div>
+							<div class="charsheet__efa-cannon-feedback" id="charsheet-combat-efa-cannon-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+							<div id="charsheet-combat-efa-cannon">
+								<!-- EFA cannon empty state or dedicated cannon card rendered here -->
+							</div>
+						</div>
+
+						<div class="charsheet__section charsheet__arcane-firearm-section" id="charsheet-combat-arcane-firearm-section" style="display: none;" role="region" aria-labelledby="charsheet-combat-arcane-firearm-title">
+							<h4 class="charsheet__section-title" id="charsheet-combat-arcane-firearm-title">🔥 Arcane Firearm</h4>
+							<div id="charsheet-combat-arcane-firearm" role="status" aria-live="polite" aria-atomic="true">
+								<!-- EFA Arcane Firearm binding and usability status rendered here -->
+							</div>
+						</div>
+
 						<!-- Vitality of the Tree Section (World Tree Barbarian — Vitality Surge / Life-Giving Force) -->
 						<div class="charsheet__section" id="charsheet-combat-vitality-section" style="display: none;">
 							<h4 class="charsheet__section-title">🌳 Vitality of the Tree</h4>
@@ -1462,6 +1481,10 @@
 									<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-add-custom-item"><span class="glyphicon glyphicon-pencil"></span> Custom</button>
 									<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-harvest" title="Harvest materials from a creature you've felled">🧺 Harvest</button>
 									<button class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-craft" title="See what you can make with what you're carrying">🔨 Craft</button>
+									<button type="button" class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-manage-generated-items" title="Review temporary generated items, repair status, and explicit lifecycle days">Generated Items</button>
+									<button type="button" class="ve-btn ve-btn-default ve-btn-xs mr-2" id="charsheet-btn-efa-tinkers-magic" style="display: none;">
+										Tinker's Magic <span class="charsheet__efa-tinker-toolbar-uses" aria-hidden="true"></span>
+									</button>
 									<div class="charsheet__inventory-view-toggle ml-auto">
 										<button class="ve-btn ve-btn-xs ve-btn-default ve-active" id="charsheet-btn-view-list" title="List view"><span class="glyphicon glyphicon-list"></span></button>
 										<button class="ve-btn ve-btn-xs ve-btn-default" id="charsheet-btn-view-compact" title="Compact view"><span class="glyphicon glyphicon-th-list"></span></button>
@@ -1746,6 +1769,7 @@
 							<!-- Populated by JS based on character features -->
 						</div>
 					</div>
+					<div id="charsheet-companion-interaction-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 					
 					<!-- Companions List -->
 					<div class="charsheet__companions-list" id="charsheet-companions-list">

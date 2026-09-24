@@ -99,6 +99,11 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   validation, mechanics, and projection; manifest construction rejects missing
 │   adapters so new progression families cannot become silently read-only.
 │
+├── CharacterSheetArtificerPlans / CharacterSheetArtificerPlanPicker
+│   Authoritative EFA Replicate Magic Item plan-table parser, stable plan-slot
+│   projection, validation/receipt contract, and shared searchable picker.
+│   These modules own plan decisions only and never mutate inventory.
+│
 ├── CharacterSheetRespecEngine (charactersheet-respec-engine.js)
 │   Isolated candidate transaction: validate, review, atomic Apply/rollback,
 │   Cancel, and one-step Undo.
@@ -147,7 +152,7 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 2. `CharacterSheetPage.pInit()` fires
 3. Parallel data load from 12+ JSON sources (races, classes, spells, items, feats, backgrounds, optional features, etc.)
 4. Brew data merged into `this._classes` / `this._subclasses` / etc. (`_mergeBrewData`)
-5. **`_copy` resolution**: every entry in `this._subclasses` and `this._classes` that carries a `_copy` block is merged in place via `DataUtil.subclass.pMergeCopy` / `DataUtil.class.pMergeCopy`. This is what gives TGTT subclasses like Chronurgy Magic and Divine Soul their inherited `additionalSpells` blocks — without this step, every spell picker would silently miss subclass-granted spells (Gift of Alacrity, Guidance, etc.). Runs AFTER brew merge so brew-added entities are included, BEFORE state setup so the picker code sees fully-merged data. As defense-in-depth, `globalThis._charSheetSubclassMergePool` is set to `this._subclasses` immediately after the eager merge so `CharacterSheetClassUtils.resolveFullSubclass` can lazy-merge any entry that still arrives with an unresolved `_copy` at picker call time; the recovery is announced via a single `[CharSheet][Phase7]` console.warn so the silent failure surfaces.
+5. **`_copy` resolution and class-catalog registration**: every entry in `this._subclasses` and `this._classes` that carries a `_copy` block is merged in place via `DataUtil.subclass.pMergeCopy` / `DataUtil.class.pMergeCopy`. The fully merged class list is then registered on `CharacterSheetState` before Builder can mutate it, so base-class `additionalSpells` grants work on the first build-time effect pass rather than only after save/reload reconciliation. This also gives TGTT subclasses like Chronurgy Magic and Divine Soul their inherited `additionalSpells` blocks — without this step, spell pickers silently miss subclass-granted spells (Gift of Alacrity, Guidance, etc.). Runs AFTER brew merge so brew-added entities are included, BEFORE state setup so progression code sees fully merged data. As defense-in-depth, `globalThis._charSheetSubclassMergePool` is set to `this._subclasses` immediately after the eager merge so `CharacterSheetClassUtils.resolveFullSubclass` can lazy-merge any entry that still arrives with an unresolved `_copy` at picker call time; the recovery is announced via a single `[CharSheet][Phase7]` console.warn so the silent failure surfaces.
 6. Sub-modules instantiated with error isolation (try/catch per module)
 7. The fully merged spell and class catalogs are injected into `CharacterSheetState` before any URL character load, spawn, Builder, Level Up, or Quick Build flow. Base-class `additionalSpells` reconciliation requires both catalogs: class data identifies the grant and spell data supplies canonical source/level metadata. `CharacterSheetRespecEngine.begin()` mirrors both catalogs into its isolated candidate before loading the draft snapshot.
 8. The URL-selected character, if any, is loaded from IndexedDB
@@ -541,6 +546,70 @@ host, representative feature adoption, and the no-stale-result invariant.
 - `toJson()`: Deep copy of `_data` via `MiscUtil.copyFast()`
 - `loadFromJson(json)`: Deep merge with defaults + migration steps + effect re-application
 - Migration handles: legacy features, combat traditions, custom ability effects, unarmed strike
+- Generated class summons remain ordinary `_data.companions[]` entries with
+  `type: "class_summon"`, but persist only stable ownership/version metadata
+  plus mutable runtime state. `charactersheet.js` loads the authoritative
+  object catalog and installs it with `setClassSummonTemplateCatalog()` before
+  loading a save; mechanics such as AC and maximum HP are projected from that
+  catalog and the current owner class rather than serialized.
+- Respec candidates must receive the same runtime-only class-summon template
+  catalog before `loadFromJson()`. Class-history reconstruction runs inside
+  `withClassSummonReconciliationDeferred()` so transient empty/partial class
+  arrays cannot retire a legal summon before the candidate class graph is
+  complete.
+
+#### Feature-companion reconciliation
+
+`charactersheet-state.js` imports `charactersheet-companion-rules.js` before
+declaring State, so production and tests use the same browser-global rules
+module. State must not duplicate a companion formula or silently substitute a
+same-named source.
+
+Public State contracts:
+
+- `resolveFeatureCompanionRules(featureUid, summonerContext)` resolves one exact
+  registry descriptor and throws for a missing module, descriptor, or invalid
+  already-derived context.
+- `reconcileFeatureOwnedCompanion(companionId, options)` refreshes derived
+  statistics/actions/scaling in place. It keeps the stable ID, setup/custom
+  metadata, lifecycle/generation, exact current HP (clamped only downward),
+  spent uses/Hit Dice, and turn usage.
+- `getFeatureOwnedCompanions`, `deactivateFeatureOwnedCompanions`,
+  `removeFeatureOwnedCompanions`, and `rebindFeatureOwnedCompanion` compare the
+  normalized full source-qualified feature UID. Never replace this with a
+  `type`, display-name, or subclass-name lookup. Teardown and compatible rebind
+  also release only that companion's exact action/reaction receipt keys.
+- `getCompanionOperationAvailability()` and `performCompanionOperation()` are
+  the shared desktop/Play Mode transaction boundary for companion actions,
+  reactions, Repair, and Hit Dice. Focused wrappers (`commandCompanionAction`,
+  `useCompanionRepair`, `useCompanionReaction`, and
+  `spendCompanionHitDie`) delegate to the same coordinator.
+- `getFeatureCompanionRevivalAvailability()` /
+  `beginFeatureCompanionRevival()` and
+  `getFeatureCompanionReplacementAvailability()` /
+  `replaceFeatureCompanionAfterLongRest()` are the State-only lifecycle
+  boundaries for the exact EFA Steel Defender. They prevalidate exact
+  ownership, canonical Action/slot/tool/rest costs, return source-qualified
+  identities, and publish per-mutation rollback results after any late failure.
+- `migrateLegacyFeatureCompanions()` has a narrow Steel Defender recognition
+  adapter but dispatches through the same registry/reconciler. It requires exact
+  defender source/type/statblock identity plus exact class/subclass source,
+  refuses duplicate or cross-source candidates, creates nothing, and initializes
+  no free HP/resources. `getFeatureCompanionMigrationStatus()` surfaces every
+  non-guessing outcome.
+
+The resolved JSON-safe rules result lives under
+`companion.scaling.resolved`; companion save/check readers consult it before
+legacy proficiency projections. Unknown future feature descriptors remain
+persisted and untouched until their registry entry exists.
+
+Exact EFA lifecycle policy is also registry-owned. State persists
+`alive`/`dead`/`revivalPending`/`expired`/`vanished`, preserves unknown
+JSON-safe lifecycle fields and the stable companion ID, and processes expiry
+and pending-revival due minutes inside the same `advanceGameTimeMinutes()`
+transaction as generated-item lifecycle work. Reconciliation may change
+derived maxima but never heals, revives, or erases lifecycle state. Lifecycle
+UI, PDF/export, and E2E coverage remain later milestones.
 
 ## Key Integration Points
 
@@ -581,6 +650,17 @@ overlapping manual, origin, and progression grants survive unrelated edits;
 materialized features, modifiers, spells, resources, and configuration are
 covered by receipts.
 
+Exact `Artificer|EFA` Replicate Magic Item choices use the same graph. The
+`artificerPlan` family creates stable acquisition slots at class levels
+2/6/10/14/18; `artificerPlanReplacement` creates an optional opportunity at
+every Artificer level from 2 onward and records old/new lineage. The catalog is
+parsed from the loaded class feature tables and item catalog. Fixed tag aliases
+are display-only, wildcard categories bind exact item UIDs, and source-less
+legacy evidence remains ambiguous. Public state projections are
+`getEfaArtificerPlanDecisions()`, `getEfaArtificerPlanProjection()`, and
+`getEfaArtificerPlans()`. Inventory materialization is explicitly outside this
+contract.
+
 ### Item Hover Routing
 
 All character-sheet item names route through `CharacterSheetClassUtils.buildItemHoverNameHtml`.
@@ -620,6 +700,8 @@ Effect types: `resistance`, `immunity`, `conditionImmunity`, `saveProficiency`, 
 ## Global Dependencies
 
 The character sheet modules depend on these 5etools globals (mocked in tests):
+- `CharacterSheetCompanionRules` — exact-source feature-companion descriptors
+  and pure summoner-context resolvers; loaded by `charactersheet-state.js`
 - `Parser` — ability abbreviations, spell levels, source constants
 - `MiscUtil` — deep copy, property access
 - `CryptUtil` — UID generation

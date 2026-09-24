@@ -3091,16 +3091,22 @@
 				"Each model includes a special weapon. When you attack with that weapon, you can add your Intelligence modifier, instead of your Strength or Dexterity modifier, to the attack and damage rolls.",
 				"You can change the armor's model whenever you finish a {@variantrule Short Rest|XPHB|Short} or {@variantrule Long Rest|XPHB} if you have {@item Smith's Tools|XPHB} in hand.",
 				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Dreadnaught|Artificer|EFA|Armorer|EFA|3|EFA"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Guardian|Artificer|EFA|Armorer|EFA|3|EFA"
-				},
-				{
-					"type": "refSubclassFeature",
-					"subclassFeature": "Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA"
+					"type": "options",
+					"count": 1,
+					"entries": [
+						{
+							"type": "refSubclassFeature",
+							"subclassFeature": "Dreadnaught|Artificer|EFA|Armorer|EFA|3|EFA"
+						},
+						{
+							"type": "refSubclassFeature",
+							"subclassFeature": "Guardian|Artificer|EFA|Armorer|EFA|3|EFA"
+						},
+						{
+							"type": "refSubclassFeature",
+							"subclassFeature": "Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA"
+						}
+					]
 				}
 			]
 		},

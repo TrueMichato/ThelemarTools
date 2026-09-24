@@ -34,10 +34,14 @@ const SPELL_DB = [
 	{name: "Speak with Animals", source: "XPHB", level: 1, school: "D"},
 	{name: "Power Word Heal", source: "XPHB", level: 9, school: "E"},
 	{name: "Power Word Kill", source: "XPHB", level: 9, school: "E"},
+	{name: "Mending", source: "XPHB", level: 0, school: "T"},
 ];
 
 const BARD_DATA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "data/class/class-bard.json"), "utf8"));
 const TGTT_DATA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
+const ARTIFICER_DATA = JSON.parse(
+	fs.readFileSync(path.join(REPO_ROOT, "data", "class", "class-artificer.json"), "utf8"),
+);
 
 function getRealBard (source) {
 	const data = source === "TGTT" ? TGTT_DATA : BARD_DATA;
@@ -611,7 +615,10 @@ describe("Class-level always-prepared spells — collision ownership", () => {
 			classGrantOwners: ["cleric|tgtt"],
 		});
 
-		state.removeSubclassSpells("Test Domain Spells");
+		state.removeSubclassSpells(state.getSubclassSpellGrantOwner(
+			state._data.classes[0],
+			{sourceFeature: "Test Domain Spells"},
+		));
 		state._data.classes[0].subclass = null;
 		state.applyClassFeatureEffects();
 		ceremony = state.getSpellsKnown().find(spell => spell.name === "Ceremony");
@@ -622,6 +629,53 @@ describe("Class-level always-prepared spells — collision ownership", () => {
 			sourceClass: "Cleric",
 		});
 		expect(state.getSpellsKnown().filter(spell => spell.name === "Ceremony")).toHaveLength(1);
+	});
+});
+
+describe("Class-level always-prepared spells — EFA Artificer", () => {
+	const efaArtificer = ARTIFICER_DATA.class.find(cls => cls.name === "Artificer" && cls.source === "EFA");
+	const tceArtificer = ARTIFICER_DATA.class.find(cls => cls.name === "Artificer" && cls.source === "TCE");
+
+	function newArtificerState (source = "EFA") {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [{name: "Artificer", source, level: 1, subclass: null}];
+		return state;
+	}
+
+	test("materializes the exact EFA Mending grant as one class-owned cantrip", () => {
+		const state = newArtificerState();
+		state.setClassCatalog([efaArtificer, tceArtificer]);
+		state.applyClassFeatureEffects();
+
+		const mendingCantrips = state.getCantripsKnown().filter(spell => spell.name === "Mending");
+		expect(mendingCantrips).toHaveLength(1);
+		expect(mendingCantrips[0]).toMatchObject({
+			source: "XPHB",
+			grantedByClass: true,
+			sourceFeature: "Artificer Spells",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		});
+		expect(state.getSpellsKnown().some(spell => spell.name === "Mending")).toBe(false);
+		expect(state.getInnateSpells().some(spell => spell.name === "Mending")).toBe(false);
+	});
+
+	test("does not grant EFA Mending when catalog registration is absent", () => {
+		const state = newArtificerState();
+		state.applyClassFeatureEffects();
+		expect(state.getCantripsKnown().some(spell => spell.name === "Mending")).toBe(false);
+	});
+
+	test("keeps the grant exact-source and tears it down when EFA ownership is lost", () => {
+		const state = newArtificerState();
+		state.setClassCatalog([efaArtificer, tceArtificer]);
+		state.applyClassFeatureEffects();
+		expect(state.getCantripsKnown().some(spell => spell.name === "Mending")).toBe(true);
+
+		state._data.classes[0].source = "TCE";
+		state.applyClassFeatureEffects();
+		expect(state.getCantripsKnown().some(spell => spell.name === "Mending")).toBe(false);
 	});
 });
 
@@ -713,5 +767,16 @@ describe("Class-level always-prepared spells — existing save auto-fix on load"
 		expect(idxSpells).toBeGreaterThan(idxData);
 		expect(idxClasses).toBeGreaterThan(idxSpells);
 		expect(idxUrlLoad).toBeGreaterThan(idxClasses);
+	});
+
+	test("the page registers the full class catalog before Builder can mutate state", () => {
+		const src = fs.readFileSync(path.join(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const idxResolvedClasses = src.indexOf("await this._pResolveCopyInheritance()");
+		const idxCatalog = src.indexOf("this._state.setClassCatalog(this._classes", idxResolvedClasses);
+		const idxRegisterHovers = src.indexOf("this._registerLoadedHoverEntities()", idxResolvedClasses);
+
+		expect(idxResolvedClasses).toBeGreaterThan(-1);
+		expect(idxCatalog).toBeGreaterThan(idxResolvedClasses);
+		expect(idxCatalog).toBeLessThan(idxRegisterHovers);
 	});
 });

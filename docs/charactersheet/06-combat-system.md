@@ -156,6 +156,27 @@ const breakdown = state.getAttackBonusBreakdown(attack);
 const total = breakdown.total;
 ```
 
+`CharacterSheetState.getWeaponAbilityResolution(attack)` is the shared ability
+authority for attack cards, attack rolls, damage cards, and damage rolls. It
+first resolves the normal weapon ability (`STR`, `DEX`, finesse, or another
+explicit mode), then considers eligible alternate abilities. An alternate wins
+only when its modifier is strictly higher; the result includes the selected
+ability plus `source`, `sourceFeatureUid`, and a display attribution such as
+`INT via Battle Ready`. `getWeaponAbilityMod(attack)` is the numeric wrapper.
+
+EFA and TCE Battle Smith both publish a generic `attackAbility` effect for
+magic weapons, but their exact source-qualified feature UIDs remain separate.
+Battle Ready uses the shared `CharacterSheetItemUtils.isMagicWeapon` classifier,
+so meaningful rarity/flags/bonuses, composed magic facts, and exact valid
+Replicate Magic Item provenance qualify. A magical damage type alone does not.
+Generated feature items fail closed when provenance is stale, malformed, or
+owned by another feature. Removing the feature or magic fact therefore changes
+the next display and roll immediately; no resolved ability is persisted.
+
+```text
+total = resolvedAbilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackBonus
+```
+
 `buildAutoAttackFromWeapon()` owns the canonical inventory-to-attack conversion.
 Its `attackBonus` is **intrinsic/local only**: the source weapon's effective
 magic bonus, upgrades, projected material effects, and custom flat bonus.
@@ -206,6 +227,56 @@ references `Entangling|GrimHollowPG24` from the external Grim Hollow Player's
 Guide (2024) brew in `homebrew/index.json`. The mastery is linked only when
 that source is loaded; otherwise its name stays visible without a broken hover.
 The sheet does not substitute another mastery effect or automate Entangling.
+
+### EFA Battle Smith Arcane Jolt
+
+Arcane Jolt is one source-qualified post-hit transaction shared by the
+summoner's attacks and Steel Defender operations. Combat registers one
+`efaArcaneJolt` entry in `_getPostAttackHooks()`. Its predicate accepts only a
+live inventory attack whose exact `sourceItem.id` resolves to a magic weapon
+through `CharacterSheetState.isMagicWeapon()`. Spell attacks, mundane weapons,
+removed items, and generated rows with stale, malformed, or wrong-owner
+provenance fail closed. Because the sheet does not know the target's AC, the
+handler first asks whether the attack hit; a miss never opens or spends Arcane
+Jolt.
+
+The defender route begins only after
+`CharacterSheetPage.pUseCompanionOperation()` returns a committed,
+hit-confirmed `forceEmpoweredRend` result for the exact owned EFA Steel
+Defender. Desktop and Play Mode already delegate to that Page method, so both
+routes call the same `pOfferEfaArcaneJolt()` modal rather than maintaining
+renderer-specific decisions.
+
+The compact modal shows remaining uses and the once-per-turn status, then
+offers **Skip**, **Destructive**, and **Restorative**:
+
+- **Destructive Energy** rolls `2d6` Force damage, or `4d6` at EFA Artificer
+  15, against the target hit by the originating attack. It returns a separate
+  damage result and never edits or rerolls the base hit.
+- **Restorative Energy** requires an explicit character, companion, object, or
+  external target; visibility confirmation; and a distance of at most 30 feet
+  measured from the attack target. Character/companion/object HP is mutated and
+  clamped atomically. External creatures/objects return a manual-application
+  result. Dead or vanished companions are rejected; Arcane Jolt never revives
+  or changes lifecycle state.
+
+The modal uses the shared `CharacterSheetModal` keyboard contract: focus starts
+on the attack-target field, stays trapped, Escape/Skip resolve as an explicit
+no-spend cancellation, and close restores focus to the invoking attack or
+companion control. Because the underlying renderer may refresh before Jolt
+opens or closes, both routes also provide a stable replacement-target getter.
+Resource/busy updates use a polite atomic status; validation and transaction
+errors keep the dialog open and focus an assertive error region. The existing
+combat-target mobile classes stack controls into one column with 44px action
+targets.
+
+`CharacterSheetState.pUseEfaArcaneJolt()` preflights the effect, trigger,
+target acknowledgement, roll, exact resource, and shared per-turn receipt
+before mutation. It commits one use and one receipt. A later modeled-HP or
+publication failure restores the resource snapshot, target HP snapshot, and
+exact receipt and returns the explicit rollback outcomes. Both trigger sources
+use the same key, so a summoner Jolt blocks a defender Jolt and vice versa until
+`resetTurnEconomy()`; changing `combatRound` does nothing.
 
 ### Rolling Attacks
 

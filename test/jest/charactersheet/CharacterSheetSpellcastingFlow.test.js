@@ -118,12 +118,20 @@ describe("Spellcasting flow — Bug #2: sorcery-point refund on a cancelled cast
 	let spells;
 	let sp;
 	let slotCurrent;
+	let actionUsed;
 
 	beforeEach(() => {
 		spells = makeSpells();
 		sp = {current: 3, max: 5};
 		slotCurrent = 2;
-		spells._allSpells = [{name: "Fireball", source: "XPHB", level: 3, duration: [{type: "instant"}]}];
+		actionUsed = false;
+		spells._allSpells = [{
+			name: "Fireball",
+			source: "XPHB",
+			level: 3,
+			time: [{number: 1, unit: "action"}],
+			duration: [{type: "instant"}],
+		}];
 		spells._state = {
 			getSpells: () => [{id: "fb", name: "Fireball", source: "XPHB", level: 3}],
 			isConcentrating: () => false,
@@ -138,6 +146,15 @@ describe("Spellcasting flow — Bug #2: sorcery-point refund on a cancelled cast
 				if (typeof pts === "number") { sp.current = pts; sp.max = pts; } else { if (pts.current != null) sp.current = pts.current; if (pts.max != null) sp.max = pts.max; }
 			},
 			useSorceryPoint: cost => { if (sp.current < cost) return false; sp.current -= cost; return true; },
+			commitActionEconomy: actionType => {
+				if (actionUsed) return {ok: false, reason: "action-unavailable", actionType, tracked: false};
+				actionUsed = true;
+				return {ok: true, actionType, tracked: true};
+			},
+			rollbackActionEconomy: receipt => {
+				if (receipt?.tracked) actionUsed = false;
+				return true;
+			},
 		};
 		spells._pChooseActiveMetamagic = jest.fn(async () => ({cancelled: false, metamagic: {key: "twinned", name: "Twinned Spell", cost: 2}}));
 		spells._pHandleCastingConstraints = jest.fn(async () => true);
@@ -150,12 +167,128 @@ describe("Spellcasting flow — Bug #2: sorcery-point refund on a cancelled cast
 		spells._showCastResult = jest.fn(async () => ({cancelled: true}));
 	});
 
-	it("restores BOTH current and max SP (not collapsing max) and refunds the slot", async () => {
+	it("restores action, current/max SP, and the slot", async () => {
 		await spells._castSpell("fb", {withMetamagic: true});
 		// Spent 2 SP for the metamagic, then cancelled → refunded back to 3/5.
 		expect(sp).toEqual({current: 3, max: 5});
 		// Slot consumed then refunded back to 2.
 		expect(slotCurrent).toBe(2);
+		expect(actionUsed).toBe(false);
+	});
+});
+
+describe("Spellcasting flow — shared casting-time action economy", () => {
+	const makeEconomyCast = ({time, cancelled = false, throws = false, inCombat = true} = {}) => {
+		const spellData = {
+			name: "Economy Probe",
+			source: "XPHB",
+			level: 0,
+			time,
+			components: {},
+			duration: [{type: "instant"}],
+			entries: ["A test spell."],
+		};
+		const state = new CharacterSheetState();
+		state.addSpell(spellData);
+		if (inCombat) state.startCombat();
+
+		const spells = makeSpells();
+		spells._state = state;
+		spells._allSpells = [spellData];
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._pChooseVariantComponent = jest.fn(async () => ({cancelled: false}));
+		spells._pConsumeMaterialComponent = jest.fn(async () => ({consumed: null}));
+		spells._updateConcentrationUI = jest.fn();
+		spells.renderSlots = jest.fn();
+		spells._page._renderQuickSpells = jest.fn();
+		spells._page._renderResources = jest.fn();
+		spells._page._combat = {renderCombatActionEconomy: jest.fn()};
+		spells._showCastResult = throws
+			? jest.fn(async () => { throw new Error("resolution failed"); })
+			: jest.fn(async () => ({cancelled}));
+
+		return {
+			state,
+			spells,
+			spellId: state.getSpells().find(spell => spell.name === spellData.name).id,
+		};
+	};
+
+	const cast = ({spells, spellId}) => spells._castSpell(spellId, {
+		withMetamagic: false,
+		decision: {skipComponentPrompt: true},
+	});
+
+	it("enforces an action once per combat turn and releases it on Reset Turn", async () => {
+		const fixture = makeEconomyCast({time: [{number: 1, unit: "action"}]});
+
+		await cast(fixture);
+		await cast(fixture);
+		expect(fixture.spells._showCastResult).toHaveBeenCalledTimes(1);
+		expect(fixture.state.isActionTypeAvailable("action")).toBe(false);
+
+		fixture.state.resetTurnEconomy();
+		await cast(fixture);
+		expect(fixture.spells._showCastResult).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([
+		["bonus", "bonus"],
+		["reaction", "reaction"],
+	])("tracks a one-%s casting time independently", async (unit, actionType) => {
+		const fixture = makeEconomyCast({time: [{number: 1, unit}]});
+
+		await cast(fixture);
+
+		expect(fixture.state.isActionTypeAvailable(actionType)).toBe(false);
+		expect(fixture.state.isActionTypeAvailable("action")).toBe(true);
+		expect(fixture.state.isActionTypeAvailable(actionType === "bonus" ? "reaction" : "bonus")).toBe(true);
+	});
+
+	it("leaves one-minute casting times untracked", async () => {
+		const fixture = makeEconomyCast({time: [{number: 1, unit: "minute"}]});
+
+		await cast(fixture);
+		await cast(fixture);
+
+		expect(fixture.spells._showCastResult).toHaveBeenCalledTimes(2);
+		expect(fixture.state.getActionEconomyState()).toEqual({action: true, bonus: true, reaction: true});
+	});
+
+	it("uses the Quickened Spell bonus-action override instead of the authored action time", () => {
+		const spells = makeSpells();
+
+		expect(spells._getSpellCastingEconomy({
+			spellData: {time: [{number: 1, unit: "action"}]},
+			castMeta: {appliedMetamagic: {key: "quickened", name: "Quickened Spell"}},
+		})).toEqual({
+			type: "bonus",
+			label: "1 bonus action",
+			tracked: true,
+		});
+	});
+
+	it("rolls back the action on targeting cancellation and resolution failure", async () => {
+		const cancelled = makeEconomyCast({time: [{number: 1, unit: "action"}], cancelled: true});
+		await cast(cancelled);
+		expect(cancelled.state.isActionTypeAvailable("action")).toBe(true);
+
+		const failed = makeEconomyCast({time: [{number: 1, unit: "action"}], throws: true});
+		await expect(cast(failed)).rejects.toThrow("resolution failed");
+		expect(failed.state.isActionTypeAvailable("action")).toBe(true);
+	});
+
+	it("does not persist transient action costs outside combat", async () => {
+		const fixture = makeEconomyCast({time: [{number: 1, unit: "action"}], inCombat: false});
+
+		await cast(fixture);
+		await cast(fixture);
+		expect(fixture.spells._showCastResult).toHaveBeenCalledTimes(2);
+		expect(fixture.state.isActionTypeAvailable("action")).toBe(true);
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(fixture.state.toJson());
+		expect(loaded.isActionTypeAvailable("action")).toBe(true);
 	});
 });
 

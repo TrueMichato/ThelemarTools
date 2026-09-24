@@ -79,9 +79,19 @@ Drives the level-up wizard for L2+ (and multiclass entries).
   provided; falls back to first-match if not.
 - `addKnownSpell(name)` / `addFirstAvailableKnownSpells(count)`.
 - `selectOptionalFeature(name)` / `selectFirstAvailableOptions()`.
+- `selectRequiredEfaArtificerPlans()` — opens the shared Replicate
+  Magic Item plan picker, selects every required addition deterministically,
+  commits the draft, and deliberately leaves optional replacements unchanged.
 - **`autoFillAllSelections()` — the critical one.**  Optimised
   state-stable polling sweep (per Phase 3): ASI stepper, counters, spell
-  picks, optional features.  Use after the spec sets explicit picks.
+  picks, optional features, and required EFA Artificer plans. Use after the
+  spec sets explicit picks.
+- `resolvePendingFeatureChoices()` — drains stacked production feature-choice
+  modals, including multi-tool picks. If the renderer owns the choice lock but
+  no modal becomes observable, it uses the production fulfillment API as the
+  deterministic picker-bypass fallback and syncs the progression ledger. It
+  then drains chained spell choices and fails with queue diagnostics if any
+  required feature or spell choice remains unresolved.
 - `finish()` — closes the wizard.  Polls modal-visible @ 100ms, max 2s.
 - `cancel()` / `expectModalClosed()`.
 - `expectDivineSoulAffinityModalVisible()` /
@@ -98,6 +108,9 @@ The sheet itself.  Most probes go through this.
 - `switchToTab(tab)` — pass one of the locators (`tabFeatures`,
   `tabSpells`, `tabInventory`, etc.) defined as fields.
 - `expectCharacterName(name)` / `expectLevel(level)`.
+- `hasClassFeatureUid(uid): boolean` — verifies an exact source-qualified
+  class-feature identity instead of accepting a same-name feature from another
+  source.
 
 ### Core stats
 
@@ -127,6 +140,12 @@ The sheet itself.  Most probes go through this.
 - `activateFeatureWithTargets(name, targetNames, {contestWon?})` — drives
   named-target capture and any follow-up contested-check confirmation through
   the real activation UI.
+- `probeEfaArtilleristFlow(probe)` — drives source-specific EFA Artillerist
+  mechanics through rendered sheet controls. The `baseCannon` probe creates,
+  activates, damages, repairs, and cleans up a Force Ballista while asserting
+  Action/Bonus Action and free-use costs. Higher-level probe variants cover
+  Arcane Firearm, Explosive Cannon, and Fortified Position as those mechanics
+  become available.
 
 ### Resources & slots
 
@@ -134,8 +153,24 @@ The sheet itself.  Most probes go through this.
 - `getResourceNames(): string[]`.
 - `getSpellSlots(level): {current, max}`.
 - `getPactSlots(): {current, max, level}`.
+- `getInnateSpellNames(): string[]` — reads the separate innate-grant bucket.
+- `getKnownSpellsByLevel()` includes ordinary, cantrip, and innate entries so
+  cantrip-count probes measure the complete player spell surface.
 - `castSpellAtSlot(level): {ok, remaining}`.
 - `useResourceByName(name, amount = 1): {ok, remaining}`.
+- `getMaxAttunement(): number` — reads the live attunement cap through the
+  state API.
+
+### Generic state transactions
+
+- `runStateTransaction(steps, {restore = true})` — executes reusable state
+  method descriptors, captures results for later `$ref` arguments, supports
+  exact/min/contains/null/truthy/reference-delta expectations, and restores the
+  pre-probe character snapshot by default. Use it for composed causal probes
+  that have no stable UI boundary; descriptors must name methods and values,
+  never branch on a class name in the dispatcher. Exact-source item probes
+  must use the canonical item source expected by the runtime contract rather
+  than a synthetic test source.
 
 ### Rests
 
@@ -187,6 +222,14 @@ The sheet itself.  Most probes go through this.
 
 - `getSubclassChoice(className): {key, name} | null`.
 - `getKnownSpellNames(): string[]`.
+- `probeCartographerFlow(probe, spellThreshold?)` — source-isolated EFA
+  Cartographer transactions for tools/crafting, exact XPHB spell tiers, Mapping
+  Magic, Guided Precision, page-save-bounded Ingenious Movement, Superior
+  Atlas, ASI/Epic Boon progression, and lifecycle teardown. Every state-driven
+  branch restores the character afterward.
+- The `atlas` Cartographer probe drives the real Long Rest modal for the
+  exact-tools gate, optional-self/external-holder creation, recreation, rendered
+  Atlas card, undo, ally-only Awareness negative, and save/load round-trip.
 
 ## When NOT to use a page object
 

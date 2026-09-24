@@ -1544,6 +1544,7 @@ class CharacterSheetRespec {
 			scholar: () => this._editManifestOptions(level, history, choice, closeParentModal),
 			"spell-mastery": () => this._editManifestOptions(level, history, choice, closeParentModal),
 			"signature-spells": () => this._editManifestOptions(level, history, choice, closeParentModal),
+			"class-plan": () => this._editArtificerPlanDecision(level, history, choice, closeParentModal),
 			"hit-points": () => this._editHpDecision(level, history, choice, closeParentModal),
 			asi: () => this._editAsi(level, history, closeParentModal, choice),
 			feat: () => this._editFeat(level, history, closeParentModal, choice),
@@ -1560,6 +1561,76 @@ class CharacterSheetRespec {
 			return;
 		}
 		await edit();
+	}
+
+	async _editArtificerPlanDecision (level, history, choice, closeParentModal) {
+		const decision = choice.decision;
+		const picker = globalThis.CharacterSheetArtificerPlanPicker;
+		const plans = globalThis.CharacterSheetArtificerPlans;
+		if (!decision || !picker || !plans) {
+			JqueryUtil.doToast({type: "danger", content: "The Replicate Magic Item plan editor is unavailable."});
+			return;
+		}
+		const ordered = (this._engine?.manifest?.decisions || [])
+			.filter(candidate => [
+				plans.DECISION_TYPE_ACQUIRE,
+				plans.DECISION_TYPE_REPLACE,
+			].includes(candidate.type))
+			.sort((a, b) =>
+				Number(a.classLevel) - Number(b.classLevel)
+				|| Number(a.type === plans.DECISION_TYPE_REPLACE) - Number(b.type === plans.DECISION_TYPE_REPLACE)
+				|| Number(a.slot) - Number(b.slot),
+			);
+		const activeIndex = ordered.findIndex(candidate => candidate.semanticKey === decision.semanticKey);
+		const toPlanDraft = candidate => ({
+			...candidate,
+			kind: candidate.meta?.kind,
+			opportunityId: candidate.meta?.opportunityId,
+			slotId: candidate.meta?.slotId,
+		});
+		const projectedBefore = plans.projectDecisions({
+			decisions: ordered.slice(0, Math.max(0, activeIndex)).map(toPlanDraft),
+		}).slots;
+		const projectedCurrent = plans.projectDecisions({
+			decisions: ordered.map(toPlanDraft),
+		}).slots;
+		const initialSlots = decision.type === plans.DECISION_TYPE_ACQUIRE
+			? projectedCurrent.filter(slot => slot.slotId !== decision.meta?.slotId)
+			: projectedBefore;
+		const opportunity = {
+			version: 1,
+			kind: decision.meta?.kind,
+			required: decision.required,
+			className: decision.className,
+			classSource: decision.classSource,
+			classLevel: decision.classLevel,
+			characterLevel: decision.characterLevel,
+			slot: decision.slot,
+			slotId: decision.meta?.slotId,
+			opportunityId: decision.meta?.opportunityId,
+			owner: decision.meta?.owner,
+			constraints: decision.meta?.constraints || {},
+		};
+		const result = await picker.pGetUserDecisions({
+			page: this._page,
+			state: this._state,
+			opportunities: [opportunity],
+			initialSlots,
+			initialSelections: decision.selection
+				? {[opportunity.opportunityId]: decision.selection}
+				: {},
+			title: `${decision.label} · Level ${level}`,
+		});
+		if (result == null) return;
+		const selection = result[0]?.selection || null;
+		await this._engine.stageGraphMutation(decision.id, selection, {
+			status: selection == null && !decision.required ? "deferred" : null,
+			reverseParent: true,
+			apply: () => ({selection}),
+		});
+		closeParentModal?.();
+		this.render();
+		JqueryUtil.doToast({type: "success", content: `${decision.label} staged in the Respec draft.`});
 	}
 
 	_getDecisionOptions (decision) {
@@ -1891,6 +1962,10 @@ class CharacterSheetRespec {
 		const normalizeSkill = value => this._state.normalizeSkillProficiencyKey?.(valueName(value))
 			|| String(valueName(value) || "").toLowerCase().replace(/\s+/g, "");
 		const normalizeValue = value => String(valueName(value) || "").trim().toLowerCase();
+		if ([
+			globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_ACQUIRE,
+			globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_REPLACE,
+		].includes(decision.type)) return;
 		const removeSetValue = (type, value, remove) => {
 			release(type, value, remove);
 		};
@@ -2037,6 +2112,42 @@ class CharacterSheetRespec {
 			return;
 		}
 		if (nestedSet) {
+			const fixedProficiencyFallback = decision.type === "nestedTool"
+				? this._state.getFixedProficiencyFallbackTransaction?.(decision.provenance?.ownerUid)
+				: null;
+			if (fixedProficiencyFallback?.mode === "fallback") {
+				const selected = next.length === 1 ? valueName(next[0]) : null;
+				if (selected) {
+					this._state.setFixedProficiencyFallbackSelection(
+						decision.provenance.ownerUid,
+						selected,
+						{decisionSemanticKey: decision.semanticKey},
+					);
+				}
+				return;
+			}
+			const pendingFeatureChoice = decision.type === "nestedTool" && decision.parentSemanticKey
+				? this._state._data?.pendingFeatureChoices?.find(choice =>
+					choice.kind === "tool"
+						&& choice.sourceDecisionKey === decision.parentSemanticKey
+						&& (!decision.provenance?.ownerUid || choice.featureUid === decision.provenance.ownerUid),
+				)
+				: null;
+			const featureChoiceOwner = decision.type === "nestedTool" && decision.provenance?.ownerUid
+				? this._state._data.features.find(feature =>
+					[
+						CharacterSheetProgression.getFeatureOwnerUid(feature),
+						CharacterSheetProgression.getEntityUid(feature),
+					]
+						.map(CharacterSheetProgression._normalize)
+						.includes(CharacterSheetProgression._normalize(decision.provenance.ownerUid)),
+				)
+				: null;
+			const nextToolsOwnedBefore = decision.type === "nestedTool"
+				? new Set(next
+					.filter(value => this._state.hasToolProficiency(valueName(value)))
+					.map(value => CharacterSheetState.normalizeToolKey(valueName(value))))
+				: new Set();
 			const beforeLevels = Object.fromEntries(
 				[...previous, ...next].map(value => {
 					const skill = ["nestedSkill", "nestedExpertise"].includes(decision.type)
@@ -2046,6 +2157,32 @@ class CharacterSheetRespec {
 				}),
 			);
 			applySetChoice(nestedSet.type, nestedSet.add, nestedSet.remove);
+			if (pendingFeatureChoice) {
+				this._state._recordFulfilledFeatureToolChoice?.(pendingFeatureChoice);
+				this._state.removePendingFeatureChoice?.(pendingFeatureChoice.id);
+			}
+			if (decision.type === "nestedTool") this._state.syncConditionalToolGrantSelection?.(decision, next);
+			if (featureChoiceOwner) {
+				const sourceId = `feature-choice:${featureChoiceOwner.id}`;
+				const previousKeys = new Set(previous.map(value => CharacterSheetState.normalizeToolKey(valueName(value))));
+				for (const value of previous) this._state._untrackGrantedProficiency("tools", valueName(value), sourceId);
+				for (const value of next) {
+					const tool = valueName(value);
+					const key = CharacterSheetState.normalizeToolKey(tool);
+					if (nextToolsOwnedBefore.has(key)
+						&& !this._state._data.grantedProficiencies?.tools?.[key]?.length) {
+						this._state._trackGrantedProficiency("tools", tool, "base");
+					}
+					this._state._trackGrantedProficiency("tools", tool, sourceId);
+				}
+				featureChoiceOwner._choices = [
+					...(featureChoiceOwner._choices || []).filter(choice =>
+						choice?.type !== "tool"
+							|| !previousKeys.has(CharacterSheetState.normalizeToolKey(choice.value)),
+					),
+					...next.map(value => ({type: "tool", value: valueName(value)})),
+				];
+			}
 			if (decision.meta?.unplacedFeatChoice && ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
 				const parent = this._engine?.manifest?.decisions?.find(candidate =>
 					candidate.semanticKey === decision.rootSemanticKey,
@@ -2098,10 +2235,12 @@ class CharacterSheetRespec {
 					? CharacterSheetClassUtils.buildCantripStateObject(spell, {
 						sourceFeature: decision.provenance?.ownerUid || decision.label,
 						sourceClass: decision.className,
+						sourceClassSource: decision.classSource,
 					})
 					: CharacterSheetClassUtils.buildSpellStateObject(spell, {
 						sourceFeature: decision.provenance?.ownerUid || decision.label,
 						sourceClass: decision.className,
+						sourceClassSource: decision.classSource,
 						prepared: decision.meta?.spellMode === "prepared",
 					});
 				if (isCantrip) this._state.addCantrip(built);
@@ -2285,6 +2424,7 @@ class CharacterSheetRespec {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
 					sourceClass: decision.className,
+					sourceClassSource: decision.classSource,
 				}));
 				return;
 			}
@@ -2292,6 +2432,7 @@ class CharacterSheetRespec {
 			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 				sourceFeature: decision.type === "spellbookSpells" ? "Wizard Spellbook" : (decision.type === "preparedSpells" ? "Prepared Spells" : "Spells Known"),
 				sourceClass: decision.className,
+				sourceClassSource: decision.classSource,
 				prepared: decision.type === "preparedSpells",
 				inSpellbook: decision.type === "spellbookSpells",
 			}));
@@ -2448,7 +2589,9 @@ class CharacterSheetRespec {
 					: `unowned:${String(resource.name || "").toLowerCase()}`,
 			name: resource.name,
 			current: resource.current,
-			turnUsage: state._data?.resourceTurnUsage?.[resource.id],
+			turnReceipt: resource.triggeredDiePool?.turnReceipt?.key
+				? state.queryTurnReceipt(resource.triggeredDiePool.turnReceipt.key).receipt
+				: null,
 		}));
 		const oldFeatureDecisionKeys = new Map((state.getFeatures?.() || [])
 			.filter(feature => feature.sourceDecisionKey)
@@ -2483,37 +2626,39 @@ class CharacterSheetRespec {
 			if (!firstEntryByClass.has(uid)) firstEntryByClass.set(uid, entry);
 		}
 
-		state._data.classes = [];
-		for (const [uid, level] of classCounts) {
-			const [name, source] = uid.split("|");
-			const classData = this._page.getClasses?.().find(cls =>
-				cls.name.toLowerCase() === name && cls.source.toLowerCase() === source,
-			);
-			if (!classData) continue;
-			const prior = existingClasses.find(cls => cls.name === classData.name && cls.source === classData.source);
-			const subclassChoiceEntry = history.find(entry =>
-				entry.class.name === classData.name
-				&& entry.class.source === classData.source
-				&& entry.choices?.subclass,
-			);
-			state.addClass({
-				...(prior || {}),
-				name: classData.name,
-				source: classData.source,
-				level,
-				hd: classData.hd,
-				proficiency: classData.proficiency,
-				startingProficiencies: classData.startingProficiencies,
-				multiclassing: classData.multiclassing,
-				subclass: subclassChoiceEntry?.choices?.subclass || prior?.subclass || null,
-				subclassChoice: subclassChoiceEntry?.choices?.subclassChoice || prior?.subclassChoice || null,
-				casterProgression: classData.casterProgression,
-				spellcastingAbility: classData.spellcastingAbility,
-				preparedSpellsProgression: classData.preparedSpellsProgression,
-				spellsKnownProgression: classData.spellsKnownProgression,
-				cantripProgression: classData.cantripProgression,
-			});
-		}
+		state.withClassSummonReconciliationDeferred(() => {
+			state._data.classes = [];
+			for (const [uid, level] of classCounts) {
+				const [name, source] = uid.split("|");
+				const classData = this._page.getClasses?.().find(cls =>
+					cls.name.toLowerCase() === name && cls.source.toLowerCase() === source,
+				);
+				if (!classData) continue;
+				const prior = existingClasses.find(cls => cls.name === classData.name && cls.source === classData.source);
+				const subclassChoiceEntry = history.find(entry =>
+					entry.class.name === classData.name
+						&& entry.class.source === classData.source
+						&& entry.choices?.subclass,
+				);
+				state.addClass({
+					...(prior || {}),
+					name: classData.name,
+					source: classData.source,
+					level,
+					hd: classData.hd,
+					proficiency: classData.proficiency,
+					startingProficiencies: classData.startingProficiencies,
+					multiclassing: classData.multiclassing,
+					subclass: subclassChoiceEntry?.choices?.subclass || prior?.subclass || null,
+					subclassChoice: subclassChoiceEntry?.choices?.subclassChoice || prior?.subclassChoice || null,
+					casterProgression: classData.casterProgression,
+					spellcastingAbility: classData.spellcastingAbility,
+					preparedSpellsProgression: classData.preparedSpellsProgression,
+					spellsKnownProgression: classData.spellsKnownProgression,
+					cantripProgression: classData.cantripProgression,
+				});
+			}
+		});
 
 		const firstClassData = this._page.getClasses?.().find(cls =>
 			cls.name === history[0]?.class?.name && cls.source === history[0]?.class?.source,
@@ -2594,14 +2739,18 @@ class CharacterSheetRespec {
 				|| (!resource.sourceDecisionKey && !resource.featureId && item.name === resource.name && item.identity.startsWith("unowned:")));
 			if (!prior) continue;
 			state.setResourceCurrent?.(resource.id, Math.min(prior.current, resource.max));
-			if (prior.turnUsage != null) {
-				state._data.resourceTurnUsage ||= {};
-				state._data.resourceTurnUsage[resource.id] = MiscUtil.copyFast(prior.turnUsage);
+			if (prior.turnReceipt && resource.triggeredDiePool?.turnReceipt) {
+				const restoredReceipt = state.commitTurnReceipt({
+					...resource.triggeredDiePool.turnReceipt,
+					metadata: {
+						...(prior.turnReceipt.metadata || {}),
+						restoredBy: "respecClassRebuild",
+					},
+				});
+				if (!restoredReceipt.ok && !restoredReceipt.duplicate) {
+					throw new Error(`Could not restore per-turn resource receipt: ${restoredReceipt.reason}`);
+				}
 			}
-		}
-		const liveResourceIds = new Set((state.getResources?.() || []).map(resource => resource.id));
-		for (const resourceId of Object.keys(state._data.resourceTurnUsage || {})) {
-			if (!liveResourceIds.has(resourceId)) delete state._data.resourceTurnUsage[resourceId];
 		}
 	}
 
@@ -2778,12 +2927,14 @@ class CharacterSheetRespec {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
 					sourceClass: decision.className,
+					sourceClassSource: decision.classSource,
 				}));
 				return;
 			}
 			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 				sourceFeature: "Spells Known",
 				sourceClass: decision.className,
+				sourceClassSource: decision.classSource,
 			}));
 		};
 
@@ -4313,9 +4464,6 @@ class CharacterSheetRespec {
 	}
 
 	async _applyFeatureChoiceChangeInner (level, history, choiceIndex, oldChoice, newOption) {
-		// Remove old feature using proper API
-		const features = this._state.getFeatures();
-		const persistedFeatures = this._state._data?.features || features;
 		const replayChoice = history.choices.replayData?.featureChoices?.[choiceIndex];
 		const acquisitionLevel = Number(
 			oldChoice.acquisitionLevel
@@ -4327,81 +4475,43 @@ class CharacterSheetRespec {
 							&& entry.class?.source === history.class.source)
 					.length,
 		) || 1;
-		const oldFeature = persistedFeatures.find(f =>
-			f.name === oldChoice.choice
-				&& f.parentFeature === oldChoice.featureName
-				&& f.className === history.class.name
-				&& Number(f.acquisitionLevel || f.level) === acquisitionLevel,
+		const decision = this._engine?.manifest?.decisions?.find(it =>
+			it.type === "featureChoice"
+			&& Number(it.characterLevel) === Number(level)
+			&& (Number(it.slot) === Number(choiceIndex) || it.sourceKey === oldChoice?.featureName),
 		);
-		if (oldFeature) {
-			oldFeature.id ||= CryptUtil.uid();
-			this._state.removeFeature(oldFeature.id);
-		} else {
-			// Fallback: remove orphaned modifiers by name if feature lookup failed
-			this._state.removeModifiersByName(oldChoice.choice);
-		}
-
-		// Add new feature
-		const classFeatures = this._page.getClassFeatures();
 		const catalogs = {
-			classFeatures,
+			classFeatures: this._page.getClassFeatures(),
 			subclassFeatures: this._page.getSubclassFeatures() || [],
 			optionalFeatures: this._page.getOptionalFeatures(),
 		};
-		const materialized = CharacterSheetClassUtils.materializeFeatureOption(newOption, {
+		const currentClass = this._state.getClasses().find(cls =>
+			cls.name === history.class.name && cls.source === history.class.source);
+		const result = CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+			state: this._state,
+			page: this._page,
+			characterLevel: level,
+			classLevel: acquisitionLevel,
 			className: history.class.name,
 			classSource: history.class.source,
-			acquisitionLevel,
+			subclassName: currentClass?.subclass?.name,
+			subclassShortName: currentClass?.subclass?.shortName,
+			subclassSource: currentClass?.subclass?.source,
 			parentFeature: oldChoice.featureName,
-			catalogs,
-		});
-		this._state.addFeature(materialized);
-		const fullFeature = CharacterSheetClassUtils.resolveFeatureOptionData(newOption, catalogs);
-
-		// Apply specialty auto-effects for the new feature (passive bonuses, PB skill bonuses, etc.)
-		const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
+			parentSource: replayChoice?.parentSource || null,
+			choiceIndex,
+			oldChoice,
 			newOption,
-			classFeatures,
-			{resolvedData: fullFeature},
-		);
-		autoEffects.forEach(effect => {
-			this._state.addNamedModifier({
-				name: newOption.name,
-				type: effect.type,
-				value: effect.value,
-				note: effect.note || `From specialty: ${newOption.name}`,
-				enabled: true,
-			});
-		});
-
-		// Update history
-		const updatedFeatureChoices = [...history.choices.featureChoices];
-		updatedFeatureChoices[choiceIndex] = {
-			featureName: oldChoice.featureName,
-			choice: newOption.name,
-			source: newOption.source,
-			acquisitionLevel,
-			ref: newOption.ref,
-			type: newOption.type,
-		};
-		const replayData = {...(history.choices.replayData || {})};
-		const updatedReplayChoices = [...(replayData.featureChoices || history.choices.featureChoices.map(() => null))];
-		updatedReplayChoices[choiceIndex] = CharacterSheetClassUtils.buildHistoryFeatureSnapshot(materialized, {
-			type: newOption.type || "featureOption",
-			parentFeature: oldChoice.featureName,
-			includeEntries: true,
-		});
-		replayData.featureChoices = updatedReplayChoices;
-
-		this._state.updateLevelChoice(level, {
-			featureChoices: updatedFeatureChoices,
-			replayData,
+			catalogs,
+			decision,
+			sourceDecisionKey: decision?.semanticKey,
+			persistHistory: true,
+			recalculate: true,
 		});
 
 		// Recalculate derived values after the swap
-		this._state.applyClassFeatureEffects();
-		this._state.calculateSpellSlots();
 		this._recalcHpPreservingHealing();
+		return result;
 	}
 
 	/**
@@ -4738,8 +4848,17 @@ class CharacterSheetRespec {
 		}
 
 		// Calculate what will be removed
-		const featuresToRemove = this._getSubclassFeatures(currentSubclass, history.class);
+		const removalPlan = this._getSubclassFeatureRemovalPlan(currentSubclass, history.class);
+		const featuresToRemove = removalPlan.features;
 		const willRemoveCount = featuresToRemove.length;
+
+		if (removalPlan.ambiguous.length) {
+			content.append(e_({
+				tag: "div",
+				clazz: "ve-alert ve-alert--danger mb-2",
+				txt: this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
+			}));
+		}
 
 		// Show cascade warning
 		if (willRemoveCount > 0) {
@@ -4818,7 +4937,15 @@ class CharacterSheetRespec {
 		cancelBtn.addEventListener("click", () => doClose());
 
 		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Change Subclass"});
+		applyBtn.disabled = !!removalPlan.ambiguous.length;
 		applyBtn.addEventListener("click", async () => {
+			if (removalPlan.ambiguous.length) {
+				JqueryUtil.doToast({
+					type: "danger",
+					content: this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
+				});
+				return;
+			}
 			if (!selectedSubclass) {
 				JqueryUtil.doToast({type: "warning", content: "Please select a subclass."});
 				return;
@@ -4863,35 +4990,65 @@ class CharacterSheetRespec {
 	}
 
 	/**
-	 * Get all features that belong to a specific subclass
+	 * Classify stored features which belong to a specific subclass.
+	 *
+	 * Modern rows use `subclassSource`, which is authoritative. Legacy rows may
+	 * omit it; only adopt those when their class, subclass name, and entity source
+	 * all identify the outgoing subclass exactly. Anything weaker is unsafe to
+	 * remove and must block the staged change instead of becoming stale state.
 	 * @param {object} subclass - The subclass {name, shortName, source}
-	 * @returns {Array} Array of features to remove
+	 * @returns {{features:Array, ambiguous:Array}}
 	 */
-	_getSubclassFeatures (subclass, classContext = null) {
-		if (!subclass) return [];
+	_getSubclassFeatureRemovalPlan (subclass, classContext = null) {
+		if (!subclass) return {features: [], ambiguous: []};
 		const features = this._state.getFeatures();
-		return features.filter(f => {
+		const out = {features: [], ambiguous: []};
+		features.forEach(f => {
 			// When a class context is supplied, only consider features belonging to that
 			// class so a subclass swap on one class of a multiclass character never
 			// removes another class's features (subclass shortNames can collide).
 			// Scope by className only — a feature's classSource (e.g. "PHB") legitimately
 			// differs from the class entry's source (e.g. "XPHB"), so it is not a safe
 			// discriminator.
-			if (classContext?.name && f.className && f.className !== classContext.name) return false;
+			if (classContext?.name && f.className && f.className !== classContext.name) return;
 
-			// Check if feature is explicitly a subclass feature
-			if (f.isSubclassFeature) {
-				// Match by subclass name or short name
-				if (f.subclassName === subclass.name || f.subclassShortName === subclass.shortName) {
-					return true;
-				}
+			const matchesName = (!!subclass.name && f.subclassName === subclass.name)
+				|| (!!subclass.shortName && f.subclassShortName === subclass.shortName);
+			if (!matchesName) return;
+
+			if (f.subclassSource) {
+				if (subclass.source && f.subclassSource !== subclass.source) return;
+				if (f.isSubclassFeature === true || f.subclassSource === subclass.source) out.features.push(f);
+				return;
 			}
-			// Check if feature has subclass source matching
-			if (f.subclassSource === subclass.source && f.subclassShortName === subclass.shortName) {
-				return true;
+
+			const hasExactClassName = !!classContext?.name && f.className === classContext.name;
+			const hasExactFeatureSource = !!subclass.source && f.source === subclass.source;
+			if (f.isSubclassFeature === true && hasExactClassName && hasExactFeatureSource) {
+				out.features.push(f);
+				return;
 			}
-			return false;
+			out.ambiguous.push(f);
 		});
+		return out;
+	}
+
+	_getSubclassFeatureAmbiguityMessage (subclass, ambiguousFeatures) {
+		const labels = ambiguousFeatures
+			.slice(0, 3)
+			.map(feature => `${feature.name || "Unnamed feature"}${feature.source ? `|${feature.source}` : ""}`)
+			.join(", ");
+		const remainder = ambiguousFeatures.length > 3 ? ` and ${ambiguousFeatures.length - 3} more` : "";
+		return `Cannot safely change ${subclass?.name || "this subclass"}: ${ambiguousFeatures.length} legacy subclass feature${ambiguousFeatures.length === 1 ? "" : "s"} (${labels}${remainder}) ${ambiguousFeatures.length === 1 ? "is" : "are"} missing subclassSource and exact class/subclass/entity-source provenance. Repair ${ambiguousFeatures.length === 1 ? "it" : "them"} with subclassSource "${subclass?.source || "the correct source"}" or remove them manually, then reopen Respec.`;
+	}
+
+	/**
+	 * Get all features that can be safely removed for a specific subclass.
+	 * @param {object} subclass - The subclass {name, shortName, source}
+	 * @returns {Array} Array of features to remove
+	 */
+	_getSubclassFeatures (subclass, classContext = null) {
+		return this._getSubclassFeatureRemovalPlan(subclass, classContext).features;
 	}
 
 	/**
@@ -4904,20 +5061,45 @@ class CharacterSheetRespec {
 	async _applySubclassChange (level, history, oldSubclass, newSubclass) {
 		// Get current total level for this class
 		const classes = this._state.getClasses();
-		const classEntry = classes.find(c => c.name === history.class.name);
+		const classEntry = classes.find(c =>
+			c.name === history.class.name
+			&& (!history.class.source || c.source === history.class.source));
 		const classLevel = classEntry?.level || 1;
+		const subclassSourceDecisionKey = this._engine?.manifest?.decisions?.find(decision =>
+			decision.type === "subclass"
+				&& decision.characterLevel === Number(history.level ?? level)
+				&& decision.className === history.class.name
+				&& decision.classSource === history.class.source,
+		)?.semanticKey
+			|| history.decisions?.find(decision => decision.type === "subclass")?.semanticKey
+			|| null;
 
-		// Remove old subclass features using proper API (scoped to the changed class)
-		const featuresToRemove = this._getSubclassFeatures(oldSubclass, history.class);
+		// Remove old subclass features using proper API (scoped to the changed class).
+		// Refuse the mutation before touching candidate state if legacy provenance is
+		// too weak to decide whether a source-less row belongs to this subclass.
+		const removalPlan = this._getSubclassFeatureRemovalPlan(oldSubclass, history.class);
+		if (removalPlan.ambiguous.length) {
+			throw new Error(this._getSubclassFeatureAmbiguityMessage(oldSubclass, removalPlan.ambiguous));
+		}
+		const featuresToRemove = removalPlan.features;
 		featuresToRemove.forEach(f => {
 			this._state.removeFeature(f.id);
 		});
 
-		// Remove the old subclass's always-prepared spells AND innate cantrips
-		// (e.g. domain/oath/origin spells + Sun Bloodline's Light). Subclass spells
-		// are stamped with sourceFeature "<Subclass Name> Spells" in
-		// populateSubclassSpells(); without this they linger after a subclass swap.
-		if (oldSubclass?.name) this._state.removeSubclassSpells(`${oldSubclass.name} Spells`);
+		// Remove only this exact class+subclass grant owner. Same-named subclasses can
+		// coexist across sources, so the display label alone is not safe provenance.
+		if (oldSubclass?.name) {
+			const sourceFeature = `${oldSubclass.name} Spells`;
+			const owner = this._state.getSubclassSpellGrantOwner({
+				name: classEntry?.name || history.class.name,
+				source: classEntry?.source || history.class.source,
+				subclass: {
+					name: oldSubclass.name,
+					source: oldSubclass.source || classEntry?.subclass?.source,
+				},
+			}, {sourceFeature});
+			this._state.removeSubclassSpells(owner);
+		}
 
 		// Update class entry with new subclass
 		if (classEntry) {
@@ -4972,15 +5154,23 @@ class CharacterSheetRespec {
 					entries: f.entries,
 					description: f.entries ? Renderer.get().render({entries: f.entries}) : "",
 					isSubclassFeature: true,
-				});
+				}, {sourceDecisionKey: subclassSourceDecisionKey});
 			});
 		}
 
 		// Update all level history entries that had the old subclass
 		const levelHistory = this._state.getLevelHistory();
 		levelHistory.forEach(entry => {
-			if ((!oldSubclass && entry.level === level)
-				|| entry.choices?.subclass?.name === oldSubclass?.name) {
+			const isExactClass = entry.class?.name === history.class.name
+				&& (!history.class.source || entry.class?.source === history.class.source);
+			const historicalSubclass = entry.choices?.subclass;
+			const isExactOldSubclass = !!oldSubclass
+				&& (
+					historicalSubclass?.name === oldSubclass.name
+					|| historicalSubclass?.shortName === oldSubclass.shortName
+				)
+				&& (!oldSubclass.source || historicalSubclass?.source === oldSubclass.source);
+			if (isExactClass && ((!oldSubclass && entry.level === level) || isExactOldSubclass)) {
 				this._state.updateLevelChoice(entry.level, {
 					subclass: {
 						name: newSubclass.name,
@@ -4998,6 +5188,8 @@ class CharacterSheetRespec {
 		// spell slots too.
 		this._state.applyClassFeatureEffects();
 		this._state.calculateSpellSlots();
+		this._state._syncAdventurersAtlasEligibility?.();
+		this._state.reconcileFeatureCompanionGrants?.({reason: "respecCandidate"});
 
 		// Subclass features may grant hpPerLevel — recalc max HP.
 		this._recalcHpPreservingHealing();

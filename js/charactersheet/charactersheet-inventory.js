@@ -3,6 +3,7 @@
  * Handles items, equipment, currency, and encumbrance
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
@@ -307,6 +308,16 @@ class CharacterSheetInventory {
 				this._page._crafting?.pShowCraftWorkbench();
 				return;
 			}
+			if (e.target.closest("#charsheet-btn-manage-generated-items")) {
+				this._pShowGeneratedItemManagement({
+					focusRestoreTarget: e.target.closest("#charsheet-btn-manage-generated-items"),
+				});
+				return;
+			}
+			if (e.target.closest("#charsheet-btn-efa-tinkers-magic")) {
+				this.pShowEfaArtificerTinker({operation: "tinkersMagic"});
+				return;
+			}
 
 			// --- Item row action buttons (delegated, dynamic) ---
 			const _getItemId = (target) => target.closest(".charsheet__item")?.dataset.itemId;
@@ -372,6 +383,13 @@ class CharacterSheetInventory {
 				if (itemId) this._showItemPowersModal(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-inline-power")) {
+				const button = e.target.closest(".charsheet__item-inline-power");
+				const itemId = _getItemId(button);
+				const powerId = button?.dataset.powerId;
+				if (itemId && powerId) this._pInvokeItemPower(itemId, powerId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-restore-charge")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._restoreCharge(itemId);
@@ -380,6 +398,21 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-recharge")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._pRechargeItemCharges(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__item-efa-charge")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this.pShowEfaArtificerTinker({operation: "charge", itemId});
+				return;
+			}
+			if (e.target.closest(".charsheet__item-efa-drain")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this.pShowEfaArtificerTinker({operation: "drain", itemId});
+				return;
+			}
+			if (e.target.closest(".charsheet__item-efa-transmute")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this.pShowEfaArtificerTinker({operation: "transmute", itemId});
 				return;
 			}
 			if (e.target.closest(".charsheet__item-cast-healing")) {
@@ -423,6 +456,17 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-use")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._useConsumable(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__efa-elixir-consume")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) {
+					CharacterSheetEfaExperimentalElixirUi.pShowConsumeModal({
+						state: this._state,
+						page: this._page,
+						itemId,
+					});
+				}
 				return;
 			}
 			if (e.target.closest(".charsheet__item-artifact-config")) {
@@ -536,6 +580,286 @@ class CharacterSheetInventory {
 		});
 	}
 
+	_getEfaArtificerTinkerUiError (preview) {
+		const messages = {
+			"action-economy-unavailable": "That action has already been used this turn.",
+			"tinkers-magic-tools-required": "Equip Tinker's Tools (XPHB) and be proficient with them.",
+			"tinkers-magic-uses-spent": "No Tinker's Magic uses remain until you finish a Long Rest.",
+			"charge-slot-unavailable": "Choose a spell slot that is still available.",
+			"charge-slot-pool-required": "Choose whether to spend the ordinary or Pact Magic slot at this level.",
+			"charge-target-full": "That item is already at its maximum charges.",
+			"charge-target-has-no-charges": "That replicated item has no charge pool to restore.",
+			"drain-already-used": "Drain Magic Item has already been used since your last Long Rest.",
+			"invalid-drain-rarity": "Drain Magic Item requires a Common, Uncommon, or Rare replicated item.",
+			"transmute-already-used": "Transmute Magic Item has already been used since your last Long Rest.",
+			"transmute-same-plan": "Choose a different known Replicate Magic Item plan.",
+			"transmute-same-item": "Choose a plan that resolves to a different item.",
+			"transmute-attunement-requirements-failed": "The replacement cannot preserve this item's attunement because its requirements are not met.",
+			"transmute-attunement-cap-reached": "The replacement would exceed your available attunement slots.",
+			"transmute-capacity-exceeded": "The replacement does not fit your current replicated-item capacity.",
+			"missing-replicate-item": "That replicated item is no longer in your inventory.",
+			"invalid-replicate-item": "That item is not an active item created by your exact Replicate Magic Item feature.",
+		};
+		return messages[preview?.code] || preview?.message || "This Magic Item Tinker transaction is not currently available.";
+	}
+
+	_getEfaArtificerTinkerSuccessMessage (result) {
+		if (result.operation === "tinkersMagic") return `${result.created.itemUid.split("|")[0]} created with Tinker's Magic.`;
+		if (result.operation === "charge") {
+			return `Restored ${result.charge.restored} charge${result.charge.restored === 1 ? "" : "s"} by spending a level ${result.charge.paidSlotLevel} spell slot.`;
+		}
+		if (result.operation === "drain") {
+			return `Drained the replicated item and gained one temporary level ${result.drain.slotLevel} spell slot.`;
+		}
+		return `Transmuted the replicated item into ${result.transmute.toItemUid.split("|")[0]}.`;
+	}
+
+	async pShowEfaArtificerTinker ({operation = "tinkersMagic", itemId = null} = {}) {
+		const titles = {
+			tinkersMagic: "Tinker's Magic",
+			charge: "Charge Magic Item",
+			drain: "Drain Magic Item",
+			transmute: "Transmute Magic Item",
+		};
+		if (!titles[operation]) return null;
+
+		let resolvedResult = null;
+		let isSettled = false;
+		let resolveResult;
+		const resultPromise = new Promise(resolve => { resolveResult = resolve; });
+		const settle = () => {
+			if (isSettled) return;
+			isSettled = true;
+			resolveResult(resolvedResult);
+		};
+		const {eleModalInner, eleModalFooter, doClose} = await CharacterSheetModal.pGetShow({
+			title: titles[operation],
+			isMinHeight0: true,
+			isWidth100: true,
+			isMaxWidth640p: true,
+			cbClose: settle,
+		});
+
+		const root = e_({tag: "div", clazz: "cs-efa-tinker"});
+		const intro = e_({tag: "p", clazz: "cs-efa-tinker__intro"});
+		intro.textContent = operation === "tinkersMagic"
+			? "Create one published mundane item. Each creation is a distinct temporary inventory row and disappears when you finish a Long Rest."
+			: operation === "charge"
+				? "Spend one available spell slot of level 1 or higher. The item regains charges equal to the paid slot level, up to its maximum."
+				: operation === "drain"
+					? "Destroy one replicated item to gain a temporary spell slot until your next Long Rest. Common items grant level 1; Uncommon or Rare items grant level 2."
+					: "Replace one replicated item with a different item resolved from another currently known plan. Its ownership and lifecycle order are preserved.";
+		root.append(intro);
+
+		const fields = e_({tag: "div", clazz: "cs-efa-tinker__fields"});
+		const feedback = e_({tag: "div", clazz: "cs-efa-tinker__feedback"});
+		feedback.setAttribute("role", "status");
+		feedback.setAttribute("aria-live", "polite");
+		root.append(fields, feedback);
+		eleModalInner.append(root);
+
+		const selects = {};
+		const addSelect = ({key, label, options = []}) => {
+			const field = e_({tag: "div", clazz: "cs-efa-tinker__field"});
+			const labelEle = e_({tag: "label", clazz: "cs-efa-tinker__label"});
+			const select = e_({tag: "select", clazz: "ve-form-control cs-efa-tinker__select"});
+			const selectId = `cs-efa-tinker-${operation}-${key}`;
+			labelEle.setAttribute("for", selectId);
+			labelEle.textContent = label;
+			select.id = selectId;
+			const setOptions = entries => {
+				select.innerHTML = "";
+				for (const entry of entries) {
+					const option = e_({tag: "option"});
+					option.value = entry.value;
+					option.textContent = entry.label;
+					select.append(option);
+				}
+				select.value = entries[0]?.value || "";
+			};
+			setOptions(options);
+			field.append(labelEle, select);
+			fields.append(field);
+			selects[key] = {select, setOptions};
+			return select;
+		};
+
+		const getOptions = () => this._state.getEfaArtificerTinkerOptions();
+		const getReplicateEntries = () => getOptions().magicItemTinker.replicateItems.map(item => ({
+			value: item.itemId,
+			label: `${item.name} (${String(item.rarity || "unknown").replace(/^\w/, ch => ch.toUpperCase())})`,
+		}));
+		if (operation === "tinkersMagic") {
+			addSelect({
+				key: "item",
+				label: "Mundane item",
+				options: getOptions().tinkersMagic.items
+					.filter(option => option.ok)
+					.map(option => ({value: option.itemUid, label: option.name})),
+			});
+		} else if (!itemId) {
+			addSelect({key: "target", label: "Replicated item", options: getReplicateEntries()});
+		}
+		if (operation === "charge") {
+			addSelect({
+				key: "slot",
+				label: "Spell slot to spend",
+				options: getOptions().magicItemTinker.chargeSlots.map(slot => ({
+					value: `${slot.pool}:${slot.level}`,
+					label: `${slot.pool === "pact" ? "Pact Magic" : "Ordinary"} level ${slot.level} (${slot.current} available)`,
+				})),
+			});
+		}
+		if (operation === "transmute") {
+			addSelect({key: "plan", label: "Different known plan"});
+			addSelect({key: "resolved", label: "Replacement item"});
+		}
+
+		const getTargetItemId = () => itemId || selects.target?.select.value || "";
+		const getTargetPlanOptions = () => {
+			const target = getOptions().magicItemTinker.replicateItems.find(item => item.itemId === getTargetItemId());
+			const currentSlotId = String(target?.plan?.slotId || "");
+			return this._state.getEfaReplicateMagicItemProductionOptions().plans
+				.filter(plan => plan.ok && String(plan.plan?.slotId || "") !== currentSlotId);
+		};
+		const updateTransmuteResolved = () => {
+			if (operation !== "transmute") return;
+			const plan = getTargetPlanOptions().find(option => String(option.plan.slotId) === selects.plan.select.value);
+			selects.resolved.setOptions((plan?.options || []).map(option => ({
+				value: option.itemUid,
+				label: option.name,
+			})));
+		};
+		const updateTransmutePlans = () => {
+			if (operation !== "transmute") return;
+			selects.plan.setOptions(getTargetPlanOptions().map(plan => ({
+				value: String(plan.plan.slotId),
+				label: plan.plan.selection.displayName || plan.plan.selection.name,
+			})));
+			updateTransmuteResolved();
+		};
+
+		const getRequest = () => {
+			if (operation === "tinkersMagic") return {operation, itemUid: selects.item?.select.value || ""};
+			if (operation === "charge") {
+				const [slotPool, slotLevel] = String(selects.slot?.select.value || "").split(":");
+				return {
+					operation,
+					itemId: getTargetItemId(),
+					slotLevel: Number(slotLevel),
+					slotPool,
+				};
+			}
+			if (operation === "drain") return {operation, itemId: getTargetItemId()};
+			return {
+				operation,
+				itemId: getTargetItemId(),
+				targetPlanSlotId: selects.plan?.select.value || "",
+				resolvedItemUid: selects.resolved?.select.value || "",
+			};
+		};
+
+		const btnConfirm = e_({tag: "button", clazz: `ve-btn ${["drain", "transmute"].includes(operation) ? "ve-btn-warning" : "ve-btn-primary"}`});
+		btnConfirm.type = "button";
+		btnConfirm.textContent = operation === "tinkersMagic"
+			? "Create Item"
+			: operation === "charge"
+				? "Spend Slot and Charge"
+				: operation === "drain"
+					? "Destroy and Drain"
+					: "Replace Item";
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default"});
+		btnCancel.type = "button";
+		btnCancel.textContent = "Cancel";
+		const footer = eleModalFooter || e_({tag: "div", clazz: "cs-efa-tinker__footer"});
+		footer.append(btnCancel, btnConfirm);
+		if (!eleModalFooter) root.append(footer);
+
+		let currentPreview = null;
+		const renderPreview = () => {
+			currentPreview = this._state.previewEfaArtificerTinkerTransaction(getRequest());
+			btnConfirm.disabled = !currentPreview.ok;
+			feedback.classList.toggle("cs-efa-tinker__feedback--error", !currentPreview.ok);
+			if (!currentPreview.ok) {
+				feedback.textContent = this._getEfaArtificerTinkerUiError(currentPreview);
+				return;
+			}
+			if (operation === "tinkersMagic") {
+				feedback.textContent = `Create ${currentPreview.item.name}. ${currentPreview.uses.remaining} of ${currentPreview.uses.max} uses remain before this creation.`;
+			} else if (operation === "charge") {
+				const poolLabel = currentPreview.charge.paidSlotPool === "pact" ? "Pact Magic" : "ordinary";
+				feedback.textContent = `Spend one ${poolLabel} level ${currentPreview.charge.paidSlotLevel} slot to restore ${currentPreview.charge.restored} charge${currentPreview.charge.restored === 1 ? "" : "s"} (${currentPreview.charge.previous} to ${currentPreview.charge.next} of ${currentPreview.charge.max}).`;
+			} else if (operation === "drain") {
+				feedback.textContent = `Destroy this ${currentPreview.drain.rarity} item and gain one temporary level ${currentPreview.drain.slotLevel} spell slot.`;
+			} else {
+				feedback.textContent = `Replace ${currentPreview.transmute.fromItemUid.split("|")[0]} with ${currentPreview.transmute.toItemUid.split("|")[0]}.`;
+			}
+		};
+
+		for (const {select} of Object.values(selects)) {
+			select.addEventListener("change", () => {
+				if (select === selects.target?.select) updateTransmutePlans();
+				if (select === selects.plan?.select) updateTransmuteResolved();
+				renderPreview();
+			});
+		}
+		updateTransmutePlans();
+		renderPreview();
+
+		let isCommitting = false;
+		btnCancel.addEventListener("click", () => doClose(false));
+		btnConfirm.addEventListener("click", async () => {
+			if (isCommitting) return;
+			isCommitting = true;
+			btnConfirm.disabled = true;
+			btnCancel.disabled = true;
+			const result = this._state.commitEfaArtificerTinkerTransaction(currentPreview?.request || getRequest());
+			if (!result.ok) {
+				isCommitting = false;
+				currentPreview = result;
+				feedback.classList.add("cs-efa-tinker__feedback--error");
+				feedback.textContent = this._getEfaArtificerTinkerUiError(result);
+				btnConfirm.disabled = true;
+				btnCancel.disabled = false;
+				return;
+			}
+			resolvedResult = result;
+			JqueryUtil.doToast({type: "success", content: this._getEfaArtificerTinkerSuccessMessage(result)});
+			try {
+				await this._page.saveCharacter?.();
+			} catch (error) {
+				feedback.classList.add("cs-efa-tinker__feedback--error");
+				feedback.textContent = "The operation committed, but the character could not be saved. Close this dialog and save the character again.";
+				btnCancel.disabled = false;
+				JqueryUtil.doToast({type: "danger", content: `Magic Item Tinker save failed: ${error.message}`});
+				this._page.renderCharacter?.();
+				return;
+			}
+			doClose(true);
+			this._page.renderCharacter?.();
+		});
+
+		CharacterSheetModal.focusFirst?.(eleModalInner, {preferSelector: "select, button"});
+		return resultPromise;
+	}
+
+	_renderEfaArtificerTinkerToolbar () {
+		const button = document.getElementById("charsheet-btn-efa-tinkers-magic");
+		if (!button) return;
+		const options = this._state.getEfaArtificerTinkerOptions();
+		const isVisible = options.classLevel >= 1;
+		button.style.display = isVisible ? "" : "none";
+		if (!isVisible) return;
+		const actionAvailable = !this._state.isInCombat() || this._state.isActionTypeAvailable("action");
+		button.disabled = !options.tinkersMagic.available || !actionAvailable;
+		button.title = !actionAvailable
+			? "Your Action has already been used this turn."
+			: options.tinkersMagic.unavailableReason || "Create a published mundane item with Tinker's Magic.";
+		button.setAttribute("aria-label", `Tinker's Magic, ${options.tinkersMagic.uses.remaining} of ${options.tinkersMagic.uses.max} uses remaining`);
+		const usesLabel = button.querySelector(".charsheet__efa-tinker-toolbar-uses");
+		if (usesLabel) usesLabel.textContent = `${options.tinkersMagic.uses.remaining}/${options.tinkersMagic.uses.max}`;
+	}
+
 	/**
 	 * Toggle starred status for an item.
 	 *
@@ -603,6 +927,135 @@ class CharacterSheetInventory {
 
 	async _showItemPicker () {
 		await this._pShowItemPickerModal();
+	}
+
+	static _escapeGeneratedItemText (value) {
+		return String(value ?? "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;");
+	}
+
+	_getGeneratedItemManagementHtml (rows = this._state.getGeneratedFeatureItemManagementRows()) {
+		const escape = CharacterSheetInventory._escapeGeneratedItemText;
+		const pendingCount = rows.filter(row => row.expiryRecords?.some(record =>
+			Number.isSafeInteger(record.daysRemaining)
+				&& record.daysRemaining > 0,
+		)).length;
+		const cards = rows.map(row => {
+			const provenance = row.classification?.provenance;
+			const owner = provenance?.owner;
+			const sourceFeature = owner?.featureUid
+				? owner.featureUid.split("|")[0]
+				: "Unknown source feature";
+			const source = owner?.featureSource || "Unknown source";
+			const plan = row.plan?.displayName || row.plan?.name || "No recorded plan";
+			const resolved = row.resolvedItem?.name
+				? `${row.resolvedItem.name}${row.resolvedItem.source ? ` (${row.resolvedItem.source})` : ""}`
+				: "No resolved catalog item";
+			const order = row.creation?.order ? `#${row.creation.order}` : "Unknown";
+			const expiry = row.expiryRecords?.find(record => record.trigger === "death") || null;
+			const expiryText = expiry?.repairRequired
+				? "Invalid persisted expiry values; exact repair is required"
+				: expiry
+					? `Rolled ${expiry.roll?.formula || "1d4"} = ${expiry.roll?.result}; ${expiry.daysRemaining} ${expiry.daysRemaining === 1 ? "day" : "days"} remaining`
+					: "Not pending";
+			const status = row.repairRequired
+				? `Repair required: ${row.issues.join(", ")}`
+				: "Lifecycle metadata valid";
+			const repairReason = row.repairRequired
+				? "Automatic repair is disabled because exact source identity must be restored without guessing."
+				: "No repair is required.";
+			return `<article class="charsheet__generated-item-card${row.repairRequired ? " charsheet__generated-item-card--repair" : ""}" data-item-id="${escape(row.itemId)}">
+				<div class="charsheet__generated-item-card-heading">
+					<div>
+						<h3 class="charsheet__generated-item-name">${escape(row.name)}</h3>
+						<div class="ve-muted ve-small">${escape(sourceFeature)} · ${escape(source)}</div>
+					</div>
+					<span class="badge ${row.repairRequired ? "badge-danger" : "badge-success"}">${escape(status)}</span>
+				</div>
+				<dl class="charsheet__generated-item-facts">
+					<div><dt>Known plan</dt><dd>${escape(plan)}</dd></div>
+					<div><dt>Resolved item</dt><dd>${escape(resolved)}</dd></div>
+					<div><dt>Creation order</dt><dd>${escape(order)}</dd></div>
+					<div><dt>Death expiry</dt><dd>${escape(expiryText)}</dd></div>
+				</dl>
+				<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__generated-item-repair" disabled aria-disabled="true" title="${escape(repairReason)}">
+					${row.repairRequired ? "Repair requires exact source" : "No repair needed"}
+				</button>
+			</article>`;
+		}).join("");
+		const disabledReason = pendingCount
+			? ""
+			: "No generated items have a pending lifecycle countdown.";
+		return `<section class="charsheet__generated-item-manager" aria-label="Generated item lifecycle management">
+			<p class="ve-muted">Review generated-item ownership and expiry here. <strong>Long rests do not advance lifecycle days.</strong></p>
+			<div class="charsheet__generated-item-actions">
+				<button type="button" class="ve-btn ve-btn-primary" data-action="advance-generated-item-day" ${pendingCount ? "" : `disabled aria-disabled="true" title="${escape(disabledReason)}"`}>
+					Advance Day
+				</button>
+				<span class="ve-small ve-muted">${pendingCount ? `${pendingCount} pending ${pendingCount === 1 ? "countdown" : "countdowns"}` : escape(disabledReason)}</span>
+			</div>
+			<div class="charsheet__generated-item-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+			<div class="charsheet__generated-item-list">
+				${cards || `<div class="charsheet__generated-item-empty ve-muted">No supported generated items are present.</div>`}
+			</div>
+		</section>`;
+	}
+
+	async _pAdvanceGeneratedItemLifecycleDaysFromUi (days = 1) {
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: days === 1 ? "Advance generated-item lifecycle by one day?" : `Advance generated-item lifecycle by ${days} days?`,
+			htmlDescription: `<p>This advances explicit generated-item countdowns only. Long rests do not advance these days.</p><p>Items reaching zero days are removed through normal inventory cleanup.</p>`,
+			textYes: days === 1 ? "Advance day" : `Advance ${days} days`,
+			textNo: "Cancel",
+		});
+		if (!confirmed) {
+			return {
+				ok: false,
+				code: "lifecycle-day-advance-cancelled",
+				message: "No lifecycle days were advanced.",
+			};
+		}
+		const result = this._state.advanceGeneratedFeatureItemLifecycleDays(days);
+		if (!result.ok) return {...result, message: result.message || "Lifecycle days could not be advanced."};
+		this._renderItemList();
+		this._renderEquippedItems();
+		this._renderAttunedItems();
+		this._updateArmorClass();
+		this._page.saveCharacter();
+		return {
+			...result,
+			message: `${result.daysAdvanced} ${result.daysAdvanced === 1 ? "day" : "days"} advanced. ${result.removed.length} expired ${result.removed.length === 1 ? "item was" : "items were"} removed.`,
+		};
+	}
+
+	async _pShowGeneratedItemManagement ({focusRestoreTarget = null} = {}) {
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Generated Items",
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+		});
+		const render = (feedback = "", {isFocus = false} = {}) => {
+			modalInner.innerHTML = this._getGeneratedItemManagementHtml();
+			const liveRegion = modalInner.querySelector(".charsheet__generated-item-feedback");
+			if (liveRegion) liveRegion.textContent = feedback;
+			const advance = modalInner.querySelector("[data-action=advance-generated-item-day]");
+			advance?.addEventListener("click", async () => {
+				advance.disabled = true;
+				const result = await this._pAdvanceGeneratedItemLifecycleDaysFromUi(1);
+				render(result.message || "", {isFocus: true});
+			});
+			const close = e_({tag: "button", clazz: "ve-btn ve-btn-default mt-3", text: "Close"});
+			close.addEventListener("click", () => doClose(true));
+			modalInner.querySelector(".charsheet__generated-item-manager")?.append(close);
+			if (isFocus) CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-action=advance-generated-item-day]:not([disabled])"});
+		};
+		render();
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-action=advance-generated-item-day]:not([disabled])"});
 	}
 
 	async _pShowItemPickerModal (opts = {}) {
@@ -1464,13 +1917,7 @@ class CharacterSheetInventory {
 		footer.querySelector("button").addEventListener("click", () => doClose(false));
 	}
 	_isMagicItem (item) {
-		if (item.rarity && !["none", "unknown"].includes(item.rarity.toLowerCase())) return true;
-		if (item.wondrous) return true;
-		if (item.reqAttune) return true;
-		if (item.bonusWeapon || item.bonusAc || item.bonusSpellAttack) return true;
-		if (["WD", "ST", "RG", "RD"].includes(item.type)) return true;
-		if (item.bonusWeaponDamage || item.bonusSavingThrow || item.bonusSpellDamage) return true;
-		return false;
+		return this._state?.isMagicItem?.(item) ?? CharacterSheetItemUtils.isMagicItem(item);
 	}
 
 	_isVariantComponent (item) {
@@ -4296,6 +4743,22 @@ class CharacterSheetInventory {
 		const items = this._state.getItems();
 		const item = items.find(i => i.id === itemId);
 		if (!item) return;
+		const modelWeaponStatus = this._state.getEfaArmorerModelWeaponInventoryStatus?.(item);
+		if (modelWeaponStatus) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `${item.name} is a derived Armor Model component and cannot be equipped independently.`,
+			});
+			return;
+		}
+		const arcaneArmorStatus = this._state.getEfaArcaneArmorBindingStatus?.();
+		if (arcaneArmorStatus?.boundItemId === itemId) {
+			const power = this._state.getItemPowers?.().find(candidate =>
+				candidate.itemId === itemId
+				&& candidate.efaArcaneArmorAction === (item.equipped ? "doff" : "don"));
+			if (power) this._pInvokeItemPower(itemId, power.id);
+			return;
+		}
 
 		const newEquipped = !item.equipped;
 
@@ -4790,7 +5253,7 @@ class CharacterSheetInventory {
 		if (tempHp > 0) {
 			const current = this._state.getTempHp() || 0;
 			if (tempHp > current) {
-				this._state.setTempHp(tempHp);
+				this._state.grantTempHp(tempHp);
 				applied.push(`${tempHp} temp HP`);
 			} else {
 				// RAW temporary hit points never stack — but silently doing nothing reads as a bug
@@ -5658,8 +6121,179 @@ class CharacterSheetInventory {
 		return confirmed;
 	}
 
-	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null} = {}) {
+	async _pGetSpellStoringItemHolder (power) {
+		const self = this._state.getEfaSpellStoringItemSelfHolder?.();
+		if (!self) return null;
+		const external = {uid: "__external__", label: "Another creature", kind: "external"};
+		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+			title: `${power.name} — Acting Holder`,
+			values: [self, external],
+			isResolveItem: true,
+			isAllowNull: true,
+			fnDisplay: (holder, ix) => (ix === -1 || !holder)
+				? "Cancel"
+				: holder.uid === external.uid
+					? "Another creature — enter an explicit identity"
+					: `${holder.label} — this character`,
+		}));
+		if (!picked || typeof picked === "symbol") return null;
+		if (picked.uid !== external.uid) return picked;
+		const label = await InputUiUtil.pGetUserString(/** @type {*} */ ({
+			title: `${power.name} — External Holder`,
+			default: "",
+			htmlDescription: "Enter the creature's name or stable table ID. This exact identity owns concentration and the once-per-turn receipt.",
+		}));
+		const normalizedLabel = String(label || "").trim();
+		if (!normalizedLabel) return null;
+		return {
+			uid: `external:${normalizedLabel.toLowerCase().replace(/\s+/g, "-")}`,
+			label: normalizedLabel,
+			kind: "external",
+		};
+	}
+
+	async _pGetEfaPerfectedGuardianContext (power) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: "Perfected Armor — Guardian Reaction",
+			isMinHeight0: true,
+		});
+		let resolved = null;
+		const form = ee`<div class="ve-flex-col w-100">
+			<p class="ve-small ve-muted mb-2">Resolve only a visible Huge-or-smaller creature that just ended its turn within ${power.range} feet. The sheet records the confirmed save and movement; it does not roll for the creature.</p>
+			<label class="ve-form-label mb-2">Creature
+				<input class="form-control" data-guardian-target aria-label="Guardian target name" placeholder="Ogre, dragon, ...">
+			</label>
+			<label class="ve-form-label mb-2">Size
+				<select class="form-control" data-guardian-size aria-label="Guardian target size">
+					${["tiny", "small", "medium", "large", "huge"].map(size => `<option value="${size}">${size.toTitleCase()}</option>`).join("")}
+				</select>
+			</label>
+			<label class="ve-form-label mb-2">Distance when its turn ended (ft.)
+				<input class="form-control" data-guardian-distance aria-label="Guardian target distance in feet" type="number" min="0" max="${power.range}" value="${power.range}">
+			</label>
+			<label class="ve-form-label mb-2">
+				<input data-guardian-visible type="checkbox" checked> You can see the creature
+			</label>
+			<label class="ve-form-label mb-2">
+				<input data-guardian-ended-turn type="checkbox" checked> The creature just ended its turn
+			</label>
+			<label class="ve-form-label mb-2">DC ${power.saveDc} Strength save
+				<select class="form-control" data-guardian-save aria-label="Guardian Strength save result">
+					<option value="failed">Failed save</option>
+					<option value="succeeded">Successful save — spend nothing</option>
+				</select>
+			</label>
+			<label class="ve-form-label mb-2">Pull directly toward you (ft.)
+				<input class="form-control" data-guardian-pull aria-label="Guardian pull distance in feet" type="number" min="0" max="${power.maxPullDistance}" value="${power.maxPullDistance}">
+			</label>
+			<div class="ve-small mb-3" data-guardian-summary role="status" aria-live="polite"></div>
+			<div class="ve-flex-v-center ve-flex-h-right">
+				<button class="ve-btn ve-btn-default mr-2" data-act="cancel">Cancel</button>
+				<button class="ve-btn ve-btn-primary" data-act="resolve">Resolve Guardian</button>
+			</div>
+		</div>`;
+		modalInner.append(form);
+		const distanceInput = form.querySelector("[data-guardian-distance]");
+		const pullInput = form.querySelector("[data-guardian-pull]");
+		const saveInput = form.querySelector("[data-guardian-save]");
+		const summary = form.querySelector("[data-guardian-summary]");
+		const updateSummary = () => {
+			const distance = Math.max(0, Number(distanceInput.value) || 0);
+			const pullMax = Math.min(power.maxPullDistance, distance);
+			pullInput.max = `${pullMax}`;
+			if (Number(pullInput.value) > pullMax) pullInput.value = `${pullMax}`;
+			const pull = Math.max(0, Number(pullInput.value) || 0);
+			const finalDistance = Math.max(0, distance - pull);
+			summary.textContent = saveInput.value === "succeeded"
+				? `Successful DC ${power.saveDc} Strength save: no Reaction or use will be spent.`
+				: `Failed DC ${power.saveDc} Strength save: pull ${pull} ft. to ${finalDistance} ft. away${finalDistance <= 5 ? "; optional melee weapon attack available" : ""}.`;
+		};
+		for (const input of [distanceInput, pullInput, saveInput]) {
+			input.addEventListener("input", updateSummary);
+			input.addEventListener("change", updateSummary);
+		}
+		form.querySelector("[data-act=cancel]").addEventListener("click", () => doClose(false));
+		form.querySelector("[data-act=resolve]").addEventListener("click", () => {
+			resolved = {
+				targetName: form.querySelector("[data-guardian-target]").value.trim(),
+				targetSize: form.querySelector("[data-guardian-size]").value,
+				distance: Number(distanceInput.value),
+				isVisible: form.querySelector("[data-guardian-visible]").checked,
+				endedTurn: form.querySelector("[data-guardian-ended-turn]").checked,
+				saveOutcome: saveInput.value,
+				pullDistance: Number(pullInput.value),
+			};
+			doClose(true);
+		});
+		updateSummary();
+		form.querySelector("[data-guardian-target]").focus();
+		await pGetResolved();
+		return resolved;
+	}
+
+	async _pResolveEfaPerfectedGuardianFollowUp (result) {
+		const attacks = result?.meleeAttackOptions || [];
+		if (!attacks.length) return result;
+		try {
+			const values = [...attacks.map((_, ix) => `${ix}`), "skip"];
+			const picked = await InputUiUtil.pGetUserEnum({
+				title: "Perfected Armor — Optional Melee Attack",
+				htmlDescription: `The target is ${result.finalDistance} feet away. Choose one eligible melee weapon attack to make as part of the already-spent Reaction, or decline it.`,
+				values,
+				fnDisplay: value => value === "skip"
+					? "Do not make the optional attack"
+					: `${attacks[Number(value)].name}${attacks[Number(value)].damage ? ` — ${attacks[Number(value)].damage} ${attacks[Number(value)].damageType || ""}` : ""}`,
+				isResolveItem: true,
+			});
+			if (picked == null || picked === "skip") {
+				result.guardianFollowUp = {ok: true, declined: true};
+				return result;
+			}
+			const attack = attacks[Number(picked)];
+			result.guardianFollowUp = {ok: true, declined: false, attack};
+			result.message += ` Optional follow-up selected: make ${attack.name} now; it costs no additional Reaction.`;
+			return result;
+		} catch (error) {
+			result.followUpFailed = true;
+			result.guardianFollowUp = {
+				ok: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
+			result.message += " The Guardian use remains committed, but the optional melee-attack selection could not be shown.";
+			return result;
+		}
+	}
+
+	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null, returnResult = false, holder = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
+		let pendingSpellCast = null;
+		let efaArmorer = null;
+		if (power?.kind === "storedSpell") {
+			const actingHolder = holder || await this._pGetSpellStoringItemHolder(power);
+			if (!actingHolder) return false;
+			const storedResult = await this._page?._spells?.pUseEfaSpellStoringItem?.({itemId, holder: actingHolder});
+			if (!storedResult?.ok) {
+				const message = storedResult?.reason === "alreadyUsed"
+					? `${actingHolder.label} already used this exact stored spell this turn.`
+					: storedResult?.reason === "cancelled"
+						? null
+						: storedResult?.reason || "That stored spell cannot be used.";
+				if (message) JqueryUtil.doToast({type: "warning", content: message});
+				return false;
+			}
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Used ${power.name} from ${power.itemName} as ${actingHolder.label} (${storedResult.usesCurrent}/${storedResult.usesMax} uses remaining).`,
+			});
+			closeModal?.();
+			this._updateItemBonuses(this._state.getItems());
+			this._renderItemList();
+			this._page?._combat?.renderCombatItemPowers?.();
+			this._page?._combat?.renderCombatActionEconomy?.();
+			this._page?._playMode?._renderActionsHub?.();
+			this._page?._saveCurrentCharacter?.();
+			return storedResult;
+		}
 		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
 		if (power?.chargesCostMax && (
 			selectedChargesCost < power.chargesCost
@@ -5678,18 +6312,63 @@ class CharacterSheetInventory {
 			const castLevel = power.isVariableChargeCast && power.castLevel
 				? power.castLevel + selectedChargesCost - power.chargesCost
 				: power.castLevel;
-			const cast = await this._page?._spells?.pCastItemSpell?.({...power, castLevel});
+			const cast = await this._page?._spells?.pCastItemSpell?.(
+				{...power, castLevel},
+				{deferCommit: true},
+			);
 			if (!cast) return false;
+			pendingSpellCast = cast.pendingSpellCast || null;
 		}
-		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost, ...(destructiveSpellConfirmed ? {confirmed: true} : {})});
+		if (power?.efaArcaneArmorModelAction === "giant-stature") {
+			const roomChoice = await InputUiUtil.pGetUserEnum({
+				title: "Giant Stature — Available Space",
+				htmlDescription: power.perfected
+					? "Choose Large or Huge. Insufficient room prevents only the size change; reach +10 and Advantage on Strength checks and saving throws still apply."
+					: "Does the space allow you to become Large? Insufficient room prevents only the size change; the reach increase still applies.",
+				values: power.perfected
+					? ["Become Large", "Become Huge", "Reach only — insufficient room"]
+					: ["Become Large", "Reach only — insufficient room"],
+				isResolveItem: true,
+			});
+			if (roomChoice == null) return false;
+			efaArmorer = {
+				hasRoom: roomChoice !== "Reach only — insufficient room",
+				targetSize: roomChoice === "Become Huge" ? "huge" : "large",
+			};
+		}
+		if (power?.efaArcaneArmorModelAction === "perfected-guardian") {
+			efaArmorer = await this._pGetEfaPerfectedGuardianContext(power);
+			if (!efaArmorer) return false;
+		}
+		if (power?.efaArcaneArmorModelAction === "perfected-flight") {
+			const confirmed = await CharacterSheetModal.pGetUserBoolean({
+				title: "Perfected Armor — Flight",
+				htmlDescription: `Spend your Bonus Action and 1 use to gain a ${power.flySpeed}-foot Fly Speed (2 × current ${power.speed}-foot Speed) until the end of this turn?`,
+				textYes: `Fly ${power.flySpeed} ft.`,
+				textNo: "Cancel",
+			});
+			if (confirmed !== true) return false;
+			efaArmorer = {cancelled: false};
+		}
+		let result = await this._state.invokeItemPower?.(itemId, powerId, {
+			chargesCost,
+			...(efaArmorer ? {efaArmorer} : {}),
+			...(destructiveSpellConfirmed ? {confirmed: true} : {}),
+		});
 		if (result?.needsConfirmation) {
 			const confirmed = await this._pConfirmDestructiveItemPower(result.power);
 			if (!confirmed) return false;
-			result = this._state.invokeItemPower(itemId, powerId, {confirmed: true});
+			result = await this._state.invokeItemPower(itemId, powerId, {
+				confirmed: true,
+				...(efaArmorer ? {efaArmorer} : {}),
+			});
 		}
 		if (!result?.ok) {
 			JqueryUtil.doToast({type: "warning", content: result?.reason || "That item power cannot be used."});
 			return false;
+		}
+		if (power?.efaArcaneArmorModelAction === "perfected-guardian") {
+			result = await this._pResolveEfaPerfectedGuardianFollowUp(result);
 		}
 		const chargeText = result.chargesMax
 			? ` (${result.chargesCurrent}/${result.chargesMax} charges remaining)`
@@ -5698,22 +6377,34 @@ class CharacterSheetInventory {
 			? result.isActive ? "Activated" : "Deactivated"
 			: result.power.kind === "spell" ? "Cast" : "Invoked";
 		JqueryUtil.doToast({
-			type: "success",
-			content: `${verb} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
+			type: result.followUpFailed ? "warning" : "success",
+			content: result.message || `${verb} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
 		});
 		closeModal?.();
 		this._updateItemBonuses(this._state.getItems());
 		this._renderItemList();
+		if (result.power?.isEfaArcaneArmorPower) {
+			this._renderEquippedItems();
+			this._updateArmorClass();
+			this._updateEncumbrance();
+			this._page?.renderCharacter?.();
+		}
 		this._page?._combat?.renderCombatItemPowers?.();
 		this._page?._combat?.renderCombatActionEconomy?.();
 		this._page?._playMode?._renderActionsHub?.();
+		if (pendingSpellCast) {
+			const receipt = await this._page?._spells?.pCommitPendingSpellCast?.(pendingSpellCast);
+			this._page?._saveCurrentCharacter?.();
+			return receipt || (returnResult ? result : true);
+		}
 		this._page?._saveCurrentCharacter?.();
-		return true;
+		return returnResult ? result : true;
 	}
 
 	async _showItemPowersModal (itemId) {
 		const item = this._state.getItems().find(it => it.id === itemId);
-		const powers = this._state.getItemPowers?.().filter(power => power.itemId === itemId) || [];
+		const powers = this._state.getItemPowers?.()
+			.filter(power => power.itemId === itemId && !power.isInlinePrimary) || [];
 		if (!item || !powers.length) return;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${item.name} — Powers`,
@@ -5752,6 +6443,8 @@ class CharacterSheetInventory {
 				if (power.chargesCost) metaParts.push(`${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
 				if (power.usesMax) metaParts.push(`${power.usesCurrent}/${power.usesMax} uses`);
 				if (power.castLevel) metaParts.push(`level ${power.castLevel}`);
+				if (power.spellSaveDc) metaParts.push(`DC ${power.spellSaveDc}`);
+				if (power.spellAttackBonus != null) metaParts.push(`${power.spellAttackBonus >= 0 ? "+" : ""}${power.spellAttackBonus} attack`);
 				if (power.isDestructive) metaParts.push("destroys item");
 				if (power.isReferenceOnly) metaParts.push("rules reference");
 				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", text: metaParts.join(" · ")}));
@@ -5774,10 +6467,10 @@ class CharacterSheetInventory {
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
-					text: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
+					text: power.invokeLabel || (power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"),
 				});
 				use.disabled = !power.isAvailable;
-				use.title = power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`;
+				use.title = power.unavailableReason || `${power.invokeLabel || (power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke")} ${power.name}`;
 				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {
 					closeModal: () => doClose(true),
 					chargesCost: chargeChoice ? parseInt(chargeChoice.value, 10) : null,
@@ -5792,6 +6485,8 @@ class CharacterSheetInventory {
 
 	_renderItemDetails (item) {
 		let html = "";
+		const arcaneArmorStatus = this._state.getEfaArcaneArmorBindingStatus?.();
+		const isActiveArcaneArmor = arcaneArmorStatus?.active && arcaneArmorStatus.boundItemId === item.id;
 
 		// Type and rarity - filter out special rarity values
 		const typeStr = this._getItemTypeTag(item);
@@ -5823,7 +6518,7 @@ class CharacterSheetInventory {
 		if (item.armor) {
 			html += `<p><strong>AC:</strong> ${item.ac}</p>`;
 			if (item.strength) {
-				html += `<p><strong>Strength Required:</strong> ${item.strength}</p>`;
+				html += `<p><strong>Strength Required:</strong> ${item.strength}${isActiveArcaneArmor ? ` <span class="text-success">— ignored while worn as Arcane Armor</span>` : ""}</p>`;
 			}
 			if (item.stealth) {
 				html += `<p><strong>Stealth:</strong> Disadvantage</p>`;
@@ -7085,6 +7780,9 @@ class CharacterSheetInventory {
 	}
 
 	_renderItemRow (item) {
+		const efaExperimentalElixir = this._state.classifyEfaExperimentalElixir?.(item);
+		const isEfaExperimentalElixir = ["valid", "stale"].includes(efaExperimentalElixir?.status);
+		const efaExperimentalElixirMetadata = efaExperimentalElixir?.metadata;
 		const typeTag = this._getItemTypeTagFromStoredType(item.type);
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const hasAttunementGemstone = item.socketedGemstones?.some(gem => CharacterSheetUpgrades?.getGemstoneDescriptor?.(gem)?.requiresAttunement);
@@ -7109,8 +7807,13 @@ class CharacterSheetInventory {
 				: "Form an Ioun bond in the Ioun Stone manager — bonding takes days, and never costs an attunement slot")
 			: (item.attuned ? "End attunement" : "Attune");
 		const hasCharges = item.charges && item.charges > 0;
-		const itemPowers = this._state.getItemPowers?.().filter(power => power.itemId === item.id) || [];
+		const allItemPowers = this._state.getItemPowers?.().filter(power => power.itemId === item.id) || [];
+		const inlinePrimaryPower = allItemPowers.find(power => power.isInlinePrimary) || null;
+		const itemPowers = allItemPowers.filter(power => !power.isInlinePrimary);
 		const hasPowers = itemPowers.length > 0;
+		const isBoundArcaneArmor = ["don", "doff"].includes(inlinePrimaryPower?.efaArcaneArmorAction);
+		const modelWeaponStatus = this._state.getEfaArmorerModelWeaponInventoryStatus?.(item) || null;
+		const showEquipControl = canEquip && !isBoundArcaneArmor && !modelWeaponStatus;
 		const canRecharge = hasCharges && !!item.recharge;
 		const rechargeFormula = canRecharge ? CharacterSheetState.getItemRechargeFormula(item) : "";
 		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
@@ -7124,7 +7827,7 @@ class CharacterSheetInventory {
 		// which meant a `"P|DMG"` potion, a lowercase type, a poison, or anything name-matched was
 		// listed on the Consumables tab and then offered no way to consume it — the same strictness
 		// already fixed in the *dispatch* path but left behind here.
-		const isConsumable = this._isConsumable(item);
+		const isConsumable = !isEfaExperimentalElixir && this._isConsumable(item);
 		const isArtifact = item.rarity === "artifact";
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
 		const hasSpellward = !!(item.spellImmunitySlots?.count);
@@ -7164,6 +7867,53 @@ class CharacterSheetInventory {
 		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
 		const canOpenPack = !!this._getEffectivePackContents(item)?.length;
 		const packProvenanceName = item._fromPack ? item._fromPack.split("|")[0] : "";
+		const generatedClassification = this._state.classifyGeneratedFeatureItem?.(item) || {status: "ordinary", reason: "unsupported"};
+		const generatedProvenance = generatedClassification.status === "valid"
+			? generatedClassification.provenance
+			: null;
+		const generatedPlan = generatedProvenance?.catalog?.plan?.selection || null;
+		const generatedOrder = generatedProvenance?.creation?.order || null;
+		const generatedRepairRequired = efaExperimentalElixir?.status === "stale"
+			|| generatedClassification.repairRequired
+			|| (
+				generatedClassification.status === "valid"
+				&& generatedProvenance?.lifecycle?.state === "unresolved"
+			);
+		const generatedRepairReason = efaExperimentalElixir?.status === "stale"
+			? `Experimental Elixir: ${CharacterSheetEfaExperimentalElixirUi.formatRepairReason(efaExperimentalElixir.reason)}.`
+			: "Generated-item provenance or catalog resolution needs repair.";
+		const generatedFeatureLabel = generatedProvenance?.metadata?.sourceFeatureUid
+			? String(generatedProvenance.metadata.sourceFeatureUid).split("|")[0]
+			: "Generated feature item";
+		const generatedFeatureSource = generatedProvenance?.metadata?.sourceFeatureUid
+			? String(generatedProvenance.metadata.sourceFeatureUid).split("|").at(-1)
+			: null;
+		const spellStorage = item._spellStorage || null;
+		const spellStorageExpired = spellStorage?.repair?.status === "expired";
+		const spellStorageRepair = spellStorage?.repair?.status && !["active", "expired"].includes(spellStorage.repair.status);
+		const efaTinkerOptions = this._state.getEfaArtificerTinkerOptions?.() || null;
+		const efaReplicateItem = efaTinkerOptions?.magicItemTinker?.replicateItems
+			.find(candidate => candidate.itemId === item.id) || null;
+		const efaBonusActionAvailable = !this._state.isInCombat?.() || this._state.isActionTypeAvailable?.("bonus");
+		const efaActionAvailable = !this._state.isInCombat?.() || this._state.isActionTypeAvailable?.("action");
+		const efaChargeSlotsAvailable = !!efaTinkerOptions?.magicItemTinker?.chargeSlots?.length;
+		const efaCanCharge = !!efaReplicateItem
+			&& Number(efaReplicateItem.chargesMax) > 0
+			&& Number(efaReplicateItem.chargesCurrent) < Number(efaReplicateItem.chargesMax)
+			&& efaChargeSlotsAvailable
+			&& efaBonusActionAvailable;
+		const efaDrainRarityValid = ["common", "uncommon", "rare"].includes(String(efaReplicateItem?.rarity || "").toLowerCase());
+		const efaCanDrain = !!efaReplicateItem
+			&& !!efaTinkerOptions?.magicItemTinker?.drainAvailable
+			&& efaDrainRarityValid
+			&& efaBonusActionAvailable;
+		const efaCurrentPlanSlotId = String(efaReplicateItem?.plan?.slotId || "");
+		const efaHasAlternatePlan = !!efaReplicateItem
+			&& this._state.getEfaArtificerPlans().some(plan => String(plan.slotId) !== efaCurrentPlanSlotId);
+		const efaCanTransmute = !!efaReplicateItem
+			&& !!efaTinkerOptions?.magicItemTinker?.transmuteAvailable
+			&& efaHasAlternatePlan
+			&& efaActionAvailable;
 
 		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
@@ -7214,6 +7964,11 @@ class CharacterSheetInventory {
 						</span>
 						<span class="charsheet__item-meta">
 							${typeTag ? `<span class="badge badge-secondary ve-small">${typeTag}</span>` : ""}
+							${generatedProvenance ? `<span class="badge badge-warning ve-small" title="Temporary item created by ${generatedFeatureLabel.replace(/"/g, "&quot;")}${generatedFeatureSource ? ` (${generatedFeatureSource.replace(/"/g, "&quot;")})` : ""}">⌛ Temporary</span>` : ""}
+							${generatedPlan ? `<span class="badge badge-info ve-small" title="Known plan: ${String(generatedPlan.name || generatedPlan.displayName || "").replace(/"/g, "&quot;")} (${String(generatedPlan.source || "").replace(/"/g, "&quot;")})">Plan: ${String(generatedPlan.displayName || generatedPlan.name || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>` : ""}
+							${generatedOrder ? `<span class="ve-muted ve-small" title="Stable generated-item creation order">Created #${generatedOrder}</span>` : ""}
+							${generatedRepairRequired ? `<span class="badge badge-danger ve-small" title="${generatedRepairReason.replace(/"/g, "&quot;")} The item remains in inventory; use the shared generated-item edit/delete/restore controls.">Repair required</span>` : ""}
+							${spellStorage ? `<span class="badge ${spellStorageRepair || spellStorageExpired ? "badge-danger" : "badge-info"} ve-small" title="${spellStorageRepair ? `Spell storage needs repair: ${(spellStorage.repair?.reasons || []).join(", ") || "unresolved identity"}` : spellStorageExpired ? `Spell-Storing Item: ${spellStorage.spell.name} has no uses remaining` : `Spell-Storing Item: ${spellStorage.spell.name} (${spellStorage.usesCurrent}/${spellStorage.usesMax} uses)`}">${spellStorageRepair ? "Storage repair required" : spellStorageExpired ? "Storage depleted" : `Stored: ${String(spellStorage.spell.name || "Spell").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`}</span>` : ""}
 							${isVariantComponent ? `<span class="badge badge-info ve-small" title="Variant Spell Component — can enhance matching spells when cast">🧪 Component</span>` : ""}
 							${isArtifact ? `<span class="badge badge-danger ve-small" title="Artifact">⚗️ Artifact</span>` : item.rarity && !["none", "unknown", "unknown (magic)", "varies"].includes(item.rarity.toLowerCase()) ? `<span class="badge badge-info ve-small">${item.rarity.toTitleCase()}</span>` : ""}
 							${item.weight ? `<span class="ve-muted ve-small">${(item.weight * item.quantity).toFixed(1)} lb.</span>` : ""}
@@ -7231,11 +7986,33 @@ class CharacterSheetInventory {
 	}</span>` : ""}
 						${item.regeneration ? `<span class="ve-small text-success" title="${(item.regeneration.condition || item.regeneration.note || "Start of turn").replace(/"/g, "&quot;")}">♥ Regen ${item.regeneration.value ?? item.regeneration.amount ?? item.regeneration.hp}/turn</span>` : ""}
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
+						${efaExperimentalElixir?.status === "valid" ? `
+							<span class="ve-small charsheet__efa-elixir-item-status">
+								<strong>${CharacterSheetEfaExperimentalElixirUi.getEffectLabel(efaExperimentalElixirMetadata.effectKey)}</strong>
+								${CharacterSheetEfaExperimentalElixirUi.formatMetadataEffect(efaExperimentalElixirMetadata, this._state)}
+								${CharacterSheetEfaExperimentalElixirUi.formatOrigin(efaExperimentalElixirMetadata)}
+							</span>
+						` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
+						${spellStorage ? `<span class="ve-small ${spellStorageRepair ? "text-danger" : "text-info"}" title="Stored-spell casting statistics">Spell storage: <strong>${spellStorage.usesCurrent}/${spellStorage.usesMax}</strong> uses · DC ${spellStorage.casting?.saveDc ?? "—"} · ${(spellStorage.casting?.attackBonus ?? 0) >= 0 ? "+" : ""}${spellStorage.casting?.attackBonus ?? "—"} attack</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
+						${inlinePrimaryPower ? `
+							<span class="ve-small charsheet__item-inline-power-status charsheet__item-inline-power-status--${inlinePrimaryPower.statusTone}" title="${(inlinePrimaryPower.statusDescription || inlinePrimaryPower.statusLabel).replace(/"/g, "&quot;")}">
+								<span aria-hidden="true">${inlinePrimaryPower.statusIcon || "⚙"}</span>
+								<span>${inlinePrimaryPower.statusLabel}</span>
+							</span>
+							${inlinePrimaryPower.statusDescription ? `<span class="ve-small ve-muted">${inlinePrimaryPower.statusDescription}</span>` : ""}
+							${inlinePrimaryPower.referenceText ? `<span class="ve-small ve-muted">${inlinePrimaryPower.referenceText}</span>` : ""}
+						` : ""}
+						${modelWeaponStatus ? `
+							<span class="ve-small charsheet__item-inline-power-status charsheet__item-inline-power-status--${modelWeaponStatus.active ? "active" : "suspended"}" title="${modelWeaponStatus.reason.replace(/"/g, "&quot;")}">
+								<span aria-hidden="true">${modelWeaponStatus.active ? "⚙" : "○"}</span>
+								<span>${modelWeaponStatus.label}</span>
+							</span>
+						` : ""}
 						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity, item)}`).replace(/"/g, "&quot;")}"><span aria-hidden="true">⚙</span> <span class="sr-only">Material:</span>${materialEntity.name}<span class="sr-only"> — ${CharacterSheetMaterials.getSummary(materialEntity, item)}</span></span>` : ""}
 						${iounHost ? `<span class="ve-small charsheet__item-material-badge" title="${iounSetStatusTitle.qq()}"><span aria-hidden="true">◉</span> Set in ${iounHostName.qq()}${isIounMatrixDoubled ? " · Numeric effects ×2" : (isIounMatrixExcluded ? " · Fragment not doubled" : "")}</span>` : ""}
 						${mcStatus ? `<button type="button" class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}" aria-label="${CharacterSheetMaterials.getMagicCapacityAriaLabel(materialEntity, mcStatus).replace(/"/g, "&quot;")}"><span aria-hidden="true">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span></button>` : ""}
@@ -7271,6 +8048,18 @@ class CharacterSheetInventory {
 								<span class="glyphicon glyphicon-plus"></span>
 							</button>
 						` : ""}
+						${inlinePrimaryPower ? `
+							<button
+								type="button"
+								class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-inline-power"
+								data-power-id="${inlinePrimaryPower.id}"
+								title="${(inlinePrimaryPower.unavailableReason || inlinePrimaryPower.description || `${inlinePrimaryPower.invokeLabel} ${item.name}`).replace(/"/g, "&quot;")}"
+								aria-label="${(`${inlinePrimaryPower.invokeLabel} ${item.name} — ${inlinePrimaryPower.activationType}${inlinePrimaryPower.unavailableReason ? `: ${inlinePrimaryPower.unavailableReason}` : ""}`).replace(/"/g, "&quot;")}"
+								${inlinePrimaryPower.isAvailable ? "" : "disabled"}
+							>
+								<span aria-hidden="true">${inlinePrimaryPower.statusIcon || "⚙"}</span> ${inlinePrimaryPower.invokeLabel}
+							</button>
+						` : ""}
 						${hasPowers ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-powers" title="View and invoke ${itemPowers.length} item power${itemPowers.length === 1 ? "" : "s"}">
 								<span class="glyphicon glyphicon-flash"></span> Powers (${itemPowers.length})
@@ -7279,6 +8068,19 @@ class CharacterSheetInventory {
 						${canRecharge ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-recharge" title="Recharge (${rechargeFormula.replace(/"/g, "&quot;")})" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-refresh"></span> ${rechargeFormula}
+							</button>
+						` : ""}
+						${efaReplicateItem ? `
+							${Number(efaReplicateItem.chargesMax) > 0 ? `
+								<button type="button" class="ve-btn ve-btn-xs ve-btn-info charsheet__item-efa-charge" title="${efaCanCharge ? "Spend a spell slot to restore charges" : "Requires missing charges, an available level 1+ spell slot, and an unused Bonus Action in combat"}" ${efaCanCharge ? "" : "disabled"}>
+									Charge
+								</button>
+							` : ""}
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-warning charsheet__item-efa-drain" title="${efaCanDrain ? "Destroy this item to gain a temporary spell slot" : "Requires a Common, Uncommon, or Rare item, an unused Drain, and an unused Bonus Action in combat"}" ${efaCanDrain ? "" : "disabled"}>
+								Drain
+							</button>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-efa-transmute" title="${efaCanTransmute ? "Replace this item from another known plan" : "Requires another known plan, an unused Transmute, and an unused Action in combat"}" ${efaCanTransmute ? "" : "disabled"}>
+								Transmute
 							</button>
 						` : ""}
 						${hasSpellward ? `
@@ -7314,7 +8116,7 @@ class CharacterSheetInventory {
 								💎 Stored Spells
 							</button>
 						` : ""}
-						${canEquip ? `
+						${showEquipControl ? `
 							<button type="button" class="ve-btn ve-btn-xs ${item.equipped ? "ve-btn-success" : "ve-btn-default"} charsheet__item-equip" title="${item.equipped ? "Unequip" : "Equip"}">
 								<span class="glyphicon glyphicon-hand-right"></span> ${item.equipped ? "Equipped" : "Equip"}
 							</button>
@@ -7327,6 +8129,11 @@ class CharacterSheetInventory {
 						${isConsumable ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-use" title="Use ${item.name}">
 								<span class="glyphicon glyphicon-play"></span> Use
+							</button>
+						` : ""}
+						${efaExperimentalElixir?.status === "valid" ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__efa-elixir-consume" data-efa-elixir-consume="${item.id}" title="Drink this vial or administer it to a creature within 5 feet">
+								Drink / Administer
 							</button>
 						` : ""}
 						${isArtifact ? `
@@ -7570,6 +8377,7 @@ class CharacterSheetInventory {
 
 	render () {
 		this._renderItemList();
+		this._renderEfaArtificerTinkerToolbar();
 		this._renderCurrency();
 		this._initCurrencyInputs();
 		this._updateEncumbrance();

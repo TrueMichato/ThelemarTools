@@ -157,6 +157,12 @@ class CharacterSheetModal {
 		return globalThis.InputUiUtil.pGetUserNumber(CharacterSheetModal._getRollFollowupInputOpts(opts, {isDescriptionElement: true}));
 	}
 
+	static pGetUserString (opts) {
+		const inputOpts = CharacterSheetModal._getRollFollowupInputOpts(opts, {isDescriptionElement: true});
+		inputOpts.fnGetShowModal ||= modalOpts => CharacterSheetModal.pGetShow(modalOpts);
+		return globalThis.InputUiUtil.pGetUserString(inputOpts);
+	}
+
 	static _getRollFollowupInputOpts (opts, {isDescriptionHtml = false, isDescriptionElement = false} = {}) {
 		const {rollFollowup, ...inputOpts} = opts || {};
 		if (!rollFollowup) return inputOpts;

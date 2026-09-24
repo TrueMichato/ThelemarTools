@@ -34,6 +34,31 @@ open-code pools or per-pick effect probes when a helper exists.
 doesn't apply, `{skip: true}` with a one-line reason — don't drop the
 field.
 
+### EFA Artificer base assets
+
+The EFA Artificer chassis has reusable, source-safe E2E assets:
+
+- `buildEfaArtificerPreset()` in
+  [`characterBuilder.ts`](../../test/e2e/utils/characterBuilder.ts) pins
+  `Artificer|EFA`, EFA source priority, INT-first abilities, deterministic
+  skills/tools, and spell essentials. It requires an explicit subclass name
+  and source.
+- `buildEfaArtificerBaseChecks()` and
+  `EFA_ARTIFICER_BASE_FEATURE_UIDS` in
+  [`efaArtificerBase.ts`](../../test/e2e/utils/efaArtificerBase.ts) publish
+  the source-qualified L1–20 base-feature matrix, including persisted
+  Ability Score Improvement choices and generic state transaction probes for
+  the M1–M6 mechanics.
+- `LevelUpPage.selectRequiredEfaArtificerPlans()` drives the shared plan modal
+  for required gains while preserving optional replacement choices.
+
+These helpers are **assets for a future accepted subclass spec**, not permission
+to publish a subclass-free comprehensive Artificer build. The consuming spec
+must spread the base rows into its `featuresMatrix`, add every subclass feature
+at L3/L5/L9/L15 with real effects, and satisfy the rest of this standard. The
+base Epic Boon row intentionally records an `effectReason`; the consuming spec
+owns the mechanics of the exact boon it selects.
+
 ## Post-test JSON export (automatic)
 
 Every generated test (single-class L1/L3/L5/L5-loadout/MEGA/USE/round-trip
