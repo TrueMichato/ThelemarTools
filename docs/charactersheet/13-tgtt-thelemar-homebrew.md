@@ -253,13 +253,27 @@ Three Barbarian Specialties grant permanent bonuses equal to proficiency bonus:
 
 | Specialty | Modifier targets | Scope |
 |---|---|---|
-| **Agile Sprinter** | `skill:athletics`, `skill:acrobatics` | Always on |
+| **Marathoner** | `skill:endurance` | Always on; its forced-march reroll is a separate action |
 | **Lead the Pack** | `skill:athletics`, `skill:acrobatics` | Always on; its separate group-check result-sharing rider remains DM/player operated |
 | **Unyielding Might** | `skill:might` | Always on; never Athletics |
 
 TGTT defines **Might** as the Strength skill for raw-strength feats such as
 breaking, bending, lifting, dragging, carrying, and forcing objects. Grapple and
 shove are not part of the Might skill definition.
+Marathoner instead boosts **Endurance (TGTT)** checks by the Barbarian's
+proficiency bonus; it grants no bonus to Athletics, Acrobatics, or Might. Old
+TGTT Barbarian Agile Sprinter choices migrate to Marathoner on load, including
+stored feature picks and level-history replay, without adding another specialty.
+
+With Marathoner selected, the **Forced March** button appears below Saving Throws.
+Enter the DM's forced-march save DC, then roll the Constitution save there:
+ordinary Constitution saves do not qualify. After an actual failure, the sheet
+offers a reroll for **one available Hit Die** (pick the die type if multiclassed).
+The reroll uses the original DC, save modifiers, situational choices, and rolled
+bonus dice; it does not heal and has no daily limit beyond remaining Hit Dice.
+Declining the reroll spends no die. The **final** failed result, including a
+declined reroll, adds one exhaustion; a successful final result adds none.
+The result reports both totals, the DC, die spent, and remaining dice.
 
 These modifiers are prose-parsed from the explicit shape “gain a bonus to
 <skill> checks. The bonus equals your proficiency bonus.” Keep that wording and

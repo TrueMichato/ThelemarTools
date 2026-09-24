@@ -18,7 +18,7 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const FeatureModifierParser = globalThis.FeatureModifierParser;
 
 const EXPECTED_REFS = [
-	"Agile Sprinter|Barbarian|TGTT|1",
+	"Marathoner|Barbarian|TGTT|1",
 	"Flock Step|Barbarian|TGTT|1",
 	"Mark of the Wilderness|Barbarian|TGTT|1",
 	"Natural Tracker|Barbarian|TGTT|1",
@@ -46,9 +46,8 @@ const signature = (type, overrides = {}) => ({
 });
 
 const EXPECTED_SIGNATURES = {
-	"Agile Sprinter": [
-		signature("skill:acrobatics", {proficiencyBonus: true}),
-		signature("skill:athletics", {proficiencyBonus: true}),
+	"Marathoner": [
+		signature("skill:endurance", {proficiencyBonus: true}),
 	],
 	"Flock Step": [
 		signature("skill:stealth", {proficiencyBonus: true}),
@@ -160,7 +159,7 @@ describe("TGTT Barbarian Specialty parser corpus", () => {
 
 describe("TGTT Barbarian Specialty registered mechanics", () => {
 	test.each([
-		["Agile Sprinter", ["athletics", "acrobatics"], ["might"]],
+		["Marathoner", ["endurance"], ["athletics", "acrobatics", "might"]],
 		["Lead the Pack", ["athletics", "acrobatics"], ["might"]],
 		["Unyielding Might", ["might"], ["athletics", "acrobatics"]],
 	])("%s grants permanent PB only to its intended skills", (name, targets, untouched) => {

@@ -4106,6 +4106,34 @@ body[data-font="readable"] {
 	transform: translateX(4px);
 }
 
+.charsheet__forced-march-btn {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+	width: 100%;
+	margin-top: var(--cs-space-xs, 0.25rem);
+	padding: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.2));
+	border-radius: var(--cs-radius-md, 10px);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	color: var(--cs-primary-text, #6366f1);
+	cursor: pointer;
+	text-align: left;
+}
+
+.charsheet__forced-march-btn small {
+	color: var(--cs-text-muted, var(--rgb-text-muted));
+	font-size: var(--cs-text-xs, 0.75rem);
+	text-align: right;
+}
+
+.charsheet__forced-march-btn:hover,
+.charsheet__forced-march-btn:focus-visible {
+	border-color: var(--cs-primary-text, #6366f1);
+	background: rgba(99, 102, 241, 0.1);
+}
+
 .charsheet__prof-indicator {
 	width: 14px;
 	height: 14px;

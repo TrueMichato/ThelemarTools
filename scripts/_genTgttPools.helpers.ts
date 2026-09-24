@@ -1,10 +1,8 @@
 // ────────────────────────────────────────────────────────────────────────
 // build*Checks helpers — emit FeatureCheck arrays that specs spread
-// into their featuresMatrix. Each helper attaches a "pickedFeatureGrants"
-// effect for the auto-picker's deterministic first choice (when an
-// effect map entry exists), so the test verifies not just that a pick
-// surfaced but that the picked option's documented effect lands on the
-// sheet.
+// into their featuresMatrix. Each helper attaches "pickedFeatureGrants"
+// effects for supported picks, so the test verifies that documented
+// effects land on the sheet when those options are chosen.
 //
 // All progression arrays are defaults — pass an explicit progression
 // to override (e.g. for multiclass specs).
@@ -40,9 +38,8 @@ export function withSkipReason (checks: FeatureCheck[], skipReason: string): Fea
  * Generate FeatureCheck entries for the TGTT "Specialties" pick at each
  * level the class gains a new specialty. Each entry asserts that
  * cumulative `pickedCount` distinct specialty names from the class's
- * pool surface in the feature list, and (if the class has an entry in
- * TGTT_SPECIALTY_EFFECTS) attaches a `pickedFeatureGrants` effect for
- * the auto-picker's deterministic first pick.
+ * pool surface in the feature list, and conditionally probes the
+ * mechanical effects of whichever specialties were actually picked.
  *
  * Multiclass usage: pass the class-level you expect at the milestone
  * (not character-level) — `levelMap` maps class-level → character-level.
@@ -52,17 +49,18 @@ export function buildSpecialtyChecks (className: string, levelMap?: Record<numbe
 	const levels = TGTT_SPECIALTY_LEVELS[className];
 	if (!pool || !levels) return [];
 	const firstPick = TGTT_SPECIALTY_FIRST_PICK[className];
-	const subEffects = firstPick ? TGTT_SPECIALTY_EFFECTS?.[className]?.[firstPick] : undefined;
-	const grants = firstPick ? pickedGrants(firstPick, subEffects) : [];
+	const firstGrants = firstPick ? pickedGrants(firstPick, TGTT_SPECIALTY_EFFECTS?.[className]?.[firstPick]) : [];
+	const laterGrants = Object.entries(TGTT_SPECIALTY_EFFECTS?.[className] || {})
+		.filter(([name]) => name !== firstPick)
+		.flatMap(([name, effects]) => pickedGrants(name, effects));
+	const initialGrants = [...firstGrants, ...laterGrants];
 	return levels.map((classLevel, idx) => ({
 		level: applyLevelMap(classLevel, levelMap),
 		name: /specialties/i,
 		kind: "pick" as const,
 		pickedCount: idx + 1,
 		pickedFrom: pool,
-		// Per-pick effect attached only at the first milestone — re-checking
-		// the same effect at every milestone would be redundant.
-		effects: idx === 0 && grants.length ? grants : undefined,
+		effects: (idx === 0 ? initialGrants : laterGrants).length ? (idx === 0 ? initialGrants : laterGrants) : undefined,
 	}));
 }
 
