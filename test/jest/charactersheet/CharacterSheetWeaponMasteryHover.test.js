@@ -27,6 +27,7 @@ function installHoverMocks () {
 	const calls = [];
 	globalThis.HASH_LIST_SEP = "_";
 	globalThis.UrlUtil.encodeForHash = (v) => (Array.isArray(v) ? v.join(globalThis.HASH_LIST_SEP) : String(v)).toLowerCase().replace(/\s+/g, "%20");
+	globalThis.Renderer.item = {_getMastery: uid => ({name: uid.split("|")[0], source: uid.split("|")[1], entries: ["Available"]})};
 	globalThis.Renderer.hover = {
 		getHoverElementAttributes: ({page, source, hash, isFauxPage}) => {
 			calls.push({page, source, hash, isFauxPage});
@@ -44,6 +45,7 @@ function installHoverMocks () {
 
 function removeHoverMocks () {
 	delete globalThis.Renderer.hover;
+	delete globalThis.Renderer.item;
 	delete globalThis.UrlUtil.encodeForHash;
 	delete globalThis.HASH_LIST_SEP;
 }
@@ -74,6 +76,17 @@ describe("#4 combat.js mastery hover helpers", () => {
 		removeHoverMocks(); // no Renderer.hover / UrlUtil.encodeForHash
 		const attrs = mkCombat()._getMasteryHoverAttrs("Cleave", "XPHB");
 		expect(attrs).toBe(`title="Weapon Mastery: Cleave"`);
+	});
+
+	it("leaves an unavailable external mastery visible without a broken hover link", () => {
+		const calls = installHoverMocks();
+		globalThis.Renderer.item._getMastery = () => undefined;
+		const html = mkCombat()._formatMasteryLink("Entangling|GrimHollowPG24");
+		expect(html).toContain(">Entangling</span>");
+		expect(html).toContain(`title="Weapon Mastery: Entangling"`);
+		expect(html).not.toContain("data-vet-page");
+		expect(html).not.toContain("charsheet__mastery-link");
+		expect(calls).toHaveLength(0);
 	});
 
 	it("_formatMasteryLink emits a hoverable span carrying the itemMastery attrs (default source XPHB)", () => {
@@ -177,6 +190,14 @@ describe("#4 charactersheet.js mastery hover helpers", () => {
 		expect(mkPage()._getMasteryHoverAttrs("Topple", "XPHB")).toBe(`title="Weapon Mastery: Topple"`);
 	});
 
+	it("does not link an external mastery when its source is not loaded", () => {
+		const calls = installHoverMocks();
+		globalThis.Renderer.item._getMastery = () => undefined;
+		expect(mkPage()._getMasteryHoverAttrs("Entangling", "GrimHollowPG24"))
+			.toBe(`title="Weapon Mastery: Entangling"`);
+		expect(calls).toHaveLength(0);
+	});
+
 	it("_renderWeaponMasteries renders a hoverable itemMastery span for each mastery weapon", () => {
 		installHoverMocks();
 
@@ -204,5 +225,31 @@ describe("#4 charactersheet.js mastery hover helpers", () => {
 		expect(html).toContain("charsheet__mastery-link");
 		expect(html).toContain(`data-vet-page="itemMastery"`);
 		expect(html).toContain("Sap");
+	});
+
+	it("_renderWeaponMasteries shows the external mastery without a false link when its source is missing", () => {
+		const calls = installHoverMocks();
+		globalThis.Renderer.item._getMastery = () => undefined;
+		const group = e_({outer: "<div></div>"});
+		const container = e_({outer: "<div></div>"});
+		const prevDoc = globalThis.document;
+		globalThis.document = {
+			...prevDoc,
+			getElementById: id => (id === "charsheet-masteries-group" ? group : id === "charsheet-combat-masteries" ? container : null),
+		};
+		const page = mkPage();
+		page._state = {getWeaponMasteries: () => ["Rope Dart|TGTT"]};
+		page._getMaxWeaponMasteries = () => 1;
+		page._itemsData = [{name: "Rope Dart", source: "TGTT", _isBaseItem: true, mastery: ["Entangling|GrimHollowPG24"]}];
+		try {
+			page._renderWeaponMasteries();
+		} finally {
+			globalThis.document = prevDoc;
+		}
+		expect(container.innerHTML).toContain("Entangling");
+		expect(container.innerHTML).toContain(`title="Weapon Mastery: Entangling"`);
+		expect(container.innerHTML).not.toContain("charsheet__mastery-link");
+		expect(container.innerHTML).not.toContain("data-vet-page");
+		expect(calls).toHaveLength(0);
 	});
 });

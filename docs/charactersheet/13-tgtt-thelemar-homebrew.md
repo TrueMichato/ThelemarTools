@@ -1091,24 +1091,27 @@ TGTT variant rule: characters may have **lore skills** — narrow, character-def
 - **Flat per-skill bonus** plus proficiency bonus on the roll. No ability modifier, no separate scaling.
 - Minimum bonus is **+0** (PB is always added on top by the roll handler).
 - Players add / remove lore skills freely via the **"Add Lore Skill"** button in the Skills tab.
+- Each Lore skill has an optional, player-written **source note** recording what granted it. Use **Add source note** / **Edit source note** below its roll row to enter multiline plain text, save, cancel, or clear it. The note does not affect the skill's name, bonus, passive score, or rolls.
 
 ### State API
 
 ```javascript
-_data.loreSkills = [
-    {name: "Heraldry of the Northern Kingdoms", bonus: 0},
-    {name: "Drow Politics", bonus: 2},
+_data.customSkills = [
+    {name: "Heraldry of the Northern Kingdoms", ability: null, isLoreSkill: true, bonus: 0, note: ""},
+    {name: "Drow Politics", ability: null, isLoreSkill: true, bonus: 2, note: "Granted by my background"},
 ];
 ```
 
 | Method | Purpose |
 |---|---|
-| `getLoreSkills()` | Returns the array |
-| `setLoreSkillBonus(name, bonus)` | Upsert; bonus floored at 0 |
+| `addLoreSkill(name, bonus = 2)` | Add a Lore skill with an empty source note |
+| `getLoreSkills()` | Return Lore-skill entries from `customSkills` |
+| `setLoreSkillBonus(name, bonus)` | Update the extra flat bonus |
+| `setLoreSkillNote(name, note)` | Update its player-written plain-text source note (blank clears it) |
 | `removeLoreSkill(name)` | Delete by name |
+
+Legacy Lore entries without a note load with `note: ""`; the earlier Lore Mastery custom-skill migration also initializes this field without guessing its source.
 
 ### UI
 
-Rendered by `_renderLoreSkillsSection()` in `charactersheet.js` (~L2849), positioned beneath the main Skills table. Each row exposes −/+ buttons (bonus increment) and an × delete handle. Skills with `isLoreSkill: true` are filtered out of the main table by the standard renderer (charactersheet.js L2754–2755).
-
-Non-TGTT characters never see the section — it's gated by the standard TGTT settings flag.
+Rendered by `_renderLoreSkillsSection()` in `charactersheet.js`, beneath the main Skills table. The row remains click-to-roll, with −/+ bonus controls and an × delete handle. Its separate note area presents the saved text and an inline editor, so focusing or using the note never triggers a roll. Skills with `isLoreSkill: true` are filtered out of the main skills table.

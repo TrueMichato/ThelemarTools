@@ -65,6 +65,7 @@ function makeRollableCombat () {
 			hasDisadvantageFromStates: () => false,
 			aggregateModifiers: () => ({conditionalsAvailable: [], advantage: false, disadvantage: false}),
 			isStateTypeActive: () => false,
+			endBladesongForWeaponAttack: () => false,
 		},
 		page: {
 			rollD20: (opts = {}) => ({roll: 10, mode: opts.mode || "normal"}),

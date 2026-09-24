@@ -201,7 +201,12 @@ describe("CharacterSheetNpcExporter", () => {
 	it("should keep passive Lies but exclude active Bladesong from the standing statblock", () => {
 		const warrior = new CharacterSheetState();
 		warrior.setName("Substitution Tester");
-		warrior.addClass({name: "Illrigger", source: "TGTT", level: 20});
+		warrior.addClass({name: "Illrigger", source: "TGTT", level: 17});
+		warrior.addClass({name: "Wizard",
+			source: "XPHB",
+			level: 3,
+			subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "FRHoF"}});
+		warrior.addWeaponProficiency("Longsword");
 		warrior.setAbilityBase("str", 14); // +2
 		warrior.setAbilityBase("cha", 20); // +5, passive Lies choice
 		warrior.setAbilityBase("int", 22); // +6, active Bladesong choice
@@ -222,6 +227,10 @@ describe("CharacterSheetNpcExporter", () => {
 		const item = warrior.getItems().find(it => it.name === "Longsword");
 		const attack = warrior.buildAutoAttackFromWeapon(item);
 
+		expect(warrior.isStateTypeActive("bladesong")).toBe(true);
+		expect(warrior.getClasses().find(cls => cls.name === "Wizard")?.subclass?.source).toBe("FRHoF");
+		expect(warrior._isBladesong2024()).toBe(true);
+		expect(warrior._isWeaponProficient(attack.sourceItem)).toBe(true);
 		expect(warrior.getAttackBonusBreakdown(attack).effectiveAbility).toBe(6);
 		expect(warrior.getAttackBonusBreakdown(attack, {includeActiveStates: false}).effectiveAbility).toBe(5);
 

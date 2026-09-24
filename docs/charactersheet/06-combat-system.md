@@ -191,7 +191,21 @@ when the attack has no authored structured reach.
 
 Thrown uses retain their thrown range and return no melee reach. An attack-local
 reach value therefore cannot leak to another weapon; a character-wide boon still
-adds to each eligible melee attack independently.
+adds to each eligible melee attack independently. Spell attacks, including
+ranged spells with a distance such as "60 ft." and melee spell attacks with
+touch range, keep their authored range even when an equipped item grants
+additional melee reach.
+
+TGTT's Rope Dart remains a martial melee weapon in the item catalog, but its
+Special rule requires **every** attack (even at 5 feet) to use the Thrown property.
+Equipping it builds a ranged, thrown attack with a 15/30-foot range and Finesse
+(the better of STR/DEX); ordinary thrown melee weapons still default to melee.
+The sheet shows the rope-retrieval rule as an attack reminder, without tracking
+where the blade lands or automatically retrieving it. Its Entangling mastery
+references `Entangling|GrimHollowPG24` from the external Grim Hollow Player's
+Guide (2024) brew in `homebrew/index.json`. The mastery is linked only when
+that source is loaded; otherwise its name stays visible without a broken hover.
+The sheet does not substitute another mastery effect or automate Entangling.
 
 ### Rolling Attacks
 
@@ -252,7 +266,8 @@ natural 20 for this specific attack." Item thresholds are read only from that
 attack's source weapon. Champion-style features, active states, and stance
 effects are then composed according to their authored weapon/range scope, with
 any stated minimum threshold enforced. Spell attacks pass `{kind: "spell"}` and
-never inherit weapon-only critical ranges.
+never inherit weapon-only critical ranges, including when rolled directly from
+the Spells tab or while casting.
 
 ### Rolling Damage
 

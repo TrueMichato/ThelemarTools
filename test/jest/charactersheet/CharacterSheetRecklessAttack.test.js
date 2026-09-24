@@ -216,6 +216,7 @@ describe("#7 _rollAttack — reckless advantage still cancels with disadvantage"
 			getFeatureCalculations: () => ({}),
 			hasAdvantageFromStates: () => advantage,
 			hasDisadvantageFromStates: () => disadvantage,
+			endBladesongForWeaponAttack: () => false,
 		};
 		combat._page = {
 			rollD20: (opts = {}) => { rollModes.push(opts.mode); return {roll: 10, mode: opts.mode || "normal"}; },

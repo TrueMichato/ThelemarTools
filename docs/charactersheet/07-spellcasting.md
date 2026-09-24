@@ -561,6 +561,28 @@ the Gambler rolled cap on Gambler-attributed spells (so it works in multiclass).
 
 ## Casting Spells
 
+### Condition checks before casting
+
+TGTT **Frightened** and **Choked** require a concentration check for spells with
+verbal components; TGTT **Grappled** requires one for somatic components. The
+authored condition text does not specify a DC, so casting uses the sheet's
+minimum concentration DC of **10** (no damage), with its normal Constitution
+save/concentration bonus, bonus dice from saves or concentration, advantage or
+disadvantage, exhaustion penalty, and enabled critical-roll rule. The sheet
+rolls automatically, announces the dice, total, DC, and success/failure, and
+records it in roll history. If several conditions constrain the same cast, one
+check covers all of them.
+
+The check happens **before** spending a slot, metamagic, a feature or innate
+use, or a component. Failure disrupts the spell without ending any existing
+concentration. A cancelled cast likewise leaves existing concentration alone;
+accepting a replacement-concentration prompt does not end the old spell until
+the new cast succeeds. Standard (non-TGTT) Frightened has no verbal gate.
+Subtle Spell removes its verbal and somatic gates; Silenced still blocks an
+ordinary verbal cast outright. Cantrips, rituals, item spells, innate spells,
+and cast-menu choices use the same condition gate. Destructive item powers ask
+for confirmation before casting, so declining cannot alter concentration.
+
 ### Basic Casting
 
 ```javascript

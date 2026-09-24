@@ -43,6 +43,15 @@ across unsocket/resocket.
 
 Core states: `rage`, `resoluteStance`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `wardingFlare`, `coronaOfLight`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
+Bladesong equipment eligibility lives in `getBladesongEquipmentIssue` and is
+checked before UI resource/action spending, on state activation, on armor or
+shield equip, and when loading a saved state. TCE/TGTT-2014 permits light armor
+and lacks Bladework; FRHoF/TGTT-2024 requires no armor and grants Intelligence
+attack/damage substitution only to proficient weapons. TGTT-2024 also inherits
+FRHoF's fixed martial-melee proficiency from Training in War and Song. Combat
+and Overview/Play Mode end Bladesong before rolling a two-handed weapon attack,
+then refresh the sheet so AC, speed, and attack rows agree with the roll.
+
 Astral Self states: `astralArms`, `astralVisage`, `astralBody`,
 `awakenedAstralSelf`. Body uses `requiresStates`; ending a prerequisite
 cascades through dependents. All four declare incapacitation/death
@@ -285,6 +294,8 @@ Structured reach adds the character-wide reach above the normal 5-foot baseline;
 attack-local reach is added separately and respects `reachCondition:
 "onYourTurn"`. The Reach property adds 5 feet only without structured reach.
 Thrown uses preserve their ranged text and return `null` from `getAttackReach()`.
+Spell attacks also return `null` regardless of their range string; an item/feature
+that increases melee reach must not rewrite a spell's authored range.
 
 ### Standing Weapon Damage Display
 
@@ -431,6 +442,22 @@ All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex
   spending a superiority die. Turn advance resets the allowance.
 
 ## Spell Data Format
+
+### TGTT condition-gated casting
+
+`CharacterSheetSpells._pHandleCastingConstraints` is the shared gate for slot,
+cantrip, ritual, item, and innate casts. `_checkCastingConstraints` first handles
+hard bans (including Silenced, TGTT Restrained, materials and armor) and
+Subtle Spell's component removal; it returns every applicable TGTT
+verbal/somatic check. One automatic roll covers those checks, using
+`state.makeConcentrationCheck(0)` for the default DC 10 (the condition text
+does not state a DC), `page.rollD20` for dice/critical rules and advantage
+resolution, and `page.showDiceResult` for visible roll history. Include
+concentration-specific disadvantage (TGTT Poisoned), CON-save advantage,
+concentration bonuses, save/concentration bonus dice and exhaustion. Do not call
+the damage-triggered `_promptConcentrationCheck`: that flow can **end** a spell,
+whereas a disrupted cast must preserve any existing concentration. Confirming replacement
+concentration is only intent; `setConcentration` changes it on a committed cast.
 
 ### Known/Prepared Spells (`_data.spellcasting.spellsKnown[]`)
 ```javascript

@@ -12731,8 +12731,11 @@ Renderer.item = class {
 			isSkipPrefix ? "" : "Mastery: ",
 			item.mastery
 				.map(info => {
-					if (!info.uid) return renderer.render(`{@itemMastery ${info}}`);
-					return renderer.render(`{@itemMastery ${info.uid}} {@style (${info.note})|small}`);
+					const uid = info.uid || info;
+					const label = Renderer.item._getMastery(uid, {isIgnoreMissing: true})
+						? renderer.render(`{@itemMastery ${uid}}`)
+						: `<span title="Mastery definition unavailable; load its source">${String(uid).split("|")[0].replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>`;
+					return info.uid ? `${label} ${renderer.render(`{@style (${info.note})|small}`)}` : label;
 				})
 				.join(", "),
 		]
@@ -13174,10 +13177,10 @@ Renderer.item = class {
 		MiscUtil.set(Renderer.item._masteryMap, lookupSource, lookupName, ent);
 	}
 
-	static _getMastery (uid) {
+	static _getMastery (uid, {isIgnoreMissing = false} = {}) {
 		const {name, source} = DataUtil.proxy.unpackUid("itemMastery", uid, "itemMastery", {isLower: true});
 		const out = MiscUtil.get(Renderer.item._masteryMap, source, name);
-		if (!out) throw new Error(`Item mastry ${uid} not found. You probably meant to load the mastery reference first.`);
+		if (!out && !isIgnoreMissing) throw new Error(`Item mastery ${uid} not found. You probably meant to load the mastery reference first.`);
 		return out;
 	}
 
@@ -13800,8 +13803,20 @@ Renderer.item = class {
 		}
 
 		(item.mastery || [])
-			.forEach(info => {
-				const mastery = Renderer.item._getMastery(info.uid || info);
+			.forEach((info, ix) => {
+				const uid = info.uid || info;
+				const mastery = Renderer.item._getMastery(uid, {isIgnoreMissing: true});
+				if (!mastery) {
+					BrewDiagnostics.report({
+						code: BrewDiagnostics.CODES.REFERENCE_MISSING,
+						severity: "warning",
+						target: {kind: "itemMastery", uid},
+						...diagnosticContextBase,
+						fieldPath: `mastery[${ix}]${info.uid ? ".uid" : ""}`,
+						detail: `Item mastery "${uid}" not found; load its homebrew source to see its rules.`,
+					});
+					return;
+				}
 
 				if (!mastery.entries && !mastery.entriesTemplate) return;
 

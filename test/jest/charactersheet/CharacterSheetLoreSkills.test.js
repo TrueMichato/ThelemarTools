@@ -19,7 +19,7 @@ describe("Character Sheet — Lore Skills (TGTT variant rule)", () => {
 	});
 
 	describe("addLoreSkill / data shape", () => {
-		it("creates a skill with isLoreSkill, ability:null, default bonus 2, and proficient flag", () => {
+		it("creates a skill with isLoreSkill, ability:null, default bonus 2, and an empty source note", () => {
 			state.addLoreSkill("Heraldry");
 			const lore = state.getLoreSkills();
 			expect(lore).toHaveLength(1);
@@ -28,6 +28,36 @@ describe("Character Sheet — Lore Skills (TGTT variant rule)", () => {
 				isLoreSkill: true,
 				ability: null,
 				bonus: 2,
+				note: "",
+			});
+		});
+
+		describe("setLoreSkillNote", () => {
+			it("edits and clears multiline plain text without changing the name or roll bonus", () => {
+				state.addClass({name: "Wizard", source: "PHB", level: 1});
+				state.addLoreSkill("Heraldry", 4);
+				const before = state.getSkillMod("heraldry");
+
+				expect(state.setLoreSkillNote("HERALDRY", "Granted by background\nStudied in the library")).toBe(true);
+				expect(state.getLoreSkills()[0]).toMatchObject({
+					name: "Heraldry",
+					bonus: 4,
+					note: "Granted by background\nStudied in the library",
+				});
+				expect(state.getSkillMod("heraldry")).toBe(before);
+				expect(state.setLoreSkillNote("Heraldry", "  ")).toBe(true);
+				expect(state.getLoreSkills()[0].note).toBe("");
+				expect(state.getSkillMod("heraldry")).toBe(before);
+			});
+
+			it("changes only the named Lore skill and rejects invalid input", () => {
+				state.addLoreSkill("Heraldry", 2);
+				state.addLoreSkill("Planar Geography", 4);
+				expect(state.setLoreSkillNote("Heraldry", "From my background")).toBe(true);
+				expect(state.getLoreSkills().map(s => s.note)).toEqual(["From my background", ""]);
+				expect(state.setLoreSkillNote("Missing", "From a book")).toBe(false);
+				expect(() => state.setLoreSkillNote("Heraldry", {html: "<b>unsafe</b>"})).toThrow(TypeError);
+				expect(state.getLoreSkills().map(s => s.note)).toEqual(["From my background", ""]);
 			});
 		});
 
@@ -144,6 +174,30 @@ describe("Character Sheet — Lore Skills (TGTT variant rule)", () => {
 			// PB +2 (default for level-0/1 state) + lore +4 = +6
 			expect(fresh.getSkillMod("heraldry")).toBe(6);
 		});
+
+		it("persists an edited source note and a second blank note independently", () => {
+			state.addLoreSkill("Heraldry", 4);
+			state.addLoreSkill("Planar Geography", 2);
+			state.setLoreSkillNote("Heraldry", "Granted by a feat\nLearned from a tutor");
+			const fresh = new CharacterSheetState();
+			fresh.loadFromJson(state.toJson());
+
+			expect(fresh.getLoreSkills().map(s => s.note)).toEqual(["Granted by a feat\nLearned from a tutor", ""]);
+			fresh.setLoreSkillNote("Heraldry", "");
+			expect(fresh.toJson().customSkills.map(s => s.note)).toEqual(["", ""]);
+		});
+
+		it("loads pre-note Lore skills with a blank note without inventing an origin", () => {
+			const fresh = new CharacterSheetState();
+			fresh.loadFromJson({
+				customSkills: [
+					{name: "Heraldry", ability: null, isLoreSkill: true, bonus: 2},
+					{name: "Planar Geography", ability: null, isLoreSkill: true, bonus: 4, note: "Granted by a book"},
+				],
+			});
+			expect(fresh.getLoreSkills().map(s => s.note)).toEqual(["", "Granted by a book"]);
+			expect(fresh.toJson().customSkills[0].note).toBe("");
+		});
 	});
 
 	describe("_migrateLoreSkills (legacy → new shape)", () => {
@@ -171,7 +225,7 @@ describe("Character Sheet — Lore Skills (TGTT variant rule)", () => {
 			fresh.loadFromJson(legacyJson);
 			const lore = fresh.getLoreSkills();
 			expect(lore).toHaveLength(1);
-			expect(lore[0]).toMatchObject({name: "Heraldry", isLoreSkill: true, ability: null, bonus: 2});
+			expect(lore[0]).toMatchObject({name: "Heraldry", isLoreSkill: true, ability: null, bonus: 2, note: ""});
 			// Legacy modifier removed
 			expect(fresh.getNamedModifiersByType("skill:heraldry").length).toBe(0);
 			// Proficient flag set so the row will roll cleanly

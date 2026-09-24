@@ -5669,14 +5669,19 @@ class CharacterSheetInventory {
 			JqueryUtil.doToast({type: "warning", content: `Choose an available charge cost for ${power.name}.`});
 			return false;
 		}
+		let destructiveSpellConfirmed = false;
 		if (power?.kind === "spell" && power.isAvailable) {
+			if (power.isDestructive) {
+				destructiveSpellConfirmed = await this._pConfirmDestructiveItemPower(power);
+				if (!destructiveSpellConfirmed) return false;
+			}
 			const castLevel = power.isVariableChargeCast && power.castLevel
 				? power.castLevel + selectedChargesCost - power.chargesCost
 				: power.castLevel;
 			const cast = await this._page?._spells?.pCastItemSpell?.({...power, castLevel});
 			if (!cast) return false;
 		}
-		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost});
+		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost, ...(destructiveSpellConfirmed ? {confirmed: true} : {})});
 		if (result?.needsConfirmation) {
 			const confirmed = await this._pConfirmDestructiveItemPower(result.power);
 			if (!confirmed) return false;

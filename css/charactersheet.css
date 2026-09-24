@@ -4338,6 +4338,10 @@ body[data-font="readable"] {
 /* ========================================================================
    Lore Skills (TGTT variant) - Skills tab section
    ======================================================================== */
+.charsheet__lore-skills-list {
+	container-type: inline-size;
+}
+
 .charsheet__lore-skill-row {
 	display: flex;
 	align-items: center;
@@ -4428,6 +4432,79 @@ body[data-font="readable"] {
 .charsheet__lore-skill-delete:hover {
 	color: var(--cs-danger, #ef4444);
 	background: rgba(239, 68, 68, 0.12);
+}
+
+@container (max-width: 340px) {
+	.charsheet__lore-skill-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 36px 42px 20px 20px 20px;
+	}
+
+	.charsheet__lore-skill-icon {
+		display: none;
+	}
+
+	.charsheet__lore-skill-name {
+		grid-column: 1 / -1;
+	}
+
+	.charsheet__lore-skill-mod,
+	.charsheet__lore-skill-passive,
+	.charsheet__lore-skill-bump,
+	.charsheet__lore-skill-delete {
+		grid-row: 2;
+	}
+
+	.charsheet__lore-skill-mod { grid-column: 2; }
+	.charsheet__lore-skill-passive { grid-column: 3; }
+	.charsheet__lore-skill-bump[data-delta="-2"] { grid-column: 4; }
+	.charsheet__lore-skill-bump[data-delta="2"] { grid-column: 5; }
+	.charsheet__lore-skill-delete { grid-column: 6; }
+}
+
+.charsheet__lore-skill-note-area {
+	margin: 0 0 var(--cs-space-sm, 8px) var(--cs-space-lg, 24px);
+	color: var(--cs-text-secondary);
+}
+
+.charsheet__lore-skill-note-text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: var(--cs-text-sm, 0.875rem);
+	line-height: 1.4;
+}
+
+.charsheet__lore-skill-note-edit {
+	margin-top: var(--cs-space-xs, 4px);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__lore-skill-note-editor {
+	display: grid;
+	gap: var(--cs-space-sm, 8px);
+}
+
+.charsheet__lore-skill-note-editor[hidden] {
+	display: none;
+}
+
+.charsheet__lore-skill-note-label,
+.charsheet__lore-skill-note-input {
+	display: block;
+	width: 100%;
+}
+
+.charsheet__lore-skill-note-input {
+	box-sizing: border-box;
+	margin-top: var(--cs-space-xs, 4px);
+	resize: vertical;
+}
+
+.charsheet__lore-skill-note-actions {
+	display: flex;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 4px);
 }
 
 /* ========================================================================

@@ -4985,7 +4985,7 @@ class CharacterSheetState {
 			// Proficiencies
 			saveProficiencies: [], // ["str", "con"]
 			skillProficiencies: {}, // {athletics: 1, stealth: 2} (1 = prof, 2 = expertise)
-			customSkills: [], // [{name, ability, isLoreSkill?, bonus?}] - user-added custom skills (lore skills are flagged with isLoreSkill:true and store a flat `bonus`)
+			customSkills: [], // [{name, ability, isLoreSkill?, bonus?, note?}] - lore skills store a flat bonus and an optional source note
 			skillAbilityOverrides: {}, // {<normalizedSkillKey>: <ability>} - persistent per-skill ability pins (Feature C); lore skills excluded
 			armorProficiencies: [],
 			weaponProficiencies: [],
@@ -6050,6 +6050,7 @@ class CharacterSheetState {
 		// Idempotent; only ever sets a missing/false flag to true.
 		this._migrateInventoryItemWeaponFlag();
 		this._ensureFeatRegistryResources();
+		this._endBladesongForInvalidEquipment();
 	}
 
 	/**
@@ -6473,7 +6474,7 @@ class CharacterSheetState {
 	 * `ability:"wis"` (or per-skill override) and a paired named modifier of value 2
 	 * with type `skill:<key>` and a `note` mentioning "Lore Mastery".
 	 *
-	 * New shape: `{name, ability:null, isLoreSkill:true, bonus:2}`, no companion modifier
+	 * New shape: `{name, ability:null, isLoreSkill:true, bonus:2, note:""}`, no companion modifier
 	 * (the bonus is stored on the skill itself).
 	 *
 	 * Detection heuristic: a custom skill is convertible iff it (a) lacks `isLoreSkill`,
@@ -6485,7 +6486,10 @@ class CharacterSheetState {
 		const mods = this._data.namedModifiers || [];
 
 		this._data.customSkills.forEach(skill => {
-			if (skill.isLoreSkill) return;
+			if (skill.isLoreSkill) {
+				if (typeof skill.note !== "string") skill.note = "";
+				return;
+			}
 			const key = skill.name.toLowerCase().replace(/\s+/g, "");
 			const matchingModifierIndex = mods.findIndex(m =>
 				m.type === `skill:${key}` && /lore mastery/i.test(m.note || m.name || ""),
@@ -6496,6 +6500,7 @@ class CharacterSheetState {
 			skill.isLoreSkill = true;
 			skill.ability = null;
 			skill.bonus = (skill.bonus || 0) + carriedBonus;
+			if (typeof skill.note !== "string") skill.note = "";
 			// Drop the now-redundant named modifier
 			mods.splice(matchingModifierIndex, 1);
 			// Ensure proficiency entry exists so the skill renders correctly
@@ -8082,7 +8087,7 @@ class CharacterSheetState {
 	 */
 	getAttackReach (attack, {meleeReach, isOwnTurn = true} = {}) {
 		if (!attack) return null;
-		if (attack.isMelee === false) return null; // explicitly ranged
+		if (this.getAttackClassification(attack).kind === "spell" || attack.isMelee === false) return null;
 
 		const rangeStr = attack.range != null ? String(attack.range) : "";
 		const isThrown = rangeStr.includes("/");
@@ -10879,32 +10884,79 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Whether an attack is a weapon attack eligible for Bladesong's INT override.
-	 * Spell attacks (and the "spellcasting" pseudo-ability) are excluded so a
-	 * custom/temp spell attack never silently gains INT scaling.
+	 * Only weapon attacks can use the 2024 Bladework ability choice.
 	 * @param {object} attack
 	 * @returns {boolean}
 	 */
 	_isBladesongWeaponAttack (attack) {
 		if (!attack || typeof attack !== "object") return false;
 		if (attack.isSpell || attack.isSpellAttack) return false;
+		if (attack.isUnarmedStrike || attack.isNaturalWeapon) return false;
 		if (attack.abilityMod === "spellcasting") return false;
 		return true;
 	}
 
+	_isBladesong2024 () {
+		return this._data.classes.some(cls =>
+			cls.name?.toLowerCase() === "wizard"
+			&& (
+				(cls.source === "XPHB" && cls.subclass?.source === "FRHoF")
+				|| (cls.source === "TGTT" && cls.subclass?.source === "TGTT-2024")
+			)
+			&& ["bladesinger", "bladesinging"].includes((cls.subclass?.shortName || cls.subclass?.name || "").toLowerCase())
+			&& cls.level >= 3,
+		);
+	}
+
+	getBladesongEquipmentIssue () {
+		const equipped = (this._data.inventory || []).filter(row => row.equipped && row.item);
+		if (this._data.ac.shield || equipped.some(row => this.isShieldItem(row.item))) {
+			return "Remove your shield before activating Bladesong.";
+		}
+		const armor = [
+			this._data.ac.armor,
+			...equipped.filter(row => this.isBodyArmorItem(row.item)).map(row => row.item),
+		].filter(Boolean);
+		if (!armor.length) return null;
+		if (this._isBladesong2024()) return "Remove your armor before activating Bladesong.";
+		const hasIncompatibleArmor = armor.some(item => {
+			const type = `${item.armorType || item.type || ""}`.split("|")[0].trim().toLowerCase();
+			return !["light", "light armor", "la"].includes(type);
+		});
+		return hasIncompatibleArmor ? "Remove your medium or heavy armor before activating Bladesong." : null;
+	}
+
+	_endBladesongForInvalidEquipment () {
+		if (!this.isStateTypeActive("bladesong") || !this.getBladesongEquipmentIssue()) return;
+		this.deactivateState("bladesong", {reason: "incompatible equipment"});
+	}
+
+	endBladesongForWeaponAttack (attack) {
+		if (!this.isStateTypeActive("bladesong") || !this._isBladesongWeaponAttack(attack)) return false;
+		const weapon = (attack.sourceItem?.id && this.getItemRaw(attack.sourceItem.id)) || attack.sourceItem;
+		const props = attack.properties?.length
+			? attack.properties
+			: (weapon?.attackOverrides?.properties ?? weapon?.property ?? weapon?.properties ?? attack.properties ?? []);
+		const twoHanded = Number(weapon?.handsUsed ?? attack.handsUsed) >= 2
+			|| (Array.isArray(props) && props.some(prop => ["2h", "two-handed"].includes(String(prop).split("|")[0].trim().toLowerCase())));
+		if (!twoHanded) return false;
+		this.deactivateState("bladesong", {reason: "two-handed weapon attack"});
+		return true;
+	}
+
 	/**
-	 * Additive bonus Bladesong contributes to a weapon attack/damage roll.
-	 * While Bladesong is active a Bladesinger may use Intelligence in place of the
-	 * weapon's normal ability when it is higher, so the bonus is the
-	 * (player-favorable) positive difference between INT and the weapon's
-	 * normally-resolved modifier. 0 when Bladesong is inactive, the attack is not
-	 * a weapon attack, or INT does not exceed the weapon's mod.
+	 * Additive bonus 2024 Bladework contributes to a proficient weapon attack.
+	 * When Intelligence exceeds the weapon's Strength/Dexterity modifier, return
+	 * the positive difference; 2014 Bladesinging does not grant Bladework.
 	 * @param {object} attack - Attack object (uses attack.abilityMod, attack.isSpell)
 	 * @returns {number}
 	 */
 	getBladesongWeaponBonus (attack) {
 		if (!this.isStateTypeActive?.("bladesong")) return 0;
+		if (!this._isBladesong2024()) return 0;
 		if (!this._isBladesongWeaponAttack(attack)) return 0;
+		if (!["str", "dex", "finesse"].includes(attack.abilityMod || "str")) return 0;
+		if (!this._isWeaponProficient(attack.sourceItem || attack)) return 0;
 		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMod || "str");
 		return Math.max(0, this.getAbilityMod("int") - base);
 	}
@@ -13303,7 +13355,7 @@ class CharacterSheetState {
 
 	// #region Lore Skills (TGTT variant rule)
 	// Lore skills are a flagged subtype of custom skills with a flat per-skill bonus
-	// (no ability mod, no PB doubling). Stored as {name, ability:null, isLoreSkill:true, bonus:N}.
+	// (no ability mod, no PB doubling). Stored as {name, ability:null, isLoreSkill:true, bonus:N, note:""}.
 
 	/**
 	 * Look up a lore-skill entry by normalized name.
@@ -13343,6 +13395,7 @@ class CharacterSheetState {
 			ability: null,
 			isLoreSkill: true,
 			bonus: Number(bonus) || 0,
+			note: "",
 		});
 		// Mark as proficient so the skills table treats it as a real entry; the
 		// flat bonus completely replaces ability+PB calc via the short-circuit.
@@ -13361,6 +13414,21 @@ class CharacterSheetState {
 		const entry = this._getLoreSkillEntry(key);
 		if (!entry) return false;
 		entry.bonus = Number(bonus) || 0;
+		return true;
+	}
+
+	/**
+	 * Record the player's own description of what granted a lore skill.
+	 * @param {string} name
+	 * @param {string} note - Plain text; may contain line breaks or be blank
+	 * @returns {boolean} true if the skill exists
+	 */
+	setLoreSkillNote (name, note) {
+		if (typeof note !== "string") throw new TypeError("Lore skill note must be plain text.");
+		const key = name.toLowerCase().replace(/\s+/g, "");
+		const entry = this._getLoreSkillEntry(key);
+		if (!entry) return false;
+		entry.note = note.trim();
 		return true;
 	}
 
@@ -13389,7 +13457,7 @@ class CharacterSheetState {
 
 	/**
 	 * Get all lore skills.
-	 * @returns {Array<{name:string, ability:null, isLoreSkill:true, bonus:number}>}
+	 * @returns {Array<{name:string, ability:null, isLoreSkill:true, bonus:number, note:string}>}
 	 */
 	getLoreSkills () {
 		return (this._data.customSkills || []).filter(s => s.isLoreSkill);
@@ -14445,6 +14513,7 @@ class CharacterSheetState {
 		if (!wasHeavy && this._isHeavyArmorSnapshot(armor)) {
 			this._deactivateStatesForEndCondition({armorType: "heavy"});
 		}
+		this._endBladesongForInvalidEquipment();
 	}
 
 	_isHeavyArmorSnapshot (armor) {
@@ -14508,6 +14577,7 @@ class CharacterSheetState {
 	setShield (hasShield) {
 		if (!hasShield || typeof hasShield !== "object") {
 			this._data.ac.shield = hasShield;
+			this._endBladesongForInvalidEquipment();
 			return;
 		}
 		this._data.ac.shield = {
@@ -14515,6 +14585,7 @@ class CharacterSheetState {
 			ac: CharacterSheetItemUtils.parseBonus(hasShield.ac ?? 2),
 			bonus: CharacterSheetItemUtils.parseBonus(hasShield.bonus),
 		};
+		this._endBladesongForInvalidEquipment();
 	}
 	setItemAcBonus (bonus) { this._data.ac.itemBonus = CharacterSheetItemUtils.parseBonus(bonus); }
 	getItemAcBonus () { return CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus); }
@@ -28882,11 +28953,9 @@ class CharacterSheetState {
 								calculations.hasTrainingInWarAndSong = true;
 
 								// The 2024 (FRHoF) Bladesinger's version additionally grants a
-								// FIXED proficiency with all Melee Martial weapons lacking the
-								// Two-Handed/Heavy property. Gate strictly on the FRHoF subclass
-								// source so neither the 2014 TCE "Bladesinging" nor TGTT variants
-								// pick up the bundle.
-								if (cls.subclass?.source === "FRHoF") {
+								// FIXED proficiency with Melee Martial weapons lacking the
+								// Two-Handed/Heavy property; TGTT-2024 copies FRHoF, not TCE.
+								if (["FRHoF", "TGTT-2024"].includes(cls.subclass?.source)) {
 									calculations.hasTrainingInWarAndSongMartialMelee = true;
 								}
 
@@ -39470,6 +39539,16 @@ class CharacterSheetState {
 	getAttacks () { return [...this._data.attacks]; }
 
 	/**
+	 * A Special thrown weapon may require every attack to be a throw, including
+	 * attacks against adjacent targets. Its item type remains melee for proficiency.
+	 */
+	isWeaponAlwaysThrown (weapon) {
+		const properties = weapon?.property || weapon?.properties || [];
+		if (!properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T")) return false;
+		return /\ball attacks with this weapon use its thrown property\b/i.test(CharacterSheetState._getItemEntryText(weapon.entries));
+	}
+
+	/**
 	 * Build the canonical attack descriptor for an equipped inventory weapon.
 	 * `attackBonus`/`damageBonus` are intrinsic-only: effective source-item bonuses,
 	 * upgrades, projected materials, and the item's custom flat value.
@@ -39482,13 +39561,17 @@ class CharacterSheetState {
 		const overrides = weapon.attackOverrides || {};
 		const properties = overrides.properties ?? weapon.property ?? weapon.properties ?? [];
 		const typeBase = String(weapon.type || "").split("|")[0].toUpperCase();
+		const isAlwaysThrown = this.isWeaponAlwaysThrown(weapon);
 		const isRanged = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "A")
 			|| ["R", "RW"].includes(typeBase)
-			|| weapon.isMelee === false;
+			|| weapon.isMelee === false
+			|| isAlwaysThrown;
 		const isThrown = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T");
 		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
 		const isMonkWeapon = !!this.isMonkWeapon?.(weapon);
-		const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
+		const defaultAbility = isAlwaysThrown
+			? (hasFinesse ? "finesse" : "str")
+			: isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
 		const effectiveBonuses = this.getEffectiveItemBonuses?.(weapon.id) || {};
 		const num = value => {
 			const parsed = Number(value);
@@ -39726,13 +39809,14 @@ class CharacterSheetState {
 		const props = item.property || item.properties || [];
 		const isFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 		const rawType = (item.type || "").split("|")[0];
-		// Thrown (T) alone does not make a weapon ranged — a thrown melee weapon uses
-		// STR/finesse. Classify ranged via Ammunition (A) / type R / explicit isMelee===false.
-		const isRanged = rawType === "R" || props.some(p => p === "A" || p.startsWith("A|")) || (item.isMelee === false);
+		const isAlwaysThrown = this.isWeaponAlwaysThrown(item);
+		// Thrown (T) alone does not make a weapon ranged — only an explicit
+		// always-thrown rule changes the default attack kind of a melee weapon.
+		const isRanged = rawType === "R" || props.some(p => p === "A" || p.startsWith("A|")) || (item.isMelee === false) || isAlwaysThrown;
 		const isMonkWeapon = this.isMonkWeapon?.(item) || item.isMonkWeapon;
 
 		let abilityUsed;
-		if (isRanged) {
+		if (isRanged && !isAlwaysThrown) {
 			abilityUsed = "dex";
 		} else if (isFinesse || isMonkWeapon) {
 			abilityUsed = this.getAbilityMod("dex") >= this.getAbilityMod("str") ? "dex" : "str";
@@ -51359,10 +51443,12 @@ class CharacterSheetState {
 	 * are surfaced as first-class badges on the attack row and in the roll title, the
 	 * same "reminder" convention used for Remarkable Athlete's movement.
 	 *
-	 * Two sources, unioned:
+	 * Sources, unioned:
 	 *  1. Structured `attackRiders` declared on the weapon's `sourceItem` — the
 	 *     data-driven path any homebrew item or feature-granted weapon can use.
-	 *  2. Feature-derived riders (TGTT Gambler's Coins ricochet).
+	 *  2. Authored Special rules which affect an attack but cannot be automated
+	 *     without tracking battlefield position (TGTT Rope Dart retrieval).
+	 *  3. Feature-derived riders (TGTT Gambler's Coins ricochet).
 	 *
 	 * Each rider: `{id, icon, label, description}`.
 	 * @param {*} attack
@@ -51381,6 +51467,20 @@ class CharacterSheetState {
 					icon: r.icon || "\u2726",
 					label: r.label,
 					description: r.description || r.label,
+				});
+			}
+		}
+
+		if (this.isWeaponAlwaysThrown(item)) {
+			const retrieval = CharacterSheetState._getItemEntryText(item.entries).match(
+				/For attacks at ranges up to \d+ feet, you retain your hold on the rope and can pull the blade back as a free action\. Following an attack beyond \d+ feet, the weapon can be retrieved anywhere along the last \d+ feet of its trajectory\./i,
+			);
+			if (retrieval) {
+				riders.push({
+					id: "ropeRetrieval",
+					icon: "\u21a9",
+					label: "Rope retrieval",
+					description: retrieval[0],
 				});
 			}
 		}
@@ -59922,13 +60022,13 @@ class CharacterSheetState {
 			icon: "⚔️",
 			description: "Elven combat magic granting speed, agility, and focus",
 			effects: [
-				{type: "bonus", target: "ac", abilityMod: "int"}, // +INT to AC
+				{type: "bonus", target: "ac", abilityMod: "int", minimum: 1},
 				{type: "bonus", target: "speed:walk", value: 10},
 				{type: "advantage", target: "skill:acrobatics"},
 				{type: "bonus", target: "concentration", abilityMod: "int"}, // +INT to concentration saves
 			],
 			duration: "1 minute",
-			endConditions: ["Incapacitated", "Don medium/heavy armor or shield", "Two-handed weapon attack"],
+			endConditions: ["Incapacitated", "Don incompatible armor or shield", "Two-handed weapon attack"],
 			resourceName: "Bladesong",
 			detectPatterns: ["bladesong", "invoke.*bladesong"],
 			activationAction: "bonus",
@@ -65574,6 +65674,7 @@ class CharacterSheetState {
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
 		if (stateType?.requiresStates?.some(requiredId => !this.isStateTypeActive(requiredId))) return null;
 		if (stateTypeId === "manifestChains" && !this._getChainedFuryClass()) return null;
+		if (stateTypeId === "bladesong" && this.getBladesongEquipmentIssue()) return null;
 
 		// (Generic) A state type may declare an `effectsBuilder` — the name of an
 		// instance method that resolves its effect list against the CURRENT build
@@ -66857,10 +66958,11 @@ class CharacterSheetState {
 		const overrides = item.attackOverrides || {};
 		const properties = overrides.properties ?? item.property ?? item.properties ?? attack.properties ?? [];
 		const typeBase = String(item.type || "").split("|")[0].toUpperCase();
+		const isAlwaysThrown = this.isWeaponAlwaysThrown(item);
 		const isRanged = properties.some(prop => {
 			const code = String(prop).split("|")[0].toUpperCase();
 			return code === "A";
-		}) || ["R", "RW"].includes(typeBase) || item.isMelee === false;
+		}) || ["R", "RW"].includes(typeBase) || item.isMelee === false || isAlwaysThrown;
 		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
 		const range = overrides.range ?? item.range ?? attack.range;
 		const reachMatch = !isRanged ? /^\s*(\d+(?:\.\d+)?)\s*ft\b/i.exec(String(range || "")) : null;
@@ -66872,7 +66974,7 @@ class CharacterSheetState {
 			id: `auto_${item.id}`,
 			name: overrides.name ?? item.name ?? attack.name,
 			isMelee: overrides.isMelee ?? !isRanged,
-			abilityMod: overrides.abilityMod ?? (isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
+			abilityMod: overrides.abilityMod ?? (isAlwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
 			attackBonus: Number(damage.attackBonus || 0) + Number(item.customAttackBonus || 0),
 			range,
 			reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : attack.reach),
@@ -67046,7 +67148,10 @@ class CharacterSheetState {
 			.forEach(e => {
 				if (e.abilityMod) {
 					// Add ability modifier (e.g., Bladesong adds INT to AC)
-					bonus += Math.max(e.minimum ?? -Infinity, this.getAbilityMod(e.abilityMod));
+					const minimum = e.stateTypeId === "bladesong" && target === "concentration" && !this._isBladesong2024()
+						? 1
+						: (e.minimum ?? -Infinity);
+					bonus += Math.max(minimum, this.getAbilityMod(e.abilityMod));
 				} else if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
 				} else {

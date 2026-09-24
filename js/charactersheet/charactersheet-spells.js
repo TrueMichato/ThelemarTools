@@ -205,6 +205,19 @@ class CharacterSheetSpells {
 		return true;
 	}
 
+	_refundMetamagicCost (metamagic) {
+		if (!metamagic) return;
+		if (metamagic.cost) {
+			const sp = this._state.getSorceryPoints();
+			this._state.setSorceryPoints({current: Math.min(sp.max, sp.current + metamagic.cost), max: sp.max});
+		}
+		if (metamagic.lunarBoonApplied) {
+			const boon = this._state.getResources().find(r => r.name === CharacterSheetState.LUNAR_BOONS_RESOURCE);
+			if (boon) this._state.setResourceCurrent(boon.id, boon.current + 1);
+		}
+		this._refreshSorceryPointUI();
+	}
+
 	_renderMetamagic () {
 		CharacterSheetCombat.renderMetamagicDashboard(
 			this._state,
@@ -2351,10 +2364,10 @@ class CharacterSheetSpells {
 				textNo: "Cancel",
 			}));
 			if (!confirmed) return false;
-			this._state.breakConcentration?.();
 		}
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: false})) return false;
-		await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
+		const castResult = await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
+		if (castResult?.cancelled) return false;
 		if (requiresConcentration) {
 			this._state.setConcentration?.(spell.name, slotLevel);
 			this._updateConcentrationUI();
@@ -2486,7 +2499,6 @@ class CharacterSheetSpells {
 				textNo: "Cancel",
 			}));
 			if (!confirmed) return;
-			this._state.breakConcentration?.();
 		}
 
 		// Cantrips don't use slots
@@ -2543,13 +2555,18 @@ class CharacterSheetSpells {
 			}
 			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
+			const castResult = weaponChannelChoice
+				? null
+				: await this._showCastResult(spell, 0, false, false, castMeta);
+			if (castResult?.cancelled) {
+				this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
+				return;
+			}
 			if (variantComponentChoice?.variantComponent) {
 				for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
 					this._state.consumeVariantComponent(id);
 				}
 			}
-
-			if (!weaponChannelChoice) await this._showCastResult(spell, 0, false, false, castMeta);
 			await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 			// Set concentration for concentration cantrips (rare but possible)
 			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
@@ -2597,20 +2614,14 @@ class CharacterSheetSpells {
 				const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: spell.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
 				if (activeMetamagicChoice?.cancelled) return;
 				if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
+				// Variant spell component selection (ritual)
+				const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
+				if (variantComponentChoice?.cancelled) return;
 				if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
 				}
 				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
-
-				// Variant spell component selection (ritual)
-				const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
-				if (variantComponentChoice?.cancelled) return;
-				if (variantComponentChoice?.variantComponent) {
-					for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
-						this._state.consumeVariantComponent(id);
-					}
-				}
 
 				const castMeta = this._getNormalizedCastMeta({
 					spell,
@@ -2624,7 +2635,16 @@ class CharacterSheetSpells {
 				});
 
 				// Ritual cast: no slot consumed
-				await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				const castResult = await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				if (castResult?.cancelled) {
+					this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
+					return;
+				}
+				if (variantComponentChoice?.variantComponent) {
+					for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+						this._state.consumeVariantComponent(id);
+					}
+				}
 				await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 				if (requiresConcentration && !vcRemovesConcR) {
@@ -2794,10 +2814,6 @@ class CharacterSheetSpells {
 					}
 				}
 			}
-			// Consume the component(s)
-			for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
-				this._state.consumeVariantComponent(id);
-			}
 		}
 		if (gamblerCastResolution?.slotTransaction === "preserve") skipSlotConsumption = true;
 
@@ -2855,14 +2871,7 @@ class CharacterSheetSpells {
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
-			// Refund any sorcery points spent on metamagic for this cast.
-			// setSorceryPoints takes an object — passing a bare number would set
-			// BOTH current and max, corrupting the pool's max on a non-full refund.
-			if (activeMetamagicChoice?.metamagic?.cost) {
-				const sp = this._state.getSorceryPoints();
-				this._state.setSorceryPoints({current: Math.min(sp.max, sp.current + activeMetamagicChoice.metamagic.cost), max: sp.max});
-				this._refreshSorceryPointUI();
-			}
+			this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
 			if (selectedSlot.isWizardCapstone) {
 				if (selectedSlot.capstoneType === "signature") this._state.restoreSignatureSpellUse?.(spell);
 			} else if (selectedSlot.isNoSlotResource) {
@@ -2880,6 +2889,11 @@ class CharacterSheetSpells {
 				}
 			}
 			return;
+		}
+		if (variantComponentChoice?.variantComponent) {
+			for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+				this._state.consumeVariantComponent(id);
+			}
 		}
 		if (gamblerCastResolution) {
 			const descriptor = gamblerCastResolution.descriptor;
@@ -2993,12 +3007,12 @@ class CharacterSheetSpells {
 				textNo: "Cancel",
 			}));
 			if (!confirmed) return;
-			this._state.breakConcentration?.();
 		}
 
 		// Cast as ritual — no slot consumed
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: true})) return;
-		await this._showCastResult(spell, spell.level, false, true);
+		const castResult = await this._showCastResult(spell, spell.level, false, true);
+		if (castResult?.cancelled) return;
 		await this._pConsumeMaterialComponent({spell, spellData, variantUsed: false});
 
 		if (requiresConcentration) {
@@ -3120,7 +3134,7 @@ class CharacterSheetSpells {
 	}
 
 	/**
-	 * Process casting constraints: block if hard-blocked, confirm if soft-check required.
+	 * Process casting constraints before any cast resources or concentration are changed.
 	 * @param {object} spell - The spell being cast
 	 * @param {object} spellData - Full spell data
 	 * @param {object|null} appliedMetamagic - Active metamagic
@@ -3133,15 +3147,48 @@ class CharacterSheetSpells {
 			return false;
 		}
 		if (checks.length) {
-			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
-				title: "Condition Check Required",
-				htmlDescription: `<div class="mb-2">Casting <strong>${spell.name}</strong> requires passing a check:</div>
-					<ul class="mb-2">${checks.map(c => `<li>${c}</li>`).join("")}</ul>
-					<div>Did you pass the required check(s)?</div>`,
-				textYes: "Yes — cast the spell",
-				textNo: "No — cancel",
-			}));
-			if (!confirmed) return false;
+			// TGTT gives no DC for these condition checks; the sheet's minimum
+			// concentration DC (zero damage) is 10. One check covers all conditions.
+			const check = this._state.makeConcentrationCheck?.(0);
+			if (!check || !Number.isFinite(check.dc) || !Number.isFinite(check.bonus)) {
+				JqueryUtil.doToast({type: "warning", content: "Concentration check unavailable; the spell was not cast."});
+				return false;
+			}
+			const conSaveMode = this._state.getAdvantageState("save:con");
+			const concentrationMode = this._state.getAdvantageState("save:con:concentration");
+			const rollResult = this._page.rollD20?.({
+				stateAdvantage: check.advantage || conSaveMode.advantage || conSaveMode.cancelled || concentrationMode.advantage || concentrationMode.cancelled,
+				stateDisadvantage: conSaveMode.disadvantage || conSaveMode.cancelled || concentrationMode.disadvantage || concentrationMode.cancelled,
+			});
+			if (!Number.isInteger(rollResult?.roll) || rollResult.roll < 1 || rollResult.roll > 20) {
+				JqueryUtil.doToast({type: "warning", content: "Concentration roll unavailable; the spell was not cast."});
+				return false;
+			}
+			const exhaustion = this._state._getExhaustionD20Penalty();
+			const stateDice = this._page._rollStateDiceBonuses("save:con");
+			const modifierDice = this._page._rollModifierDiceBonuses(
+				this._state.aggregateModifiers("save:con"),
+				this._state.aggregateModifiers("concentration"),
+			);
+			const total = rollResult.roll + check.bonus - exhaustion + (rollResult.thelemar_critBonus || 0)
+				+ (stateDice?.total || 0) + (modifierDice?.total || 0);
+			const success = total >= check.dc;
+			const reason = checks.join("; ");
+			const diceBreakdown = [stateDice?.breakdownStr, modifierDice?.breakdownStr].filter(Boolean).join(" ");
+			const breakdown = `${this._page.formatD20Breakdown(rollResult, check.bonus, exhaustion ? ` - ${exhaustion} (exhaustion)` : "")}${diceBreakdown ? ` ${diceBreakdown}` : ""} = ${total} vs DC ${check.dc}`;
+			await this._page.pAnimateD20(rollResult);
+			this._page.showDiceResult({
+				title: `${CharacterSheetClassUtils.escapeHtml(spell.name)} — Concentration Check`,
+				total,
+				subtitle: breakdown,
+				resultClass: success ? "" : "charsheet__dice-result-total--fumble",
+				resultNote: `${CharacterSheetClassUtils.escapeHtml(reason)}: ${success ? "Success — cast proceeds." : "Failure — spell disrupted; nothing spent."}`,
+			});
+			JqueryUtil.doToast({
+				type: success ? "success" : "warning",
+				content: `${CharacterSheetClassUtils.escapeHtml(reason)}: ${breakdown}. ${success ? "Success — cast proceeds." : "Failure — spell disrupted; nothing spent."}`,
+			});
+			return success;
 		}
 		return true;
 	}
@@ -3156,7 +3203,7 @@ class CharacterSheetSpells {
 	 *        (gold-cost item possessed / spellcasting focus or pouch for no-cost materials).
 	 *        Off by default so innate / item-granted casting (which ignores material
 	 *        components) is never blocked.
-	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring confirmation
+	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring one concentration check
 	 */
 	_checkCastingConstraints (spell, spellData, appliedMetamagic = null, opts = {}) {
 		// Advanced opt-in escape hatch: when enabled, skip every condition/component
@@ -3203,10 +3250,7 @@ class CharacterSheetSpells {
 			if (banned) {
 				return {block: `Cannot cast ${spell.name} — spell has verbal components and you are ${banned.conditionName.toLowerCase()}!`, checks: []};
 			}
-			const check = constraints.verbal.find(c => c.value === "check");
-			if (check) {
-				checks.push(`${check.conditionName}: verbal spells require a concentration check to cast`);
-			}
+			checks.push(...constraints.verbal.filter(c => c.value === "check").map(c => `${c.conditionName} (verbal)`));
 		}
 
 		// Somatic component constraints
@@ -3215,10 +3259,7 @@ class CharacterSheetSpells {
 			if (banned) {
 				return {block: `Cannot cast ${spell.name} — spell has somatic components and you are ${banned.conditionName.toLowerCase()}!`, checks: []};
 			}
-			const check = constraints.somatic.find(c => c.value === "check");
-			if (check) {
-				checks.push(`${check.conditionName}: somatic spells require a concentration check to cast`);
-			}
+			checks.push(...constraints.somatic.filter(c => c.value === "check").map(c => `${c.conditionName} (somatic)`));
 		}
 
 		// Material component requirement (only when the caller opts in — i.e. normal/ritual
@@ -3242,8 +3283,8 @@ class CharacterSheetSpells {
 			}
 		}
 
-		// All checks passed (may have soft checks that need confirmation)
-		return {block: null, checks};
+		// A verbal-and-somatic spell makes one check even when several conditions apply.
+		return {block: null, checks: [...new Set(checks)]};
 	}
 
 	/**
@@ -4371,7 +4412,7 @@ class CharacterSheetSpells {
 					: initialRoll;
 				// Animate the spell-attack d20 (lands on the resolved roll).
 				await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]});
-				const criticalRange = this._state.getCriticalRange?.("spell") || 20;
+				const criticalRange = this._state.getCriticalRange?.({kind: "spell"}) || 20;
 				if (finalRoll >= criticalRange) await this._pApplyTriggeredFeatCriticalHit({spell, spellData});
 				const aimedText = aimedBonus ? ` + ${aimedBonus.total} aimed` : "";
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
@@ -8858,7 +8899,7 @@ class CharacterSheetSpells {
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
 		const total = rollResult.roll + totalBonus;
 
-		const critRange = this._state.getCriticalRange?.("spell") || 20;
+		const critRange = this._state.getCriticalRange?.({kind: "spell"}) || 20;
 		let resultClass = "";
 		let resultNote = "";
 		if (rollResult.roll >= critRange) {
