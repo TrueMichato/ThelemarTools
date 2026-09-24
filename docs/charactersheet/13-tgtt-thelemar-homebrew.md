@@ -265,7 +265,12 @@ These modifiers are prose-parsed from the explicit shape “gain a bonus to
 <skill> checks. The bonus equals your proficiency bonus.” Keep that wording and
 the `{@skill ...}` tags when editing the source data. The Barbarian Specialty
 corpus test pins both raw-tagged and rendered-text parsing for every option in
-the L1 pool.
+the L1 pool. In the actual Builder, Level Up, and Quick Build selection paths,
+class-feature modifiers must carry `sourceType: "classFeature"` so they can be
+cleared and rebuilt on level changes or load. Saves with older feature-owned
+skill modifiers are repaired against the current TGTT definitions on load and
+again when the brew catalog is registered after an initial page load;
+unattributed/manual modifiers are never repurposed.
 
 ---
 

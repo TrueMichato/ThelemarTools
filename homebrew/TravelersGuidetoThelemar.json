@@ -22096,7 +22096,7 @@
 			"level": 6,
 			"entries": [
 				"{@i Prerequisite: 6th level}",
-				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus. When your group makes a group Athletics or Acrobatics check, you can choose one ally to use your roll's result instead of their own."
+				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus for each skill. Separately, when your group makes a group Athletics or Acrobatics check, you can choose one ally to use your roll's result instead of their own."
 			]
 		},
 		{
