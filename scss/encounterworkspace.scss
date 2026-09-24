@@ -92,6 +92,35 @@
 			margin-bottom: 18px;
 		}
 
+		&__effect-tools {
+			grid-column: 1 / -1;
+			min-width: 0;
+
+			summary {
+				padding: 12px 14px;
+				border: 1px solid vars.$rgb-border-grey;
+				background: vars.$rgb-bg--alt;
+				font-size: 1.5rem;
+				font-weight: 600;
+				cursor: pointer;
+
+				&:focus-visible {
+					outline: 2px solid vars.$rgb-active-blue;
+					outline-offset: 2px;
+				}
+			}
+
+			&[open] summary {
+				margin-bottom: 10px;
+			}
+		}
+
+		&__effect-tools-grid {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 14px;
+		}
+
 		&__operation,
 		&__results {
 			min-width: 0;
@@ -101,7 +130,7 @@
 
 			h3 {
 				margin: 0 0 10px;
-				font-size: 1rem;
+				font-size: 1.5rem;
 			}
 		}
 
@@ -125,6 +154,97 @@
 
 		&__operation-help {
 			margin: 9px 0 0;
+		}
+
+		&__effect-form {
+			display: grid;
+			gap: 7px;
+			margin-top: 12px;
+
+			&:first-of-type {
+				margin-top: 0;
+			}
+
+			h4 {
+				margin: 5px 0 2px;
+				padding-top: 11px;
+				border-top: 1px solid vars.$rgb-border-grey--muted;
+				font-size: 1.5rem;
+			}
+
+			label {
+				margin: 0;
+				font-weight: 600;
+			}
+
+			input,
+			textarea,
+			select {
+				min-width: 0;
+				width: 100%;
+				font-size: max(16px, 1rem);
+			}
+
+			button {
+				justify-self: start;
+				margin-top: 5px;
+			}
+
+			.ew__operation-help {
+				margin: 0;
+			}
+		}
+
+		&__scopes {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 7px 14px;
+			margin: 2px 0;
+			padding: 8px 10px;
+			border: 1px solid vars.$rgb-border-grey--muted;
+
+			legend {
+				width: auto;
+				margin: 0;
+				padding: 0 4px;
+				border: 0;
+				color: vars.$rgb-font;
+				font-size: 1.5rem;
+				font-weight: 600;
+			}
+
+			label {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				font-weight: 400;
+			}
+
+			input {
+				width: auto;
+				margin: 0;
+			}
+		}
+
+		&__effect-remove {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 7px;
+			margin-top: 13px;
+			padding-top: 12px;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+
+			label {
+				width: 100%;
+				margin: 0;
+				font-weight: 600;
+			}
+
+			select {
+				flex: 1 1 190px;
+				min-width: 0;
+			}
 		}
 
 		&__results {
@@ -294,6 +414,39 @@
 			}
 		}
 
+		&__effects {
+			display: grid;
+			gap: 7px;
+			padding: 8px 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__effect {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: start;
+			gap: 8px;
+			padding: 7px 0;
+			border-bottom: 1px solid vars.$rgb-border-grey--muted;
+
+			&:last-child {
+				border-bottom: 0;
+			}
+
+			strong,
+			p {
+				overflow-wrap: anywhere;
+			}
+
+			p {
+				margin: 3px 0 0;
+			}
+
+			button {
+				min-height: 34px;
+			}
+		}
+
 		&__empty {
 			margin: 0;
 			padding: 20px;
@@ -313,7 +466,8 @@
 		&__results,
 		&__statblock,
 		&__statblock-title,
-		&__empty {
+		&__empty,
+		&__effect-tools summary {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
@@ -324,7 +478,8 @@
 		&__results,
 		&__results-table th,
 		&__statblock-title,
-		&__empty {
+		&__empty,
+		&__effect-tools summary {
 			background: vars-night.$rgb-bg--alt-night;
 		}
 
@@ -340,7 +495,12 @@
 
 		&__results-table th,
 		&__results-table td,
-		&__conditions {
+		&__conditions,
+		&__effects,
+		&__effect,
+		&__effect-form h4,
+		&__effect-remove,
+		&__scopes {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
@@ -351,6 +511,10 @@
 
 		&__help,
 		&__roster-meta {
+			color: vars-night.$rgb-font--night;
+		}
+
+		&__scopes legend {
 			color: vars-night.$rgb-font--night;
 		}
 
@@ -371,7 +535,8 @@
 	}
 
 	@media (width <= 800px) {
-		.ew__operations {
+		.ew__operations,
+		.ew__effect-tools-grid {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
@@ -448,6 +613,32 @@
 			label {
 				width: 100%;
 			}
+		}
+
+		.ew__effect-remove {
+			select,
+			button {
+				width: 100%;
+			}
+		}
+
+		.ew__effect {
+			grid-template-columns: minmax(0, 1fr);
+
+			button {
+				justify-self: start;
+				min-height: 44px;
+			}
+		}
+
+		.ew__effect-form button,
+		.ew__effect-remove button {
+			width: 100%;
+			min-height: 44px;
+		}
+
+		.ew__scopes label {
+			min-height: 44px;
 		}
 	}
 }

@@ -74,6 +74,67 @@
 					<p id="ew-roll-summary" role="status" aria-live="polite"></p>
 					<div id="ew-result-table" class="ew__results-scroll"></div>
 				</section>
+				<details class="ew__effect-tools">
+					<summary id="ew-effects-summary">Area effects — traits, lair notes &amp; roll modifiers</summary>
+					<div class="ew__effect-tools-grid">
+						<div class="ew__operation">
+							<h3>Area traits &amp; lair notes</h3>
+							<div class="ew__effect-form">
+								<label for="ew-note-kind">Note type</label>
+								<select class="ve-form-control" id="ew-note-kind">
+									<option value="trait">Area trait</option>
+									<option value="lair">Lair-action note (manual)</option>
+								</select>
+								<label for="ew-note-name">Name</label>
+								<input class="ve-form-control" id="ew-note-name" type="text" placeholder="e.g. Choking mist">
+								<label for="ew-note-description">Description</label>
+								<textarea class="ve-form-control" id="ew-note-description" rows="2" placeholder="What should the DM remember?"></textarea>
+								<button type="button" class="ve-btn ve-btn-primary" id="ew-note-add">Add to selected</button>
+							</div>
+							<div class="ew__effect-remove">
+								<label for="ew-note-remove">Applied note</label>
+								<select class="ve-form-control" id="ew-note-remove"></select>
+								<button type="button" class="ve-btn ve-btn-default" id="ew-note-remove-selected">Remove from selected</button>
+							</div>
+							<p class="ew__operation-help">Notes are reminders only. Lair actions are not triggered or rolled automatically.</p>
+						</div>
+						<div class="ew__operation">
+							<h3>Area roll modifiers</h3>
+							<div class="ew__effect-form">
+								<label for="ew-preset">Desecrated Ground rule</label>
+								<select class="ve-form-control" id="ew-preset" aria-describedby="ew-preset-detail"></select>
+								<p class="ew__operation-help" id="ew-preset-detail"></p>
+								<button type="button" class="ve-btn ve-btn-primary" id="ew-preset-add">Apply to selected undead</button>
+							</div>
+							<div class="ew__effect-form">
+								<h4>Custom roll modifier</h4>
+								<label for="ew-mod-name">Name / source</label>
+								<input class="ve-form-control" id="ew-mod-name" type="text" placeholder="e.g. Blessed mist">
+								<fieldset class="ew__scopes">
+									<legend>Affects</legend>
+									<label><input id="ew-mod-check" type="checkbox" checked> Ability &amp; skill checks</label>
+									<label><input id="ew-mod-save" type="checkbox"> Saving throws</label>
+								</fieldset>
+								<label for="ew-mod-mode">Roll mode</label>
+								<select class="ve-form-control" id="ew-mod-mode">
+									<option value="normal">No advantage change</option>
+									<option value="advantage" selected>Advantage</option>
+									<option value="disadvantage">Disadvantage</option>
+								</select>
+								<label for="ew-mod-bonus">Signed flat bonus</label>
+								<input class="ve-form-control" id="ew-mod-bonus" type="text" inputmode="numeric" value="0" aria-describedby="ew-mod-help">
+								<p class="ew__operation-help" id="ew-mod-help">Use a whole number such as +2, 0, or -3. Bonuses from different sources add together.</p>
+								<button type="button" class="ve-btn ve-btn-primary" id="ew-mod-add">Add to selected</button>
+							</div>
+							<div class="ew__effect-remove">
+								<label for="ew-mod-remove">Applied modifier</label>
+								<select class="ve-form-control" id="ew-mod-remove"></select>
+								<button type="button" class="ve-btn ve-btn-default" id="ew-mod-remove-selected">Remove from selected</button>
+							</div>
+							<p class="ew__operation-help">Only selected monsters are treated as standing in the area. Remove an effect from one monster using its statblock below.</p>
+						</div>
+					</div>
+				</details>
 			</section>
 			<div class="ew__layout">
 				<aside class="ew__rail" aria-label="Monster targets">

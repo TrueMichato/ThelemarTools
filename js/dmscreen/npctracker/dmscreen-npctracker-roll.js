@@ -95,11 +95,16 @@ export function getNpcTrackerRollLabel ({rollType, key = null, skill = null}) {
 	}
 }
 
-export function getNpcTrackerConditionRollMeta ({npc, rollType, key = null, rollMode = "normal"}) {
+export function getNpcTrackerConditionRollMeta ({npc, rollType, key = null, rollMode = "normal", additionalEffects = []}) {
 	if (!["normal", "advantage", "disadvantage"].includes(rollMode)) throw new Error(`Unknown roll mode "${rollMode}".`);
+	if (
+		!Array.isArray(additionalEffects)
+		|| additionalEffects.some(it => !["advantage", "disadvantage"].includes(it?.mode) || typeof it.reason !== "string" || !it.reason.trim())
+	) throw new Error("Additional roll effects must name an advantage or disadvantage source.");
 	const effects = (npc?.conditions || [])
 		.flatMap(condition => (_CONDITION_ROLL_EFFECTS[`${condition}`.trim().toLowerCase()] || [])
 			.filter(effect => effect.rollTypes.includes(rollType) && (!effect.keys || effect.keys.includes(key))));
+	effects.push(...additionalEffects);
 	if (rollMode !== "normal") effects.push({mode: rollMode, reason: `Chosen ${rollMode}`});
 	const unavailable = effects.filter(effect => effect.mode === "unavailable");
 	if (unavailable.length) return _getConditionMeta({mode: "unavailable", effects: unavailable});
@@ -167,10 +172,10 @@ export function sortNpcTrackerBatchResults ({results, sortKey, sortDirection}) {
 	});
 }
 
-export async function pRollNpcTrackerD20 ({npc, label, bonus, rollType = null, key = null, rollMode = "normal"}) {
+export async function pRollNpcTrackerD20 ({npc, label, bonus, rollType = null, key = null, rollMode = "normal", additionalEffects = []}) {
 	if (!Number.isFinite(bonus)) throw new Error("A valid roll bonus is required.");
 	const conditionMeta = rollType
-		? getNpcTrackerConditionRollMeta({npc, rollType, key, rollMode})
+		? getNpcTrackerConditionRollMeta({npc, rollType, key, rollMode, additionalEffects})
 		: {mode: "normal", reasons: [], statusText: ""};
 	if (conditionMeta.mode === "unavailable") return {...conditionMeta, total: null, die: null};
 	if (conditionMeta.mode === "autoFail") return {...conditionMeta, total: null, die: null};

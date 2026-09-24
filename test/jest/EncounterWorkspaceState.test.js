@@ -4,6 +4,10 @@ import {
 	EncounterWorkspaceStore,
 	pResolveSavedBestiaryItem,
 } from "../../js/encounterworkspace/encounterworkspace-state.js";
+import {
+	getEncounterIsUndead,
+	getEncounterModifierForPreset,
+} from "../../js/encounterworkspace/encounterworkspace-effects.js";
 
 const getMonster = (name = "Goblin") => ({
 	name,
@@ -164,15 +168,17 @@ describe("Encounter Workspace working copy", () => {
 		const removed = EncounterWorkspaceState.withConditions(secondPoisoned, {condition: "poisoned", isAdd: false});
 		await store.pSave(removed);
 		const restored = await store.pLoad();
-		expect(restored.version).toBe(2);
+		expect(restored.version).toBe(3);
 		expect(restored.instances.map(it => it.conditions)).toEqual([[], ["poisoned"]]);
+		expect(restored.instances.map(it => it.areaNotes)).toEqual([[], []]);
+		expect(restored.instances.map(it => it.modifiers)).toEqual([[], []]);
 		expect(restored.instances[0].monster).toEqual(initial.instances[0].monster);
 		expect(Object.isFrozen(restored.instances[0].monster.action[0])).toBe(true);
 		expect(storage.pSetForPage).toHaveBeenCalledWith("encounterWorkspaceState", expect.anything(), {page: "encounterworkspace.html"});
 		expect(storage.pSetForPage).not.toHaveBeenCalledWith("listSaveManager", expect.anything(), {page: "bestiary.html"});
 	});
 
-	it("migrates foundation v1 saves without writes, then preserves conditions absent from the source catalog", async () => {
+	it("migrates v1 and v2 saves without writes, then preserves conditions absent from the source catalog", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
 		const state = await EncounterWorkspaceState.pFromSavedList({
@@ -185,12 +191,127 @@ describe("Encounter Workspace working copy", () => {
 		delete legacy.instances[0].conditions;
 		storage.values.set("encounterWorkspaceState_encounterworkspace.html", legacy);
 		const loaded = await store.pLoad();
-		expect(loaded.version).toBe(2);
+		expect(loaded.version).toBe(3);
 		expect(loaded.instances[0].conditions).toEqual([]);
+		expect(loaded.instances[0].areaNotes).toEqual([]);
+		expect(loaded.instances[0].modifiers).toEqual([]);
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 		const conditioned = EncounterWorkspaceState.withConditions(loaded, {condition: "Dreambound", isAdd: true});
 		await store.pSave(conditioned);
 		expect((await store.pLoad()).instances[0].conditions).toEqual(["dreambound"]);
+
+		const v2 = structuredClone(conditioned);
+		v2.version = 2;
+		delete v2.instances[0].areaNotes;
+		delete v2.instances[0].modifiers;
+		storage.values.set("encounterWorkspaceState_encounterworkspace.html", v2);
+		storage.pSetForPage.mockClear();
+		const upgraded = await store.pLoad();
+		expect(upgraded).toMatchObject({version: 3, selectedIds: state.selectedIds, omissions: state.omissions, sourceList: state.sourceList});
+		expect(upgraded.instances[0]).toMatchObject({conditions: ["dreambound"], areaNotes: [], modifiers: []});
+		expect(storage.pSetForPage).not.toHaveBeenCalled();
+	});
+
+	it("persists independently removable area and manual lair notes on selected duplicate monsters", async () => {
+		const store = new EncounterWorkspaceStore({storage: getStorage()});
+		const initial = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "goblin_mm", c: 2}]),
+			pResolveItem: async () => ({entity: getMonster()}),
+			fnUid: getUid(),
+		});
+		const note = {id: "note-a", kind: "trait", name: "Ash clouds", description: "<img src=x onerror=alert(1)>"};
+		const onlyFirst = EncounterWorkspaceState.withTarget(initial, {id: "encounter-2", isSelected: false});
+		const {state: noted, changedIds} = EncounterWorkspaceState.withAreaNote(onlyFirst, {note, isAdd: true});
+		expect(changedIds).toEqual(["encounter-1"]);
+		expect(onlyFirst.instances.map(it => it.areaNotes)).toEqual([[], []]);
+		expect(noted.instances.map(it => it.areaNotes)).toEqual([[note], []]);
+		const lair = {id: "note-b", kind: "lair", name: "Bell tolls", description: "Manual reminder; no automatic dice."};
+		const {state: bothNoted} = EncounterWorkspaceState.withAreaNote(noted, {note: lair, isAdd: true, targetIds: ["encounter-1", "encounter-2"]});
+		const {state: removed} = EncounterWorkspaceState.withAreaNote(bothNoted, {noteId: lair.id, isAdd: false, targetIds: ["encounter-1"]});
+		await store.pSave(removed);
+		const restored = await store.pLoad();
+		expect(restored.instances.map(it => it.areaNotes)).toEqual([[note], [lair]]);
+		expect(restored.selectedIds).toEqual(["encounter-1"]);
+		expect(restored.instances[0].monster).toEqual(initial.instances[0].monster);
+		expect(Object.isFrozen(restored.instances[0].monster.action[0])).toBe(true);
+	});
+
+	it("applies the selected Desecrated Ground variant only to actual undead and replaces the other", async () => {
+		const monsters = [
+			{...getMonster("Skeleton"), type: "undead"},
+			{...getMonster("Wight"), type: {type: "undead", tags: ["wizard"]}},
+			{...getMonster("Necromancer"), type: {type: "humanoid", tags: ["undead"]}},
+			{...getMonster("Zombie"), type: "undead"},
+		];
+		const state = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList(monsters.map((it, i) => ({h: `monster-${i}`, c: 1}))),
+			fnUid: getUid(),
+			pResolveItem: async item => ({entity: monsters[Number(item.h.at(-1))]}),
+		});
+		const unselected = EncounterWorkspaceState.withTarget(state, {id: "encounter-4", isSelected: false});
+		const dmg = getEncounterModifierForPreset("desecrated-dmg");
+		const first = EncounterWorkspaceState.withModifier(unselected, {modifier: dmg, isAdd: true});
+		expect(first.changedIds).toEqual(["encounter-1", "encounter-2"]);
+		expect(first.skippedIds).toEqual(["encounter-3"]);
+		expect(first.state.instances.map(it => it.modifiers)).toEqual([[dmg], [dmg], [], []]);
+		expect(getEncounterIsUndead(monsters[0])).toBe(true);
+		expect(getEncounterIsUndead(monsters[1])).toBe(true);
+		expect(getEncounterIsUndead(monsters[2])).toBe(false);
+		const house = getEncounterModifierForPreset("desecrated-house");
+		const switched = EncounterWorkspaceState.withModifier(first.state, {modifier: house, isAdd: true, targetIds: ["encounter-1", "encounter-3"]});
+		expect(switched.changedIds).toEqual(["encounter-1"]);
+		expect(switched.skippedIds).toEqual(["encounter-3"]);
+		expect(switched.state.instances.map(it => it.modifiers)).toEqual([[house], [dmg], [], []]);
+		const repeated = EncounterWorkspaceState.withModifier(switched.state, {modifier: house, isAdd: true, targetIds: ["encounter-1"]});
+		expect(repeated.changedIds).toEqual([]);
+		const {state: removed} = EncounterWorkspaceState.withModifier(switched.state, {modifierId: house.id, isAdd: false, targetIds: ["encounter-1"]});
+		expect(removed.instances.map(it => it.modifiers)).toEqual([[], [dmg], [], []]);
+	});
+
+	it("rejects malformed v3 effects, imprecise bonuses and tampered preset scopes", async () => {
+		const state = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "goblin_mm"}]),
+			pResolveItem: async () => ({entity: getMonster()}),
+			fnUid: getUid(),
+		});
+		const modifier = {id: "dm:1", name: "Blessing", scopes: ["check", "save"], mode: "normal", bonus: 2};
+		for (const bad of [
+			{...modifier, bonus: Infinity},
+			{...modifier, bonus: 0.5},
+			{...modifier, bonus: Number.MAX_SAFE_INTEGER + 1},
+			{...modifier, scopes: []},
+			{...modifier, mode: "normal", bonus: 0},
+			{...getEncounterModifierForPreset("desecrated-dmg"), scopes: ["check", "save"]},
+			{...modifier, presetId: "unrecognized"},
+		]) {
+			expect(() => EncounterWorkspaceState.withModifier(state, {modifier: bad, isAdd: true})).toThrow();
+		}
+		expect(() => EncounterWorkspaceState.validate({...state, instances: [{...state.instances[0], areaNotes: null}]}))
+			.toThrow(/invalid monster instance/);
+		expect(() => EncounterWorkspaceState.withAreaNote(state, {
+			note: {id: "x", kind: "lair", name: "   ", description: "note"},
+			isAdd: true,
+		})).toThrow(/area note/);
+		expect(state.instances[0]).toMatchObject({areaNotes: [], modifiers: []});
+	});
+
+	it("does not publish changes to working state if effect persistence fails", async () => {
+		const storage = getStorage();
+		const store = new EncounterWorkspaceStore({storage});
+		const initial = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "skeleton_mm", c: 2}]),
+			pResolveItem: async () => ({entity: {...getMonster("Skeleton"), type: "undead"}}),
+			fnUid: getUid(),
+		});
+		storage.pSetForPage.mockRejectedValue(new Error("Storage full"));
+		const note = {id: "note", kind: "trait", name: "Deep fog", description: "Dense fog."};
+		const notes = EncounterWorkspaceState.withAreaNote(initial, {note, isAdd: true}).state;
+		const preset = EncounterWorkspaceState.withModifier(initial, {modifier: getEncounterModifierForPreset("desecrated-dmg"), isAdd: true}).state;
+		await expect(store.pSave(notes)).rejects.toThrow("Storage full");
+		await expect(store.pSave(preset)).rejects.toThrow("Storage full");
+		expect(initial.instances.map(it => [it.areaNotes, it.modifiers])).toEqual([[[], []], [[], []]]);
+		expect(initial.selectedIds).toEqual(["encounter-1", "encounter-2"]);
+		expect(storage.pSetForPage).not.toHaveBeenCalledWith("listSaveManager", expect.anything(), {page: "bestiary.html"});
 	});
 
 	it("does not change working state or selection on condition save failure", async () => {
@@ -238,7 +359,7 @@ describe("Encounter Workspace working copy", () => {
 	it("does not accept invalid or unsupported persisted data, or silently erase it", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
-		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 3, instances: []});
+		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 4, instances: []});
 		await expect(store.pLoad()).rejects.toThrow(/unsupported version/);
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 		await expect(store.pSave({
