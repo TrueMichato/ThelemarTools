@@ -3,6 +3,14 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 62 — Reported regressions and specialty redesign (pending verification)
+
+- **Spectral Chains roll UX (bugs 1–2):** The attack follow-up shows `[object Object]` in its breakdown, and optional post-roll choices still open a blocking modal that obscures the roll. Keep the roll readable and offer an explicitly openable, non-blocking follow-up without losing the attack's result or resources.
+- **Barbarian specialty regressions (bugs 3 and 6):** Despite the Round 61 fix, Unyielding Might reportedly bonuses Athletics instead of Might; Lead the Pack needs clearer choice/flow wording and a verified bonus to both Athletics and Acrobatics. Reproduce through the real character/skill-roll path, not just isolated feature parsing.
+- **Boots of Speed (bug 4):** Speed reportedly doubles while the boots are merely worn, rather than only while their power is active. Verify the equipped/attuned, inactive, active, deactivated, and loaded character paths in the displayed speed and its breakdown.
+- **Marathoner (bug 5):** Replace Agile Sprinter with a specialty granting a proficiency-bonus bonus to Endurance checks; on a failed forced-march save, the character may spend one Hit Die to reroll it. Preserve or migrate existing Agile Sprinter choices.
+- **Custom/Modify Item editor (bug 7, plan only):** Revisit the approved shared-editor design from the earlier Bug fixes session, reconcile it with the Boots of Speed activation fix, and produce a phased improvement plan before implementing it.
+
 ## Closed Bugs
 
 ### Round 61 — Respec, Bard capstone, combat methods, specialties, and derived combat statistics
