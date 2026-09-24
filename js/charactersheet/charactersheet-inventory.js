@@ -6352,13 +6352,16 @@ class CharacterSheetInventory {
 		}
 		let result = await this._state.invokeItemPower?.(itemId, powerId, {
 			chargesCost,
-			efaArmorer,
+			...(efaArmorer ? {efaArmorer} : {}),
 			...(destructiveSpellConfirmed ? {confirmed: true} : {}),
 		});
 		if (result?.needsConfirmation) {
 			const confirmed = await this._pConfirmDestructiveItemPower(result.power);
 			if (!confirmed) return false;
-			result = await this._state.invokeItemPower(itemId, powerId, {confirmed: true, efaArmorer});
+			result = await this._state.invokeItemPower(itemId, powerId, {
+				confirmed: true,
+				...(efaArmorer ? {efaArmorer} : {}),
+			});
 		}
 		if (!result?.ok) {
 			JqueryUtil.doToast({type: "warning", content: result?.reason || "That item power cannot be used."});

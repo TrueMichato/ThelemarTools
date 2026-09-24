@@ -16299,13 +16299,13 @@ body.has-quickbuild-overlay .toast__container {
 	.cancer__wrp-sidebar {
 		display: none !important;
 	}
-	
+
 	.charsheet__section {
 		box-shadow: none;
 		border: 1px solid #ddd;
 		break-inside: avoid;
 	}
-	
+
 	.charsheet__ability,
 	.charsheet__stat-box,
 	.charsheet__combat-stat {
@@ -16322,20 +16322,20 @@ body.has-quickbuild-overlay .toast__container {
 	#charsheet-tabs {
 		gap: 0;
 	}
-	
+
 	#charsheet-tabs > li > a {
 		padding: var(--cs-space-xs, 0.375rem) var(--cs-space-sm, 0.5rem);
 		font-size: var(--cs-text-xs, 0.75rem);
 	}
-	
+
 	#charsheet-tabs > li > a::before {
 		display: none;
 	}
-	
+
 	#charsheet-header {
 		padding: var(--cs-space-sm, 0.5rem);
 	}
-	
+
 	.charsheet__abilities-grid {
 		grid-template-columns: repeat(2, 1fr);
 	}
@@ -16346,11 +16346,11 @@ body.has-quickbuild-overlay .toast__container {
 		grid-template-columns: repeat(2, 1fr);
 		gap: var(--cs-space-xs, 0.25rem);
 	}
-	
+
 	.charsheet__ability {
 		padding: var(--cs-space-sm, 0.5rem) var(--cs-space-xs, 0.25rem);
 	}
-	
+
 	.charsheet__ability-score {
 		font-size: var(--cs-text-xl, 1.25rem);
 	}

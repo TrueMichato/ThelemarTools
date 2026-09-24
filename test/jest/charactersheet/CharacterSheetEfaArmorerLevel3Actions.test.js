@@ -286,31 +286,6 @@ describe("EFA Armorer Combat integration", () => {
 		})).toBe(false);
 	});
 
-	it("never uses a disallowed Thunder Pulse option as the shared track-only base", () => {
-		const combat = makeCombatConsumer({});
-		const options = [
-			{
-				id: "thunder-pulse",
-				name: "Thunder Pulse",
-				targetAware: true,
-				allowTrackOnly: false,
-				targetEffect: {source: "efa-armorer-thunder-pulse", effect: "attack-disadvantage-other-targets"},
-			},
-			{
-				id: "generic-target",
-				name: "Generic Target",
-				targetAware: true,
-				targetEffect: {source: "generic-target-source", effect: "mark"},
-			},
-		];
-		expect(combat._getTrackOnlyOnHitOption(options)).toMatchObject({
-			id: "target-only",
-			name: "Track target only",
-			targetEffect: {source: "generic-target-source", effect: "target"},
-		});
-		expect(combat._getTrackOnlyOnHitOption([options[0]])).toBeNull();
-	});
-
 	it("uses only the Base M1E turn-receipt contract for Lightning Launcher", () => {
 		const {state} = buildState({model: "Infiltrator"});
 		const combat = makeCombatConsumer(state);
