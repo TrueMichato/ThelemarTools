@@ -149,12 +149,20 @@ class CharacterSheetInventory {
 					}
 				}
 			}
-			if (!(Array.isArray(item.itemPowers) && item.itemPowers.length)
-				&& typeof this._state._normalizeItemPowers === "function") {
+			if (typeof this._state._normalizeItemPowers === "function") {
 				const powers = this._state._normalizeItemPowers(match);
-				if (powers.length) {
+				if (!(Array.isArray(item.itemPowers) && item.itemPowers.length) && powers.length) {
 					item.itemPowers = JSON.parse(JSON.stringify(powers));
 					rowChanged = true;
+				} else if (item.modifySpeed && Array.isArray(item.itemPowers)
+					&& !item.itemPowers.some(power => power.effectType === "modifySpeed")) {
+					const speedPower = powers.find(power => power.effectType === "modifySpeed");
+					if (speedPower) {
+						const oldReferenceId = CharacterSheetState._getItemPowerId(["reference", match.name, speedPower.actionType]);
+						item.itemPowers = item.itemPowers.filter(power => power.id !== oldReferenceId || !power.isReferenceOnly);
+						item.itemPowers.push(JSON.parse(JSON.stringify(speedPower)));
+						rowChanged = true;
+					}
 				}
 			}
 			if (!item.ability && match.ability) {
@@ -6387,6 +6395,8 @@ class CharacterSheetInventory {
 			this._renderEquippedItems();
 			this._updateArmorClass();
 			this._updateEncumbrance();
+			this._page?.renderCharacter?.();
+		} else if (result.power?.effectType === "modifySpeed") {
 			this._page?.renderCharacter?.();
 		}
 		this._page?._combat?.renderCombatItemPowers?.();

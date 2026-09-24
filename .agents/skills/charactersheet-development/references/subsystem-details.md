@@ -2411,6 +2411,18 @@ A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cur
 }
 ```
 
+**Activated item speed.** Catalog `modifySpeed` describes the magnitude, not necessarily
+the activation rule. An operational `itemPowers[]` entry with `isToggle: true` and
+`effectType: "modifySpeed"` gates the modifier through persisted
+`itemPowerStates[power.id].active` plus equip/attunement. Both the DMG text and the XDMG
+tagged Bonus Action form of Boots of Speed derive that toggle. Inventory recomputes item
+bonuses and calls the page render on a successful speed-power invocation so Overview
+speed and `getSpeedBreakdown("walk")` update together. Taking off or unattuning the item
+ends the toggle. Catalog rehydration adds a missing speed power to older rows even if
+they already have unrelated powers, and replaces the old XDMG reference-only card.
+Custom items with `modifySpeed` and no authored speed power stay passive while equipped
+and attuned; never infer a toggle from a bare multiplier.
+
 **Crafting-time calculation.** `CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state, items})`
 is the only reusable workweek calculator: resolve the crafted item by `name|source`, calculate the
 Complete Crafter baseline, then multiply by `state.getCraftingTimeMultiplier({item})`. EFA
