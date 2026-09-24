@@ -43770,16 +43770,16 @@ class CharacterSheetState {
 					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(explicitActionType || "other", text),
 					isReferenceOnly: true,
 				});
-			} else if (actionType && toggleEffectType) {
+			} else if ((actionType || explicitActionType) && toggleEffectType) {
 				addPower({
 					id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
 					name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
 					kind: "toggle",
-					actionType,
+					actionType: actionType || explicitActionType,
 					isToggle: true,
 					effectType: toggleEffectType,
 					description: text,
-					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType, text),
+					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType || explicitActionType, text),
 					isReferenceOnly: false,
 				});
 			} else if (actionType && recurring) {
@@ -45803,11 +45803,22 @@ class CharacterSheetState {
 		}
 	}
 
+	_deactivateItemSpeedPowers (inventoryRow) {
+		const states = inventoryRow?.item?.itemPowerStates;
+		if (!states) return;
+		for (const power of inventoryRow.item.itemPowers || []) {
+			if (power.isToggle && power.effectType === "modifySpeed" && states[power.id]?.active) {
+				states[power.id].active = false;
+			}
+		}
+	}
+
 	setItemEquipped (itemId, equipped) {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.equipped = equipped;
+			if (!equipped) this._deactivateItemSpeedPowers(item);
 			const isActive = this._isItemProficienciesActive(item);
 			// Apply or remove proficiencies + item effects if activation state changed
 			if (!wasActive && isActive) {
@@ -45868,6 +45879,7 @@ class CharacterSheetState {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.equipped = false;
+			this._deactivateItemSpeedPowers(item);
 			if (
 				item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
 				|| item.item?._isChainedFuryChain
@@ -45895,6 +45907,7 @@ class CharacterSheetState {
 		if (item) {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.attuned = attuned;
+			if (!attuned) this._deactivateItemSpeedPowers(item);
 			const isActive = this._isItemProficienciesActive(item);
 			// Apply or remove proficiencies + item effects if activation state changed
 			if (!wasActive && isActive) {
