@@ -141,6 +141,20 @@ maintain creature records. The optional **Remember chained creatures** toggle
 adds a compact name plus failed/succeeded outcome form for grapple, Chain
 Imprisonment, and Chain Control; ordinary shove remains reminder-only.
 
+Optional post-attack decisions appear in one compact side offer rather than
+opening a modal automatically. It lists each eligible effect with an **Open**
+control and keeps the triggering natural roll, total, and breakdown readable
+while the dice toast is present and after it expires. The offer persists through
+the damage roll; **Dismiss offers**, the next committed attack, or switching
+characters removes it.
+Cancelling a pre-roll choice leaves the old offer intact. An opened choice still
+uses the roll-aware full modal, but cancelling it does not spend a resource or
+remove its offer. Applying an effect removes only that choice for that roll.
+Eligibility is checked again on Open: for example, Cruel's critical-hit
+temporary-HP die is no longer available if its once-per-turn die was spent on
+damage first. Roll-changing fortune interventions remain blocking because later
+critical-hit and on-hit decisions depend on their outcome.
+
 Combat and Play Mode render the same opted-in records as a creature name,
 Grappled/Restrained badges, the recurring force-damage reminder, chain capacity,
 and Release. They deliberately do not expose size, distance, coordinates,

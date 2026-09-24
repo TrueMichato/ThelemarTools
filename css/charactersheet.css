@@ -167,6 +167,78 @@
 	min-width: 0;
 }
 
+.cs-post-roll-offer {
+	position: fixed;
+	left: max(0.75rem, env(safe-area-inset-left));
+	bottom: max(1rem, env(safe-area-inset-bottom));
+	z-index: var(--cs-z-overlay, 1000);
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	box-sizing: border-box;
+	width: min(19rem, calc(100vw - 1.5rem));
+	max-height: min(20rem, 55dvh);
+	padding: 0.75rem;
+	border: 1px solid var(--cs-border-control);
+	border-radius: var(--cs-radius-md, 10px);
+	background: var(--cs-bg-surface);
+	color: var(--cs-text-primary);
+	box-shadow: 0 5px 20px rgb(0 0 0 / 28%);
+	font-family: var(--cs-font-family, inherit);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.cs-post-roll-offer__heading {
+	font-weight: 700;
+	line-height: 1.3;
+	overflow-wrap: anywhere;
+}
+
+.cs-post-roll-offer__caption {
+	color: var(--cs-text-secondary);
+	line-height: 1.3;
+}
+
+.cs-post-roll-offer__breakdown {
+	color: var(--cs-text-secondary);
+	font-family: var(--cs-font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.cs-post-roll-offer__choices {
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.cs-post-roll-offer__row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding: 0.35rem 0;
+	border-top: 1px solid var(--cs-border);
+}
+
+.cs-post-roll-offer__row > span {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.cs-post-roll-offer__open {
+	flex: 0 0 auto;
+}
+
+.cs-post-roll-offer__dismiss {
+	align-self: flex-start;
+}
+
+.cs-post-roll-offer button:focus-visible {
+	outline: 2px solid var(--cs-border-focus);
+	outline-offset: 2px;
+}
+
 /* `InputUiUtil.pGetUserGenericButton` wraps every `htmlDescription` in a *row*
    flex container (`utils-ui.js`: `<div class="ve-flex ve-w-100 ve-mb-1">`), so a
    description made of several block elements is laid out as columns. Short prose

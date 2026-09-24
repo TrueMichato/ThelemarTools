@@ -210,7 +210,21 @@ const rollFollowup = CharacterSheetModal.buildRollFollowup({
 - If an intervention changes the roll, replace the context before later sequential prompts run.
 
 The normal backdrop, focus trap, Escape handling, screen-reader naming, and focus restoration stay
-active because the result is embedded in the dialog instead of exposed by weakening modal safety.
+active when a full modal is explicitly opened; the result is embedded there rather than exposed by
+weakening modal safety.
+
+For optional **post-attack** decisions, do not open that modal automatically. Add a labelled
+`deferred` entry to Combat's `_getPostAttackHooks()`: the common side offer keeps the real
+`rollFollowup` (including a formatted **string** breakdown, never the attack-bonus object)
+alongside the visible dice result and gives each hook an **Open** button. Return `true` from its
+handler only when the choice was actually applied, so the offer can remove that one option;
+return `false` on cancel so it can be reopened without consuming a resource. Validate the
+hook predicate again when Open is clicked and enforce action/turn/resource costs in the
+existing state mutation, not in the offer. A new committed attack or character switch
+discards pending options, but a damage roll or cancelled pre-roll choice does not. Keep
+prerequisite roll-changing interventions synchronous before dependent critical/on-hit
+predicates; leave passive informational reminders immediate. Do not add a persisted
+last-roll cache.
 
 ### Adding Class Features
 
