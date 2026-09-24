@@ -1790,15 +1790,13 @@ class FeatureModifierParser {
 		// "bonus to Dexterity (Acrobatics) checks equal to your proficiency bonus"
 		// Also handles: "gain a bonus to X checks. The bonus equals your proficiency bonus"
 		//
-		// TGTT defines custom ability-scoped skills that aren't in the standard 18 (e.g. the
-		// Strength skill "Might"). A specialty like "Unyielding Might" grants a bonus to Might
-		// checks equal to the proficiency bonus, which must flow onto the Might skill line (via
-		// skill:might → customModifiers.skills.might → getSkillCustomMod), NOT Athletics. We only
-		// extend THIS structured block — which requires the literal "<skill> check(s)" phrasing
-		// plus an "equal to / The bonus equals … proficiency bonus" clause — so the common word
-		// "might" can never false-match ordinary prose the way the looser generic skill loop above
-		// would. Keys are lowercased/space-free to match getSkillAbility()'s custom skillMap.
-		const tgttCustomSkillNames = ["might"];
+		// TGTT defines custom skills outside the standard 18: Strength's Might and
+		// Constitution's Endurance. Unyielding Might must
+		// target skill:might, never Athletics. Only this structured block accepts these
+		// ordinary words: it requires "<skill> check(s)" AND an explicit proficiency-bonus
+		// clause, so incidental uses of "might" or "endurance" cannot mint a modifier.
+		// Keys match getSkillAbility()'s custom skillMap.
+		const tgttCustomSkillNames = ["might", "endurance"];
 		[...skillNames, ...tgttCustomSkillNames].forEach(skill => {
 			const skillKey = skill.replace(/\s+/g, "");
 			// Pattern 1: "bonus to X checks equal to your proficiency bonus" - handles both plain parens and {@skill}
@@ -6578,6 +6576,7 @@ class CharacterSheetState {
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
 		this._reapplyHistoryFeatureChoices();
+		this._migrateTgttBarbarianSpecialtyModifiers();
 		this._migrateActiveStateRuntimeMetadata();
 		this._syncTunedMetamagicsToKnownOptions();
 
@@ -9243,6 +9242,48 @@ class CharacterSheetState {
 				}
 			});
 		});
+	}
+
+	_migrateTgttBarbarianSpecialtyModifiers () {
+		const activeClass = (this._data.classes || []).find(cls =>
+			cls.name === "Barbarian" && cls.source === "TGTT",
+		);
+		const names = new Set(["Unyielding Might", "Lead the Pack"]);
+		const owners = (this._data.features || []).filter(feature =>
+			feature.id
+			&& names.has(feature.name)
+			&& feature.source === "TGTT"
+			&& feature.className === "Barbarian"
+			&& (!feature.classSource || feature.classSource === "TGTT"),
+		);
+		if (!owners.length) return;
+
+		for (const feature of owners.filter(feature =>
+			activeClass && Number(feature.acquisitionLevel || feature.level) <= activeClass.level,
+		)) {
+			const definition = (this._classFeatureCatalog || []).find(candidate =>
+				candidate.name === feature.name
+				&& candidate.source === "TGTT"
+				&& candidate.className === "Barbarian"
+				&& candidate.classSource === "TGTT"
+				&& (!feature.definitionLevel || candidate.level === Number(feature.definitionLevel)),
+			);
+			if (!definition?.entries) continue;
+			feature.entries = MiscUtil.copyFast(definition.entries);
+			feature.description = CharacterSheetClassUtils.buildFeatureStateObject(
+				{...definition, description: ""},
+				{className: "Barbarian", classSource: "TGTT", level: feature.level},
+			).description;
+		}
+
+		const ownerIds = new Set(owners.map(feature => feature.id));
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(mod =>
+			!(ownerIds.has(mod.sourceFeatureId)
+				&& mod.type?.startsWith("skill:")
+				&& mod.sourceType !== "classFeature"),
+		);
+		if (this._data.namedModifiers.length !== before) this._recalculateCustomModifiers();
 	}
 
 	/**
@@ -61147,6 +61188,7 @@ class CharacterSheetState {
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
 		this._optionalFeatureCatalog = Array.isArray(optionalFeatures) ? optionalFeatures : [];
 		this._reapplyHistoryFeatureChoices();
+		this._migrateTgttBarbarianSpecialtyModifiers();
 		this._migrateActiveStateRuntimeMetadata();
 	}
 
@@ -61776,6 +61818,17 @@ class CharacterSheetState {
 	 *   transaction; skip the greedy prose grant.
 	 */
 	_processFeatureModifiers (feature, featureId, opts = {}) {
+		if (feature.source === "TGTT"
+			&& feature.className === "Barbarian"
+			&& ["Unyielding Might", "Lead the Pack"].includes(feature.name)) {
+			if (feature.classSource && feature.classSource !== "TGTT") return;
+			if (!(this._data.classes || []).some(cls =>
+				cls.name === "Barbarian"
+				&& cls.source === "TGTT"
+				&& cls.level >= Number(feature.acquisitionLevel || feature.level),
+			)) return;
+		}
+
 		// Prefer rendered descriptions when available. Raw entries retain tags such
 		// as `{@skill Arcana}`, which intentionally do not match the plain-text
 		// proficiency parser; the rendered form carries the visible skill name.
@@ -62081,7 +62134,11 @@ class CharacterSheetState {
 			);
 			if (isDuplicate) return;
 
-			this.addNamedModifier(modifierData);
+			if (CharacterSheetState._isClassFeatureEffectSource(feature)) {
+				this._addClassFeatureModifier(modifierData);
+			} else {
+				this.addNamedModifier(modifierData);
+			}
 
 			const valueStr = mod.setValue ? `=${mod.value}` : (mod.value >= 0 ? `+${mod.value}` : `${mod.value}`);
 		});
