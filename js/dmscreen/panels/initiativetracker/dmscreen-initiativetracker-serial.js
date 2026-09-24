@@ -90,6 +90,8 @@ export class InitiativeTrackerRowDataSerializer extends InitiativeTrackerDataSer
 		}
 
 		const out = super.fromSerial(dataSerial);
+		if (dataSerial.h === null) MiscUtil.set(out, "entity", "hpCurrent", null);
+		if (dataSerial.g === null) MiscUtil.set(out, "entity", "hpMax", null);
 
 		// Convert legacy data
 		out.id = out.id || CryptUtil.uid();
@@ -150,6 +152,8 @@ export class InitiativeTrackerRowDataSerializer extends InitiativeTrackerDataSer
 
 	static toSerial (data) {
 		const out = super.toSerial(data);
+		if (data.entity.hpCurrent === null) out.h = null;
+		if (data.entity.hpMax === null) out.g = null;
 
 		out.k = (data.entity.rowStatColData || [])
 			.map(rowStatColData => InitiativeTrackerRowStatsColDataSerializer.toSerial(rowStatColData));

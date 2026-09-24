@@ -55,7 +55,8 @@ class Board {
 		this.availAdventures = {};
 		this.availBooks = {};
 
-		this._pDoSaveStateDebounced = MiscUtil.debounce(() => StorageUtil.pSet(VeCt.STORAGE_DMSCREEN, this.getSaveableState()), VeCt.DUR_DEBOUNCE_SAVE);
+		this._pSaveStatePending = Promise.resolve();
+		this._pDoSaveStateDebounced = MiscUtil.debounce(() => this._pQueueSaveState(), VeCt.DUR_DEBOUNCE_SAVE);
 	}
 
 	getInitialWidth () {
@@ -645,6 +646,21 @@ class Board {
 
 	doSaveStateDebounced () {
 		this._pDoSaveStateDebounced();
+	}
+
+	_pQueueSaveState () {
+		const write = () => StorageUtil.pSet(VeCt.STORAGE_DMSCREEN, this.getSaveableState());
+		return this._pSaveStatePending = this._pSaveStatePending.then(write, write);
+	}
+
+	async pDoSaveStateNow () {
+		this._pDoSaveStateDebounced.cancel();
+		await this._pQueueSaveState();
+		const expected = this.getSaveableState();
+		const actual = await StorageUtil.pGet(VeCt.STORAGE_DMSCREEN);
+		if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+			throw new Error("DM Screen save could not be verified. Reload before attempting another import.");
+		}
 	}
 
 	/* -------------------------------------------- */

@@ -10,6 +10,48 @@
 		height: 100%;
 	}
 
+	.dm-init__handoff {
+		flex: 0 0 auto;
+		padding: 6px 8px;
+		border-bottom: 1px solid vars.$rgb-border-grey;
+		background: vars.$rgb-bg--alt;
+		font-size: 12px;
+
+		p {
+			margin: 0 0 5px;
+			overflow-wrap: anywhere;
+		}
+	}
+
+	.dm-init__handoff-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 5px;
+
+		.ve-btn {
+			max-width: 100%;
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
+	}
+
+	.dm-init__handoff-summary {
+		max-height: 110px;
+		overflow-y: auto;
+	}
+
+	.dm-init__handoff-status {
+		margin-top: 5px !important;
+
+		&:empty {
+			display: none;
+		}
+
+		&--error {
+			color: vars.$rgb-alert-text-danger;
+		}
+	}
+
 	.dm-init__wrp-header-outer {
 		overflow-x: auto;
 		display: flex;
@@ -261,6 +303,12 @@
 	}
 
 	.ve-night-mode {
+		.dm-init__handoff {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+			color: vars-night.$rgb-font--night;
+		}
+
 		.dm-init__wrp-header {
 			border-color: vars-night.$rgb-border-grey--night;
 		}

@@ -30,6 +30,8 @@ import {ListUtilBestiary} from "../../../utils-list-bestiary.js";
 import {InitiativeTrackerLairMarkers} from "./dmscreen-initiativetracker-lairmarkers.js";
 import {InitiativeTrackerConditionUtil} from "./dmscreen-initiativetracker-condition.js";
 import {DmScreenPanelAppBase} from "../dmscreen-panelapp-base.js";
+import {EncounterWorkspaceHandoffStore, isEncounterHandoffImportedInBoardSave} from "../../../encounterworkspace/encounterworkspace-handoff.js";
+import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionColor} from "../../npctracker/dmscreen-npctracker-condition.js";
 
 export class InitiativeTracker extends DmScreenPanelAppBase {
 	constructor (...args) {
@@ -89,6 +91,13 @@ export class InitiativeTrackerComponent extends BaseComponent {
 		this._selectionHooks = [];
 		this._hpApplyUndoStack = [];
 		this._selectionBarRefs = null;
+		this._handoffStore = new EncounterWorkspaceHandoffStore();
+		this._pendingHandoff = null;
+		this._handoffReadError = false;
+		this._corruptHandoffToken = null;
+		this._handoffRefs = null;
+		this._isHandoffBusy = false;
+		this._handoffRefreshIx = 0;
 
 		// region Lair-action markers
 		this._lairGroupCache = new Map(); // hash -> {legGroup, monName}
@@ -275,22 +284,29 @@ export class InitiativeTrackerComponent extends BaseComponent {
 		await this._pDoLoadEncounter({entityInfos, encounterInfo});
 	}
 
-	async pDoAppendNpcTrackerEntries ({entries}) {
+	async pDoAppendNpcTrackerEntries ({entries, handoffId = null}) {
 		if (this._state.isLocked) return {ok: false, message: "Initiative Tracker is locked."};
 		if (!Array.isArray(entries) || !entries.length) return {ok: false, message: "No NPCs were provided."};
-		if (entries.some(entry => !entry?.monster?.name || !entry.monster.source || !Number.isFinite(entry.initiative))) {
+		if (handoffId != null && (typeof handoffId !== "string" || !handoffId.trim())) return {ok: false, message: "Invalid handoff ID."};
+		if (handoffId && this._state.importedEncounterHandoffIds?.includes(handoffId)) {
+			return {ok: false, message: "This encounter was already imported into this tracker. Clear the pending queue, not the tracker rows."};
+		}
+		if (entries.some(entry => !entry?.monster?.name || !entry.monster.source || !Number.isFinite(entry.initiative)
+			|| (handoffId && entry.conditions != null && (!Array.isArray(entry.conditions)
+				|| entry.conditions.some(it => !getNpcTrackerCanonicalConditionName(it)))))) {
 			return {ok: false, message: "NPC initiative data is incomplete."};
 		}
 
 		const rowsNext = [...this._state.rows];
 		for (const entry of entries) {
 			const conditions = (entry.conditions || [])
-				.filter(condition => Parser.CONDITIONS.includes(condition))
+				.filter(condition => handoffId || Parser.CONDITIONS.includes(condition))
 				.map(condition => {
-					const name = condition === "exhaustion" ? "Exhausted" : condition.toTitleCase();
+					const canonical = getNpcTrackerCanonicalConditionName(condition);
+					const name = canonical === "exhaustion" ? "Exhausted" : canonical.toTitleCase();
 					return InitiativeTrackerConditionUtil.getNewRowState({
 						name,
-						color: Parser.CONDITION_TO_COLOR[name],
+						color: handoffId ? getNpcTrackerConditionColor(canonical) : Parser.CONDITION_TO_COLOR[name],
 					});
 				});
 			const row = await this._rowStateBuilderActive.pGetNewRowState({
@@ -303,6 +319,7 @@ export class InitiativeTrackerComponent extends BaseComponent {
 				hpCurrent: entry.hp?.current ?? null,
 				hpMax: entry.hp?.max ?? null,
 				hpTemp: entry.hp?.temp ?? 0,
+				isKeepHpUnset: !!handoffId,
 				initiative: entry.initiative,
 				conditions,
 			});
@@ -310,11 +327,13 @@ export class InitiativeTrackerComponent extends BaseComponent {
 			rowsNext.push(row);
 		}
 
-		this._state.rows = InitiativeTrackerSort.getSortedRows({
+		const rowsSorted = InitiativeTrackerSort.getSortedRows({
 			rows: rowsNext,
 			sortBy: this._state.sort,
 			sortDir: this._state.dir,
 		});
+		this._state.rows = rowsSorted;
+		if (handoffId) this._state.importedEncounterHandoffIds = [...(this._state.importedEncounterHandoffIds || []), handoffId];
 		return {ok: true, count: entries.length};
 	}
 
@@ -362,6 +381,9 @@ export class InitiativeTrackerComponent extends BaseComponent {
 			rowStateBuilder: this._rowStateBuilderActive,
 		});
 
+		this._render_getWrpEncounterHandoff().appendTo(wrpTracker);
+		this._pRefreshEncounterHandoff();
+		this._addHookBase("isLocked", () => this._updateEncounterHandoff());
 		this._render_getWrpSelectionBar().appendTo(wrpTracker);
 
 		this._viewRowsActiveMeta = this._viewRowsActive.getRenderedView();
@@ -374,6 +396,148 @@ export class InitiativeTrackerComponent extends BaseComponent {
 		this._render_getWrpFooter({wrpTracker, doUpdateExternalStates: this._doUpdateExternalStates}).appendTo(wrpTracker);
 
 		return wrpTracker;
+	}
+
+	_render_getWrpEncounterHandoff () {
+		const summary = ee`<p class="dm-init__handoff-summary" tabindex="0"></p>`;
+		const status = ee`<p class="dm-init__handoff-status" role="status" aria-live="polite"></p>`;
+		const btnRefresh = ee`<button type="button" class="ve-btn ve-btn-default ve-btn-xs">Refresh queue</button>`
+			.onn("click", () => this._pRefreshEncounterHandoff());
+		const btnImport = ee`<button type="button" class="ve-btn ve-btn-primary ve-btn-xs">Import here</button>`
+			.onn("click", () => this._pImportEncounterHandoff());
+		const btnClear = ee`<button type="button" class="ve-btn ve-btn-default ve-btn-xs">Clear queue</button>`
+			.onn("click", () => this._pClearEncounterHandoff());
+		this._handoffRefs = {summary, status, btnImport, btnClear};
+		return ee`<section class="dm-init__handoff" aria-label="Encounter Workspace handoff">
+			${summary}
+			<div class="dm-init__handoff-actions">${btnRefresh}${btnImport}${btnClear}</div>
+			${status}
+		</section>`;
+	}
+
+	_updateEncounterHandoff () {
+		if (!this._handoffRefs) return;
+		const {summary, btnImport, btnClear} = this._handoffRefs;
+		const pending = this._pendingHandoff;
+		const isImported = pending && this._state.importedEncounterHandoffIds?.includes(pending.id);
+		if (this._handoffReadError) summary.textContent = "The Encounter Workspace queue could not be read. It has not been cleared.";
+		else if (pending) {
+			summary.textContent = `Encounter Workspace: ${pending.source.name} · ${pending.entries.length} ${pending.entries.length === 1 ? "monster" : "monsters"} · queued ${new Date(pending.createdAt).toLocaleString()}. One-time import; later changes do not sync. Area notes and roll modifiers stay in the workspace.${isImported ? " Already imported into this panel; do not import again." : ""}`;
+		} else summary.textContent = "No Encounter Workspace snapshot queued. Queue selected monsters there, then refresh this panel.";
+		btnImport.disabled = this._isHandoffBusy || this._handoffReadError || !pending || !!this._state.isLocked || !!isImported;
+		btnClear.disabled = this._isHandoffBusy || !(pending || this._corruptHandoffToken);
+		btnClear.textContent = this._corruptHandoffToken ? "Clear damaged queue" : "Clear queue";
+	}
+
+	_setEncounterHandoffStatus (text, {isError = false} = {}) {
+		if (!this._handoffRefs) return;
+		const {status} = this._handoffRefs;
+		status.textContent = text;
+		status.setAttribute("role", isError ? "alert" : "status");
+		status.classList.toggle("dm-init__handoff-status--error", isError);
+	}
+
+	async _pRefreshEncounterHandoff () {
+		const ix = ++this._handoffRefreshIx;
+		try {
+			const pending = await this._handoffStore.pRead();
+			if (ix !== this._handoffRefreshIx) return;
+			if (this._handoffReadError) this._setEncounterHandoffStatus("");
+			this._handoffReadError = false;
+			this._corruptHandoffToken = null;
+			this._pendingHandoff = pending;
+			this._updateEncounterHandoff();
+		} catch (e) {
+			if (ix !== this._handoffRefreshIx) return;
+			this._handoffReadError = true;
+			this._pendingHandoff = null;
+			try {
+				this._corruptHandoffToken = await this._handoffStore.pGetCorruptRecoveryToken();
+			} catch (recoveryError) {
+				this._corruptHandoffToken = null;
+				this._setEncounterHandoffStatus(`Could not inspect queued data: ${recoveryError.message}`, {isError: true});
+			}
+			this._updateEncounterHandoff();
+			if (this._corruptHandoffToken) this._setEncounterHandoffStatus(`Queued encounter could not be read: ${e.message}. It was not cleared; you can explicitly clear the damaged queue.`, {isError: true});
+		}
+	}
+
+	async _pIsHandoffAlreadySaved (id) {
+		return isEncounterHandoffImportedInBoardSave({
+			saved: await StorageUtil.pGet(VeCt.STORAGE_DMSCREEN),
+			id,
+		});
+	}
+
+	async _pImportEncounterHandoff () {
+		if (this._isHandoffBusy || !this._pendingHandoff) return;
+		const expectedId = this._pendingHandoff.id;
+		this._isHandoffBusy = true;
+		this._updateEncounterHandoff();
+		try {
+			if (this._state.isLocked) throw new Error("Initiative Tracker is locked. Unlock it before importing.");
+			if (this._state.importedEncounterHandoffIds?.includes(expectedId)) throw new Error("Already imported into this panel. Clear the pending queue; do not import it again.");
+			if (!await InputUiUtil.pGetUserBoolean({
+				title: "Import Queued Encounter Here",
+				htmlDescription: "Append all queued monsters to this Initiative Tracker? Area notes and custom roll modifiers stay in Encounter Workspace. Future HP, conditions, and turns will not sync.",
+				textYes: "Import Here",
+				textNo: "Cancel",
+			})) {
+				this._setEncounterHandoffStatus("Import cancelled; the queue is unchanged.");
+				return;
+			}
+
+			const result = await this._handoffStore.pImport({
+				expectedId,
+				pAppend: async pending => {
+					if (await this._pIsHandoffAlreadySaved(pending.id)) {
+						return {ok: false, message: "This snapshot is already saved in a DM Screen tracker. Clear the pending queue rather than importing it again."};
+					}
+					const appended = await this.pDoAppendNpcTrackerEntries({entries: pending.entries, handoffId: pending.id});
+					if (!appended.ok) return appended;
+					try {
+						await this._board.pDoSaveStateNow();
+					} catch (e) {
+						return {ok: false, message: `Tracker rows may be visible, but the save could not be verified: ${e.message}. The queue was kept; reload DM Screen before retrying.`};
+					}
+					return appended;
+				},
+			});
+			this._setEncounterHandoffStatus(result.ok
+				? `Imported ${result.count} monsters into this panel. The queue was cleared; no later changes will sync.`
+				: `${result.message} The pending snapshot was kept.`, {isError: !result.ok});
+		} catch (e) {
+			this._setEncounterHandoffStatus(`Import could not be completed: ${e.message}. The queue may still be pending; refresh before retrying.`, {isError: true});
+		} finally {
+			this._isHandoffBusy = false;
+			await this._pRefreshEncounterHandoff();
+		}
+	}
+
+	async _pClearEncounterHandoff () {
+		if (this._isHandoffBusy || !(this._pendingHandoff || this._corruptHandoffToken)) return;
+		const expectedId = this._pendingHandoff?.id;
+		const corruptToken = this._corruptHandoffToken;
+		this._isHandoffBusy = true;
+		this._updateEncounterHandoff();
+		try {
+			if (!await InputUiUtil.pGetUserBoolean({
+				title: corruptToken ? "Clear Damaged Queue" : "Clear Queued Encounter",
+				htmlDescription: corruptToken
+					? "The queued snapshot is unreadable. Discard it to allow a new queue? Any Initiative Tracker rows remain unchanged."
+					: "Discard this pending snapshot? Any Initiative Tracker rows already imported remain unchanged.",
+				textYes: "Clear Queue",
+				textNo: "Keep Queue",
+			})) return this._setEncounterHandoffStatus("Queued encounter kept.");
+			if (corruptToken) await this._handoffStore.pClearCorrupt({expectedToken: corruptToken});
+			else await this._handoffStore.pClear({expectedId});
+			this._setEncounterHandoffStatus("Queued encounter cleared; tracker rows were not changed.");
+		} catch (e) {
+			this._setEncounterHandoffStatus(`Queue was not cleared: ${e.message}`, {isError: true});
+		} finally {
+			this._isHandoffBusy = false;
+			await this._pRefreshEncounterHandoff();
+		}
 	}
 
 	_render_getWrpSelectionBar () {
@@ -1041,6 +1205,7 @@ export class InitiativeTrackerComponent extends BaseComponent {
 			// region Custom conditions
 			conditionsCustom: (this._savedState.cndc || [])
 				.map(dataSerial => InitiativeTrackerConditionCustomSerializer.fromSerial(dataSerial)),
+			importedEncounterHandoffIds: Array.isArray(this._savedState.ih) ? this._savedState.ih.filter(id => typeof id === "string") : [],
 			// endregion
 
 			// region Rows
@@ -1113,6 +1278,7 @@ export class InitiativeTrackerComponent extends BaseComponent {
 			// region Custom conditions
 			cndc: (this._state.conditionsCustom || [])
 				.map(data => InitiativeTrackerConditionCustomSerializer.toSerial(data)),
+			ih: this._state.importedEncounterHandoffIds || [],
 			// endregion
 
 			// region Rows
@@ -1152,6 +1318,7 @@ export class InitiativeTrackerComponent extends BaseComponent {
 
 			// region Custom conditions
 			conditionsCustom: [],
+			importedEncounterHandoffIds: [],
 			// endregion
 
 			// region Rows

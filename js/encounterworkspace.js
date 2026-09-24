@@ -6,10 +6,16 @@ import {getNpcTrackerSignedNumber} from "./dmscreen/npctracker/dmscreen-npctrack
 import {getNpcTrackerHpInputValue, getNpcTrackerHpOperation} from "./dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {InitiativeTrackerRowUtil} from "./dmscreen/panels/initiativetracker/dmscreen-initiativetracker-consts.js";
 import {ENCOUNTER_DESECRATED_PRESETS, getEncounterModifierForPreset} from "./encounterworkspace/encounterworkspace-effects.js";
+import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
 
 export class EncounterWorkspacePage {
-	constructor ({store = new EncounterWorkspaceStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
+	constructor ({store = new EncounterWorkspaceStore(), handoffStore = new EncounterWorkspaceHandoffStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
 		this._store = store;
+		this._handoffStore = handoffStore;
+		this._pendingHandoff = null;
+		this._handoffReadError = false;
+		this._corruptHandoffToken = null;
+		this._handoffRefreshIx = 0;
 		this._pGetReferenceData = pGetReferenceData;
 		this._state = EncounterWorkspaceState.getEmpty();
 		this._hasUnreadableSave = false;
@@ -73,6 +79,10 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart = document.getElementById("ew-turn-start");
 		this._btnTurnNext = document.getElementById("ew-turn-next");
 		this._btnTurnReset = document.getElementById("ew-turn-reset");
+		this._btnHandoffQueue = document.getElementById("ew-handoff-queue");
+		this._btnHandoffClear = document.getElementById("ew-handoff-clear");
+		this._eleHandoffPending = document.getElementById("ew-handoff-pending");
+		this._eleHandoffStatus = document.getElementById("ew-handoff-status");
 		this._eleRoundStatus = document.getElementById("ew-round-status");
 		this._eleTurnOrder = document.getElementById("ew-turn-order");
 		this._eleInitUnrolled = document.getElementById("ew-init-unrolled");
@@ -103,6 +113,9 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.addEventListener("click", () => this._pUpdateTurn("start"));
 		this._btnTurnNext.addEventListener("click", () => this._pUpdateTurn("next"));
 		this._btnTurnReset.addEventListener("click", () => this._pUpdateTurn("reset"));
+		this._btnHandoffQueue.addEventListener("click", () => this._pQueueHandoff());
+		this._btnHandoffClear.addEventListener("click", () => this._pClearHandoff());
+		window.addEventListener("focus", () => this._pRefreshHandoff());
 
 		let catalogError = null;
 		try {
@@ -135,6 +148,7 @@ export class EncounterWorkspacePage {
 		}
 		if (catalogError) this._setError(`Bestiary sources could not be initialized: ${this._getErrorMessage(catalogError)}. ${this._hasUnreadableSave ? "The saved encounter also could not be opened." : "The saved encounter is still available."} Importing another list is disabled until the page can load those sources.`);
 		else if (referenceError) this._setError(`Condition and skill reference data could not be loaded: ${this._getErrorMessage(referenceError)}. Standard conditions and skills remain available. You can still choose a saved Bestiary list.${this._hasUnreadableSave ? " The saved encounter also could not be opened; choose a saved list to replace it." : ""}`);
+		await this._pRefreshHandoff();
 	}
 
 	_getErrorMessage (error) { return String(error?.message || error).replace(/[.!?]+$/, ""); }
@@ -183,6 +197,94 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.disabled = this._isBusy || isStarted || !hasInitiative;
 		this._btnTurnNext.disabled = this._isBusy || !isStarted;
 		this._btnTurnReset.disabled = this._isBusy || !isStarted;
+		this._btnHandoffQueue.disabled = this._isBusy || this._handoffReadError || !hasTargets || !this._state.sourceList;
+		this._btnHandoffClear.disabled = this._isBusy || !(this._pendingHandoff || this._corruptHandoffToken);
+		this._btnHandoffClear.textContent = this._corruptHandoffToken ? "Clear damaged queue" : "Clear queued snapshot";
+	}
+
+	_setHandoffStatus (text, {isError = false} = {}) {
+		this._eleHandoffStatus.textContent = text;
+		this._eleHandoffStatus.setAttribute("role", isError ? "alert" : "status");
+		this._eleHandoffStatus.classList[isError ? "add" : "remove"]("ew__handoff-status--error");
+	}
+
+	async _pRefreshHandoff () {
+		const ix = ++this._handoffRefreshIx;
+		try {
+			const pending = await this._handoffStore.pRead();
+			if (ix !== this._handoffRefreshIx) return;
+			if (this._handoffReadError) this._setHandoffStatus("");
+			this._handoffReadError = false;
+			this._corruptHandoffToken = null;
+			this._pendingHandoff = pending;
+			this._eleHandoffPending.textContent = pending
+				? `Queued: ${pending.source.name} · ${pending.entries.length} ${pending.entries.length === 1 ? "monster" : "monsters"} · ${new Date(pending.createdAt).toLocaleString()}. Awaiting confirmation in DM Screen.`
+				: "Nothing queued. A snapshot stays here until you import or clear it.";
+			this._updateControls();
+		} catch (e) {
+			if (ix !== this._handoffRefreshIx) return;
+			this._handoffReadError = true;
+			this._pendingHandoff = null;
+			try {
+				this._corruptHandoffToken = await this._handoffStore.pGetCorruptRecoveryToken();
+			} catch (recoveryError) {
+				this._corruptHandoffToken = null;
+				this._setHandoffStatus(`Cannot inspect damaged queue: ${this._getErrorMessage(recoveryError)}`, {isError: true});
+			}
+			this._eleHandoffPending.textContent = "The queued snapshot could not be read. It has not been discarded.";
+			if (this._corruptHandoffToken) this._setHandoffStatus(`Cannot read queued snapshot: ${this._getErrorMessage(e)}. You may explicitly clear the damaged queue.`, {isError: true});
+			this._updateControls();
+		}
+	}
+
+	async _pQueueHandoff () {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		try {
+			const snapshot = getEncounterHandoffSnapshot({state: this._state});
+			const result = await this._handoffStore.pQueue({
+				snapshot,
+				pConfirmReplace: () => InputUiUtil.pGetUserBoolean({
+					title: "Replace Queued Encounter",
+					htmlDescription: "Another encounter is still waiting in this browser. Replace it? The previous queue will no longer be available in DM Screen; neither working encounter changes.",
+					textYes: "Replace Queue",
+					textNo: "Keep Queue",
+				}),
+			});
+			if (!result.ok) this._setHandoffStatus("Kept the existing queued encounter; nothing was replaced.");
+			else this._setHandoffStatus(`Queued ${snapshot.entries.length} monsters. Open DM Screen and confirm Import on the intended Initiative Tracker panel.`);
+		} catch (e) {
+			this._setHandoffStatus(`Could not queue monsters: ${this._getErrorMessage(e)}`, {isError: true});
+		} finally {
+			this._setBusy(false);
+			await this._pRefreshHandoff();
+		}
+	}
+
+	async _pClearHandoff () {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		try {
+			const isCorrupt = !!this._corruptHandoffToken;
+			const pending = isCorrupt ? null : await this._handoffStore.pRead();
+			if (!isCorrupt && (!pending || pending.id !== this._pendingHandoff?.id)) throw new Error("The queued encounter changed. Refresh before clearing.");
+			if (!await InputUiUtil.pGetUserBoolean({
+				title: isCorrupt ? "Clear Damaged Queue" : "Clear Queued Encounter",
+				htmlDescription: isCorrupt
+					? "The pending snapshot is unreadable. Discard it so you can queue a new one? Working encounters and tracker rows are unchanged."
+					: "Discard the pending DM Screen import? This does not change either working encounter or an already-imported tracker.",
+				textYes: "Clear Queue",
+				textNo: "Keep Queue",
+			})) return this._setHandoffStatus("Queued encounter kept.");
+			if (isCorrupt) await this._handoffStore.pClearCorrupt({expectedToken: this._corruptHandoffToken});
+			else await this._handoffStore.pClear({expectedId: pending.id});
+			this._setHandoffStatus("Queued encounter cleared. The working encounter is unchanged.");
+		} catch (e) {
+			this._setHandoffStatus(`Could not clear queued encounter: ${this._getErrorMessage(e)}`, {isError: true});
+		} finally {
+			this._setBusy(false);
+			await this._pRefreshHandoff();
+		}
 	}
 
 	_setStatus (text) {
