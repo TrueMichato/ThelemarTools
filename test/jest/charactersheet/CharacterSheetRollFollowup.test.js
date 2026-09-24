@@ -82,6 +82,14 @@ describe("CharacterSheetModal roll follow-ups", () => {
 		expect(html).toContain("Hit &amp; marked");
 	});
 
+	it("rejects unformatted breakdown objects rather than displaying object coercion in every follow-up", () => {
+		expect(() => CharacterSheetModal.buildRollFollowup({
+			label: "Attack",
+			total: 27,
+			breakdown: {total: 8, proficiency: 6},
+		})).toThrow("breakdown must be formatted text");
+	});
+
 	it("prepends the same exact summary to InputUiUtil prompts without leaking it into the next prompt", async () => {
 		const rollFollowup = CharacterSheetModal.buildRollFollowup({
 			label: "Wisdom Save",

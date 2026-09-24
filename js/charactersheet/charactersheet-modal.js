@@ -75,6 +75,7 @@ class CharacterSheetModal {
 	 */
 	static buildRollFollowup ({label, total, naturalRoll = null, breakdown = "", outcome = ""} = {}) {
 		if (total == null) throw new TypeError("A roll follow-up requires a total.");
+		if (typeof breakdown !== "string") throw new TypeError("A roll follow-up breakdown must be formatted text.");
 		const out = {
 			label: String(label || "Triggering roll"),
 			total: String(total),

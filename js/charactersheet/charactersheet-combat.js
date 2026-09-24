@@ -1474,6 +1474,7 @@ class CharacterSheetCombat {
 
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
+		this._dismissPostAttackOffer();
 		this._pendingBattleMasterAttackAdvantage = false;
 		const stateDice = this._page._rollStateDiceBonuses?.(attackType) || null;
 		const stateDiceTotal = stateDice?.total || 0;
@@ -1550,7 +1551,7 @@ class CharacterSheetCombat {
 			label: `${attack.name} Attack`,
 			total,
 			naturalRoll: rollResult.roll,
-			breakdown: attackBreakdown,
+			breakdown: rollBreakdown,
 			outcome: resultNote,
 		});
 
@@ -1623,9 +1624,8 @@ class CharacterSheetCombat {
 		// Consume "next attack only" states (e.g. Steady Aim or Laughing Lunge).
 		this._consumeOnAttackStates();
 
-		// Generic post-attack extension point. Blocking hooks resolve first when their
-		// choice competes with the subsequent damage roll for a shared once-per-turn
-		// resource; all other hooks remain fire-and-forget.
+		// Roll-changing interventions resolve before dependent hit/crit decisions;
+		// independent optional choices wait in the per-roll offer until explicitly opened.
 		const postCtx = {
 			attack,
 			attackId,
@@ -1652,7 +1652,8 @@ class CharacterSheetCombat {
 			attack,
 			getRollContext: () => ({total: postCtx.total, rollFollowup: postCtx.rollFollowup}),
 		});
-		void this._runPostAttackHooks(postCtx, {blocking: false}).catch(e => {
+		this._stagePostAttackOffers(postCtx);
+		void this._runPostAttackHooks(postCtx, {blocking: false, deferred: false}).catch(e => {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Combat] post-attack hook error", e);
 		});
@@ -1897,13 +1898,13 @@ class CharacterSheetCombat {
 
 	// =========================================================================
 	// Generic post-attack hook pipeline (#7). Each hook is {id, predicate, handler}.
-	// `predicate(ctx)` is a cheap sync gate; `handler(ctx)` is async (may show a
-	// modal, roll damage, spend a resource). Kept feature-agnostic — feature logic
-	// lives entirely in the hook handlers, not in `_rollAttack`.
+	// `predicate(ctx)` is a cheap sync gate; `handler(ctx)` may show a modal or
+	// spend a resource. `deferred` hooks only run when the player opens their
+	// individually labelled option in the shared, non-blocking offer.
 	// =========================================================================
 
 	/**
-	 * @returns {Array<{id: string, blocking?: boolean, predicate: (ctx: *) => boolean, handler: (ctx: *) => Promise<void>}>}
+	 * @returns {Array<{id: string, label?: string, blocking?: boolean, deferred?: boolean, predicate: (ctx: *) => boolean, handler: (ctx: *) => Promise<*>}>}
 	 */
 	_getPostAttackHooks () {
 		return [
@@ -1922,13 +1923,16 @@ class CharacterSheetCombat {
 			},
 			{
 				id: "triggeredFeatCriticalHit",
-				blocking: true,
+				label: "Critical-hit feat die",
+				deferred: true,
 				predicate: (ctx) => ctx.isCrit
 					&& (this._state.getTriggeredFeatDieOptions?.("criticalHit", {isCriticalHit: true, attack: ctx.attack}) || []).length > 0,
 				handler: (ctx) => this._pApplyTriggeredFeatCriticalHit(ctx),
 			},
 			{
 				id: "arcaneShot",
+				label: "Arcane Shot",
+				deferred: true,
 				predicate: (ctx) => ctx.isRanged
 					&& this._state.hasArcaneShot?.()
 					&& (this._state.getArcaneShotRemaining?.() || 0) > 0
@@ -1943,6 +1947,8 @@ class CharacterSheetCombat {
 				// already-resolved attack roll. Reusable for any crit-triggered weapon
 				// effect (append-friendly for future combat-method crit riders).
 				id: "critWeaponRider",
+				label: "Critical weapon effect",
+				deferred: true,
 				predicate: (ctx) => !ctx.attack?.isSpell
 					&& (this._state.getCritWeaponRiders?.(ctx.attack) || [])
 						.some(r => (r.trigger === "nat20" ? ctx.isNat20 : ctx.isCrit)),
@@ -1954,6 +1960,8 @@ class CharacterSheetCombat {
 				// live canonically-classified magic-weapon source. The handler then asks
 				// whether the attack actually hit before opening the shared Page flow.
 				id: "efaArcaneJolt",
+				label: "Arcane Jolt",
+				deferred: true,
 				predicate: (ctx) => !ctx.isFumble
 					&& this._state.canOfferEfaArcaneJoltForAttack?.(ctx.attack) === true,
 				handler: (ctx) => this._pOfferEfaArcaneJolt(ctx),
@@ -1963,6 +1971,8 @@ class CharacterSheetCombat {
 				// to place a seal (no action). Non-blocking and purely additive — it never
 				// alters the attack/damage math. Spell attacks are excluded (weapon only).
 				id: "balefulInterdict",
+				label: "Baleful Interdict",
+				deferred: true,
 				predicate: (ctx) => !ctx.attack?.isSpell
 					&& this._state.hasBalefulInterdict?.()
 					&& this._state.canPlaceSealThisTurn?.()
@@ -1993,6 +2003,8 @@ class CharacterSheetCombat {
 				// sheet cannot know. Powers Chained Fury's grapple / shove / restrain /
 				// reposition riders.
 				id: "featureOnHitOptions",
+				label: "On-hit effect",
+				deferred: true,
 				predicate: (ctx) => !ctx.attack?.isSpell
 					&& !ctx.isFumble
 					&& this._getEligibleOnHitOptions(ctx.attack).length > 0,
@@ -2000,6 +2012,8 @@ class CharacterSheetCombat {
 			},
 			{
 				id: "shadowKnightTriggers",
+				label: "Shadow weapon effects",
+				deferred: true,
 				predicate: (ctx) => (!!ctx.attack?.isShadowWeapon || !!ctx.attack?.countsAsShadowWeapon)
 					&& !!this._state.getFeatureCalculations?.().hasShadowKnight,
 				handler: (ctx) => this._pHandleShadowKnightHit(ctx),
@@ -2011,6 +2025,8 @@ class CharacterSheetCombat {
 				// chipped the blade — and, for Ordinary Glass, whether that critical hit
 				// landed at all — is the table's call.
 				id: "materialDegradation",
+				label: "Material degradation",
+				deferred: true,
 				predicate: (ctx) => !ctx.attack?.isSpell
 					&& this._getDegradationCandidates(ctx).length > 0,
 				handler: (ctx) => this._pOfferMaterialDegradation(ctx),
@@ -2020,6 +2036,8 @@ class CharacterSheetCombat {
 				// of degradation: that one hurts the ITEM, this one hurts the CARRIER. Also
 				// data-driven off an authored block, also only ever offered.
 				id: "materialInstability",
+				label: "Material instability",
+				deferred: true,
 				predicate: (ctx) => !ctx.attack?.isSpell
 					&& this._getInstabilityCandidates(ctx).length > 0,
 				handler: (ctx) => this._pOfferMaterialInstability(ctx),
@@ -2035,12 +2053,12 @@ class CharacterSheetCombat {
 			textNo: "Miss",
 			rollFollowup: ctx.rollFollowup,
 		});
-		if (!didHit) return;
-		const focusRestoreTarget = csGetAttackFocusTrigger(ctx.attack)
+		if (!didHit) return false;
+		const focusRestoreTarget = ctx.offerButton?.isConnected ? ctx.offerButton : csGetAttackFocusTrigger(ctx.attack)
 			|| (typeof document !== "undefined"
 				? document.activeElement?.closest?.("button, [role=button]")
 				: null);
-		await this._page.pOfferEfaArcaneJolt?.({
+		const outcome = await this._page.pOfferEfaArcaneJolt?.({
 			trigger: {
 				type: "summonerMagicWeaponHit",
 				hitConfirmed: true,
@@ -2050,6 +2068,7 @@ class CharacterSheetCombat {
 			focusRestoreTarget,
 			getFocusRestoreTarget: () => csGetAttackFocusTrigger(ctx.attack),
 		});
+		return outcome?.committed === true;
 	}
 
 	/**
@@ -2073,8 +2092,9 @@ class CharacterSheetCombat {
 	 */
 	async _pOfferMaterialDegradation (ctx) {
 		const candidates = this._getDegradationCandidates(ctx);
-		if (!candidates.length) return;
+		if (!candidates.length) return false;
 
+		let applied = false;
 		for (const cand of candidates) {
 			const spec = CharacterSheetMaterials.getDegradationSpec(cand.material);
 			const what = spec?.destroys
@@ -2090,6 +2110,11 @@ class CharacterSheetCombat {
 			if (!isConfirm) continue;
 
 			const status = this._state.degradeItemMaterial(cand.id);
+			if (!status) {
+				JqueryUtil.doToast({type: "warning", content: `${cand.name} could not be degraded; the material is no longer eligible.`});
+				continue;
+			}
+			applied = true;
 			const summary = status?.isDestroyed
 				? "Destroyed"
 				: CharacterSheetMaterials.getDegradationSummary(this._state.getItemRaw(cand.id), cand.material);
@@ -2099,6 +2124,7 @@ class CharacterSheetCombat {
 			});
 			this._page.renderCharacter?.();
 		}
+		return applied;
 	}
 
 	/**
@@ -2120,7 +2146,7 @@ class CharacterSheetCombat {
 	 * @param {object} ctx Post-attack context.
 	 */
 	async _pOfferMaterialInstability (ctx) {
-		await this.pResolveMaterialInstability(this._getInstabilityCandidates(ctx), {rollFollowup: ctx.rollFollowup});
+		return this.pResolveMaterialInstability(this._getInstabilityCandidates(ctx), {rollFollowup: ctx.rollFollowup});
 	}
 
 	/**
@@ -2136,8 +2162,9 @@ class CharacterSheetCombat {
 	 * @param {Array<{id, name, material, spec}>} candidates
 	 */
 	async pResolveMaterialInstability (candidates, {rollFollowup = null} = {}) {
-		if (!candidates?.length) return;
+		if (!candidates?.length) return false;
 
+		let applied = false;
 		for (const cand of candidates) {
 			const effect = cand.spec?.effect || {};
 			const isDamage = effect.type === "selfDamage";
@@ -2154,6 +2181,7 @@ class CharacterSheetCombat {
 			});
 			if (!isConfirm) continue;
 
+			applied = true;
 			if (isDamage) {
 				const roll = await Renderer.dice.pRoll2(effect.damage, {isUser: false, name: `${cand.material.name} backlash`}, {isResultUsed: true});
 				const amount = Math.max(0, Number(roll) || 0);
@@ -2169,6 +2197,7 @@ class CharacterSheetCombat {
 
 			this._page.renderCharacter?.();
 		}
+		return applied;
 	}
 
 	/**
@@ -2223,8 +2252,9 @@ class CharacterSheetCombat {
 	 */
 	async _pOfferFeatureOnHitOptions (ctx) {
 		const options = this._getEligibleOnHitOptions(ctx.attack);
-		if (!options.length) return;
-		const focusTrigger = csGetAttackFocusTrigger(ctx.attack)
+		if (!options.length) return false;
+		const focusTrigger = (ctx.offerButton?.isConnected ? ctx.offerButton : null)
+			|| csGetAttackFocusTrigger(ctx.attack)
 			|| document?.activeElement?.closest?.("button, [role=button]");
 
 		const labels = options.map(opt => {
@@ -2239,7 +2269,7 @@ class CharacterSheetCombat {
 			textNo: "Miss",
 			rollFollowup: ctx.rollFollowup,
 		});
-		if (!didHit) return;
+		if (!didHit) return false;
 
 		const picked = await CharacterSheetModal.pGetUserEnum(/** @type {*} */ ({
 			title: `${ctx.attack?.name || "Attack"} — Choose an On-Hit Effect`,
@@ -2247,17 +2277,15 @@ class CharacterSheetCombat {
 			isResolveItem: false,
 			rollFollowup: ctx.rollFollowup,
 		}));
-		if (picked == null || picked >= options.length) return;
+		if (picked == null || picked >= options.length) return false;
 
 		const opt = options[picked];
-		if (!opt) return;
+		if (!opt) return false;
 		if (opt.resolutionKind === "forcedMovement") {
-			await this._pOfferForcedMovementOnHit(ctx, opt);
-			return;
+			return this._pOfferForcedMovementOnHit(ctx, opt);
 		}
 		if (opt.targetAware && opt.targetEffect?.source) {
-			await this._pOfferTargetEffect({...ctx, focusTrigger}, opt);
-			return;
+			return this._pOfferTargetEffect({...ctx, focusTrigger}, opt);
 		}
 		const parts = [opt.description || opt.name];
 		if (opt.save?.dc) {
@@ -2267,32 +2295,36 @@ class CharacterSheetCombat {
 			parts.push(`Recurring: ${opt.recurringDamage.amount} ${opt.recurringDamage.type || ""} damage at the ${opt.recurringDamage.when || "start of each of its turns"}.`);
 		}
 		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
+		return true;
 	}
 
 	async _pOfferForcedMovementOnHit (ctx, opt) {
-		const targetSize = await InputUiUtil.pGetUserEnum({
+		const targetSize = await CharacterSheetModal.pGetUserEnum({
 			title: `${opt.name} — Target Size`,
 			values: ["tiny", "small", "medium", "large", "huge", "gargantuan"],
 			fnDisplay: value => value.toTitleCase(),
 			isResolveItem: true,
+			rollFollowup: ctx.rollFollowup,
 		});
-		if (targetSize == null || typeof targetSize === "symbol") return;
-		const direction = await InputUiUtil.pGetUserEnum({
+		if (targetSize == null || typeof targetSize === "symbol") return false;
+		const direction = await CharacterSheetModal.pGetUserEnum({
 			title: `${opt.name} — Direction`,
 			values: ["push", "pull"],
 			fnDisplay: value => value === "push" ? "Push away" : "Pull toward",
 			isResolveItem: true,
+			rollFollowup: ctx.rollFollowup,
 		});
-		if (direction == null || typeof direction === "symbol") return;
-		const distance = await InputUiUtil.pGetUserNumber({
+		if (direction == null || typeof direction === "symbol") return false;
+		const distance = await CharacterSheetModal.pGetUserNumber({
 			title: `${opt.name} — Distance`,
 			inputMode: "numeric",
 			min: 1,
 			max: Number(opt.distanceMax) || 10,
 			int: true,
 			default: Number(opt.distanceMax) || 10,
+			rollFollowup: ctx.rollFollowup,
 		});
-		if (distance == null) return;
+		if (distance == null) return false;
 		const result = this._state.resolveEfaForceDemolisherHitRider?.({
 			attackId: ctx.attack?.id,
 			hit: true,
@@ -2307,9 +2339,10 @@ class CharacterSheetCombat {
 					? `Force Demolisher requires a target at least one size smaller than you (${result.ownerSize}).`
 					: "Force Demolisher is no longer eligible for this hit.",
 			});
-			return;
+			return false;
 		}
 		JqueryUtil.doToast({type: "success", content: result.message});
+		return true;
 	}
 
 	/**
@@ -2326,6 +2359,7 @@ class CharacterSheetCombat {
 		const trigger = ctx.focusTrigger?.isConnected
 			? ctx.focusTrigger
 			: csGetAttackFocusTrigger(ctx.attack);
+		let finishModal = null;
 		// InputUiUtil resolves its promise as soon as the enum choice is made, while
 		// the closing modal can remain mounted for one animation frame. Wait for that
 		// previous dialog to leave the document before opening the target form; otherwise
@@ -2346,20 +2380,22 @@ class CharacterSheetCombat {
 			rollFollowup: ctx.rollFollowup,
 			focusRestoreTarget: trigger,
 			getFocusRestoreTarget: () => csGetAttackFocusTrigger(ctx.attack),
+			cbClose: () => finishModal?.(false),
 		});
 		modalInner.classList.add("cs-combat-target-modal");
 		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
 		modalInner.style.overflowY = "auto";
 		modalInner.style.boxSizing = "border-box";
 		modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
-		await new Promise(resolve => {
+		return new Promise(resolve => {
 			let resolved = false;
-			const finish = () => {
+			const finish = (applied = false) => {
 				if (resolved) return false;
 				resolved = true;
-				resolve();
+				resolve(applied);
 				return true;
 			};
+			finishModal = finish;
 			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName}</option>`).join("");
 			const isRestrain = effect === "restrain";
 			modalInner.innerHTML = `
@@ -2435,7 +2471,7 @@ class CharacterSheetCombat {
 					JqueryUtil.doToast({type: "warning", content: messages[result.reason] || "The creature result could not be saved."});
 					return;
 				}
-				finish();
+				finish(true);
 				await doClose();
 				const outcome = result.target
 					? `${result.target.targetName} recorded as ${result.target.restrained ? "restrained" : "grappled"}.`
@@ -2522,8 +2558,9 @@ class CharacterSheetCombat {
 	}
 
 	async _pHandleShadowKnightHit (ctx) {
-		if (ctx.isFumble) return;
+		if (ctx.isFumble) return false;
 		const didAttackHaveAdvantage = ctx.rollResult?.mode === "advantage";
+		let applied = false;
 		if (!ctx.isCrit) {
 			const didHit = await CharacterSheetModal.pGetUserBoolean({
 				title: "Shadow Weapon Attack",
@@ -2532,7 +2569,7 @@ class CharacterSheetCombat {
 				textNo: "Miss",
 				rollFollowup: ctx.rollFollowup,
 			});
-			if (!didHit) return;
+			if (!didHit) return false;
 		}
 
 		const shadowcasting = this._state.getShadowcastingResource?.();
@@ -2547,6 +2584,7 @@ class CharacterSheetCombat {
 			if (useShadowbite) {
 				const result = this._state.useShadowbite?.({hadAttackAdvantage: didAttackHaveAdvantage});
 				if (result) {
+					applied = true;
 					const damage = this._page.rollDice?.(1, 8) ?? 0;
 					JqueryUtil.doToast({
 						type: "success",
@@ -2566,11 +2604,13 @@ class CharacterSheetCombat {
 				rollFollowup: ctx.rollFollowup,
 			});
 			if (useShadowSneak && this._state.useShadowSneak?.()) {
+				applied = true;
 				JqueryUtil.doToast({type: "success", content: "Shadow Sneak: teleport within 5 feet of the target; you are now Invisible."});
 			}
 		}
 		this._page.saveCharacter?.();
 		this._page.renderCharacter?.();
+		return applied;
 	}
 
 	/**
@@ -2593,13 +2633,14 @@ class CharacterSheetCombat {
 	 * Run all post-attack hooks in order. Hooks whose predicate fails are skipped.
 	 * Errors in one hook never abort the others (or the roll).
 	 * @param {*} ctx
-	 * @param {{blocking?: ?boolean}} opts
+	 * @param {{blocking?: ?boolean, deferred?: ?boolean}} opts
 	 * @returns {Promise<void>}
 	 */
-	async _runPostAttackHooks (ctx, {blocking = null} = {}) {
+	async _runPostAttackHooks (ctx, {blocking = null, deferred = null} = {}) {
 		const hooks = this._getPostAttackHooks();
 		for (const hook of hooks) {
 			if (blocking != null && !!hook.blocking !== blocking) continue;
+			if (deferred != null && !!hook.deferred !== deferred) continue;
 			let applies = false;
 			try { applies = !!hook.predicate(ctx); } catch (e) { applies = false; }
 			if (!applies) continue;
@@ -2613,6 +2654,101 @@ class CharacterSheetCombat {
 		}
 	}
 
+	_dismissPostAttackOffer () {
+		this._postAttackOffer?.element?.remove();
+		this._postAttackOffer = null;
+	}
+
+	_stagePostAttackOffers (ctx) {
+		const hooks = this._getPostAttackHooks().filter(hook => {
+			if (!hook.deferred) return false;
+			try { return !!hook.predicate(ctx); } catch (e) {
+				// eslint-disable-next-line no-console
+				console.error(`[CharSheet Combat] post-attack offer "${hook.id}" failed`, e);
+				return false;
+			}
+		});
+		if (!hooks.length) return;
+
+		const escape = CharacterSheetModal._escapeHtml;
+		const offer = e_({outer: `
+			<aside class="cs-post-roll-offer" role="region" aria-label="Optional follow-ups for ${escape(ctx.attack?.name || "attack")}">
+				<div class="cs-post-roll-offer__heading">${escape(ctx.attack?.name || "Attack")} · Optional follow-ups</div>
+				<div class="cs-post-roll-offer__caption">Natural ${escape(ctx.rollFollowup.naturalRoll)} · Total ${escape(ctx.rollFollowup.total)}${ctx.isCrit ? " · Critical hit" : ""}</div>
+				<div class="cs-post-roll-offer__breakdown">${escape(ctx.rollFollowup.breakdown)}</div>
+				<div class="cs-post-roll-offer__choices"></div>
+				<button type="button" class="cs-post-roll-offer__dismiss ve-btn ve-btn-xs ve-btn-default">Dismiss offers</button>
+			</aside>
+		`});
+		const choices = offer.querySelector(".cs-post-roll-offer__choices");
+		const pending = {rollId: this._lastAttackContext.rollId, state: this._state, ctx, element: offer, options: new Map(), inFlight: false};
+		for (const hook of hooks) {
+			const row = e_({outer: `<div class="cs-post-roll-offer__row">
+				<span>${escape(hook.label || hook.id)}</span>
+				<button type="button" class="cs-post-roll-offer__open ve-btn ve-btn-xs ve-btn-default" aria-label="Open ${escape(hook.label || hook.id)} for ${escape(ctx.attack?.name || "attack")}">Open</button>
+			</div>`});
+			const button = row.querySelector(".cs-post-roll-offer__open");
+			button.addEventListener("click", () => {
+				void this._pOpenPostAttackOffer(pending, hook.id);
+			});
+			pending.options.set(hook.id, {hook, row, button});
+			choices.append(row);
+		}
+		offer.querySelector(".cs-post-roll-offer__dismiss").addEventListener("click", () => this._dismissPostAttackOffer());
+		document.body.append(offer);
+		this._postAttackOffer = pending;
+	}
+
+	async _pOpenPostAttackOffer (pending, hookId) {
+		if (this._postAttackOffer !== pending || this._lastAttackContext?.rollId !== pending.rollId) return false;
+		if (this._state !== pending.state) {
+			this._dismissPostAttackOffer();
+			return false;
+		}
+		const option = pending.options.get(hookId);
+		if (!option || pending.inFlight) return false;
+		const {hook, button, row} = option;
+		let isEligible;
+		try { isEligible = !!hook.predicate(pending.ctx); } catch (e) {
+			// eslint-disable-next-line no-console
+			console.error(`[CharSheet Combat] post-attack offer "${hookId}" failed`, e);
+			JqueryUtil.doToast({type: "danger", content: `${hook.label} could not be checked. Try again.`});
+			return false;
+		}
+		if (!isEligible) {
+			JqueryUtil.doToast({type: "warning", content: `${hook.label} is no longer available for this attack.`});
+			row.remove();
+			pending.options.delete(hookId);
+			if (!pending.options.size) this._dismissPostAttackOffer();
+			return false;
+		}
+		pending.inFlight = true;
+		for (const {button: openButton} of pending.options.values()) openButton.disabled = true;
+		try {
+			const applied = await hook.handler({...pending.ctx, offerButton: button});
+			if (applied === true) {
+				row.remove();
+				pending.options.delete(hookId);
+				if (!pending.options.size && this._postAttackOffer === pending) this._dismissPostAttackOffer();
+				else if (this._postAttackOffer === pending) {
+					setTimeout(() => {
+						if (this._postAttackOffer !== pending) return;
+						(pending.options.values().next().value?.button || pending.element.querySelector(".cs-post-roll-offer__dismiss"))?.focus({preventScroll: true});
+					}, 0);
+				}
+			}
+			return applied === true;
+		} catch (e) {
+			// eslint-disable-next-line no-console
+			console.error(`[CharSheet Combat] post-attack offer "${hookId}" failed`, e);
+			JqueryUtil.doToast({type: "danger", content: `${hook.label} could not be applied. Review the current state and try again.`});
+			return false;
+		} finally {
+			pending.inFlight = false;
+			for (const {button: openButton} of pending.options.values()) openButton.disabled = false;
+		}
+	}
+
 	async _pApplyTriggeredFeatCriticalHit (ctx) {
 		const die = await this._page._pRollTriggeredFeatDie?.({
 			trigger: "criticalHit",
@@ -2620,13 +2756,14 @@ class CharacterSheetCombat {
 			rollLabel: `${ctx.attack?.name || "Attack"} critical hit`,
 			rollFollowup: ctx.rollFollowup,
 		});
-		if (!die) return;
+		if (!die) return false;
 		this._state.grantTempHp(die.roll);
 		await this._page._saveCurrentCharacter?.();
 		this._page._renderResources?.();
 		this._page._features?._renderResources?.();
 		this.renderCombatResources?.();
 		JqueryUtil.doToast({type: "success", content: `${die.sourceName}: gained ${die.roll} temporary hit points.`});
+		return true;
 	}
 
 	/**
@@ -2653,9 +2790,9 @@ class CharacterSheetCombat {
 	 */
 	async _pPickArcaneShot (ctx) {
 		// Re-validate at prompt time (state may have changed between roll and modal).
-		if (!this._state.hasArcaneShot?.() || (this._state.getArcaneShotRemaining?.() || 0) <= 0) return;
+		if (!this._state.hasArcaneShot?.() || (this._state.getArcaneShotRemaining?.() || 0) <= 0) return false;
 		const shots = this._state.getKnownArcaneShots?.() || [];
-		if (!shots.length) return;
+		if (!shots.length) return false;
 
 		const calcs = this._state.getFeatureCalculations?.() || {};
 		const dc = calcs.arcaneShotSaveDc;
@@ -2663,6 +2800,7 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let applied = false;
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
@@ -2716,7 +2854,7 @@ class CharacterSheetCombat {
 					const shot = shots[idx];
 					if (!finalize()) return; // guard against rapid double-click double-spend
 					doClose();
-					this._applyArcaneShot(shot, ctx, {dc, ability});
+					applied = this._applyArcaneShot(shot, ctx, {dc, ability});
 				});
 			});
 			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => { finalize(); doClose(); });
@@ -2725,6 +2863,7 @@ class CharacterSheetCombat {
 			// without a mouse (the site util blurs the trigger but doesn't focus in).
 			csFocusModalOnOpen(modalInner, {preferSelector: ".charsheet__arcaneshot-opt"});
 		});
+		return applied;
 	}
 
 	/**
@@ -2736,10 +2875,10 @@ class CharacterSheetCombat {
 	 * @param {{dc: number, ability: string}} saveInfo
 	 */
 	_applyArcaneShot (shot, ctx, saveInfo) {
-		if (!shot) return;
+		if (!shot) return false;
 		if (!this._state.useArcaneShot?.()) {
 			JqueryUtil.doToast({type: "warning", content: "No Arcane Shot uses remaining!"});
-			return;
+			return false;
 		}
 
 		const dmg = this._extractArcaneShotDamage(shot);
@@ -2765,6 +2904,7 @@ class CharacterSheetCombat {
 
 		this._page.saveCharacter?.();
 		this.renderCombatResources();
+		return true;
 	}
 
 	/**
@@ -2841,10 +2981,11 @@ class CharacterSheetCombat {
 	async _pOfferCritWeaponRiders (ctx) {
 		const riders = (this._state.getCritWeaponRiders?.(ctx.attack) || [])
 			.filter(r => (r.trigger === "nat20" ? ctx.isNat20 : ctx.isCrit));
-		if (!riders.length) return;
+		if (!riders.length) return false;
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let applied = false;
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
@@ -2894,7 +3035,7 @@ class CharacterSheetCombat {
 					const rider = riders[idx];
 					if (!finalize()) return; // guard against rapid double-click
 					doClose();
-					this._applyCritWeaponRider(ctx.attack, rider);
+					applied = !!this._applyCritWeaponRider(ctx.attack, rider);
 				});
 			});
 			modalInner.querySelector(`[data-act="none"]`).addEventListener("click", () => { finalize(); doClose(); });
@@ -2903,6 +3044,7 @@ class CharacterSheetCombat {
 			// without a mouse (the site util blurs the trigger but doesn't focus in).
 			csFocusModalOnOpen(modalInner, {preferSelector: ".charsheet__critrider-opt"});
 		});
+		return applied;
 	}
 
 	/**
@@ -6041,8 +6183,8 @@ class CharacterSheetCombat {
 	 */
 	async _pPlaceBalefulInterdictSeal (ctx) {
 		// Re-validate at prompt time (state may have changed between roll and modal).
-		if (!this._state.hasBalefulInterdict?.() || (this._state.getSealsAvailable?.() || 0) <= 0) return;
-		if (!this._state.canPlaceSealThisTurn?.()) return;
+		if (!this._state.hasBalefulInterdict?.() || (this._state.getSealsAvailable?.() || 0) <= 0) return false;
+		if (!this._state.canPlaceSealThisTurn?.()) return false;
 
 		const calcs = this._state.getFeatureCalculations?.() || {};
 		const dc = calcs.interdictDc;
@@ -6057,9 +6199,9 @@ class CharacterSheetCombat {
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
 		});
 
-		await new Promise((resolve) => {
+		return new Promise((resolve) => {
 			resolveOuter = resolve;
-			const finalize = () => { if (isResolved) return; isResolved = true; resolve(); };
+			const finalize = (applied = false) => { if (isResolved) return; isResolved = true; resolve(applied); };
 
 			const placeholder = ctx.attack?.name ? `creature hit by ${ctx.attack.name}` : "creature";
 			modalInner.innerHTML = `
@@ -6088,7 +6230,7 @@ class CharacterSheetCombat {
 				} else {
 					JqueryUtil.doToast({type: "warning", content: "Could not place a seal (none available, or already placed this turn)."});
 				}
-				finalize();
+				finalize(!!placed);
 				doClose(true);
 			});
 			setTimeout(() => { try { ipt?.focus(); } catch (e) { /* ignore */ } }, 50);
@@ -8507,7 +8649,9 @@ class CharacterSheetCombat {
 
 	render () {
 		// Always refresh state reference from page at start of render
-		this._state = this._page.getState();
+		const nextState = this._page.getState();
+		if (nextState !== this._state) this._dismissPostAttackOffer();
+		this._state = nextState;
 
 		// A full re-render means we've left the in-the-moment attack→damage flow (tab switch,
 		// long rest, condition toggle, etc.). Discard any armed channeled-spell rider so a
