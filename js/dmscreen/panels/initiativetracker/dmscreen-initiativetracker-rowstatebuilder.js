@@ -176,6 +176,7 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 			hpCurrent = null,
 			hpMax = null,
 			hpTemp = null,
+			isKeepHpUnset = false,
 			initiative = null,
 			ordinal = null,
 			rowStatColData = null,
@@ -189,7 +190,7 @@ export class InitiativeTrackerRowStateBuilderActive extends _InitiativeTrackerRo
 		const fluff = mon ? await Renderer.monster.pGetFluff(mon) : null;
 
 		if (isMon) {
-			if (hpCurrent == null && hpMax == null) {
+			if (hpCurrent == null && hpMax == null && !isKeepHpUnset) {
 				hpMax = await this._roller.pGetOrRollHp(mon, {isRollHp: this._comp._state.isRollHp});
 				hpCurrent = this._comp._state_isInvertWoundDirection ? 0 : hpMax;
 			}

@@ -32,6 +32,21 @@
 
 		<p class="ew__status" id="ew-status" role="status" aria-live="polite">Loading working encounter...</p>
 
+		<section class="ew__handoff" aria-label="DM Screen handoff">
+			<div>
+				<h2>Send to DM Screen</h2>
+				<p>Queue a one-time snapshot of selected monsters in this browser. In DM Screen, confirm Import on the Initiative Tracker panel you want. Later HP, conditions, and turns will not sync.</p>
+				<p>Area notes and custom roll modifiers stay in this workspace; they cannot be shown in the Initiative Tracker.</p>
+				<p id="ew-handoff-pending" class="ew__handoff-pending"></p>
+			</div>
+			<div class="ew__handoff-actions">
+				<button type="button" class="ve-btn ve-btn-primary" id="ew-handoff-queue" disabled>Queue selected monsters</button>
+				<a class="ve-btn ve-btn-default" href="dmscreen.html">Open DM Screen</a>
+				<button type="button" class="ve-btn ve-btn-default" id="ew-handoff-clear" disabled>Clear queued snapshot</button>
+			</div>
+			<p id="ew-handoff-status" class="ew__handoff-status" role="status" aria-live="polite"></p>
+		</section>
+
 		<section class="ew__content" id="ew-workspace" aria-label="Working encounter" hidden>
 			<header class="ew__source">
 				<div>

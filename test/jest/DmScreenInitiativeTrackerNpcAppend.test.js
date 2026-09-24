@@ -38,7 +38,7 @@ describe("Initiative Tracker NPC append API", () => {
 				alias: "Vale",
 				monster: {name: "Court Mage", source: "TST"},
 				hp: {current: 17, max: 27, temp: 4},
-				conditions: ["poisoned"],
+				conditions: ["poisoned", "dreambound"],
 				initiative: 19,
 			}],
 		});
@@ -55,6 +55,7 @@ describe("Initiative Tracker NPC append API", () => {
 			name: "Poisoned",
 			color: Parser.CONDITION_TO_COLOR.Poisoned,
 		});
+		expect(tracker._state.rows[0].entity.conditions).toHaveLength(1);
 	});
 
 	it("rejects locked trackers without constructing rows", async () => {
@@ -108,6 +109,20 @@ describe("Initiative Tracker NPC append API", () => {
 		expect(serialized.ht).toBe(4);
 		expect(serialized.mon).toEqual(monster);
 		expect(InitiativeTrackerRowDataSerializer.fromSerial(serialized).entity).toMatchObject({hpTemp: 4, monster});
+	});
+
+	it("retains explicitly unset HP on a tracker reload without changing absent legacy fields", () => {
+		const serialized = InitiativeTrackerRowDataSerializer.toSerial({
+			id: "unknown",
+			entity: {name: "Unknown", hpCurrent: null, hpMax: null, hpTemp: 0, rowStatColData: []},
+		});
+		expect(serialized).toMatchObject({h: null, g: null, ht: 0});
+		expect(InitiativeTrackerRowDataSerializer.fromSerial(serialized).entity).toMatchObject({
+			hpCurrent: null,
+			hpMax: null,
+			hpTemp: 0,
+		});
+		expect(InitiativeTrackerRowDataSerializer.fromSerial({id: "legacy", n: "Old"}).entity.hpCurrent).toBeUndefined();
 	});
 
 	it("consumes temporary HP before current HP and restores both on undo", () => {
