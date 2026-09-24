@@ -167,6 +167,7 @@ describe("canonical attack projection", () => {
 		combat._renderSneakAttackToggle = () => {};
 		combat._isSneakAttackAvailableThisTurn = () => false;
 		combat._runPostAttackHooks = async () => {};
+		combat._stagePostAttackOffers = () => {};
 		combat._consumeOnAttackStates = () => {};
 		combat._clearPendingSpellRider = () => {};
 
@@ -682,6 +683,7 @@ describe("item bonus scope across attack kinds", () => {
 		combat._renderSneakAttackToggle = () => {};
 		combat._isSneakAttackAvailableThisTurn = () => false;
 		combat._runPostAttackHooks = async () => {};
+		combat._stagePostAttackOffers = () => {};
 		combat._consumeOnAttackStates = () => {};
 		combat._clearPendingSpellRider = () => {};
 		const preview = attack => combat._renderAttackItem(attack, {meleeReach: state.getMeleeReach()}).outerHTML;

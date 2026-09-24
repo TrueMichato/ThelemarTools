@@ -5910,6 +5910,12 @@ export class CharacterSheetPage {
 		try {
 			const attack = await this.clickAttackRoll(/Spectral Chains/i);
 			if (!attack.clicked || attack.threwError) throw new Error(`Spectral Chains attack did not click: ${attack.errorMessage || "not found"}`);
+			const offer = this.page.locator(".cs-post-roll-offer");
+			const onHit = offer.locator(".cs-post-roll-offer__row").filter({hasText: "On-hit effect"});
+			await expect(onHit).toBeVisible({timeout: 10000});
+			await expect(offer.locator(".cs-post-roll-offer__caption")).toContainText(/Natural 10.*Total \d+/);
+			await expect(offer.locator(".cs-post-roll-offer__breakdown")).not.toContainText(/\[object Object\]/i);
+			await onHit.getByRole("button", {name: /open on-hit effect/i}).click();
 			await this.confirmPrompt("Hit");
 			const enumModal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
 			const select = enumModal.locator("select").first();

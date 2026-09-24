@@ -21932,7 +21932,7 @@
 					"entries": [
 						{
 							"type": "refClassFeature",
-							"classFeature": "Agile Sprinter|Barbarian|TGTT|1"
+							"classFeature": "Marathoner|Barbarian|TGTT|1"
 						},
 						{
 							"type": "refClassFeature",
@@ -21989,13 +21989,13 @@
 			]
 		},
 		{
-			"name": "Agile Sprinter",
+			"name": "Marathoner",
 			"source": "TGTT",
 			"className": "Barbarian",
 			"classSource": "TGTT",
 			"level": 1,
 			"entries": [
-				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus."
+				"You gain a bonus to Constitution ({@skill Endurance|TGTT}) checks. The bonus equals your proficiency bonus. When you fail a saving throw against exhaustion from a forced march, you can spend one Hit Die to reroll that saving throw. You must use the new result."
 			]
 		},
 		{
@@ -22096,7 +22096,7 @@
 			"level": 6,
 			"entries": [
 				"{@i Prerequisite: 6th level}",
-				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus. When your group makes a group Athletics or Acrobatics check, you can choose one ally to use your roll's result instead of their own."
+				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus for each skill. Separately, when your group makes a group Athletics or Acrobatics check, you can choose one ally to use your roll's result instead of their own."
 			]
 		},
 		{

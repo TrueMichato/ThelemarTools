@@ -23,6 +23,28 @@
 		padding: 0.625rem;
 	}
 
+	.cs-post-roll-offer {
+		top: max(0.75rem, env(safe-area-inset-top));
+		bottom: auto;
+		max-height: min(18rem, calc(100dvh - 16rem));
+		overflow-y: auto;
+	}
+
+	.cs-post-roll-offer__choices {
+		overflow: visible;
+		flex-shrink: 0;
+	}
+
+	.cs-post-roll-offer__dismiss {
+		flex-shrink: 0;
+	}
+
+	.cs-post-roll-offer__open,
+	.cs-post-roll-offer__dismiss {
+		min-height: 44px;
+		min-width: 44px;
+	}
+
 	.charsheet__efa-cannon-section-header {
 		align-items: stretch;
 		flex-direction: column;

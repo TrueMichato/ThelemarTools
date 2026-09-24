@@ -24,6 +24,9 @@ const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
 });
 const FIXED_PROFICIENCY_FALLBACK_DEFINITIONS = new Map();
 const FEATURE_COMPANION_GRANT_DEFINITIONS = new Map();
+const TGTT_MARATHONER_REF = "Marathoner|Barbarian|TGTT|1";
+const TGTT_AGILE_SPRINTER_REF = "Agile Sprinter|Barbarian|TGTT|1";
+const TGTT_MARATHONER_ENTRY = "You gain a bonus to Constitution ({@skill Endurance|TGTT}) checks. The bonus equals your proficiency bonus. When you fail a saving throw against exhaustion from a forced march, you can spend one Hit Die to reroll that saving throw. You must use the new result.";
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -1790,15 +1793,13 @@ class FeatureModifierParser {
 		// "bonus to Dexterity (Acrobatics) checks equal to your proficiency bonus"
 		// Also handles: "gain a bonus to X checks. The bonus equals your proficiency bonus"
 		//
-		// TGTT defines custom ability-scoped skills that aren't in the standard 18 (e.g. the
-		// Strength skill "Might"). A specialty like "Unyielding Might" grants a bonus to Might
-		// checks equal to the proficiency bonus, which must flow onto the Might skill line (via
-		// skill:might → customModifiers.skills.might → getSkillCustomMod), NOT Athletics. We only
-		// extend THIS structured block — which requires the literal "<skill> check(s)" phrasing
-		// plus an "equal to / The bonus equals … proficiency bonus" clause — so the common word
-		// "might" can never false-match ordinary prose the way the looser generic skill loop above
-		// would. Keys are lowercased/space-free to match getSkillAbility()'s custom skillMap.
-		const tgttCustomSkillNames = ["might"];
+		// TGTT defines custom skills outside the standard 18: Strength's Might and
+		// Constitution's Endurance. Unyielding Might must
+		// target skill:might, never Athletics. Only this structured block accepts these
+		// ordinary words: it requires "<skill> check(s)" AND an explicit proficiency-bonus
+		// clause, so incidental uses of "might" or "endurance" cannot mint a modifier.
+		// Keys match getSkillAbility()'s custom skillMap.
+		const tgttCustomSkillNames = ["might", "endurance"];
 		[...skillNames, ...tgttCustomSkillNames].forEach(skill => {
 			const skillKey = skill.replace(/\s+/g, "");
 			// Pattern 1: "bonus to X checks equal to your proficiency bonus" - handles both plain parens and {@skill}
@@ -6390,6 +6391,7 @@ class CharacterSheetState {
 		// migrations and the various `_reapply*` passes see the resolved subclass.
 		this._migrateRepairSubclass();
 
+		this._migrateTgttMarathoner();
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
 		this._migrateFixedProficiencyFallbacks();
@@ -6578,6 +6580,7 @@ class CharacterSheetState {
 		// but did not fully reconstruct runtime feature state.
 		this._reapplyHistoryOptionalFeatures();
 		this._reapplyHistoryFeatureChoices();
+		this._migrateTgttBarbarianSpecialtyModifiers();
 		this._migrateActiveStateRuntimeMetadata();
 		this._syncTunedMetamagicsToKnownOptions();
 
@@ -9245,6 +9248,48 @@ class CharacterSheetState {
 		});
 	}
 
+	_migrateTgttBarbarianSpecialtyModifiers () {
+		const activeClass = (this._data.classes || []).find(cls =>
+			cls.name === "Barbarian" && cls.source === "TGTT",
+		);
+		const names = new Set(["Unyielding Might", "Lead the Pack"]);
+		const owners = (this._data.features || []).filter(feature =>
+			feature.id
+			&& names.has(feature.name)
+			&& feature.source === "TGTT"
+			&& feature.className === "Barbarian"
+			&& (!feature.classSource || feature.classSource === "TGTT"),
+		);
+		if (!owners.length) return;
+
+		for (const feature of owners.filter(feature =>
+			activeClass && Number(feature.acquisitionLevel || feature.level) <= activeClass.level,
+		)) {
+			const definition = (this._classFeatureCatalog || []).find(candidate =>
+				candidate.name === feature.name
+				&& candidate.source === "TGTT"
+				&& candidate.className === "Barbarian"
+				&& candidate.classSource === "TGTT"
+				&& (!feature.definitionLevel || candidate.level === Number(feature.definitionLevel)),
+			);
+			if (!definition?.entries) continue;
+			feature.entries = MiscUtil.copyFast(definition.entries);
+			feature.description = CharacterSheetClassUtils.buildFeatureStateObject(
+				{...definition, description: ""},
+				{className: "Barbarian", classSource: "TGTT", level: feature.level},
+			).description;
+		}
+
+		const ownerIds = new Set(owners.map(feature => feature.id));
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(mod =>
+			!(ownerIds.has(mod.sourceFeatureId)
+				&& mod.type?.startsWith("skill:")
+				&& mod.sourceType !== "classFeature"),
+		);
+		if (this._data.namedModifiers.length !== before) this._recalculateCustomModifiers();
+	}
+
 	/**
 	 * Re-gate stale conditional speed modifiers on load.
 	 *
@@ -9744,6 +9789,93 @@ class CharacterSheetState {
 				console.log(`[CharSheet] _migrateRepairSubclass: repaired ${cls.name} subclass → ${resolved.shortName} (${resolved.source})`);
 			}
 		}
+	}
+
+	_migrateTgttMarathoner () {
+		const norm = value => String(value || "").trim().toLowerCase();
+		const isTgttBarbarian = (name, source) => norm(name) === "barbarian" && norm(source) === "tgtt";
+		if (!(this._data.classes || []).some(cls => isTgttBarbarian(cls.name, cls.source))) return;
+
+		const oldIds = new Set();
+		let migratedFeature = false;
+		for (const feature of this._data.features || []) {
+			if (norm(feature.name) !== "agile sprinter"
+				|| norm(feature.source) !== "tgtt"
+				|| !isTgttBarbarian(feature.className, feature.classSource)
+				|| (feature.parentFeature && norm(feature.parentFeature) !== "specialties")) continue;
+			migratedFeature = true;
+			if (feature.id) oldIds.add(feature.id);
+			feature.name = "Marathoner";
+			for (const key of ["ref", "uid", "classFeature"]) {
+				if (norm(feature[key]) === norm(TGTT_AGILE_SPRINTER_REF)) feature[key] = TGTT_MARATHONER_REF;
+			}
+			feature.entries = [TGTT_MARATHONER_ENTRY];
+			feature.description = TGTT_MARATHONER_ENTRY.replace("{@skill Endurance|TGTT}", "Endurance");
+		}
+		if (migratedFeature) {
+			const isAgileModifier = mod => oldIds.has(mod.sourceFeatureId)
+				|| (!mod.sourceFeatureId && !mod.sourceType
+					&& norm(mod.name) === "agile sprinter"
+					&& norm(mod.note) === "from agile sprinter");
+			this._data.namedModifiers = (this._data.namedModifiers || []).filter(mod =>
+				!["skill:athletics", "skill:acrobatics"].includes(norm(mod.type))
+					|| !isAgileModifier(mod),
+			);
+		}
+
+		const migrateChoice = (choice, parent) => {
+			if (!choice || typeof choice !== "object") return;
+			const hasOldRef = ["ref", "uid", "classFeature"]
+				.some(key => norm(choice[key]) === norm(TGTT_AGILE_SPRINTER_REF));
+			const belongs = hasOldRef
+				|| (
+					norm(choice.source) === "tgtt"
+					&& norm(parent || choice.parentFeature || choice.featureName) === "specialties"
+				);
+			if (!belongs || (choice.ref && norm(choice.ref) !== norm(TGTT_AGILE_SPRINTER_REF))) return;
+			if (norm(choice.name) !== "agile sprinter"
+				&& norm(choice.choice) !== "agile sprinter"
+				&& !hasOldRef) return;
+			if (norm(choice.name) === "agile sprinter") choice.name = "Marathoner";
+			if (norm(choice.choice) === "agile sprinter") choice.choice = "Marathoner";
+			for (const key of ["ref", "uid", "classFeature"]) {
+				if (norm(choice[key]) === norm(TGTT_AGILE_SPRINTER_REF)) choice[key] = TGTT_MARATHONER_REF;
+			}
+			if (Array.isArray(choice.entries)) choice.entries = [TGTT_MARATHONER_ENTRY];
+			if (typeof choice.description === "string") choice.description = TGTT_MARATHONER_ENTRY.replace("{@skill Endurance|TGTT}", "Endurance");
+		};
+		const migrateDecision = (decision, owner = null) => {
+			if (!isTgttBarbarian(decision?.className || owner?.name, decision?.classSource || owner?.source)) return;
+			const parent = decision.sourceKey || decision.parentFeature || decision.featureName;
+			const selections = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+			if (norm(parent) !== "specialties"
+				&& !selections.some(selection => norm(selection?.ref || selection?.uid || selection?.classFeature) === norm(TGTT_AGILE_SPRINTER_REF))) return;
+			const migrateSelection = selection => {
+				if (typeof selection === "string") {
+					if (norm(selection) === norm(TGTT_AGILE_SPRINTER_REF)) return TGTT_MARATHONER_REF;
+					return norm(parent) === "specialties" && norm(selection) === "agile sprinter" ? "Marathoner" : selection;
+				}
+				migrateChoice(selection, parent);
+				return selection;
+			};
+			if (Array.isArray(decision.selection)) {
+				decision.selection = decision.selection.map(migrateSelection);
+			} else {
+				decision.selection = migrateSelection(decision.selection);
+			}
+		};
+		for (const chosen of this._data.chosenSubfeatures || []) {
+			if (isTgttBarbarian(chosen.parentClass, chosen.parentClassSource)
+				&& norm(chosen.parent) === "specialties") migrateChoice(chosen, chosen.parent);
+		}
+		for (const entry of this._data.levelHistory || []) {
+			if (!isTgttBarbarian(entry?.class?.name, entry?.class?.source)) continue;
+			for (const choice of entry.choices?.featureChoices || []) migrateChoice(choice, choice.featureName);
+			for (const snapshot of entry.choices?.replayData?.featureChoices || []) migrateChoice(snapshot, snapshot.parentFeature);
+			for (const decision of entry.decisions || []) migrateDecision(decision, entry.class);
+			for (const decision of entry.choices?.decisions || []) migrateDecision(decision, entry.class);
+		}
+		for (const decision of this._data.characterBase?.decisions || []) migrateDecision(decision);
 	}
 
 	_migrateFeatures () {
@@ -15521,6 +15653,54 @@ class CharacterSheetState {
 
 	getHitDiceByType () {
 		return {...this._data.hitDice};
+	}
+
+	getMarathonerFeature () {
+		if (this.getSettings().enableTgtt === false) return null;
+		const norm = value => String(value || "").trim().toLowerCase();
+		return (this._data.features || []).find(feature =>
+			norm(feature.name) === "marathoner"
+			&& norm(feature.source) === "tgtt"
+			&& norm(feature.className) === "barbarian"
+			&& norm(feature.classSource) === "tgtt"
+			&& (norm(feature.parentFeature) === "specialties" || feature.isFeatureOption === true)
+			&& (this._data.classes || []).some(cls =>
+				norm(cls.name) === "barbarian"
+				&& norm(cls.source) === "tgtt"
+				&& Number(cls.level) >= Number(feature.acquisitionLevel || feature.level || 1)),
+		) || null;
+	}
+
+	resolveForcedMarchSave ({dc, initialTotal, rerollTotal, dieType} = {}) {
+		if (!this.getMarathonerFeature()) return {ok: false, error: "Marathoner is not an acquired TGTT Barbarian specialty."};
+		if (!Number.isInteger(dc) || dc < 1 || !Number.isFinite(initialTotal)
+			|| (rerollTotal != null && !Number.isFinite(rerollTotal))
+			|| ((rerollTotal != null) !== (dieType != null))) {
+			return {ok: false, error: "A valid forced-march DC and save totals are required."};
+		}
+		const isReroll = rerollTotal != null;
+		if (isReroll && initialTotal >= dc) return {ok: false, error: "Only a failed forced-march save can be rerolled."};
+		const pool = isReroll ? this._data.hitDice?.[dieType] : null;
+		if (isReroll && (!/^d(?:6|8|10|12)$/.test(dieType)
+			|| !pool || !Number.isInteger(pool.current) || pool.current < 1)) {
+			return {ok: false, error: "The selected Hit Die is no longer available."};
+		}
+
+		const finalTotal = isReroll ? rerollTotal : initialTotal;
+		const beforeExhaustion = this.getExhaustion();
+		if (isReroll) pool.current--;
+		if (finalTotal < dc) this.addExhaustion(1);
+		return {
+			ok: true,
+			dc,
+			initialTotal,
+			finalTotal,
+			passed: finalTotal >= dc,
+			hitDiceSpent: isReroll ? 1 : 0,
+			dieType: isReroll ? dieType : null,
+			remaining: isReroll ? pool.current : null,
+			exhaustionGained: this.getExhaustion() - beforeExhaustion,
+		};
 	}
 
 	/**
@@ -43590,16 +43770,16 @@ class CharacterSheetState {
 					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(explicitActionType || "other", text),
 					isReferenceOnly: true,
 				});
-			} else if (actionType && toggleEffectType) {
+			} else if ((actionType || explicitActionType) && toggleEffectType) {
 				addPower({
 					id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
 					name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
 					kind: "toggle",
-					actionType,
+					actionType: actionType || explicitActionType,
 					isToggle: true,
 					effectType: toggleEffectType,
 					description: text,
-					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType, text),
+					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType || explicitActionType, text),
 					isReferenceOnly: false,
 				});
 			} else if (actionType && recurring) {
@@ -45623,11 +45803,22 @@ class CharacterSheetState {
 		}
 	}
 
+	_deactivateItemSpeedPowers (inventoryRow) {
+		const states = inventoryRow?.item?.itemPowerStates;
+		if (!states) return;
+		for (const power of inventoryRow.item.itemPowers || []) {
+			if (power.isToggle && power.effectType === "modifySpeed" && states[power.id]?.active) {
+				states[power.id].active = false;
+			}
+		}
+	}
+
 	setItemEquipped (itemId, equipped) {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.equipped = equipped;
+			if (!equipped) this._deactivateItemSpeedPowers(item);
 			const isActive = this._isItemProficienciesActive(item);
 			// Apply or remove proficiencies + item effects if activation state changed
 			if (!wasActive && isActive) {
@@ -45688,6 +45879,7 @@ class CharacterSheetState {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.equipped = false;
+			this._deactivateItemSpeedPowers(item);
 			if (
 				item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
 				|| item.item?._isChainedFuryChain
@@ -45715,6 +45907,7 @@ class CharacterSheetState {
 		if (item) {
 			const wasActive = this._isItemProficienciesActive(item);
 			item.attuned = attuned;
+			if (!attuned) this._deactivateItemSpeedPowers(item);
 			const isActive = this._isItemProficienciesActive(item);
 			// Apply or remove proficiencies + item effects if activation state changed
 			if (!wasActive && isActive) {
@@ -61147,6 +61340,7 @@ class CharacterSheetState {
 		this._subclassFeatureCatalog = Array.isArray(subclassFeatures) ? subclassFeatures : [];
 		this._optionalFeatureCatalog = Array.isArray(optionalFeatures) ? optionalFeatures : [];
 		this._reapplyHistoryFeatureChoices();
+		this._migrateTgttBarbarianSpecialtyModifiers();
 		this._migrateActiveStateRuntimeMetadata();
 	}
 
@@ -61776,6 +61970,17 @@ class CharacterSheetState {
 	 *   transaction; skip the greedy prose grant.
 	 */
 	_processFeatureModifiers (feature, featureId, opts = {}) {
+		if (feature.source === "TGTT"
+			&& feature.className === "Barbarian"
+			&& ["Unyielding Might", "Lead the Pack"].includes(feature.name)) {
+			if (feature.classSource && feature.classSource !== "TGTT") return;
+			if (!(this._data.classes || []).some(cls =>
+				cls.name === "Barbarian"
+				&& cls.source === "TGTT"
+				&& cls.level >= Number(feature.acquisitionLevel || feature.level),
+			)) return;
+		}
+
 		// Prefer rendered descriptions when available. Raw entries retain tags such
 		// as `{@skill Arcana}`, which intentionally do not match the plain-text
 		// proficiency parser; the rendered form carries the visible skill name.
@@ -62081,7 +62286,11 @@ class CharacterSheetState {
 			);
 			if (isDuplicate) return;
 
-			this.addNamedModifier(modifierData);
+			if (CharacterSheetState._isClassFeatureEffectSource(feature)) {
+				this._addClassFeatureModifier(modifierData);
+			} else {
+				this.addNamedModifier(modifierData);
+			}
 
 			const valueStr = mod.setValue ? `=${mod.value}` : (mod.value >= 0 ? `+${mod.value}` : `${mod.value}`);
 		});

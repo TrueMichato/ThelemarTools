@@ -715,6 +715,195 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getSpeed()).toContain("30 ft.");
 	});
 
+	it("repaints Overview speed and breakdown when Boots of Speed are invoked through the inventory UI", async () => {
+		const state = new CharacterSheetState();
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "DMG");
+		let inventory;
+		let displayed;
+		const page = {
+			getState: () => state,
+			renderCharacter: jest.fn(() => {
+				inventory.syncItemDerivedState();
+				displayed = {
+					speed: state.getSpeed(),
+					breakdown: state.getSpeedBreakdown("walk"),
+				};
+			}),
+			saveCharacter: jest.fn(),
+			_saveCurrentCharacter: jest.fn(),
+		};
+		inventory = new CharacterSheetInventory(page);
+		inventory._renderItemList = () => {};
+		inventory._renderEquippedItems = () => {};
+		inventory._renderAttunedItems = () => {};
+		inventory._updateEncumbrance = () => {};
+
+		const expectSpeed = (sheet, feet) => {
+			expect(sheet.getSpeed("walk")).toBe(feet);
+			expect(sheet.getWalkSpeed()).toBe(feet);
+			expect(sheet.getSpeedByType("walk")).toBe(feet);
+			expect(sheet.getSpeed()).toBe(`${feet} ft.`);
+			const breakdown = sheet.getSpeedBreakdown("walk");
+			expect(breakdown.total).toBe(feet);
+			expect(breakdown.components.some(c => c.name === "Speed Multiplier (×2)")).toBe(feet === 60);
+		};
+		const expectOverviewSpeed = feet => {
+			expect(displayed.speed).toBe(`${feet} ft.`);
+			expect(displayed.breakdown.total).toBe(feet);
+			expect(displayed.breakdown.components.some(c => c.name === "Speed Multiplier (×2)")).toBe(feet === 60);
+		};
+
+		// The picker passes the catalog item to this handler, which normalizes it before addItem.
+		await inventory._pAddItemWithChoices(boots);
+		const added = state.getItems().find(it => it.name === "Boots of Speed" && it.source === "DMG");
+		inventory._toggleEquipped(added.id);
+		await inventory._toggleAttuned(added.id);
+		const power = state.getItemPowers().find(it => it.itemId === added.id && it.effectType === "modifySpeed");
+		expect(power).toEqual(expect.objectContaining({kind: "toggle", isToggle: true, isActive: false}));
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+
+		expect(await inventory._pInvokeItemPower(added.id, power.id, {returnResult: true})).toEqual(expect.objectContaining({ok: true, isActive: true}));
+		expectSpeed(state, 60);
+		expectOverviewSpeed(60);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		const restoredInventory = makeInventory(restored);
+		restoredInventory.setItems([boots]);
+		restoredInventory.syncItemDerivedState();
+		expect(restored.getItemPower(added.id, power.id).isActive).toBe(true);
+		expectSpeed(restored, 60);
+
+		expect(await inventory._pInvokeItemPower(added.id, power.id, {returnResult: true})).toEqual(expect.objectContaining({ok: true, isActive: false}));
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+		const restoredInactive = new CharacterSheetState();
+		restoredInactive.loadFromJson(state.toJson());
+		const inactiveInventory = makeInventory(restoredInactive);
+		inactiveInventory.setItems([boots]);
+		inactiveInventory.syncItemDerivedState();
+		expect(restoredInactive.getItemPower(added.id, power.id).isActive).toBe(false);
+		expectSpeed(restoredInactive, 30);
+
+		await inventory._pInvokeItemPower(added.id, power.id);
+		inventory._toggleEquipped(added.id);
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+		inventory._toggleEquipped(added.id);
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+		expect(state.getItemPower(added.id, power.id).isActive).toBe(false);
+
+		await inventory._pInvokeItemPower(added.id, power.id);
+		await inventory._toggleAttuned(added.id);
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+		await inventory._toggleAttuned(added.id);
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+		expect(state.getItemPower(added.id, power.id).isActive).toBe(false);
+
+		await inventory._pInvokeItemPower(added.id, power.id);
+		inventory._removeItem(added.id);
+		expectSpeed(state, 30);
+		expectOverviewSpeed(30);
+	});
+
+	it("rehydrates the missing speed toggle on saved catalog Boots with an unrelated legacy power", () => {
+		const state = new CharacterSheetState();
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "DMG");
+		state.addItem({
+			...boots,
+			requiresAttunement: true,
+			equipped: true,
+			attuned: true,
+		});
+		const saved = state.toJson();
+		saved.inventory[0].item.itemPowers = [{id: "legacy-reference", name: "Legacy Rules", kind: "ability", isReferenceOnly: true}];
+		saved.itemBonuses.speedMultiply = {walk: 2};
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(saved);
+		const inventory = makeInventory(restored);
+		inventory.setItems([boots]);
+		inventory.syncItemDerivedState();
+
+		const added = restored.getItems().find(it => it.source === "DMG" && it.name === "Boots of Speed");
+		expect(added.itemPowers).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "legacy-reference"}),
+			expect.objectContaining({kind: "toggle", effectType: "modifySpeed", isToggle: true}),
+		]));
+		expect(restored.getSpeedBreakdown("walk").total).toBe(30);
+		expect(restored.getWalkSpeed()).toBe(30);
+	});
+
+	it("treats XDMG Boots of Speed with a tagged Bonus Action as an activated, not passive, multiplier", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "XDMG");
+		const added = addCatalogItemViaInventory(state, inventory, boots);
+		inventory.syncItemDerivedState();
+
+		const power = state.getItemPowers().find(it => it.itemId === added.id && it.effectType === "modifySpeed");
+		expect(power).toEqual(expect.objectContaining({
+			kind: "toggle",
+			actionType: "bonus",
+			activationFingerprint: expect.stringMatching(/^bonus:/),
+			isToggle: true,
+			isActive: false,
+		}));
+		expect(state.getWalkSpeed()).toBe(30);
+		expect(state.getSpeedBreakdown("walk").total).toBe(30);
+		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, isActive: true}));
+		inventory.syncItemDerivedState();
+		expect(state.getWalkSpeed()).toBe(60);
+		expect(state.getSpeedBreakdown("walk").total).toBe(60);
+	});
+
+	it("upgrades saved XDMG Boots' obsolete reference card without leaving a duplicate power", () => {
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "XDMG");
+		const state = new CharacterSheetState();
+		state.addItem({...boots, requiresAttunement: true, equipped: true, attuned: true});
+		const saved = state.toJson();
+		saved.inventory[0].item.itemPowers = [{
+			id: "reference:boots-of-speed:bonus",
+			name: "Boots of Speed Power",
+			kind: "ability",
+			actionType: "bonus",
+			isReferenceOnly: true,
+		}];
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(saved);
+		const inventory = makeInventory(restored);
+		inventory.setItems([boots]);
+		inventory.syncItemDerivedState();
+
+		const itemId = restored.getItems().find(it => it.source === "XDMG" && it.name === "Boots of Speed").id;
+		const powers = restored.getItemPowers().filter(power => power.itemId === itemId);
+		expect(powers).toEqual([
+			expect.objectContaining({kind: "toggle", effectType: "modifySpeed", isToggle: true, isActive: false}),
+		]);
+		expect(restored.getSpeedBreakdown("walk").total).toBe(30);
+	});
+
+	it("keeps an explicitly authored custom-item speed multiplier passive without a speed toggle", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		inventory._addCustomItem("Swift Boots", 1, 1, {
+			type: "wondrous",
+			requiresAttunement: true,
+			modifySpeed: {multiply: {walk: 2}},
+		});
+		const added = state.getItems().find(it => it.name === "Swift Boots");
+		state.setItemEquipped(added.id, true);
+		state.setItemAttuned(added.id, true);
+		inventory.syncItemDerivedState();
+
+		expect(state.getItemPowers().some(it => it.itemId === added.id && it.effectType === "modifySpeed")).toBe(false);
+		expect(state.getWalkSpeed()).toBe(60);
+		expect(state.getSpeedBreakdown("walk").total).toBe(60);
+	});
+
 	it.each([
 		["Wand of Magic Missiles", "Magic Missile", 1],
 		["Wand of Fireballs", "Fireball", 3],

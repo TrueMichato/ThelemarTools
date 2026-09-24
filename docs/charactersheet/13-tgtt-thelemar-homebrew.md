@@ -253,19 +253,40 @@ Three Barbarian Specialties grant permanent bonuses equal to proficiency bonus:
 
 | Specialty | Modifier targets | Scope |
 |---|---|---|
-| **Agile Sprinter** | `skill:athletics`, `skill:acrobatics` | Always on |
+| **Marathoner** | `skill:endurance` | Always on; its forced-march reroll is a separate action |
 | **Lead the Pack** | `skill:athletics`, `skill:acrobatics` | Always on; its separate group-check result-sharing rider remains DM/player operated |
 | **Unyielding Might** | `skill:might` | Always on; never Athletics |
 
 TGTT defines **Might** as the Strength skill for raw-strength feats such as
 breaking, bending, lifting, dragging, carrying, and forcing objects. Grapple and
 shove are not part of the Might skill definition.
+Marathoner instead boosts **Endurance (TGTT)** checks by the Barbarian's
+proficiency bonus; it grants no bonus to Athletics, Acrobatics, or Might. Old
+TGTT Barbarian Agile Sprinter choices migrate to Marathoner on load, including
+stored feature picks and level-history replay, without adding another specialty.
+
+With Marathoner selected, the **Forced March** button appears below Saving Throws.
+Enter the DM's forced-march save DC, then roll the Constitution save there:
+ordinary Constitution saves do not qualify. After an actual failure, the sheet
+offers a reroll for **one available Hit Die** (pick the die type if multiclassed).
+The reroll uses the original DC, save modifiers, situational choices, and rolled
+bonus dice; it does not heal and has no daily limit beyond remaining Hit Dice.
+Unconditional Constitution-save bonuses are counted once, as on an ordinary
+save; opted-in situational bonuses remain in effect on both forced-march rolls.
+Declining the reroll spends no die. The **final** failed result, including a
+declined reroll, adds one exhaustion; a successful final result adds none.
+The result reports both totals, the DC, die spent, and remaining dice.
 
 These modifiers are prose-parsed from the explicit shape “gain a bonus to
 <skill> checks. The bonus equals your proficiency bonus.” Keep that wording and
 the `{@skill ...}` tags when editing the source data. The Barbarian Specialty
 corpus test pins both raw-tagged and rendered-text parsing for every option in
-the L1 pool.
+the L1 pool. In the actual Builder, Level Up, and Quick Build selection paths,
+class-feature modifiers must carry `sourceType: "classFeature"` so they can be
+cleared and rebuilt on level changes or load. Saves with older feature-owned
+skill modifiers are repaired against the current TGTT definitions on load and
+again when the brew catalog is registered after an initial page load;
+unattributed/manual modifiers are never repurposed.
 
 ---
 
