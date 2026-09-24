@@ -152,6 +152,67 @@
 			}
 		}
 
+		&__hp-expression {
+			flex: 1 1 140px;
+			min-width: 0;
+			font-size: max(16px, 1rem);
+		}
+
+		&__inline-check {
+			display: inline-flex;
+			align-items: center;
+			gap: 5px;
+		}
+
+		&__turns {
+			grid-column: 1 / -1;
+		}
+
+		&__turns-header {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: baseline;
+			justify-content: space-between;
+			gap: 8px;
+
+			p {
+				margin: 0;
+				font-weight: 600;
+			}
+		}
+
+		&__turn-order {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+			gap: 8px;
+			margin: 12px 0 0;
+			padding: 0;
+			list-style-position: inside;
+		}
+
+		&__turn {
+			display: flex;
+			justify-content: space-between;
+			gap: 8px;
+			padding: 7px 9px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg;
+
+			&--active {
+				border-color: vars.$rgb-active-blue;
+				outline: 1px solid vars.$rgb-active-blue;
+			}
+
+			span {
+				min-width: 0;
+				overflow-wrap: anywhere;
+			}
+
+			.ew__turn-name {
+				flex: 1;
+			}
+		}
+
 		&__operation-help {
 			margin: 9px 0 0;
 		}
@@ -386,6 +447,29 @@
 			font-weight: 600;
 		}
 
+		&__vitals {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 8px;
+			padding: 9px 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__vital-field {
+			display: grid;
+			gap: 4px;
+			min-width: 0;
+			margin: 0;
+			font-size: 1rem;
+			font-weight: 600;
+
+			input {
+				width: 100%;
+				min-width: 0;
+				font-size: max(16px, 1rem);
+			}
+		}
+
 		&__conditions {
 			display: flex;
 			flex-wrap: wrap;
@@ -497,6 +581,8 @@
 		&__results-table td,
 		&__conditions,
 		&__effects,
+		&__vitals,
+		&__turn,
 		&__effect,
 		&__effect-form h4,
 		&__effect-remove,
@@ -507,6 +593,15 @@
 		&__condition {
 			background: vars-night.$rgb-bg--night;
 			color: vars-night.$rgb-font--night;
+		}
+
+		&__turn {
+			background: vars-night.$rgb-bg--night;
+
+			&--active {
+				border-color: vars-night.$rgb-link-blue--night;
+				outline-color: vars-night.$rgb-link-blue--night;
+			}
 		}
 
 		&__help,
@@ -602,6 +697,10 @@
 	}
 
 	@media (width <= 480px) {
+		.ew__vitals {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
 		.ew__controls {
 			align-items: stretch;
 
@@ -612,6 +711,11 @@
 
 			label {
 				width: 100%;
+			}
+
+			.ew__inline-check {
+				width: auto;
+				min-height: 44px;
 			}
 		}
 

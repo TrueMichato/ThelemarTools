@@ -7,6 +7,7 @@ import {pRollEncounterSelection} from "../../js/encounterworkspace/encounterwork
 import {getEncounterModifierForPreset} from "../../js/encounterworkspace/encounterworkspace-effects.js";
 import {getNpcTrackerConditionPickerModel} from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerConditionRollMeta} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
+import {EncounterWorkspaceState} from "../../js/encounterworkspace/encounterworkspace-state.js";
 
 const monster = {
 	name: "Goblin",
@@ -190,6 +191,69 @@ describe("Encounter Workspace rolls", () => {
 		}
 	});
 
+	it("rolls initiative as a Dexterity check with explicit bonus, check modifiers, conditions and authored advantage", async () => {
+		const dice = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValueOnce(17).mockResolvedValueOnce(19);
+		const state = getState({
+			conditions: [["poisoned"], []],
+			modifiers: [[{id: "mist", name: "Blessed mist", scopes: ["check"], mode: "advantage", bonus: 2}], []],
+		});
+		state.instances[0].monster = {...monster, initiative: 4};
+		state.instances[1].monster = {...monster, initiative: {initiative: 5, advantageMode: "adv"}};
+		try {
+			const {results, failures} = await pRollEncounterSelection({state, rollType: "initiative"});
+			expect(failures).toEqual([]);
+			expect(results.map(it => [it.baseBonus, it.bonus, it.mode, it.total]))
+				.toEqual([[4, 6, "normal", 17], [5, 5, "advantage", 19]]);
+			expect(results[0].sourcesText).toContain("Poisoned");
+			expect(results[0].sourcesText).toContain("Blessed mist +2");
+			expect(results[1].sourcesText).toContain("Monster initiative");
+			expect(dice).toHaveBeenNthCalledWith(1, "1d20+6", expect.objectContaining({
+				name: "Goblin #1", label: expect.stringContaining("Initiative (Dexterity check)"),
+			}), {isResultUsed: true});
+			expect(dice).toHaveBeenNthCalledWith(2, "2d20dl1+5", expect.objectContaining({name: "Goblin #2"}), {isResultUsed: true});
+		} finally {
+			dice.mockRestore();
+		}
+	});
+
+	it("leaves prior initiative intact on cancelled or invalid dice and reports per-instance failures", async () => {
+		const dice = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValueOnce(16).mockResolvedValueOnce(null);
+		const state = getState();
+		state.instances[0].initiative = 3;
+		state.instances[1].initiative = 12;
+		try {
+			const {results, failures} = await pRollEncounterSelection({state, rollType: "initiative"});
+			expect(results.map(it => it.id)).toEqual(["one"]);
+			expect(failures).toEqual([{id: "two", name: "Goblin #2", reason: "Roll cancelled or dice result invalid."}]);
+			const initial = {
+				...EncounterWorkspaceState.getEmpty(),
+				instances: state.instances.map(it => ({
+					...it, hash: "goblin_mm", areaNotes: [], hp: {current: 7, max: 7, temp: 0},
+				})),
+				selectedIds: state.selectedIds,
+			};
+			const saved = EncounterWorkspaceState.withInitiativeResults(initial, results.map(({id, total}) => ({id, total})));
+			expect(saved.instances.map(it => it.initiative)).toEqual([16, 12]);
+			expect(await pRollEncounterSelection({
+				state: {...state, selectedIds: ["two"]},
+				rollType: "initiative",
+				pRoll: async () => ({mode: "autoFail", total: null, die: null}),
+			})).toMatchObject({results: [], failures: [{id: "two"}]});
+		} finally {
+			dice.mockRestore();
+		}
+	});
+
+	it("does not invent an initiative bonus for monsters without a Dexterity score or valid explicit bonus", async () => {
+		const state = getState({selectedIds: ["one"]});
+		state.instances[0].monster = {name: "Unknown", source: "TST"};
+		const roll = jest.fn();
+		const {results, failures} = await pRollEncounterSelection({state, rollType: "initiative", pRoll: roll});
+		expect(results).toEqual([]);
+		expect(failures).toEqual([{id: "one", name: "Unknown #1", reason: "No valid initiative bonus is available for this monster."}]);
+		expect(roll).not.toHaveBeenCalled();
+	});
+
 	it("keeps saved conditions removable when their source is no longer installed", () => {
 		expect(getNpcTrackerConditionPickerModel({
 			conditions: ["dreambound"],
@@ -219,7 +283,8 @@ describe("Encounter Workspace rolls", () => {
 	it("rejects invalid roll setup before invoking dice", async () => {
 		const dice = jest.spyOn(Renderer.dice, "pRoll2");
 		try {
-			await expect(pRollEncounterSelection({state: getState(), rollType: "attack", key: "str"})).rejects.toThrow(/Choose an ability/);
+			await expect(pRollEncounterSelection({state: getState(), rollType: "attack", key: "str"})).rejects.toThrow(/ability check/);
+			await expect(pRollEncounterSelection({state: getState(), rollType: "initiative", key: "wis"})).rejects.toThrow(/valid ability/);
 			await expect(pRollEncounterSelection({state: getState(), rollType: "save", key: "none"})).rejects.toThrow(/valid ability/);
 			await expect(pRollEncounterSelection({state: getState(), rollType: "skill", key: "missing", skills})).rejects.toThrow(/valid ability or skill/);
 			expect(dice).not.toHaveBeenCalled();

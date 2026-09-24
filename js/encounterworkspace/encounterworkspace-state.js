@@ -1,4 +1,5 @@
 import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate} from "../dmscreen/npctracker/dmscreen-npctracker-condition.js";
+import {getNpcTrackerHpAfterOperation} from "../dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {
 	getEncounterEffectTargets,
 	validateEncounterAreaNote,
@@ -7,7 +8,7 @@ import {
 
 const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
-const VERSION = 3;
+const VERSION = 4;
 const MAX_INSTANCES = 1000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -16,6 +17,26 @@ function freezeSnapshot (value) {
 	if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
 	Object.values(value).forEach(freezeSnapshot);
 	return Object.freeze(value);
+}
+
+function getHpDefaults (monster) {
+	const average = monster?.hp?.average;
+	const max = typeof average === "number" && Number.isFinite(average) && average >= 0 && average <= Number.MAX_SAFE_INTEGER
+		? average
+		: null;
+	return {current: max, max, temp: 0};
+}
+
+function isHpValue (value) {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+}
+
+function validateHp (hp) {
+	if (!hp || typeof hp !== "object" || !Object.hasOwn(hp, "current") || !Object.hasOwn(hp, "max")
+		|| (hp.current != null && !isHpValue(hp.current))
+		|| (hp.max != null && !isHpValue(hp.max)) || !isHpValue(hp.temp)) {
+		throw new Error("The saved encounter contains invalid hit points. It has not been changed.");
+	}
 }
 
 export async function pResolveSavedBestiaryItem (item) {
@@ -28,11 +49,11 @@ export async function pResolveSavedBestiaryItem (item) {
 
 export class EncounterWorkspaceState {
 	static getEmpty () {
-		return {version: VERSION, sourceList: null, instances: [], selectedIds: [], omissions: []};
+		return {version: VERSION, sourceList: null, instances: [], selectedIds: [], omissions: [], turn: {round: 0, activeId: null}};
 	}
 
 	static validate (raw) {
-		if (!raw || ![1, 2, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
+		if (!raw || ![1, 2, 3, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
 		if (
 			(raw.sourceList !== null && (typeof raw.sourceList?.name !== "string" || typeof raw.sourceList?.saveId !== "string"))
 			|| !Array.isArray(raw.instances)
@@ -52,9 +73,9 @@ export class EncounterWorkspaceState {
 					!Array.isArray(instance.conditions)
 					|| instance.conditions.some(condition => typeof condition !== "string" || !getNpcTrackerCanonicalConditionName(condition))
 				))
-				|| (raw.version === VERSION && (!Array.isArray(instance.areaNotes) || !Array.isArray(instance.modifiers)))
+				|| (raw.version >= 3 && (!Array.isArray(instance.areaNotes) || !Array.isArray(instance.modifiers)))
 			) throw new Error("The saved encounter contains an invalid monster instance. It has not been changed.");
-			if (raw.version === VERSION) {
+			if (raw.version >= 3) {
 				for (const [entries, validateEntry] of [
 					[instance.areaNotes, validateEncounterAreaNote],
 					[instance.modifiers, validateEncounterModifier],
@@ -67,6 +88,12 @@ export class EncounterWorkspaceState {
 					}
 				}
 			}
+			if (raw.version >= 4) {
+				validateHp(instance.hp);
+				if (instance.initiative !== null && !Number.isSafeInteger(instance.initiative)) {
+					throw new Error("The saved encounter contains invalid initiative. It has not been changed.");
+				}
+			}
 			ids.add(instance.id);
 		}
 		if (
@@ -74,18 +101,29 @@ export class EncounterWorkspaceState {
 			|| new Set(raw.selectedIds).size !== raw.selectedIds.length
 			|| raw.omissions.some(it => typeof it?.hash !== "string" || typeof it?.reason !== "string")
 		) throw new Error("The saved encounter contains invalid targets or load notices. It has not been changed.");
+		if (raw.version >= 4 && (
+			!raw.turn
+			|| !Number.isSafeInteger(raw.turn.round) || raw.turn.round < 0
+			|| (raw.turn.round === 0 ? raw.turn.activeId !== null
+				: !ids.has(raw.turn.activeId) || raw.instances.find(it => it.id === raw.turn.activeId)?.initiative == null)
+		)) throw new Error("The saved encounter contains an invalid active turn. It has not been changed.");
 
 		const state = copy(raw);
 		state.version = VERSION;
+		if (raw.version < 4) state.turn = {round: 0, activeId: null};
 		state.instances.forEach(instance => {
 			instance.conditions = raw.version === 1 ? [] : getNpcTrackerConditionsAfterUpdate({
 				conditions: instance.conditions,
 				condition: null,
 				isAdd: true,
 			});
-			if (raw.version < VERSION) {
+			if (raw.version < 3) {
 				instance.areaNotes = [];
 				instance.modifiers = [];
+			}
+			if (raw.version < 4) {
+				instance.hp = getHpDefaults(instance.monster);
+				instance.initiative = null;
 			}
 			freezeSnapshot(instance.monster);
 		});
@@ -135,6 +173,8 @@ export class EncounterWorkspaceState {
 					conditions: [],
 					areaNotes: [],
 					modifiers: [],
+					hp: getHpDefaults(resolved.entity),
+					initiative: null,
 				});
 				state.selectedIds.push(id);
 			}
@@ -215,6 +255,115 @@ export class EncounterWorkspaceState {
 			}),
 		});
 		return {state: next, changedIds, skippedIds};
+	}
+
+	static withHp (state, {id, prop, value}) {
+		if (!["current", "max", "temp"].includes(prop) || (value !== null && !isHpValue(value)) || (prop === "temp" && value === null)) {
+			throw new Error("Hit points must be a non-negative number; current and maximum may be left unset.");
+		}
+		if (!state.instances.some(it => it.id === id)) throw new Error("This encounter target no longer exists.");
+		return this.validate({
+			...state,
+			instances: state.instances.map(instance => instance.id === id
+				? {...instance, hp: {...instance.hp, [prop]: value}}
+				: instance),
+		});
+	}
+
+	static withHpOperation (state, {operation, targetIds = state.selectedIds}) {
+		const {eligibleIds, skippedIds: missingIds} = getEncounterEffectTargets(state, {targetIds});
+		if (!["delta", "set"].includes(operation?.mode) || !Number.isSafeInteger(operation.value)) {
+			throw new Error("Choose a valid whole-number HP operation.");
+		}
+		const selected = new Set(eligibleIds);
+		const changedIds = [];
+		const snapshots = [];
+		const skippedIds = [...missingIds];
+		const next = this.validate({
+			...state,
+			instances: state.instances.map(instance => {
+				if (!selected.has(instance.id)) return instance;
+				if (instance.hp.max == null || (operation.mode === "delta" && instance.hp.current == null)) {
+					skippedIds.push(instance.id);
+					return instance;
+				}
+				const hp = getNpcTrackerHpAfterOperation({hp: instance.hp, operation});
+				validateHp(hp);
+				if (Object.keys(hp).every(prop => hp[prop] === instance.hp[prop])) return instance;
+				changedIds.push(instance.id);
+				snapshots.push({id: instance.id, before: {...instance.hp}, after: hp});
+				return {...instance, hp};
+			}),
+		});
+		return {state: next, changedIds, skippedIds, snapshots};
+	}
+
+	static withHpUndo (state, snapshots) {
+		if (!Array.isArray(snapshots) || !snapshots.length) throw new Error("There is no HP operation to undo.");
+		const byId = new Map(snapshots.map(snapshot => [snapshot.id, snapshot]));
+		if (byId.size !== snapshots.length || snapshots.some(snapshot => {
+			const instance = state.instances.find(it => it.id === snapshot.id);
+			return !instance || Object.keys(instance.hp).some(prop => instance.hp[prop] !== snapshot.after?.[prop]);
+		})) throw new Error("Hit points changed since this operation; it cannot be undone safely.");
+		return this.validate({
+			...state,
+			instances: state.instances.map(instance => byId.has(instance.id)
+				? {...instance, hp: {...byId.get(instance.id).before}}
+				: instance),
+		});
+	}
+
+	static getInitiativeOrder (state) {
+		return state.instances.map((instance, order) => ({instance, order}))
+			.filter(({instance}) => instance.initiative !== null)
+			.sort((a, b) => b.instance.initiative - a.instance.initiative || a.order - b.order)
+			.map(({instance}) => instance);
+	}
+
+	static withInitiative (state, {id, total}) {
+		if (total !== null && !Number.isSafeInteger(total)) throw new Error("Initiative must be a whole number or unset.");
+		if (!state.instances.some(it => it.id === id)) throw new Error("This encounter target no longer exists.");
+		return this.withInitiativeResults(state, [{id, total}]);
+	}
+
+	static withInitiativeResults (state, results) {
+		const ids = new Set(state.instances.map(it => it.id));
+		const totals = new Map();
+		for (const result of results) {
+			if (!ids.has(result.id) || totals.has(result.id) || (result.total !== null && !Number.isSafeInteger(result.total))) {
+				throw new Error("Initiative results contain an invalid encounter target or total.");
+			}
+			totals.set(result.id, result.total);
+		}
+		const turn = totals.get(state.turn.activeId) === null
+			? {round: 0, activeId: null}
+			: state.turn;
+		return this.validate({
+			...state,
+			turn,
+			instances: state.instances.map(instance => totals.has(instance.id)
+				? {...instance, initiative: totals.get(instance.id)}
+				: instance),
+		});
+	}
+
+	static withTurn (state, action) {
+		if (action === "reset") return this.validate({...state, turn: {round: 0, activeId: null}});
+		const order = this.getInitiativeOrder(state);
+		if (!order.length) throw new Error("Enter or roll initiative before starting turns.");
+		if (action === "start") {
+			if (state.turn.round !== 0) throw new Error("Reset turns before starting a new round.");
+			return this.validate({...state, turn: {round: 1, activeId: order[0].id}});
+		}
+		if (action !== "next" || !state.turn.round) throw new Error("Start turns before advancing.");
+		const index = order.findIndex(it => it.id === state.turn.activeId);
+		if (index < 0) throw new Error("The active monster is no longer in initiative order.");
+		const isWrap = index === order.length - 1;
+		if (isWrap && !Number.isSafeInteger(state.turn.round + 1)) throw new Error("The round number cannot increase further.");
+		return this.validate({
+			...state,
+			turn: {round: state.turn.round + Number(isWrap), activeId: order[isWrap ? 0 : index + 1].id},
+		});
 	}
 }
 
