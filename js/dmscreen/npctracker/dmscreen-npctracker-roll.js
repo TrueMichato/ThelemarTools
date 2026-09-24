@@ -95,10 +95,12 @@ export function getNpcTrackerRollLabel ({rollType, key = null, skill = null}) {
 	}
 }
 
-export function getNpcTrackerConditionRollMeta ({npc, rollType, key = null}) {
+export function getNpcTrackerConditionRollMeta ({npc, rollType, key = null, rollMode = "normal"}) {
+	if (!["normal", "advantage", "disadvantage"].includes(rollMode)) throw new Error(`Unknown roll mode "${rollMode}".`);
 	const effects = (npc?.conditions || [])
 		.flatMap(condition => (_CONDITION_ROLL_EFFECTS[`${condition}`.trim().toLowerCase()] || [])
 			.filter(effect => effect.rollTypes.includes(rollType) && (!effect.keys || effect.keys.includes(key))));
+	if (rollMode !== "normal") effects.push({mode: rollMode, reason: `Chosen ${rollMode}`});
 	const unavailable = effects.filter(effect => effect.mode === "unavailable");
 	if (unavailable.length) return _getConditionMeta({mode: "unavailable", effects: unavailable});
 	const autoFail = effects.filter(effect => effect.mode === "autoFail");
@@ -165,9 +167,10 @@ export function sortNpcTrackerBatchResults ({results, sortKey, sortDirection}) {
 	});
 }
 
-export async function pRollNpcTrackerD20 ({npc, label, bonus, rollType = null, key = null}) {
+export async function pRollNpcTrackerD20 ({npc, label, bonus, rollType = null, key = null, rollMode = "normal"}) {
+	if (!Number.isFinite(bonus)) throw new Error("A valid roll bonus is required.");
 	const conditionMeta = rollType
-		? getNpcTrackerConditionRollMeta({npc, rollType, key})
+		? getNpcTrackerConditionRollMeta({npc, rollType, key, rollMode})
 		: {mode: "normal", reasons: [], statusText: ""};
 	if (conditionMeta.mode === "unavailable") return {...conditionMeta, total: null, die: null};
 	if (conditionMeta.mode === "autoFail") return {...conditionMeta, total: null, die: null};
@@ -214,6 +217,7 @@ function _getAbilityModifier (mon, ability) {
 }
 
 function _getFiniteNumber (value, fallback) {
+	if (value == null || (typeof value === "string" && !value.trim())) return fallback;
 	const number = Number(value);
 	return Number.isFinite(number) ? number : fallback;
 }

@@ -106,6 +106,40 @@
 				<p id="ew-summary" role="status" aria-live="polite"></p>
 			</header>
 			<div class="ew__notices" id="ew-notices" aria-label="Entries not loaded" hidden></div>
+			<section class="ew__operations" aria-label="Actions for selected monsters">
+				<div class="ew__operation">
+					<h3>Roll for selected</h3>
+					<div class="ew__controls">
+						<label for="ew-roll-type">Roll</label>
+						<select class="ve-form-control" id="ew-roll-type"></select>
+						<label for="ew-roll-key">Using</label>
+						<select class="ve-form-control" id="ew-roll-key"></select>
+						<label for="ew-roll-mode">Mode</label>
+						<select class="ve-form-control" id="ew-roll-mode">
+							<option value="normal">Normal</option>
+							<option value="advantage">Advantage</option>
+							<option value="disadvantage">Disadvantage</option>
+						</select>
+						<button type="button" class="ve-btn ve-btn-primary" id="ew-roll">Roll selected</button>
+					</div>
+					<p class="ew__operation-help" id="ew-roll-hint"></p>
+				</div>
+				<div class="ew__operation">
+					<h3>Conditions</h3>
+					<div class="ew__controls">
+						<label for="ew-condition">Condition</label>
+						<select class="ve-form-control" id="ew-condition"></select>
+						<button type="button" class="ve-btn ve-btn-primary" id="ew-condition-add">Apply to selected</button>
+						<button type="button" class="ve-btn ve-btn-default" id="ew-condition-remove">Remove from selected</button>
+					</div>
+					<p class="ew__operation-help">Conditions are saved per monster; remove a chip from a single monster below.</p>
+				</div>
+				<section class="ew__results" id="ew-results" aria-label="Roll results" hidden>
+					<h3>Roll results</h3>
+					<p id="ew-roll-summary" role="status" aria-live="polite"></p>
+					<div id="ew-result-table" class="ew__results-scroll"></div>
+				</section>
+			</section>
 			<div class="ew__layout">
 				<aside class="ew__rail" aria-label="Monster targets">
 					<div class="ew__rail-header">
