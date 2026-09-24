@@ -2681,7 +2681,7 @@ class CharacterSheetCombat {
 			</aside>
 		`});
 		const choices = offer.querySelector(".cs-post-roll-offer__choices");
-		const pending = {rollId: this._lastAttackContext.rollId, state: this._state, ctx, element: offer, options: new Map()};
+		const pending = {rollId: this._lastAttackContext.rollId, state: this._state, ctx, element: offer, options: new Map(), inFlight: false};
 		for (const hook of hooks) {
 			const row = e_({outer: `<div class="cs-post-roll-offer__row">
 				<span>${escape(hook.label || hook.id)}</span>
@@ -2691,7 +2691,7 @@ class CharacterSheetCombat {
 			button.addEventListener("click", () => {
 				void this._pOpenPostAttackOffer(pending, hook.id);
 			});
-			pending.options.set(hook.id, {hook, row, button, busy: false});
+			pending.options.set(hook.id, {hook, row, button});
 			choices.append(row);
 		}
 		offer.querySelector(".cs-post-roll-offer__dismiss").addEventListener("click", () => this._dismissPostAttackOffer());
@@ -2706,7 +2706,7 @@ class CharacterSheetCombat {
 			return false;
 		}
 		const option = pending.options.get(hookId);
-		if (!option || option.busy) return false;
+		if (!option || pending.inFlight) return false;
 		const {hook, button, row} = option;
 		let isEligible;
 		try { isEligible = !!hook.predicate(pending.ctx); } catch (e) {
@@ -2722,8 +2722,8 @@ class CharacterSheetCombat {
 			if (!pending.options.size) this._dismissPostAttackOffer();
 			return false;
 		}
-		option.busy = true;
-		button.disabled = true;
+		pending.inFlight = true;
+		for (const {button: openButton} of pending.options.values()) openButton.disabled = true;
 		try {
 			const applied = await hook.handler({...pending.ctx, offerButton: button});
 			if (applied === true) {
@@ -2744,8 +2744,8 @@ class CharacterSheetCombat {
 			JqueryUtil.doToast({type: "danger", content: `${hook.label} could not be applied. Review the current state and try again.`});
 			return false;
 		} finally {
-			option.busy = false;
-			button.disabled = false;
+			pending.inFlight = false;
+			for (const {button: openButton} of pending.options.values()) openButton.disabled = false;
 		}
 	}
 

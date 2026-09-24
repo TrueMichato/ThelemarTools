@@ -193,9 +193,58 @@ describe("post-attack roll offers at the real attack boundary", () => {
 		expect(cruelty.current).toBe(5);
 		expect(state.getTempHp()).toBe(4);
 		expect(offer.options.has("triggeredFeatCriticalHit")).toBe(false);
+		expect(offer.options.get("featureOnHitOptions").button.disabled).toBe(false);
 		await expect(combat._pOpenPostAttackOffer(offer, "triggeredFeatCriticalHit")).resolves.toBe(false);
 		expect(cruelty.current).toBe(5);
 		expect(combat._page.rollD20).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not open a second choice while another choice's modal is still pending", async () => {
+		const {state, attack} = makeChainsState();
+		const combat = makeCombat(state, attack);
+		let settleFirst;
+		combat._page._pRollTriggeredFeatDie.mockImplementation(() => new Promise(resolve => { settleFirst = resolve; }));
+		const onHitPrompt = jest.spyOn(CharacterSheetModal, "pGetUserBoolean").mockResolvedValue(false);
+		await combat._rollAttack(attack.id, null);
+		const offer = combat._postAttackOffer;
+		const first = combat._pOpenPostAttackOffer(offer, "triggeredFeatCriticalHit");
+		let secondWhilePending;
+		let buttonsWhilePending;
+		let promptsWhilePending;
+		try {
+			buttonsWhilePending = [...offer.options.values()].map(option => option.button.disabled);
+			secondWhilePending = await combat._pOpenPostAttackOffer(offer, "featureOnHitOptions");
+			promptsWhilePending = onHitPrompt.mock.calls.length;
+		} finally {
+			settleFirst(null);
+			await first;
+		}
+
+		expect(buttonsWhilePending).toEqual([true, true]);
+		expect(secondWhilePending).toBe(false);
+		expect(promptsWhilePending).toBe(0);
+		expect([...offer.options.values()].map(option => option.button.disabled)).toEqual([false, false]);
+		expect(state.getResources().find(it => it.name === "Cruelty Dice").current).toBe(6);
+		await expect(combat._pOpenPostAttackOffer(offer, "featureOnHitOptions")).resolves.toBe(false);
+		expect(onHitPrompt).toHaveBeenCalledTimes(1);
+	});
+
+	it("unlocks every choice when an opened handler fails", async () => {
+		const {state, attack} = makeChainsState();
+		const combat = makeCombat(state, attack);
+		const failure = new Error("picker failed");
+		const logged = jest.spyOn(console, "error").mockImplementation(() => {});
+		combat._page._pRollTriggeredFeatDie.mockRejectedValueOnce(failure);
+		const onHitPrompt = jest.spyOn(CharacterSheetModal, "pGetUserBoolean").mockResolvedValue(false);
+		await combat._rollAttack(attack.id, null);
+		const offer = combat._postAttackOffer;
+
+		await expect(combat._pOpenPostAttackOffer(offer, "triggeredFeatCriticalHit")).resolves.toBe(false);
+		expect(logged).toHaveBeenCalledWith(expect.stringContaining("triggeredFeatCriticalHit"), failure);
+		expect([...offer.options.values()].map(option => option.button.disabled)).toEqual([false, false]);
+		await expect(combat._pOpenPostAttackOffer(offer, "featureOnHitOptions")).resolves.toBe(false);
+		expect(onHitPrompt).toHaveBeenCalledTimes(1);
+		expect(state.getResources().find(it => it.name === "Cruelty Dice").current).toBe(6);
 	});
 
 	it("invalidates an unclaimed Cruel choice if the same die was spent on damage first", async () => {

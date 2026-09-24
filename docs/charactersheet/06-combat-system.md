@@ -149,7 +149,8 @@ the damage roll; **Dismiss offers**, the next committed attack, or switching
 characters removes it.
 Cancelling a pre-roll choice leaves the old offer intact. An opened choice still
 uses the roll-aware full modal, but cancelling it does not spend a resource or
-remove its offer. Applying an effect removes only that choice for that roll.
+remove its offer. Other **Open** controls pause until that choice closes.
+Applying an effect removes only that choice for that roll.
 Eligibility is checked again on Open: for example, Cruel's critical-hit
 temporary-HP die is no longer available if its once-per-turn die was spent on
 damage first. Roll-changing fortune interventions remain blocking because later
