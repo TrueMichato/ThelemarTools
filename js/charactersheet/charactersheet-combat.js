@@ -2269,19 +2269,6 @@ class CharacterSheetCombat {
 		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
 	}
 
-	_getTrackOnlyOnHitOption (options) {
-		const base = (options || []).find(it =>
-			it.targetAware
-			&& it.targetEffect?.source
-			&& it.allowTrackOnly !== false);
-		return base ? {
-			...base,
-			id: "target-only",
-			name: "Track target only",
-			targetEffect: {...base.targetEffect, effect: "target"},
-		} : null;
-	}
-
 	async _pOfferForcedMovementOnHit (ctx, opt) {
 		const targetSize = await InputUiUtil.pGetUserEnum({
 			title: `${opt.name} — Target Size`,

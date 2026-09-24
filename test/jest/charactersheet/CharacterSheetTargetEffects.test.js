@@ -29,8 +29,9 @@ const makeFury = (level = 6, {tracking = false} = {}) => {
 	return state;
 };
 
-const addGrappledTarget = (state, targetName = "Ogre") => state.applyChainedTargetEffect({
+const addGrappledTarget = (state, targetName = "Ogre", size = "medium") => state.applyChainedTargetEffect({
 	targetName,
+	size,
 	effect: "grapple",
 	riderId: "chains-grapple",
 	grappleSaveFailed: true,
@@ -101,7 +102,7 @@ describe("Chained Fury optional target bookkeeping", () => {
 
 	it("accounts for drag movement, doubled chain-only movement, and the level-14 exception", () => {
 		const pre14 = makeFury(10, {tracking: true});
-		const target = pre14.createChainedTarget({targetName: "Large", size: "large", distance: 0}).target;
+		const target = addGrappledTarget(pre14, "Large", "large").target;
 		expect(pre14.moveChainedTarget(target.id, 15)).toMatchObject({
 			ok: true,
 			movementCost: 30,
@@ -112,7 +113,7 @@ describe("Chained Fury optional target bookkeeping", () => {
 		expect(pre14.moveChainedTarget(target.id, 25)).toMatchObject({ok: false, reason: "movement-exceeded"});
 
 		const level14 = makeFury(14, {tracking: true});
-		const free = level14.createChainedTarget({targetName: "Huge", size: "huge", distance: 0}).target;
+		const free = addGrappledTarget(level14, "Huge", "huge").target;
 		expect(level14.moveChainedTarget(free.id, 30, {doubleMovement: true})).toMatchObject({ok: true, movementCost: 30, dragMultiplier: 1});
 		expect(level14.getMovementEconomyState()).toMatchObject({allowance: 30, used: 30, remaining: 0});
 		expect(level14.getChainedMovementState()).toMatchObject({allowance: 60, used: 30, remaining: 30, doubled: true});

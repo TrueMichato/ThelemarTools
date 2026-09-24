@@ -82969,7 +82969,7 @@ class CharacterSheetState {
 	}
 
 	applyChainedTargetEffect ({
-		targetId, targetName, name, effect = "grapple",
+		targetId, targetName, name, size = "medium", effect = "grapple",
 		riderId, restraintSaveTotal = null, grappleSaveTotal = null,
 		grappleSaveFailed = null, restraintSaveFailed = null, grappleSaveAbility = "str",
 		source = "chained-fury", targetEffect = null,
@@ -83083,7 +83083,7 @@ class CharacterSheetState {
 			source: "chained-fury",
 			effectType: restrained ? "restrain" : "grapple",
 			targetName: resolvedName,
-			size: existing?.size || "medium",
+			size: existing?.size || size,
 			grappled: true,
 			restrained,
 			shoved: false,

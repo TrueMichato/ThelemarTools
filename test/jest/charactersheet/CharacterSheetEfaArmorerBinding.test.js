@@ -1131,7 +1131,9 @@ describe("EFA Armorer stable generated model weapons", () => {
 
 	it("suspends Infiltrator passives when the bound Arcane Armor is doffed", () => {
 		const {state, armor} = buildState({model: "Infiltrator"});
-		const baseSpeed = buildState({model: "Guardian"}).state.getWalkSpeed();
+		state.setItemEquipped(armor.id, false);
+		const baseSpeed = state.getWalkSpeed();
+		state.setItemEquipped(armor.id, true);
 		state.bindEfaArcaneArmor(armor.id);
 		state.setItemEquipped(armor.id, false);
 
