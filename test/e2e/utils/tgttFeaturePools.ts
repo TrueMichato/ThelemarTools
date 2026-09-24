@@ -1,7 +1,7 @@
 /**
  * TGTT Feature Pools — Auto-generated. Do not edit by hand.
  *
- * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:90f0220a467d)
+ * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:b01822a0006b)
  * Generator:     scripts/genTgttPools.mjs
  * Regenerate:    node scripts/genTgttPools.mjs
  *

@@ -209,11 +209,12 @@ describe("Bug #3 (ii) — attack roll folds in the ammo attack bonus, never cons
 		combat._page._offerGuidedStrikePostAttack = () => {};
 		combat._renderSneakAttackToggle = () => {};
 		combat._runPostAttackHooks = async () => {};
+		combat._stagePostAttackOffers = () => {};
 		combat.__captured = captured;
 		return combat;
 	}
 
-	test("a selected +1 ammo adds +1 to the to-hit total and is itemized; stack untouched", () => {
+	test("a selected +1 ammo adds +1 to the to-hit total and is itemized; stack untouched", async () => {
 		const state = loadCharacter();
 		addQuiverArrow(state, {id: "plus1", name: "+1 Arrow", quantity: 7, bonusWeapon: "+1"});
 
@@ -223,13 +224,13 @@ describe("Bug #3 (ii) — attack roll folds in the ammo attack bonus, never cons
 
 		// Baseline (Regular).
 		const base = mkAttackCombat(state);
-		base._rollAttack(`auto_${ID.longbow}`, null);
+		await base._rollAttack(`auto_${ID.longbow}`, null);
 		const regularModifier = base.__captured.modifier;
 
 		// With +1 ammo selected.
 		state.setSelectedAmmoId(ID.longbow, "plus1");
 		const withAmmo = mkAttackCombat(state);
-		withAmmo._rollAttack(`auto_${ID.longbow}`, null);
+		await withAmmo._rollAttack(`auto_${ID.longbow}`, null);
 
 		// (a) The to-hit bonus is exactly +1 higher than Regular.
 		expect(withAmmo.__captured.modifier).toBe(regularModifier + 1);

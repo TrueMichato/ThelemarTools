@@ -271,6 +271,8 @@ ordinary Constitution saves do not qualify. After an actual failure, the sheet
 offers a reroll for **one available Hit Die** (pick the die type if multiclassed).
 The reroll uses the original DC, save modifiers, situational choices, and rolled
 bonus dice; it does not heal and has no daily limit beyond remaining Hit Dice.
+Unconditional Constitution-save bonuses are counted once, as on an ordinary
+save; opted-in situational bonuses remain in effect on both forced-march rolls.
 Declining the reroll spends no die. The **final** failed result, including a
 declined reroll, adds one exhaustion; a successful final result adds none.
 The result reports both totals, the DC, die spent, and remaining dice.

@@ -277,9 +277,28 @@ describe("player-facing forced-march action", () => {
 		} finally { number.mockRestore(); confirm.mockRestore(); }
 	});
 
+	it("counts an unconditional Constitution save bonus once on both forced-march rolls", async () => {
+		const state = makeBarbarian();
+		pickSpecialty(state, 1);
+		state.addNamedModifier({name: "March Charm", type: "save:con", value: 2});
+		expect(state.getSaveMod("con")).toBe(6);
+		expect(state.aggregateModifiers("save:con").bonus).toBe(2);
+		const page = makeForcedMarchPage(state, [7, 14]);
+		const number = jest.spyOn(globalThis.InputUiUtil, "pGetUserNumber").mockResolvedValue(18);
+		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			const result = await page._pRollForcedMarch();
+			expect(result).toEqual(expect.objectContaining({initialTotal: 13, finalTotal: 20, passed: true, hitDiceSpent: 1}));
+			expect(page._showDiceResult.mock.lastCall[2]).toContain("+ 6");
+			expect(page._showDiceResult.mock.lastCall[2]).not.toContain("+ 8");
+			expect(state.getExhaustion()).toBe(0);
+		} finally { number.mockRestore(); confirm.mockRestore(); }
+	});
+
 	it("keeps conditional and dice bonuses frozen on both rolls, then adds exhaustion only for a final failure", async () => {
 		const state = makeBarbarian();
 		pickSpecialty(state, 1);
+		state.addNamedModifier({name: "March Charm", type: "save:con", value: 2});
 		state.addNamedModifier({name: "March Aid", type: "save:con", value: 2, conditional: "against forced marches", enabled: false});
 		const page = makeForcedMarchPage(state, [3, 4]);
 		const available = state.aggregateModifiers("save:con").conditionalsAvailable;
@@ -294,10 +313,10 @@ describe("player-facing forced-march action", () => {
 		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
 		try {
 			const result = await page._pRollForcedMarch();
-			expect(result).toEqual(expect.objectContaining({initialTotal: 10, finalTotal: 11, passed: false, exhaustionGained: 1}));
+			expect(result).toEqual(expect.objectContaining({initialTotal: 12, finalTotal: 13, passed: false, exhaustionGained: 1}));
 			expect(page._rollStateDiceBonuses).toHaveBeenCalledTimes(1);
 			expect(page._rollD20.mock.calls[1][0].mode).toBe("normal");
-			expect(page._showDiceResult.mock.lastCall.join(" ")).toContain("+ 6");
+			expect(page._showDiceResult.mock.lastCall.join(" ")).toContain("+ 8");
 			expect(page._showDiceResult.mock.lastCall.join(" ")).toContain("Bless");
 			expect(state.getExhaustion()).toBe(1);
 			expect(state.getHitDiceByType().d12.current).toBe(2);

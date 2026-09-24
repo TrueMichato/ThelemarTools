@@ -3,15 +3,29 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 62 — Reported regressions and specialty redesign (pending verification)
+### Round 62 — Item editor follow-up (plan only)
 
-- **Spectral Chains roll UX (bugs 1–2):** The attack follow-up shows `[object Object]` in its breakdown, and optional post-roll choices still open a blocking modal that obscures the roll. Keep the roll readable and offer an explicitly openable, non-blocking follow-up without losing the attack's result or resources.
-- **Barbarian specialty regressions (bugs 3 and 6):** Despite the Round 61 fix, Unyielding Might reportedly bonuses Athletics instead of Might; Lead the Pack needs clearer choice/flow wording and a verified bonus to both Athletics and Acrobatics. Reproduce through the real character/skill-roll path, not just isolated feature parsing.
-- **Boots of Speed (bug 4):** Speed reportedly doubles while the boots are merely worn, rather than only while their power is active. Verify the equipped/attuned, inactive, active, deactivated, and loaded character paths in the displayed speed and its breakdown.
-- **Marathoner (bug 5):** Replace Agile Sprinter with a specialty granting a proficiency-bonus bonus to Endurance checks; on a failed forced-march save, the character may spend one Hit Die to reroll it. Preserve or migrate existing Agile Sprinter choices.
-- **Custom/Modify Item editor (bug 7, plan only):** Revisit the approved shared-editor design from the earlier Bug fixes session, reconcile it with the Boots of Speed activation fix, and produce a phased improvement plan before implementing it.
+- **Custom/Modify Item editor (bug 7):** The item-editor session completed a phased plan based on the previously approved shared-editor design and the DMG/XDMG Boots findings. Create/Modify/catalog-clone implementation is still pending; no editor code was changed in this round.
 
 ## Closed Bugs
+
+### Round 62 — Character Sheet regressions and Marathoner
+
+**Integration.** Four isolated fixes were merged into the orchestration branch with
+an additional fail-first correction for forced-march save bonuses. Full ESLint,
+Stylelint, JSON and Combat Method schema checks passed; the memory-bounded Jest
+run passed **718 suites / 18,902 tests** (2 suites / 208 tests skipped), and
+the separately run crafting-freshness test passed. The complete Chained Fury
+Chromium build, including the revised on-hit offer and Marathoner feature
+matrix, passed **8/8 tests**. The untracked `npc-exports/` corpus was absent,
+so its optional real-save cases were not part of this gate. `npm run test:data`
+still reports missing references in unchanged `data/crafting.json` and
+`data/bestiary/monstergroups.json`.
+
+- **Spectral Chains roll UX (bugs 1–2):** Attack follow-ups use the formatted roll breakdown, never an object. Optional on-hit and critical choices now sit in one durable side offer that opens a roll-aware modal only when selected; cancellation does not consume resources, and simultaneous choices cannot open overlapping modals. Real-state Jest and the Chained Fury browser on-hit path cover the flow.
+- **Barbarian specialty regressions (bugs 3 and 6):** Unyielding Might grants proficiency bonus to Might, not Athletics; Lead the Pack grants it to both Athletics and Acrobatics with clearer group-check wording. Feature-owned legacy modifiers are repaired through actual Builder, Level Up, Quick Build, load, skill-row and roll paths without taking over manual modifiers.
+- **Boots of Speed (bug 4):** DMG/XDMG catalog powers double speed only while activated, repaint Overview on activation/deactivation, repair legacy saved power cards, and end activation on unequip/unattune. Custom speed multipliers without an explicit power remain passive.
+- **Marathoner (bug 5):** Agile Sprinter was replaced with Endurance proficiency and a dedicated prompted-DC forced-march save. A failed save may consume one selected Hit Die for a no-heal reroll; only a final failure adds exhaustion. Source-qualified legacy picks migrate, and unconditional save bonuses count once while opted-in situational bonuses carry to the reroll.
 
 ### Round 61 — Respec, Bard capstone, combat methods, specialties, and derived combat statistics
 

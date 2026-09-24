@@ -18863,7 +18863,9 @@ class CharacterSheetPage {
 			const aggregated = appliedConditionalIds.size
 				? this._state.aggregateModifiers("save:con", {appliedConditionalIds})
 				: probe;
-			const mod = this._state.getSaveMod("con") + aggregated.bonus;
+			// The save getter already includes unconditional named bonuses; only opted-in
+			// conditional bonuses are new relative to the unselected aggregate.
+			const mod = this._state.getSaveMod("con") + aggregated.bonus - probe.bonus;
 			const exhaustionPenalty = this._getExhaustionPenalty();
 			const advState = this._state.getAdvantageState?.("save:con", {appliedConditionalIds});
 			const hasAdvantage = advState?.advantage || aggregated.advantage || this._state.hasAdvantageFromStates("save:con");

@@ -192,6 +192,7 @@ function wireAttack (combat, state) {
 	combat._page._offerGuidedStrikePostAttack = () => {};
 	combat._renderSneakAttackToggle = () => {};
 	combat._runPostAttackHooks = async () => {};
+	combat._stagePostAttackOffers = () => {};
 	combat.__captured = captured;
 	return captured;
 }
@@ -299,7 +300,7 @@ describe("R35 integrated — #3 active-ammo selector", () => {
 		expect(typeof CharacterSheetCombat.prototype._getSelectedAmmoForWeapon).toBe("function");
 	});
 
-	test("a selected +1 ammo adds +1 to the to-hit total and never consumes on attack", () => {
+	test("a selected +1 ammo adds +1 to the to-hit total and never consumes on attack", async () => {
 		const state = loadState();
 		addQuiverArrow(state, {id: "plus1", name: "+1 Arrow", quantity: 7, bonusWeapon: "+1"});
 		const consumeSpy = [];
@@ -308,12 +309,12 @@ describe("R35 integrated — #3 active-ammo selector", () => {
 
 		const base = makeCombat(state);
 		const baseCap = wireAttack(base, state);
-		base._rollAttack(`auto_${ID.longbow}`, null);
+		await base._rollAttack(`auto_${ID.longbow}`, null);
 
 		state.setSelectedAmmoId(ID.longbow, "plus1");
 		const withAmmo = makeCombat(state);
 		const cap = wireAttack(withAmmo, state);
-		withAmmo._rollAttack(`auto_${ID.longbow}`, null);
+		await withAmmo._rollAttack(`auto_${ID.longbow}`, null);
 
 		expect(cap.modifier).toBe(baseCap.modifier + 1);
 		expect(consumeSpy.length).toBe(0);
