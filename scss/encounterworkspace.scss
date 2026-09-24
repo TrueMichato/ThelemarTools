@@ -1,0 +1,256 @@
+@use "vars/vars";
+@use "vars/vars-night";
+
+@layer vetools {
+	.ew {
+		width: calc(100% - 32px);
+		max-width: 1600px;
+		padding-top: 18px;
+		padding-bottom: 32px;
+		color: vars.$rgb-font;
+
+		&__header,
+		&__source,
+		&__rail-header {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+		}
+
+		&__header {
+			padding-bottom: 14px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+
+			h2 {
+				margin: 0 0 5px;
+				font-size: 1.5rem;
+			}
+
+			p {
+				margin: 0;
+			}
+		}
+
+		&__actions,
+		&__selection-actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 7px;
+		}
+
+		&__status {
+			margin: 14px 0;
+			padding: 10px 12px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__status--error,
+		&__render-error {
+			color: vars.$rgb-alert-text-danger;
+			border-color: vars.$rgb-btn-danger-border-red;
+			background: vars.$rgb-bg;
+		}
+
+		&__source {
+			padding: 4px 0 12px;
+
+			h2 {
+				margin: 0 0 4px;
+				font-size: 1.5rem;
+			}
+
+			p {
+				margin: 0;
+			}
+		}
+
+		&__notices {
+			margin-bottom: 15px;
+			padding: 10px 15px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			h3 {
+				margin: 0 0 7px;
+				font-size: 1rem;
+			}
+
+			ul {
+				margin: 0;
+				padding-left: 20px;
+				overflow-wrap: anywhere;
+			}
+		}
+
+		&__layout {
+			display: grid;
+			grid-template-columns: minmax(220px, 265px) minmax(0, 1fr);
+			align-items: start;
+			gap: 18px;
+		}
+
+		&__rail {
+			min-width: 0;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__rail-header {
+			padding: 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+
+			h3 {
+				margin: 0;
+				font-size: 1rem;
+			}
+		}
+
+		&__help {
+			margin: 0;
+			padding: 10px 12px;
+			color: vars.$rgb-font;
+			font-size: 1rem;
+		}
+
+		&__roster {
+			max-height: 65vh;
+			overflow-y: auto;
+		}
+
+		&__roster-row {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: center;
+			column-gap: 10px;
+			padding: 9px 12px;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+			cursor: pointer;
+
+			&:hover,
+			&:focus-within {
+				background: vars.$rgb-bg;
+			}
+
+			&:focus-within {
+				outline: 2px solid vars.$rgb-active-blue;
+				outline-offset: -2px;
+			}
+
+			input {
+				margin: 0;
+			}
+		}
+
+		&__roster-name {
+			min-width: 0;
+			font-weight: 600;
+			overflow-wrap: anywhere;
+		}
+
+		&__roster-meta {
+			grid-column: 2;
+			color: vars.$rgb-font;
+			font-size: 1rem;
+		}
+
+		&__statblocks {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr));
+			align-items: start;
+			gap: 14px;
+			min-width: 0;
+		}
+
+		&__statblock {
+			min-width: 0;
+			overflow-x: auto;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg;
+
+			&--selected {
+				border-color: vars.$rgb-active-blue;
+			}
+
+			.ve-stats {
+				min-width: 390px;
+			}
+		}
+
+		&__statblock-title {
+			margin: 0;
+			padding: 9px 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+			font-size: 1rem;
+			font-weight: 600;
+		}
+
+		&__empty {
+			margin: 0;
+			padding: 20px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+		}
+	}
+
+	.ve-night-mode .ew {
+		color: vars-night.$rgb-font--night;
+
+		&__header,
+		&__rail-header,
+		&__rail,
+		&__notices,
+		&__statblock,
+		&__statblock-title,
+		&__empty {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__rail,
+		&__status,
+		&__notices,
+		&__statblock-title,
+		&__empty {
+			background: vars-night.$rgb-bg--alt-night;
+		}
+
+		&__statblock,
+		&__roster-row:hover,
+		&__roster-row:focus-within {
+			background: vars-night.$rgb-bg--night;
+		}
+
+		&__roster-row {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__help,
+		&__roster-meta {
+			color: vars-night.$rgb-font--night;
+		}
+
+		&__status--error,
+		&__render-error {
+			color: #ffa5a5;
+			border-color: #ffa5a5;
+			background: vars-night.$rgb-bg--night;
+		}
+
+		&__statblock--selected {
+			border-color: vars-night.$rgb-link-blue--night;
+		}
+	}
+
+	@media (width <= 800px) {
+		.ew__layout {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.ew__roster {
+			max-height: 240px;
+		}
+	}
+}

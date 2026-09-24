@@ -373,11 +373,13 @@ class SaveManager extends BaseComponent {
 
 	static _LEGACY_MIGRATOR = new _LegacyPersistedStateMigrator();
 
-	constructor ({isReadOnlyUi = false, isReferencable = false, page = null} = {}) {
+	constructor ({isReadOnlyUi = false, isStorageReadOnly = false, isReferencable = false, page = null} = {}) {
 		super();
+		if (isStorageReadOnly && !isReadOnlyUi) throw new Error("A storage-read-only saved-list picker must use read-only UI.");
 		this._page = page || UrlUtil.getCurrentPage();
 		this._isReferencable = !!isReferencable;
 		this._isReadOnlyUi = !!isReadOnlyUi;
+		this._isStorageReadOnly = !!isStorageReadOnly;
 
 		this._pDoSaveStateToStorageDebounced = MiscUtil.debounce(
 			this.pDoSaveStateToStorage.bind(this),
@@ -389,16 +391,22 @@ class SaveManager extends BaseComponent {
 	async pMutStateFromStorage () {
 		let stored = await StorageUtil.pGetForPage(this.constructor._STORAGE_KEY_SAVES, {page: this._page});
 		stored = stored || this._getDefaultState();
-		const isMigration = await this.constructor._LEGACY_MIGRATOR.pApplyLegacyMigrations(stored);
-		if (isMigration) await StorageUtil.pSetForPage(this.constructor._STORAGE_KEY_SAVES, stored, {page: this._page});
+		if (this._isStorageReadOnly) stored = MiscUtil.copyFast(stored);
+		else {
+			// Legacy migrations can write other storage keys; a read-only chooser must not run them.
+			const isMigration = await this.constructor._LEGACY_MIGRATOR.pApplyLegacyMigrations(stored);
+			if (isMigration) await StorageUtil.pSetForPage(this.constructor._STORAGE_KEY_SAVES, stored, {page: this._page});
+		}
 		this.setBaseSaveableStateFrom(stored);
 	}
 
 	async pDoSaveStateToStorage () {
+		if (this._isStorageReadOnly) throw new Error("Cannot save a storage-read-only saved-list picker.");
 		await StorageUtil.pSetForPage(this.constructor._STORAGE_KEY_SAVES, this.getBaseSaveableState(), {page: this._page});
 	}
 
 	async pDoRemoveStateFromStorage () {
+		if (this._isStorageReadOnly) throw new Error("Cannot remove data from a storage-read-only saved-list picker.");
 		await StorageUtil.pRemoveForPage(this.constructor._STORAGE_KEY_SAVES, {page: this._page});
 	}
 	// endregion
@@ -475,7 +483,7 @@ class SaveManager extends BaseComponent {
 			isIncludeManagerClientState = false,
 		} = {},
 	) {
-		this._addHookBase("saves", this._pDoSaveStateToStorageDebounced);
+		if (!this._isStorageReadOnly) this._addHookBase("saves", this._pDoSaveStateToStorageDebounced);
 
 		const dispCaret = veE({
 			tag: "span",
@@ -619,7 +627,7 @@ class SaveManager extends BaseComponent {
 
 		const [isSelected, exportedSublist] = (await pGetResolved());
 
-		this._removeHookBase("saves", this._pDoSaveStateToStorageDebounced);
+		if (!this._isStorageReadOnly) this._removeHookBase("saves", this._pDoSaveStateToStorageDebounced);
 		this._removeHookBase("saves", hkSaves);
 		this._resetCollectionRenders("saves", "load");
 
