@@ -3,8 +3,8 @@
  * hand-written XPHB Weapon Mastery effect map.
  *
  * Used by the `build*Checks` helpers in `tgttFeaturePools.ts` to
- * attach `pickedFeatureGrants` sub-effects when the auto-picker's
- * deterministic first choice (alphabetical) lands on the sheet.
+ * attach `pickedFeatureGrants` sub-effects when a mapped pick lands
+ * on the sheet.
  *
  * These maps are NOT auto-generated. Add new entries by hand as new
  * picker options are introduced or as test coverage broadens.
@@ -28,17 +28,16 @@ import type {EffectCheck} from "./comprehensiveBuildHelpers";
 // ── Specialty effects: keyed by [className][specialtyName] ───────────
 
 export const TGTT_SPECIALTY_EFFECTS: Record<string, Record<string, EffectCheck[]>> = {
-	// Alphabetical first picks per class. Most TGTT specialties grant a
+	// Most TGTT specialties grant a
 	// proficiency, expertise, or passive bump that surfaces on the sheet
-	// — but verifying which specialty was chosen is brittle without
-	// reading raw state, so we attach `pickActivatable: false`-style
-	// existence probes only where the specialty produces an
-	// activatable / toggleable feature row. For pure-passive picks the
-	// existing `kind: "pick"` count check is sufficient.
+	// — attach measurable probes where possible and leave context-dependent
+	// effects empty rather than asserting an unrelated proxy.
 	Barbarian: {
-		// "Agile Sprinter" → flat speed bonus while not wearing heavy armor.
-		"Agile Sprinter": [
-			{kind: "speed", min: 30},
+		// Flock Step requires five or more creatures to hide among; no blanket Stealth bonus.
+		"Flock Step": [],
+		"Marathoner": [
+			{kind: "stateCall", method: "aggregateModifiers", args: ["skill:endurance"], path: "bonus", min: 2},
+			{kind: "stateCall", method: "getMarathonerFeature", path: "name", exact: "Marathoner"},
 		],
 	},
 	Bard: {

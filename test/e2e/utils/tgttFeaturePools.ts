@@ -1,7 +1,7 @@
 /**
  * TGTT Feature Pools — Auto-generated. Do not edit by hand.
  *
- * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:de7976781071)
+ * Source:        homebrew/TravelersGuidetoThelemar.json (sha256:90f0220a467d)
  * Generator:     scripts/genTgttPools.mjs
  * Regenerate:    node scripts/genTgttPools.mjs
  *
@@ -38,9 +38,9 @@ import {
 // ── Specialties (Class-feature "Specialties" pick-list at progression levels) ──
 export const TGTT_SPECIALTIES: Record<string, RegExp[]> = {
 	Barbarian: [
-		/^Agile Sprinter$/i,
 		/^Flock Step$/i,
 		/^Lead the Pack$/i,
+		/^Marathoner$/i,
 		/^Mark of the Wilderness$/i,
 		/^Natural Tracker$/i,
 		/^Path of Blustery Autumns$/i,
@@ -273,7 +273,7 @@ export const TGTT_SPECIALTY_LEVELS: Record<string, number[]> = {
 // Auto-picker's deterministic first choice (alphabetical) per class.
 // Used as the key into TGTT_SPECIALTY_EFFECTS.
 export const TGTT_SPECIALTY_FIRST_PICK: Record<string, string> = {
-	Barbarian: "Agile Sprinter",
+	Barbarian: "Flock Step",
 	Bard: "Bewitching Companion",
 	Cleric: "Ancestral Guidance",
 	Druid: "Aerial Surveyor",
@@ -1114,11 +1114,9 @@ export const ZODIAC_FORMS_L10_LEVEL: number = 10;
 
 // ────────────────────────────────────────────────────────────────────────
 // build*Checks helpers — emit FeatureCheck arrays that specs spread
-// into their featuresMatrix. Each helper attaches a "pickedFeatureGrants"
-// effect for the auto-picker's deterministic first choice (when an
-// effect map entry exists), so the test verifies not just that a pick
-// surfaced but that the picked option's documented effect lands on the
-// sheet.
+// into their featuresMatrix. Each helper attaches "pickedFeatureGrants"
+// effects for supported picks, so the test verifies that documented
+// effects land on the sheet when those options are chosen.
 //
 // All progression arrays are defaults — pass an explicit progression
 // to override (e.g. for multiclass specs).
@@ -1154,9 +1152,8 @@ export function withSkipReason (checks: FeatureCheck[], skipReason: string): Fea
  * Generate FeatureCheck entries for the TGTT "Specialties" pick at each
  * level the class gains a new specialty. Each entry asserts that
  * cumulative `pickedCount` distinct specialty names from the class's
- * pool surface in the feature list, and (if the class has an entry in
- * TGTT_SPECIALTY_EFFECTS) attaches a `pickedFeatureGrants` effect for
- * the auto-picker's deterministic first pick.
+ * pool surface in the feature list, and conditionally probes the
+ * mechanical effects of whichever specialties were actually picked.
  *
  * Multiclass usage: pass the class-level you expect at the milestone
  * (not character-level) — `levelMap` maps class-level → character-level.
@@ -1166,17 +1163,18 @@ export function buildSpecialtyChecks (className: string, levelMap?: Record<numbe
 	const levels = TGTT_SPECIALTY_LEVELS[className];
 	if (!pool || !levels) return [];
 	const firstPick = TGTT_SPECIALTY_FIRST_PICK[className];
-	const subEffects = firstPick ? TGTT_SPECIALTY_EFFECTS?.[className]?.[firstPick] : undefined;
-	const grants = firstPick ? pickedGrants(firstPick, subEffects) : [];
+	const firstGrants = firstPick ? pickedGrants(firstPick, TGTT_SPECIALTY_EFFECTS?.[className]?.[firstPick]) : [];
+	const laterGrants = Object.entries(TGTT_SPECIALTY_EFFECTS?.[className] || {})
+		.filter(([name]) => name !== firstPick)
+		.flatMap(([name, effects]) => pickedGrants(name, effects));
+	const initialGrants = [...firstGrants, ...laterGrants];
 	return levels.map((classLevel, idx) => ({
 		level: applyLevelMap(classLevel, levelMap),
 		name: /specialties/i,
 		kind: "pick" as const,
 		pickedCount: idx + 1,
 		pickedFrom: pool,
-		// Per-pick effect attached only at the first milestone — re-checking
-		// the same effect at every milestone would be redundant.
-		effects: idx === 0 && grants.length ? grants : undefined,
+		effects: (idx === 0 ? initialGrants : laterGrants).length ? (idx === 0 ? initialGrants : laterGrants) : undefined,
 	}));
 }
 

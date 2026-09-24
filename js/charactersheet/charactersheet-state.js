@@ -24,6 +24,9 @@ const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
 });
 const FIXED_PROFICIENCY_FALLBACK_DEFINITIONS = new Map();
 const FEATURE_COMPANION_GRANT_DEFINITIONS = new Map();
+const TGTT_MARATHONER_REF = "Marathoner|Barbarian|TGTT|1";
+const TGTT_AGILE_SPRINTER_REF = "Agile Sprinter|Barbarian|TGTT|1";
+const TGTT_MARATHONER_ENTRY = "You gain a bonus to Constitution ({@skill Endurance|TGTT}) checks. The bonus equals your proficiency bonus. When you fail a saving throw against exhaustion from a forced march, you can spend one Hit Die to reroll that saving throw. You must use the new result.";
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -6390,6 +6393,7 @@ class CharacterSheetState {
 		// migrations and the various `_reapply*` passes see the resolved subclass.
 		this._migrateRepairSubclass();
 
+		this._migrateTgttMarathoner();
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
 		this._migrateFixedProficiencyFallbacks();
@@ -9744,6 +9748,93 @@ class CharacterSheetState {
 				console.log(`[CharSheet] _migrateRepairSubclass: repaired ${cls.name} subclass → ${resolved.shortName} (${resolved.source})`);
 			}
 		}
+	}
+
+	_migrateTgttMarathoner () {
+		const norm = value => String(value || "").trim().toLowerCase();
+		const isTgttBarbarian = (name, source) => norm(name) === "barbarian" && norm(source) === "tgtt";
+		if (!(this._data.classes || []).some(cls => isTgttBarbarian(cls.name, cls.source))) return;
+
+		const oldIds = new Set();
+		let migratedFeature = false;
+		for (const feature of this._data.features || []) {
+			if (norm(feature.name) !== "agile sprinter"
+				|| norm(feature.source) !== "tgtt"
+				|| !isTgttBarbarian(feature.className, feature.classSource)
+				|| (feature.parentFeature && norm(feature.parentFeature) !== "specialties")) continue;
+			migratedFeature = true;
+			if (feature.id) oldIds.add(feature.id);
+			feature.name = "Marathoner";
+			for (const key of ["ref", "uid", "classFeature"]) {
+				if (norm(feature[key]) === norm(TGTT_AGILE_SPRINTER_REF)) feature[key] = TGTT_MARATHONER_REF;
+			}
+			feature.entries = [TGTT_MARATHONER_ENTRY];
+			feature.description = TGTT_MARATHONER_ENTRY.replace("{@skill Endurance|TGTT}", "Endurance");
+		}
+		if (migratedFeature) {
+			const isAgileModifier = mod => oldIds.has(mod.sourceFeatureId)
+				|| (!mod.sourceFeatureId && !mod.sourceType
+					&& norm(mod.name) === "agile sprinter"
+					&& norm(mod.note) === "from agile sprinter");
+			this._data.namedModifiers = (this._data.namedModifiers || []).filter(mod =>
+				!["skill:athletics", "skill:acrobatics"].includes(norm(mod.type))
+					|| !isAgileModifier(mod),
+			);
+		}
+
+		const migrateChoice = (choice, parent) => {
+			if (!choice || typeof choice !== "object") return;
+			const hasOldRef = ["ref", "uid", "classFeature"]
+				.some(key => norm(choice[key]) === norm(TGTT_AGILE_SPRINTER_REF));
+			const belongs = hasOldRef
+				|| (
+					norm(choice.source) === "tgtt"
+					&& norm(parent || choice.parentFeature || choice.featureName) === "specialties"
+				);
+			if (!belongs || (choice.ref && norm(choice.ref) !== norm(TGTT_AGILE_SPRINTER_REF))) return;
+			if (norm(choice.name) !== "agile sprinter"
+				&& norm(choice.choice) !== "agile sprinter"
+				&& !hasOldRef) return;
+			if (norm(choice.name) === "agile sprinter") choice.name = "Marathoner";
+			if (norm(choice.choice) === "agile sprinter") choice.choice = "Marathoner";
+			for (const key of ["ref", "uid", "classFeature"]) {
+				if (norm(choice[key]) === norm(TGTT_AGILE_SPRINTER_REF)) choice[key] = TGTT_MARATHONER_REF;
+			}
+			if (Array.isArray(choice.entries)) choice.entries = [TGTT_MARATHONER_ENTRY];
+			if (typeof choice.description === "string") choice.description = TGTT_MARATHONER_ENTRY.replace("{@skill Endurance|TGTT}", "Endurance");
+		};
+		const migrateDecision = (decision, owner = null) => {
+			if (!isTgttBarbarian(decision?.className || owner?.name, decision?.classSource || owner?.source)) return;
+			const parent = decision.sourceKey || decision.parentFeature || decision.featureName;
+			const selections = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+			if (norm(parent) !== "specialties"
+				&& !selections.some(selection => norm(selection?.ref || selection?.uid || selection?.classFeature) === norm(TGTT_AGILE_SPRINTER_REF))) return;
+			const migrateSelection = selection => {
+				if (typeof selection === "string") {
+					if (norm(selection) === norm(TGTT_AGILE_SPRINTER_REF)) return TGTT_MARATHONER_REF;
+					return norm(parent) === "specialties" && norm(selection) === "agile sprinter" ? "Marathoner" : selection;
+				}
+				migrateChoice(selection, parent);
+				return selection;
+			};
+			if (Array.isArray(decision.selection)) {
+				decision.selection = decision.selection.map(migrateSelection);
+			} else {
+				decision.selection = migrateSelection(decision.selection);
+			}
+		};
+		for (const chosen of this._data.chosenSubfeatures || []) {
+			if (isTgttBarbarian(chosen.parentClass, chosen.parentClassSource)
+				&& norm(chosen.parent) === "specialties") migrateChoice(chosen, chosen.parent);
+		}
+		for (const entry of this._data.levelHistory || []) {
+			if (!isTgttBarbarian(entry?.class?.name, entry?.class?.source)) continue;
+			for (const choice of entry.choices?.featureChoices || []) migrateChoice(choice, choice.featureName);
+			for (const snapshot of entry.choices?.replayData?.featureChoices || []) migrateChoice(snapshot, snapshot.parentFeature);
+			for (const decision of entry.decisions || []) migrateDecision(decision, entry.class);
+			for (const decision of entry.choices?.decisions || []) migrateDecision(decision, entry.class);
+		}
+		for (const decision of this._data.characterBase?.decisions || []) migrateDecision(decision);
 	}
 
 	_migrateFeatures () {
@@ -15521,6 +15612,54 @@ class CharacterSheetState {
 
 	getHitDiceByType () {
 		return {...this._data.hitDice};
+	}
+
+	getMarathonerFeature () {
+		if (this.getSettings().enableTgtt === false) return null;
+		const norm = value => String(value || "").trim().toLowerCase();
+		return (this._data.features || []).find(feature =>
+			norm(feature.name) === "marathoner"
+			&& norm(feature.source) === "tgtt"
+			&& norm(feature.className) === "barbarian"
+			&& norm(feature.classSource) === "tgtt"
+			&& (norm(feature.parentFeature) === "specialties" || feature.isFeatureOption === true)
+			&& (this._data.classes || []).some(cls =>
+				norm(cls.name) === "barbarian"
+				&& norm(cls.source) === "tgtt"
+				&& Number(cls.level) >= Number(feature.acquisitionLevel || feature.level || 1)),
+		) || null;
+	}
+
+	resolveForcedMarchSave ({dc, initialTotal, rerollTotal, dieType} = {}) {
+		if (!this.getMarathonerFeature()) return {ok: false, error: "Marathoner is not an acquired TGTT Barbarian specialty."};
+		if (!Number.isInteger(dc) || dc < 1 || !Number.isFinite(initialTotal)
+			|| (rerollTotal != null && !Number.isFinite(rerollTotal))
+			|| ((rerollTotal != null) !== (dieType != null))) {
+			return {ok: false, error: "A valid forced-march DC and save totals are required."};
+		}
+		const isReroll = rerollTotal != null;
+		if (isReroll && initialTotal >= dc) return {ok: false, error: "Only a failed forced-march save can be rerolled."};
+		const pool = isReroll ? this._data.hitDice?.[dieType] : null;
+		if (isReroll && (!/^d(?:6|8|10|12)$/.test(dieType)
+			|| !pool || !Number.isInteger(pool.current) || pool.current < 1)) {
+			return {ok: false, error: "The selected Hit Die is no longer available."};
+		}
+
+		const finalTotal = isReroll ? rerollTotal : initialTotal;
+		const beforeExhaustion = this.getExhaustion();
+		if (isReroll) pool.current--;
+		if (finalTotal < dc) this.addExhaustion(1);
+		return {
+			ok: true,
+			dc,
+			initialTotal,
+			finalTotal,
+			passed: finalTotal >= dc,
+			hitDiceSpent: isReroll ? 1 : 0,
+			dieType: isReroll ? dieType : null,
+			remaining: isReroll ? pool.current : null,
+			exhaustionGained: this.getExhaustion() - beforeExhaustion,
+		};
 	}
 
 	/**

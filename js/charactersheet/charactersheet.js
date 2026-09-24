@@ -5290,6 +5290,17 @@ class CharacterSheetPage {
 			this._bindActivate(row, {label: `Roll ${Parser.attAbvToFull(abl)} saving throw`});
 			container.append(row);
 		});
+		if (this._state.getMarathonerFeature()) {
+			const button = e_({outer: `
+				<button type="button" class="charsheet__forced-march-btn"
+					title="Roll a forced-march Constitution save against the DM's DC; a final failure adds one exhaustion">
+					<span>Forced March</span>
+					<small>DC + optional Hit Die reroll</small>
+				</button>
+			`});
+			button.addEventListener("click", event => this._pRollForcedMarch(event));
+			container.append(button);
+		}
 	}
 
 	_getSkillHoverLink (skill) {
@@ -18814,6 +18825,143 @@ class CharacterSheetPage {
 			return `2d20kl (${rollResult.roll1}, ${rollResult.roll2}) → ${minimumApplied ?? rollResult.roll}${minStr} ${modStr}${thelemar_critStr}${extraStr}`;
 		}
 		return `1d20 (${rollResult.roll})${minStr} ${modStr}${thelemar_critStr}${extraStr}`;
+	}
+
+	async _pRollForcedMarch (event) {
+		if (this._forcedMarchRollPending) return;
+		if (!this._state.getMarathonerFeature()) {
+			JqueryUtil.doToast({type: "warning", content: "Forced March rerolls require the TGTT Barbarian Marathoner specialty."});
+			return;
+		}
+		this._forcedMarchRollPending = true;
+		try {
+			const dc = await InputUiUtil.pGetUserNumber({
+				title: "Forced March — Constitution Save DC",
+				inputMode: "numeric",
+				default: 10,
+				min: 1,
+				int: true,
+			});
+			if (dc == null) return;
+			if (!Number.isInteger(dc) || dc < 1) {
+				JqueryUtil.doToast({type: "warning", content: "Enter a positive whole-number forced-march DC."});
+				return;
+			}
+
+			const probe = this._state.aggregateModifiers("save:con");
+			let appliedConditionalIds = new Set();
+			let appliedConditionals = [];
+			if (probe.conditionalsAvailable?.length) {
+				const picked = await this._pPickConditionalModifiers({
+					rollLabel: "Forced March Constitution Save",
+					conditionalsAvailable: probe.conditionalsAvailable,
+				});
+				if (picked.cancelled) return;
+				appliedConditionalIds = picked.appliedConditionalIds;
+				appliedConditionals = picked.applied;
+			}
+			const aggregated = appliedConditionalIds.size
+				? this._state.aggregateModifiers("save:con", {appliedConditionalIds})
+				: probe;
+			const mod = this._state.getSaveMod("con") + aggregated.bonus;
+			const exhaustionPenalty = this._getExhaustionPenalty();
+			const advState = this._state.getAdvantageState?.("save:con", {appliedConditionalIds});
+			const hasAdvantage = advState?.advantage || aggregated.advantage || this._state.hasAdvantageFromStates("save:con");
+			const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || this._state.hasDisadvantageFromStates("save:con");
+			const firstRoll = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage});
+			const stateDice = this._rollStateDiceBonuses("save:con");
+			const modifierDice = this._rollModifierDiceBonuses(aggregated);
+			const diceBonus = (stateDice?.total || 0) + (modifierDice?.total || 0);
+			const diceBreakdown = `${stateDice ? ` ${stateDice.breakdownStr}` : ""}${modifierDice ? ` ${modifierDice.breakdownStr}` : ""}`;
+			const sourcesStr = aggregated.sources.length ? ` [${aggregated.sources.join(", ")}]` : "";
+			const conditionalNote = this._formatAppliedConditionalsNote(appliedConditionals);
+			const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+			const getTotal = (roll, effectiveRoll = roll.roll) =>
+				this._applyTotalFloor(
+					Math.max(effectiveRoll, aggregated.minimum ?? -Infinity)
+						+ mod - exhaustionPenalty + (roll.thelemar_critBonus || 0) + diceBonus,
+					aggregated.totalMinimum,
+				).total;
+			const fortune = await this._pMaybeApplyFortuneIntervention({
+				rollResult: firstRoll,
+				effectiveRoll: Math.max(firstRoll.roll, aggregated.minimum ?? -Infinity),
+				rollLabel: "Forced March Constitution Save",
+				rollType: "save",
+				totalMod: mod,
+				exhaustionPenalty,
+			});
+			const initialTotal = getTotal(firstRoll, fortune.effectiveRoll);
+			const getBreakdown = roll =>
+				`${this._formatD20BreakdownWithMinimum(roll, mod, exhaustionStr, roll.roll < (aggregated.minimum ?? -Infinity) ? aggregated.minimum : null)}${sourcesStr}${diceBreakdown}`;
+			const label = `Forced March Constitution Save${this._getModeLabel(firstRoll.mode)} vs DC ${dc}`;
+			await this.pAnimateD20(firstRoll);
+			this._showDiceResult(label, initialTotal, getBreakdown(firstRoll), "", `${initialTotal < dc ? "Failed" : "Passed"} vs DC ${dc}${conditionalNote ? `\n${conditionalNote}` : ""}${fortune.note ? `\n${fortune.note}` : ""}`);
+
+			let finalRoll = firstRoll;
+			let rerollTotal;
+			let dieType;
+			if (initialTotal < dc) {
+				const pools = Object.entries(this._state.getHitDiceByType())
+					.filter(([, pool]) => Number.isInteger(pool?.current) && pool.current > 0)
+					.map(([type, pool]) => ({type, current: pool.current}));
+				if (pools.length) {
+					const confirmed = await CharacterSheetModal.pGetUserBoolean({
+						title: "Marathoner — Forced March",
+						htmlDescription: "Spend one Hit Die (without healing) to reroll this failed forced-march save? You must use the new result. Declining makes the first failure final and adds one exhaustion.",
+						textYes: "Spend 1 Hit Die and reroll",
+						textNo: "Keep failure (+1 exhaustion)",
+						rollFollowup: CharacterSheetModal.buildRollFollowup({
+							label,
+							total: initialTotal,
+							naturalRoll: firstRoll.roll,
+							breakdown: getBreakdown(firstRoll),
+							outcome: `Failed vs DC ${dc}`,
+						}),
+					});
+					if (confirmed) {
+						if (pools.length === 1) dieType = pools[0].type;
+						else {
+							const choices = pools.map(pool => `${pool.type} (${pool.current} remaining)`);
+							const selected = await InputUiUtil.pGetUserEnum({
+								title: "Choose a Hit Die for Marathoner",
+								values: choices,
+								isResolveItem: true,
+							});
+							if (selected != null) dieType = pools[choices.indexOf(selected)]?.type;
+						}
+						if (dieType) {
+							finalRoll = this._rollD20({mode: firstRoll.mode});
+							rerollTotal = getTotal(finalRoll);
+							await this.pAnimateD20(finalRoll);
+						}
+					}
+				}
+			}
+			let result = this._state.resolveForcedMarchSave({dc, initialTotal, rerollTotal, dieType});
+			if (!result.ok && rerollTotal != null) {
+				JqueryUtil.doToast({type: "warning", content: `${result.error} Reroll discarded; the original forced-march failure is final.`});
+				finalRoll = firstRoll;
+				result = this._state.resolveForcedMarchSave({dc, initialTotal});
+			}
+			if (!result.ok) {
+				JqueryUtil.doToast({type: "warning", content: result.error});
+				return result;
+			}
+			this._renderCharacter?.();
+			const cost = result.hitDiceSpent ? `Spent 1${result.dieType} Hit Die (no healing; ${result.remaining} remaining).` : "No Hit Die spent.";
+			const exhaustionNote = result.passed ? "No exhaustion gained." : `Final failure: +${result.exhaustionGained} exhaustion${result.exhaustionGained ? "." : " (already at maximum)."}`;
+			this._showDiceResult(
+				label,
+				result.finalTotal,
+				getBreakdown(finalRoll),
+				result.passed ? "" : "charsheet__dice-result-total--fumble",
+				`Original ${initialTotal} vs DC ${dc}; final ${result.finalTotal} (${result.passed ? "pass" : "fail"}). ${cost} ${exhaustionNote}${conditionalNote ? `\n${conditionalNote}` : ""}${fortune.note ? `\n${fortune.note}` : ""}`,
+			);
+			await this._saveCurrentCharacter?.();
+			return result;
+		} finally {
+			this._forcedMarchRollPending = false;
+		}
 	}
 
 	async _rollSavingThrow (ability, event) {
