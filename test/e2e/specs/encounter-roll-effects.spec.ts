@@ -4,7 +4,7 @@ import {EncounterRollPage} from "../pages/EncounterRollPage";
 test("rendered encounter rolls use each creature's saved effects independently of batch selection", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
-	await expect(page.locator(".ew__statblock")).toHaveCount(2);
+	await expect(page.locator(".ew__statblock")).toHaveCount(1);
 	await expect(page.locator(".ew__statblock").first()).toContainText("Rally");
 	await encounter.clickRenderedRoll(0, "hit");
 	await expect(page.locator("#ew-status")).toContainText("Rally +3");
@@ -25,7 +25,8 @@ test("rendered encounter rolls use each creature's saved effects independently o
 	await expect(page.locator("#ew-status")).toContainText("no recognized");
 	await expect(encounter.rolledEntries).toHaveCount(priorCount + 3);
 	await expect(encounter.rolledEntries.filter({hasText: /1d20\s*\+\s*4/})).toHaveCount(1);
-	await encounter.clickRenderedRoll(1, "hit");
+	await encounter.focus(1);
+	await encounter.clickRenderedRoll(0, "hit");
 	await expect(encounter.rolledEntries).toHaveCount(priorCount + 4);
 	await expect(encounter.rolledEntries.filter({hasText: /1d20\s*\+\s*4/})).toHaveCount(2);
 	for (const title of await encounter.rolledEntries.filter({hasText: /1d20\s*\+\s*4/}).evaluateAll(elements => elements.map(it => it.getAttribute("title")))) {
@@ -34,6 +35,7 @@ test("rendered encounter rolls use each creature's saved effects independently o
 	await page.locator("#ew-none").click();
 	await expect(page.locator("#ew-summary")).toContainText("0 of 2 selected as targets");
 	const countWithNoSelection = await encounter.rolledEntries.count();
+	await encounter.focus(0);
 	await encounter.clickRenderedRoll(0, "hit");
 	await expect(encounter.rolledEntries).toHaveCount(countWithNoSelection + 1);
 	await expect(encounter.rolledEntries.filter({hasText: /2d20dl1\s*\+\s*7/})).toHaveCount(2);
@@ -43,6 +45,7 @@ test("rendered encounter rolls use each creature's saved effects independently o
 test("a rendered ability check and batch initiative share saved check effects without changing area notes", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
+	await encounter.openActions();
 	await page.locator("#ew-effects-summary").click();
 	await page.locator("#ew-mod-name").fill("Fortune");
 	await page.locator("#ew-mod-bonus").fill("+2");
@@ -58,6 +61,7 @@ test("a rendered ability check and batch initiative share saved check effects wi
 test("searchable cited presets ask for unknown attack context before changing the real roll", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
+	await encounter.openActions();
 	await page.locator("#ew-effects-summary").click();
 	await page.locator("#ew-preset-search").fill("IDRotF");
 	await expect(page.locator("#ew-preset option")).toHaveCount(1);

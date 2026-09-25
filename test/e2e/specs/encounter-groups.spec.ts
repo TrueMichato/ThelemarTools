@@ -2,11 +2,12 @@ import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
 
 test("effective-statblock roster group exposes mixed selection, collapse and independent member state", async ({page}) => {
-	await new EncounterRollPage(page).seed();
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed();
 	const group = page.locator(".ew__roster-group").first();
 	await expect(page.locator(".ew__group-header")).toHaveCount(1);
 	await expect(group.locator(".ew__group-title")).toContainText("Goblin ×2");
-	await expect(page.locator(".ew__statblock")).toHaveCount(2);
+	await expect(page.locator(".ew__statblock")).toHaveCount(1);
 	const groupCheck = group.locator(".ew__group-header input[type=checkbox]");
 	await expect(groupCheck).toHaveJSProperty("indeterminate", true);
 	await group.getByRole("button", {name: /Collapse.*group/}).click();
@@ -19,20 +20,23 @@ test("effective-statblock roster group exposes mixed selection, collapse and ind
 	await group.locator(".ew__roster-row input[type=checkbox]").last().uncheck();
 	await expect(groupCheck).toHaveJSProperty("indeterminate", true);
 	await expect(page.locator("#ew-summary")).toContainText("1 of 2 selected");
-	await page.locator(".ew__statblock").last().locator("[data-field=current]").fill("3");
-	await page.locator(".ew__statblock").last().locator("[data-field=current]").press("Tab");
+	await encounter.focus(1);
+	await page.locator(".ew__statblock [data-field=current]").fill("3");
+	await page.locator(".ew__statblock [data-field=current]").press("Tab");
 	await expect(group.locator(".ew__roster-meta").first()).toContainText("HP 7/7");
 	await expect(group.locator(".ew__roster-meta").last()).toContainText("HP 3/7");
 });
 
 test("a confirmed shared initiative acts once, survives reload, and restores original totals", async ({page}) => {
-	await new EncounterRollPage(page).seed();
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed();
 	const group = page.locator(".ew__roster-group").first();
 	await page.locator(".ew__statblock").first().locator("[data-field=initiative]").fill("9");
 	await page.locator(".ew__statblock").first().locator("[data-field=initiative]").press("Tab");
 	await expect(page.locator("#ew-status")).toContainText("to 9");
-	await page.locator(".ew__statblock").last().locator("[data-field=initiative]").fill("20");
-	await page.locator(".ew__statblock").last().locator("[data-field=initiative]").press("Tab");
+	await encounter.focus(1);
+	await page.locator(".ew__statblock [data-field=initiative]").fill("20");
+	await page.locator(".ew__statblock [data-field=initiative]").press("Tab");
 	await expect(page.locator("#ew-status")).toContainText("to 20");
 	await group.locator(".ew__group-init").fill("16");
 	await group.getByRole("button", {name: "Share turns"}).click();
@@ -54,12 +58,15 @@ test("a confirmed shared initiative acts once, survives reload, and restores ori
 	await expect(page.locator("#ew-round-status")).toContainText("Round 2");
 	await expect(page.locator(".ew__statblock [data-field=initiative]").first()).toBeDisabled();
 	await page.locator("#ew-all").click();
+	await encounter.openActions();
 	await page.locator("#ew-init-roll").click();
 	await expect(page.locator("#ew-result-table tbody tr")).toHaveCount(1);
 	await expect(page.locator(".ew__turn")).toHaveCount(1);
 	await page.getByRole("button", {name: "Individual turns"}).click();
 	await expect(page.locator(".ew__turn")).toHaveCount(2);
+	await encounter.focus(0);
 	await expect(page.locator(".ew__statblock [data-field=initiative]").first()).toHaveValue("9");
+	await encounter.focus(1);
 	await expect(page.locator(".ew__statblock [data-field=initiative]").last()).toHaveValue("20");
 	await expect(page.locator("#ew-round-status")).toContainText("Goblin #1");
 });
