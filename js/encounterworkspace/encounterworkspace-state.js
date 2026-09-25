@@ -2,6 +2,7 @@ import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate}
 import {getNpcTrackerHpAfterOperation} from "../dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {
 	getEncounterEffectTargets,
+	getEncounterModifierForPreset,
 	validateEncounterAreaNote,
 	validateEncounterModifier,
 } from "./encounterworkspace-effects.js";
@@ -120,6 +121,11 @@ export class EncounterWorkspaceState {
 			if (raw.version < 3) {
 				instance.areaNotes = [];
 				instance.modifiers = [];
+			} else {
+				instance.modifiers = instance.modifiers.map(modifier =>
+					modifier.presetId && !Object.hasOwn(modifier, "source")
+						? getEncounterModifierForPreset(modifier.presetId)
+						: modifier);
 			}
 			if (raw.version < 4) {
 				instance.hp = getHpDefaults(instance.monster);
@@ -241,8 +247,10 @@ export class EncounterWorkspaceState {
 				const existing = instance.modifiers || [];
 				let modifiers;
 				if (isAdd && modifier.presetId) {
-					modifiers = [...existing.filter(it => !it.presetId), modifier];
-					if (existing.length !== modifiers.length || existing.some(it => it.presetId && it.presetId !== modifier.presetId)) changedIds.push(instance.id);
+					const isDesecrated = modifier.presetId.startsWith("desecrated-");
+					const replaced = existing.filter(it => it.id === modifier.id || (isDesecrated && it.presetId?.startsWith("desecrated-")));
+					modifiers = [...existing.filter(it => !replaced.includes(it)), modifier];
+					if (replaced.length !== 1 || replaced[0].id !== modifier.id) changedIds.push(instance.id);
 				} else if (isAdd) {
 					if (existing.some(it => it.id === modifier.id)) throw new Error("This roll modifier ID is already in use.");
 					modifiers = [...existing, modifier];

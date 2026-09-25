@@ -36,7 +36,7 @@
 			<div>
 				<h2>Send to DM Screen</h2>
 				<p>Queue a one-time snapshot of selected monsters in this browser. In DM Screen, confirm Import on the Initiative Tracker panel you want. Later HP, conditions, and turns will not sync.</p>
-				<p>Area notes and custom roll modifiers stay in this workspace; they cannot be shown in the Initiative Tracker.</p>
+				<p>Area notes and roll effects stay in this workspace; they cannot be shown in the Initiative Tracker.</p>
 				<p id="ew-handoff-pending" class="ew__handoff-pending"></p>
 			</div>
 			<div class="ew__handoff-actions">
@@ -106,7 +106,7 @@
 						</select>
 						<button type="button" class="ve-btn ve-btn-primary" id="ew-init-roll">Roll selected initiative</button>
 					</div>
-					<p class="ew__operation-help">Uses each monster's initiative bonus as a Dexterity check, including applicable conditions and area modifiers. Edit a total on its statblock below.</p>
+					<p class="ew__operation-help">Uses each monster's initiative bonus as a Dexterity check, including applicable conditions and roll effects. Edit a total on its statblock below.</p>
 				</div>
 				<section class="ew__operation ew__turns" aria-label="Turn order">
 					<div class="ew__turns-header">
@@ -127,7 +127,7 @@
 					<div id="ew-result-table" class="ew__results-scroll"></div>
 				</section>
 				<details class="ew__effect-tools">
-					<summary id="ew-effects-summary">Area effects — traits, lair notes &amp; roll modifiers</summary>
+					<summary id="ew-effects-summary">Area notes &amp; roll effects</summary>
 					<div class="ew__effect-tools-grid">
 						<div class="ew__operation">
 							<h3>Area traits &amp; lair notes</h3>
@@ -151,21 +151,26 @@
 							<p class="ew__operation-help">Notes are reminders only. Lair actions are not triggered or rolled automatically.</p>
 						</div>
 						<div class="ew__operation">
-							<h3>Area roll modifiers</h3>
+							<h3>Roll effects</h3>
 							<div class="ew__effect-form">
-								<label for="ew-preset">Desecrated Ground rule</label>
+								<label for="ew-preset-search">Find a cited rule or house rule</label>
+								<input class="ve-form-control" id="ew-preset-search" type="search" placeholder="Search rule, source or effect">
+								<label for="ew-preset">Preset</label>
 								<select class="ve-form-control" id="ew-preset" aria-describedby="ew-preset-detail"></select>
 								<p class="ew__operation-help" id="ew-preset-detail"></p>
-								<button type="button" class="ve-btn ve-btn-primary" id="ew-preset-add">Apply to selected undead</button>
+								<button type="button" class="ve-btn ve-btn-primary" id="ew-preset-add">Apply to selected</button>
 							</div>
 							<div class="ew__effect-form">
-								<h4>Custom roll modifier</h4>
+								<h4>Custom roll effect</h4>
 								<label for="ew-mod-name">Name / source</label>
 								<input class="ve-form-control" id="ew-mod-name" type="text" placeholder="e.g. Blessed mist">
 								<fieldset class="ew__scopes">
 									<legend>Affects</legend>
-									<label><input id="ew-mod-check" type="checkbox" checked> Ability &amp; skill checks</label>
+									<label><input id="ew-mod-check" type="checkbox" checked> Ability checks (also skills &amp; initiative)</label>
+									<label><input id="ew-mod-skill" type="checkbox"> Skill checks only</label>
 									<label><input id="ew-mod-save" type="checkbox"> Saving throws</label>
+									<label><input id="ew-mod-initiative" type="checkbox"> Initiative only</label>
+									<label><input id="ew-mod-attack" type="checkbox"> Attack rolls</label>
 								</fieldset>
 								<label for="ew-mod-mode">Roll mode</label>
 								<select class="ve-form-control" id="ew-mod-mode">
@@ -179,11 +184,11 @@
 								<button type="button" class="ve-btn ve-btn-primary" id="ew-mod-add">Add to selected</button>
 							</div>
 							<div class="ew__effect-remove">
-								<label for="ew-mod-remove">Applied modifier</label>
+								<label for="ew-mod-remove">Applied roll effect</label>
 								<select class="ve-form-control" id="ew-mod-remove"></select>
 								<button type="button" class="ve-btn ve-btn-default" id="ew-mod-remove-selected">Remove from selected</button>
 							</div>
-							<p class="ew__operation-help">Only selected monsters are treated as standing in the area. Remove an effect from one monster using its statblock below.</p>
+							<p class="ew__operation-help">Choose only eligible monsters. Context-dependent presets ask before each roll; attack effects apply to recognized statblock d20 attack links, not damage or recharge. Remove a roll effect from one monster below. Area and lair notes above remain reminders only.</p>
 						</div>
 					</div>
 				</details>
