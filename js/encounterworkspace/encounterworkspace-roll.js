@@ -11,7 +11,7 @@ import {
 	getEncounterPreset,
 	getEncounterPresetCitation,
 } from "./encounterworkspace-effects.js";
-import {getEncounterEffectiveMonster} from "./encounterworkspace-state.js";
+import {getEncounterEffectiveMonster, getEncounterSharedGroup} from "./encounterworkspace-state.js";
 
 export const ENCOUNTER_ROLL_TYPES = [
 	{id: "initiative", name: "Initiative"},
@@ -151,10 +151,14 @@ export async function pRollEncounterSelection ({
 	const selected = new Set(state.selectedIds);
 	const results = [];
 	const failures = [];
+	const rolledGroups = new Set();
 
 	for (const instance of state.instances) {
 		if (!selected.has(instance.id)) continue;
-		const name = names.get(instance.id);
+		const group = rollType === "initiative" ? getEncounterSharedGroup(state, instance.id) : null;
+		if (group && rolledGroups.has(group.id)) continue;
+		if (group) rolledGroups.add(group.id);
+		const name = group ? `${names.get(group.memberIds[0])} ×${group.memberIds.length} (shared turn)` : names.get(instance.id);
 		try {
 			const monster = getEncounterEffectiveMonster(instance);
 			if (skill && !skill.ability) {

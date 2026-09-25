@@ -27,6 +27,7 @@ const getState = ({selectedIds = ["one", "two"], conditions = [[], []], modifier
 		{id: "one", monster, conditions: conditions[0], modifiers: modifiers[0]},
 		{id: "two", monster, conditions: conditions[1], modifiers: modifiers[1]},
 	],
+	groups: [],
 	selectedIds,
 });
 const skills = [

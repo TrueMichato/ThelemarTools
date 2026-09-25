@@ -202,7 +202,7 @@ describe("Encounter Workspace instance statblock edits", () => {
 				saved.instances[0].modifiers = [{id: "bonus", name: "Fog", scopes: ["save"], mode: "advantage", bonus: 0}];
 			}
 			const loaded = await store.pLoad();
-			expect(loaded.version).toBe(5);
+			expect(loaded.version).toBe(6);
 			expect(loaded.instances[0].statblockOperations).toEqual([]);
 			if (version >= 3) {
 				expect(loaded.instances[0].areaNotes[0].kind).toBe("lair");

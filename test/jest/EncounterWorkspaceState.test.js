@@ -168,7 +168,7 @@ describe("Encounter Workspace working copy", () => {
 		const removed = EncounterWorkspaceState.withConditions(secondPoisoned, {condition: "poisoned", isAdd: false});
 		await store.pSave(removed);
 		const restored = await store.pLoad();
-		expect(restored.version).toBe(5);
+		expect(restored.version).toBe(6);
 		expect(restored.instances.map(it => it.conditions)).toEqual([[], ["poisoned"]]);
 		expect(restored.instances.map(it => it.areaNotes)).toEqual([[], []]);
 		expect(restored.instances.map(it => it.modifiers)).toEqual([[], []]);
@@ -191,7 +191,7 @@ describe("Encounter Workspace working copy", () => {
 		delete legacy.instances[0].conditions;
 		storage.values.set("encounterWorkspaceState_encounterworkspace.html", legacy);
 		const loaded = await store.pLoad();
-		expect(loaded.version).toBe(5);
+		expect(loaded.version).toBe(6);
 		expect(loaded.instances[0].conditions).toEqual([]);
 		expect(loaded.instances[0].areaNotes).toEqual([]);
 		expect(loaded.instances[0].modifiers).toEqual([]);
@@ -207,7 +207,7 @@ describe("Encounter Workspace working copy", () => {
 		storage.values.set("encounterWorkspaceState_encounterworkspace.html", v2);
 		storage.pSetForPage.mockClear();
 		const upgraded = await store.pLoad();
-		expect(upgraded).toMatchObject({version: 5, selectedIds: state.selectedIds, omissions: state.omissions, sourceList: state.sourceList});
+		expect(upgraded).toMatchObject({version: 6, selectedIds: state.selectedIds, omissions: state.omissions, sourceList: state.sourceList});
 		expect(upgraded.instances[0]).toMatchObject({conditions: ["dreambound"], areaNotes: [], modifiers: []});
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 	});
@@ -426,7 +426,7 @@ describe("Encounter Workspace working copy", () => {
 	it("does not accept invalid or unsupported persisted data, or silently erase it", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
-		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 6, instances: []});
+		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 7, instances: []});
 		await expect(store.pLoad()).rejects.toThrow(/unsupported version/);
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 		await expect(store.pSave({
