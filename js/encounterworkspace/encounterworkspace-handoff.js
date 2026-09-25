@@ -1,5 +1,6 @@
 import {getNpcTrackerCanonicalConditionName} from "../dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getEncounterInstanceLabels} from "./encounterworkspace-roll.js";
+import {getEncounterEffectiveMonster, getEncounterInitiativeTotal} from "./encounterworkspace-state.js";
 
 const STORAGE_KEY = "encounterWorkspaceInitiativeHandoffV1";
 const LOCK_NAME = "encounterWorkspaceInitiativeHandoffV1";
@@ -16,7 +17,7 @@ export function getEncounterHandoffSnapshot ({state, id = CryptUtil.uid(), creat
 	if (!instances.length) throw new Error("Select at least one monster before queuing an encounter.");
 	if (instances.length !== selected.size) throw new Error("Some selected monsters no longer exist; refresh the encounter.");
 	const labels = getEncounterInstanceLabels(state.instances);
-	const unrolled = instances.filter(it => !Number.isSafeInteger(it.initiative));
+	const unrolled = instances.filter(it => !Number.isSafeInteger(getEncounterInitiativeTotal(state, it)));
 	if (unrolled.length) throw new Error(`Enter or roll initiative for ${unrolled.map(it => labels.get(it.id)).join(", ")} before queuing.`);
 
 	return validateEncounterHandoffSnapshot({
@@ -27,10 +28,10 @@ export function getEncounterHandoffSnapshot ({state, id = CryptUtil.uid(), creat
 		entries: instances.map(it => ({
 			instanceId: it.id,
 			alias: labels.get(it.id),
-			monster: copy(it.monster),
+			monster: copy(getEncounterEffectiveMonster(it)),
 			hp: {...it.hp},
 			conditions: [...it.conditions],
-			initiative: it.initiative,
+			initiative: getEncounterInitiativeTotal(state, it),
 		})),
 	});
 }

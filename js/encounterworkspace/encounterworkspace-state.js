@@ -1,15 +1,20 @@
 import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate} from "../dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerHpAfterOperation} from "../dmscreen/npctracker/dmscreen-npctracker-hp.js";
+import {BestiaryQuickActionsEngine, BestiaryQuickActionsOperationTypes} from "../bestiary/bestiary-quick-actions-engine.js";
 import {
 	getEncounterEffectTargets,
+	getEncounterIsLegacyPresetId,
+	getEncounterModifierForPreset,
 	validateEncounterAreaNote,
 	validateEncounterModifier,
 } from "./encounterworkspace-effects.js";
 
 const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
-const VERSION = 4;
+const VERSION = 6;
 const MAX_INSTANCES = 1000;
+const MAX_STATBLOCK_OPERATIONS = 100;
+const MAX_OPERATION_SIZE = 200_000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
 
@@ -39,6 +44,103 @@ function validateHp (hp) {
 	}
 }
 
+const isRecord = value => value && typeof value === "object" && !Array.isArray(value);
+
+function validateStatblockOperations (monster, operations) {
+	if (!Array.isArray(operations) || operations.length > MAX_STATBLOCK_OPERATIONS) {
+		throw new Error("The saved encounter contains an invalid statblock history. It has not been changed.");
+	}
+	const ids = new Set();
+	for (const operation of operations) {
+		let serialized;
+		try { serialized = JSON.stringify(operation); } catch { /* Rejected below. */ }
+		if (!isRecord(operation) || typeof operation.id !== "string" || !operation.id.trim()
+				|| ids.has(operation.id) || !serialized || serialized.length > MAX_OPERATION_SIZE
+				|| !Object.values(BestiaryQuickActionsOperationTypes).includes(operation.type)
+				|| (operation.type === "patch" && !isRecord(operation.patch ?? operation.data?.patch))
+				|| (operation.type === "addEntry" && !isRecord(operation.data?.entry))
+				|| (operation.type === "applyAreaTrait" && !isRecord(operation.data?.entry))
+				|| (operation.type === "applyItem" && (!isRecord(operation.data) || !isRecord(operation.data.patch)))
+				|| (operation.type === "setLegendaryGroup" && !isRecord(operation.legendaryGroup ?? operation.data?.legendaryGroup))) {
+			throw new Error("The saved encounter contains an invalid statblock operation. It has not been changed.");
+		}
+		ids.add(operation.id);
+	}
+	try {
+		BestiaryQuickActionsEngine.applyOperations({monster, operations});
+	} catch (e) {
+		throw new Error(`The saved encounter contains an invalid statblock edit: ${e.message}. It has not been changed.`, {cause: e});
+	}
+}
+
+export function getEncounterEffectiveMonster (instance) {
+	return instance.statblockOperations?.length
+		? BestiaryQuickActionsEngine.applyOperations({monster: instance.monster, operations: instance.statblockOperations})
+		: instance.monster;
+}
+
+function getStatblockKey (instance) {
+	const normalize = value => Array.isArray(value) ? value.map(normalize)
+		: isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])]))
+			: value;
+	return JSON.stringify(normalize(getEncounterEffectiveMonster(instance)));
+}
+
+export function getEncounterViewGroups (state) {
+	const byId = new Map(state.instances.map(it => [it.id, it]));
+	const claimed = new Set(state.groups.flatMap(it => it.memberIds));
+	const excluded = new Set(state.ungroupedIds);
+	const groups = [];
+	const implicit = new Map();
+	const explicit = new Set();
+	for (const instance of state.instances) {
+		if (claimed.has(instance.id)) {
+			const group = state.groups.find(it => it.memberIds.includes(instance.id));
+			if (!explicit.has(group.id)) {
+				groups.push({...group, isExplicit: true});
+				explicit.add(group.id);
+			}
+			continue;
+		}
+		if (excluded.has(instance.id)) {
+			groups.push({id: `view:${instance.id}`, memberIds: [instance.id], isExplicit: false});
+			continue;
+		}
+		const key = getStatblockKey(instance);
+		let group = implicit.get(key);
+		if (!group) {
+			group = {id: `view:${instance.id}`, memberIds: [], isExplicit: false};
+			implicit.set(key, group);
+			groups.push(group);
+		}
+		group.memberIds.push(instance.id);
+	}
+	return groups.map(group => ({...group, members: group.memberIds.map(id => byId.get(id))}));
+}
+
+export function getEncounterSharedGroup (state, id) {
+	return state.groups.find(group => group.sharedTurn && (group.id === id || group.memberIds.includes(id)));
+}
+
+export function getEncounterCompatibleGroups (state, id) {
+	const instance = state.instances.find(it => it.id === id);
+	if (!instance) throw new Error("This encounter monster no longer exists.");
+	const key = getStatblockKey(instance);
+	return state.groups.filter(group => getStatblockKey(state.instances.find(it => it.id === group.memberIds[0])) === key);
+}
+
+export function getEncounterInitiativeTotal (state, instance) {
+	const group = getEncounterSharedGroup(state, instance.id);
+	return group ? group.initiative : instance.initiative;
+}
+
+function getTurnAfterGroupRemoval (state, group) {
+	if (state.turn.activeId !== group.id) return state.turn;
+	const next = group.memberIds.map(id => state.instances.find(it => it.id === id))
+		.find(instance => instance?.initiative != null);
+	return next ? {...state.turn, activeId: next.id} : {round: 0, activeId: null};
+}
+
 export async function pResolveSavedBestiaryItem (item) {
 	const [resolved] = await ListUtil.pGetSublistEntities_fromHover({
 		exportedSublist: {items: [item]},
@@ -49,11 +151,11 @@ export async function pResolveSavedBestiaryItem (item) {
 
 export class EncounterWorkspaceState {
 	static getEmpty () {
-		return {version: VERSION, sourceList: null, instances: [], selectedIds: [], omissions: [], turn: {round: 0, activeId: null}};
+		return {version: VERSION, sourceList: null, instances: [], selectedIds: [], omissions: [], groups: [], ungroupedIds: [], turn: {round: 0, activeId: null}};
 	}
 
 	static validate (raw) {
-		if (!raw || ![1, 2, 3, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
+		if (!raw || ![1, 2, 3, 4, 5, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
 		if (
 			(raw.sourceList !== null && (typeof raw.sourceList?.name !== "string" || typeof raw.sourceList?.saveId !== "string"))
 			|| !Array.isArray(raw.instances)
@@ -94,6 +196,7 @@ export class EncounterWorkspaceState {
 					throw new Error("The saved encounter contains invalid initiative. It has not been changed.");
 				}
 			}
+			if (raw.version >= 5) validateStatblockOperations(instance.monster, instance.statblockOperations);
 			ids.add(instance.id);
 		}
 		if (
@@ -101,16 +204,53 @@ export class EncounterWorkspaceState {
 			|| new Set(raw.selectedIds).size !== raw.selectedIds.length
 			|| raw.omissions.some(it => typeof it?.hash !== "string" || typeof it?.reason !== "string")
 		) throw new Error("The saved encounter contains invalid targets or load notices. It has not been changed.");
+		if (raw.version >= 6) {
+			if (!Array.isArray(raw.groups) || !Array.isArray(raw.ungroupedIds)) {
+				throw new Error("The saved encounter contains invalid groups. It has not been changed.");
+			}
+			const groupIds = new Set();
+			const members = new Set();
+			for (const group of raw.groups) {
+				if (!isRecord(group) || typeof group.id !== "string" || !group.id.trim() || group.id.startsWith("view:")
+					|| ids.has(group.id) || groupIds.has(group.id)
+					|| !Array.isArray(group.memberIds) || !group.memberIds.length
+					|| typeof group.sharedTurn !== "boolean"
+					|| (group.sharedTurn ? group.initiative !== null && !Number.isSafeInteger(group.initiative) : group.initiative !== null)
+					|| group.memberIds.some(id => !ids.has(id) || members.has(id))
+					|| new Set(group.memberIds).size !== group.memberIds.length) {
+					throw new Error("The saved encounter contains invalid groups. It has not been changed.");
+				}
+				const key = getStatblockKey(raw.instances.find(it => it.id === group.memberIds[0]));
+				if (group.memberIds.some(id => getStatblockKey(raw.instances.find(it => it.id === id)) !== key)) {
+					throw new Error("A saved group contains different effective statblocks. It has not been changed.");
+				}
+				groupIds.add(group.id);
+				group.memberIds.forEach(id => members.add(id));
+			}
+			if (raw.ungroupedIds.some(id => !ids.has(id) || members.has(id))
+				|| new Set(raw.ungroupedIds).size !== raw.ungroupedIds.length) {
+				throw new Error("The saved encounter contains invalid split members. It has not been changed.");
+			}
+		}
 		if (raw.version >= 4 && (
 			!raw.turn
 			|| !Number.isSafeInteger(raw.turn.round) || raw.turn.round < 0
 			|| (raw.turn.round === 0 ? raw.turn.activeId !== null
-				: !ids.has(raw.turn.activeId) || raw.instances.find(it => it.id === raw.turn.activeId)?.initiative == null)
+				: raw.version < 6
+					? !ids.has(raw.turn.activeId) || raw.instances.find(it => it.id === raw.turn.activeId)?.initiative == null
+					: !(raw.groups.some(group => group.sharedTurn && group.id === raw.turn.activeId && group.initiative != null)
+						|| (ids.has(raw.turn.activeId)
+							&& !raw.groups.some(group => group.sharedTurn && group.memberIds.includes(raw.turn.activeId))
+							&& raw.instances.find(it => it.id === raw.turn.activeId)?.initiative != null)))
 		)) throw new Error("The saved encounter contains an invalid active turn. It has not been changed.");
 
 		const state = copy(raw);
 		state.version = VERSION;
 		if (raw.version < 4) state.turn = {round: 0, activeId: null};
+		if (raw.version < 6) {
+			state.groups = [];
+			state.ungroupedIds = [];
+		}
 		state.instances.forEach(instance => {
 			instance.conditions = raw.version === 1 ? [] : getNpcTrackerConditionsAfterUpdate({
 				conditions: instance.conditions,
@@ -120,11 +260,17 @@ export class EncounterWorkspaceState {
 			if (raw.version < 3) {
 				instance.areaNotes = [];
 				instance.modifiers = [];
+			} else {
+				instance.modifiers = instance.modifiers.map(modifier =>
+					getEncounterIsLegacyPresetId(modifier.presetId) && !Object.hasOwn(modifier, "source")
+						? getEncounterModifierForPreset(modifier.presetId)
+						: modifier);
 			}
 			if (raw.version < 4) {
 				instance.hp = getHpDefaults(instance.monster);
 				instance.initiative = null;
 			}
+			if (raw.version < 5) instance.statblockOperations = [];
 			freezeSnapshot(instance.monster);
 		});
 		return state;
@@ -173,6 +319,7 @@ export class EncounterWorkspaceState {
 					conditions: [],
 					areaNotes: [],
 					modifiers: [],
+					statblockOperations: [],
 					hp: getHpDefaults(resolved.entity),
 					initiative: null,
 				});
@@ -189,6 +336,184 @@ export class EncounterWorkspaceState {
 		if (isSelected) selectedIds.add(id);
 		else selectedIds.delete(id);
 		return this.validate({...state, selectedIds: [...selectedIds]});
+	}
+
+	static withGroup ({state, memberIds, id}) {
+		if (!Array.isArray(memberIds) || memberIds.length < 2 || new Set(memberIds).size !== memberIds.length
+			|| typeof id !== "string" || !id.trim() || id.startsWith("view:")
+			|| state.instances.some(it => it.id === id) || state.groups.some(it => it.id === id)) {
+			throw new Error("Choose two or more distinct monsters and a new group ID.");
+		}
+		const members = memberIds.map(memberId => state.instances.find(it => it.id === memberId));
+		if (members.some(it => !it) || members.some(it => state.groups.some(group => group.memberIds.includes(it.id)))
+			|| members.some(it => getStatblockKey(it) !== getStatblockKey(members[0]))) {
+			throw new Error("Only ungrouped monsters with identical effective statblocks can form a group.");
+		}
+		return this.validate({
+			...state,
+			groups: [...state.groups, {id, memberIds, sharedTurn: false, initiative: null}],
+			ungroupedIds: state.ungroupedIds.filter(it => !memberIds.includes(it)),
+		});
+	}
+
+	static withGroupSplit (state, {id}) {
+		const instance = state.instances.find(it => it.id === id);
+		if (!instance) throw new Error("This encounter monster no longer exists.");
+		const group = state.groups.find(it => it.memberIds.includes(id));
+		if (!group && state.ungroupedIds.includes(id)) throw new Error("This monster is already split out.");
+		const groups = group ? state.groups.flatMap(it => {
+			if (it !== group) return [it];
+			const memberIds = it.memberIds.filter(memberId => memberId !== id);
+			return memberIds.length ? [{...it, memberIds}] : [];
+		}) : state.groups;
+		const turn = group && group.memberIds.length === 1 ? getTurnAfterGroupRemoval(state, group) : state.turn;
+		return this.validate({...state, groups, turn, ungroupedIds: [...state.ungroupedIds, id]});
+	}
+
+	static withGroupRejoin (state, {id, groupId = null}) {
+		const instance = state.instances.find(it => it.id === id);
+		if (!instance || !state.ungroupedIds.includes(id)) throw new Error("This split monster is no longer available.");
+		const group = groupId == null ? null : state.groups.find(it => it.id === groupId);
+		if (groupId != null && (!group || getStatblockKey(instance) !== getStatblockKey(state.instances.find(it => it.id === group.memberIds[0])))) {
+			throw new Error("The selected group has a different effective statblock.");
+		}
+		return this.validate({
+			...state,
+			groups: state.groups.map(it => it === group ? {...it, memberIds: [...it.memberIds, id]} : it),
+			ungroupedIds: state.ungroupedIds.filter(it => it !== id),
+		});
+	}
+
+	static withGroupDisband (state, {groupId}) {
+		const group = state.groups.find(it => it.id === groupId);
+		if (!group) throw new Error("This encounter group no longer exists.");
+		return this.validate({
+			...state,
+			groups: state.groups.filter(it => it !== group),
+			ungroupedIds: [...state.ungroupedIds, ...group.memberIds],
+			turn: getTurnAfterGroupRemoval(state, group),
+		});
+	}
+
+	static withSharedTurn (state, {groupId, isShared, total = null}) {
+		const group = state.groups.find(it => it.id === groupId);
+		if (!group) throw new Error("This encounter group no longer exists.");
+		if (isShared && !Number.isSafeInteger(total)) throw new Error("Choose or roll a whole-number group initiative.");
+		return this.validate({
+			...state,
+			groups: state.groups.map(it => it === group ? {...it, sharedTurn: isShared, initiative: isShared ? total : null} : it),
+			turn: isShared
+				? state.turn.round && group.memberIds.includes(state.turn.activeId)
+					? {...state.turn, activeId: group.id}
+					: state.turn
+				: getTurnAfterGroupRemoval(state, group),
+		});
+	}
+
+	static withStatblockChanges (state, changes) {
+		if (!Array.isArray(changes) || !changes.length) throw new Error("Choose a statblock edit to apply.");
+		const byId = new Map();
+		for (const change of changes) {
+			if (!change?.id || byId.has(change.id) || !state.instances.some(it => it.id === change.id)) {
+				throw new Error("A statblock target no longer exists or appears twice.");
+			}
+			if (!Array.isArray(change.addOperations) || !Array.isArray(change.removeIds)
+				|| change.removeIds.some(id => typeof id !== "string")) throw new Error("Choose valid statblock changes.");
+			byId.set(change.id, change);
+		}
+		const changedIds = [];
+		const resetHpIds = [];
+		const instances = state.instances.map(instance => {
+			const change = byId.get(instance.id);
+			if (!change) return instance;
+			const before = getEncounterEffectiveMonster(instance);
+			const prior = instance.statblockOperations || [];
+			const removed = new Set(change.removeIds);
+			if (removed.size !== change.removeIds.length || change.removeIds.some(id => !prior.some(it => it.id === id))) {
+				throw new Error("A statblock operation no longer exists.");
+			}
+			const operations = [...prior.filter(it => !removed.has(it.id)), ...change.addOperations];
+			if (JSON.stringify(operations) === JSON.stringify(prior)) return instance;
+			validateStatblockOperations(instance.monster, operations);
+			const after = BestiaryQuickActionsEngine.applyOperations({monster: instance.monster, operations});
+			const hpChanged = !Object.is(before.hp?.average, after.hp?.average);
+			changedIds.push(instance.id);
+			if (hpChanged) resetHpIds.push(instance.id);
+			return {
+				...instance,
+				statblockOperations: operations,
+				hp: hpChanged ? {...getHpDefaults(after), temp: instance.hp.temp} : instance.hp,
+			};
+		});
+		const byEffective = new Map(instances.map(it => [it.id, getStatblockKey(it)]));
+		const splitIds = [];
+		const groups = state.groups.map(group => {
+			const anchorId = group.memberIds.find(id => !changedIds.includes(id)) || group.memberIds[0];
+			const key = byEffective.get(anchorId);
+			const memberIds = group.memberIds.filter(id => {
+				if (byEffective.get(id) === key) return true;
+				splitIds.push(id);
+				return false;
+			});
+			return {...group, memberIds};
+		});
+		const next = this.validate({
+			...state,
+			instances,
+			groups,
+		});
+		return {state: next, changedIds, resetHpIds, splitIds};
+	}
+
+	static previewBulkStatblockOperation (state, {operation, targetIds = state.selectedIds}) {
+		if (!Array.isArray(targetIds) || !targetIds.length || new Set(targetIds).size !== targetIds.length) {
+			throw new Error("Select at least one monster for the bulk statblock edit.");
+		}
+		const targets = new Set(targetIds);
+		if (state.instances.filter(it => targets.has(it.id)).length !== targets.size) throw new Error("An encounter target no longer exists.");
+		const legendaryGroup = operation.type === "setLegendaryGroup"
+			? operation.legendaryGroup ?? operation.data?.legendaryGroup
+			: null;
+		const changes = [];
+		const skipped = [];
+		for (const instance of state.instances) {
+			if (!targets.has(instance.id)) continue;
+			const current = getEncounterEffectiveMonster(instance);
+			let reason = null;
+			const typeTags = typeof current.type === "object" && Array.isArray(current.type?.tags)
+				? current.type.tags
+				: [];
+			if (operation.type === "minion" && (
+				instance.statblockOperations.some(it => it.type === "minion")
+				|| typeTags.some(tag => `${typeof tag === "object" ? tag.tag : tag}`.toLowerCase() === "minion")
+				|| (Array.isArray(current.trait) && current.trait.some(it => it.name?.toLowerCase() === "minion"))
+			)) reason = "already a minion";
+			if (operation.type === "applyAreaTrait" && instance.statblockOperations.some(it =>
+				it.type === "applyAreaTrait" && it.sourceUid === operation.sourceUid)) reason = "area trait already applied";
+			if (operation.type === "addEntry" && current[operation.data?.section]?.some(it =>
+				it.name?.toLowerCase() === operation.data?.entry?.name?.toLowerCase())) reason = "legendary entry already exists";
+			if (operation.type === "setLegendaryGroup" && current.legendaryGroup && legendaryGroup
+				&& current.legendaryGroup.name === legendaryGroup.name
+				&& current.legendaryGroup.source === legendaryGroup.source) reason = "lair group already applied";
+			if (reason) {
+				skipped.push({id: instance.id, reason});
+				continue;
+			}
+			const removeIds = operation.type === "setLegendaryGroup"
+				? instance.statblockOperations.filter(it => it.type === "setLegendaryGroup").map(it => it.id)
+				: [];
+			try {
+				validateStatblockOperations(instance.monster, [
+					...instance.statblockOperations.filter(it => !removeIds.includes(it.id)),
+					operation,
+				]);
+				changes.push({id: instance.id, addOperations: [operation], removeIds});
+			} catch (e) {
+				skipped.push({id: instance.id, reason: e.message});
+			}
+		}
+		if (!changes.length) return {state, changedIds: [], resetHpIds: [], splitIds: [], skipped};
+		return {...this.withStatblockChanges(state, changes), skipped};
 	}
 
 	static withConditions (state, {condition, isAdd, targetIds = state.selectedIds}) {
@@ -241,8 +566,10 @@ export class EncounterWorkspaceState {
 				const existing = instance.modifiers || [];
 				let modifiers;
 				if (isAdd && modifier.presetId) {
-					modifiers = [...existing.filter(it => !it.presetId), modifier];
-					if (existing.length !== modifiers.length || existing.some(it => it.presetId && it.presetId !== modifier.presetId)) changedIds.push(instance.id);
+					const isDesecrated = modifier.presetId.startsWith("desecrated-");
+					const replaced = existing.filter(it => it.id === modifier.id || (isDesecrated && it.presetId?.startsWith("desecrated-")));
+					modifiers = [...existing.filter(it => !replaced.includes(it)), modifier];
+					if (replaced.length !== 1 || replaced[0].id !== modifier.id) changedIds.push(instance.id);
 				} else if (isAdd) {
 					if (existing.some(it => it.id === modifier.id)) throw new Error("This roll modifier ID is already in use.");
 					modifiers = [...existing, modifier];
@@ -314,15 +641,23 @@ export class EncounterWorkspaceState {
 	}
 
 	static getInitiativeOrder (state) {
-		return state.instances.map((instance, order) => ({instance, order}))
-			.filter(({instance}) => instance.initiative !== null)
-			.sort((a, b) => b.instance.initiative - a.instance.initiative || a.order - b.order)
-			.map(({instance}) => instance);
+		const seen = new Set();
+		return state.instances.flatMap((instance, order) => {
+			const group = getEncounterSharedGroup(state, instance.id);
+			if (group) {
+				if (seen.has(group.id) || group.initiative == null) return [];
+				seen.add(group.id);
+				return [{entry: {id: group.id, initiative: group.initiative, memberIds: group.memberIds}, order}];
+			}
+			return instance.initiative == null ? [] : [{entry: instance, order}];
+		})
+			.sort((a, b) => b.entry.initiative - a.entry.initiative || a.order - b.order)
+			.map(({entry}) => entry);
 	}
 
 	static withInitiative (state, {id, total}) {
 		if (total !== null && !Number.isSafeInteger(total)) throw new Error("Initiative must be a whole number or unset.");
-		if (!state.instances.some(it => it.id === id)) throw new Error("This encounter target no longer exists.");
+		if (!state.instances.some(it => it.id === id) && !getEncounterSharedGroup(state, id)) throw new Error("This encounter target no longer exists.");
 		return this.withInitiativeResults(state, [{id, total}]);
 	}
 
@@ -330,17 +665,21 @@ export class EncounterWorkspaceState {
 		const ids = new Set(state.instances.map(it => it.id));
 		const totals = new Map();
 		for (const result of results) {
-			if (!ids.has(result.id) || totals.has(result.id) || (result.total !== null && !Number.isSafeInteger(result.total))) {
+			const shared = getEncounterSharedGroup(state, result.id);
+			const id = shared?.id || result.id;
+			if ((!ids.has(result.id) && !shared) || totals.has(id)
+				|| (result.total !== null && !Number.isSafeInteger(result.total))) {
 				throw new Error("Initiative results contain an invalid encounter target or total.");
 			}
-			totals.set(result.id, result.total);
+			totals.set(id, result.total);
 		}
-		const turn = totals.get(state.turn.activeId) === null
+		const turn = totals.has(state.turn.activeId) && totals.get(state.turn.activeId) === null
 			? {round: 0, activeId: null}
 			: state.turn;
 		return this.validate({
 			...state,
 			turn,
+			groups: state.groups.map(group => totals.has(group.id) ? {...group, initiative: totals.get(group.id)} : group),
 			instances: state.instances.map(instance => totals.has(instance.id)
 				? {...instance, initiative: totals.get(instance.id)}
 				: instance),

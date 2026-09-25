@@ -1,12 +1,37 @@
-import {EncounterWorkspaceState, EncounterWorkspaceStore} from "./encounterworkspace/encounterworkspace-state.js";
-import {ENCOUNTER_ROLL_TYPES, getEncounterInstanceLabels, pRollEncounterSelection} from "./encounterworkspace/encounterworkspace-roll.js";
+import {
+	EncounterWorkspaceState,
+	EncounterWorkspaceStore,
+	getEncounterCompatibleGroups,
+	getEncounterEffectiveMonster,
+	getEncounterInitiativeTotal,
+	getEncounterSharedGroup,
+	getEncounterViewGroups,
+} from "./encounterworkspace/encounterworkspace-state.js";
+import {EncounterWorkspacePostSaveError, EncounterWorkspaceQuickActionsAdapter} from "./encounterworkspace/encounterworkspace-quick-actions.js";
+import {BestiaryQuickActionsUi} from "./bestiary/bestiary-quick-actions-ui.js";
+import {BestiaryQuickActionsOperations} from "./bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsStructuredEditor} from "./bestiary/bestiary-quick-actions-structured.js";
+import {
+	ENCOUNTER_ROLL_TYPES,
+	getEncounterInstanceLabels,
+	getEncounterRollFromPackedDice,
+	pRollEncounterInstance,
+	pRollEncounterSelection,
+} from "./encounterworkspace/encounterworkspace-roll.js";
 import {getNpcTrackerFallbackReferenceData, getNpcTrackerSkillDescriptors, pGetNpcTrackerReferenceData} from "./dmscreen/npctracker/dmscreen-npctracker-data.js";
 import {getNpcTrackerConditionColor, getNpcTrackerConditionHoverMeta, getNpcTrackerConditionPickerModel} from "./dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerSignedNumber} from "./dmscreen/npctracker/dmscreen-npctracker-roll.js";
 import {getNpcTrackerHpInputValue, getNpcTrackerHpOperation} from "./dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {InitiativeTrackerRowUtil} from "./dmscreen/panels/initiativetracker/dmscreen-initiativetracker-consts.js";
-import {ENCOUNTER_DESECRATED_PRESETS, getEncounterModifierForPreset} from "./encounterworkspace/encounterworkspace-effects.js";
+import {
+	ENCOUNTER_ROLL_PRESETS,
+	getEncounterModifierForPreset,
+	getEncounterPresetCitation,
+} from "./encounterworkspace/encounterworkspace-effects.js";
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
+import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-view.js";
+
+const STATBLOCK_BATCH_SIZE = 12;
 
 export class EncounterWorkspacePage {
 	constructor ({store = new EncounterWorkspaceStore(), handoffStore = new EncounterWorkspaceHandoffStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
@@ -23,11 +48,20 @@ export class EncounterWorkspacePage {
 		this._isCatalogReady = false;
 		this._tiles = new Map();
 		this._checks = new Map();
+		this._groupChecks = new Map();
+		this._groupInitiativeInputs = new Map();
+		this._collapsedGroups = new Set();
 		this._conditionContainers = new Map();
 		this._effectContainers = new Map();
 		this._vitalContainers = new Map();
 		this._rosterMeta = new Map();
 		this._hpUndo = [];
+		this._focusedInstanceId = null;
+		this._viewMode = "focused";
+		this._visibleIds = [];
+		this._shownCards = STATBLOCK_BATCH_SIZE;
+		this._expandedCards = new Set();
+		this._cardSummaries = new Map();
 		this._referenceData = getNpcTrackerFallbackReferenceData();
 
 		this._eleMain = document.getElementById("encounter-workspace");
@@ -45,6 +79,7 @@ export class EncounterWorkspacePage {
 		this._btnChoose = document.getElementById("ew-choose");
 		this._btnSelectAll = document.getElementById("ew-all");
 		this._btnSelectNone = document.getElementById("ew-none");
+		this._btnGroupSelected = document.getElementById("ew-group-selected");
 		this._selRollType = document.getElementById("ew-roll-type");
 		this._selRollKey = document.getElementById("ew-roll-key");
 		this._selRollMode = document.getElementById("ew-roll-mode");
@@ -60,11 +95,15 @@ export class EncounterWorkspacePage {
 		this._selNoteRemove = document.getElementById("ew-note-remove");
 		this._btnNoteRemove = document.getElementById("ew-note-remove-selected");
 		this._selPreset = document.getElementById("ew-preset");
+		this._inpPresetSearch = document.getElementById("ew-preset-search");
 		this._elePresetDetail = document.getElementById("ew-preset-detail");
 		this._btnPresetAdd = document.getElementById("ew-preset-add");
 		this._inpModName = document.getElementById("ew-mod-name");
 		this._checkModCheck = document.getElementById("ew-mod-check");
+		this._checkModSkill = document.getElementById("ew-mod-skill");
 		this._checkModSave = document.getElementById("ew-mod-save");
+		this._checkModInitiative = document.getElementById("ew-mod-initiative");
+		this._checkModAttack = document.getElementById("ew-mod-attack");
 		this._selModMode = document.getElementById("ew-mod-mode");
 		this._inpModBonus = document.getElementById("ew-mod-bonus");
 		this._btnModAdd = document.getElementById("ew-mod-add");
@@ -79,6 +118,12 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart = document.getElementById("ew-turn-start");
 		this._btnTurnNext = document.getElementById("ew-turn-next");
 		this._btnTurnReset = document.getElementById("ew-turn-reset");
+		this._selBulkType = document.getElementById("ew-bulk-type");
+		this._selBulkChoice = document.getElementById("ew-bulk-choice");
+		this._inpBulkName = document.getElementById("ew-bulk-name");
+		this._inpBulkDescription = document.getElementById("ew-bulk-description");
+		this._inpBulkCost = document.getElementById("ew-bulk-cost");
+		this._btnBulkPreview = document.getElementById("ew-bulk-preview");
 		this._btnHandoffQueue = document.getElementById("ew-handoff-queue");
 		this._btnHandoffClear = document.getElementById("ew-handoff-clear");
 		this._eleHandoffPending = document.getElementById("ew-handoff-pending");
@@ -86,12 +131,25 @@ export class EncounterWorkspacePage {
 		this._eleRoundStatus = document.getElementById("ew-round-status");
 		this._eleTurnOrder = document.getElementById("ew-turn-order");
 		this._eleInitUnrolled = document.getElementById("ew-init-unrolled");
+		this._eleActiveVitals = document.getElementById("ew-active-vitals");
+		this._eleSetup = document.getElementById("ew-setup");
+		this._inpRosterSearch = document.getElementById("ew-roster-search");
+		this._selRosterSort = document.getElementById("ew-roster-sort");
+		this._selRosterFilter = document.getElementById("ew-roster-filter");
+		this._eleRosterCount = document.getElementById("ew-roster-count");
+		this._eleFocusStatus = document.getElementById("ew-focus-status");
+		this._btnFocusPrev = document.getElementById("ew-focus-prev");
+		this._btnFocusNext = document.getElementById("ew-focus-next");
+		this._btnFocusCurrent = document.getElementById("ew-focus-current");
+		this._selViewMode = document.getElementById("ew-view-mode");
+		this._btnCardsMore = document.getElementById("ew-cards-more");
 	}
 
 	async pInit () {
 		this._btnChoose.addEventListener("click", () => this._pChoose());
 		this._btnSelectAll.addEventListener("click", () => this._pSetTargets(this._state.instances.map(it => it.id)));
 		this._btnSelectNone.addEventListener("click", () => this._pSetTargets([]));
+		this._btnGroupSelected.addEventListener("click", () => this._pCreateGroup());
 		this._selRollType.addEventListener("change", () => this._renderRollKeys());
 		this._selRollKey.addEventListener("change", () => this._clearRollResults());
 		this._selRollMode.addEventListener("change", () => this._clearRollResults());
@@ -103,6 +161,8 @@ export class EncounterWorkspacePage {
 		this._btnNoteRemove.addEventListener("click", () => this._pUpdateAreaNote({isAdd: false}));
 		this._selNoteRemove.addEventListener("change", () => this._updateControls());
 		this._selPreset.addEventListener("change", () => this._renderPresetDetail());
+		this._inpPresetSearch.addEventListener("input", () => this._renderPresetSearch());
+		this._eleStatblocks.addEventListener("click", event => this._onStatblockDiceClick(event), true);
 		this._btnPresetAdd.addEventListener("click", () => this._pUpdateModifier({isAdd: true, isPreset: true}));
 		this._btnModAdd.addEventListener("click", () => this._pUpdateModifier({isAdd: true, isPreset: false}));
 		this._btnModRemove.addEventListener("click", () => this._pUpdateModifier({isAdd: false}));
@@ -113,6 +173,34 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.addEventListener("click", () => this._pUpdateTurn("start"));
 		this._btnTurnNext.addEventListener("click", () => this._pUpdateTurn("next"));
 		this._btnTurnReset.addEventListener("click", () => this._pUpdateTurn("reset"));
+		this._inpRosterSearch.addEventListener("input", () => this._renderRosterView());
+		this._selRosterSort.addEventListener("change", () => this._renderRosterView());
+		this._selRosterFilter.addEventListener("change", () => this._renderRosterView());
+		this._btnFocusPrev.addEventListener("click", () => this._stepFocus(-1));
+		this._btnFocusNext.addEventListener("click", () => this._stepFocus(1));
+		this._btnFocusCurrent.addEventListener("click", () => this._focusCurrentTurn({moveFocus: true}));
+		this._selViewMode.addEventListener("change", () => {
+			this._viewMode = this._selViewMode.value;
+			this._shownCards = STATBLOCK_BATCH_SIZE;
+			this._expandedCards.clear();
+			if (this._viewMode === "all") this._expandedCards.add(this._focusedInstanceId);
+			this._renderStatblocks();
+		});
+		this._btnCardsMore.addEventListener("click", () => {
+			this._shownCards += STATBLOCK_BATCH_SIZE;
+			this._renderStatblocks({preserveFocus: true});
+		});
+		this._eleRoster.addEventListener("keydown", event => {
+			if (!["ArrowDown", "ArrowUp"].includes(event.key) || !event.target.closest(".ew__roster-jump")) return;
+			const jumps = [...this._eleRoster.querySelectorAll(".ew__roster-jump")].filter(it => it.getClientRects().length);
+			const index = jumps.indexOf(event.target);
+			const next = jumps[index + (event.key === "ArrowDown" ? 1 : -1)];
+			if (!next) return;
+			event.preventDefault();
+			next.focus();
+		});
+		this._selBulkType.addEventListener("change", () => this._pRenderBulkChoices());
+		this._btnBulkPreview.addEventListener("click", () => this._pPreviewBulkStatblock());
 		this._btnHandoffQueue.addEventListener("click", () => this._pQueueHandoff());
 		this._btnHandoffClear.addEventListener("click", () => this._pClearHandoff());
 		window.addEventListener("focus", () => this._pRefreshHandoff());
@@ -159,11 +247,17 @@ export class EncounterWorkspacePage {
 		this._btnChoose.disabled = isBusy || !this._isCatalogReady;
 		this._btnSelectAll.disabled = isBusy || !this._state.instances.length;
 		this._btnSelectNone.disabled = isBusy || !this._state.instances.length;
+		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
+		this._groupChecks.forEach(check => check.disabled = isBusy);
+		this._eleRoster.querySelectorAll(".ew__group-action, .ew__group-init").forEach(control => control.disabled = isBusy);
 		this._conditionContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
 		this._effectContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
-		this._vitalContainers.forEach(container => container.querySelectorAll("input").forEach(input => input.disabled = isBusy));
+		this._vitalContainers.forEach(container => container.querySelectorAll("input").forEach(input => {
+			input.disabled = isBusy || (input.dataset.field === "initiative" && !!getEncounterSharedGroup(this._state, input.dataset.instanceId));
+		}));
 		this._updateControls();
+		this._updateFocusStatus();
 	}
 
 	_updateControls () {
@@ -179,10 +273,12 @@ export class EncounterWorkspacePage {
 			this._state.selectedIds.includes(it.id) && it.conditions.includes(condition));
 		[
 			this._selNoteKind, this._inpNoteName, this._inpNoteDescription,
-			this._selPreset, this._inpModName, this._checkModCheck, this._checkModSave,
+			this._selPreset, this._inpPresetSearch, this._inpModName, this._checkModCheck, this._checkModSkill,
+			this._checkModSave, this._checkModInitiative, this._checkModAttack,
 			this._selModMode, this._inpModBonus,
 		].forEach(field => field.disabled = this._isBusy || !hasTargets);
-		this._btnNoteAdd.disabled = this._btnPresetAdd.disabled = this._btnModAdd.disabled = this._isBusy || !hasTargets;
+		this._btnNoteAdd.disabled = this._btnModAdd.disabled = this._isBusy || !hasTargets;
+		this._btnPresetAdd.disabled = this._isBusy || !hasTargets || !this._selPreset.value;
 		this._selNoteRemove.disabled = this._isBusy || !hasTargets || this._selNoteRemove.options.length <= 1;
 		this._btnNoteRemove.disabled = this._selNoteRemove.disabled || !this._selNoteRemove.value;
 		this._selModRemove.disabled = this._isBusy || !hasTargets || this._selModRemove.options.length <= 1;
@@ -193,13 +289,21 @@ export class EncounterWorkspacePage {
 		this._selInitMode.disabled = this._isBusy || !hasTargets;
 		this._btnInitRoll.disabled = this._isBusy || !hasTargets;
 		const isStarted = !!this._state.turn?.round;
-		const hasInitiative = this._state.instances.some(it => it.initiative != null);
+		const hasInitiative = EncounterWorkspaceState.getInitiativeOrder(this._state).length;
 		this._btnTurnStart.disabled = this._isBusy || isStarted || !hasInitiative;
 		this._btnTurnNext.disabled = this._isBusy || !isStarted;
 		this._btnTurnReset.disabled = this._isBusy || !isStarted;
 		this._btnHandoffQueue.disabled = this._isBusy || this._handoffReadError || !hasTargets || !this._state.sourceList;
 		this._btnHandoffClear.disabled = this._isBusy || !(this._pendingHandoff || this._corruptHandoffToken);
 		this._btnHandoffClear.textContent = this._corruptHandoffToken ? "Clear damaged queue" : "Clear queued snapshot";
+		this._selBulkType.disabled = this._isBusy || !hasTargets;
+		this._selBulkChoice.disabled = this._isBusy || !hasTargets;
+		[this._inpBulkName, this._inpBulkDescription, this._inpBulkCost].forEach(input => input.disabled = this._isBusy || !hasTargets);
+		this._btnBulkPreview.disabled = this._isBusy || !hasTargets;
+		this._tiles.forEach(tile => {
+			const button = tile.querySelector(".ew__statblock-edit");
+			if (button) button.disabled = this._isBusy;
+		});
 	}
 
 	_setHandoffStatus (text, {isError = false} = {}) {
@@ -338,6 +442,12 @@ export class EncounterWorkspacePage {
 			}
 			this._state = next;
 			this._hpUndo = [];
+			this._collapsedGroups.clear();
+			this._focusedInstanceId = null;
+			this._viewMode = "focused";
+			this._selViewMode.value = "focused";
+			this._shownCards = STATBLOCK_BATCH_SIZE;
+			this._expandedCards.clear();
 			this._hasUnreadableSave = false;
 			this._render();
 			const loaded = next.instances.length
@@ -354,7 +464,7 @@ export class EncounterWorkspacePage {
 	_pConfirmReplace () {
 		return InputUiUtil.pGetUserBoolean({
 			title: "Replace Working Encounter",
-			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, conditions, area effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
+			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, statblock edits, conditions, notes, roll effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
 			textYes: "Replace Encounter",
 			textNo: "Keep Current",
 		});
@@ -379,6 +489,119 @@ export class EncounterWorkspacePage {
 		}
 	}
 
+	async _pChangeGroup ({action, id, groupId = null, memberIds = null}) {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			let next;
+			if (action === "create") {
+				next = EncounterWorkspaceState.withGroup({
+					state: this._state, memberIds, id: `group:${CryptUtil.uid()}`,
+				});
+			} else if (action === "split") next = EncounterWorkspaceState.withGroupSplit(this._state, {id});
+			else if (action === "rejoin") {
+				const group = this._state.groups.find(it => it.id === groupId);
+				if (group?.sharedTurn && !await InputUiUtil.pGetUserBoolean({
+					title: "Join a shared turn?",
+					htmlDescription: `<p>This monster will join the existing group turn at initiative <b>${group.initiative ?? "unrolled"}</b>. Its individual initiative is preserved for switching back. Continue?</p>`,
+					textYes: "Join group turn",
+					textNo: "Keep separate",
+				})) return this._setStatus("Monster kept separate; no turns changed.");
+				next = EncounterWorkspaceState.withGroupRejoin(this._state, {id, groupId});
+			} else if (action === "disband") next = EncounterWorkspaceState.withGroupDisband(this._state, {groupId});
+			else if (action === "individual") next = EncounterWorkspaceState.withSharedTurn(this._state, {groupId, isShared: false});
+			else throw new Error("Choose a group action.");
+			const previousTurn = this._state.turn;
+			this._state = await this._store.pSave(next);
+			if (previousTurn.activeId !== next.turn.activeId) this._focusActiveTurn();
+			isSaved = true;
+			this._render();
+			const turnNotice = previousTurn.activeId !== next.turn.activeId
+				? ` Active turn ${next.turn.round ? `moved to ${this._getTurnName(next.turn.activeId)}` : "was reset because no former member has initiative"}.`
+				: "";
+			this._setStatus(`${{create: "Created a persistent group.", split: "Split this monster from its group.", rejoin: "Rejoined this monster to identical statblocks.", disband: "Disbanded this group; members remain separate.", individual: "Individual turns restored with their original initiative totals."}[action]}${turnNotice}`);
+		} catch (e) {
+			this._setError(isSaved
+				? `Group was saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload before making another change.`
+				: `Group was not changed: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	_pCreateGroup () {
+		return this._pChangeGroup({action: "create", memberIds: this._state.selectedIds});
+	}
+
+	async _pShareTurn ({group, raw, isRoll = false}) {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const members = group.memberIds.map(id => this._state.instances.find(it => it.id === id));
+			if (members.some(it => !it)) {
+				throw new Error("This group changed. Refresh before sharing turns.");
+			}
+			let total;
+			let rolled = null;
+			if (isRoll) {
+				const instance = members[0];
+				const monster = getEncounterEffectiveMonster(instance);
+				if (!Number.isSafeInteger(Renderer.monster.getInitiativeBonusNumber({mon: monster}))) {
+					throw new Error("No valid initiative bonus is available for this monster.");
+				}
+				rolled = await pRollEncounterInstance({
+					instance,
+					name: this._getTurnName(group.id, group),
+					rollType: "initiative",
+					key: "dex",
+					label: "Group initiative (Dexterity check)",
+					rollMode: this._selInitMode.value,
+				});
+				total = rolled.total;
+			} else {
+				const trimmed = `${raw}`.trim();
+				total = /^[+-]?\d+$/.test(trimmed) ? Number(trimmed) : NaN;
+			}
+			if (!Number.isSafeInteger(total)) throw new Error("Enter a whole-number shared initiative, or roll it.");
+			const originals = members.map(it => it.initiative == null ? "unrolled" : it.initiative).join(", ");
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: "Share this group's turn?",
+				htmlDescription: `<p>${group.memberIds.length} monsters will act on one turn at <b>${total}</b>${rolled ? ` (rolled ${rolled.die} with ${getNpcTrackerSignedNumber(rolled.bonus)} bonus)` : ""}. Their individual totals (${originals.qq()}) are preserved for switching back.</p><p>${isRoll ? "This roll used the first member's conditions and roll effects. " : ""}HP and conditions remain separate.</p>`,
+				textYes: "Share turn",
+				textNo: "Keep individual turns",
+			});
+			if (!confirmed) return this._setStatus(`Group initiative ${total} was ${isRoll ? "rolled but " : ""}not applied; individual turns remain.`);
+			const explicit = group.isExplicit ? this._state : EncounterWorkspaceState.withGroup({
+				state: this._state, memberIds: group.memberIds, id: `group:${CryptUtil.uid()}`,
+			});
+			const groupId = group.isExplicit ? group.id : explicit.groups.at(-1).id;
+			const next = EncounterWorkspaceState.withSharedTurn(explicit, {groupId, isShared: true, total});
+			const previousTurn = this._state.turn;
+			this._state = await this._store.pSave(next);
+			if (previousTurn.activeId !== next.turn.activeId) this._focusActiveTurn();
+			isSaved = true;
+			this._render();
+			this._setStatus(`Shared turn enabled at initiative ${total} for ${members.length} monsters.${previousTurn.activeId !== next.turn.activeId ? " The active member is now represented by the group's single turn." : ""} Original totals are preserved.`);
+		} catch (e) {
+			this._setError(isSaved
+				? `Shared turn was saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload before making another change.`
+				: `Shared turn was not saved: ${this._getErrorMessage(e)}. Individual turns and original initiatives are unchanged.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	_getTurnName (id, viewGroup = null) {
+		const group = viewGroup || getEncounterViewGroups(this._state).find(it => it.id === id);
+		if (group) {
+			const name = getEncounterEffectiveMonster(group.members[0])._displayName || group.members[0].monster.name;
+			return `${name} ×${group.memberIds.length}${group.sharedTurn ? " (shared turn)" : ""}`;
+		}
+		return getEncounterInstanceLabels(this._state.instances).get(id) || "unknown monster";
+	}
+
 	async _pUpdateConditions (isAdd) {
 		if (this._isBusy) return;
 		const focused = document.activeElement;
@@ -392,6 +615,7 @@ export class EncounterWorkspacePage {
 			const next = EncounterWorkspaceState.withConditions(this._state, {condition, isAdd});
 			this._state = await this._store.pSave(next);
 			this._renderConditions();
+			this._refreshRosterFor("condition");
 			this._renderConditionPicker();
 			this._clearRollResults();
 			this._setStatus(`${isAdd ? "Applied" : "Removed"} ${condition} ${isAdd ? "to" : "from"} ${this._state.selectedIds.length} selected ${this._state.selectedIds.length === 1 ? "monster" : "monsters"}.`);
@@ -456,12 +680,15 @@ export class EncounterWorkspacePage {
 					name: this._inpModName.value.trim(),
 					scopes: [
 						...(this._checkModCheck.checked ? ["check"] : []),
+						...(this._checkModSkill.checked ? ["skill"] : []),
 						...(this._checkModSave.checked ? ["save"] : []),
+						...(this._checkModInitiative.checked ? ["initiative"] : []),
+						...(this._checkModAttack.checked ? ["attack"] : []),
 					],
 					mode: this._selModMode.value,
 					bonus: /^[+-]?\d+$/.test(enteredBonus) ? Number(enteredBonus) : NaN,
 				};
-			const name = modifier?.name || this._getEffectName(removedId, "modifiers") || "roll modifier";
+			const name = modifier?.name || this._getEffectName(removedId, "modifiers") || "roll effect";
 			const {state, changedIds, skippedIds} = EncounterWorkspaceState.withModifier(this._state, {
 				modifier, modifierId: removedId, isAdd, targetIds,
 			});
@@ -479,7 +706,7 @@ export class EncounterWorkspacePage {
 				: "";
 			this._setStatus(`${outcome}${skipped}`);
 		} catch (e) {
-			this._setError(`Roll modifiers were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			this._setError(`Roll effects were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);
 			this._focusAfterEffectUpdate(focused, id, this._selModRemove);
@@ -543,8 +770,180 @@ export class EncounterWorkspacePage {
 	_getSkills () {
 		return getNpcTrackerSkillDescriptors({
 			skillCatalog: this._referenceData.skills,
-			monsters: this._state.instances.map(it => it.monster),
+			monsters: this._state.instances.map(getEncounterEffectiveMonster),
 		});
+	}
+
+	async _pCommitStatblockEdit ({state, changedIds, resetHpIds, splitIds = []}) {
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			this._state = await this._store.pSave(state);
+			isSaved = true;
+			if (resetHpIds.length) this._hpUndo = this._hpUndo.filter(snapshots => !snapshots.some(it => resetHpIds.includes(it.id)));
+			this._render();
+			this._clearRollResults();
+			const names = this._getTargetNames(changedIds);
+			this._setStatus(`Saved statblock edits for ${names}.${resetHpIds.length
+				? ` Reset current and maximum HP for ${this._getTargetNames(resetHpIds)} to the new average (or Unset); temporary HP was preserved.`
+				: " Tracked HP was unchanged."}${splitIds.length
+				? ` ${this._getTargetNames(splitIds)} left their incompatible groups and returned to individual initiative. Any remaining shared group keeps its active turn.`
+				: ""}`);
+		} catch (e) {
+			if (isSaved) {
+				const savedError = new EncounterWorkspacePostSaveError(
+					`Statblock edits were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload this page to see the changes.`,
+					{cause: e},
+				);
+				this._setError(savedError.message);
+				throw savedError;
+			}
+			this._setError(`Statblock edits were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			throw e;
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	async _pOpenStatblockEditor (id) {
+		if (this._isBusy) return;
+		const instance = this._state.instances.find(it => it.id === id);
+		if (!instance) return this._setError("This encounter monster no longer exists.");
+		const adapter = new EncounterWorkspaceQuickActionsAdapter({
+			id,
+			getState: () => this._state,
+			pCommit: result => this._pCommitStatblockEdit(result),
+		});
+		try {
+			await BestiaryQuickActionsUi.pOpen({monster: instance.monster, registry: adapter});
+		} catch (e) {
+			this._setError(`Could not open statblock editor: ${this._getErrorMessage(e)}`);
+		}
+	}
+
+	async _pRenderBulkChoices () {
+		const type = this._selBulkType.value;
+		const isLegendary = type === "legendary";
+		const hasChoices = type === "lair" || type === "area";
+		const previousChoice = this._bulkChoiceType === type ? this._selBulkChoice.value : "";
+		this._bulkChoiceType = type;
+		const request = this._bulkChoiceRequest = (this._bulkChoiceRequest || 0) + 1;
+		for (const id of ["name", "description", "cost"]) {
+			document.getElementById(`ew-bulk-${id}`).hidden = !isLegendary;
+			document.getElementById(`ew-bulk-${id}-label`).hidden = !isLegendary;
+		}
+		this._selBulkChoice.hidden = document.getElementById("ew-bulk-choice-label").hidden = !hasChoices;
+		this._selBulkChoice.replaceChildren();
+		if (!hasChoices) return;
+		this._selBulkChoice.add(new Option("Loading available rules...", ""));
+		try {
+			const entries = type === "area"
+				? await BestiaryQuickActionsUi._pLoadAreaTraits()
+				: await BestiaryQuickActionsUi._pLoadLegendaryGroups();
+			if (request !== this._bulkChoiceRequest) return;
+			this._selBulkChoice.replaceChildren();
+			this._selBulkChoice.add(new Option(entries.length ? "Choose a loaded rule..." : "No matching rules loaded", ""));
+			const seen = new Set();
+			entries.forEach(entry => {
+				const uid = BestiaryQuickActionsUi.getRuleUid(entry);
+				if (seen.has(uid)) throw new Error(`Multiple loaded rules share the identity "${uid}".`);
+				seen.add(uid);
+				this._selBulkChoice.add(new Option(
+					type === "area" ? `${entry._areaName}: ${entry.name} (${entry.source})` : `${entry.name} (${entry.source})`,
+					uid,
+				));
+			});
+			if ([...this._selBulkChoice.options].some(it => it.value === previousChoice)) this._selBulkChoice.value = previousChoice;
+		} catch (e) {
+			if (request !== this._bulkChoiceRequest) return;
+			this._selBulkChoice.replaceChildren(new Option("Could not load rules; change type to retry", ""));
+			this._setError(`Bulk statblock rules could not be loaded: ${this._getErrorMessage(e)}`);
+		}
+	}
+
+	async _pPreviewBulkStatblock () {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		try {
+			const type = this._selBulkType.value;
+			let operation;
+			let editLabel;
+			if (type === "minion") {
+				operation = BestiaryQuickActionsOperations.minion();
+				editLabel = "Minion conversion";
+			} else if (type === "legendary") {
+				const name = this._inpBulkName.value.trim();
+				const description = this._inpBulkDescription.value.trim();
+				const cost = Number(this._inpBulkCost.value);
+				if (!name || !description || !Number.isSafeInteger(cost) || cost < 1 || cost > 9) {
+					throw new Error("Enter a legendary action name, action text, and a cost from 1 to 9.");
+				}
+				operation = BestiaryQuickActionsOperations.addEntry({
+					section: "legendary",
+					entry: {name: BestiaryQuickActionsStructuredEditor.getLegendaryActionName({name, cost}), entries: [description]},
+				});
+				editLabel = `Legendary action: ${operation.data.entry.name}`;
+			} else if (type === "area" || type === "lair") {
+				const selectedUid = this._selBulkChoice.value;
+				if (!selectedUid) throw new Error("Choose a loaded rule before previewing.");
+				const entries = type === "area"
+					? await BestiaryQuickActionsUi._pLoadAreaTraits()
+					: await BestiaryQuickActionsUi._pLoadLegendaryGroups();
+				if (type !== this._selBulkType.value || selectedUid !== this._selBulkChoice.value) {
+					throw new Error("The selected rule changed while loading. Preview it again.");
+				}
+				const matches = entries.filter(entry => BestiaryQuickActionsUi.getRuleUid(entry) === selectedUid);
+				if (!matches.length) throw new Error("That rule is no longer available. Choose a loaded rule again.");
+				if (matches.length > 1) throw new Error(`Multiple loaded rules share the identity "${selectedUid}". Choose another rule.`);
+				const entry = matches[0];
+				editLabel = type === "area"
+					? `Area trait: ${entry._areaName}: ${entry.name} (${entry.source})`
+					: `Lair-action group: ${entry.name} (${entry.source})`;
+				if (type === "lair") operation = BestiaryQuickActionsOperations.setLegendaryGroup(entry);
+				else {
+					const choices = await BestiaryQuickActionsUi._pGetAreaTraitChoices({traits: [entry]});
+					if (choices == null) return this._setStatus("Bulk area trait cancelled; no statblocks changed.");
+					if (type !== this._selBulkType.value || selectedUid !== this._selBulkChoice.value) {
+						throw new Error("The selected rule changed while configuring it. Preview it again.");
+					}
+					operation = BestiaryQuickActionsUi.getAreaTraitOperation({
+						trait: entry,
+						choices: choices.get(selectedUid) || {},
+					});
+				}
+			} else throw new Error("Choose a supported bulk statblock edit.");
+			operation.id = CryptUtil.uid();
+			const preview = EncounterWorkspaceState.previewBulkStatblockOperation(this._state, {operation});
+			const labels = getEncounterInstanceLabels(this._state.instances);
+			const skips = preview.skipped.map(({id, reason}) => `${labels.get(id)}: ${reason}`);
+			const reset = preview.resetHpIds.map(id => labels.get(id));
+			const split = preview.splitIds.map(id => labels.get(id));
+			const description = [
+				`<p><b>Mechanical edit:</b> ${editLabel.qq()}</p>`,
+				`<p><b>${preview.changedIds.length} eligible:</b> ${preview.changedIds.map(id => labels.get(id).qq()).join(", ") || "none"}</p>`,
+				skips.length ? `<p><b>${skips.length} skipped:</b> ${skips.map(it => it.qq()).join("; ")}</p>` : "",
+				reset.length ? `<p><b>HP reset:</b> ${reset.map(it => it.qq()).join(", ")} will use the edited average (or Unset), retaining temporary HP.</p>` : "",
+				split.length ? `<p><b>Group split:</b> ${split.map(it => it.qq()).join(", ")} will leave incompatible persistent groups and return to individual initiative. A remaining shared group keeps its active turn.</p>` : "",
+				"<p>Only eligible monsters will be edited. All edits are saved together or none are saved.</p>",
+			].join("");
+			if (!preview.changedIds.length) {
+				this._setError(`No eligible monsters for this edit. ${skips.join("; ")}`);
+				return;
+			}
+			if (!await InputUiUtil.pGetUserBoolean({
+				title: "Apply Bulk Statblock Edit",
+				htmlDescription: description,
+				textYes: `Apply to ${preview.changedIds.length}`,
+				textNo: "Cancel",
+			})) return this._setStatus("Bulk statblock edit cancelled; no statblocks changed.");
+			await this._pCommitStatblockEdit(preview);
+			if (skips.length) this._setStatus(`${this._eleStatus.textContent} Skipped ${skips.length}: ${skips.join("; ")}.`);
+		} catch (e) {
+			if (e.isEncounterStatblockSaved) return;
+			this._setError(`Bulk statblock edit was not applied: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+		}
 	}
 
 	_renderRollKeys () {
@@ -576,8 +975,60 @@ export class EncounterWorkspacePage {
 	}
 
 	_renderPresetDetail () {
-		const preset = ENCOUNTER_DESECRATED_PRESETS.find(it => it.presetId === this._selPreset.value);
-		this._elePresetDetail.textContent = preset?.description || "";
+		const preset = ENCOUNTER_ROLL_PRESETS.find(it => it.presetId === this._selPreset.value);
+		this._elePresetDetail.textContent = preset
+			? `${getEncounterPresetCitation(preset)} · ${preset.description}${preset.contextQuestion ? " You will be asked to confirm context at roll time." : ""}`
+			: "No matching preset. Search by rule, source, or effect.";
+		this._updateControls();
+	}
+
+	_renderPresetSearch () {
+		const previous = this._selPreset.value;
+		const query = this._inpPresetSearch.value.trim().toLowerCase();
+		const matches = ENCOUNTER_ROLL_PRESETS.filter(preset =>
+			[preset.name, preset.source, preset.page, preset.description, preset.edition].join(" ").toLowerCase().includes(query));
+		this._selPreset.replaceChildren();
+		matches.forEach(preset => this._selPreset.add(new Option(`${preset.name} — ${getEncounterPresetCitation(preset)}`, preset.presetId)));
+		if (matches.some(it => it.presetId === previous)) this._selPreset.value = previous;
+		this._renderPresetDetail();
+	}
+
+	_onStatblockDiceClick (event) {
+		const link = event.target.closest?.("[data-packed-dice]");
+		const tile = link?.closest(".ew__statblock");
+		if (!tile || !this._eleStatblocks.contains(tile)) return;
+		const instance = this._state.instances.find(it => it.id === tile.dataset.instanceId);
+		if (!instance) return;
+		let entry;
+		try {
+			entry = JSON.parse(link.dataset.packedDice);
+		} catch (e) {
+			this._setError(`The statblock dice link cannot be read: ${this._getErrorMessage(e)}`);
+			return;
+		}
+		const roll = getEncounterRollFromPackedDice(entry);
+		if (!roll) return;
+		if (roll.unsupported) {
+			this._setError(roll.unsupported);
+			return;
+		}
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		this._pRollStatblockDice({instance, roll, event});
+	}
+
+	async _pRollStatblockDice ({instance, roll, event}) {
+		if (this._isBusy) return this._setError("Wait for the current encounter operation before rolling.");
+		const name = getEncounterInstanceLabels(this._state.instances).get(instance.id);
+		const rollMode = (event.ctrlKey || event.metaKey) ? "disadvantage" : event.shiftKey ? "advantage" : "normal";
+		try {
+			const result = await pRollEncounterInstance({instance, name, ...roll, rollMode});
+			const outcome = `${name}: ${result.label} — ${result.mode === "autoFail" ? "automatic failure" : result.mode === "unavailable" ? "unavailable" : result.total}. ${result.sourcesText || "Normal roll"}.`;
+			if (result.mode === "autoFail" || result.mode === "unavailable") this._setError(outcome);
+			else this._setStatus(outcome);
+		} catch (e) {
+			this._setError(`Could not roll ${roll.label} for ${name}: ${this._getErrorMessage(e)}`);
+		}
 	}
 
 	_renderEffectPickers () {
@@ -597,9 +1048,9 @@ export class EncounterWorkspacePage {
 				});
 			});
 			select.replaceChildren();
-			select.add(new Option(property === "areaNotes" ? "Choose an applied note..." : "Choose an applied modifier...", ""));
+			select.add(new Option(property === "areaNotes" ? "Choose an applied note..." : "Choose an applied roll effect...", ""));
 			byId.forEach(({effect, count}, id) => {
-				const type = property === "areaNotes" ? effect.kind === "lair" ? "Lair note" : "Area trait" : "Modifier";
+				const type = property === "areaNotes" ? effect.kind === "lair" ? "Lair note" : "Area trait" : "Roll effect";
 				select.add(new Option(`${type}: ${effect.name} (${count} selected)`, id));
 			});
 			select.value = byId.has(previous) ? previous : "";
@@ -660,6 +1111,7 @@ export class EncounterWorkspacePage {
 			this._state = await this._store.pSave(next);
 			this._hpUndo = [];
 			this._renderVitals([id]);
+			this._refreshRosterFor("hp");
 			this._setStatus(`Updated ${prop} HP for ${getEncounterInstanceLabels(this._state.instances).get(id)}.`);
 		} catch (e) {
 			this._renderVitals([id]);
@@ -691,6 +1143,7 @@ export class EncounterWorkspacePage {
 				this._hpUndo.push(snapshots);
 				if (this._hpUndo.length > 5) this._hpUndo.shift();
 				this._renderVitals(changedIds);
+				this._refreshRosterFor("hp");
 			}
 			this._setStatus(`Updated HP for ${changedIds.length} ${changedIds.length === 1 ? "monster" : "monsters"}.${skippedIds.length ? ` Skipped ${skippedIds.length} with unset HP: ${this._getTargetNames(skippedIds)}.` : ""}`);
 		} catch (e) {
@@ -709,6 +1162,7 @@ export class EncounterWorkspacePage {
 			this._state = await this._store.pSave(next);
 			this._hpUndo.pop();
 			this._renderVitals(snapshots.map(it => it.id));
+			this._refreshRosterFor("hp");
 			this._setStatus(`Undid the last HP operation for ${snapshots.length} ${snapshots.length === 1 ? "monster" : "monsters"}.`);
 		} catch (e) {
 			this._setError(`HP undo was not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
@@ -726,12 +1180,18 @@ export class EncounterWorkspacePage {
 			const total = !trimmed ? null : /^[+-]?\d+$/.test(trimmed) ? Number(trimmed) : NaN;
 			const next = EncounterWorkspaceState.withInitiative(this._state, {id, total});
 			this._state = await this._store.pSave(next);
-			this._renderVitals([id]);
+			const group = getEncounterSharedGroup(this._state, id);
+			this._renderVitals(group?.memberIds || [id]);
+			this._refreshGroupInitiativeInputs();
 			this._renderTurnOrder();
+			this._refreshRosterFor("initiative");
 			this._clearRollResults();
-			this._setStatus(`${total == null ? "Cleared" : "Set"} initiative for ${getEncounterInstanceLabels(this._state.instances).get(id)}${total == null ? "." : ` to ${total}.`}`);
+			this._setStatus(`${total == null ? "Cleared" : "Set"} initiative for ${group ? this._getTurnName(group.id) : getEncounterInstanceLabels(this._state.instances).get(id)}${total == null ? "." : ` to ${total}.`}${group ? " Original individual totals were not changed." : ""}`);
 		} catch (e) {
-			this._renderVitals([id]);
+			const group = getEncounterSharedGroup(this._state, id);
+			const input = group && this._groupInitiativeInputs?.get(group.id);
+			if (input) input.value = group.initiative ?? "";
+			this._renderVitals(group?.memberIds || [id]);
 			this._setError(`Initiative was not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);
@@ -753,8 +1213,10 @@ export class EncounterWorkspacePage {
 			if (results.length) {
 				const next = EncounterWorkspaceState.withInitiativeResults(this._state, results.map(({id, total}) => ({id, total})));
 				this._state = await this._store.pSave(next);
-				this._renderVitals(results.map(it => it.id));
+				this._renderVitals(results.flatMap(it => getEncounterSharedGroup(this._state, it.id)?.memberIds || [it.id]));
+				this._refreshGroupInitiativeInputs();
 				this._renderTurnOrder();
+				this._refreshRosterFor("initiative");
 			}
 			this._renderRollResults({results, failures, failureLabel: "Initiative (Dexterity check)"});
 			const outcome = `${results.length} initiatives saved, ${failures.length} failed.`;
@@ -775,7 +1237,8 @@ export class EncounterWorkspacePage {
 			const next = EncounterWorkspaceState.withTurn(this._state, action);
 			this._state = await this._store.pSave(next);
 			this._renderTurnOrder();
-			this._setStatus(action === "reset" ? "Turns reset; initiative totals are unchanged." : `Round ${next.turn.round}: ${getEncounterInstanceLabels(next.instances).get(next.turn.activeId)} is active.`);
+			if (action !== "reset") this._focusCurrentTurn();
+			this._setStatus(action === "reset" ? "Turns reset; initiative totals are unchanged." : `Round ${next.turn.round}: ${this._getTurnName(next.turn.activeId)} is active.`);
 		} catch (e) {
 			this._setError(`Turns were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
@@ -790,28 +1253,38 @@ export class EncounterWorkspacePage {
 		if (next && !next.disabled) next.focus({preventScroll: true});
 	}
 
+	_refreshGroupInitiativeInputs () {
+		if (!this._groupInitiativeInputs) return;
+		getEncounterViewGroups(this._state).forEach(group => {
+			const input = this._groupInitiativeInputs.get(group.id);
+			if (!input || input.dataset.dirty) return;
+			if (group.sharedTurn) input.value = group.initiative ?? "";
+			else {
+				const totals = group.members.map(it => it.initiative);
+				input.value = totals[0] != null && totals.every(it => it === totals[0]) ? totals[0] : "";
+			}
+		});
+	}
+
 	_render () {
-		this._tiles.clear();
-		this._checks.clear();
-		this._conditionContainers.clear();
-		this._effectContainers.clear();
-		this._vitalContainers.clear();
-		this._rosterMeta.clear();
-		this._eleRoster.replaceChildren();
-		this._eleStatblocks.replaceChildren();
+		const previousRollType = this._selRollType.value;
+		const previousRollKey = this._selRollKey.value;
 		this._eleNotices.replaceChildren();
 
 		const {sourceList, instances, omissions} = this._state;
 		this._eleWorkspace.hidden = !sourceList;
+		if (this._setupSource !== sourceList?.saveId) {
+			this._eleSetup.open = !sourceList;
+			this._setupSource = sourceList?.saveId;
+		}
 		if (!sourceList) return;
 		this._selRollType.replaceChildren();
 		ENCOUNTER_ROLL_TYPES.filter(it => it.id !== "initiative").forEach(({id, name}) => this._selRollType.add(new Option(name, id)));
-		this._selRollType.value = "ability";
+		this._selRollType.value = ENCOUNTER_ROLL_TYPES.some(it => it.id === previousRollType && it.id !== "initiative") ? previousRollType : "ability";
 		this._renderRollKeys();
+		if ([...this._selRollKey.options].some(it => it.value === previousRollKey)) this._selRollKey.value = previousRollKey;
 		this._renderConditionPicker();
-		this._selPreset.replaceChildren();
-		ENCOUNTER_DESECRATED_PRESETS.forEach(preset => this._selPreset.add(new Option(preset.name, preset.presetId)));
-		this._renderPresetDetail();
+		this._renderPresetSearch();
 
 		this._eleName.textContent = sourceList.name;
 		if (!instances.length) {
@@ -834,74 +1307,413 @@ export class EncounterWorkspacePage {
 			this._eleNotices.hidden = false;
 		} else this._eleNotices.hidden = true;
 
-		const labels = getEncounterInstanceLabels(instances);
-		for (const instance of instances) {
-			const label = labels.get(instance.id);
+		if (!instances.some(it => it.id === this._focusedInstanceId)) this._focusActiveTurn();
+		if (!this._focusedInstanceId) this._focusedInstanceId = instances[0]?.id ?? null;
+		this._renderRosterView();
+		this._renderTurnOrder();
+		this._pRenderBulkChoices();
+	}
 
-			const row = document.createElement("label");
-			row.className = "ew__roster-row";
-			const check = document.createElement("input");
-			check.type = "checkbox";
-			check.addEventListener("change", () => this._pSetTargets(
-				check.checked
-					? [...this._state.selectedIds, instance.id]
-					: this._state.selectedIds.filter(id => id !== instance.id),
-			));
-			const rowText = document.createElement("span");
-			rowText.className = "ew__roster-name";
-			rowText.textContent = label;
-			const rowMeta = document.createElement("span");
-			rowMeta.className = "ew__roster-meta";
-			rowMeta.textContent = `${instance.monster.source} · CR ${instance.monster.cr?.cr || instance.monster.cr || "—"}`;
-			row.append(check, rowText, rowMeta);
-			this._eleRoster.append(row);
-			this._checks.set(instance.id, check);
-			this._rosterMeta.set(instance.id, rowMeta);
+	_focusActiveTurn () {
+		const activeId = this._state.turn.activeId;
+		this._focusedInstanceId = this._state.instances.find(it => it.id === activeId)?.id
+			|| getEncounterSharedGroup(this._state, activeId)?.memberIds[0]
+			|| this._state.instances[0]?.id || null;
+	}
 
-			const tile = document.createElement("article");
-			tile.className = "ew__statblock";
-			const title = document.createElement("h3");
-			title.className = "ew__statblock-title";
-			title.textContent = label;
-			const conditions = document.createElement("div");
-			conditions.className = "ew__conditions";
-			conditions.setAttribute("aria-label", `Conditions for ${label}`);
-			this._conditionContainers.set(instance.id, conditions);
-			const effects = document.createElement("div");
-			effects.className = "ew__effects";
-			effects.setAttribute("aria-label", `Area effects for ${label}`);
-			this._effectContainers.set(instance.id, effects);
-			const vitals = document.createElement("div");
-			vitals.className = "ew__vitals";
-			vitals.setAttribute("aria-label", `HP and initiative for ${label}`);
-			this._vitalContainers.set(instance.id, vitals);
-			const table = document.createElement("table");
-			table.className = "ve-w-100 ve-stats";
-			const body = document.createElement("tbody");
-			try {
-				body.innerHTML = Renderer.monster.getCompactRenderedString(
-					MiscUtil.copyFast(instance.monster),
-					{isShowScalers: false},
-				);
-			} catch (e) {
-				const failure = document.createElement("p");
-				failure.className = "ew__render-error";
-				failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-				tile.append(title, vitals, conditions, effects, failure);
-				this._tiles.set(instance.id, tile);
-				this._eleStatblocks.append(tile);
-				continue;
+	_focusCurrentTurn ({moveFocus = false} = {}) {
+		if (!this._state.turn.activeId) return;
+		this._focusActiveTurn();
+		if (!this._selViewMode) return;
+		this._viewMode = this._selViewMode.value = "focused";
+		this._renderStatblocks();
+		if (moveFocus) this._eleStatblocks.querySelector(".ew__statblock-title")?.focus();
+	}
+
+	_setFocus (id, {moveFocus = false} = {}) {
+		if (!this._state.instances.some(it => it.id === id)) return;
+		this._focusedInstanceId = id;
+		this._viewMode = this._selViewMode.value = "focused";
+		this._renderStatblocks();
+		if (moveFocus) this._eleStatblocks.querySelector(".ew__statblock-title")?.focus();
+	}
+
+	_stepFocus (delta) {
+		const index = this._visibleIds.indexOf(this._focusedInstanceId);
+		if (index < 0) {
+			if (this._visibleIds.length) this._setFocus(this._visibleIds[delta > 0 ? 0 : this._visibleIds.length - 1]);
+			return;
+		}
+		const next = this._visibleIds[index + delta];
+		if (next) this._setFocus(next);
+	}
+
+	_refreshRosterFor (kind) {
+		if (!this._selRosterSort) return;
+		const sort = this._selRosterSort.value;
+		const filter = this._selRosterFilter.value;
+		if ((kind === "hp" && (["hp", "hpPercent", "status"].includes(sort) || ["bloodied", "defeated"].includes(filter)))
+			|| (kind === "condition" && (sort === "status" || filter === "conditioned" || this._inpRosterSearch.value.trim()))
+			|| (kind === "initiative" && (sort === "initiative" || filter === "unrolled"))) this._renderRosterView();
+	}
+
+	_renderRosterView () {
+		this._checks.clear();
+		this._groupChecks.clear();
+		this._groupInitiativeInputs.clear();
+		this._rosterMeta.clear();
+		this._eleRoster.replaceChildren();
+		const view = getEncounterRosterView({
+			state: this._state,
+			query: this._inpRosterSearch.value,
+			sort: this._selRosterSort.value,
+			filter: this._selRosterFilter.value,
+		});
+		this._visibleIds = view.visibleIds;
+		this._eleRosterCount.textContent = `${view.visibleIds.length} of ${this._state.instances.length} shown`;
+		if (!view.visibleIds.length) {
+			const empty = document.createElement("p");
+			empty.className = "ew__empty";
+			empty.textContent = this._state.instances.length
+				? "No monsters match these roster filters. Clear the search or choose All monsters."
+				: "No available monsters in this saved list. Choose another saved list to populate the encounter.";
+			this._eleRoster.append(empty);
+		}
+		this._renderRosterGroups(view);
+		this._rosterMeta.forEach((_, id) => this._renderRosterMeta(this._state.instances.find(it => it.id === id)));
+		this._renderStatblocks();
+		this._updateTargets();
+	}
+
+	_renderRosterGroups ({groups, labels, displayLabels}) {
+		groups.forEach((group, ix) => {
+			const isGrouped = group.memberIds.length > 1 || group.isExplicit;
+			const container = document.createElement("section");
+			container.className = "ew__roster-group";
+			container.dataset.groupId = group.id;
+			const members = document.createElement("div");
+			members.className = "ew__group-members";
+			members.id = `ew-group-members-${ix}`;
+			members.hidden = isGrouped && this._collapsedGroups.has(group.id);
+			if (isGrouped) {
+				const header = document.createElement("div");
+				header.className = "ew__group-header";
+				const select = document.createElement("input");
+				select.type = "checkbox";
+				select.setAttribute("aria-label", `Select all ${group.memberIds.length} ${labels.get(group.memberIds[0])} group members`);
+				select.addEventListener("change", () => {
+					const selected = new Set(this._state.selectedIds);
+					group.memberIds.forEach(id => select.checked ? selected.add(id) : selected.delete(id));
+					this._pSetTargets([...selected]);
+				});
+				this._groupChecks.set(group.id, {check: select, memberIds: group.memberIds});
+				const toggle = this._getGroupButton({
+					text: "",
+					label: `${members.hidden ? "Expand" : "Collapse"} ${labels.get(group.memberIds[0])} group`,
+					onClick: () => {
+						members.hidden = !members.hidden;
+						toggle.setAttribute("aria-expanded", String(!members.hidden));
+						toggle.textContent = members.hidden ? "Show members" : "Hide members";
+						toggle.setAttribute("aria-label", `${members.hidden ? "Expand" : "Collapse"} ${labels.get(group.memberIds[0])} group`);
+						if (members.hidden) this._collapsedGroups.add(group.id);
+						else this._collapsedGroups.delete(group.id);
+					},
+				});
+				toggle.textContent = members.hidden ? "Show members" : "Hide members";
+				toggle.setAttribute("aria-expanded", String(!members.hidden));
+				toggle.setAttribute("aria-controls", members.id);
+				const title = document.createElement("strong");
+				title.className = "ew__group-title";
+				const first = getEncounterEffectiveMonster(group.members[0]);
+				title.textContent = `${first._displayName || first.name} ×${group.memberIds.length} · ${first.source} · CR ${first.cr?.cr || first.cr || "—"}${group.visibleMembers.length < group.memberIds.length ? ` · ${group.visibleMembers.length} shown` : ""}`;
+				const controls = document.createElement("div");
+				controls.className = "ew__group-controls";
+				const view = this._getGroupButton({
+					text: "View group",
+					label: `View statblock for ${displayLabels.get(group.visibleMembers[0].id)}`,
+					onClick: () => this._setFocus(group.visibleMembers[0].id, {moveFocus: true}),
+				});
+				controls.append(view);
+				if (group.sharedTurn) {
+					const caption = document.createElement("label");
+					caption.className = "ew__group-initiative";
+					caption.textContent = "Shared initiative";
+					const input = document.createElement("input");
+					input.className = "ew__group-init ve-form-control";
+					input.type = "number";
+					input.step = "1";
+					input.value = group.initiative ?? "";
+					input.placeholder = "Unrolled";
+					input.setAttribute("aria-label", `${title.textContent}: Shared initiative`);
+					input.addEventListener("change", () => this._pSetInitiative({id: group.id, raw: input.value}));
+					caption.append(input);
+					controls.append(caption);
+					this._groupInitiativeInputs.set(group.id, input);
+					controls.append(this._getGroupButton({text: "Individual turns", onClick: () => this._pChangeGroup({action: "individual", groupId: group.id})}));
+				} else {
+					const caption = document.createElement("label");
+					caption.className = "ew__group-initiative";
+					caption.textContent = "Group total";
+					const input = document.createElement("input");
+					input.className = "ew__group-init ve-form-control";
+					input.type = "number";
+					input.step = "1";
+					const totals = group.members.map(it => it.initiative);
+					input.value = totals[0] != null && totals.every(it => it === totals[0]) ? totals[0] : "";
+					input.placeholder = "Enter total";
+					input.setAttribute("aria-label", `${title.textContent}: Group initiative to share`);
+					input.addEventListener("input", () => input.dataset.dirty = "true");
+					caption.append(input);
+					controls.append(caption);
+					this._groupInitiativeInputs.set(group.id, input);
+					controls.append(this._getGroupButton({text: "Share turns", onClick: () => this._pShareTurn({group, raw: input.value})}));
+					controls.append(this._getGroupButton({text: "Roll & share", onClick: () => this._pShareTurn({group, isRoll: true})}));
+				}
+				if (group.isExplicit) {
+					controls.append(this._getGroupButton({
+						text: "Disband", onClick: () => this._pChangeGroup({action: "disband", groupId: group.id}),
+					}));
+				}
+				header.append(select, title, toggle, controls);
+				container.append(header);
 			}
-			table.append(body);
-			tile.append(title, vitals, conditions, effects, table);
-			this._tiles.set(instance.id, tile);
-			this._eleStatblocks.append(tile);
+			group.visibleMembers.forEach(instance => {
+				const displayLabel = displayLabels.get(instance.id);
+				const row = document.createElement("div");
+				row.className = "ew__roster-row";
+				row.dataset.instanceId = instance.id;
+				const label = document.createElement("label");
+				label.className = "ew__roster-member";
+				const check = document.createElement("input");
+				check.type = "checkbox";
+				check.setAttribute("aria-label", `Select ${displayLabel}`);
+				check.addEventListener("change", () => this._pSetTargets(
+					check.checked
+						? [...this._state.selectedIds, instance.id]
+						: this._state.selectedIds.filter(id => id !== instance.id),
+				));
+				const name = document.createElement("span");
+				name.className = "ew__roster-name";
+				name.textContent = displayLabel;
+				label.append(check, name);
+				const jump = document.createElement("button");
+				jump.type = "button";
+				jump.className = "ew__roster-jump ve-btn ve-btn-default ve-btn-xs";
+				jump.textContent = "View";
+				jump.setAttribute("aria-label", `View statblock for ${displayLabel}`);
+				jump.addEventListener("click", () => this._setFocus(instance.id, {moveFocus: true}));
+				const meta = document.createElement("span");
+				meta.className = "ew__roster-meta";
+				row.append(label, jump, meta);
+				this._checks.set(instance.id, check);
+				this._rosterMeta.set(instance.id, meta);
+				if (isGrouped) {
+					row.append(this._getGroupButton({
+						text: "Split",
+						label: `Split ${labels.get(instance.id)} from group`,
+						onClick: () => this._pChangeGroup({action: "split", id: instance.id}),
+					}));
+				} else if (this._state.ungroupedIds.includes(instance.id)) {
+					const compatible = getEncounterCompatibleGroups(this._state, instance.id);
+					if (compatible.length) {
+						compatible.forEach(target => row.append(this._getGroupButton({
+							text: "Rejoin",
+							label: `Rejoin ${labels.get(instance.id)} to ${this._getTurnName(target.id)} group`,
+							onClick: () => this._pChangeGroup({action: "rejoin", id: instance.id, groupId: target.id}),
+						})));
+					} else {
+						row.append(this._getGroupButton({
+							text: "Rejoin",
+							label: `Rejoin ${labels.get(instance.id)} with identical statblocks`,
+							onClick: () => this._pChangeGroup({action: "rejoin", id: instance.id}),
+						}));
+					}
+				}
+				members.append(row);
+			});
+			container.append(members);
+			this._eleRoster.append(container);
+		});
+	}
+
+	_renderStatblocks ({preserveFocus = false} = {}) {
+		const hadFocus = preserveFocus && document.activeElement === this._btnCardsMore;
+		this._tiles.clear();
+		this._conditionContainers.clear();
+		this._effectContainers.clear();
+		this._vitalContainers.clear();
+		this._cardSummaries.clear();
+		this._eleStatblocks.replaceChildren();
+		const byId = new Map(this._state.instances.map(it => [it.id, it]));
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		if (this._viewMode === "focused") {
+			const instance = byId.get(this._focusedInstanceId);
+			if (instance) this._eleStatblocks.append(this._createStatblock(instance, labels.get(instance.id)));
+			else {
+				const empty = document.createElement("p");
+				empty.className = "ew__empty";
+				empty.textContent = "No statblock to show. Choose a saved list with available monsters.";
+				this._eleStatblocks.append(empty);
+			}
+			this._btnCardsMore.hidden = true;
+		} else {
+			for (const id of this._visibleIds.slice(0, this._shownCards)) {
+				const instance = byId.get(id);
+				const card = document.createElement("div");
+				card.className = "ew__card";
+				card.dataset.instanceId = id;
+				const jump = document.createElement("button");
+				jump.type = "button";
+				jump.className = "ew__card-jump ve-btn ve-btn-default ve-btn-xs";
+				jump.textContent = `Focus ${labels.get(id)}`;
+				jump.addEventListener("click", () => this._setFocus(id, {moveFocus: true}));
+				const details = document.createElement("details");
+				details.className = "ew__card-details";
+				const summary = document.createElement("summary");
+				this._cardSummaries.set(id, summary);
+				this._renderCardSummary(instance, labels.get(id));
+				details.append(summary);
+				details.addEventListener("toggle", () => {
+					if (!details.isConnected) return;
+					if (details.open) {
+						details.append(this._createStatblock(byId.get(id), labels.get(id)));
+						this._renderVitals([id]);
+						this._renderConditions([id]);
+						this._renderEffects([id]);
+						this._updateTargets();
+						this._expandedCards.add(id);
+					} else {
+						details.querySelector(".ew__statblock")?.remove();
+						this._tiles.delete(id);
+						this._conditionContainers.delete(id);
+						this._effectContainers.delete(id);
+						this._vitalContainers.delete(id);
+						this._expandedCards.delete(id);
+					}
+				});
+				card.append(jump, details);
+				this._eleStatblocks.append(card);
+				if (this._expandedCards.has(id)) details.open = true;
+			}
+			this._btnCardsMore.hidden = this._shownCards >= this._visibleIds.length;
+			this._btnCardsMore.textContent = `Load more statblocks (${Math.min(this._shownCards, this._visibleIds.length)} of ${this._visibleIds.length} shown)`;
+			if (!this._visibleIds.length) {
+				const empty = document.createElement("p");
+				empty.className = "ew__empty";
+				empty.textContent = "No statblocks match these filters. Focused view keeps your last creature available.";
+				this._eleStatblocks.append(empty);
+			}
 		}
 		this._renderVitals();
 		this._renderConditions();
 		this._renderEffects();
-		this._renderTurnOrder();
 		this._updateTargets();
+		this._updateFocusStatus();
+		if (hadFocus) {
+			(this._btnCardsMore.hidden ? this._eleStatblocks.lastElementChild?.querySelector("summary") : this._btnCardsMore)?.focus({preventScroll: true});
+		}
+	}
+
+	_renderCardSummary (instance, label) {
+		const summary = this._cardSummaries.get(instance.id);
+		if (summary) summary.textContent = `${label} · HP ${instance.hp.current ?? "unset"}/${instance.hp.max ?? "unset"} · ${instance.conditions.length ? instance.conditions.join(", ") : "No conditions"}`;
+	}
+
+	_createStatblock (instance, label) {
+		const effective = getEncounterEffectiveMonster(instance);
+		const tile = document.createElement("article");
+		tile.className = "ew__statblock";
+		tile.dataset.instanceId = instance.id;
+		const title = document.createElement("h3");
+		title.className = "ew__statblock-title";
+		title.textContent = label;
+		title.tabIndex = -1;
+		const heading = document.createElement("div");
+		heading.className = "ew__statblock-heading";
+		const edit = document.createElement("button");
+		edit.type = "button";
+		edit.className = "ew__statblock-edit ve-btn ve-btn-default ve-btn-xs";
+		edit.textContent = `Edit statblock${instance.statblockOperations?.length ? ` (${instance.statblockOperations.length})` : ""}`;
+		edit.setAttribute("aria-label", `Edit statblock for ${label}`);
+		edit.disabled = this._isBusy;
+		edit.addEventListener("click", () => this._pOpenStatblockEditor(instance.id));
+		heading.append(title, edit);
+		const conditions = document.createElement("div");
+		conditions.className = "ew__conditions";
+		conditions.setAttribute("aria-label", `Conditions for ${label}`);
+		this._conditionContainers.set(instance.id, conditions);
+		const effects = document.createElement("div");
+		effects.className = "ew__effects";
+		effects.setAttribute("aria-label", `Notes and roll effects for ${label}`);
+		this._effectContainers.set(instance.id, effects);
+		const vitals = document.createElement("div");
+		vitals.className = "ew__vitals";
+		vitals.setAttribute("aria-label", `HP and initiative for ${label}`);
+		this._vitalContainers.set(instance.id, vitals);
+		const table = document.createElement("table");
+		table.className = "ve-w-100 ve-stats";
+		const body = document.createElement("tbody");
+		try {
+			body.innerHTML = Renderer.monster.getCompactRenderedString(MiscUtil.copyFast(effective), {isShowScalers: false});
+			table.append(body);
+			tile.append(heading, vitals, conditions, effects, table);
+		} catch (e) {
+			const failure = document.createElement("p");
+			failure.className = "ew__render-error";
+			failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
+			tile.append(heading, vitals, conditions, effects, failure);
+		}
+		this._tiles.set(instance.id, tile);
+		return tile;
+	}
+
+	_updateFocusStatus () {
+		if (!this._eleFocusStatus || !this._state.sourceList) return;
+		const index = this._visibleIds.indexOf(this._focusedInstanceId);
+		const label = getEncounterInstanceLabels(this._state.instances).get(this._focusedInstanceId);
+		const activeGroup = this._state.groups.find(it => it.id === this._state.turn.activeId);
+		const activeMembers = new Set(activeGroup?.memberIds || [this._state.turn.activeId]);
+		this._eleFocusStatus.textContent = label
+			? `${label}${index < 0 ? " · outside roster filter" : ` · ${index + 1} of ${this._visibleIds.length} shown`}`
+			: "No creature focused";
+		this._btnFocusPrev.disabled = this._isBusy || !this._visibleIds.length || index === 0;
+		this._btnFocusNext.disabled = this._isBusy || !this._visibleIds.length || index === this._visibleIds.length - 1;
+		this._btnFocusCurrent.disabled = this._isBusy || !this._state.turn.activeId;
+		this._eleRoster.querySelectorAll(".ew__roster-row").forEach(row => {
+			const isFocused = row.dataset.instanceId === this._focusedInstanceId;
+			row.classList.toggle("ew__roster-row--focused", isFocused);
+			const jump = row.querySelector(".ew__roster-jump");
+			if (isFocused) jump.setAttribute("aria-current", "true");
+			else jump.removeAttribute("aria-current");
+			row.classList.toggle("ew__roster-row--active", activeMembers.has(row.dataset.instanceId));
+		});
+		this._tiles.forEach((tile, id) => tile.classList.toggle("ew__statblock--active", activeMembers.has(id)));
+	}
+
+	_renderActiveVitals () {
+		if (!this._eleActiveVitals) return;
+		const activeId = this._state.turn.activeId;
+		const group = this._state.groups.find(it => it.id === activeId);
+		const memberIds = new Set(group?.memberIds || [activeId]);
+		const members = this._state.instances.filter(it => memberIds.has(it.id));
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		this._eleActiveVitals.textContent = members.length
+			? [
+				...members.slice(0, 3).map(it => `${labels.get(it.id)}: HP ${it.hp.current ?? "unset"}/${it.hp.max ?? "unset"}${it.hp.temp ? ` +${it.hp.temp} temp` : ""} · ${it.conditions.length ? it.conditions.join(", ") : "No conditions"}`),
+				...(members.length > 3 ? [`${members.length - 3} more group members in the roster`] : []),
+			].join(" · ")
+			: "Start turns to follow the active monster.";
+	}
+
+	_getGroupButton ({text, label = text, onClick}) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "ew__group-action ve-btn ve-btn-default ve-btn-xs";
+		button.textContent = text;
+		button.setAttribute("aria-label", label);
+		button.disabled = this._isBusy;
+		button.addEventListener("click", onClick);
+		return button;
 	}
 
 	_renderVitals (ids = this._state.instances.map(it => it.id)) {
@@ -910,12 +1722,14 @@ export class EncounterWorkspacePage {
 		this._state.instances.forEach(instance => {
 			if (!selected.has(instance.id)) return;
 			const container = this._vitalContainers.get(instance.id);
+			this._renderCardSummary(instance, labels.get(instance.id));
 			if (!container) return;
+			const shared = getEncounterSharedGroup(this._state, instance.id);
 			const fields = [
 				{prop: "current", label: "Current HP", value: instance.hp.current},
 				{prop: "max", label: "Maximum HP", value: instance.hp.max},
 				{prop: "temp", label: "Temp HP", value: instance.hp.temp},
-				{prop: "initiative", label: "Initiative", value: instance.initiative},
+				{prop: "initiative", label: shared ? "Shared initiative" : "Initiative", value: getEncounterInitiativeTotal(this._state, instance)},
 			];
 			const controls = fields.map(({prop, label, value}) => {
 				const field = document.createElement("label");
@@ -932,11 +1746,12 @@ export class EncounterWorkspacePage {
 				input.dataset.instanceId = instance.id;
 				input.dataset.field = prop;
 				input.setAttribute("aria-label", `${labels.get(instance.id)}: ${label}`);
-				input.disabled = this._isBusy;
+				input.disabled = this._isBusy || (prop === "initiative" && !!shared);
+				if (prop === "initiative" && shared) input.title = "Edit the group's shared initiative in the roster. Individual total is retained for switching back.";
 				input.addEventListener("change", () => {
 					if (this._isBusy) {
 						const persisted = this._state.instances.find(it => it.id === instance.id);
-						input.value = (prop === "initiative" ? persisted.initiative : persisted.hp[prop]) ?? "";
+						input.value = (prop === "initiative" ? getEncounterInitiativeTotal(this._state, persisted) : persisted.hp[prop]) ?? "";
 						this._setError("Wait for the current encounter save before editing another value.");
 						return;
 					}
@@ -948,14 +1763,16 @@ export class EncounterWorkspacePage {
 			});
 			container.replaceChildren(...controls);
 			this._renderRosterMeta(instance);
+			this._renderCardSummary(instance, labels.get(instance.id));
 		});
+		this._renderActiveVitals();
 	}
 
 	_renderTurnOrder () {
 		const order = EncounterWorkspaceState.getInitiativeOrder(this._state);
 		const labels = getEncounterInstanceLabels(this._state.instances);
 		const {round, activeId} = this._state.turn;
-		this._eleRoundStatus.textContent = round ? `Round ${round} · ${labels.get(activeId)}'s turn` : "Not started";
+		this._eleRoundStatus.textContent = round ? `Round ${round} · ${this._getTurnName(activeId)}'s turn` : "Not started";
 		const items = order.map((instance, index) => {
 			const item = document.createElement("li");
 			item.className = "ew__turn";
@@ -968,29 +1785,39 @@ export class EncounterWorkspacePage {
 			rank.textContent = `${index + 1}.`;
 			const name = document.createElement("span");
 			name.className = "ew__turn-name";
-			name.textContent = labels.get(instance.id);
+			name.textContent = instance.memberIds ? this._getTurnName(instance.id) : labels.get(instance.id);
 			const total = document.createElement("strong");
 			total.textContent = String(instance.initiative);
 			item.append(rank, name, total);
 			return item;
 		});
 		this._eleTurnOrder.replaceChildren(...items);
-		const unrolled = this._state.instances.filter(it => it.initiative == null);
+		const unrolled = this._state.instances.filter(it => getEncounterInitiativeTotal(this._state, it) == null);
 		this._eleInitUnrolled.textContent = unrolled.length
 			? `${unrolled.length} unrolled (not in turn order): ${this._getTargetNames(unrolled.map(it => it.id))}.`
 			: order.length ? "All monsters have initiative." : "Enter or roll initiative to create a turn order.";
 		this._updateControls();
+		this._renderActiveVitals();
+		this._updateFocusStatus();
 	}
 
-	_renderConditions () {
+	_renderConditions (ids = this._state.instances.map(it => it.id)) {
 		const labels = getEncounterInstanceLabels(this._state.instances);
+		const selected = new Set(ids);
 		this._state.instances.forEach(instance => {
+			if (!selected.has(instance.id)) return;
 			const container = this._conditionContainers.get(instance.id);
 			const meta = this._rosterMeta.get(instance.id);
-			if (!container || !meta) return;
+			if (!container && !meta) return;
+			if (!container) {
+				this._renderRosterMeta(instance);
+				this._renderCardSummary(instance, labels.get(instance.id));
+				return;
+			}
 			container.replaceChildren();
 			const picker = getNpcTrackerConditionPickerModel({conditions: instance.conditions, conditionCatalog: this._referenceData.conditions});
 			this._renderRosterMeta(instance, picker.active.map(it => it.label));
+			this._renderCardSummary(instance, labels.get(instance.id));
 			if (!picker.active.length) {
 				const empty = document.createElement("span");
 				empty.className = "ew__condition-empty";
@@ -1019,6 +1846,7 @@ export class EncounterWorkspacePage {
 				container.append(button);
 			});
 		});
+		this._renderActiveVitals();
 	}
 
 	_renderRosterMeta (instance, conditionLabels = null) {
@@ -1033,9 +1861,9 @@ export class EncounterWorkspacePage {
 			...instance.modifiers.map(it => it.name),
 		];
 		meta.textContent = [
-			`${instance.monster.source} · CR ${instance.monster.cr?.cr || instance.monster.cr || "—"}`,
+			`${getEncounterEffectiveMonster(instance).source} · CR ${getEncounterEffectiveMonster(instance).cr?.cr || getEncounterEffectiveMonster(instance).cr || "—"}`,
 			`HP ${instance.hp.current == null ? "unset" : instance.hp.current}/${instance.hp.max == null ? "unset" : instance.hp.max}${instance.hp.temp ? ` +${instance.hp.temp} temp` : ""}`,
-			`Init ${instance.initiative == null ? "unrolled" : instance.initiative}`,
+			`Init ${getEncounterInitiativeTotal(this._state, instance) == null ? "unrolled" : getEncounterInitiativeTotal(this._state, instance)}${getEncounterSharedGroup(this._state, instance.id) ? " shared" : ""}`,
 			...activeConditions,
 			...effectNames,
 		].join(" · ");
@@ -1050,17 +1878,21 @@ export class EncounterWorkspacePage {
 			this._renderRosterMeta(instance);
 			const entries = [
 				...instance.areaNotes.map(note => ({
-					title: `${note.kind === "lair" ? "Lair note (manual)" : "Area trait"}: ${note.name}`,
+					title: `${note.kind === "lair" ? "Lair reminder (text only)" : "Area reminder (text only)"}: ${note.name}`,
 					description: note.description,
 					onRemove: () => this._pUpdateAreaNote({isAdd: false, id: instance.id, noteId: note.id}),
 				})),
 				...instance.modifiers.map(modifier => ({
 					title: modifier.name,
 					description: [
-						modifier.scopes.includes("check") ? "Checks (including skills)" : "",
+						modifier.scopes.includes("check") ? "Checks (including skills and initiative)" : "",
+						modifier.scopes.includes("skill") ? "Skill checks" : "",
 						modifier.scopes.includes("save") ? "Saving throws" : "",
+						modifier.scopes.includes("initiative") ? "Initiative" : "",
+						modifier.scopes.includes("attack") ? "Attack rolls" : "",
 						modifier.mode === "normal" ? "" : modifier.mode,
 						modifier.bonus ? getNpcTrackerSignedNumber(modifier.bonus) : "",
+						modifier.presetId ? getEncounterPresetCitation(ENCOUNTER_ROLL_PRESETS.find(it => it.presetId === modifier.presetId)) : "",
 					].filter(Boolean).join(" · "),
 					onRemove: () => this._pUpdateModifier({isAdd: false, id: instance.id, modifierId: modifier.id}),
 				})),
@@ -1068,7 +1900,7 @@ export class EncounterWorkspacePage {
 			if (!entries.length) {
 				const empty = document.createElement("span");
 				empty.className = "ew__condition-empty";
-				empty.textContent = "No area effects";
+				empty.textContent = "No notes or roll effects";
 				container.append(empty);
 			}
 			entries.forEach(({title, description, onRemove}) => {
@@ -1101,6 +1933,7 @@ export class EncounterWorkspacePage {
 			const next = EncounterWorkspaceState.withConditions(this._state, {condition, isAdd: false, targetIds: [id]});
 			this._state = await this._store.pSave(next);
 			this._renderConditions();
+			this._refreshRosterFor("condition");
 			this._renderConditionPicker();
 			this._clearRollResults();
 			this._setStatus(`Removed ${condition} from ${getEncounterInstanceLabels(this._state.instances).get(id)}.`);
@@ -1108,7 +1941,7 @@ export class EncounterWorkspacePage {
 			this._setError(`Condition was not removed: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);
-			this._selCondition.focus();
+			this._eleStatblocks.querySelector(".ew__statblock-title")?.focus({preventScroll: true});
 		}
 	}
 
@@ -1116,6 +1949,12 @@ export class EncounterWorkspacePage {
 		const selected = new Set(this._state.selectedIds);
 		this._eleSummary.textContent = `${selected.size} of ${this._state.instances.length} selected as targets`;
 		this._checks.forEach((check, id) => check.checked = selected.has(id));
+		this._groupChecks.forEach(({check, memberIds}) => {
+			const count = memberIds.filter(id => selected.has(id)).length;
+			check.checked = count === memberIds.length;
+			check.indeterminate = count > 0 && count < memberIds.length;
+			check.setAttribute("aria-checked", check.indeterminate ? "mixed" : String(check.checked));
+		});
 		this._tiles.forEach((tile, id) => tile.classList.toggle("ew__statblock--selected", selected.has(id)));
 		this._renderEffectPickers();
 	}

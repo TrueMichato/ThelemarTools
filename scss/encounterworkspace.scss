@@ -1,5 +1,6 @@
 @use "vars/vars";
 @use "vars/vars-night";
+@use "includes/bestiary-quick-actions";
 
 @layer vetools {
 	.ew {
@@ -20,7 +21,7 @@
 		}
 
 		&__header {
-			padding-bottom: 14px;
+			padding-bottom: 10px;
 			border-bottom: 1px solid vars.$rgb-border-grey;
 
 			h2 {
@@ -41,8 +42,8 @@
 		}
 
 		&__status {
-			margin: 14px 0;
-			padding: 10px 12px;
+			margin: 8px 0;
+			padding: 7px 12px;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg--alt;
 		}
@@ -100,7 +101,7 @@
 		}
 
 		&__source {
-			padding: 4px 0 12px;
+			padding: 4px 0 8px;
 
 			h2 {
 				margin: 0 0 4px;
@@ -134,7 +135,81 @@
 			display: grid;
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 14px;
-			margin-bottom: 18px;
+			margin-top: 12px;
+		}
+
+		&__setup,
+		&__action-drawer,
+		&__roster-help {
+			min-width: 0;
+
+			> summary {
+				padding: 9px 12px;
+				border: 1px solid vars.$rgb-border-grey;
+				background: vars.$rgb-bg--alt;
+				font-weight: 600;
+				cursor: pointer;
+
+				&:focus-visible {
+					outline: 2px solid vars.$rgb-active-blue;
+					outline-offset: 2px;
+				}
+			}
+		}
+
+		&__setup {
+			margin-bottom: 10px;
+
+			> .ew__actions {
+				padding: 10px 0;
+			}
+		}
+
+		&__action-drawer {
+			margin-top: 18px;
+		}
+
+		&__live {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 8px 18px;
+			min-width: 0;
+			padding: 9px 12px;
+			margin-bottom: 14px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg;
+
+			> p {
+				margin: 0;
+				font-weight: 600;
+			}
+		}
+
+		&__live-turn {
+			flex: 1 1 240px;
+			min-width: 0;
+
+			strong {
+				font-size: 1.5rem;
+			}
+
+			p {
+				margin: 3px 0 0;
+				overflow-wrap: anywhere;
+			}
+		}
+
+		&__bulk-edit {
+			> summary {
+				font-size: 1.5rem;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			&[open] > summary {
+				margin-bottom: 12px;
+			}
 		}
 
 		&__effect-tools {
@@ -164,6 +239,57 @@
 			display: grid;
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 14px;
+		}
+
+		&__bulk-edit {
+			grid-column: 1 / -1;
+
+			.ew__operation-help {
+				margin: 0 0 12px;
+			}
+		}
+
+		&__bulk-fields {
+			display: grid;
+			grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+			align-items: center;
+			gap: 9px 14px;
+
+			label {
+				margin: 0;
+				font-weight: 600;
+			}
+
+			.ve-form-control {
+				width: 100%;
+				min-width: 0;
+				font-size: max(16px, 1rem);
+			}
+
+			button {
+				grid-column: 2;
+				justify-self: start;
+			}
+
+			[hidden] {
+				display: none;
+			}
+		}
+
+		&__statblock-heading {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			padding: 8px 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			.ew__statblock-title {
+				padding: 0;
+				border: 0;
+				background: none;
+			}
 		}
 
 		&__operation,
@@ -391,12 +517,81 @@
 
 		&__layout {
 			display: grid;
-			grid-template-columns: minmax(220px, 265px) minmax(0, 1fr);
+			grid-template-columns: minmax(235px, 300px) minmax(0, 1fr);
 			align-items: start;
 			gap: 18px;
 		}
 
+		&__focus {
+			grid-column: 2;
+			grid-row: 1;
+			min-width: 0;
+		}
+
+		&__focus-bar,
+		&__focus-nav {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 8px;
+		}
+
+		&__focus-bar {
+			justify-content: space-between;
+			padding: 8px 10px;
+			margin-bottom: 10px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			label {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				margin: 0;
+			}
+		}
+
+		&__focus-nav {
+			strong {
+				min-width: 0;
+				overflow-wrap: anywhere;
+			}
+		}
+
+		&__card {
+			min-width: 0;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			.ew__statblock {
+				border: 0;
+			}
+		}
+
+		&__card-details > summary {
+			padding: 9px 12px;
+			cursor: pointer;
+
+			&:focus-visible {
+				outline: 2px solid vars.$rgb-active-blue;
+			}
+		}
+
+		&__card-jump {
+			margin: 8px 12px 0;
+		}
+
+		&__load-more {
+			margin-top: 12px;
+
+			&[hidden] {
+				display: none;
+			}
+		}
+
 		&__rail {
+			grid-column: 1;
+			grid-row: 1;
 			min-width: 0;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg--alt;
@@ -419,19 +614,86 @@
 			font-size: 1rem;
 		}
 
+		&__roster-controls {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 5px 8px;
+			padding: 10px 12px;
+
+			label {
+				margin: 0;
+			}
+
+			input,
+			> p {
+				grid-column: 1 / -1;
+				min-width: 0;
+				margin: 0;
+			}
+
+			select {
+				min-width: 0;
+				width: 100%;
+			}
+		}
+
+		&__roster-help > summary {
+			border-right: 0;
+			border-left: 0;
+		}
+
 		&__roster {
 			max-height: 65vh;
 			overflow-y: auto;
 		}
 
+		&__roster-group {
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__group-header {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 7px;
+			padding: 9px 12px;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__group-title {
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+
+		&__group-controls {
+			display: flex;
+			grid-column: 2 / -1;
+			flex-wrap: wrap;
+			align-items: end;
+			gap: 6px;
+		}
+
+		&__group-initiative {
+			display: grid;
+			gap: 3px;
+			font-size: 1rem;
+		}
+
+		&__group-init {
+			width: 105px;
+		}
+
+		&__group-members[hidden] {
+			display: none;
+		}
+
 		&__roster-row {
 			display: grid;
-			grid-template-columns: auto minmax(0, 1fr);
+			grid-template-columns: minmax(0, 1fr) auto;
 			align-items: center;
-			column-gap: 10px;
+			gap: 4px 10px;
 			padding: 9px 12px;
 			border-top: 1px solid vars.$rgb-border-grey--muted;
-			cursor: pointer;
 
 			&:hover,
 			&:focus-within {
@@ -443,9 +705,33 @@
 				outline-offset: -2px;
 			}
 
+			&--focused {
+				background: vars.$rgb-bg;
+				outline: 1px solid vars.$rgb-active-blue;
+				outline-offset: -1px;
+			}
+
+			&--active .ew__roster-name::before {
+				content: "● ";
+				color: vars.$rgb-active-blue;
+			}
+
+			.ew__group-action {
+				grid-column: 1 / -1;
+				justify-self: start;
+			}
+
 			input {
 				margin: 0;
 			}
+		}
+
+		&__roster-member {
+			display: inline-flex;
+			align-items: center;
+			gap: 10px;
+			min-width: 0;
+			cursor: pointer;
 		}
 
 		&__roster-name {
@@ -455,14 +741,14 @@
 		}
 
 		&__roster-meta {
-			grid-column: 2;
+			grid-column: 1 / -1;
 			color: vars.$rgb-font;
 			font-size: 1rem;
 		}
 
 		&__statblocks {
 			display: grid;
-			grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr));
+			grid-template-columns: minmax(0, 1fr);
 			align-items: start;
 			gap: 14px;
 			min-width: 0;
@@ -478,6 +764,11 @@
 				border-color: vars.$rgb-active-blue;
 			}
 
+			&--active {
+				outline: 2px solid vars.$rgb-active-blue;
+				outline-offset: 2px;
+			}
+
 			.ve-stats {
 				min-width: 390px;
 			}
@@ -490,6 +781,10 @@
 			background: vars.$rgb-bg--alt;
 			font-size: 1rem;
 			font-weight: 600;
+
+			&:focus {
+				outline: 2px solid vars.$rgb-active-blue;
+			}
 		}
 
 		&__vitals {
@@ -590,6 +885,11 @@
 		&__header,
 		&__rail-header,
 		&__rail,
+		&__focus-bar,
+		&__card,
+		&__setup > summary,
+		&__action-drawer > summary,
+		&__roster-help > summary,
 		&__notices,
 		&__operation,
 		&__results,
@@ -602,6 +902,11 @@
 		}
 
 		&__rail,
+		&__focus-bar,
+		&__card,
+		&__setup > summary,
+		&__action-drawer > summary,
+		&__roster-help > summary,
 		&__status,
 		&__notices,
 		&__operation,
@@ -615,6 +920,7 @@
 		}
 
 		&__statblock,
+		&__live,
 		&__roster-row:hover,
 		&__roster-row:focus-within {
 			background: vars-night.$rgb-bg--night;
@@ -622,6 +928,31 @@
 
 		&__roster-row {
 			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__roster-row--focused {
+			background: vars-night.$rgb-bg--night;
+			outline-color: vars-night.$rgb-link-blue--night;
+		}
+
+		&__roster-row--active .ew__roster-name::before {
+			color: vars-night.$rgb-link-blue--night;
+		}
+
+		&__live {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__statblock--active {
+			outline-color: vars-night.$rgb-link-blue--night;
+		}
+
+		&__roster-group {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__group-header {
+			background: vars-night.$rgb-bg--alt-night;
 		}
 
 		&__results-table th,
@@ -652,7 +983,8 @@
 		}
 
 		&__help,
-		&__roster-meta {
+		&__roster-meta,
+		&__condition-empty {
 			color: vars-night.$rgb-font--night;
 		}
 
@@ -674,6 +1006,11 @@
 		&__statblock--selected {
 			border-color: vars-night.$rgb-link-blue--night;
 		}
+
+		&__statblock-heading {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+		}
 	}
 
 	@media (width <= 800px) {
@@ -686,12 +1023,32 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 
+		.ew__focus {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		.ew__rail {
+			grid-column: 1;
+			grid-row: 2;
+		}
+
 		.ew__roster {
-			max-height: 240px;
+			max-height: 225px;
 		}
 	}
 
 	@media (width <= 600px) {
+		.ew__bulk-fields {
+			grid-template-columns: minmax(0, 1fr);
+
+			button {
+				grid-column: 1;
+				width: 100%;
+				min-height: 44px;
+			}
+		}
+
 		.ew__results-scroll {
 			max-height: 360px;
 		}
@@ -744,6 +1101,14 @@
 	}
 
 	@media (width <= 480px) {
+		.ew__focus-nav {
+			width: 100%;
+		}
+
+		.ew__statblock .ve-stats {
+			min-width: 0;
+		}
+
 		.ew__vitals {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}

@@ -168,7 +168,7 @@ describe("Encounter Workspace working copy", () => {
 		const removed = EncounterWorkspaceState.withConditions(secondPoisoned, {condition: "poisoned", isAdd: false});
 		await store.pSave(removed);
 		const restored = await store.pLoad();
-		expect(restored.version).toBe(4);
+		expect(restored.version).toBe(6);
 		expect(restored.instances.map(it => it.conditions)).toEqual([[], ["poisoned"]]);
 		expect(restored.instances.map(it => it.areaNotes)).toEqual([[], []]);
 		expect(restored.instances.map(it => it.modifiers)).toEqual([[], []]);
@@ -191,7 +191,7 @@ describe("Encounter Workspace working copy", () => {
 		delete legacy.instances[0].conditions;
 		storage.values.set("encounterWorkspaceState_encounterworkspace.html", legacy);
 		const loaded = await store.pLoad();
-		expect(loaded.version).toBe(4);
+		expect(loaded.version).toBe(6);
 		expect(loaded.instances[0].conditions).toEqual([]);
 		expect(loaded.instances[0].areaNotes).toEqual([]);
 		expect(loaded.instances[0].modifiers).toEqual([]);
@@ -207,7 +207,7 @@ describe("Encounter Workspace working copy", () => {
 		storage.values.set("encounterWorkspaceState_encounterworkspace.html", v2);
 		storage.pSetForPage.mockClear();
 		const upgraded = await store.pLoad();
-		expect(upgraded).toMatchObject({version: 4, selectedIds: state.selectedIds, omissions: state.omissions, sourceList: state.sourceList});
+		expect(upgraded).toMatchObject({version: 6, selectedIds: state.selectedIds, omissions: state.omissions, sourceList: state.sourceList});
 		expect(upgraded.instances[0]).toMatchObject({conditions: ["dreambound"], areaNotes: [], modifiers: []});
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 	});
@@ -295,6 +295,73 @@ describe("Encounter Workspace working copy", () => {
 		expect(state.instances[0]).toMatchObject({areaNotes: [], modifiers: []});
 	});
 
+	it("loads v3/v4 saved presets without rewriting storage, preserves notes, and rejects forged catalog metadata", async () => {
+		const storage = getStorage();
+		const store = new EncounterWorkspaceStore({storage});
+		const base = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "skeleton_mm"}]),
+			pResolveItem: async () => ({entity: {...getMonster("Skeleton"), type: "undead"}}),
+			fnUid: getUid(),
+		});
+		const old = {...getEncounterModifierForPreset("desecrated-dmg")};
+		delete old.source;
+		delete old.page;
+		delete old.edition;
+		const note = {id: "note", kind: "lair", name: "Bell", description: "Manual reminder"};
+		for (const version of [3, 4]) {
+			const legacy = structuredClone(base);
+			legacy.version = version;
+			legacy.instances[0].modifiers = [old];
+			legacy.instances[0].areaNotes = [note];
+			if (version === 3) {
+				delete legacy.instances[0].hp;
+				delete legacy.instances[0].initiative;
+				delete legacy.turn;
+			}
+			storage.values.set("encounterWorkspaceState_encounterworkspace.html", legacy);
+			const loaded = await store.pLoad();
+			expect(loaded.instances[0].modifiers).toEqual([getEncounterModifierForPreset("desecrated-dmg")]);
+			expect(loaded.instances[0].areaNotes).toEqual([note]);
+			expect(storage.pSetForPage).not.toHaveBeenCalled();
+		}
+		for (const tampered of [
+			{...getEncounterModifierForPreset("heavy-precipitation-xdmg"), page: 70},
+			{...getEncounterModifierForPreset("heavy-precipitation-xdmg"), source: "House rule"},
+			{...getEncounterModifierForPreset("heavy-precipitation-xdmg"), scopes: ["attack"]},
+			{...getEncounterModifierForPreset("heavy-precipitation-xdmg"), bonus: 2},
+		]) {
+			expect(() => EncounterWorkspaceState.withModifier(base, {modifier: tampered, isAdd: true})).toThrow();
+		}
+		for (const presetId of ["heavy-precipitation-xdmg", "blizzard-idrotf", "ioun-dark-blue-rhomboid"]) {
+			const uncited = {...getEncounterModifierForPreset(presetId)};
+			delete uncited.source;
+			delete uncited.page;
+			delete uncited.edition;
+			expect(() => EncounterWorkspaceState.withModifier(base, {modifier: uncited, isAdd: true})).toThrow(/cited source/);
+			expect(() => EncounterWorkspaceState.validate({
+				...base,
+				instances: [{...base.instances[0], modifiers: [uncited]}],
+			})).toThrow(/cited source/);
+		}
+	});
+
+	it("stacks different cited presets but replaces only the other Desecrated Ground variant", async () => {
+		const base = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "skeleton_mm"}]),
+			pResolveItem: async () => ({entity: {...getMonster("Skeleton"), type: "undead"}}),
+			fnUid: getUid(),
+		});
+		const dmg = getEncounterModifierForPreset("desecrated-dmg");
+		const weather = getEncounterModifierForPreset("heavy-precipitation-xdmg");
+		const house = getEncounterModifierForPreset("desecrated-house");
+		const withDmg = EncounterWorkspaceState.withModifier(base, {modifier: dmg, isAdd: true}).state;
+		const withWeather = EncounterWorkspaceState.withModifier(withDmg, {modifier: weather, isAdd: true}).state;
+		expect(withWeather.instances[0].modifiers).toEqual([dmg, weather]);
+		const switched = EncounterWorkspaceState.withModifier(withWeather, {modifier: house, isAdd: true});
+		expect(switched.state.instances[0].modifiers).toEqual([weather, house]);
+		expect(EncounterWorkspaceState.withModifier(switched.state, {modifier: house, isAdd: true}).changedIds).toEqual([]);
+	});
+
 	it("does not publish changes to working state if effect persistence fails", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
@@ -359,7 +426,7 @@ describe("Encounter Workspace working copy", () => {
 	it("does not accept invalid or unsupported persisted data, or silently erase it", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
-		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 5, instances: []});
+		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 7, instances: []});
 		await expect(store.pLoad()).rejects.toThrow(/unsupported version/);
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 		await expect(store.pSave({

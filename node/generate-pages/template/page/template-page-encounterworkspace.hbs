@@ -12,11 +12,11 @@
 	{{> "navbar" }}
 
 	<!--
-	THESIS: Saved Bestiary encounters become independent, selectable working instances, not edits to pins.
-	OWN-WORLD: Bestiary's compact statblocks, site buttons, neutral roster rail, and restrained blue target selection.
-	STORY: Choose a saved list, see every counted monster together, select individual targets, return after reload.
-	FIRST VIEWPORT: Source/list action above a roster rail and multi-statblock field; omissions remain visible above both.
-	FORM: Familiar DM tool workspace, inherited from Bestiary rather than a new visual world.
+	THESIS: The active turn and one effective statblock lead; preparation never blocks a DM's next action.
+	OWN-WORLD: Bestiary statblocks, compact neutral surfaces and familiar controls; blue marks the current turn and targets.
+	STORY: Scan the turn, find a creature in the grouped roster, act on its own HP and conditions, advance.
+	FIRST VIEWPORT: A live turn strip sits above the roster and focused statblock; setup and bulk actions fold away.
+	FORM: Operate-mode combat workbench in the existing Bestiary/DM-tool identity.
 	-->
 	<main class="ew container" id="encounter-workspace" aria-busy="true">
 		<header class="ew__header">
@@ -24,19 +24,22 @@
 				<h2>Encounter Workspace</h2>
 				<p>Make a working copy of a saved Bestiary pinned list. Your original list stays untouched.</p>
 			</div>
-			<div class="ew__actions">
-				<button type="button" class="ve-btn ve-btn-primary" id="ew-choose" disabled>Choose saved list</button>
-				<a href="bestiary.html" class="ve-btn ve-btn-default">Bestiary</a>
-			</div>
 		</header>
 
 		<p class="ew__status" id="ew-status" role="status" aria-live="polite">Loading working encounter...</p>
 
-		<section class="ew__handoff" aria-label="DM Screen handoff">
+		<details class="ew__setup" id="ew-setup" open>
+			<summary>Encounter setup &amp; DM Screen handoff</summary>
+			<div class="ew__actions">
+				<button type="button" class="ve-btn ve-btn-primary" id="ew-choose" disabled>Choose saved list</button>
+				<a href="bestiary.html" class="ve-btn ve-btn-default">Bestiary</a>
+			</div>
+
+			<section class="ew__handoff" aria-label="DM Screen handoff">
 			<div>
 				<h2>Send to DM Screen</h2>
 				<p>Queue a one-time snapshot of selected monsters in this browser. In DM Screen, confirm Import on the Initiative Tracker panel you want. Later HP, conditions, and turns will not sync.</p>
-				<p>Area notes and custom roll modifiers stay in this workspace; they cannot be shown in the Initiative Tracker.</p>
+				<p>Area notes and roll effects stay in this workspace; they cannot be shown in the Initiative Tracker.</p>
 				<p id="ew-handoff-pending" class="ew__handoff-pending"></p>
 			</div>
 			<div class="ew__handoff-actions">
@@ -45,7 +48,8 @@
 				<button type="button" class="ve-btn ve-btn-default" id="ew-handoff-clear" disabled>Clear queued snapshot</button>
 			</div>
 			<p id="ew-handoff-status" class="ew__handoff-status" role="status" aria-live="polite"></p>
-		</section>
+			</section>
+		</details>
 
 		<section class="ew__content" id="ew-workspace" aria-label="Working encounter" hidden>
 			<header class="ew__source">
@@ -53,9 +57,79 @@
 					<h2 id="ew-name"></h2>
 					<p>Working copy · source list will not change</p>
 				</div>
-				<p id="ew-summary" role="status" aria-live="polite"></p>
 			</header>
 			<div class="ew__notices" id="ew-notices" aria-label="Entries not loaded" hidden></div>
+			<section class="ew__live" aria-label="Combat status">
+				<div class="ew__live-turn">
+					<strong id="ew-round-status" role="status" aria-live="polite">Not started</strong>
+					<p id="ew-active-vitals">Start turns to follow the active monster.</p>
+				</div>
+				<p id="ew-summary" role="status" aria-live="polite"></p>
+				<div class="ew__controls">
+					<button type="button" class="ve-btn ve-btn-primary" id="ew-turn-start">Start turns</button>
+					<button type="button" class="ve-btn ve-btn-primary" id="ew-turn-next">Next turn</button>
+					<button type="button" class="ve-btn ve-btn-default" id="ew-turn-reset">Reset turns</button>
+				</div>
+			</section>
+			<div class="ew__layout">
+				<section class="ew__focus" aria-label="Monster statblocks">
+					<div class="ew__focus-bar">
+						<div class="ew__focus-nav">
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-prev" aria-label="Previous visible monster">Previous</button>
+							<strong id="ew-focus-status" role="status" aria-live="polite"></strong>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-next" aria-label="Next visible monster">Next</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-current">Current turn</button>
+						</div>
+						<label for="ew-view-mode">Statblocks
+							<select class="ve-form-control" id="ew-view-mode">
+								<option value="focused">Focused</option>
+								<option value="all">All (load in batches)</option>
+							</select>
+						</label>
+					</div>
+					<div class="ew__statblocks" id="ew-statblocks"></div>
+					<button type="button" class="ve-btn ve-btn-default ew__load-more" id="ew-cards-more" hidden>Load more statblocks</button>
+				</section>
+				<aside class="ew__rail" aria-label="Monster targets">
+					<div class="ew__rail-header">
+						<h3>Targets</h3>
+						<div class="ew__selection-actions">
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-all">All</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-none">None</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-group-selected">Group selected</button>
+						</div>
+					</div>
+					<div class="ew__roster-controls">
+						<label for="ew-roster-search">Find a monster</label>
+						<input class="ve-form-control" id="ew-roster-search" type="search" autocomplete="off" placeholder="Name, source, CR or condition">
+						<label for="ew-roster-sort">Sort roster</label>
+						<select class="ve-form-control" id="ew-roster-sort">
+							<option value="source">Source order</option>
+							<option value="initiative">Initiative (high first)</option>
+							<option value="hp">Current HP (low first)</option>
+							<option value="hpPercent">HP % (low first)</option>
+							<option value="name">Name (A–Z)</option>
+							<option value="cr">CR (high first)</option>
+							<option value="status">Status (urgent first)</option>
+						</select>
+						<label for="ew-roster-filter">Show</label>
+						<select class="ve-form-control" id="ew-roster-filter">
+							<option value="all">All monsters</option>
+							<option value="conditioned">With conditions</option>
+							<option value="bloodied">Below half HP</option>
+							<option value="defeated">At 0 HP</option>
+							<option value="unrolled">No initiative</option>
+						</select>
+						<p id="ew-roster-count" role="status" aria-live="polite"></p>
+					</div>
+					<details class="ew__roster-help"><summary>Grouping and targets</summary>
+						<p class="ew__help">Identical effective statblocks group in this roster; expand for individual HP, conditions and targets. Group selected creatures to keep them together or share a turn. Selection is saved. A group checkbox always selects its full group, including filtered-out members.</p>
+					</details>
+					<div id="ew-roster" class="ew__roster"></div>
+				</aside>
+			</div>
+			<details class="ew__action-drawer" id="ew-actions">
+				<summary>Selected monster actions · rolls, HP, conditions, initiative &amp; edits</summary>
 			<section class="ew__operations" aria-label="Actions for selected monsters">
 				<div class="ew__operation">
 					<h3>Roll for selected</h3>
@@ -106,17 +180,11 @@
 						</select>
 						<button type="button" class="ve-btn ve-btn-primary" id="ew-init-roll">Roll selected initiative</button>
 					</div>
-					<p class="ew__operation-help">Uses each monster's initiative bonus as a Dexterity check, including applicable conditions and area modifiers. Edit a total on its statblock below.</p>
+					<p class="ew__operation-help">Uses each monster's initiative bonus as a Dexterity check, including applicable conditions and roll effects. Shared-turn groups roll once using the first selected member's effects; original individual totals are retained.</p>
 				</div>
 				<section class="ew__operation ew__turns" aria-label="Turn order">
 					<div class="ew__turns-header">
 						<h3>Turn order</h3>
-						<p id="ew-round-status" role="status" aria-live="polite"></p>
-					</div>
-					<div class="ew__controls">
-						<button type="button" class="ve-btn ve-btn-primary" id="ew-turn-start">Start turns</button>
-						<button type="button" class="ve-btn ve-btn-default" id="ew-turn-next">Next turn</button>
-						<button type="button" class="ve-btn ve-btn-default" id="ew-turn-reset">Reset turns</button>
 					</div>
 					<ol id="ew-turn-order" class="ew__turn-order"></ol>
 					<p id="ew-init-unrolled" class="ew__operation-help"></p>
@@ -126,15 +194,37 @@
 					<p id="ew-roll-summary" role="status" aria-live="polite"></p>
 					<div id="ew-result-table" class="ew__results-scroll"></div>
 				</section>
+				<details class="ew__operation ew__bulk-edit">
+					<summary>Bulk statblock edits</summary>
+					<p class="ew__operation-help">Preview mechanical changes for selected instances. Ineligible monsters are named and skipped; eligible changes save together.</p>
+					<div class="ew__bulk-fields">
+						<label for="ew-bulk-type">Edit</label>
+						<select class="ve-form-control" id="ew-bulk-type">
+							<option value="legendary">Add legendary action</option>
+							<option value="lair">Use lair-action group</option>
+							<option value="area">Apply mechanical area trait</option>
+							<option value="minion">Convert to minion</option>
+						</select>
+						<label for="ew-bulk-choice" id="ew-bulk-choice-label" hidden>Loaded rule</label>
+						<select class="ve-form-control" id="ew-bulk-choice" hidden></select>
+						<label for="ew-bulk-name" id="ew-bulk-name-label">Legendary action name</label>
+						<input class="ve-form-control" id="ew-bulk-name" type="text" maxlength="120" placeholder="e.g. Tail Sweep">
+						<label for="ew-bulk-description" id="ew-bulk-description-label">Action text</label>
+						<textarea class="ve-form-control" id="ew-bulk-description" rows="2" placeholder="Describe the action and its mechanics"></textarea>
+						<label for="ew-bulk-cost" id="ew-bulk-cost-label">Action cost</label>
+						<input class="ve-form-control" id="ew-bulk-cost" type="number" min="1" max="9" value="1">
+						<button type="button" class="ve-btn ve-btn-primary" id="ew-bulk-preview">Preview bulk edit</button>
+					</div>
+				</details>
 				<details class="ew__effect-tools">
-					<summary id="ew-effects-summary">Area effects — traits, lair notes &amp; roll modifiers</summary>
+					<summary id="ew-effects-summary">Non-mechanical notes &amp; roll effects</summary>
 					<div class="ew__effect-tools-grid">
 						<div class="ew__operation">
-							<h3>Area traits &amp; lair notes</h3>
+							<h3>Area &amp; lair reminders (text only)</h3>
 							<div class="ew__effect-form">
 								<label for="ew-note-kind">Note type</label>
 								<select class="ve-form-control" id="ew-note-kind">
-									<option value="trait">Area trait</option>
+									<option value="trait">Area reminder</option>
 									<option value="lair">Lair-action note (manual)</option>
 								</select>
 								<label for="ew-note-name">Name</label>
@@ -148,24 +238,29 @@
 								<select class="ve-form-control" id="ew-note-remove"></select>
 								<button type="button" class="ve-btn ve-btn-default" id="ew-note-remove-selected">Remove from selected</button>
 							</div>
-							<p class="ew__operation-help">Notes are reminders only. Lair actions are not triggered or rolled automatically.</p>
+							<p class="ew__operation-help">These notes do not change the statblock. Use Bulk statblock edits above or Edit statblock on an individual monster for mechanical traits and lair actions.</p>
 						</div>
 						<div class="ew__operation">
-							<h3>Area roll modifiers</h3>
+							<h3>Roll effects</h3>
 							<div class="ew__effect-form">
-								<label for="ew-preset">Desecrated Ground rule</label>
+								<label for="ew-preset-search">Find a cited rule or house rule</label>
+								<input class="ve-form-control" id="ew-preset-search" type="search" placeholder="Search rule, source or effect">
+								<label for="ew-preset">Preset</label>
 								<select class="ve-form-control" id="ew-preset" aria-describedby="ew-preset-detail"></select>
 								<p class="ew__operation-help" id="ew-preset-detail"></p>
-								<button type="button" class="ve-btn ve-btn-primary" id="ew-preset-add">Apply to selected undead</button>
+								<button type="button" class="ve-btn ve-btn-primary" id="ew-preset-add">Apply to selected</button>
 							</div>
 							<div class="ew__effect-form">
-								<h4>Custom roll modifier</h4>
+								<h4>Custom roll effect</h4>
 								<label for="ew-mod-name">Name / source</label>
 								<input class="ve-form-control" id="ew-mod-name" type="text" placeholder="e.g. Blessed mist">
 								<fieldset class="ew__scopes">
 									<legend>Affects</legend>
-									<label><input id="ew-mod-check" type="checkbox" checked> Ability &amp; skill checks</label>
+									<label><input id="ew-mod-check" type="checkbox" checked> Ability checks (also skills &amp; initiative)</label>
+									<label><input id="ew-mod-skill" type="checkbox"> Skill checks only</label>
 									<label><input id="ew-mod-save" type="checkbox"> Saving throws</label>
+									<label><input id="ew-mod-initiative" type="checkbox"> Initiative only</label>
+									<label><input id="ew-mod-attack" type="checkbox"> Attack rolls</label>
 								</fieldset>
 								<label for="ew-mod-mode">Roll mode</label>
 								<select class="ve-form-control" id="ew-mod-mode">
@@ -179,29 +274,16 @@
 								<button type="button" class="ve-btn ve-btn-primary" id="ew-mod-add">Add to selected</button>
 							</div>
 							<div class="ew__effect-remove">
-								<label for="ew-mod-remove">Applied modifier</label>
+								<label for="ew-mod-remove">Applied roll effect</label>
 								<select class="ve-form-control" id="ew-mod-remove"></select>
 								<button type="button" class="ve-btn ve-btn-default" id="ew-mod-remove-selected">Remove from selected</button>
 							</div>
-							<p class="ew__operation-help">Only selected monsters are treated as standing in the area. Remove an effect from one monster using its statblock below.</p>
+							<p class="ew__operation-help">Choose only eligible monsters. Context-dependent presets ask before each roll; attack effects apply to recognized statblock d20 attack links, not damage or recharge. Remove a roll effect from one monster below. Area and lair notes above remain reminders only.</p>
 						</div>
 					</div>
 				</details>
 			</section>
-			<div class="ew__layout">
-				<aside class="ew__rail" aria-label="Monster targets">
-					<div class="ew__rail-header">
-						<h3>Targets</h3>
-						<div class="ew__selection-actions">
-							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-all">All</button>
-							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-none">None</button>
-						</div>
-					</div>
-					<p class="ew__help">Choose monsters individually. Selection is saved for the next visit.</p>
-					<div id="ew-roster" class="ew__roster"></div>
-				</aside>
-				<section class="ew__statblocks" id="ew-statblocks" aria-label="Monster statblocks"></section>
-			</div>
+			</details>
 		</section>
 	</main>
 </div>
