@@ -1385,7 +1385,7 @@ export class EncounterWorkspacePage {
 		this._updateTargets();
 	}
 
-	_renderRosterGroups ({groups, labels}) {
+	_renderRosterGroups ({groups, labels, displayLabels}) {
 		groups.forEach((group, ix) => {
 			const isGrouped = group.memberIds.length > 1 || group.isExplicit;
 			const container = document.createElement("section");
@@ -1430,7 +1430,7 @@ export class EncounterWorkspacePage {
 				controls.className = "ew__group-controls";
 				const view = this._getGroupButton({
 					text: "View group",
-					label: `View statblock for ${labels.get(group.visibleMembers[0].id)}`,
+					label: `View statblock for ${displayLabels.get(group.visibleMembers[0].id)}`,
 					onClick: () => this._setFocus(group.visibleMembers[0].id, {moveFocus: true}),
 				});
 				controls.append(view);
@@ -1478,6 +1478,7 @@ export class EncounterWorkspacePage {
 				container.append(header);
 			}
 			group.visibleMembers.forEach(instance => {
+				const displayLabel = displayLabels.get(instance.id);
 				const row = document.createElement("div");
 				row.className = "ew__roster-row";
 				row.dataset.instanceId = instance.id;
@@ -1485,7 +1486,7 @@ export class EncounterWorkspacePage {
 				label.className = "ew__roster-member";
 				const check = document.createElement("input");
 				check.type = "checkbox";
-				check.setAttribute("aria-label", `Select ${labels.get(instance.id)}`);
+				check.setAttribute("aria-label", `Select ${displayLabel}`);
 				check.addEventListener("change", () => this._pSetTargets(
 					check.checked
 						? [...this._state.selectedIds, instance.id]
@@ -1493,13 +1494,13 @@ export class EncounterWorkspacePage {
 				));
 				const name = document.createElement("span");
 				name.className = "ew__roster-name";
-				name.textContent = labels.get(instance.id);
+				name.textContent = displayLabel;
 				label.append(check, name);
 				const jump = document.createElement("button");
 				jump.type = "button";
 				jump.className = "ew__roster-jump ve-btn ve-btn-default ve-btn-xs";
 				jump.textContent = "View";
-				jump.setAttribute("aria-label", `View statblock for ${labels.get(instance.id)}`);
+				jump.setAttribute("aria-label", `View statblock for ${displayLabel}`);
 				jump.addEventListener("click", () => this._setFocus(instance.id, {moveFocus: true}));
 				const meta = document.createElement("span");
 				meta.className = "ew__roster-meta";

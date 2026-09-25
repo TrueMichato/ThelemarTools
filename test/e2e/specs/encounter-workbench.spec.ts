@@ -39,6 +39,64 @@ test("roster navigation and filters do not change the active turn or selected ta
 	await expect(jumps.last()).toBeFocused();
 });
 
+test("a renamed effective monster is visible and sorted by its edited name without changing turn identity", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({renameSecond: "Acolyte"});
+	await encounter.focus(0);
+	await page.locator(".ew__statblock [data-field=initiative]").fill("20");
+	await page.locator(".ew__statblock [data-field=initiative]").press("Tab");
+	await encounter.focus(1);
+	await page.locator(".ew__statblock [data-field=initiative]").fill("9");
+	await page.locator(".ew__statblock [data-field=initiative]").press("Tab");
+	await page.locator("#ew-turn-start").click();
+	await expect(page.locator("#ew-round-status")).toContainText("Goblin #1");
+	const original = page.locator('.ew__roster-row[data-instance-id="one"]');
+	const edited = page.locator('.ew__roster-row[data-instance-id="two"]');
+	await expect(edited.locator(".ew__roster-name")).toHaveText("Acolyte (Goblin #2)");
+	await expect(edited.getByRole("button", {name: "View statblock for Acolyte (Goblin #2)"})).toBeVisible();
+	await page.locator("#ew-roster-sort").selectOption("name");
+	await expect(page.locator(".ew__roster-row").first()).toHaveAttribute("data-instance-id", "two");
+	await expect(original.locator(".ew__roster-name")).toHaveText("Goblin #1");
+	await encounter.openActions();
+	await expect(page.locator("#ew-turn-order .ew__turn")).toContainText(["Goblin #1", "Goblin #2"]);
+	await page.locator("#ew-roster-search").fill("Acolyte");
+	await expect(page.locator(".ew__roster-row")).toHaveCount(1);
+	await expect(page.locator(".ew__roster-row")).toHaveAttribute("data-instance-id", "two");
+	await page.locator("#ew-roster-search").fill("");
+	await page.locator("#ew-turn-next").click();
+	await expect(page.locator("#ew-round-status")).toContainText("Goblin #2");
+});
+
+test("bulk edit and notes/effects disclosures remain sibling actions and work independently", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed();
+	await encounter.openActions();
+	const bulk = page.locator("#ew-actions > .ew__operations > details.ew__bulk-edit");
+	const effects = page.locator("#ew-actions > .ew__operations > details.ew__effect-tools");
+	await expect(bulk).toHaveCount(1);
+	await expect(effects).toHaveCount(1);
+	await expect(bulk.locator(":scope > .ew__bulk-fields")).toHaveCount(1);
+	await bulk.locator("summary").click();
+	await expect(bulk).toHaveJSProperty("open", true);
+	await expect(effects).toHaveJSProperty("open", false);
+	await bulk.locator("#ew-bulk-name").fill("Tail Swipe");
+	await bulk.locator("#ew-bulk-description").fill("The goblin attacks an adjacent creature.");
+	await bulk.locator("#ew-bulk-preview").click();
+	await expect(page.getByRole("button", {name: "Apply to 1"})).toBeVisible();
+	await page.getByRole("button", {name: "Cancel"}).click();
+	await expect(page.locator("#ew-status")).toContainText("cancelled");
+	await effects.locator("summary").click();
+	await expect(effects).toHaveJSProperty("open", true);
+	await effects.locator("#ew-mod-name").fill("Clarity");
+	await effects.locator("#ew-mod-add").click();
+	await expect(page.locator("#ew-status")).toContainText('Applied "Clarity"');
+	await expect(effects.locator("#ew-mod-remove")).toContainText("Clarity");
+	await effects.locator("#ew-mod-remove").selectOption({label: "Roll effect: Clarity (1 selected)"});
+	await effects.locator("#ew-mod-remove-selected").click();
+	await expect(page.locator("#ew-status")).toContainText('Removed "Clarity"');
+	await expect(page.locator(".ew__statblock")).toContainText("Lair reminder (text only): Bell");
+});
+
 test("all-cards mode constructs statblocks only when requested, in bounded batches of twelve", async ({page}) => {
 	test.setTimeout(120_000);
 	const encounter = new EncounterRollPage(page);

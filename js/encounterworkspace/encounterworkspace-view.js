@@ -4,13 +4,14 @@ import {getEncounterInstanceLabels} from "./encounterworkspace-roll.js";
 export const ENCOUNTER_ROSTER_SORTS = Object.freeze(["source", "initiative", "hp", "hpPercent", "name", "cr", "status"]);
 export const ENCOUNTER_ROSTER_FILTERS = Object.freeze(["all", "conditioned", "bloodied", "defeated", "unrolled"]);
 
-const getCr = instance => {
-	const raw = getEncounterEffectiveMonster(instance).cr;
+const getCr = monster => {
+	const raw = monster.cr;
 	const cr = typeof raw === "object" ? raw?.cr : raw;
 	if (cr == null || cr === "Unknown" || cr === "—") return null;
 	if (typeof cr === "string" && cr.includes("/")) {
 		const [numerator, denominator] = cr.split("/").map(Number);
-		return denominator ? numerator / denominator : null;
+		const value = numerator / denominator;
+		return Number.isFinite(value) ? value : null;
 	}
 	const value = Number(cr);
 	return Number.isFinite(value) ? value : null;
@@ -31,6 +32,16 @@ export function getEncounterRosterView ({state, query = "", sort = "source", fil
 		throw new Error("Choose a supported roster sort and filter.");
 	}
 	const labels = getEncounterInstanceLabels(state.instances);
+	const effectiveById = new Map(state.instances.map(instance => [instance.id, getEncounterEffectiveMonster(instance)]));
+	const displayNames = new Map(state.instances.map(instance => {
+		const effective = effectiveById.get(instance.id);
+		return [instance.id, effective._displayName || effective.name];
+	}));
+	const displayLabels = new Map(state.instances.map(instance => {
+		const name = displayNames.get(instance.id);
+		const originalName = instance.monster._displayName || instance.monster.name;
+		return [instance.id, name === originalName ? labels.get(instance.id) : `${name} (${labels.get(instance.id)})`];
+	}));
 	const search = query.trim().toLocaleLowerCase();
 	const indexed = new Map(state.instances.map((instance, index) => [instance.id, index]));
 	const matches = instance => {
@@ -40,8 +51,8 @@ export function getEncounterRosterView ({state, query = "", sort = "source", fil
 			|| (filter === "defeated" && hp.current !== 0)
 			|| (filter === "unrolled" && getEncounterInitiativeTotal(state, instance) != null)) return false;
 		if (!search) return true;
-		const effective = getEncounterEffectiveMonster(instance);
-		return [labels.get(instance.id), effective.name, effective.source, effective.cr?.cr ?? effective.cr, ...instance.conditions]
+		const effective = effectiveById.get(instance.id);
+		return [labels.get(instance.id), displayNames.get(instance.id), effective.name, effective.source, effective.cr?.cr ?? effective.cr, ...instance.conditions]
 			.some(value => String(value ?? "").toLocaleLowerCase().includes(search));
 	};
 	const compare = (a, b) => {
@@ -53,8 +64,8 @@ export function getEncounterRosterView ({state, query = "", sort = "source", fil
 				a.hp.current == null || !a.hp.max ? null : a.hp.current / a.hp.max,
 				b.hp.current == null || !b.hp.max ? null : b.hp.current / b.hp.max,
 			); break;
-			case "name": result = (a.monster._displayName || a.monster.name).localeCompare(b.monster._displayName || b.monster.name); break;
-			case "cr": result = compareOptional(getCr(a), getCr(b), {descending: true}); break;
+			case "name": result = displayNames.get(a.id).localeCompare(displayNames.get(b.id)); break;
+			case "cr": result = compareOptional(getCr(effectiveById.get(a.id)), getCr(effectiveById.get(b.id)), {descending: true}); break;
 			case "status": result = getStatus(a) - getStatus(b); break;
 			default: break;
 		}
@@ -66,5 +77,5 @@ export function getEncounterRosterView ({state, query = "", sort = "source", fil
 		visibleMembers: group.members.filter(matches).sort(compare),
 	})).filter(group => group.visibleMembers.length);
 	if (sort !== "source") visible.sort((a, b) => compare(a.visibleMembers[0], b.visibleMembers[0]));
-	return {groups: visible, labels, visibleIds: visible.flatMap(group => group.visibleMembers.map(it => it.id))};
+	return {groups: visible, labels, displayLabels, visibleIds: visible.flatMap(group => group.visibleMembers.map(it => it.id))};
 }

@@ -27,12 +27,12 @@ const monster = {
 export class EncounterRollPage {
 	constructor (readonly page: Page) {}
 
-	async seed ({count = 2}: {count?: number} = {}) {
+	async seed ({count = 2, renameSecond}: {count?: number, renameSecond?: string} = {}) {
 		await this.page.goto("/encounterworkspace.html");
 		await this.page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 		const effect = {id: "custom-attack", name: "Rally", scopes: ["attack"], mode: "advantage", bonus: 3};
 		const state = {
-			version: 4,
+			version: renameSecond ? 6 : 4,
 			sourceList: {name: "Goblin Patrol", saveId: "test-list"},
 			instances: Array.from({length: count}, (_, index) => ({
 				id: index === 0 ? "one" : index === 1 ? "two" : `creature-${index}`,
@@ -41,11 +41,16 @@ export class EncounterRollPage {
 				conditions: [],
 				areaNotes: [{id: "note", kind: "lair", name: "Bell", description: "Reminder only"}],
 				modifiers: index === 0 ? [effect] : [],
+				statblockOperations: renameSecond && index === 1
+					? [{id: "rename-two", type: "patch", data: {patch: {set: {name: renameSecond}}}}]
+					: [],
 				hp: {current: 7, max: 7, temp: 0},
 				initiative: null,
 			})),
 			selectedIds: ["one"],
 			omissions: [],
+			groups: [],
+			ungroupedIds: [],
 			turn: {round: 0, activeId: null},
 		};
 		await this.page.evaluate(async saved => {
