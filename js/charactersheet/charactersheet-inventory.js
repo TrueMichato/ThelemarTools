@@ -2209,6 +2209,7 @@ class CharacterSheetInventory {
 			weaponCategory: options.weaponCategory,
 			dmg1: options.dmg1,
 			dmgType: options.dmgType,
+			damageRiders: options.type === "weapon" ? options.damageRiders : undefined,
 			// Friendly damage string used by the inventory row + the Combat "add from inventory"
 			// prefill. Derived here so custom weapons (and edited weapons) keep showing damage.
 			damage: options.dmg1 ? `${options.dmg1}${options.dmgType ? ` ${Parser.dmgTypeToFull(options.dmgType)}` : ""}` : undefined,
@@ -2464,6 +2465,76 @@ class CharacterSheetInventory {
 		}
 	}
 
+	_validateCustomItemDraft ({name, quantity, weight, options = {}, speedMode, baseItem}) {
+		const errors = [];
+		const add = (code, field, message) => errors.push({code, field, message});
+		if (!name?.trim()) add("missingName", "#custom-item-name", "Enter an item name.");
+		if (quantity != null && (!Number.isInteger(quantity) || quantity < 1)) add("invalidQuantity", "#custom-item-qty", "Quantity must be at least one.");
+		if (weight != null && (!Number.isFinite(weight) || weight < 0)) add("invalidWeight", "#custom-item-weight", "Weight cannot be negative.");
+		if (options.value < 0) add("invalidValue", "#custom-item-value", "Value cannot be negative.");
+		if (options.type === "weapon" && options.dmg1 != null
+			&& !/^[1-9]\d*d[1-9]\d*(?:\s*[+-]\s*\d+)?$/i.test(String(options.dmg1).trim())) {
+			add("invalidBaseDice", "#custom-item-damage", "Enter base weapon dice such as 1d8.");
+		}
+		if (baseItem && options.type !== this._getCustomTypeForItem(baseItem)) {
+			add("incompatibleType", ".charsheet__custom-item-type-btn.selected", "Changing a catalog base's type could retain incompatible rules. Choose a suitable base instead.");
+		}
+		if ((options._pendingUpgrades?.length || options._pendingGemstone)
+			&& !["weapon", "armor", "shield"].includes(options.type)) {
+			add("incompatibleUpgrades", ".charsheet__custom-item-types", "Choose a weapon, armor, or shield to keep the selected upgrades.");
+		}
+		if (options._pendingUpgrades?.length && this._page?._upgrades?.getEligibleUpgrades
+			&& !options._pendingUpgrades.every(upgrade => this._page._upgrades.getEligibleUpgrades({
+				weapon: options.type === "weapon", armor: options.type === "armor", shield: options.type === "shield",
+			}).some(eligible => eligible.name === upgrade.name && eligible.source === upgrade.source))) {
+			add("incompatibleUpgrades", ".charsheet__custom-item-types", "Some selected upgrades do not apply to this item type. Change the type back or remove them.");
+		}
+		const powers = options.itemPowers || [];
+		const powerIds = new Set();
+		for (const power of powers) {
+			if (!power.name?.trim()) add("missingPowerName", "#custom-item-powers-list", "Give each power a name.");
+			if (!power.id || powerIds.has(power.id)) add("duplicatePowerId", "#custom-item-powers-list", "Each power needs a unique, stable ID.");
+			powerIds.add(power.id);
+		}
+		const speed = powers.filter(power => power.effectType === "modifySpeed");
+		if (speedMode === "activated" && !speed.length && options.modifySpeed) {
+			add("missingSpeedPower", "#custom-item-speed-mode",
+				"Removing the active speed power would make its speed bonus passive. Clear the speed bonus too, or keep the power.");
+		}
+		if (speed.length > 1) add("ambiguousSpeedPower", "#custom-item-speed-mode", "Keep only one speed power.");
+		for (const power of speed) {
+			if (!power.id || power.kind !== "toggle" || power.isToggle !== true || power.isReferenceOnly !== false
+				|| !["action", "bonus", "reaction"].includes(power.actionType)) {
+				add("invalidSpeedAction", "#custom-item-speed-action", "Activated speed needs an operational toggle and a valid action cost.");
+			}
+			if (!options.modifySpeed || !Object.values(options.modifySpeed).some(group => group && Object.keys(group).length)) {
+				add("speedWithoutModifier", "#custom-item-speed-mode", "Clear the speed power when removing its speed modifier.");
+			}
+		}
+		const riderIds = new Set();
+		for (const [index, rider] of (options.damageRiders || []).entries()) {
+			const field = `[data-rider-index="${index}"]`;
+			if (!rider.id || riderIds.has(rider.id)) add("duplicateRiderId", `${field} [data-rider-field="dice"]`, "Each damage line needs a unique, stable ID.");
+			riderIds.add(rider.id);
+			if (!/^[1-9]\d*d[1-9]\d*(?:\s*[+-]\s*\d+)?$/i.test(String(rider.dice || "").trim())) {
+				add("invalidDice", `${field} [data-rider-field="dice"]`, "Enter dice such as 1d6 or 2d4+1.");
+			}
+			if (!CharacterSheetState.DAMAGE_TYPES.has(String(rider.damageType || "").toLowerCase())) {
+				add("invalidDamageType", `${field} [data-rider-field="damageType"]`, "Choose a valid damage type.");
+			}
+			if (rider.conditions?.targetCreatureType && !Parser.MON_TYPES.includes(rider.conditions.targetCreatureType)) {
+				add("invalidTargetCreatureType", `${field} [data-rider-field="targetCreatureType"]`, "Choose a valid creature type.");
+			}
+			if (rider.conditions?.powerId) {
+				const power = powers.find(it => it.id === rider.conditions.powerId);
+				if (!power || !power.isToggle || power.isReferenceOnly) {
+					add("missingPower", `${field} [data-rider-field="powerId"]`, "Choose an operational toggle on this item for the damage line.");
+				}
+			}
+		}
+		return errors;
+	}
+
 	_pruneCustomItemPowerStates (item, before) {
 		if (!item.itemPowerStates) return;
 		const powers = new Map((item.itemPowers || []).map(power => [power.id, power]));
@@ -2682,6 +2753,7 @@ class CharacterSheetInventory {
 
 		// Weapon
 		if (type === "weapon") {
+			if (item.damageRiders) options.damageRiders = MiscUtil.copyFast(item.damageRiders);
 			if (item.weaponCategory) options.weaponCategory = item.weaponCategory;
 			if (item.dmg1) options.dmg1 = item.dmg1;
 			if (item.dmgType) options.dmgType = item.dmgType;
@@ -2805,10 +2877,20 @@ class CharacterSheetInventory {
 	async _showAddCustomItem (opts = {}) {
 		const {prefillItem = null, editItemId = null} = opts;
 		const isEdit = !!editItemId;
+		let allowClose = false;
+		let confirmDiscard = () => {};
+		let isDraftDirty = () => false;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: isEdit ? "✏️ Modify Item" : "✨ Create Custom Item",
 			isMinHeight0: true,
 			isWidth100: true,
+			fnCanClose: ({isDataEntered}) => {
+				if (!isDataEntered && !allowClose && isDraftDirty()) {
+					confirmDiscard();
+					return false;
+				}
+				return true;
+			},
 		});
 
 		// Item types
@@ -3014,6 +3096,8 @@ class CharacterSheetInventory {
 
 		// State
 		let selectedType = "gear";
+		const damageRiders = [];
+		let updateDraftSummary = () => {};
 
 		// Build form
 		const form = e_({outer: `<div class="charsheet__custom-item-form"></div>`});
@@ -3036,16 +3120,21 @@ class CharacterSheetInventory {
 		const typeGrid = e_({outer: `<div class="charsheet__custom-item-types"></div>`});
 		itemTypes.forEach(type => {
 			const btn = e_({outer: `
-				<button type="button" class="charsheet__custom-item-type-btn ${type.value === selectedType ? "selected" : ""}" data-type="${type.value}">
+				<button type="button" class="charsheet__custom-item-type-btn ${type.value === selectedType ? "selected" : ""}" data-type="${type.value}" aria-pressed="${type.value === selectedType}">
 					<span class="charsheet__custom-item-type-icon">${type.icon}</span>
 					<span class="charsheet__custom-item-type-label">${type.label}</span>
 				</button>
 			`});
 			btn.addEventListener("click", () => {
-				typeGrid.querySelectorAll(".charsheet__custom-item-type-btn").forEach(b => b.classList.remove("selected"));
+				typeGrid.querySelectorAll(".charsheet__custom-item-type-btn").forEach(b => {
+					b.classList.remove("selected");
+					b.setAttribute("aria-pressed", "false");
+				});
 				btn.classList.add("selected");
+				btn.setAttribute("aria-pressed", "true");
 				selectedType = type.value;
 				updateFieldVisibility();
+				updateDraftSummary();
 			});
 			typeGrid.append(btn);
 		});
@@ -3588,6 +3677,28 @@ class CharacterSheetInventory {
 						</div>
 					</div>
 				</div>
+				<div class="charsheet__custom-item-fields mt-2">
+					<div class="charsheet__custom-item-field">
+						<label for="custom-item-speed-mode">Speed activation</label>
+						<select id="custom-item-speed-mode" class="ve-form-control">
+							<option value="passive">Passive while equipped / attuned</option>
+							<option value="activated">Requires an activated power</option>
+						</select>
+					</div>
+					<div class="charsheet__custom-item-field charsheet__custom-item-speed-action" hidden>
+						<label for="custom-item-speed-action">Activation cost</label>
+						<select id="custom-item-speed-action" class="ve-form-control">
+							<option value="bonus">Bonus Action</option>
+							<option value="action">Action</option>
+							<option value="reaction">Reaction</option>
+						</select>
+					</div>
+					<div class="charsheet__custom-item-field charsheet__custom-item-speed-action" hidden>
+						<label for="custom-item-speed-power-name">Power name</label>
+						<input id="custom-item-speed-power-name" class="ve-form-control" placeholder="e.g., Fleet Step">
+					</div>
+				</div>
+				<p class="ve-muted ve-small mt-2">Activated speed applies only while its named power is on. Removing an active power requires clearing its speed modifiers first.</p>
 			</div>
 		`});
 		form.append(speedSection);
@@ -3724,10 +3835,85 @@ class CharacterSheetInventory {
 		effectsSection.querySelector("#custom-item-add-effect")?.addEventListener("click", () => {
 			itemEffects.push(CustomAbilities ? CustomAbilities.createDefaultEffect() : {type: "ac", value: 0});
 			renderItemEffects();
+			updateDraftSummary();
 		});
 
 		// Explicit powers use the same runtime item-power contract as catalog and curated definitions.
 		const itemPowers = [];
+		const riderSection = e_({outer: `
+			<div class="charsheet__custom-item-field charsheet__custom-item-field--full charsheet__custom-item-riders">
+				<div class="charsheet__custom-item-riders-heading">
+					<div><strong>Extra damage dice</strong><div class="ve-muted ve-small">Each line rolls independently. All conditions on a line must apply (AND).</div></div>
+					<button type="button" id="custom-item-add-rider" class="ve-btn ve-btn-default ve-btn-xs">+ Add damage dice</button>
+				</div>
+				<div id="custom-item-riders-list"></div>
+			</div>
+		`});
+		weaponFields.querySelector("#custom-item-dmg-type").parentElement.after(riderSection);
+		const ridersListEl = riderSection.querySelector("#custom-item-riders-list");
+		const renderDamageRiders = () => {
+			ridersListEl.innerHTML = damageRiders.length
+				? damageRiders.map((rider, index) => {
+					const conditions = rider.conditions || {};
+					const powers = itemPowers.filter(power => power.isToggle && !power.isReferenceOnly);
+					const chosenPower = itemPowers.find(power => power.id === conditions.powerId);
+					return `<div class="charsheet__custom-item-rider" data-rider-index="${index}">
+						<div class="charsheet__custom-item-rider-fields">
+							<label>Extra dice <input class="ve-form-control" data-rider-field="dice" value="${(rider.dice || "").qq()}" placeholder="1d6" aria-label="Extra damage dice ${index + 1}"></label>
+							<label>Damage type <select class="ve-form-control" data-rider-field="damageType" aria-label="Extra damage type ${index + 1}">
+								${damageTypes.map(type => `<option value="${type}"${type === rider.damageType ? " selected" : ""}>${type.toTitleCase()}</option>`).join("")}
+							</select></label>
+							<button type="button" class="ve-btn ve-btn-danger ve-btn-xs" data-rider-remove aria-label="Remove extra damage line ${index + 1}">Remove</button>
+						</div>
+						<div class="charsheet__custom-item-rider-conditions">
+							<label>Only while power is active <select class="ve-form-control" data-rider-field="powerId" aria-label="Required active power for damage line ${index + 1}">
+								<option value="">Always</option>
+								${conditions.powerId && !chosenPower ? `<option value="${conditions.powerId.qq()}" selected>Missing power (${conditions.powerId.qq()})</option>` : ""}
+								${itemPowers.filter(power => power.id && (powers.includes(power) || power.id === conditions.powerId))
+		.map(power => `<option value="${power.id.qq()}"${power.id === conditions.powerId ? " selected" : ""}>${(power.name || power.id).qq()}${power.isReferenceOnly || !power.isToggle ? " (unresolved)" : ""}</option>`).join("")}
+							</select></label>
+							<label>Target type <select class="ve-form-control" data-rider-field="targetCreatureType" aria-label="Required creature type for damage line ${index + 1}">
+								<option value="">Any</option>
+								${Parser.MON_TYPES.map(type => `<option value="${type}"${type === conditions.targetCreatureType ? " selected" : ""}>${type.toTitleCase()}</option>`).join("")}
+							</select></label>
+							<label><input type="checkbox" data-rider-field="criticalOnly"${conditions.criticalOnly ? " checked" : ""}> Critical hits only (roll once)</label>
+							<label><input type="checkbox" data-rider-field="oncePerTurn"${conditions.oncePerTurn ? " checked" : ""}> Once per turn</label>
+						</div>
+					</div>`;
+				}).join("")
+				: `<p class="ve-muted ve-small">No extra damage dice. Base weapon damage still rolls normally.</p>`;
+			ridersListEl.querySelectorAll("[data-rider-index]").forEach(row => {
+				const rider = damageRiders[Number(row.dataset.riderIndex)];
+				row.querySelectorAll("[data-rider-field]").forEach(input => {
+					const update = () => {
+						const field = input.dataset.riderField;
+						if (field === "dice" || field === "damageType") rider[field] = input.value;
+						else {
+							rider.conditions ||= {};
+							if (input.type === "checkbox") {
+								if (input.checked) rider.conditions[field] = true;
+								else delete rider.conditions[field];
+							} else if (input.value) rider.conditions[field] = input.value;
+							else delete rider.conditions[field];
+						}
+						updateDraftSummary();
+					};
+					input.addEventListener(input.tagName === "INPUT" && input.type !== "checkbox" ? "input" : "change", update);
+				});
+				row.querySelector("[data-rider-remove]").addEventListener("click", () => {
+					damageRiders.splice(Number(row.dataset.riderIndex), 1);
+					renderDamageRiders();
+					updateDraftSummary();
+				});
+			});
+		};
+		riderSection.querySelector("#custom-item-add-rider").addEventListener("click", () => {
+			damageRiders.push({id: `rider-${CryptUtil.uid()}`, dice: "", damageType: "acid", conditions: {}});
+			renderDamageRiders();
+			updateDraftSummary();
+			ridersListEl.querySelector(`[data-rider-index="${damageRiders.length - 1}"] [data-rider-field="dice"]`)?.focus();
+		});
+		renderDamageRiders();
 		const powersSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--powers">
 				<div class="charsheet__custom-item-section-title">⚡ Powers (Optional)</div>
@@ -3746,14 +3932,22 @@ class CharacterSheetInventory {
 			if (!powersListEl) return;
 			powersListEl.innerHTML = itemPowers.length
 				? itemPowers.map((power, ix) => `
-					<div class="ve-flex-col mb-2 p-2 ve-border" data-power-index="${ix}">
+					<div class="ve-flex-col mb-2 p-2 ve-border charsheet__custom-item-power-row" data-power-index="${ix}">
 						<div class="ve-flex-v-center mb-1">
-							<input class="ve-form-control mr-2" data-power-field="name" value="${(power.name || "").qq()}" placeholder="Power name">
-							<select class="ve-form-control mr-2" data-power-field="actionType">
+							<input class="ve-form-control mr-2" data-power-field="name" aria-label="Power name" value="${(power.name || "").qq()}" placeholder="Power name">
+							<label class="ve-small">Operation
+								<select class="ve-form-control" data-power-field="operation" aria-label="Power operation" ${power.effectType === "modifySpeed" ? "disabled" : ""}>
+									<option value="reference"${!power.isToggle ? " selected" : ""}>Ability / reference</option>
+									<option value="damage"${power.isToggle && power.effectType === "damageRiders" ? " selected" : ""}>Damage toggle</option>
+									${power.isToggle && power.effectType !== "damageRiders" ? `<option value="existing" selected>Existing toggle</option>` : ""}
+								</select>
+							</label>
+							<select class="ve-form-control mr-2" data-power-field="actionType" aria-label="Power action cost">
 								${["action", "bonus", "reaction", "onHit", "other"].map(type => `<option value="${type}"${power.actionType === type ? " selected" : ""}>${type}</option>`).join("")}
 							</select>
 							<button type="button" class="ve-btn ve-btn-danger ve-btn-xs" data-power-remove title="Remove power">×</button>
 						</div>
+						<span class="ve-small ve-muted charsheet__custom-item-power-status">${power.isReferenceOnly ? "Reference only (no automatic effect)" : power.isToggle ? `Operational toggle${power.effectType === "modifySpeed" ? " · speed" : ""}` : "Operational power"}</span>
 						<textarea class="ve-form-control mb-1" data-power-field="description" rows="2" placeholder="Rules text">${(power.description || "").qq()}</textarea>
 						<div class="ve-flex-v-center">
 							<label class="mr-2">Charge cost <input type="number" class="ve-form-control input-xs" data-power-field="chargesCost" min="0" value="${Number(power.chargesCost) || 0}"></label>
@@ -3771,22 +3965,43 @@ class CharacterSheetInventory {
 			for (const row of powersListEl.querySelectorAll("[data-power-index]")) {
 				const ix = Number(row.dataset.powerIndex);
 				for (const input of row.querySelectorAll("[data-power-field]")) {
-					input.addEventListener("change", () => {
+					input.addEventListener(input.tagName === "TEXTAREA" || input.dataset.powerField === "name" ? "input" : "change", () => {
 						const field = input.dataset.powerField;
-						if (field === "chargesCost" || field === "usesMax") itemPowers[ix][field] = Math.max(0, parseInt(input.value, 10) || 0);
+						if (field === "operation") {
+							if (input.value === "damage") {
+								itemPowers[ix].kind = "toggle";
+								itemPowers[ix].isToggle = true;
+								itemPowers[ix].effectType = "damageRiders";
+								itemPowers[ix].isReferenceOnly = false;
+							} else if (input.value === "reference") {
+								itemPowers[ix].kind = "ability";
+								itemPowers[ix].isToggle = false;
+								delete itemPowers[ix].effectType;
+							}
+							renderItemPowers();
+						} else if (field === "chargesCost" || field === "usesMax") itemPowers[ix][field] = Math.max(0, parseInt(input.value, 10) || 0);
 						else if (field === "isReferenceOnly") itemPowers[ix][field] = !!input.checked;
 						else itemPowers[ix][field] = input.value;
+						if (itemPowers[ix].effectType === "modifySpeed") {
+							if (field === "name") form.querySelector("#custom-item-speed-power-name").value = itemPowers[ix].name;
+							if (field === "actionType") form.querySelector("#custom-item-speed-action").value = itemPowers[ix].actionType;
+						}
+						renderDamageRiders();
+						updateDraftSummary();
 					});
 				}
 				row.querySelector("[data-power-remove]")?.addEventListener("click", () => {
 					itemPowers.splice(ix, 1);
 					renderItemPowers();
+					renderDamageRiders();
+					updateDraftSummary();
 				});
 			}
 		};
 		renderItemPowers();
 		powersSection.querySelector("#custom-item-add-power")?.addEventListener("click", () => {
 			itemPowers.push({
+				id: `custom:${CryptUtil.uid()}`,
 				name: "New Power",
 				kind: "ability",
 				actionType: "action",
@@ -3798,6 +4013,46 @@ class CharacterSheetInventory {
 				usesKey: `custom:${CryptUtil.uid()}`,
 			});
 			renderItemPowers();
+			renderDamageRiders();
+			updateDraftSummary();
+		});
+
+		const speedMode = speedSection.querySelector("#custom-item-speed-mode");
+		const speedAction = speedSection.querySelector("#custom-item-speed-action");
+		const speedPowerName = speedSection.querySelector("#custom-item-speed-power-name");
+		const updateSpeedControls = () => {
+			speedSection.querySelectorAll(".charsheet__custom-item-speed-action").forEach(el => { el.hidden = speedMode.value !== "activated"; });
+		};
+		speedMode.addEventListener("change", () => {
+			if (speedMode.value === "activated" && !itemPowers.some(power => power.effectType === "modifySpeed")) {
+				itemPowers.push({id: `custom:${CryptUtil.uid()}`,
+					name: speedPowerName.value.trim() || "Speed Boost",
+					kind: "toggle",
+					isToggle: true,
+					effectType: "modifySpeed",
+					actionType: speedAction.value,
+					isReferenceOnly: false,
+					requiresEquipped: true});
+			} else if (speedMode.value === "passive") {
+				for (let i = itemPowers.length - 1; i >= 0; i--) {
+					if (itemPowers[i].effectType === "modifySpeed") itemPowers.splice(i, 1);
+				}
+			}
+			updateSpeedControls();
+			renderItemPowers();
+			renderDamageRiders();
+			updateDraftSummary();
+		});
+		speedAction.addEventListener("change", () => {
+			const power = itemPowers.find(it => it.effectType === "modifySpeed");
+			if (power) power.actionType = speedAction.value;
+			renderItemPowers();
+			updateDraftSummary();
+		});
+		speedPowerName.addEventListener("input", () => {
+			const power = itemPowers.find(it => it.effectType === "modifySpeed");
+			if (power) power.name = speedPowerName.value;
+			updateDraftSummary();
 		});
 
 		// Attached Spells Section
@@ -3910,6 +4165,7 @@ class CharacterSheetInventory {
 					}
 					renderSpellList();
 					renderSelectedSpells();
+					updateDraftSummary();
 				});
 			});
 		};
@@ -3974,6 +4230,7 @@ class CharacterSheetInventory {
 							spell.uses = 1;
 						}
 						renderSelectedSpells();
+						updateDraftSummary();
 					});
 				}
 
@@ -3982,6 +4239,7 @@ class CharacterSheetInventory {
 				if (usesInput) {
 					usesInput.addEventListener("change", function () {
 						spell.uses = parseInt(this.value) || 1;
+						updateDraftSummary();
 					});
 				}
 
@@ -3990,6 +4248,7 @@ class CharacterSheetInventory {
 				if (rechargeSelect) {
 					rechargeSelect.addEventListener("change", function () {
 						spell.recharge = this.value;
+						updateDraftSummary();
 					});
 				}
 
@@ -3998,6 +4257,7 @@ class CharacterSheetInventory {
 					selectedSpells.splice(idx, 1);
 					renderSpellList();
 					renderSelectedSpells();
+					updateDraftSummary();
 				});
 			});
 		};
@@ -4035,19 +4295,13 @@ class CharacterSheetInventory {
 				body.innerHTML = "";
 				const isSocketable = ["weapon", "armor", "shield"].includes(selectedType);
 				if (!isSocketable) {
-					// Type no longer supports upgrades/sockets — clear any pending selections.
-					pendingUpgrades.length = 0;
-					pendingGemstone = null;
-					body.append(e_({outer: `<div class="ve-muted ve-small">Item upgrades &amp; gem sockets apply to weapons, armor, and shields. Pick one of those types above to add upgrades.</div>`}));
+					body.append(e_({outer: `<div class="ve-muted ve-small">Item upgrades &amp; gem sockets apply to weapons, armor, and shields. Selections stay in this draft if you switch back; Save rejects incompatible choices.</div>`}));
 					return;
 				}
 
 				const synthItem = {weapon: selectedType === "weapon", armor: selectedType === "armor", shield: selectedType === "shield"};
 				const eligible = upgradesModule.getEligibleUpgrades(synthItem);
-				// Drop pending upgrades that are no longer eligible for the current type.
-				for (let i = pendingUpgrades.length - 1; i >= 0; i--) {
-					if (!eligible.some(u => u.name === pendingUpgrades[i].name && u.source === pendingUpgrades[i].source)) pendingUpgrades.splice(i, 1);
-				}
+				// Keep choices until the user explicitly removes them; switching type is reversible.
 
 				if (eligible.length) {
 					body.append(e_({outer: `<div class="ve-small ve-bold mb-1">Item Upgrades</div>`}));
@@ -4116,7 +4370,67 @@ class CharacterSheetInventory {
 		`});
 		form.append(descSection);
 
-		modalInner.append(form);
+		const groupDefs = [
+			{key: "basics", label: "Basics", sections: [typeGrid.parentElement, basicFields]},
+			{key: "stats", label: "Type-specific stats", sections: [weaponFields, armorFields, shieldFields]},
+			{key: "effects", label: "Bonuses & Effects", sections: [bonusesSection, effectsSection, defensesSection, speedSection, abilitySection, sensesSection]},
+			{key: "powers", label: "Powers & Spells", sections: [magicFields, powersSection, spellsSection, form.querySelector(".charsheet__custom-item-section--upgrades")]},
+			{key: "details", label: "Details", sections: [descSection]},
+		];
+		const nav = e_({outer: `<nav class="charsheet__custom-item-nav" aria-label="Item editor groups"></nav>`});
+		const shell = e_({outer: `<div class="charsheet__custom-item-layout"></div>`});
+		const summaryPane = e_({outer: `
+			<aside class="charsheet__custom-item-summary" aria-label="Unsaved item summary">
+				<button type="button" class="charsheet__custom-item-summary-toggle" aria-expanded="false" aria-controls="custom-item-summary-content">Draft summary <span aria-hidden="true">⌄</span></button>
+				<div id="custom-item-summary-content" class="charsheet__custom-item-summary-content">
+					<p class="ve-muted ve-small">Preview only — nothing changes on your character until Save.</p>
+					<div class="charsheet__custom-item-summary-body"></div>
+				</div>
+			</aside>
+		`});
+		const summaryBody = summaryPane.querySelector(".charsheet__custom-item-summary-body");
+		const btnSummary = summaryPane.querySelector(".charsheet__custom-item-summary-toggle");
+		btnSummary.addEventListener("click", () => {
+			const isOpen = summaryPane.classList.toggle("charsheet__custom-item-summary--open");
+			btnSummary.setAttribute("aria-expanded", String(isOpen));
+		});
+		if (topActions) form.append(topActions);
+		for (const {key, label, sections} of groupDefs) {
+			const group = e_({outer: `<section class="charsheet__custom-item-group" id="custom-item-group-${key}" data-item-group="${key}" aria-labelledby="custom-item-group-title-${key}">
+				<h3 id="custom-item-group-title-${key}">${label}</h3>
+			</section>`});
+			for (const section of sections.filter(Boolean)) group.append(section);
+			if (key === "basics" && topActions) group.insertBefore(topActions, group.children[1]);
+			if (key === "stats") group.append(e_({outer: `<p class="charsheet__custom-item-stats-empty ve-muted ve-small">This item type has no additional statistics. Add effects or powers in the next groups.</p>`}));
+			if (key === "details") group.append(e_({outer: `<p class="ve-muted ve-small charsheet__custom-item-provenance"></p>`}));
+			form.append(group);
+			const btn = e_({tag: "button",
+				clazz: "charsheet__custom-item-nav-btn",
+				txt: label,
+				attr: {type: "button", "aria-controls": group.id}});
+			btn.addEventListener("click", () => group.scrollIntoView({block: "start", behavior: "instant"}));
+			nav.append(btn);
+		}
+		shell.append(form, summaryPane);
+		modalInner.append(nav, shell);
+		const discardPanel = e_({outer: `<div class="charsheet__custom-item-discard" role="alert" hidden>
+			<span>Discard your unsaved item changes?</span>
+			<button type="button" class="ve-btn ve-btn-danger" data-discard>Discard changes</button>
+			<button type="button" class="ve-btn ve-btn-default" data-keep>Keep editing</button>
+		</div>`});
+		modalInner.append(discardPanel);
+		confirmDiscard = () => {
+			discardPanel.hidden = false;
+			discardPanel.querySelector("[data-keep]").focus();
+		};
+		discardPanel.querySelector("[data-keep]").addEventListener("click", () => {
+			discardPanel.hidden = true;
+			form.querySelector("#custom-item-name")?.focus();
+		});
+		discardPanel.querySelector("[data-discard]").addEventListener("click", () => {
+			allowClose = true;
+			doClose(false);
+		});
 		const emptyFormFields = [...form.querySelectorAll("input, select, textarea")].map(el => ({
 			el, value: el.value, checked: el.checked,
 		}));
@@ -4131,6 +4445,8 @@ class CharacterSheetInventory {
 			form.querySelector(".charsheet__custom-item-section--armor").style.display = selectedType === "armor" ? "" : "none";
 			form.querySelector(".charsheet__custom-item-section--shield").style.display = selectedType === "shield" ? "" : "none";
 			form.querySelector(".charsheet__custom-item-section--magic").style.display = ["wondrous", "wand", "ring", "potion", "scroll"].includes(selectedType) ? "" : "none";
+			const emptyStats = form.querySelector(".charsheet__custom-item-stats-empty");
+			if (emptyStats) emptyStats.hidden = ["weapon", "armor", "shield"].includes(selectedType);
 			renderUpgradeChoices();
 		};
 		updateFieldVisibility();
@@ -4146,7 +4462,9 @@ class CharacterSheetInventory {
 			pendingGemstone = null;
 			selectedType = seed.type || "gear";
 			typeGrid.querySelectorAll(".charsheet__custom-item-type-btn").forEach(b => {
-				b.classList.toggle("selected", b.getAttribute("data-type") === selectedType);
+				const selected = b.getAttribute("data-type") === selectedType;
+				b.classList.toggle("selected", selected);
+				b.setAttribute("aria-pressed", String(selected));
 			});
 			updateFieldVisibility();
 			this._prefillCustomItemForm(form, seed);
@@ -4167,10 +4485,26 @@ class CharacterSheetInventory {
 				: null;
 			for (const power of base?.itemPowers || []) itemPowers.push(MiscUtil.copyFast(power));
 			renderItemPowers();
+			damageRiders.length = 0;
+			for (const rider of seed.options?.damageRiders || base?.damageRiders || []) damageRiders.push(MiscUtil.copyFast(rider));
+			renderDamageRiders();
+			const speedPower = itemPowers.find(power => power.effectType === "modifySpeed" && power.isToggle && !power.isReferenceOnly);
+			speedMode.value = speedPower ? "activated" : "passive";
+			if (speedPower) {
+				speedAction.value = speedPower.actionType || "bonus";
+				speedPowerName.value = speedPower.name || "";
+			} else {
+				speedAction.value = "bonus";
+				speedPowerName.value = "";
+			}
+			updateSpeedControls();
 			selectedSpells.length = 0;
 			originalAttachedSpells = base?.attachedSpells ? MiscUtil.copyFast(base.attachedSpells) : null;
 			selectedSpells.push(...this._getCustomItemSpellSelections(originalAttachedSpells, allSpells));
 			renderSelectedSpells();
+			form.querySelector(".charsheet__custom-item-provenance").textContent = seed.item?.source
+				? `Based on ${seed.item.name} | ${seed.item.source}. Unmodeled catalog fields and structured entries remain intact until changed.`
+				: "Original custom item. Unmodeled fields remain intact until changed.";
 		};
 
 		// Pre-seed for edit mode, or an explicitly supplied base item.
@@ -4207,12 +4541,22 @@ class CharacterSheetInventory {
 		if (!isEdit) {
 			btnFromBase = e_({tag: "button", clazz: "ve-btn ve-btn-default charsheet__custom-item-from-base-btn", txt: "📦 Start from Base Item"});
 			btnFromBase.addEventListener("click", async () => {
+				if (isDraftDirty()) {
+					const replace = await InputUiUtil.pGetUserBoolean({
+						title: "Replace item draft?",
+						htmlDescription: "Choosing a different base discards all unsaved changes in this editor.",
+						textYes: "Replace draft",
+						textNo: "Keep editing",
+					});
+					if (!replace) return;
+				}
 				await this._pShowItemPickerModal({
 					title: "📦 Choose a Base Item",
 					onSelect: (baseItem) => {
 						selectedBaseItem = baseItem;
 						applySeed(this._seedOptionsFromItem(baseItem));
 						draftBaseline = getDraft();
+						updateDraftSummary();
 						JqueryUtil.doToast({type: "info", content: `Loaded "${baseItem.name}" — edit and save as a custom item.`});
 					},
 				});
@@ -4236,8 +4580,9 @@ class CharacterSheetInventory {
 			// Weapon stats
 			if (selectedType === "weapon") {
 				options.weaponCategory = form.querySelector("#custom-item-weapon-cat")?.value;
-				options.dmg1 = form.querySelector("#custom-item-damage")?.value || "1d6";
+				options.dmg1 = form.querySelector("#custom-item-damage")?.value?.trim() || "";
 				options.dmgType = form.querySelector("#custom-item-dmg-type")?.value;
+				options.damageRiders = MiscUtil.copyFast(damageRiders);
 				const range = form.querySelector("#custom-item-range")?.value?.trim();
 				if (range) options.range = range;
 				const bonus = parseInt(form.querySelector("#custom-item-weapon-bonus")?.value);
@@ -4509,8 +4854,8 @@ class CharacterSheetInventory {
 				options.attachedSpells = Object.keys(retained).length ? retained : null;
 			}
 
-			const quantity = parseInt(form.querySelector("#custom-item-qty")?.value) || 1;
-			const weight = parseFloat(form.querySelector("#custom-item-weight")?.value) || 0;
+			const quantity = Number(form.querySelector("#custom-item-qty")?.value);
+			const weight = Number(form.querySelector("#custom-item-weight")?.value);
 
 			// Structured modifiers & effects (Bug #8) — same schema as custom abilities.
 			// Drop empty/no-op rows so we never persist meaningless effects. A row needs both a
@@ -4541,14 +4886,92 @@ class CharacterSheetInventory {
 				if (pendingGemstone) options._pendingGemstone = pendingGemstone;
 			}
 
-			return {name, quantity, weight, options};
+			return {name, quantity, weight, options, speedMode: speedMode.value, baseItem: selectedBaseItem};
 		};
-		draftBaseline = prefillItem ? getDraft() : null;
+		draftBaseline = getDraft();
+		isDraftDirty = () => JSON.stringify(getDraft()) !== JSON.stringify(draftBaseline);
+		const errorsEl = e_({outer: `<div class="charsheet__custom-item-errors" role="alert" hidden></div>`});
+		modalInner.insertBefore(errorsEl, nav);
+		const showErrors = (errors) => {
+			errorsEl.hidden = !errors.length;
+			errorsEl.replaceChildren();
+			for (const error of errors) {
+				const link = e_({tag: "button",
+					clazz: "charsheet__custom-item-error-link",
+					txt: error.message,
+					attr: {type: "button"}});
+				link.addEventListener("click", () => {
+					const target = form.querySelector(error.field);
+					(target?.matches("input, select, textarea, button") ? target : target?.querySelector("input, select, textarea, button"))?.focus();
+				});
+				errorsEl.append(link);
+			}
+			nav.querySelectorAll(".charsheet__custom-item-nav-btn").forEach(btn => {
+				const group = form.querySelector(`#${btn.getAttribute("aria-controls")}`);
+				btn.classList.toggle("charsheet__custom-item-nav-btn--invalid",
+					errors.some(error => group?.contains(form.querySelector(error.field))));
+			});
+		};
+		updateDraftSummary = () => {
+			const draft = getDraft();
+			const validation = this._validateCustomItemDraft(draft);
+			const item = draft.options;
+			const addLine = (label, value) => {
+				const row = e_({outer: `<div class="charsheet__custom-item-summary-line"></div>`});
+				const heading = document.createElement("strong");
+				heading.textContent = label;
+				const detail = document.createElement("span");
+				detail.textContent = value;
+				row.append(heading, detail);
+				summaryBody.append(row);
+			};
+			summaryBody.replaceChildren();
+			addLine("Item", `${draft.name || "Unnamed"} · ${selectedType}${selectedBaseItem ? ` · based on ${selectedBaseItem.name} | ${selectedBaseItem.source}` : ""}`);
+			addLine("Wear", item.requiresAttunement ? "Equip and attune for effects" : "Equip for effects");
+			if (selectedType === "weapon") {
+				addLine("Base damage", `${item.dmg1} ${Parser.dmgTypeToFull(item.dmgType)}`);
+				for (const rider of item.damageRiders || []) {
+					const conditions = rider.conditions || {};
+					const power = itemPowers.find(it => it.id === conditions.powerId);
+					const gates = [
+						conditions.powerId && (power ? `${power.name} active${editItemId && prefillItem?.itemPowerStates?.[power.id]?.active ? " now" : " (off until activated)"}` : "UNRESOLVED power"),
+						conditions.criticalOnly && "critical hit (dice roll once)",
+						conditions.oncePerTurn && "once per turn",
+						conditions.targetCreatureType && `${conditions.targetCreatureType} target (chosen at roll)`,
+					].filter(Boolean);
+					addLine("Extra dice", `${rider.dice || "Dice needed"} ${rider.damageType} · ${gates.length ? `only if ${gates.join(" AND ")}` : "always on"}`);
+				}
+			}
+			const speedPower = itemPowers.find(it => it.effectType === "modifySpeed");
+			if (item.modifySpeed) {
+				addLine("Speed", speedPower
+					? `${speedPower.name} · ${speedPower.actionType} · only while active${editItemId && prefillItem?.itemPowerStates?.[speedPower.id]?.active ? " now" : " (currently off)"}${speedPower.isReferenceOnly ? " (UNRESOLVED)" : ""}`
+					: "Passive while equipped / attuned");
+			}
+			addLine("Bonuses & effects", `${item.effects?.length || 0} structured effect(s) · ${item.resist?.length || 0} damage resistance(s)`);
+			addLine("Powers & spells", `${itemPowers.filter(it => !it.isReferenceOnly).length} operational, ${itemPowers.filter(it => it.isReferenceOnly).length} reference-only · ${selectedSpells.length} selected spell uses`);
+			if (item.charges) addLine("Charges", `${item.charges} maximum · ${item.recharge || "manual recharge"}`);
+			if (itemPowers.some(it => it.isReferenceOnly)) addLine("Rules to resolve", "Reference-only powers are shown for manual use, not activated automatically.");
+			if (validation.length) addLine("Needs attention", validation.map(error => error.message).join(" "));
+			const changed = this._getCustomItemDraftPatch(draftBaseline, draft);
+			addLine("Changes", isDraftDirty() ? `${Object.keys(changed).length || 1} draft field(s); not saved` : "No unsaved changes");
+			if (!errorsEl.hidden) showErrors(validation);
+		};
+		form.addEventListener("input", updateDraftSummary);
+		form.addEventListener("change", updateDraftSummary);
+		updateDraftSummary();
+		form.querySelectorAll(".charsheet__custom-item-field > label:not([for])").forEach(label => {
+			const control = label.parentElement?.querySelector("input[id], select[id], textarea[id]");
+			if (control && !label.contains(control)) label.htmlFor = control.id;
+		});
 		btnCreate.addEventListener("click", () => {
-			const {name, quantity, weight, options} = getDraft();
-			if (!name) {
-				JqueryUtil.doToast({type: "warning", content: "Please enter an item name!"});
-				form.querySelector("#custom-item-name")?.focus();
+			const draft = getDraft();
+			const {name, quantity, weight, options} = draft;
+			const errors = this._validateCustomItemDraft(draft);
+			if (errors.length) {
+				showErrors(errors);
+				const first = form.querySelector(errors[0].field);
+				(first?.matches("input, select, textarea, button") ? first : first?.querySelector("input, select, textarea, button"))?.focus();
 				return;
 			}
 			if (Array.isArray(originalAttachedSpells) && options.attachedSpells) {
@@ -4561,6 +4984,7 @@ class CharacterSheetInventory {
 					baseline: draftBaseline,
 				});
 			} catch (error) {
+				showErrors([{field: "#custom-item-speed-mode", message: error.message}]);
 				JqueryUtil.doToast({type: "danger", content: error.message});
 				return;
 			}
@@ -4568,7 +4992,7 @@ class CharacterSheetInventory {
 			doClose(true);
 		});
 
-		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2">
+		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3 gap-2 charsheet__custom-item-footer">
 			${btnCancel}
 			${btnCreate}
 		</div>`;
