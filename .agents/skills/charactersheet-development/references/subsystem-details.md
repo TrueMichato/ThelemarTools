@@ -2447,8 +2447,17 @@ Combat rolls ordinary item dice on hits and doubles them on critical hits;
 critical-only dice roll just once on a crit. The target-type choice is pooled
 with materials and gemstones; **No qualifying type** excludes gated lines,
 whereas cancelling aborts the roll before any damage-method or Hand of Harm
-resource spending. The grouped editor for authoring these lines is a separate
-later phase; raw payloads and runtime consumers use this contract now.
+resource spending. `_showAddCustomItem` now shares the same grouped draft editor
+for Create, Modify, and catalog clones. The Extra damage dice control sits
+beside base weapon damage and stores independent line IDs and exact power IDs;
+selecting a Damage toggle in Powers & Spells yields an operational power to
+gate a line. `_validateCustomItemDraft` rejects malformed dice, duplicate IDs,
+unknown damage/creature types, and unresolved power references before Save;
+the draft-only summary explains combined conditions and activation. The same
+form selects passive speed or creates an operational `modifySpeed` toggle with
+a chosen action cost. Keep the raw-field difference overlay in
+`_getCustomItemDraftPatch`; re-seeding or modifying an owned item must not
+materialize untouched catalog/nested fields into an edited payload.
 
 **Crafting-time calculation.** `CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state, items})`
 is the only reusable workweek calculator: resolve the crafted item by `name|source`, calculate the

@@ -19,6 +19,7 @@ if (typeof globalThis.document === "undefined") {
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
+globalThis.Parser.MON_TYPES = ["aberration", "beast", "dragon", "fiend", "giant", "humanoid", "undead"];
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const catalog = JSON.parse(readFileSync(resolve(root, "data/items.json"), "utf8")).item;
 const boots = source => catalog.find(item => item.name === "Boots of Speed" && item.source === source);
@@ -33,6 +34,68 @@ const editorSave = (inventory, draft, {editItemId = null, baseItem = null, basel
 	inventory._saveCustomItem(draft.name, draft.quantity, draft.weight, draft.options, editItemId, {baseItem, baseline});
 
 describe("Custom item editor draft fidelity", () => {
+	test("two typed rider lines serialize independently, preserve stable IDs, and clear deliberately", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const riders = [
+			{id: "acid-edge", dice: "1d6", damageType: "acid", conditions: {}},
+			{id: "dragon-flame",
+				dice: "2d4",
+				damageType: "fire",
+				conditions: {powerId: "ignite", criticalOnly: true, oncePerTurn: true, targetCreatureType: "dragon"}},
+		];
+		const power = {id: "ignite",
+			name: "Ignite",
+			kind: "toggle",
+			isToggle: true,
+			effectType: "damageRiders",
+			actionType: "bonus",
+			isReferenceOnly: false};
+		const baseline = {name: "Blade",
+			quantity: 1,
+			weight: 2,
+			options: {type: "weapon", dmg1: "1d8", dmgType: "S", damageRiders: riders, itemPowers: [power]}};
+		const validation = inventory._validateCustomItemDraft(baseline);
+		expect(validation).toEqual([]);
+		expect(inventory._buildCustomItem("Blade", 1, 2, baseline.options).damageRiders).toEqual(riders);
+		expect(inventory._getCustomItemDraftPatch(baseline, {...baseline, name: "Renamed"})).not.toHaveProperty("damageRiders");
+		const cleared = {...baseline, options: {...baseline.options, damageRiders: []}};
+		expect(inventory._getCustomItemDraftPatch(baseline, cleared)).toMatchObject({damageRiders: []});
+	});
+
+	test("draft validation rejects malformed dice, damage types, duplicate IDs and unresolved powers", () => {
+		const inventory = makeInventory(new CharacterSheetState());
+		const base = {name: "Blade",
+			options: {type: "weapon",
+				dmg1: "1d8",
+				dmgType: "S",
+				damageRiders: [
+					{id: "same", dice: "1d6", damageType: "acid", conditions: {}},
+					{id: "same", dice: "wrong", damageType: "mystery", conditions: {powerId: "missing"}},
+				]}};
+		expect(inventory._validateCustomItemDraft(base).map(error => error.code)).toEqual(expect.arrayContaining([
+			"duplicateRiderId", "invalidDice", "invalidDamageType", "missingPower",
+		]));
+	});
+
+	test.each(["DMG", "XDMG"])("%s speed clone keeps activation and rejects an invalid action or ambiguous speed power", source => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const base = inventory._getCustomItemBase(boots(source));
+		const speed = base.itemPowers.find(power => power.effectType === "modifySpeed");
+		const draft = {name: base.name,
+			options: {
+				type: "wondrous", modifySpeed: base.modifySpeed, itemPowers: [speed],
+			}};
+		expect(inventory._validateCustomItemDraft(draft)).toEqual([]);
+		expect(inventory._validateCustomItemDraft({...draft,
+			options: {...draft.options,
+				itemPowers: [{...speed, actionType: "invalid"}]}}).map(error => error.code)).toContain("invalidSpeedAction");
+		expect(inventory._validateCustomItemDraft({...draft,
+			options: {...draft.options,
+				itemPowers: [speed, {...speed, id: "second"}]}}).map(error => error.code)).toContain("ambiguousSpeedPower");
+	});
+
 	test("an untouched raw item is a semantic no-op, including nested entries, unsupported fields and material bases", () => {
 		const state = new CharacterSheetState();
 		const inventory = makeInventory(state);
