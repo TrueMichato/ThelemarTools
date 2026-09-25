@@ -43771,17 +43771,19 @@ class CharacterSheetState {
 					isReferenceOnly: true,
 				});
 			} else if ((actionType || explicitActionType) && toggleEffectType) {
-				addPower({
-					id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
-					name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
-					kind: "toggle",
-					actionType: actionType || explicitActionType,
-					isToggle: true,
-					effectType: toggleEffectType,
-					description: text,
-					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType || explicitActionType, text),
-					isReferenceOnly: false,
-				});
+				if (!item.itemPowers?.some(power => power.isToggle && !power.isReferenceOnly && power.effectType === toggleEffectType)) {
+					addPower({
+						id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
+						name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
+						kind: "toggle",
+						actionType: actionType || explicitActionType,
+						isToggle: true,
+						effectType: toggleEffectType,
+						description: text,
+						activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType || explicitActionType, text),
+						isReferenceOnly: false,
+					});
+				}
 			} else if (actionType && recurring) {
 				addPower({
 					id: CharacterSheetState._getItemPowerId(["ability", item.name, recurring.usageType]),

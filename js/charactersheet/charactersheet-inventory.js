@@ -2318,13 +2318,29 @@ class CharacterSheetInventory {
 	 * @param {string|null} [editItemId] - When set, replace this inventory item instead of adding
 	 * @returns {string|undefined} The inventory id of the saved item, when known
 	 */
-	_saveCustomItem (name, quantity, weight, options, editItemId = null) {
-		const newItem = this._buildCustomItem(name, quantity, weight, options);
+	_saveCustomItem (name, quantity, weight, options, editItemId = null, {baseItem = null, baseline = null} = {}) {
+		const built = this._buildCustomItem(name, quantity, weight, options);
+		const patch = baseline
+			? this._getCustomItemDraftPatch(baseline, {name, quantity, weight, options})
+			: built;
 
 		if (editItemId) {
+			const oldItem = this._state.getItemRaw(editItemId);
+			if (!oldItem) throw new Error("The item being edited is no longer in the inventory.");
+			const upgradesChanged = baseline && (
+				JSON.stringify(baseline.options?._pendingUpgrades) !== JSON.stringify(options._pendingUpgrades)
+				|| JSON.stringify(baseline.options?._pendingGemstone) !== JSON.stringify(options._pendingGemstone)
+			);
+			const quantityChanged = baseline && quantity !== baseline.quantity;
+			if (baseline && !Object.keys(patch).length && !upgradesChanged && !quantityChanged) return editItemId;
+			if (baseline && patch.type && patch.type !== oldItem.type
+				&& (oldItem.typeCode || oldItem.damageRiders?.length || oldItem.itemPowers?.length)) {
+				throw new Error("Changing this item's type would retain incompatible catalog or power fields. Create a new item from a suitable base instead.");
+			}
+			if (Object.keys(patch).length) this._validateCustomItemSpeedPower(oldItem, this._mergeEditedItem(oldItem, patch));
+
 			// Capture remaining charges BEFORE replacing — _buildCustomItem resets chargesCurrent to
 			// full, which would silently refill a depleted item on edit.
-			const oldItem = this._state.getItems().find(i => i.id === editItemId);
 			const oldChargesCurrent = oldItem?.chargesCurrent;
 
 			// Merge the rebuilt payload onto the ORIGINAL item rather than replacing it wholesale.
@@ -2339,22 +2355,31 @@ class CharacterSheetInventory {
 			// values for any grant the form does not model. Restoring the pristine bases first
 			// makes both halves of the merge speak the same units, and dropping the capture lets
 			// `reconcileIounHosts` re-derive it from the freshly-agreed base.
-			this._state.dematerialiseIounHostBonuses?.(editItemId);
-			const mergeBase = this._state.getItems().find(i => i.id === editItemId) || oldItem;
-			const merged = this._mergeEditedItem(mergeBase, newItem);
-			merged.iounBaseBonuses = null;
-			// The editor stamps every edited row as "Custom", which erases where the item came
-			// from. Record the original source once so provenance-keyed lookups (the Ioun host
-			// registry, and anything added later) still resolve after an edit.
-			merged._baseSource = mergeBase?._baseSource
-				|| (mergeBase?.source && mergeBase.source !== merged.source ? mergeBase.source : undefined);
-
-			// Preserve the original quantity unless the form explicitly changed it
-			this._state.replaceItem(editItemId, merged);
+			if (Object.keys(patch).length) {
+				this._state.dematerialiseIounHostBonuses?.(editItemId);
+				const mergeBase = this._state.getItemRaw(editItemId);
+				const merged = this._mergeEditedItem(mergeBase, patch);
+				if (Object.hasOwn(patch, "attachedSpells")) this._reconcileCustomItemSpellPowers(mergeBase, merged);
+				if (Object.hasOwn(patch, "charges") && merged.charges == null) merged.chargesCurrent = null;
+				merged.source = "Custom";
+				merged._baseSource = mergeBase._baseSource
+					|| (mergeBase.source !== "Custom" ? mergeBase.source : undefined);
+				merged.iounBaseBonuses = null;
+				this._pruneCustomItemPowerStates(merged, mergeBase);
+				if (mergeBase.attuned && merged.requiresAttunement === false && merged.itemPowerStates) {
+					for (const power of merged.itemPowers || []) {
+						if (power.isToggle && power.effectType === "modifySpeed" && merged.itemPowerStates[power.id]) {
+							merged.itemPowerStates[power.id].active = false;
+						}
+					}
+				}
+				if (!this._state.replaceItem(editItemId, merged)) throw new Error("The item could not be updated.");
+			}
 			// Keep the quantity the user set in the form
-			if (typeof this._state.setItemQuantity === "function") this._state.setItemQuantity(editItemId, quantity);
+			if (quantityChanged || !baseline) this._state.setItemQuantity(editItemId, quantity);
 			// Restore remaining charges, clamped to the new max (setItemCharges clamps to [0, charges]).
-			if (oldChargesCurrent != null && typeof this._state.setItemCharges === "function") {
+			if (Object.keys(patch).length && oldChargesCurrent != null && this._state.getItemRaw(editItemId)?.charges != null
+				&& typeof this._state.setItemCharges === "function") {
 				this._state.setItemCharges(editItemId, oldChargesCurrent);
 			}
 			// Apply the upgrades/gemstone delta selected in the edit modal (#6). replaceItem has
@@ -2363,13 +2388,30 @@ class CharacterSheetInventory {
 			this._applyEditUpgrades(editItemId, options);
 			// An edit can declare or withdraw Ioun settings, so the host layer has to re-settle
 			// before anything reads the item's bonuses again.
-			this._state.reconcileIounHosts?.();
+			if (Object.keys(patch).length) this._state.reconcileIounHosts?.();
 			this._syncArmorState();
 			this._page.renderCharacter?.();
 			this._page.saveCharacter?.();
 			return editItemId;
 		}
 
+		const cloneBase = baseItem ? this._getCustomItemBase(baseItem) : null;
+		const newItem = cloneBase ? this._mergeEditedItem(cloneBase, patch) : built;
+		if (baseItem) {
+			this._validateCustomItemSpeedPower(cloneBase, newItem);
+			if (Object.hasOwn(patch, "attachedSpells")) this._reconcileCustomItemSpellPowers(cloneBase, newItem);
+			newItem.source = "Custom";
+			newItem._isCustom = true;
+			newItem._baseSource = newItem._baseSource || baseItem._baseSource || baseItem.source;
+			newItem.quantity = quantity;
+			newItem.equipped = false;
+			newItem.attuned = false;
+			newItem.containedItems = [];
+			newItem.iounSet = [];
+			newItem.itemPowerStates = {};
+			for (const key of ["starred", "note", "_isGeneratedFeatureItem", "_generatedItemId",
+				"_generatedItemProvenance", "_efaArmorerWeaponId", "_gamblerWeaponId"]) delete newItem[key];
+		}
 		const newId = CryptUtil.uid();
 		newItem.id = newId;
 		this._state.addItem(newItem);
@@ -2378,6 +2420,122 @@ class CharacterSheetInventory {
 		this._renderItemList();
 		this._page.saveCharacter?.();
 		return newId;
+	}
+
+	_getCustomItemDraftPatch (baseline, current) {
+		const before = this._buildCustomItem(baseline.name, baseline.quantity, baseline.weight, baseline.options);
+		const after = this._buildCustomItem(current.name, current.quantity, current.weight, current.options);
+		const patch = {};
+		for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+			if (["source", "_isCustom", "equipped", "attuned", "quantity"].includes(key)) continue;
+			const value = after[key];
+			if (JSON.stringify(value) === JSON.stringify(before[key])) continue;
+			patch[key] = value === undefined
+				? (["entries", "effects", "itemPowers", "property", "mastery"].includes(key) ? [] : null)
+				: MiscUtil.copyFast(value);
+		}
+		return patch;
+	}
+
+	_getCustomItemBase (item) {
+		const raw = (item.id && this._state.getItemRaw(item.id)) || item._compositionRaw || item;
+		const base = MiscUtil.copyFast(raw);
+		if (base.iounBaseBonuses) {
+			Object.assign(base, MiscUtil.copyFast(base.iounBaseBonuses));
+			base.iounBaseBonuses = null;
+		}
+		const normalized = CharacterSheetItemUtils.getNormalizedCatalogItem({item: base, state: this._state});
+		const merged = {...base, ...normalized};
+		if (!merged.entries?.length) {
+			const catalogEntries = this._getEffectiveItemEntries(base);
+			if (catalogEntries?.length) merged.entries = MiscUtil.copyFast(catalogEntries);
+		}
+		merged.itemPowers = MiscUtil.copyFast(this._state._normalizeItemPowers({...base, entries: merged.entries}));
+		merged.effects = MiscUtil.copyFast(this._state._normalizeItemEffects({...base, entries: merged.entries}));
+		return merged;
+	}
+
+	_validateCustomItemSpeedPower (before, after) {
+		const hadSpeedToggle = before?.itemPowers?.some(power => power.effectType === "modifySpeed" && power.isToggle && !power.isReferenceOnly);
+		const hasSpeedToggle = after?.itemPowers?.some(power => power.effectType === "modifySpeed" && power.isToggle && !power.isReferenceOnly);
+		if (hadSpeedToggle && after.modifySpeed && !hasSpeedToggle) {
+			throw new Error("Removing the active speed power would make its speed bonus passive. Clear the speed bonus too, or keep the power.");
+		}
+	}
+
+	_pruneCustomItemPowerStates (item, before) {
+		if (!item.itemPowerStates) return;
+		const powers = new Map((item.itemPowers || []).map(power => [power.id, power]));
+		const oldPowers = new Map((before.itemPowers || []).map(power => [power.id, power]));
+		for (const id of Object.keys(item.itemPowerStates)) {
+			const next = powers.get(id);
+			if (!next) {
+				delete item.itemPowerStates[id];
+				continue;
+			}
+			const prior = oldPowers.get(id);
+			if (prior?.isToggle && (!next.isToggle || next.isReferenceOnly || prior.effectType !== next.effectType)) {
+				if (item.itemPowerStates[id]) item.itemPowerStates[id].active = false;
+			}
+		}
+	}
+
+	_reconcileCustomItemSpellPowers (before, after) {
+		const derived = item => this._state._normalizeItemPowers({...item, itemPowers: []})
+			.filter(power => power.kind === "spell");
+		const oldIds = new Set(derived(before).map(power => power.id));
+		after.itemPowers = [
+			...(after.itemPowers || []).filter(power => power.kind !== "spell" || !oldIds.has(power.id)),
+			...derived(after),
+		];
+	}
+
+	_serializeCustomItemPowers (powers) {
+		return powers
+			.filter(power => power?.name?.trim())
+			.map(power => {
+				if (!power.id) power.id = `custom:${CryptUtil.uid()}`;
+				const chargesCost = Math.max(0, Number(power.chargesCost) || 0);
+				const usesMax = Math.max(0, Number(power.usesMax) || 0);
+				return {
+					...MiscUtil.copyFast(power),
+					name: power.name.trim(),
+					kind: power.kind || "ability",
+					actionType: power.actionType || "other",
+					chargesCost,
+					...(usesMax ? {
+						usesMax,
+						usageType: power.usageType || "limited",
+						usesKey: power.usesKey || `custom:${power.id}`,
+					} : {}),
+					isReferenceOnly: !!power.isReferenceOnly && !chargesCost && !usesMax,
+				};
+			});
+	}
+
+	_getCustomItemSpellSelections (attached, spells = []) {
+		if (!attached || Array.isArray(attached)) return [];
+		const selected = [];
+		const add = (ref, usageType, uses = null, recharge = "long") => {
+			const [name, source = "PHB"] = String(ref).split("|");
+			const match = spells.find(spell => spell.name.toLowerCase() === name.toLowerCase()
+				&& spell.source.toLowerCase() === source.toLowerCase());
+			selected.push({name: match?.name || name,
+				source: match?.source || source,
+				level: match?.level ?? 1,
+				usageType,
+				uses,
+				recharge,
+				spellRef: ref});
+		};
+		for (const ref of attached.will || []) add(ref, "will");
+		for (const [key, refs] of Object.entries(attached.daily || {})) {
+			for (const ref of refs || []) add(ref, "daily", parseInt(key, 10) || 1, key.endsWith("e") ? "long" : "short");
+		}
+		for (const [key, refs] of Object.entries(attached.charges || {})) {
+			for (const ref of refs || []) add(ref, "charges", parseInt(key, 10) || 1);
+		}
+		return selected;
 	}
 
 	/**
@@ -2488,7 +2646,7 @@ class CharacterSheetInventory {
 	 * @returns {object} The merged item payload
 	 */
 	_mergeEditedItem (oldItem, newItem) {
-		const merged = {...(oldItem || {})};
+		const merged = MiscUtil.copyFast(oldItem || {});
 		for (const [k, v] of Object.entries(newItem)) {
 			if (v !== undefined) merged[k] = v;
 		}
@@ -2516,7 +2674,7 @@ class CharacterSheetInventory {
 		const entries = this._getEffectiveItemEntries(item);
 		if (entries?.length) {
 			options.entries = entries
-				.map(e => typeof e === "string" ? e : (e?.entries ? e.entries.join("\n") : ""))
+				.map(e => CharacterSheetState._getItemRawEntryText(e))
 				.filter(Boolean)
 				.join("\n\n");
 		}
@@ -3529,7 +3687,8 @@ class CharacterSheetInventory {
 		// Reuses the SAME catalog + effect-row editor as the custom-ability modal so items and
 		// abilities produce one identical effect schema and flow through one modifier pipeline.
 		// Effects are applied while the item is equipped (and attuned, if it requires attunement).
-		const itemEffects = Array.isArray(prefillItem?.effects) ? JSON.parse(JSON.stringify(prefillItem.effects)) : [];
+		const itemEffects = [];
+		let seededEffects = [];
 		const effectsSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--effects">
 				<div class="charsheet__custom-item-section-title">⚙️ Modifiers &amp; Effects <span class="charsheet__custom-item-recommended-badge">Recommended</span></div>
@@ -3567,7 +3726,7 @@ class CharacterSheetInventory {
 		});
 
 		// Explicit powers use the same runtime item-power contract as catalog and curated definitions.
-		const itemPowers = Array.isArray(prefillItem?.itemPowers) ? JSON.parse(JSON.stringify(prefillItem.itemPowers)) : [];
+		const itemPowers = [];
 		const powersSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--powers">
 				<div class="charsheet__custom-item-section-title">⚡ Powers (Optional)</div>
@@ -3643,6 +3802,7 @@ class CharacterSheetInventory {
 		// Attached Spells Section
 		const allSpells = this._page.getSpells?.() || [];
 		const selectedSpells = [];
+		let originalAttachedSpells = null;
 
 		const spellsSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--spells">
@@ -3757,7 +3917,9 @@ class CharacterSheetInventory {
 			const selectedContainer = form.querySelector("#custom-item-spell-selected");
 
 			if (!selectedSpells.length) {
-				selectedContainer.innerHTML = `<div class="charsheet__custom-item-spell-empty">No spells selected</div>`;
+				selectedContainer.innerHTML = `<div class="charsheet__custom-item-spell-empty">${originalAttachedSpells
+					? "No editable spell uses selected. Other inherited spell grants are preserved."
+					: "No spells selected"}</div>`;
 				return;
 			}
 
@@ -3944,6 +4106,9 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
 						<textarea id="custom-item-desc" class="ve-form-control" rows="3" placeholder="Describe any special properties, abilities, or lore..."></textarea>
+						<div id="custom-item-entries-fidelity" class="ve-muted ve-small mt-1" style="display: none;">
+							This item has structured entries (such as tables). Saving without changing this description preserves them; editing the description replaces them with plain text.
+						</div>
 					</div>
 				</div>
 			</div>
@@ -3951,6 +4116,9 @@ class CharacterSheetInventory {
 		form.append(descSection);
 
 		modalInner.append(form);
+		const emptyFormFields = [...form.querySelectorAll("input, select, textarea")].map(el => ({
+			el, value: el.value, checked: el.checked,
+		}));
 
 		// Decorate legacy numeric bonus fields with a live signed preview (e.g. "+3" / "-2") so
 		// players can tell at a glance that positive AND negative values are accepted (Bug #1).
@@ -3969,20 +4137,39 @@ class CharacterSheetInventory {
 		// Apply a seed (base-item clone or edit pre-seed) into the form fields + selected type.
 		const applySeed = (seed) => {
 			if (!seed) return;
+			for (const {el, value, checked} of emptyFormFields) {
+				el.value = value;
+				if (checked !== undefined) el.checked = checked;
+			}
+			pendingUpgrades.length = 0;
+			pendingGemstone = null;
 			selectedType = seed.type || "gear";
 			typeGrid.querySelectorAll(".charsheet__custom-item-type-btn").forEach(b => {
 				b.classList.toggle("selected", b.getAttribute("data-type") === selectedType);
 			});
 			updateFieldVisibility();
 			this._prefillCustomItemForm(form, seed);
+			const entriesHint = form.querySelector("#custom-item-entries-fidelity");
+			if (entriesHint) {
+				const entries = this._getEffectiveItemEntries(seed.item || {});
+				entriesHint.style.display = entries?.some(entry => entry && typeof entry === "object") ? "" : "none";
+			}
 			// Re-seed the Modifiers & Effects editor from the seed's effects[] (Bug #8), so cloning
 			// a custom item via "Start from Base Item" also carries its structured effects.
-			const seedEffects = seed.options?.effects;
-			if (Array.isArray(seedEffects)) {
-				itemEffects.length = 0;
-				for (const eff of seedEffects) itemEffects.push(JSON.parse(JSON.stringify(eff)));
-				renderItemEffects();
-			}
+			itemEffects.length = 0;
+			seededEffects = MiscUtil.copyFast(seed.options?.effects || []);
+			for (const effect of seededEffects) itemEffects.push(MiscUtil.copyFast(effect));
+			renderItemEffects();
+			itemPowers.length = 0;
+			const base = seed.item
+				? (isEdit ? seed.item : this._getCustomItemBase(seed.item))
+				: null;
+			for (const power of base?.itemPowers || []) itemPowers.push(MiscUtil.copyFast(power));
+			renderItemPowers();
+			selectedSpells.length = 0;
+			originalAttachedSpells = base?.attachedSpells ? MiscUtil.copyFast(base.attachedSpells) : null;
+			selectedSpells.push(...this._getCustomItemSpellSelections(originalAttachedSpells, allSpells));
+			renderSelectedSpells();
 		};
 
 		// Pre-seed for edit mode, or an explicitly supplied base item.
@@ -4013,6 +4200,8 @@ class CharacterSheetInventory {
 
 		// "Start from base item" — only meaningful when creating (edit already starts from the item).
 		// Lives at the TOP of the modal (in topActions) so a base can be picked before editing fields.
+		let selectedBaseItem = isEdit ? null : prefillItem;
+		let draftBaseline = null;
 		let btnFromBase = null;
 		if (!isEdit) {
 			btnFromBase = e_({tag: "button", clazz: "ve-btn ve-btn-default charsheet__custom-item-from-base-btn", txt: "📦 Start from Base Item"});
@@ -4020,10 +4209,9 @@ class CharacterSheetInventory {
 				await this._pShowItemPickerModal({
 					title: "📦 Choose a Base Item",
 					onSelect: (baseItem) => {
+						selectedBaseItem = baseItem;
 						applySeed(this._seedOptionsFromItem(baseItem));
-						// Ensure the chosen name is populated if blank
-						const nameEl = form.querySelector("#custom-item-name");
-						if (nameEl && !nameEl.value) nameEl.value = baseItem.name || "";
+						draftBaseline = getDraft();
 						JqueryUtil.doToast({type: "info", content: `Loaded "${baseItem.name}" — edit and save as a custom item.`});
 					},
 				});
@@ -4032,13 +4220,8 @@ class CharacterSheetInventory {
 		}
 
 		const btnCreate = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: isEdit ? "💾 Save Changes" : "✨ Create Item"});
-		btnCreate.addEventListener("click", () => {
+		const getDraft = () => {
 			const name = form.querySelector("#custom-item-name")?.value?.trim();
-			if (!name) {
-				JqueryUtil.doToast({type: "warning", content: "Please enter an item name!"});
-				return;
-			}
-
 			const options = {
 				type: selectedType,
 				// Field is entered in gp; store in copper to match catalog items and _formatValue().
@@ -4291,8 +4474,8 @@ class CharacterSheetInventory {
 				const chargesSpells = {};
 
 				for (const spell of selectedSpells) {
-					const spellRef = `${spell.name}|${spell.source}`;
-					if (spell.usageType === "will" || spell.level === 0) {
+					const spellRef = spell.spellRef || `${spell.name}|${spell.source}`;
+					if (spell.usageType === "will") {
 						willSpells.push(spellRef);
 					} else if (spell.usageType === "daily") {
 						const key = `${spell.uses}${spell.recharge === "short" ? "" : "e"}`;
@@ -4309,7 +4492,20 @@ class CharacterSheetInventory {
 				if (Object.keys(dailySpells).length) attachedSpells.daily = dailySpells;
 				if (Object.keys(chargesSpells).length) attachedSpells.charges = chargesSpells;
 
-				if (Object.keys(attachedSpells).length) options.attachedSpells = attachedSpells;
+				if (Object.keys(attachedSpells).length) {
+					options.attachedSpells = {
+						...(originalAttachedSpells && !Array.isArray(originalAttachedSpells)
+							? MiscUtil.copyFast(originalAttachedSpells) : {}),
+						...attachedSpells,
+					};
+					for (const key of ["will", "daily", "charges"]) {
+						if (!attachedSpells[key]) delete options.attachedSpells[key];
+					}
+				}
+			} else if (originalAttachedSpells && !Array.isArray(originalAttachedSpells)) {
+				const retained = MiscUtil.copyFast(originalAttachedSpells);
+				for (const key of ["will", "daily", "charges"]) delete retained[key];
+				options.attachedSpells = Object.keys(retained).length ? retained : null;
 			}
 
 			const quantity = parseInt(form.querySelector("#custom-item-qty")?.value) || 1;
@@ -4324,28 +4520,11 @@ class CharacterSheetInventory {
 				? (eff) => CustomAbilities.effectHasBehavior(eff)
 				: (eff) => eff && eff.type;
 			const cleanedEffects = itemEffects
-				.filter(eff => eff && eff.type && hasBehavior(eff))
+				.filter(eff => eff && eff.type && (hasBehavior(eff)
+					|| seededEffects.some(original => JSON.stringify(original) === JSON.stringify(eff))))
 				.map(eff => JSON.parse(JSON.stringify(eff)));
 			if (cleanedEffects.length) options.effects = cleanedEffects;
-			const cleanedPowers = itemPowers
-				.filter(power => power?.name?.trim())
-				.map((power, ix) => {
-					const chargesCost = Math.max(0, Number(power.chargesCost) || 0);
-					const usesMax = Math.max(0, Number(power.usesMax) || 0);
-					return {
-						name: power.name.trim(),
-						kind: power.kind || "ability",
-						actionType: power.actionType || "other",
-						description: power.description || "",
-						chargesCost,
-						...(usesMax ? {
-							usesMax,
-							usageType: power.usageType || "limited",
-							usesKey: power.usesKey || `custom:${ix}:${power.name.trim().toLowerCase().replace(/\W+/g, "-")}`,
-						} : {}),
-						isReferenceOnly: !!power.isReferenceOnly || (!chargesCost && !usesMax),
-					};
-				});
+			const cleanedPowers = this._serializeCustomItemPowers(itemPowers);
 			if (cleanedPowers.length) options.itemPowers = cleanedPowers;
 
 			// Creation-time upgrades & empowerment (#15) — applied AFTER the item is created,
@@ -4361,7 +4540,29 @@ class CharacterSheetInventory {
 				if (pendingGemstone) options._pendingGemstone = pendingGemstone;
 			}
 
-			this._saveCustomItem(name, quantity, weight, options, editItemId);
+			return {name, quantity, weight, options};
+		};
+		draftBaseline = prefillItem ? getDraft() : null;
+		btnCreate.addEventListener("click", () => {
+			const {name, quantity, weight, options} = getDraft();
+			if (!name) {
+				JqueryUtil.doToast({type: "warning", content: "Please enter an item name!"});
+				form.querySelector("#custom-item-name")?.focus();
+				return;
+			}
+			if (Array.isArray(originalAttachedSpells) && options.attachedSpells) {
+				JqueryUtil.doToast({type: "warning", content: "This item uses a legacy spell list. Create a separate item to add selectable spell uses without changing its rules."});
+				return;
+			}
+			try {
+				this._saveCustomItem(name, quantity, weight, options, editItemId, {
+					baseItem: selectedBaseItem,
+					baseline: draftBaseline,
+				});
+			} catch (error) {
+				JqueryUtil.doToast({type: "danger", content: error.message});
+				return;
+			}
 			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
 			doClose(true);
 		});
