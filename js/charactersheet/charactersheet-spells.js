@@ -7778,12 +7778,19 @@ class CharacterSheetSpells {
 		});
 		if (!triggeredFeatDie) return null;
 
-		this._state.grantTempHp(triggeredFeatDie.roll);
+		const granted = this._state.grantTempHp(triggeredFeatDie.roll);
 		await this._page._saveCurrentCharacter?.();
+		this._page._renderHp?.();
+		if (this._state.getViewMode?.() === "play") this._page._playMode?.render?.();
 		this._page._renderResources?.();
 		this._page._features?._renderResources?.();
 		this._page._combat?.renderCombatResources?.();
-		JqueryUtil.doToast({type: "success", content: `${triggeredFeatDie.sourceName}: gained ${triggeredFeatDie.roll} temporary hit points.`});
+		JqueryUtil.doToast({
+			type: granted ? "success" : "info",
+			content: granted
+				? `${triggeredFeatDie.sourceName}: gained ${triggeredFeatDie.roll} temporary hit points.`
+				: `${triggeredFeatDie.sourceName}: rolled ${triggeredFeatDie.roll} temporary hit points; kept existing ${this._state.getTempHp()} (temporary hit points don't stack).`,
+		});
 		return triggeredFeatDie;
 	}
 

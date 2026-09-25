@@ -66,6 +66,53 @@ function spendTriggeredDieWithRoll (state, trigger, context = {}, roll = 4) {
 	return spent.ok ? {...spent, roll, sides: 6} : null;
 }
 
+function makeCriticalHitPage (state) {
+	const elements = new Map([
+		"charsheet-ipt-hp-current",
+		"charsheet-disp-hp-max",
+		"charsheet-ipt-hp-temp",
+		"charsheet-ipt-hp-max-reduction",
+		"charsheet-hp-bar-fill",
+		"charsheet-hp-bar-temp",
+		"charsheet-hp-percent",
+	].map(id => [id, {style: {}, classList: {toggle () {}}, setAttribute () {}, hidden: false}]));
+	const combatTemp = {hidden: true, textContent: ""};
+	jest.spyOn(document, "getElementById").mockImplementation(id => elements.get(id) || null);
+	jest.spyOn(document, "querySelectorAll").mockImplementation(selector => selector === "[data-charsheet-combat-hp-temp]" ? [combatTemp] : []);
+	const page = Object.create(CharacterSheetPage.prototype);
+	const saved = [];
+	page._state = state;
+	page.rollDice = jest.fn(() => 5);
+	page._saveCurrentCharacter = jest.fn(async () => { saved.push(state.toJson()); });
+	page._renderResources = jest.fn();
+	page._features = {_renderResources: jest.fn()};
+	page._combat = {renderCombatResources: jest.fn()};
+	page._renderDamageIntakes = jest.fn();
+	page._renderHp();
+	return {page, elements, combatTemp, saved};
+}
+
+async function openWeaponCriticalHitOffer (page, state) {
+	const combat = Object.create(CharacterSheetCombat.prototype);
+	combat._state = state;
+	combat._page = page;
+	combat.renderCombatResources = jest.fn();
+	const ctx = {isCrit: true, attack: {name: "Longsword"}};
+	const hook = combat._getPostAttackHooks().find(it => it.id === "triggeredFeatCriticalHit");
+	expect(hook.predicate(ctx)).toBe(true);
+	const offer = {
+		rollId: "critical-roll",
+		state,
+		ctx,
+		element: {remove: jest.fn()},
+		options: new Map([[hook.id, {hook, row: {remove: jest.fn()}, button: {disabled: false}}]]),
+		inFlight: false,
+	};
+	combat._lastAttackContext = {rollId: offer.rollId};
+	combat._postAttackOffer = offer;
+	return combat._pOpenPostAttackOffer(offer, hook.id);
+}
+
 describe("Cruel feat resource model", () => {
 	it("does not apply the Tal'Dorei mechanic to an unrelated same-name feat", () => {
 		const state = new CharacterSheetState();
@@ -337,5 +384,102 @@ describe("Cruel feat roll integration", () => {
 		expect(state.getTempHp()).toBe(5);
 		expect(getCrueltyDice(state).current).toBe(2);
 		expect(state.getTriggeredFeatDieOptions("damage", {damageSource: "weapon"})).toEqual([]);
+	});
+
+	it("updates the HP display and saved character when Cruel is opened from the weapon critical-hit offer", async () => {
+		const state = makeState();
+		state.setHp(20, 40);
+		const {page, elements, combatTemp, saved} = makeCriticalHitPage(state);
+		jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValueOnce(true);
+
+		expect(elements.get("charsheet-ipt-hp-temp").value).toBe(0);
+		expect(await openWeaponCriticalHitOffer(page, state)).toBe(true);
+
+		expect(page.rollDice).toHaveBeenCalledWith(1, 6);
+		expect(getCrueltyDice(state).current).toBe(2);
+		expect(state.getTempHp()).toBe(5);
+		expect(elements.get("charsheet-ipt-hp-temp").value).toBe(5);
+		expect(elements.get("charsheet-hp-bar-temp").style.width).toBe("12.5%");
+		expect(combatTemp).toMatchObject({textContent: "+5 temp", hidden: false});
+		expect(saved.at(-1).hp.temp).toBe(5);
+	});
+
+	it("updates the HP display and saved character after a critical spell attack", async () => {
+		const state = makeState();
+		state.setHp(20, 40);
+		const {page, elements, combatTemp, saved} = makeCriticalHitPage(state);
+		jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValueOnce(true);
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = state;
+		spells._page = page;
+
+		await spells._pApplyTriggeredFeatCriticalHit({
+			spell: {name: "Scorching Ray"},
+			spellData: {name: "Scorching Ray"},
+		});
+
+		expect(page.rollDice).toHaveBeenCalledWith(1, 6);
+		expect(getCrueltyDice(state).current).toBe(2);
+		expect(state.getTempHp()).toBe(5);
+		expect(elements.get("charsheet-ipt-hp-temp").value).toBe(5);
+		expect(elements.get("charsheet-hp-bar-temp").style.width).toBe("12.5%");
+		expect(combatTemp).toMatchObject({textContent: "+5 temp", hidden: false});
+		expect(saved.at(-1).hp.temp).toBe(5);
+	});
+
+	it.each(["weapon", "spell"])("keeps a higher temp-HP pool and reports the non-stacking result on a %s critical hit", async route => {
+		const state = makeState();
+		state.setHp(20, 40);
+		state.grantTempHp(9);
+		const {page, elements, combatTemp, saved} = makeCriticalHitPage(state);
+		const toast = jest.spyOn(globalThis.JqueryUtil, "doToast").mockImplementation(() => {});
+		jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValueOnce(true);
+
+		if (route === "weapon") {
+			expect(await openWeaponCriticalHitOffer(page, state)).toBe(true);
+		} else {
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._state = state;
+			spells._page = page;
+			await spells._pApplyTriggeredFeatCriticalHit({
+				spell: {name: "Scorching Ray"},
+				spellData: {name: "Scorching Ray"},
+			});
+		}
+
+		expect(page.rollDice).toHaveBeenCalledWith(1, 6);
+		expect(getCrueltyDice(state).current).toBe(2);
+		expect(state.getTempHp()).toBe(9);
+		expect(elements.get("charsheet-ipt-hp-temp").value).toBe(9);
+		expect(combatTemp).toMatchObject({textContent: "+9 temp", hidden: false});
+		expect(saved.at(-1).hp.temp).toBe(9);
+		expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+			type: "info",
+			content: expect.stringMatching(/rolled 5.*kept.*9/i),
+		}));
+	});
+
+	it.each(["weapon", "spell"])("refreshes the Play Mode HP bar after a %s critical hit", async route => {
+		const state = makeState();
+		state.setHp(20, 40);
+		state.setViewMode("play");
+		const {page} = makeCriticalHitPage(state);
+		page._playMode = {render: jest.fn()};
+		jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValueOnce(true);
+
+		if (route === "weapon") {
+			expect(await openWeaponCriticalHitOffer(page, state)).toBe(true);
+		} else {
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._state = state;
+			spells._page = page;
+			await spells._pApplyTriggeredFeatCriticalHit({
+				spell: {name: "Scorching Ray"},
+				spellData: {name: "Scorching Ray"},
+			});
+		}
+
+		expect(state.getTempHp()).toBe(5);
+		expect(page._playMode.render).toHaveBeenCalledTimes(1);
 	});
 });

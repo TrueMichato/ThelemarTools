@@ -261,6 +261,11 @@ All Ranger subclasses are fully implemented:
   after scoring a critical hit, or on a Charisma (Intimidation) check. The
   effects add untyped damage, grant temporary hit points, or add to the check,
   respectively; all three share one persisted once-per-turn receipt.
+- Opening the critical-hit offer on a weapon attack, or accepting it after a
+  critical spell attack, updates the HP input, bar, and Combat HP label as well
+  as the Play Mode HP bar and saved character. Temporary HP does not stack: if
+  the die is no higher than the existing pool, the die is spent but the higher
+  pool is retained and the result says so rather than claiming new HP was gained.
 - The resource is shown as `d6 • Triggered • No action • 1/turn`. Generic
   resource panels do not expose a misleading bare **Use** button; their restore
   control and Combat's pips remain available for manual corrections.
