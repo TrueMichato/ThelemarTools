@@ -106,7 +106,7 @@
 						</select>
 						<button type="button" class="ve-btn ve-btn-primary" id="ew-init-roll">Roll selected initiative</button>
 					</div>
-					<p class="ew__operation-help">Uses each monster's initiative bonus as a Dexterity check, including applicable conditions and roll effects. Edit a total on its statblock below.</p>
+					<p class="ew__operation-help">Uses each monster's initiative bonus as a Dexterity check, including applicable conditions and roll effects. Shared-turn groups roll once using the first selected member's effects; original individual totals are retained.</p>
 				</div>
 				<section class="ew__operation ew__turns" aria-label="Turn order">
 					<div class="ew__turns-header">
@@ -222,9 +222,10 @@
 						<div class="ew__selection-actions">
 							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-all">All</button>
 							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-none">None</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-group-selected">Group selected</button>
 						</div>
 					</div>
-					<p class="ew__help">Choose monsters individually. Selection is saved for the next visit.</p>
+					<p class="ew__help">Identical effective statblocks group in this roster; expand for individual HP, conditions and targets. Group selected creatures to keep them together or share a turn. Selection is saved.</p>
 					<div id="ew-roster" class="ew__roster"></div>
 				</aside>
 				<section class="ew__statblocks" id="ew-statblocks" aria-label="Monster statblocks"></section>

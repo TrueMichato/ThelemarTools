@@ -24,6 +24,7 @@ const getElements = () => {
 						setAttribute: jest.fn(),
 						classList: {add: jest.fn(), remove: jest.fn()},
 						replaceChildren: jest.fn(),
+						querySelectorAll: jest.fn(() => []),
 						options: [],
 						value: "",
 						disabled: false,

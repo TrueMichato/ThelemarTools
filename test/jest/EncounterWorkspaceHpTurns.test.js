@@ -126,7 +126,7 @@ describe("Encounter Workspace HP and turns", () => {
 			});
 			storage.pGetForPage.mockResolvedValueOnce(legacy);
 			const migrated = await store.pLoad();
-			expect(migrated.version).toBe(5);
+			expect(migrated.version).toBe(6);
 			expect(migrated.selectedIds).toEqual(withNote.selectedIds);
 			expect(migrated.turn).toEqual({round: 0, activeId: null});
 			expect(migrated.instances.map(it => it.hp.current)).toEqual([7, 7]);

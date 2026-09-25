@@ -476,14 +476,53 @@
 			overflow-y: auto;
 		}
 
+		&__roster-group {
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__group-header {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 7px;
+			padding: 9px 12px;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__group-title {
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+
+		&__group-controls {
+			display: flex;
+			grid-column: 2 / -1;
+			flex-wrap: wrap;
+			align-items: end;
+			gap: 6px;
+		}
+
+		&__group-initiative {
+			display: grid;
+			gap: 3px;
+			font-size: 1rem;
+		}
+
+		&__group-init {
+			width: 105px;
+		}
+
+		&__group-members[hidden] {
+			display: none;
+		}
+
 		&__roster-row {
 			display: grid;
-			grid-template-columns: auto minmax(0, 1fr);
+			grid-template-columns: minmax(0, 1fr) auto;
 			align-items: center;
-			column-gap: 10px;
+			gap: 4px 10px;
 			padding: 9px 12px;
 			border-top: 1px solid vars.$rgb-border-grey--muted;
-			cursor: pointer;
 
 			&:hover,
 			&:focus-within {
@@ -500,6 +539,14 @@
 			}
 		}
 
+		&__roster-member {
+			display: inline-flex;
+			align-items: center;
+			gap: 10px;
+			min-width: 0;
+			cursor: pointer;
+		}
+
 		&__roster-name {
 			min-width: 0;
 			font-weight: 600;
@@ -507,7 +554,7 @@
 		}
 
 		&__roster-meta {
-			grid-column: 2;
+			grid-column: 1 / -1;
 			color: vars.$rgb-font;
 			font-size: 1rem;
 		}
@@ -674,6 +721,14 @@
 
 		&__roster-row {
 			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__roster-group {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__group-header {
+			background: vars-night.$rgb-bg--alt-night;
 		}
 
 		&__results-table th,
