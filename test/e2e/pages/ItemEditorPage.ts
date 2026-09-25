@@ -218,8 +218,8 @@ export class ItemEditorPage {
 		}, id);
 	}
 
-	async rollItemDamage (id: string): Promise<string> {
-		return this.page.evaluate(async id => {
+	async rollItemDamage (id: string, isCrit = false): Promise<string> {
+		return this.page.evaluate(async ({id, isCrit}) => {
 			const cs = (globalThis as any).charSheet;
 			const combat = cs._combat;
 			const attack = cs._state.getAttacks().find((it: any) => it.sourceItem?.id === id)
@@ -235,12 +235,97 @@ export class ItemEditorPage {
 				cs.rollDice = () => 1;
 				cs.pAnimateDamageDice = async () => {};
 				cs.showDiceResult = (result: any) => { total = String(result.total); };
-				await combat._rollDamage(attack.id);
+				await combat._rollDamage(attack.id, isCrit);
 				if (!total) throw new Error("Damage roll did not produce a result");
 				return total;
 			} finally {
 				Object.assign(cs, original);
 			}
+		}, {id, isCrit});
+	}
+
+	async exportAndReload (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			const exported = cs._state.toJson();
+			if (cs._state.loadFromJson(structuredClone(exported)) === false) throw new Error("Character export was rejected on load");
+			cs.renderCharacter();
+		});
+	}
+
+	async addLegacyCatalogBoots (source: string): Promise<string> {
+		return this.page.evaluate(source => {
+			const cs = (globalThis as any).charSheet;
+			const base = cs._inventory._allItems.find((item: any) => item.name === "Boots of Speed" && item.source === source);
+			if (!base) throw new Error(`Catalog Boots of Speed|${source} not loaded`);
+			cs._state.addItem(base, 1, true, true);
+			const id = cs._state.getItems().find((item: any) => item.name === base.name && item.source === source).id;
+			const saved = cs._state.toJson();
+			saved.inventory.find((row: any) => row.id === id).item.itemPowers = [
+				{id: "unrelated-lore", name: "Unrelated lore", kind: "ability", isReferenceOnly: true},
+				...(source === "XDMG" ? [{
+					id: "reference:boots-of-speed:bonus",
+					name: "Boots of Speed Power",
+					kind: "ability",
+					actionType: "bonus",
+					isReferenceOnly: true,
+				}] : []),
+			];
+			cs._state.loadFromJson(saved);
+			cs._inventory.syncItemDerivedState();
+			cs.renderCharacter();
+			return id;
+		}, source);
+	}
+
+	async setEquipmentState (id: string, {equipped, attuned}: {equipped?: boolean; attuned?: boolean}): Promise<void> {
+		await this.page.evaluate(({id, equipped, attuned}) => {
+			const cs = (globalThis as any).charSheet;
+			if (equipped !== undefined) cs._state.setItemEquipped(id, equipped);
+			if (attuned !== undefined) cs._state.setItemAttuned(id, attuned);
+			cs.renderCharacter();
+		}, {id, equipped, attuned});
+	}
+
+	async getOverviewSpeedText (): Promise<string> {
+		return this.page.evaluate(() => document.getElementById("charsheet-disp-speed")?.getAttribute("data-speed-text") || "");
+	}
+
+	async failNextCharacterSave (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const cs = (globalThis as any).charSheet;
+			if (await cs.saveCharacter() === false) throw new Error("Test character could not be saved before failure injection");
+			const storage = (globalThis as any).StorageUtil;
+			const original = storage.pSet;
+			storage.pSet = async function (key: string, value: unknown) {
+				if (key === "charsheet-characters") {
+					storage.pSet = original;
+					throw new Error("Simulated character persistence failure");
+				}
+				return original.call(this, key, value);
+			};
+			(globalThis as any).__itemEditorSaveFeedback = [];
+			const originalToast = (globalThis as any).JqueryUtil.doToast;
+			(globalThis as any).JqueryUtil.doToast = function (message: {type: string}) {
+				(globalThis as any).__itemEditorSaveFeedback.push(message.type);
+				return originalToast.call(this, message);
+			};
+		});
+	}
+
+	async getSaveFeedback (): Promise<string[]> {
+		return this.page.evaluate(() => (globalThis as any).__itemEditorSaveFeedback || []);
+	}
+
+	async getPersistedItemNames (id: string): Promise<{canonical: string | null; mirror: string | null}> {
+		return this.page.evaluate(async id => {
+			const cs = (globalThis as any).charSheet;
+			const saved = await (globalThis as any).StorageUtil.pGet("charsheet-characters") || [];
+			const canonical = saved.find((character: any) => character.id === cs._currentCharacterId);
+			const mirror = cs._readActiveCharacterMirror(cs._currentCharacterId);
+			const name = (character: any): string | null =>
+				character?.inventory?.find((row: any) => row.id === id)?.item?.name || null;
+			return {canonical: name(canonical), mirror: name(mirror)};
 		}, id);
 	}
 

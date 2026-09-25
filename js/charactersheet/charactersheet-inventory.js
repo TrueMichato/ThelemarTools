@@ -2320,7 +2320,7 @@ class CharacterSheetInventory {
 	 * @param {string|null} [editItemId] - When set, replace this inventory item instead of adding
 	 * @returns {string|undefined} The inventory id of the saved item, when known
 	 */
-	_saveCustomItem (name, quantity, weight, options, editItemId = null, {baseItem = null, baseline = null} = {}) {
+	_saveCustomItem (name, quantity, weight, options, editItemId = null, {baseItem = null, baseline = null, deferPersistence = false, feedback = []} = {}) {
 		const built = this._buildCustomItem(name, quantity, weight, options);
 		const patch = baseline
 			? this._getCustomItemDraftPatch(baseline, {name, quantity, weight, options})
@@ -2357,44 +2357,50 @@ class CharacterSheetInventory {
 			// values for any grant the form does not model. Restoring the pristine bases first
 			// makes both halves of the merge speak the same units, and dropping the capture lets
 			// `reconcileIounHosts` re-derive it from the freshly-agreed base.
-			if (Object.keys(patch).length) {
-				this._state.dematerialiseIounHostBonuses?.(editItemId);
-				const mergeBase = this._state.getItemRaw(editItemId);
-				const merged = this._mergeEditedItem(mergeBase, patch);
-				if (Object.hasOwn(patch, "attachedSpells")) this._reconcileCustomItemSpellPowers(mergeBase, merged);
-				if (Object.hasOwn(patch, "charges") && merged.charges == null) merged.chargesCurrent = null;
-				merged.source = "Custom";
-				merged._baseSource = mergeBase._baseSource
+			return this._commitCustomItemMutation(() => {
+				if (Object.keys(patch).length) {
+					this._state.dematerialiseIounHostBonuses?.(editItemId);
+					const mergeBase = this._state.getItemRaw(editItemId);
+					const merged = this._mergeEditedItem(mergeBase, patch);
+					if (Object.hasOwn(patch, "attachedSpells")) this._reconcileCustomItemSpellPowers(mergeBase, merged);
+					if (Object.hasOwn(patch, "charges") && merged.charges == null) merged.chargesCurrent = null;
+					merged.source = "Custom";
+					merged._baseSource = mergeBase._baseSource
 					|| (mergeBase.source !== "Custom" ? mergeBase.source : undefined);
-				merged.iounBaseBonuses = null;
-				this._pruneCustomItemPowerStates(merged, mergeBase);
-				if (mergeBase.attuned && merged.requiresAttunement === false && merged.itemPowerStates) {
-					for (const power of merged.itemPowers || []) {
-						if (power.isToggle && power.effectType === "modifySpeed" && merged.itemPowerStates[power.id]) {
-							merged.itemPowerStates[power.id].active = false;
+					merged.iounBaseBonuses = null;
+					this._pruneCustomItemPowerStates(merged, mergeBase);
+					if (mergeBase.attuned && merged.requiresAttunement === false && merged.itemPowerStates) {
+						for (const power of merged.itemPowers || []) {
+							if (power.isToggle && power.effectType === "modifySpeed" && merged.itemPowerStates[power.id]) {
+								merged.itemPowerStates[power.id].active = false;
+							}
 						}
 					}
+					if (!this._state.replaceItem(editItemId, merged)) throw new Error("The item could not be updated.");
 				}
-				if (!this._state.replaceItem(editItemId, merged)) throw new Error("The item could not be updated.");
-			}
-			// Keep the quantity the user set in the form
-			if (quantityChanged || !baseline) this._state.setItemQuantity(editItemId, quantity);
-			// Restore remaining charges, clamped to the new max (setItemCharges clamps to [0, charges]).
-			if (Object.keys(patch).length && oldChargesCurrent != null && this._state.getItemRaw(editItemId)?.charges != null
+				// Keep the quantity the user set in the form
+				if (quantityChanged || !baseline) this._state.setItemQuantity(editItemId, quantity);
+				// Restore remaining charges, clamped to the new max (setItemCharges clamps to [0, charges]).
+				if (Object.keys(patch).length && oldChargesCurrent != null && this._state.getItemRaw(editItemId)?.charges != null
 				&& typeof this._state.setItemCharges === "function") {
-				this._state.setItemCharges(editItemId, oldChargesCurrent);
-			}
-			// Apply the upgrades/gemstone delta selected in the edit modal (#6). replaceItem has
-			// already preserved the item's existing appliedUpgrades/socketedGemstones, so this only
-			// adds newly-checked entries and removes un-checked ones — idempotently.
-			this._applyEditUpgrades(editItemId, options);
-			// An edit can declare or withdraw Ioun settings, so the host layer has to re-settle
-			// before anything reads the item's bonuses again.
-			if (Object.keys(patch).length) this._state.reconcileIounHosts?.();
-			this._syncArmorState();
-			this._page.renderCharacter?.();
-			this._page.saveCharacter?.();
-			return editItemId;
+					this._state.setItemCharges(editItemId, oldChargesCurrent);
+				}
+				// Apply the upgrades/gemstone delta selected in the edit modal (#6). replaceItem has
+				// already preserved the item's existing appliedUpgrades/socketedGemstones, so this only
+				// adds newly-checked entries and removes un-checked ones — idempotently.
+				const upgradeFeedback = this._applyEditUpgrades(editItemId, options);
+				// An edit can declare or withdraw Ioun settings, so the host layer has to re-settle
+				// before anything reads the item's bonuses again.
+				if (Object.keys(patch).length) this._state.reconcileIounHosts?.();
+				this._syncArmorState();
+				this._page.renderCharacter?.();
+				if (upgradeFeedback) feedback.push(upgradeFeedback);
+				if (!deferPersistence) {
+					this._page.saveCharacter?.();
+					for (const message of feedback) JqueryUtil.doToast({type: "success", content: message});
+				}
+				return editItemId;
+			});
 		}
 
 		const cloneBase = baseItem ? this._getCustomItemBase(baseItem) : null;
@@ -2416,12 +2422,55 @@ class CharacterSheetInventory {
 		}
 		const newId = CryptUtil.uid();
 		newItem.id = newId;
-		this._state.addItem(newItem);
-		this._applyCreationUpgrades(newId, options);
-		this._syncArmorState();
-		this._renderItemList();
-		this._page.saveCharacter?.();
-		return newId;
+		return this._commitCustomItemMutation(() => {
+			this._state.addItem(newItem);
+			const upgradeFeedback = this._applyCreationUpgrades(newId, options);
+			this._syncArmorState();
+			this._renderItemList();
+			if (upgradeFeedback) feedback.push(upgradeFeedback);
+			if (!deferPersistence) {
+				this._page.saveCharacter?.();
+				for (const message of feedback) JqueryUtil.doToast({type: "success", content: message});
+			}
+			return newId;
+		});
+	}
+
+	async _pSaveCustomItem (name, quantity, weight, options, editItemId, {baseItem, baseline}) {
+		const state = this._state;
+		const snapshot = MiscUtil.copyFast(state._data);
+		const characterId = this._page._currentCharacterId;
+		const previousMirror = characterId && this._page._readActiveCharacterMirror?.(characterId);
+		const feedback = [];
+		let id;
+		try {
+			id = this._saveCustomItem(name, quantity, weight, options, editItemId, {
+				baseItem, baseline, deferPersistence: true, feedback,
+			});
+			if (await this._page.saveCharacter() === false) throw new Error("The item could not be saved. Try again.");
+		} catch (error) {
+			if (this._page.getState?.() === state && this._page._currentCharacterId === characterId) {
+				state._data = snapshot;
+				if (characterId) {
+					if (previousMirror) this._page._writeActiveCharacterMirror?.(previousMirror);
+					else this._page._clearActiveCharacterMirror?.(characterId);
+				}
+				this._page.renderCharacter?.();
+			}
+			throw error;
+		}
+		for (const message of feedback) JqueryUtil.doToast({type: "success", content: message});
+		return id;
+	}
+
+	_commitCustomItemMutation (commit) {
+		const snapshot = MiscUtil.copyFast(this._state._data);
+		try {
+			return commit();
+		} catch (error) {
+			this._state._data = snapshot;
+			throw error;
+		}
 	}
 
 	_getCustomItemDraftPatch (baseline, current) {
@@ -2632,9 +2681,7 @@ class CharacterSheetInventory {
 		const parts = [];
 		if (appliedUpgrades) parts.push(`${appliedUpgrades} upgrade${appliedUpgrades === 1 ? "" : "s"}`);
 		if (socketed) parts.push("1 empowered gemstone");
-		if (parts.length) {
-			JqueryUtil.doToast({type: "success", content: `Applied ${parts.join(" + ")} (requirements bypassed).`});
-		}
+		return parts.length ? `Applied ${parts.join(" + ")} (requirements bypassed).` : null;
 	}
 
 	/**
@@ -2700,9 +2747,7 @@ class CharacterSheetInventory {
 		if (added) parts.push(`${added} upgrade${added === 1 ? "" : "s"} added`);
 		if (removed) parts.push(`${removed} upgrade${removed === 1 ? "" : "s"} removed`);
 		if (gemChanged) parts.push("gemstone updated");
-		if (parts.length) {
-			JqueryUtil.doToast({type: "success", content: `Item upgrades: ${parts.join(", ")} (requirements bypassed).`});
-		}
+		return parts.length ? `Item upgrades: ${parts.join(", ")} (requirements bypassed).` : null;
 	}
 
 	/**
@@ -4964,7 +5009,7 @@ class CharacterSheetInventory {
 			const control = label.parentElement?.querySelector("input[id], select[id], textarea[id]");
 			if (control && !label.contains(control)) label.htmlFor = control.id;
 		});
-		btnCreate.addEventListener("click", () => {
+		btnCreate.addEventListener("click", async () => {
 			const draft = getDraft();
 			const {name, quantity, weight, options} = draft;
 			const errors = this._validateCustomItemDraft(draft);
@@ -4978,15 +5023,19 @@ class CharacterSheetInventory {
 				JqueryUtil.doToast({type: "warning", content: "This item uses a legacy spell list. Create a separate item to add selectable spell uses without changing its rules."});
 				return;
 			}
+			btnCreate.disabled = true;
 			try {
-				this._saveCustomItem(name, quantity, weight, options, editItemId, {
+				await this._pSaveCustomItem(name, quantity, weight, options, editItemId, {
 					baseItem: selectedBaseItem,
 					baseline: draftBaseline,
 				});
 			} catch (error) {
-				showErrors([{field: "#custom-item-speed-mode", message: error.message}]);
-				JqueryUtil.doToast({type: "danger", content: error.message});
+				const message = error?.message || "The item could not be saved.";
+				showErrors([{field: "#custom-item-name", message}]);
+				JqueryUtil.doToast({type: "danger", content: message});
 				return;
+			} finally {
+				btnCreate.disabled = false;
 			}
 			JqueryUtil.doToast({type: "success", content: isEdit ? `Updated ${name}!` : `Created ${name}!`});
 			doClose(true);

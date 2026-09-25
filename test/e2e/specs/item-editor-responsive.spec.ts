@@ -38,6 +38,59 @@ test.describe("Shared responsive item editor", () => {
 		expect(await editor.rollItemDamage(id)).toMatch(/\d+ slashing \+ \d+ fire \+ \d+ cold/i);
 	});
 
+	test("a worn item's draft leaves derived speed unchanged until Save, then survives export, load, and re-edit", async ({page}) => {
+		const editor = await start(page);
+		const id = await editor.addRawItem({name: "Swift Keepsake", source: "Custom", _isCustom: true,
+			type: "W", equipped: true, modifySpeed: {multiply: {walk: 2}},
+			itemPowers: [{id: "lore", name: "Historical lore", kind: "ability", isReferenceOnly: true}]});
+		expect(await editor.readWalkSpeed()).toBe(60);
+		const before = await editor.getRawItem(id);
+		await editor.openOwnedItemFromInventory(id);
+		await editor.setWalkSpeedMultiplier("");
+		expect(await editor.getSummary()).not.toContain("Speed\n");
+		expect(await editor.readWalkSpeed()).toBe(60);
+		expect(await editor.getRawItem(id)).toEqual(before);
+		await editor.save();
+		expect(await editor.readWalkSpeed()).toBe(30);
+		expect((await editor.getRawItem(id)).modifySpeed).toBeNull();
+		await editor.exportAndReload();
+		expect(await editor.readWalkSpeed()).toBe(30);
+		expect((await editor.getRawItem(id)).itemPowers).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "lore", isReferenceOnly: true}),
+		]));
+		await editor.openOwnedItemFromInventory(id);
+		await editor.setWalkSpeedMultiplier("2");
+		expect(await editor.readWalkSpeed()).toBe(30);
+		await editor.save();
+		expect(await editor.readWalkSpeed()).toBe(60);
+	});
+
+	test("a 1d8 slashing + 1d6 acid weapon rolls both typed lines once normally and twice on a crit after reload", async ({page}) => {
+		const editor = await start(page);
+		const before = await editor.countItems();
+		await editor.openCreate();
+		await editor.selectType("weapon");
+		await editor.rename("Acid Edge");
+		await editor.setBaseDamage("1d8", "slashing");
+		await editor.addDamageRider("1d6", "acid");
+		expect(await editor.countItems()).toBe(before);
+		await editor.save();
+		const [id] = await editor.findOwnedIds("Acid Edge");
+		await editor.equipAndAttune(id);
+		const normal = await editor.rollItemDamage(id);
+		const critical = await editor.rollItemDamage(id, true);
+		const normalBase = Number(normal.match(/^(\d+) slashing \+ 1 acid/i)?.[1]);
+		const criticalBase = Number(critical.match(/^(\d+) slashing \+ 2 acid/i)?.[1]);
+		expect(Number.isFinite(normalBase)).toBe(true);
+		expect(criticalBase).toBe(normalBase + 1);
+		await editor.exportAndReload();
+		expect((await editor.getRawItem(id)).damageRiders).toMatchObject([{dice: "1d6", damageType: "acid"}]);
+		expect(await editor.rollItemDamage(id, true)).toBe(critical);
+		await editor.openOwnedItemFromInventory(id);
+		await editor.save();
+		expect(await editor.rollItemDamage(id)).toBe(normal);
+	});
+
 	test("Modify preserves a nested raw item while editing combined damage conditions", async ({page}) => {
 		const editor = await start(page);
 		const id = await editor.addRawItem({

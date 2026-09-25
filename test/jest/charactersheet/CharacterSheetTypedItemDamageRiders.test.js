@@ -320,6 +320,22 @@ describe("Typed item damage riders", () => {
 		expect(combat._page.rollDice).toHaveBeenCalledTimes(3);
 	});
 
+	it("loads an old save with no damageRiders field and rolls its legacy damage exactly once", async () => {
+		const id = makeWeapon(state, {bonusDamageDice: "1d6", bonusDamageType: "acid"});
+		const saved = state.toJson();
+		delete saved.inventory.find(row => row.id === id).item.damageRiders;
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(saved);
+		const combat = makeCombat(restored, id);
+
+		await combat._rollDamage(`attack:${id}`);
+		expect(combat._page.showDiceResult.mock.lastCall[0].total).toBe("1 slashing + 1 acid = 2");
+		expect(combat._page.rollDice).toHaveBeenCalledTimes(2);
+		await combat._rollDamage(`attack:${id}`, true);
+		expect(combat._page.showDiceResult.mock.lastCall[0].total).toBe("2 slashing + 2 acid = 4");
+		expect(combat._page.rollDice).toHaveBeenCalledTimes(6);
+	});
+
 	it("pools authored, material, and gemstone target types into one question and keeps upgrades", async () => {
 		state.setItemMaterialCatalog([{
 			name: "Dragon Iron",
