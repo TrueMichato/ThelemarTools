@@ -1,5 +1,6 @@
 @use "vars/vars";
 @use "vars/vars-night";
+@use "includes/bestiary-quick-actions";
 
 @layer vetools {
 	.ew {
@@ -164,6 +165,57 @@
 			display: grid;
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 			gap: 14px;
+		}
+
+		&__bulk-edit {
+			grid-column: 1 / -1;
+
+			.ew__operation-help {
+				margin: 0 0 12px;
+			}
+		}
+
+		&__bulk-fields {
+			display: grid;
+			grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+			align-items: center;
+			gap: 9px 14px;
+
+			label {
+				margin: 0;
+				font-weight: 600;
+			}
+
+			.ve-form-control {
+				width: 100%;
+				min-width: 0;
+				font-size: max(16px, 1rem);
+			}
+
+			button {
+				grid-column: 2;
+				justify-self: start;
+			}
+
+			[hidden] {
+				display: none;
+			}
+		}
+
+		&__statblock-heading {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			padding: 8px 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			.ew__statblock-title {
+				padding: 0;
+				border: 0;
+				background: none;
+			}
 		}
 
 		&__operation,
@@ -674,6 +726,11 @@
 		&__statblock--selected {
 			border-color: vars-night.$rgb-link-blue--night;
 		}
+
+		&__statblock-heading {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+		}
 	}
 
 	@media (width <= 800px) {
@@ -692,6 +749,16 @@
 	}
 
 	@media (width <= 600px) {
+		.ew__bulk-fields {
+			grid-template-columns: minmax(0, 1fr);
+
+			button {
+				grid-column: 1;
+				width: 100%;
+				min-height: 44px;
+			}
+		}
+
 		.ew__results-scroll {
 			max-height: 360px;
 		}

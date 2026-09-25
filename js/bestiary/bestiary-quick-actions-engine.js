@@ -773,15 +773,25 @@ export class BestiaryQuickActionsRegistry {
 
 	addOperation ({creature = null, monster = null, scaleContext = null, operation}) {
 		creature ||= monster;
+		return this.applyChanges({creature, scaleContext, addOperations: [operation], eventType: "addOperation"});
+	}
+
+	applyChanges ({creature = null, monster = null, scaleContext = null, addOperations = [], removeIds = [], eventType = "change"}) {
+		creature ||= monster;
 		const key = this.getKey({creature, scaleContext});
 		const record = this.#records.get(key) || {baseCreature: _clone(creature), operations: []};
-		const normalizedOperation = _clone(operation);
-		normalizedOperation.id ||= `bqa-${this.#nextOperationId++}`;
-		const operations = [...record.operations, normalizedOperation];
+		const normalized = addOperations.map(operation => {
+			const out = _clone(operation);
+			out.id ||= `bqa-${this.#nextOperationId++}`;
+			return out;
+		});
+		const removed = new Set(removeIds);
+		if (removeIds.some(id => !record.operations.some(it => it.id === id))) return false;
+		const operations = [...record.operations.filter(it => !removed.has(it.id)), ...normalized];
 		BestiaryQuickActionsUtil.applyOperations({baseCreature: record.baseCreature, operations});
 		this.#records.set(key, {baseCreature: record.baseCreature, operations});
-		this.#notify({type: "addOperation", key, operationId: normalizedOperation.id});
-		return normalizedOperation.id;
+		this.#notify({type: eventType, key, operationId: normalized[0]?.id || removeIds[0]});
+		return normalized[0]?.id || true;
 	}
 
 	removeOperation ({creature = null, monster = null, scaleContext = null, operationId}) {
@@ -789,12 +799,8 @@ export class BestiaryQuickActionsRegistry {
 		const key = this.getKey({creature, scaleContext});
 		const record = this.#records.get(key);
 		if (!record) return false;
-		const operations = record.operations.filter(operation => operation.id !== operationId);
-		if (operations.length === record.operations.length) return false;
-		BestiaryQuickActionsUtil.applyOperations({baseCreature: record.baseCreature, operations});
-		this.#records.set(key, {...record, operations});
-		this.#notify({type: "removeOperation", key, operationId});
-		return true;
+		if (!record.operations.some(operation => operation.id === operationId)) return false;
+		return this.applyChanges({creature, scaleContext, removeIds: [operationId], eventType: "removeOperation"});
 	}
 
 	getCreature ({creature = null, monster = null, scaleContext = null}) {

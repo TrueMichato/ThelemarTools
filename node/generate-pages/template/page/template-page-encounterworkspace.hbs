@@ -126,15 +126,37 @@
 					<p id="ew-roll-summary" role="status" aria-live="polite"></p>
 					<div id="ew-result-table" class="ew__results-scroll"></div>
 				</section>
+				<div class="ew__operation ew__bulk-edit">
+					<h3>Bulk statblock edits</h3>
+					<p class="ew__operation-help">Preview mechanical changes for selected instances. Ineligible monsters are named and skipped; eligible changes save together.</p>
+					<div class="ew__bulk-fields">
+						<label for="ew-bulk-type">Edit</label>
+						<select class="ve-form-control" id="ew-bulk-type">
+							<option value="legendary">Add legendary action</option>
+							<option value="lair">Use lair-action group</option>
+							<option value="area">Apply mechanical area trait</option>
+							<option value="minion">Convert to minion</option>
+						</select>
+						<label for="ew-bulk-choice" id="ew-bulk-choice-label" hidden>Loaded rule</label>
+						<select class="ve-form-control" id="ew-bulk-choice" hidden></select>
+						<label for="ew-bulk-name" id="ew-bulk-name-label">Legendary action name</label>
+						<input class="ve-form-control" id="ew-bulk-name" type="text" maxlength="120" placeholder="e.g. Tail Sweep">
+						<label for="ew-bulk-description" id="ew-bulk-description-label">Action text</label>
+						<textarea class="ve-form-control" id="ew-bulk-description" rows="2" placeholder="Describe the action and its mechanics"></textarea>
+						<label for="ew-bulk-cost" id="ew-bulk-cost-label">Action cost</label>
+						<input class="ve-form-control" id="ew-bulk-cost" type="number" min="1" max="9" value="1">
+						<button type="button" class="ve-btn ve-btn-primary" id="ew-bulk-preview">Preview bulk edit</button>
+					</div>
+				</div>
 				<details class="ew__effect-tools">
-					<summary id="ew-effects-summary">Area notes &amp; roll effects</summary>
+					<summary id="ew-effects-summary">Non-mechanical notes &amp; roll effects</summary>
 					<div class="ew__effect-tools-grid">
 						<div class="ew__operation">
-							<h3>Area traits &amp; lair notes</h3>
+							<h3>Area &amp; lair reminders (text only)</h3>
 							<div class="ew__effect-form">
 								<label for="ew-note-kind">Note type</label>
 								<select class="ve-form-control" id="ew-note-kind">
-									<option value="trait">Area trait</option>
+									<option value="trait">Area reminder</option>
 									<option value="lair">Lair-action note (manual)</option>
 								</select>
 								<label for="ew-note-name">Name</label>
@@ -148,7 +170,7 @@
 								<select class="ve-form-control" id="ew-note-remove"></select>
 								<button type="button" class="ve-btn ve-btn-default" id="ew-note-remove-selected">Remove from selected</button>
 							</div>
-							<p class="ew__operation-help">Notes are reminders only. Lair actions are not triggered or rolled automatically.</p>
+							<p class="ew__operation-help">These notes do not change the statblock. Use Bulk statblock edits above or Edit statblock on an individual monster for mechanical traits and lair actions.</p>
 						</div>
 						<div class="ew__operation">
 							<h3>Roll effects</h3>

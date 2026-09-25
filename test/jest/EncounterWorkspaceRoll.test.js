@@ -232,7 +232,7 @@ describe("Encounter Workspace rolls", () => {
 			const initial = {
 				...EncounterWorkspaceState.getEmpty(),
 				instances: state.instances.map(it => ({
-					...it, hash: "goblin_mm", areaNotes: [], hp: {current: 7, max: 7, temp: 0},
+					...it, hash: "goblin_mm", areaNotes: [], statblockOperations: [], hp: {current: 7, max: 7, temp: 0},
 				})),
 				selectedIds: state.selectedIds,
 			};
