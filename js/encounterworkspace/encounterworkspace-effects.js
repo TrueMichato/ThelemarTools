@@ -70,6 +70,9 @@ const MODIFIER_SCOPES = ["check", "skill", "save", "initiative", "attack"];
 const MODIFIER_MODES = ["normal", "advantage", "disadvantage"];
 const PRESET_FIELDS = ["id", "presetId", "name", "scopes", "mode", "bonus", "source", "page", "edition"];
 const LEGACY_PRESET_FIELDS = PRESET_FIELDS.slice(0, 6);
+const LEGACY_PRESET_IDS = new Set(["desecrated-dmg", "desecrated-house"]);
+
+export function getEncounterIsLegacyPresetId (presetId) { return LEGACY_PRESET_IDS.has(presetId); }
 
 export function getEncounterIsUndead (monster) {
 	const type = typeof monster?.type === "string" ? monster.type : monster?.type?.type;
@@ -122,7 +125,8 @@ export function validateEncounterModifier (modifier) {
 	) throw new Error("A roll effect needs a name, valid check/skill/save/initiative/attack scope, mode, and exact whole-number bonus.");
 	if (modifier.presetId == null) return;
 	const preset = getEncounterModifierForPreset(modifier.presetId);
-	const isLegacy = !["source", "page", "edition"].some(field => Object.hasOwn(modifier, field));
+	const isLegacy = getEncounterIsLegacyPresetId(modifier.presetId)
+		&& !["source", "page", "edition"].some(field => Object.hasOwn(modifier, field));
 	const fields = isLegacy ? LEGACY_PRESET_FIELDS : PRESET_FIELDS;
 	if (
 		Object.keys(modifier).some(field => !fields.includes(field))

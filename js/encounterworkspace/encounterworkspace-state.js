@@ -2,6 +2,7 @@ import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate}
 import {getNpcTrackerHpAfterOperation} from "../dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {
 	getEncounterEffectTargets,
+	getEncounterIsLegacyPresetId,
 	getEncounterModifierForPreset,
 	validateEncounterAreaNote,
 	validateEncounterModifier,
@@ -123,7 +124,7 @@ export class EncounterWorkspaceState {
 				instance.modifiers = [];
 			} else {
 				instance.modifiers = instance.modifiers.map(modifier =>
-					modifier.presetId && !Object.hasOwn(modifier, "source")
+					getEncounterIsLegacyPresetId(modifier.presetId) && !Object.hasOwn(modifier, "source")
 						? getEncounterModifierForPreset(modifier.presetId)
 						: modifier);
 			}

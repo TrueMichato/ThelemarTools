@@ -332,6 +332,17 @@ describe("Encounter Workspace working copy", () => {
 		]) {
 			expect(() => EncounterWorkspaceState.withModifier(base, {modifier: tampered, isAdd: true})).toThrow();
 		}
+		for (const presetId of ["heavy-precipitation-xdmg", "blizzard-idrotf", "ioun-dark-blue-rhomboid"]) {
+			const uncited = {...getEncounterModifierForPreset(presetId)};
+			delete uncited.source;
+			delete uncited.page;
+			delete uncited.edition;
+			expect(() => EncounterWorkspaceState.withModifier(base, {modifier: uncited, isAdd: true})).toThrow(/cited source/);
+			expect(() => EncounterWorkspaceState.validate({
+				...base,
+				instances: [{...base.instances[0], modifiers: [uncited]}],
+			})).toThrow(/cited source/);
+		}
 	});
 
 	it("stacks different cited presets but replaces only the other Desecrated Ground variant", async () => {

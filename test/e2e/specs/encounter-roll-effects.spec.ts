@@ -1,7 +1,7 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
 
-test("rendered encounter attack uses the actual dice log, but damage, recharge and unselected links retain normal behavior", async ({page}) => {
+test("rendered encounter rolls use each creature's saved effects independently of batch selection", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
 	await expect(page.locator(".ew__statblock")).toHaveCount(2);
@@ -31,6 +31,13 @@ test("rendered encounter attack uses the actual dice log, but damage, recharge a
 	for (const title of await encounter.rolledEntries.filter({hasText: /1d20\s*\+\s*4/}).evaluateAll(elements => elements.map(it => it.getAttribute("title")))) {
 		expect(title).not.toContain("Rally");
 	}
+	await page.locator("#ew-none").click();
+	await expect(page.locator("#ew-summary")).toContainText("0 of 2 selected as targets");
+	const countWithNoSelection = await encounter.rolledEntries.count();
+	await encounter.clickRenderedRoll(0, "hit");
+	await expect(encounter.rolledEntries).toHaveCount(countWithNoSelection + 1);
+	await expect(encounter.rolledEntries.filter({hasText: /2d20dl1\s*\+\s*7/})).toHaveCount(2);
+	await expect(page.locator("#ew-status")).toContainText("Rally +3");
 });
 
 test("a rendered ability check and batch initiative share saved check effects without changing area notes", async ({page}) => {

@@ -620,7 +620,7 @@ export class EncounterWorkspacePage {
 		const tile = link?.closest(".ew__statblock");
 		if (!tile || !this._eleStatblocks.contains(tile)) return;
 		const instance = this._state.instances.find(it => it.id === tile.dataset.instanceId);
-		if (!instance || !this._state.selectedIds.includes(instance.id)) return;
+		if (!instance) return;
 		let entry;
 		try {
 			entry = JSON.parse(link.dataset.packedDice);
