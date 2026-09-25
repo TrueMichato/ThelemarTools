@@ -27,25 +27,30 @@ const monster = {
 export class EncounterRollPage {
 	constructor (readonly page: Page) {}
 
-	async seed () {
+	async seed ({count = 2, renameSecond}: {count?: number, renameSecond?: string} = {}) {
 		await this.page.goto("/encounterworkspace.html");
 		await this.page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 		const effect = {id: "custom-attack", name: "Rally", scopes: ["attack"], mode: "advantage", bonus: 3};
 		const state = {
-			version: 4,
+			version: renameSecond ? 6 : 4,
 			sourceList: {name: "Goblin Patrol", saveId: "test-list"},
-			instances: ["one", "two"].map(id => ({
-				id,
+			instances: Array.from({length: count}, (_, index) => ({
+				id: index === 0 ? "one" : index === 1 ? "two" : `creature-${index}`,
 				hash: "goblin_mm",
 				monster,
 				conditions: [],
 				areaNotes: [{id: "note", kind: "lair", name: "Bell", description: "Reminder only"}],
-				modifiers: id === "one" ? [effect] : [],
+				modifiers: index === 0 ? [effect] : [],
+				statblockOperations: renameSecond && index === 1
+					? [{id: "rename-two", type: "patch", data: {patch: {set: {name: renameSecond}}}}]
+					: [],
 				hp: {current: 7, max: 7, temp: 0},
 				initiative: null,
 			})),
 			selectedIds: ["one"],
 			omissions: [],
+			groups: [],
+			ungroupedIds: [],
 			turn: {round: 0, activeId: null},
 		};
 		await this.page.evaluate(async saved => {
@@ -56,6 +61,19 @@ export class EncounterRollPage {
 		}, state);
 		await this.page.reload();
 		await this.page.locator(".ew__statblock").first().locator("[data-packed-dice]").first().waitFor();
+	}
+
+	async focus (index: number) {
+		const row = this.page.locator(".ew__roster-row").nth(index);
+		const group = row.locator("xpath=ancestor::section[contains(@class,'ew__roster-group')]");
+		if (await group.locator(".ew__group-members").isHidden()) await group.getByRole("button", {name: /Expand.*group/}).click();
+		await row.getByRole("button", {name: /View statblock/}).click();
+	}
+
+	async openActions () {
+		if (!await this.page.locator("#ew-actions").evaluate(element => (element as HTMLDetailsElement).open)) {
+			await this.page.locator("#ew-actions > summary").click();
+		}
 	}
 
 	async clickRenderedRoll (tileIndex: number, kind: "hit" | "damage" | "recharge" | "abilityCheck" | "unclassified") {
