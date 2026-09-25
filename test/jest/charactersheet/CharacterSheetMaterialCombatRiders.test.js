@@ -141,11 +141,11 @@ describe("Target-type prompt pooling", () => {
 		await expect(combat._pChooseTargetTypeContext({name: "Maul", sourceItem: {id}})).resolves.toEqual([]);
 	});
 
-	it("treats a cancelled prompt as no qualifying type", async () => {
+	it("distinguishes cancelling the target question from no qualifying type", async () => {
 		const {state, combat} = makeCombat();
 		const id = equipWithMaterial(state, MAUL, "Cold Iron");
 		globalThis.InputUiUtil = {pGetUserEnum: async () => null};
-		await expect(combat._pChooseTargetTypeContext({name: "Maul", sourceItem: {id}})).resolves.toEqual([]);
+		await expect(combat._pChooseTargetTypeContext({name: "Maul", sourceItem: {id}})).resolves.toBeNull();
 	});
 
 	it("asks nothing for an attack with no source item", async () => {

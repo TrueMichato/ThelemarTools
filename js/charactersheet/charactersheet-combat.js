@@ -3702,33 +3702,37 @@ class CharacterSheetCombat {
 	}
 
 	/**
-	 * Resolve the standing weapon-UPGRADE damage-dice riders for an attack (#14).
-	 * Single source of truth for `_rollDamage`. Per the contract LOCKED with S6, this
-	 * reads S6's additive fields DIRECTLY off the weapon being rolled —
-	 * `getEffectiveItemBonuses(attack.sourceItem.id).bonusDamageDice/bonusDamageType` —
-	 * rather than going through any pre-populated `attack.weaponDamageRiders` field
-	 * (S6 declined to populate that) and WITHOUT touching the global, feature-based
-	 * `getFeatureCalculations().weaponDamageRiders` loop (which applies to ALL weapons).
-	 * Each rider keeps the upgrade's specified damage type (falling back to the weapon's
-	 * own type) and is crit-doubled by the caller via `_parseDamage(dice, isCrit)`.
-	 * Read defensively so this is an inert no-op until S6 ships the surface.
-	 * @returns {Array<{source?: string, dice: string, damageType?: string}>}
+	 * Resolve the weapon's own riders and its upgrade riders without re-reading the
+	 * legacy single-die alias when a structured list is present.
 	 */
 	_getWeaponUpgradeDamageRiders (attack) {
 		const itemId = attack?.sourceItem?.id;
 		if (!itemId) return [];
 		const eff = this._state.getEffectiveItemBonuses?.(itemId) || {};
 		const riders = [];
-		// Prefer the full damageRiders list (catalog weapons may have multiple; upgrades append).
-		// Default label stays "Weapon Upgrade" for the legacy single-field upgrade path
-		// and for tests that mock only bonusDamageDice; named catalog riders override.
 		if (Array.isArray(eff.damageRiders) && eff.damageRiders.length) {
+			const item = this._state.getItemRaw?.(itemId);
 			for (const r of eff.damageRiders) {
 				if (!r?.dice) continue;
+				const conditions = r.conditions || {};
+				if (conditions.oncePerTurn && (!r.id || !item?.name || !item?.source)) {
+					throw new Error("Once-per-turn item damage rider requires an exact item and rider identity.");
+				}
 				riders.push({
+					id: r.id,
 					source: r.name || r.source || "Weapon Upgrade",
 					dice: r.dice,
 					damageType: r.damageType || attack.damageType,
+					conditions,
+					...(conditions.oncePerTurn ? {
+						turnReceipt: {
+							key: r.id,
+							ownerUid: `item:${itemId}`,
+							sourceUid: `item:${item.name}|${item.source}`,
+							actionUid: `damage-rider:${r.id}`,
+							trackOnlyInCombat: true,
+						},
+					} : {}),
 				});
 			}
 			return riders;
@@ -3779,6 +3783,11 @@ class CharacterSheetCombat {
 		}
 		if (!attack || !attack.damage) return;
 
+		// Ask before any of the other prompts: Hand of Harm and combat methods can
+		// spend resources, while dismissing this question must leave the roll untouched.
+		const targetTypes = await this._pChooseTargetTypeContext(attack);
+		if (targetTypes === null) return;
+
 		// Per-component roll objects captured for the dice animation (each carries
 		// {sides, rolls:[…]}). Populated as each damage component is rolled below.
 		let sneakRollForAnim = null;
@@ -3819,9 +3828,6 @@ class CharacterSheetCombat {
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
 		}
 		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
-		// One target question, pooled across every rider on this attack that gates on
-		// creature type (gemstones and materials both do).
-		const targetTypes = await this._pChooseTargetTypeContext(attack);
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -3974,6 +3980,7 @@ class CharacterSheetCombat {
 		let riderDamageTotal = 0;
 		const riderParts = [];
 		const usedRiderIds = [];
+		const pendingItemRiderReceipts = [];
 		const pendingStateRiders = this._pendingActiveStateDamageRiders?.attackId === attackId
 			? this._pendingActiveStateDamageRiders.riders || []
 			: [];
@@ -4028,21 +4035,19 @@ class CharacterSheetCombat {
 				}
 			}
 
-			// Standing weapon-UPGRADE damage-dice riders (#14): e.g. a Saw-toothed weapon
-			// deals +1d4 slashing on a hit. Unlike the feature riders above, these are
-			// AUTO-applied on EVERY hit — no manual toggle, no once-per-turn gate — because
-			// the upgrade is permanent and unconditional, so they are NOT added to
-			// `usedRiderIds` (never disabled) and skip `_weaponRiderEnabled`. They ride the
-			// SAME riderParts pipeline below, so they are crit-doubled (via `isCrit`) and
-			// reported under their OWN damage type. The rider list is resolved through
-			// `_getWeaponUpgradeDamageRiders`, which reads S6's `getEffectiveItemBonuses`
-			// fields DIRECTLY off this attack's `sourceItem` (the locked #14 path).
+			// Authored and upgrade dice share the typed rider pipeline. A crit-only
+			// line is itself the critical bonus, so its dice are rolled only once.
 			for (const rider of this._getWeaponUpgradeDamageRiders(attack)) {
 				if (!rider?.dice) continue;
-				const riderRoll = this._parseDamage(rider.dice, isCrit);
+				const {criticalOnly, targetCreatureType, oncePerTurn} = rider.conditions || {};
+				if (criticalOnly && !isCrit) continue;
+				if (targetCreatureType && !targetTypes.includes(targetCreatureType.trim().toLowerCase())) continue;
+				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider)) continue;
+				const riderRoll = this._parseDamage(rider.dice, isCrit && !criticalOnly);
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.source || "Weapon Upgrade", dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
+				if (oncePerTurn) pendingItemRiderReceipts.push(rider.turnReceipt);
 			}
 
 			// Material damage riders. Two shapes, both authored per material:
@@ -4295,13 +4300,28 @@ class CharacterSheetCombat {
 		}
 		await this._page.pAnimateDamageDice?.(diceGroups);
 
-		this._page.showDiceResult({
-			title: `${attack.name} Damage`,
-			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage + (triggeredFeatDamage?.roll || 0),
-			modifier: totalBonus,
-			total: totalTitle || total,
-			subtitle,
-		});
+		const committedItemRiderReceipts = [];
+		for (const descriptor of pendingItemRiderReceipts) {
+			const result = this._state.commitTurnReceipt?.(descriptor, {trackOnlyInCombat: true});
+			if (!result?.committed) {
+				for (const receipt of committedItemRiderReceipts) this._state.rollbackTurnReceipt(receipt);
+				throw new Error(`Could not commit damage rider turn receipt: ${result?.reason || "receipt API unavailable"}`);
+			}
+			if (result.receipt) committedItemRiderReceipts.push(result.receipt);
+		}
+		try {
+			this._page.showDiceResult({
+				title: `${attack.name} Damage`,
+				roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage + (triggeredFeatDamage?.roll || 0),
+				modifier: totalBonus,
+				total: totalTitle || total,
+				subtitle,
+			});
+		} catch (error) {
+			for (const receipt of committedItemRiderReceipts) this._state.rollbackTurnReceipt(receipt);
+			throw error;
+		}
+		if (committedItemRiderReceipts.length) this._page.saveCharacter?.();
 
 		// Auto-disable sneak attack after use (once per turn)
 		if (sneakAttackDamage > 0 || cunningStrikeEffects.length) {
@@ -4503,7 +4523,9 @@ class CharacterSheetCombat {
 		const riderId = rider?.id || riderOrId;
 		if (rider?.turnReceipt) {
 			if (typeof this._state?.queryTurnReceipt !== "function") return false;
-			const query = this._state.queryTurnReceipt(rider.turnReceipt.key);
+			const query = rider.turnReceipt.trackOnlyInCombat
+				? this._state.queryTurnReceipt(rider.turnReceipt.key, {trackOnlyInCombat: true})
+				: this._state.queryTurnReceipt(rider.turnReceipt.key);
 			return !!query?.ok && !query.used;
 		}
 		if (!this._state?.isInCombat?.()) return true;
@@ -4519,13 +4541,16 @@ class CharacterSheetCombat {
 			if (typeof this._state?.commitTurnReceipt !== "function") {
 				return {ok: false, committed: false, reason: "turnReceiptApiUnavailable", receipt: null};
 			}
-			return this._state.commitTurnReceipt({
+			const descriptor = {
 				...rider.turnReceipt,
 				metadata: {
 					...(rider.turnReceipt.metadata || {}),
 					...(attackId ? {attackId} : {}),
 				},
-			});
+			};
+			return rider.turnReceipt.trackOnlyInCombat
+				? this._state.commitTurnReceipt(descriptor, {trackOnlyInCombat: true})
+				: this._state.commitTurnReceipt(descriptor);
 		}
 		if (!this._state?.isInCombat?.()) return {ok: true, committed: true, receipt: null};
 		const round = this._state.getCombatRound?.() || 0;
@@ -4865,13 +4890,9 @@ class CharacterSheetCombat {
 	/**
 	 * Ask once what the target is, for every rider on this attack that cares.
 	 *
-	 * Gemstones and materials both gate damage on the target's creature type, and a player
-	 * swinging a Cold Iron blade with a socketed gem should be asked "what are you hitting?"
-	 * ONCE, not once per subsystem. So the candidate types are pooled from both sources and
-	 * the single answer is handed back to both.
+	 * Pool authored item dice, gemstones, and materials into one creature-type choice.
 	 *
-	 * Returns `[]` when nothing on this attack is target-gated, so the common case costs the
-	 * player no interaction at all.
+	 * Returns [] for no qualifying type or no gated riders; null means Cancel.
 	 */
 	async _pChooseTargetTypeContext (attack) {
 		const effects = this._state.getGemstoneEffects?.({hostItemId: attack?.sourceItem?.id}) || [];
@@ -4881,8 +4902,9 @@ class CharacterSheetCombat {
 			? (this._state.getEffectiveItemBonuses?.(attack.sourceItem.id) || {})
 			: {};
 		const materialTypes = (itemEff.materialExtraDiceVsType || []).map(it => it.creatureType).filter(Boolean);
+		const authoredTypes = (itemEff.damageRiders || []).map(it => it.conditions?.targetCreatureType).filter(Boolean);
 
-		const targetTypes = [...new Set([...gemTypes, ...materialTypes])];
+		const targetTypes = [...new Set([...gemTypes, ...materialTypes, ...authoredTypes].map(it => String(it).trim().toLowerCase()))];
 		if (!targetTypes.length) return [];
 		const selected = await InputUiUtil.pGetUserEnum({
 			title: `${attack.name} — Target Type`,
@@ -4890,7 +4912,10 @@ class CharacterSheetCombat {
 			fnDisplay: value => value === "none" ? "No qualifying type" : value.toTitleCase(),
 			isResolveItem: true,
 		});
-		return selected && selected !== "none" ? [selected] : [];
+		if (selected == null) return null;
+		if (selected === "none") return [];
+		if (!targetTypes.includes(selected)) throw new Error(`Unknown target creature type: ${selected}`);
+		return [selected];
 	}
 
 	/**

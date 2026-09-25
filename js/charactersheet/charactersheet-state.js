@@ -4918,6 +4918,7 @@ class CharacterSheetState {
 	_normalizeInventoryItems () {
 		for (const inventoryRow of this._data?.inventory || []) {
 			CharacterSheetState._normalizeInventoryItemBonuses(inventoryRow?.item);
+			CharacterSheetState._ensureItemDamageRiderIds(inventoryRow?.item);
 		}
 	}
 
@@ -18300,24 +18301,80 @@ class CharacterSheetState {
 
 		const item = invItem.item || invItem;
 		const damageRiders = [];
+		const unresolvedDamageRiders = [];
 		// Catalog / brew weapons may declare standing extra damage dice (e.g. Spear of Lugh
 		// +4d12 radiant). Prefer an explicit damageRiders[] list; fall back to the single
 		// bonusDamageDice/bonusDamageType pair used by upgrades.
 		if (Array.isArray(item.damageRiders) && item.damageRiders.length) {
-			for (const r of item.damageRiders) {
-				if (!r?.dice) continue;
-				if (r.requiresToggle) {
-					const toggle = item.itemPowers?.find(power => power.isToggle && power.effectType === "damageRiders");
-					if (!toggle || !item.itemPowerStates?.[toggle.id]?.active) continue;
+			const riderIds = item.damageRiders.map((r, index) => `item:${itemId}:rider:${r?.id || `legacy-${index}`}`);
+			for (const [index, r] of item.damageRiders.entries()) {
+				if (!r) continue;
+				const id = riderIds[index];
+				const conditions = r.conditions;
+				const powerId = conditions?.powerId;
+				const reject = reason => unresolvedDamageRiders.push({id, powerId: powerId || null, reason});
+				if (riderIds.indexOf(id) !== riderIds.lastIndexOf(id)) {
+					reject("duplicateRiderId");
+					continue;
+				}
+				if (conditions !== undefined) {
+					if (!conditions || typeof conditions !== "object" || Array.isArray(conditions)
+						|| Object.keys(conditions).some(key => !["powerId", "criticalOnly", "oncePerTurn", "targetCreatureType"].includes(key))) {
+						reject("invalidConditions");
+						continue;
+					}
+					if (["criticalOnly", "oncePerTurn"].some(key => conditions[key] != null && typeof conditions[key] !== "boolean")) {
+						reject("invalidConditions");
+						continue;
+					}
+					if (!/^[1-9]\d*d[1-9]\d*(?:\s*[+-]\s*\d+)?$/i.test(String(r.dice).trim())) {
+						reject("invalidDice");
+						continue;
+					}
+					if (!CharacterSheetState.DAMAGE_TYPES.has(String(r.damageType || "").toLowerCase())) {
+						reject("invalidDamageType");
+						continue;
+					}
+					if (conditions.targetCreatureType != null && (typeof conditions.targetCreatureType !== "string" || !conditions.targetCreatureType.trim())) {
+						reject("invalidTargetCreatureType");
+						continue;
+					}
+					if (conditions.powerId != null && (typeof conditions.powerId !== "string" || !conditions.powerId.trim())) {
+						reject("missingPowerId");
+						continue;
+					}
+					if (r.requiresToggle && !powerId) {
+						reject("missingPowerId");
+						continue;
+					}
+				}
+				if (!r.dice) continue;
+				if (powerId || r.requiresToggle) {
+					const toggle = powerId
+						? item.itemPowers?.find(power => power.id === powerId)
+						: item.itemPowers?.find(power => power.isToggle && power.effectType === "damageRiders");
+					if (!toggle) {
+						reject("missingPower");
+						continue;
+					}
+					if (toggle.isReferenceOnly || !toggle.isToggle) {
+						reject(toggle.isReferenceOnly ? "referenceOnlyPower" : "notTogglePower");
+						continue;
+					}
+					if (!invItem.equipped || (item.requiresAttunement && !invItem.attuned)
+						|| !item.itemPowerStates?.[toggle.id]?.active) continue;
 				}
 				damageRiders.push({
+					id,
 					dice: String(r.dice),
-					damageType: r.damageType || r.type || null,
+					damageType: conditions !== undefined ? String(r.damageType).toLowerCase() : (r.damageType || r.type || null),
 					name: r.name || item.name || "Weapon",
+					...(conditions !== undefined ? {conditions: {...conditions}} : {}),
 				});
 			}
 		} else if (item.bonusDamageDice) {
 			damageRiders.push({
+				id: `item:${itemId}:legacy-bonus`,
 				dice: String(item.bonusDamageDice),
 				damageType: item.bonusDamageType || null,
 				name: item.name || "Weapon",
@@ -18348,6 +18405,7 @@ class CharacterSheetState {
 			bonusDamageDice: damageRiders[0]?.dice || null,
 			bonusDamageType: damageRiders[0]?.damageType || null,
 			damageRiders,
+			unresolvedDamageRiders,
 			// Weapon-property tags granted by upgrades (e.g. Silvered, Magical, Runic).
 			tags: [],
 			// Whether the weapon overcomes resistance to nonmagical / non-silvered attacks.
@@ -18372,6 +18430,7 @@ class CharacterSheetState {
 			}
 			if (effects.bonusDamageDice) {
 				base.damageRiders.push({
+					id: `item:${itemId}:upgrade-damage`,
 					dice: String(effects.bonusDamageDice),
 					damageType: effects.bonusDamageType || null,
 					name: "Weapon Upgrade",
@@ -43932,9 +43991,19 @@ class CharacterSheetState {
 		return effects;
 	}
 
+	static _ensureItemDamageRiderIds (item) {
+		if (!Array.isArray(item?.damageRiders)) return;
+		for (const rider of item.damageRiders) {
+			if (rider?.dice && !rider.id) rider.id = `rider-${CryptUtil.uid()}`;
+		}
+	}
+
 	_normalizeItemDamageRiders (item) {
 		const riders = Array.isArray(item?.damageRiders) ? MiscUtil.copyFast(item.damageRiders) : [];
-		if (riders.length || !item?.weapon) return riders;
+		if (riders.length || !item?.weapon) {
+			CharacterSheetState._ensureItemDamageRiderIds({damageRiders: riders});
+			return riders;
+		}
 		const text = CharacterSheetState._getItemEntryText(item.entries);
 		const sentences = text.split(/(?<=[.!?])\s+/);
 		for (const sentence of sentences) {
@@ -43953,6 +44022,7 @@ class CharacterSheetState {
 				requiresToggle,
 			});
 		}
+		CharacterSheetState._ensureItemDamageRiderIds({damageRiders: riders});
 		return riders;
 	}
 
@@ -45739,6 +45809,8 @@ class CharacterSheetState {
 		// Strip any wrapper-level props that might be present on the incoming object
 		const {quantity: _q, equipped: _e, attuned: _a, starred: _s, note: _n, id: _id, ...itemProps} = newItemProps;
 		CharacterSheetState._normalizeInventoryItemBonuses(itemProps);
+		if (Array.isArray(itemProps.damageRiders)) itemProps.damageRiders = MiscUtil.copyFast(itemProps.damageRiders);
+		CharacterSheetState._ensureItemDamageRiderIds(itemProps);
 
 		// Edited items are user-authored customs (prevents stack-merge with the catalog original)
 		itemProps._isCustom = true;
