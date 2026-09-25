@@ -52,7 +52,7 @@ test("a rendered ability check and batch initiative share saved check effects wi
 	await expect(encounter.rolledEntries.first()).toHaveAttribute("title", /Fortune.*2d20dl1\s*\+\s*4/);
 	await page.locator("#ew-init-roll").click();
 	await expect(encounter.rolledEntries.first()).toHaveAttribute("title", /Fortune.*2d20dl1\s*\+\s*4/);
-	await expect(page.locator(".ew__statblock").first()).toContainText("Lair note (manual): Bell");
+	await expect(page.locator(".ew__statblock").first()).toContainText("Lair reminder (text only): Bell");
 });
 
 test("searchable cited presets ask for unknown attack context before changing the real roll", async ({page}) => {
