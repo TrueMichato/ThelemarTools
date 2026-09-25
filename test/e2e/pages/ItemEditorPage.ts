@@ -66,6 +66,94 @@ export class ItemEditorPage {
 		await this.modal.getByRole("navigation", {name: "Item editor groups"}).getByRole("button", {name}).click();
 	}
 
+	async toggleGroup (key: string): Promise<void> {
+		await this.modal.locator(`#custom-item-group-${key} .charsheet__custom-item-group-toggle`).click();
+	}
+
+	async isGroupExpanded (key: string): Promise<boolean> {
+		return (await this.modal.locator(`#custom-item-group-${key} .charsheet__custom-item-group-toggle`).getAttribute("aria-expanded")) === "true";
+	}
+
+	async getRiderDiceGuidance (index: number): Promise<{placeholder: string; hint: string}> {
+		const input = this.modal.locator(`[data-rider-index="${index}"] [data-rider-field="dice"]`);
+		const placeholder = await input.getAttribute("placeholder") || "";
+		const hint = await this.modal.locator(`[data-rider-index="${index}"] .charsheet__custom-item-hint`).innerText();
+		return {placeholder, hint};
+	}
+
+	async getGroupIntro (key: string): Promise<string> {
+		return this.modal.locator(`#custom-item-group-${key} .charsheet__custom-item-group-intro`).innerText();
+	}
+
+	async getWeaponScopeGuide (): Promise<string> {
+		return this.modal.locator(".charsheet__custom-item-section--weapon .charsheet__custom-item-scope-note").innerText();
+	}
+
+	async getCriticalThresholdFieldGroup (): Promise<string | undefined> {
+		return this.modal.locator("#custom-item-crit-threshold")
+			.evaluate(input => input.closest("[data-item-group]")?.getAttribute("data-item-group") || undefined);
+	}
+
+	async getEffectsScopeGuide (): Promise<string> {
+		return this.modal.locator(".charsheet__custom-item-section--effects .charsheet__custom-item-scope-note").innerText();
+	}
+
+	async setWeaponMagicBonus (bonus: number): Promise<void> {
+		await this.modal.locator("#custom-item-weapon-bonus").fill(String(bonus));
+	}
+
+	async addCharacterEffect (type: string, bonus: number): Promise<void> {
+		await this.modal.locator("#custom-item-add-effect").click();
+		const row = this.modal.locator("#custom-item-effects-list .custom-abilities__effect-row").last();
+		await row.locator(".custom-abilities__effect-type").selectOption(type);
+		await row.locator(".custom-abilities__effect-value").fill(String(bonus));
+	}
+
+	async addAttachedSpell (name: string): Promise<void> {
+		await this.modal.getByRole("textbox", {name: "Search item spells"}).fill(name);
+		await this.modal.locator(".charsheet__custom-item-spell-item").filter({hasText: name})
+			.getByRole("button", {name: "Add"}).first().click();
+	}
+
+	async getAttachedSpellUseLabels (): Promise<string[]> {
+		return this.modal.locator(".charsheet__custom-item-spell-selected-options label")
+			.evaluateAll(labels => labels.map(label => label.firstChild?.textContent?.trim() || ""));
+	}
+
+	async setAttachedSpellUse (use: string): Promise<void> {
+		await this.modal.locator(".charsheet__custom-item-spell-selected-options .spell-usage-type").selectOption(use);
+	}
+
+	async getWeaponRollBonuses (ids: string[]): Promise<{attack: number; damage: number}[]> {
+		return this.page.evaluate(ids => {
+			const cs = (globalThis as any).charSheet;
+			const attacks = cs._state.getAttacks();
+			return ids.map(id => {
+				const attack = attacks.find((it: any) => String(it.sourceItem?.id) === String(id))
+					|| cs._combat._cachedAttacks?.find((it: any) => String(it.sourceItem?.id) === String(id));
+				if (!attack) throw new Error(`No attack for equipped weapon ${id}`);
+				return {
+					attack: cs._state.getAttackBonusBreakdown(attack).total,
+					damage: cs._state.getWeaponDisplayDamageBreakdown(attack).total,
+				};
+			});
+		}, ids);
+	}
+
+	async getAttackDamagePreview (id: string): Promise<string> {
+		await new CharacterSheetPage(this.page).tabCombat.click();
+		const attackId = await this.page.evaluate(id => {
+			const cs = (globalThis as any).charSheet;
+			const attack = cs._state.getAttacks().find((it: any) => it.sourceItem?.id === id)
+				|| cs._combat._cachedAttacks?.find((it: any) => it.sourceItem?.id === id);
+			if (!attack) throw new Error(`No attack for owned item ${id}`);
+			return attack.id;
+		}, id);
+		const row = this.page.locator(`.charsheet__attack-item[data-attack-id="${attackId}"]`);
+		await expect(row).toBeVisible();
+		return row.locator(".charsheet__attack-details").innerText();
+	}
+
 	async expectDiscardPrompt (): Promise<void> {
 		await expect(this.modal.getByRole("button", {name: "Discard changes"})).toBeVisible();
 	}
@@ -149,7 +237,7 @@ export class ItemEditorPage {
 		await this.modal.locator(".charsheet__custom-item-summary-toggle").click();
 	}
 
-	async inspectEditorLayout (path: string, night: boolean): Promise<{
+	async inspectEditorLayout (path: string, night: boolean, group?: string): Promise<{
 		overflow: boolean; footerVisible: boolean; display: string; footerBottom: number; viewportHeight: number;
 		navHeight: number; navButtonHeight: number;
 	}> {
@@ -162,6 +250,7 @@ export class ItemEditorPage {
 			if (!scroller) throw new Error("Item editor modal scroller is missing");
 			scroller.scrollTop = 0;
 		});
+		if (group) await this.navigateGroup(group);
 		await this.page.screenshot({path, animations: "disabled"});
 		const layout = await this.modal.evaluate(el => {
 			const editor = el.querySelector(".charsheet__custom-item-layout")!;
