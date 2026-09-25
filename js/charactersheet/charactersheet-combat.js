@@ -2757,12 +2757,19 @@ class CharacterSheetCombat {
 			rollFollowup: ctx.rollFollowup,
 		});
 		if (!die) return false;
-		this._state.grantTempHp(die.roll);
+		const granted = this._state.grantTempHp(die.roll);
 		await this._page._saveCurrentCharacter?.();
+		this._page._renderHp?.();
+		if (this._state.getViewMode?.() === "play") this._page._playMode?.render?.();
 		this._page._renderResources?.();
 		this._page._features?._renderResources?.();
 		this.renderCombatResources?.();
-		JqueryUtil.doToast({type: "success", content: `${die.sourceName}: gained ${die.roll} temporary hit points.`});
+		JqueryUtil.doToast({
+			type: granted ? "success" : "info",
+			content: granted
+				? `${die.sourceName}: gained ${die.roll} temporary hit points.`
+				: `${die.sourceName}: rolled ${die.roll} temporary hit points; kept existing ${this._state.getTempHp()} (temporary hit points don't stack).`,
+		});
 		return true;
 	}
 
