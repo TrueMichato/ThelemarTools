@@ -1,5 +1,5 @@
 import {EncounterWorkspaceState, EncounterWorkspaceStore, getEncounterEffectiveMonster} from "./encounterworkspace/encounterworkspace-state.js";
-import {EncounterWorkspaceQuickActionsAdapter} from "./encounterworkspace/encounterworkspace-quick-actions.js";
+import {EncounterWorkspacePostSaveError, EncounterWorkspaceQuickActionsAdapter} from "./encounterworkspace/encounterworkspace-quick-actions.js";
 import {BestiaryQuickActionsUi} from "./bestiary/bestiary-quick-actions-ui.js";
 import {BestiaryQuickActionsOperations} from "./bestiary/bestiary-quick-actions-engine.js";
 import {BestiaryQuickActionsStructuredEditor} from "./bestiary/bestiary-quick-actions-structured.js";
@@ -602,9 +602,15 @@ export class EncounterWorkspacePage {
 				? ` Reset current and maximum HP for ${this._getTargetNames(resetHpIds)} to the new average (or Unset); temporary HP was preserved.`
 				: " Tracked HP was unchanged."}`);
 		} catch (e) {
-			this._setError(isSaved
-				? `Statblock edits were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload this page to see the changes.`
-				: `Statblock edits were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			if (isSaved) {
+				const savedError = new EncounterWorkspacePostSaveError(
+					`Statblock edits were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload this page to see the changes.`,
+					{cause: e},
+				);
+				this._setError(savedError.message);
+				throw savedError;
+			}
+			this._setError(`Statblock edits were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 			throw e;
 		} finally {
 			this._setBusy(false);
@@ -649,10 +655,16 @@ export class EncounterWorkspacePage {
 			if (request !== this._bulkChoiceRequest) return;
 			this._selBulkChoice.replaceChildren();
 			this._selBulkChoice.add(new Option(entries.length ? "Choose a loaded rule..." : "No matching rules loaded", ""));
-			entries.forEach((entry, ix) => this._selBulkChoice.add(new Option(
-				type === "area" ? `${entry._areaName}: ${entry.name} (${entry.source})` : `${entry.name} (${entry.source})`,
-				String(ix),
-			)));
+			const seen = new Set();
+			entries.forEach(entry => {
+				const uid = BestiaryQuickActionsUi.getRuleUid(entry);
+				if (seen.has(uid)) throw new Error(`Multiple loaded rules share the identity "${uid}".`);
+				seen.add(uid);
+				this._selBulkChoice.add(new Option(
+					type === "area" ? `${entry._areaName}: ${entry.name} (${entry.source})` : `${entry.name} (${entry.source})`,
+					uid,
+				));
+			});
 			if ([...this._selBulkChoice.options].some(it => it.value === previousChoice)) this._selBulkChoice.value = previousChoice;
 		} catch (e) {
 			if (request !== this._bulkChoiceRequest) return;
@@ -667,8 +679,11 @@ export class EncounterWorkspacePage {
 		try {
 			const type = this._selBulkType.value;
 			let operation;
-			if (type === "minion") operation = BestiaryQuickActionsOperations.minion();
-			else if (type === "legendary") {
+			let editLabel;
+			if (type === "minion") {
+				operation = BestiaryQuickActionsOperations.minion();
+				editLabel = "Minion conversion";
+			} else if (type === "legendary") {
 				const name = this._inpBulkName.value.trim();
 				const description = this._inpBulkDescription.value.trim();
 				const cost = Number(this._inpBulkCost.value);
@@ -679,20 +694,33 @@ export class EncounterWorkspacePage {
 					section: "legendary",
 					entry: {name: BestiaryQuickActionsStructuredEditor.getLegendaryActionName({name, cost}), entries: [description]},
 				});
+				editLabel = `Legendary action: ${operation.data.entry.name}`;
 			} else if (type === "area" || type === "lair") {
-				if (!/^\d+$/.test(this._selBulkChoice.value)) throw new Error("Choose a loaded rule before previewing.");
+				const selectedUid = this._selBulkChoice.value;
+				if (!selectedUid) throw new Error("Choose a loaded rule before previewing.");
 				const entries = type === "area"
 					? await BestiaryQuickActionsUi._pLoadAreaTraits()
 					: await BestiaryQuickActionsUi._pLoadLegendaryGroups();
-				const entry = entries[Number(this._selBulkChoice.value)];
-				if (!entry) throw new Error("That rule is no longer available. Choose a loaded rule again.");
+				if (type !== this._selBulkType.value || selectedUid !== this._selBulkChoice.value) {
+					throw new Error("The selected rule changed while loading. Preview it again.");
+				}
+				const matches = entries.filter(entry => BestiaryQuickActionsUi.getRuleUid(entry) === selectedUid);
+				if (!matches.length) throw new Error("That rule is no longer available. Choose a loaded rule again.");
+				if (matches.length > 1) throw new Error(`Multiple loaded rules share the identity "${selectedUid}". Choose another rule.`);
+				const entry = matches[0];
+				editLabel = type === "area"
+					? `Area trait: ${entry._areaName}: ${entry.name} (${entry.source})`
+					: `Lair-action group: ${entry.name} (${entry.source})`;
 				if (type === "lair") operation = BestiaryQuickActionsOperations.setLegendaryGroup(entry);
 				else {
 					const choices = await BestiaryQuickActionsUi._pGetAreaTraitChoices({traits: [entry]});
 					if (choices == null) return this._setStatus("Bulk area trait cancelled; no statblocks changed.");
+					if (type !== this._selBulkType.value || selectedUid !== this._selBulkChoice.value) {
+						throw new Error("The selected rule changed while configuring it. Preview it again.");
+					}
 					operation = BestiaryQuickActionsUi.getAreaTraitOperation({
 						trait: entry,
-						choices: choices.get(`${entry.name}|${entry.source}`.toLowerCase()) || {},
+						choices: choices.get(selectedUid) || {},
 					});
 				}
 			} else throw new Error("Choose a supported bulk statblock edit.");
@@ -702,6 +730,7 @@ export class EncounterWorkspacePage {
 			const skips = preview.skipped.map(({id, reason}) => `${labels.get(id)}: ${reason}`);
 			const reset = preview.resetHpIds.map(id => labels.get(id));
 			const description = [
+				`<p><b>Mechanical edit:</b> ${editLabel.qq()}</p>`,
 				`<p><b>${preview.changedIds.length} eligible:</b> ${preview.changedIds.map(id => labels.get(id).qq()).join(", ") || "none"}</p>`,
 				skips.length ? `<p><b>${skips.length} skipped:</b> ${skips.map(it => it.qq()).join("; ")}</p>` : "",
 				reset.length ? `<p><b>HP reset:</b> ${reset.map(it => it.qq()).join(", ")} will use the edited average (or Unset), retaining temporary HP.</p>` : "",
@@ -720,6 +749,7 @@ export class EncounterWorkspacePage {
 			await this._pCommitStatblockEdit(preview);
 			if (skips.length) this._setStatus(`${this._eleStatus.textContent} Skipped ${skips.length}: ${skips.join("; ")}.`);
 		} catch (e) {
+			if (e.isEncounterStatblockSaved) return;
 			this._setError(`Bulk statblock edit was not applied: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);

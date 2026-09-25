@@ -215,6 +215,13 @@ export class BestiaryQuickActionsUi {
 		items: null,
 	};
 
+	static getRuleUid (rule) {
+		if (typeof rule?.name !== "string" || !rule.name.trim() || typeof rule?.source !== "string" || !rule.source.trim()) {
+			throw new Error("A loaded statblock rule must have a name and source.");
+		}
+		return _getUid(rule);
+	}
+
 	static getButtonHtml ({monster, registry = this._registry} = {}) {
 		const count = registry.getOperations({monster}).length;
 		const title = count
@@ -399,6 +406,11 @@ export class BestiaryQuickActionsUi {
 			if (!result) throw new Error("The statblock edit was not applied.");
 			return true;
 		} catch (e) {
+			if (e.isEncounterStatblockSaved) {
+				if (error) error.textContent = e.message;
+				else JqueryUtil.doToast({type: "warning", content: e.message});
+				return false;
+			}
 			if (error) error.textContent = e.message;
 			else JqueryUtil.doToast({type: "danger", content: `Statblock edit failed: ${e.message}`});
 			return false;

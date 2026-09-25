@@ -321,4 +321,133 @@ describe("Encounter Workspace instance statblock edits", () => {
 		expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("Reset current and maximum HP for Goblin #1"));
 		expect(storage.pSetForPage).toHaveBeenCalledTimes(2);
 	});
+
+	it("resolves bulk area and lair rules by source-qualified identity after list reorder, and rejects removed rules", async () => {
+		const originalDocument = globalThis.document;
+		const originalOption = globalThis.Option;
+		const controls = new Map();
+		globalThis.document = {getElementById: id => {
+			if (!controls.has(id)) controls.set(id, {hidden: false});
+			return controls.get(id);
+		}};
+		globalThis.Option = class {
+			constructor (text, value = "") { this.text = text; this.value = value; }
+		};
+		const areaA = {name: "Rockbreaker", source: "FleeMortals", _areaName: "Cave", entries: ["The creature burrows."]};
+		const areaB = {name: "Shadow Blend", source: "FleeMortals", _areaName: "Cave", entries: ["The creature hides."]};
+		const lairA = {name: "Cave", source: "FleeMortals", lairActions: ["The ground trembles."]};
+		const lairB = {name: "Cave", source: "OtherBook", lairActions: ["Vines grow."]};
+		const loadArea = jest.spyOn(BestiaryQuickActionsUi, "_pLoadAreaTraits");
+		const loadLair = jest.spyOn(BestiaryQuickActionsUi, "_pLoadLegendaryGroups");
+		const confirm = jest.spyOn(InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			const page = Object.create(EncounterWorkspacePage.prototype);
+			page._state = await makeState();
+			page._selBulkType = {value: "area"};
+			page._selBulkChoice = {
+				options: [],
+				value: "",
+				hidden: false,
+				replaceChildren (...options) { this.options = options; this.value = options[0]?.value ?? ""; },
+				add (option) { this.options.push(option); if (this.options.length === 1) this.value = option.value; },
+			};
+			page._isBusy = false;
+			page._eleStatus = {textContent: ""};
+			page._setBusy = jest.fn(value => page._isBusy = value);
+			page._setStatus = jest.fn(text => page._eleStatus.textContent = text);
+			page._setError = jest.fn(text => page._eleStatus.textContent = text);
+			page._pCommitStatblockEdit = jest.fn(async result => { page._state = result.state; page._eleStatus.textContent = "Saved"; });
+
+			loadArea.mockResolvedValueOnce([areaA, areaB])
+				.mockResolvedValueOnce([areaB, areaA])
+				.mockResolvedValueOnce([areaB, areaA]);
+			await page._pRenderBulkChoices();
+			expect(page._selBulkChoice.options.map(it => it.value)).toEqual(["", "rockbreaker|fleemortals", "shadow blend|fleemortals"]);
+			page._selBulkChoice.value = "rockbreaker|fleemortals";
+			await page._pRenderBulkChoices();
+			expect(page._selBulkChoice.value).toBe("rockbreaker|fleemortals");
+			expect(page._selBulkChoice.options.map(it => it.value)).toEqual(["", "shadow blend|fleemortals", "rockbreaker|fleemortals"]);
+			await page._pPreviewBulkStatblock();
+			expect(page._pCommitStatblockEdit).toHaveBeenCalledTimes(1);
+			expect(page._state.instances.map(it => getEncounterEffectiveMonster(it).speed.burrow)).toEqual([30, 30]);
+			expect(confirm.mock.calls[0][0].htmlDescription).toContain("Rockbreaker (FleeMortals)");
+			expect(confirm.mock.calls[0][0].htmlDescription).not.toContain("Shadow Blend");
+
+			page._selBulkType.value = "lair";
+			loadLair.mockResolvedValueOnce([lairA, lairB]).mockResolvedValueOnce([lairB, lairA]);
+			await page._pRenderBulkChoices();
+			expect(page._selBulkChoice.options.map(it => it.value)).toEqual(["", "cave|fleemortals", "cave|otherbook"]);
+			page._selBulkChoice.value = "cave|fleemortals";
+			await page._pPreviewBulkStatblock();
+			expect(page._state.instances.map(it => getEncounterEffectiveMonster(it).legendaryGroup.name)).toEqual(["Cave", "Cave"]);
+			expect(page._state.instances.map(it => getEncounterEffectiveMonster(it).legendaryGroup.source)).toEqual(["FleeMortals", "FleeMortals"]);
+			expect(confirm.mock.calls[1][0].htmlDescription).toContain("Cave (FleeMortals)");
+
+			page._selBulkType.value = "area";
+			loadArea.mockResolvedValueOnce([areaA, areaB]).mockResolvedValueOnce([areaB]);
+			await page._pRenderBulkChoices();
+			page._selBulkChoice.value = "rockbreaker|fleemortals";
+			await page._pPreviewBulkStatblock();
+			expect(page._setError).toHaveBeenCalledWith(expect.stringContaining("rule is no longer available"));
+			expect(page._pCommitStatblockEdit).toHaveBeenCalledTimes(2);
+			expect(confirm).toHaveBeenCalledTimes(2);
+
+			loadArea.mockResolvedValueOnce([areaA, areaA]);
+			await page._pRenderBulkChoices();
+			expect(page._setError).toHaveBeenCalledWith(expect.stringContaining("Multiple loaded rules share the identity"));
+		} finally {
+			loadArea.mockRestore();
+			loadLair.mockRestore();
+			confirm.mockRestore();
+			globalThis.document = originalDocument;
+			globalThis.Option = originalOption;
+		}
+	});
+
+	it("keeps saved/reload warnings after a post-save render failure in bulk and the shared editor", async () => {
+		const state = await makeState();
+		const storage = {pSetForPage: jest.fn(async () => {})};
+		const page = Object.create(EncounterWorkspacePage.prototype);
+		page._state = state;
+		page._store = new EncounterWorkspaceStore({storage});
+		page._isBusy = false;
+		page._hpUndo = [];
+		page._selBulkType = {value: "minion"};
+		page._eleStatus = {textContent: ""};
+		page._setBusy = jest.fn(value => page._isBusy = value);
+		page._setStatus = jest.fn(text => page._eleStatus.textContent = text);
+		page._setError = jest.fn(text => page._eleStatus.textContent = text);
+		page._render = jest.fn(() => { throw new Error("Renderer unavailable"); });
+		page._clearRollResults = jest.fn();
+		const confirm = jest.spyOn(InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
+		try {
+			await page._pPreviewBulkStatblock();
+			expect(storage.pSetForPage).toHaveBeenCalledTimes(1);
+			expect(page._state.instances[0].statblockOperations[0].type).toBe("minion");
+			expect(page._eleStatus.textContent).toMatch(/saved, but the page could not refresh.*Reload this page/);
+			expect(page._eleStatus.textContent).not.toMatch(/unchanged|not applied/);
+			expect(page._setError).toHaveBeenCalledTimes(1);
+			const adapter = new EncounterWorkspaceQuickActionsAdapter({
+				id: "goblin-1",
+				getState: () => page._state,
+				pCommit: result => page._pCommitStatblockEdit(result),
+			});
+			const applied = await BestiaryQuickActionsUi._pApplyChange({
+				registry: adapter,
+				monster: state.instances[0].monster,
+				addOperations: [{id: "after-render", ...BestiaryQuickActionsOperations.patch({set: {dex: 18}})}],
+			});
+			expect(applied).toBe(false);
+			expect(page._state.instances[0].statblockOperations).toHaveLength(2);
+			expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+				type: "warning",
+				content: expect.stringMatching(/saved.*reload/i),
+			}));
+			expect(toast.mock.calls[0][0].content).not.toMatch(/failed|not saved/);
+		} finally {
+			confirm.mockRestore();
+			toast.mockRestore();
+		}
+	});
 });

@@ -1,5 +1,12 @@
 import {EncounterWorkspaceState, getEncounterEffectiveMonster} from "./encounterworkspace-state.js";
 
+export class EncounterWorkspacePostSaveError extends Error {
+	constructor (message, {cause} = {}) {
+		super(message, {cause});
+		this.isEncounterStatblockSaved = true;
+	}
+}
+
 export class EncounterWorkspaceQuickActionsAdapter {
 	constructor ({id, getState, pCommit}) {
 		this._id = id;
@@ -47,7 +54,14 @@ export class EncounterWorkspaceQuickActionsAdapter {
 			}]);
 			if (!result.changedIds.length) return null;
 			await this._pCommit(result);
-			this._subscribers.forEach(fn => fn({type: "change", operations: this.getOperations(), creature: this.getOverride()}));
+			try {
+				this._subscribers.forEach(fn => fn({type: "change", operations: this.getOperations(), creature: this.getOverride()}));
+			} catch (e) {
+				throw new EncounterWorkspacePostSaveError(
+					`Statblock edit was saved, but the editor could not refresh: ${e.message}. Close and reopen the editor or reload this page.`,
+					{cause: e},
+				);
+			}
 			return normalized[0]?.id || true;
 		} finally {
 			this._isSaving = false;
