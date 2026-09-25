@@ -613,6 +613,11 @@ receipt ledger.
 
 Current consumers are:
 
+- Authored weapon `damageRiders[]` with `conditions.oncePerTurn`, keyed by
+  `item:<wrapper ID>:rider:<line ID>`. Combat checks the key before rolling,
+  commits only for lines included in a successful damage result, and rolls back
+  exact receipts if result display fails. These uses are combat-only; copies of
+  one catalog weapon have separate wrapper-scoped keys.
 - Cruel's triggered die pool, keyed by the exact
   `Cruel|TalDoreiCampaignSettingReborn` feat and stable `cruelty-die` effect id.
 - Deferred spell-damage riders such as Summer's Defiant Blood, keyed by exact
@@ -2422,6 +2427,28 @@ ends the toggle. Catalog rehydration adds a missing speed power to older rows ev
 they already have unrelated powers, and replaces the old XDMG reference-only card.
 Custom items with `modifySpeed` and no authored speed power stay passive while equipped
 and attuned; never infer a toggle from a bare multiplier.
+
+**Typed weapon damage dice.** `damageRiders[]` lines carry a persistent `id`,
+`dice`, one `damageType` (a canonical 5e damage name), and optional
+`conditions: {powerId?, criticalOnly?, oncePerTurn?, targetCreatureType?}`.
+Conditions combine with AND; different lines are independent. `powerId` must
+match the exact named item toggle ID; a missing, reference-only, or non-toggle
+power leaves the line inert and produces a reason in
+`getEffectiveItemBonuses(wrapperId).unresolvedDamageRiders`. Inactive powers,
+unequipped items, and unattuned required items do not pay damage. New typed
+lines with invalid dice/type/condition descriptors and duplicate line IDs
+also appear as unresolved rather than rolling. Existing `requiresToggle`
+lines keep the legacy toggle lookup only when no new conditions are authored;
+the legacy `bonusDamageDice` pair is used only in the absence of item riders.
+The effective rider ID includes the inventory wrapper ID and persisted line ID
+so clone/replace/load do not conflate once-per-turn uses.
+
+Combat rolls ordinary item dice on hits and doubles them on critical hits;
+critical-only dice roll just once on a crit. The target-type choice is pooled
+with materials and gemstones; **No qualifying type** excludes gated lines,
+whereas cancelling aborts the roll before any damage-method or Hand of Harm
+resource spending. The grouped editor for authoring these lines is a separate
+later phase; raw payloads and runtime consumers use this contract now.
 
 **Crafting-time calculation.** `CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state, items})`
 is the only reusable workweek calculator: resolve the crafted item by `name|source`, calculate the

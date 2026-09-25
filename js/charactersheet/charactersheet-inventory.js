@@ -217,6 +217,7 @@ class CharacterSheetInventory {
 			if (!(Array.isArray(item.damageRiders) && item.damageRiders.length)
 				&& Array.isArray(match.damageRiders) && match.damageRiders.length) {
 				item.damageRiders = JSON.parse(JSON.stringify(match.damageRiders));
+				CharacterSheetState._ensureItemDamageRiderIds(item);
 				rowChanged = true;
 			}
 			if (!item.regeneration && match.regeneration) {
