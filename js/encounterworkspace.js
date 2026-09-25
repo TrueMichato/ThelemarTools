@@ -1,11 +1,21 @@
 import {EncounterWorkspaceState, EncounterWorkspaceStore} from "./encounterworkspace/encounterworkspace-state.js";
-import {ENCOUNTER_ROLL_TYPES, getEncounterInstanceLabels, pRollEncounterSelection} from "./encounterworkspace/encounterworkspace-roll.js";
+import {
+	ENCOUNTER_ROLL_TYPES,
+	getEncounterInstanceLabels,
+	getEncounterRollFromPackedDice,
+	pRollEncounterInstance,
+	pRollEncounterSelection,
+} from "./encounterworkspace/encounterworkspace-roll.js";
 import {getNpcTrackerFallbackReferenceData, getNpcTrackerSkillDescriptors, pGetNpcTrackerReferenceData} from "./dmscreen/npctracker/dmscreen-npctracker-data.js";
 import {getNpcTrackerConditionColor, getNpcTrackerConditionHoverMeta, getNpcTrackerConditionPickerModel} from "./dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerSignedNumber} from "./dmscreen/npctracker/dmscreen-npctracker-roll.js";
 import {getNpcTrackerHpInputValue, getNpcTrackerHpOperation} from "./dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {InitiativeTrackerRowUtil} from "./dmscreen/panels/initiativetracker/dmscreen-initiativetracker-consts.js";
-import {ENCOUNTER_DESECRATED_PRESETS, getEncounterModifierForPreset} from "./encounterworkspace/encounterworkspace-effects.js";
+import {
+	ENCOUNTER_ROLL_PRESETS,
+	getEncounterModifierForPreset,
+	getEncounterPresetCitation,
+} from "./encounterworkspace/encounterworkspace-effects.js";
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
 
 export class EncounterWorkspacePage {
@@ -60,11 +70,15 @@ export class EncounterWorkspacePage {
 		this._selNoteRemove = document.getElementById("ew-note-remove");
 		this._btnNoteRemove = document.getElementById("ew-note-remove-selected");
 		this._selPreset = document.getElementById("ew-preset");
+		this._inpPresetSearch = document.getElementById("ew-preset-search");
 		this._elePresetDetail = document.getElementById("ew-preset-detail");
 		this._btnPresetAdd = document.getElementById("ew-preset-add");
 		this._inpModName = document.getElementById("ew-mod-name");
 		this._checkModCheck = document.getElementById("ew-mod-check");
+		this._checkModSkill = document.getElementById("ew-mod-skill");
 		this._checkModSave = document.getElementById("ew-mod-save");
+		this._checkModInitiative = document.getElementById("ew-mod-initiative");
+		this._checkModAttack = document.getElementById("ew-mod-attack");
 		this._selModMode = document.getElementById("ew-mod-mode");
 		this._inpModBonus = document.getElementById("ew-mod-bonus");
 		this._btnModAdd = document.getElementById("ew-mod-add");
@@ -103,6 +117,8 @@ export class EncounterWorkspacePage {
 		this._btnNoteRemove.addEventListener("click", () => this._pUpdateAreaNote({isAdd: false}));
 		this._selNoteRemove.addEventListener("change", () => this._updateControls());
 		this._selPreset.addEventListener("change", () => this._renderPresetDetail());
+		this._inpPresetSearch.addEventListener("input", () => this._renderPresetSearch());
+		this._eleStatblocks.addEventListener("click", event => this._onStatblockDiceClick(event), true);
 		this._btnPresetAdd.addEventListener("click", () => this._pUpdateModifier({isAdd: true, isPreset: true}));
 		this._btnModAdd.addEventListener("click", () => this._pUpdateModifier({isAdd: true, isPreset: false}));
 		this._btnModRemove.addEventListener("click", () => this._pUpdateModifier({isAdd: false}));
@@ -179,10 +195,12 @@ export class EncounterWorkspacePage {
 			this._state.selectedIds.includes(it.id) && it.conditions.includes(condition));
 		[
 			this._selNoteKind, this._inpNoteName, this._inpNoteDescription,
-			this._selPreset, this._inpModName, this._checkModCheck, this._checkModSave,
+			this._selPreset, this._inpPresetSearch, this._inpModName, this._checkModCheck, this._checkModSkill,
+			this._checkModSave, this._checkModInitiative, this._checkModAttack,
 			this._selModMode, this._inpModBonus,
 		].forEach(field => field.disabled = this._isBusy || !hasTargets);
-		this._btnNoteAdd.disabled = this._btnPresetAdd.disabled = this._btnModAdd.disabled = this._isBusy || !hasTargets;
+		this._btnNoteAdd.disabled = this._btnModAdd.disabled = this._isBusy || !hasTargets;
+		this._btnPresetAdd.disabled = this._isBusy || !hasTargets || !this._selPreset.value;
 		this._selNoteRemove.disabled = this._isBusy || !hasTargets || this._selNoteRemove.options.length <= 1;
 		this._btnNoteRemove.disabled = this._selNoteRemove.disabled || !this._selNoteRemove.value;
 		this._selModRemove.disabled = this._isBusy || !hasTargets || this._selModRemove.options.length <= 1;
@@ -354,7 +372,7 @@ export class EncounterWorkspacePage {
 	_pConfirmReplace () {
 		return InputUiUtil.pGetUserBoolean({
 			title: "Replace Working Encounter",
-			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, conditions, area effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
+			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, conditions, area notes, roll effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
 			textYes: "Replace Encounter",
 			textNo: "Keep Current",
 		});
@@ -456,12 +474,15 @@ export class EncounterWorkspacePage {
 					name: this._inpModName.value.trim(),
 					scopes: [
 						...(this._checkModCheck.checked ? ["check"] : []),
+						...(this._checkModSkill.checked ? ["skill"] : []),
 						...(this._checkModSave.checked ? ["save"] : []),
+						...(this._checkModInitiative.checked ? ["initiative"] : []),
+						...(this._checkModAttack.checked ? ["attack"] : []),
 					],
 					mode: this._selModMode.value,
 					bonus: /^[+-]?\d+$/.test(enteredBonus) ? Number(enteredBonus) : NaN,
 				};
-			const name = modifier?.name || this._getEffectName(removedId, "modifiers") || "roll modifier";
+			const name = modifier?.name || this._getEffectName(removedId, "modifiers") || "roll effect";
 			const {state, changedIds, skippedIds} = EncounterWorkspaceState.withModifier(this._state, {
 				modifier, modifierId: removedId, isAdd, targetIds,
 			});
@@ -479,7 +500,7 @@ export class EncounterWorkspacePage {
 				: "";
 			this._setStatus(`${outcome}${skipped}`);
 		} catch (e) {
-			this._setError(`Roll modifiers were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			this._setError(`Roll effects were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);
 			this._focusAfterEffectUpdate(focused, id, this._selModRemove);
@@ -576,8 +597,60 @@ export class EncounterWorkspacePage {
 	}
 
 	_renderPresetDetail () {
-		const preset = ENCOUNTER_DESECRATED_PRESETS.find(it => it.presetId === this._selPreset.value);
-		this._elePresetDetail.textContent = preset?.description || "";
+		const preset = ENCOUNTER_ROLL_PRESETS.find(it => it.presetId === this._selPreset.value);
+		this._elePresetDetail.textContent = preset
+			? `${getEncounterPresetCitation(preset)} · ${preset.description}${preset.contextQuestion ? " You will be asked to confirm context at roll time." : ""}`
+			: "No matching preset. Search by rule, source, or effect.";
+		this._updateControls();
+	}
+
+	_renderPresetSearch () {
+		const previous = this._selPreset.value;
+		const query = this._inpPresetSearch.value.trim().toLowerCase();
+		const matches = ENCOUNTER_ROLL_PRESETS.filter(preset =>
+			[preset.name, preset.source, preset.page, preset.description, preset.edition].join(" ").toLowerCase().includes(query));
+		this._selPreset.replaceChildren();
+		matches.forEach(preset => this._selPreset.add(new Option(`${preset.name} — ${getEncounterPresetCitation(preset)}`, preset.presetId)));
+		if (matches.some(it => it.presetId === previous)) this._selPreset.value = previous;
+		this._renderPresetDetail();
+	}
+
+	_onStatblockDiceClick (event) {
+		const link = event.target.closest?.("[data-packed-dice]");
+		const tile = link?.closest(".ew__statblock");
+		if (!tile || !this._eleStatblocks.contains(tile)) return;
+		const instance = this._state.instances.find(it => it.id === tile.dataset.instanceId);
+		if (!instance) return;
+		let entry;
+		try {
+			entry = JSON.parse(link.dataset.packedDice);
+		} catch (e) {
+			this._setError(`The statblock dice link cannot be read: ${this._getErrorMessage(e)}`);
+			return;
+		}
+		const roll = getEncounterRollFromPackedDice(entry);
+		if (!roll) return;
+		if (roll.unsupported) {
+			this._setError(roll.unsupported);
+			return;
+		}
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		this._pRollStatblockDice({instance, roll, event});
+	}
+
+	async _pRollStatblockDice ({instance, roll, event}) {
+		if (this._isBusy) return this._setError("Wait for the current encounter operation before rolling.");
+		const name = getEncounterInstanceLabels(this._state.instances).get(instance.id);
+		const rollMode = (event.ctrlKey || event.metaKey) ? "disadvantage" : event.shiftKey ? "advantage" : "normal";
+		try {
+			const result = await pRollEncounterInstance({instance, name, ...roll, rollMode});
+			const outcome = `${name}: ${result.label} — ${result.mode === "autoFail" ? "automatic failure" : result.mode === "unavailable" ? "unavailable" : result.total}. ${result.sourcesText || "Normal roll"}.`;
+			if (result.mode === "autoFail" || result.mode === "unavailable") this._setError(outcome);
+			else this._setStatus(outcome);
+		} catch (e) {
+			this._setError(`Could not roll ${roll.label} for ${name}: ${this._getErrorMessage(e)}`);
+		}
 	}
 
 	_renderEffectPickers () {
@@ -597,9 +670,9 @@ export class EncounterWorkspacePage {
 				});
 			});
 			select.replaceChildren();
-			select.add(new Option(property === "areaNotes" ? "Choose an applied note..." : "Choose an applied modifier...", ""));
+			select.add(new Option(property === "areaNotes" ? "Choose an applied note..." : "Choose an applied roll effect...", ""));
 			byId.forEach(({effect, count}, id) => {
-				const type = property === "areaNotes" ? effect.kind === "lair" ? "Lair note" : "Area trait" : "Modifier";
+				const type = property === "areaNotes" ? effect.kind === "lair" ? "Lair note" : "Area trait" : "Roll effect";
 				select.add(new Option(`${type}: ${effect.name} (${count} selected)`, id));
 			});
 			select.value = byId.has(previous) ? previous : "";
@@ -809,9 +882,7 @@ export class EncounterWorkspacePage {
 		this._selRollType.value = "ability";
 		this._renderRollKeys();
 		this._renderConditionPicker();
-		this._selPreset.replaceChildren();
-		ENCOUNTER_DESECRATED_PRESETS.forEach(preset => this._selPreset.add(new Option(preset.name, preset.presetId)));
-		this._renderPresetDetail();
+		this._renderPresetSearch();
 
 		this._eleName.textContent = sourceList.name;
 		if (!instances.length) {
@@ -860,6 +931,7 @@ export class EncounterWorkspacePage {
 
 			const tile = document.createElement("article");
 			tile.className = "ew__statblock";
+			tile.dataset.instanceId = instance.id;
 			const title = document.createElement("h3");
 			title.className = "ew__statblock-title";
 			title.textContent = label;
@@ -869,7 +941,7 @@ export class EncounterWorkspacePage {
 			this._conditionContainers.set(instance.id, conditions);
 			const effects = document.createElement("div");
 			effects.className = "ew__effects";
-			effects.setAttribute("aria-label", `Area effects for ${label}`);
+			effects.setAttribute("aria-label", `Notes and roll effects for ${label}`);
 			this._effectContainers.set(instance.id, effects);
 			const vitals = document.createElement("div");
 			vitals.className = "ew__vitals";
@@ -1057,10 +1129,14 @@ export class EncounterWorkspacePage {
 				...instance.modifiers.map(modifier => ({
 					title: modifier.name,
 					description: [
-						modifier.scopes.includes("check") ? "Checks (including skills)" : "",
+						modifier.scopes.includes("check") ? "Checks (including skills and initiative)" : "",
+						modifier.scopes.includes("skill") ? "Skill checks" : "",
 						modifier.scopes.includes("save") ? "Saving throws" : "",
+						modifier.scopes.includes("initiative") ? "Initiative" : "",
+						modifier.scopes.includes("attack") ? "Attack rolls" : "",
 						modifier.mode === "normal" ? "" : modifier.mode,
 						modifier.bonus ? getNpcTrackerSignedNumber(modifier.bonus) : "",
+						modifier.presetId ? getEncounterPresetCitation(ENCOUNTER_ROLL_PRESETS.find(it => it.presetId === modifier.presetId)) : "",
 					].filter(Boolean).join(" · "),
 					onRemove: () => this._pUpdateModifier({isAdd: false, id: instance.id, modifierId: modifier.id}),
 				})),
@@ -1068,7 +1144,7 @@ export class EncounterWorkspacePage {
 			if (!entries.length) {
 				const empty = document.createElement("span");
 				empty.className = "ew__condition-empty";
-				empty.textContent = "No area effects";
+				empty.textContent = "No notes or roll effects";
 				container.append(empty);
 			}
 			entries.forEach(({title, description, onRemove}) => {

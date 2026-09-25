@@ -3,8 +3,12 @@ import "../../js/parser.js";
 import "../../js/utils.js";
 import "../../js/render.js";
 import "../../js/render-dice.js";
-import {pRollEncounterSelection} from "../../js/encounterworkspace/encounterworkspace-roll.js";
-import {getEncounterModifierForPreset} from "../../js/encounterworkspace/encounterworkspace-effects.js";
+import {
+	getEncounterRollFromPackedDice,
+	pRollEncounterInstance,
+	pRollEncounterSelection,
+} from "../../js/encounterworkspace/encounterworkspace-roll.js";
+import {ENCOUNTER_ROLL_PRESETS, getEncounterModifierForPreset} from "../../js/encounterworkspace/encounterworkspace-effects.js";
 import {getNpcTrackerConditionPickerModel} from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerConditionRollMeta} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
 import {EncounterWorkspaceState} from "../../js/encounterworkspace/encounterworkspace-state.js";
@@ -288,6 +292,113 @@ describe("Encounter Workspace rolls", () => {
 			await expect(pRollEncounterSelection({state: getState(), rollType: "save", key: "none"})).rejects.toThrow(/valid ability/);
 			await expect(pRollEncounterSelection({state: getState(), rollType: "skill", key: "missing", skills})).rejects.toThrow(/valid ability or skill/);
 			expect(dice).not.toHaveBeenCalled();
+		} finally {
+			dice.mockRestore();
+		}
+	});
+
+	it("classifies only explicitly contextualized statblock d20 rolls with exact bonuses", () => {
+		expect(getEncounterRollFromPackedDice({subType: "d20", context: {type: "hit"}, toRoll: "1d20+4"}))
+			.toMatchObject({rollType: "attack", baseBonus: 4});
+		expect(getEncounterRollFromPackedDice({subType: "d20", context: {type: "skillCheck", skill: "Perception"}, toRoll: "1d20 - 2"}))
+			.toMatchObject({rollType: "skill", key: "perception", baseBonus: -2});
+		expect(getEncounterRollFromPackedDice({subType: "d20", context: {type: "savingThrow", ability: "dex"}, toRoll: "1d20+6"}))
+			.toMatchObject({rollType: "save", key: "dex", baseBonus: 6});
+		expect(getEncounterRollFromPackedDice({subType: "d20", context: {type: "initiative"}, toRoll: "1d20+3"}))
+			.toMatchObject({rollType: "initiative", baseBonus: 3});
+		expect(getEncounterRollFromPackedDice({subType: "damage", toRoll: "1d20+4"})).toBeNull();
+		expect(getEncounterRollFromPackedDice({toRoll: "1d6", successThresh: 5})).toBeNull();
+		expect(getEncounterRollFromPackedDice({subType: "d20", toRoll: "1d20+4"}).unsupported).toMatch(/no recognized/);
+		expect(getEncounterRollFromPackedDice({subType: "d20", context: {type: "hit"}, toRoll: "1d20+PB"}).unsupported).toMatch(/dynamic/);
+	});
+
+	it("applies source-cited skill and initiative presets only to eligible rolls, asking for unknown context", async () => {
+		const dice = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(16);
+		const pConfirmContext = jest.fn(async () => true);
+		const state = getState({selectedIds: ["one"],
+			modifiers: [[
+				getEncounterModifierForPreset("heavy-precipitation-xdmg"),
+				getEncounterModifierForPreset("ioun-dark-blue-rhomboid"),
+			], []]});
+		try {
+			const perception = await pRollEncounterSelection({
+				state, rollType: "skill", key: "perception", skills, pConfirmContext,
+			});
+			expect(perception.results[0]).toMatchObject({mode: "normal", total: 16});
+			expect(perception.results[0].sourcesText).toContain("XDMG p. 69 (2024)");
+			expect(perception.results[0].sourcesText).toContain("MECIounStones p. 18");
+			expect(dice).toHaveBeenCalledWith("1d20+1", expect.objectContaining({
+				label: expect.stringContaining("advantage and disadvantage cancel"),
+			}), {isResultUsed: true});
+			expect(pConfirmContext).toHaveBeenCalledTimes(2);
+			const initiative = await pRollEncounterSelection({state, rollType: "initiative", pConfirmContext});
+			expect(initiative.results[0]).toMatchObject({mode: "advantage"});
+			expect(dice).toHaveBeenLastCalledWith("2d20dl1+2", expect.anything(), {isResultUsed: true});
+			expect(pConfirmContext).toHaveBeenCalledTimes(3);
+			const dex = await pRollEncounterSelection({state, rollType: "ability", key: "dex", pConfirmContext});
+			expect(dex.results[0].mode).toBe("normal");
+			expect(pConfirmContext).toHaveBeenCalledTimes(3);
+			expect(ENCOUNTER_ROLL_PRESETS.find(it => it.presetId === "ioun-dark-blue-rhomboid")).toMatchObject({
+				source: "MECIounStones", page: 18,
+			});
+		} finally {
+			dice.mockRestore();
+		}
+	});
+
+	it("prompts for conditional attack context, keeps flat bonuses, and prioritizes condition auto-fail", async () => {
+		const dice = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(21);
+		const pConfirmContext = jest.fn(async () => true);
+		const instance = {
+			id: "one",
+			monster,
+			conditions: ["poisoned"],
+			modifiers: [
+				getEncounterModifierForPreset("blizzard-idrotf"),
+				{id: "strike", name: "Rally", scopes: ["attack"], mode: "advantage", bonus: 3},
+			],
+		};
+		try {
+			const attack = await pRollEncounterInstance({instance, name: "Goblin #1", rollType: "attack", key: "Attack roll", label: "Attack roll", baseBonus: 4, pConfirmContext});
+			expect(attack).toMatchObject({bonus: 7, modifierBonus: 3, mode: "normal", total: 21});
+			expect(attack.sourcesText).toContain("IDRotF p. 10 (2014)");
+			expect(attack.sourcesText).toContain("Rally +3");
+			expect(dice).toHaveBeenCalledWith("1d20+7", expect.objectContaining({
+				name: "Goblin #1", label: expect.stringContaining("Blizzard"),
+			}), {isResultUsed: true});
+			expect(pConfirmContext).toHaveBeenCalledWith(expect.objectContaining({question: expect.stringContaining("ranged weapon")}));
+			instance.conditions = ["stunned"];
+			const failed = await pRollEncounterInstance({
+				instance, name: "Goblin #1", rollType: "save", key: "dex", label: "Dexterity save", baseBonus: 4, pConfirmContext,
+			});
+			expect(failed).toMatchObject({mode: "autoFail", total: null});
+			expect(dice).toHaveBeenCalledTimes(1);
+			pConfirmContext.mockClear();
+			const blockedAttack = await pRollEncounterInstance({
+				instance, name: "Goblin #1", rollType: "attack", key: "Attack roll", label: "Attack roll", baseBonus: 4, pConfirmContext,
+			});
+			expect(blockedAttack).toMatchObject({mode: "unavailable", total: null});
+			expect(pConfirmContext).not.toHaveBeenCalled();
+			await expect(pRollEncounterInstance({
+				instance,
+				name: "Goblin #1",
+				rollType: "attack",
+				key: "Attack roll",
+				label: "Attack roll",
+				baseBonus: 4,
+				pConfirmContext: async () => null,
+			})).resolves.toMatchObject({mode: "unavailable"});
+			instance.conditions = [];
+			await expect(pRollEncounterInstance({
+				instance,
+				name: "Goblin #1",
+				rollType: "attack",
+				key: "Attack roll",
+				label: "Attack roll",
+				baseBonus: 4,
+				pConfirmContext: async () => null,
+			})).rejects.toThrow(/Context confirmation cancelled/);
+			expect(dice).toHaveBeenCalledTimes(1);
 		} finally {
 			dice.mockRestore();
 		}
