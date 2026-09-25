@@ -3705,10 +3705,10 @@ class CharacterSheetCombat {
 	 * Resolve the weapon's own riders and its upgrade riders without re-reading the
 	 * legacy single-die alias when a structured list is present.
 	 */
-	_getWeaponUpgradeDamageRiders (attack) {
+	_getWeaponUpgradeDamageRiders (attack, effectiveBonuses = null) {
 		const itemId = attack?.sourceItem?.id;
 		if (!itemId) return [];
-		const eff = this._state.getEffectiveItemBonuses?.(itemId) || {};
+		const eff = effectiveBonuses || this._state.getEffectiveItemBonuses?.(itemId) || {};
 		const riders = [];
 		if (Array.isArray(eff.damageRiders) && eff.damageRiders.length) {
 			const item = this._state.getItemRaw?.(itemId);
@@ -5808,6 +5808,21 @@ class CharacterSheetCombat {
 		const itemEff = attack.sourceItem?.id != null
 			? (this._state.getEffectiveItemBonuses?.(attack.sourceItem.id) || {})
 			: {};
+		const extraDamageHtml = this._getWeaponUpgradeDamageRiders(attack, itemEff).map(rider => {
+			const conditions = rider.conditions || {};
+			const powerName = conditions.powerId
+				? this._state.getItemRaw?.(attack.sourceItem.id)?.itemPowers?.find(power => power.id === conditions.powerId)?.name
+				: null;
+			const qualifiers = [
+				conditions.powerId && `while ${powerName || "power"} is active`,
+				conditions.criticalOnly && "crit only",
+				conditions.oncePerTurn && "once/turn",
+				conditions.targetCreatureType && `vs ${conditions.targetCreatureType}`,
+			].filter(Boolean);
+			const label = `+${rider.dice} ${rider.damageType}${qualifiers.length ? ` (${qualifiers.join(", ")})` : ""}`;
+			const detail = qualifiers.length ? `Additional item damage; ${qualifiers.join(", ")}` : "Adds damage on every hit";
+			return `<span class="badge charsheet__attack-extra-damage" title="${CharacterSheetClassUtils.escapeHtml(detail)}">${CharacterSheetClassUtils.escapeHtml(label)}</span>`;
+		}).join("");
 		if (attack.countsAsMagical || itemEff.countsAsMagical) {
 			badgeHtml += " <span class=\"badge badge-success\" title=\"Counts as magical for overcoming resistance and immunity to nonmagical attacks and damage\">✧ Magical</span>";
 		}
@@ -5897,6 +5912,7 @@ class CharacterSheetCombat {
 						${rangeDisplayHtml}
 						<span class="badge badge-primary" title="${atkBadgeTitle}">+${totalAttackBonus}</span>
 						<span class="badge badge-danger">${attack.damage}${totalDamageBonus >= 0 ? "+" : ""}${totalDamageBonus} ${attack.damageType}</span>
+						${extraDamageHtml}
 						${critRangeHtml}
 						${penetrationHtml}
 						${propertiesHtml}

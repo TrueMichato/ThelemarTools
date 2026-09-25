@@ -92,6 +92,34 @@ describe("Typed item damage riders", () => {
 		jest.restoreAllMocks();
 	});
 
+	it("previews applicable typed dice beside base damage on the Combat attack row without duplicating the legacy alias", () => {
+		const id = makeWeapon(state, {
+			damageRiders: [rider("acid", "acid"), rider("fire", "fire", {criticalOnly: true, targetCreatureType: "dragon"})],
+			bonusDamageDice: "1d6",
+			bonusDamageType: "acid",
+		});
+		const combat = makeCombat(state, id);
+		const html = combat._renderAttackItem(state.getAttacks()[0]).outerHTML;
+		expect(html).toContain("1d8");
+		const extras = [...html.matchAll(/class="[^"]*charsheet__attack-extra-damage[^"]*"[^>]*>([^<]+)<\/span>/g)]
+			.map(match => match[1].trim());
+		expect(extras).toEqual(["+1d6 acid", "+1d6 fire (crit only, vs dragon)"]);
+	});
+
+	it("shows power-gated dice only while the named item power is active", () => {
+		const id = makeWeapon(state, {
+			itemPowers: [power("ignite", {name: "Ignite"})],
+			damageRiders: [rider("flame", "fire", {powerId: "ignite", oncePerTurn: true})],
+		});
+		const combat = makeCombat(state, id);
+		const preview = () => combat._renderAttackItem(state.getAttacks()[0]).outerHTML;
+		expect(preview()).not.toContain("charsheet__attack-extra-damage");
+		state._data.inventory.find(row => row.id === id).item.itemPowerStates = {ignite: {active: true}};
+		expect(preview()).toContain("+1d6 fire (while Ignite is active, once/turn)");
+		state.setItemEquipped(id, false);
+		expect(preview()).not.toContain("charsheet__attack-extra-damage");
+	});
+
 	it("rolls two authored damage types once each on a hit and doubles their dice on a crit", async () => {
 		const id = makeWeapon(state, {
 			damageRiders: [rider("acid", "acid"), rider("fire", "fire")],
