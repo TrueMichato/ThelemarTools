@@ -66,6 +66,8 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   powers in sync, without copying wrapper links or generated identities.
 │   Explicit reference-only powers stay inert even with charges or uses;
 │   missing flags and prose-derived powers retain legacy resource inference.
+│   The modal's Save path awaits persistence before success feedback; failed
+│   writes restore the pre-edit state and rescue mirror while retaining the draft.
 │
 ├── CharacterSheetFeatures (charactersheet-features.js, ~1,600 lines)
 │   Feature display, resource pip tracking, feat picker,

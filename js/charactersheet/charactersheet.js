@@ -25734,7 +25734,7 @@ class CharacterSheetPage {
 	}
 
 	async saveCharacter () {
-		await this._saveCurrentCharacter();
+		return this._saveCurrentCharacter({isReturnStatus: true});
 	}
 
 	/**

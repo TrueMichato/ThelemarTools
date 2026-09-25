@@ -118,4 +118,61 @@ test.describe("Item editor raw draft and catalog fidelity", () => {
 		expect(row.modifySpeed).toBeNull();
 		expect(row.itemPowers.some((power: any) => power.isToggle && power.effectType === "modifySpeed")).toBe(false);
 	});
+
+	test("a rejected real character save retains the draft but rolls back the owned item and success feedback", async ({page}) => {
+		const editor = await start(page);
+		const id = await editor.addRawItem({name: "Kept Blade", source: "Custom", type: "M",
+			weapon: true, dmg1: "1d8", dmgType: "S", equipped: true});
+		const before = await editor.getRawItem(id);
+		await editor.openOwnedItemFromInventory(id);
+		await editor.rename("Saved Blade");
+		await editor.failNextCharacterSave();
+		await editor.save();
+		await editor.expectWarning("could not be saved");
+		expect(await editor.getRawItem(id)).toEqual(before);
+		expect(await editor.getSaveFeedback()).not.toContain("success");
+		expect(await editor.getPersistedItemNames(id)).toEqual({canonical: "Kept Blade", mirror: null});
+		await editor.save();
+		expect((await editor.getRawItem(id)).name).toBe("Saved Blade");
+		expect(await editor.getSaveFeedback()).toContain("success");
+	});
+
+	for (const source of ["DMG", "XDMG"]) {
+		test(`a saved ${source} Boots row repairs legacy powers and stays off after unequip/unattune and Modify`, async ({page}) => {
+			const editor = await start(page);
+			const id = await editor.addLegacyCatalogBoots(source);
+			const original = await editor.getRawItem(id);
+			const speed = original.itemPowers.filter((power: any) => power.effectType === "modifySpeed");
+			expect(speed).toHaveLength(1);
+			expect(speed[0]).toMatchObject({kind: "toggle", isToggle: true, actionType: "bonus", isReferenceOnly: false});
+			expect(original.itemPowers.map((power: any) => power.id)).toContain("unrelated-lore");
+			expect(original.itemPowers.map((power: any) => power.id)).not.toContain("reference:boots-of-speed:bonus");
+			await editor.exportAndReload();
+			expect(await editor.readWalkSpeed()).toBe(30);
+			expect(await editor.getOverviewSpeedText()).toContain("30");
+			expect(await editor.invokeSpeed(id)).toMatchObject({speed: 60, active: true});
+			expect(await editor.getOverviewSpeedText()).toContain("60");
+			expect(await editor.invokeSpeed(id)).toMatchObject({speed: 30, active: false});
+			await editor.invokeSpeed(id);
+			await editor.setEquipmentState(id, {equipped: false});
+			expect(await editor.readWalkSpeed()).toBe(30);
+			await editor.setEquipmentState(id, {equipped: true});
+			expect(await editor.readWalkSpeed()).toBe(30);
+			expect((await editor.getRawItem(id)).itemPowerStates[speed[0].id].active).toBe(false);
+			await editor.invokeSpeed(id);
+			await editor.setEquipmentState(id, {attuned: false});
+			expect(await editor.readWalkSpeed()).toBe(30);
+			await editor.setEquipmentState(id, {attuned: true});
+			expect(await editor.readWalkSpeed()).toBe(30);
+			await editor.openOwnedItemFromInventory(id);
+			await editor.expectPowerCount(2);
+			await editor.rename(`Retitled ${source} Boots`);
+			await editor.save();
+			const edited = await editor.getRawItem(id);
+			expect(edited.itemPowers.find((power: any) => power.effectType === "modifySpeed").id).toBe(speed[0].id);
+			expect(edited.itemPowers.map((power: any) => power.id)).toContain("unrelated-lore");
+			expect(await editor.invokeSpeed(id)).toMatchObject({speed: 60, active: true});
+			expect(await editor.invokeSpeed(id)).toMatchObject({speed: 30, active: false});
+		});
+	}
 });

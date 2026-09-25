@@ -690,4 +690,184 @@ describe("Custom item editor draft fidelity", () => {
 			expect.objectContaining({id: "legacy", isReferenceOnly: false}),
 		]);
 	});
+
+	test("a failed replacement restores the Ioun host before its base bonuses were dematerialised", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		state.addItem({id: "ioun-host",
+			name: "Ioun Blade",
+			source: "Custom",
+			type: "M",
+			weapon: true,
+			dmg1: "1d8",
+			bonusWeapon: 1});
+		const host = state._data.inventory[0].item;
+		host.bonusWeapon = 3;
+		host.iounBaseBonuses = {bonusWeapon: 1};
+		const before = state.toJson();
+		const baseline = {name: "Ioun Blade",
+			quantity: 1,
+			weight: 0,
+			options: {type: "weapon", dmg1: "1d8", bonusWeapon: 1}};
+		jest.spyOn(state, "replaceItem").mockReturnValue(false);
+
+		expect(() => editorSave(inventory, {...baseline, name: "Renamed Ioun Blade"},
+			{editItemId: "ioun-host", baseline})).toThrow(/could not be updated/);
+		expect(state.toJson()).toEqual(before);
+		expect(inventory._page.renderCharacter).not.toHaveBeenCalled();
+		expect(inventory._page.saveCharacter).not.toHaveBeenCalled();
+	});
+
+	test("a failed upgrade application restores the item, quantity, and derived character state", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		state.addItem({id: "upgraded",
+			name: "Old Armor",
+			source: "Custom",
+			type: "HA",
+			armor: true,
+			armorType: "heavy",
+			ac: 16,
+			equipped: true,
+			quantity: 2});
+		const before = state.toJson();
+		const baseline = {name: "Old Armor",
+			quantity: 2,
+			weight: 0,
+			options: {type: "armor", ac: 16, _pendingUpgrades: []}};
+		jest.spyOn(inventory, "_applyEditUpgrades").mockImplementation(() => {
+			state.setItemQuantity("upgraded", 5);
+			throw new Error("Upgrade application failed");
+		});
+
+		expect(() => editorSave(inventory, {...baseline, name: "New Armor"},
+			{editItemId: "upgraded", baseline})).toThrow("Upgrade application failed");
+		expect(state.toJson()).toEqual(before);
+		expect(inventory._page.renderCharacter).not.toHaveBeenCalled();
+		expect(inventory._page.saveCharacter).not.toHaveBeenCalled();
+	});
+
+	test("a failed creation upgrade does not leave an orphan item in the inventory", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const before = state.toJson();
+		jest.spyOn(inventory, "_applyCreationUpgrades").mockImplementation(() => {
+			throw new Error("Gemstone application failed");
+		});
+
+		expect(() => editorSave(inventory, {name: "Failed Blade",
+			quantity: 1,
+			weight: 1,
+			options: {type: "weapon", dmg1: "1d8", _pendingGemstone: {name: "Ruby", source: "TGTT"}}}))
+			.toThrow("Gemstone application failed");
+		expect(state.toJson()).toEqual(before);
+		expect(inventory._page.renderCharacter).not.toHaveBeenCalled();
+		expect(inventory._page.saveCharacter).not.toHaveBeenCalled();
+	});
+
+	test("a rejected persisted save restores the original item and the previous rescue mirror", async () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		state.addItem({id: "saved",
+			name: "Original Blade",
+			source: "Custom",
+			_isCustom: true,
+			type: "M",
+			weapon: true,
+			dmg1: "1d8",
+			equipped: true});
+		const baseline = {name: "Original Blade",
+			quantity: 1,
+			weight: 0,
+			options: inventory._seedOptionsFromItem(state.getItemRaw("saved")).options};
+		const before = state.toJson();
+		const previousMirror = {id: "current", _savedAt: 123, inventory: before.inventory};
+		inventory._page._currentCharacterId = "current";
+		inventory._page._readActiveCharacterMirror = jest.fn(() => previousMirror);
+		inventory._page._writeActiveCharacterMirror = jest.fn();
+		inventory._page.saveCharacter.mockResolvedValue(false);
+		const toast = jest.spyOn(JqueryUtil, "doToast");
+
+		await expect(inventory._pSaveCustomItem("Changed Blade", 1, 0, baseline.options, "saved",
+			{baseline})).rejects.toThrow(/could not be saved/);
+		expect(state.toJson()).toEqual(before);
+		expect(inventory._page._writeActiveCharacterMirror).toHaveBeenCalledWith(previousMirror);
+		expect(inventory._page.renderCharacter).toHaveBeenCalledTimes(2);
+		expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({type: "success"}));
+		toast.mockRestore();
+	});
+
+	test("a successful in-place edit retains live wrapper links, material base, resources, and active power ID", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const speed = {
+			id: "swift-step",
+			name: "Swift Step",
+			kind: "toggle",
+			isToggle: true,
+			effectType: "modifySpeed",
+			actionType: "bonus",
+			isReferenceOnly: false,
+		};
+		state.addItem({
+			id: "held",
+			name: "Swift Blade",
+			source: "Custom",
+			_isCustom: true,
+			type: "M",
+			weapon: true,
+			dmg1: "1d8",
+			dmgType: "S",
+			bonusAc: 1,
+			weight: 2,
+			requiresAttunement: true,
+			modifySpeed: {multiply: {walk: 2}},
+			itemPowers: [speed],
+			charges: 5,
+			chargesCurrent: 2,
+			material: {name: "Steel", source: "TGTT"},
+		}, 3, true, true);
+		state.addItem({id: "nested", name: "Gem", source: "Custom", type: "G"});
+		const wrapper = state._data.inventory.find(row => row.id === "held");
+		wrapper.starred = true;
+		wrapper.note = "belongs to the party";
+		wrapper.item.containedItems = ["nested"];
+		wrapper.item.appliedUpgrades = [{name: "Keen", source: "TGTT"}];
+		wrapper.item.socketedGemstones = [{name: "Ruby", source: "TGTT"}];
+		wrapper.item.itemPowerStates = {"swift-step": {active: true}};
+		inventory._updateItemBonuses(state.getItems());
+		const before = state.getItemRaw("held");
+		expect(state.getSpeed("walk")).toBe(60);
+		const baseline = {name: before.name,
+			quantity: 3,
+			weight: 2,
+			options: inventory._seedOptionsFromItem(before).options};
+
+		editorSave(inventory, {...baseline, name: "Renamed Swift Blade"},
+			{editItemId: "held", baseline});
+		const after = state.getItemRaw("held");
+		expect(after).toMatchObject({
+			id: "held",
+			name: "Renamed Swift Blade",
+			quantity: 3,
+			equipped: true,
+			attuned: true,
+			starred: true,
+			containedItems: ["nested"],
+			appliedUpgrades: [{name: "Keen", source: "TGTT"}],
+			socketedGemstones: [{name: "Ruby", source: "TGTT"}],
+			material: {name: "Steel", source: "TGTT"},
+			itemPowerStates: {"swift-step": {active: true}},
+			chargesCurrent: 2,
+		});
+		expect(state.getItemNote("held")).toBe("belongs to the party");
+		expect(state.getSpeed("walk")).toBe(60);
+		expect(state.getTotalWeight()).toBeGreaterThan(0);
+		expect(state.getItemRaw("held").bonusAc).toBe(1);
+		expect(state.getAC()).toBe(11);
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.getItemRaw("held").itemPowerStates["swift-step"].active).toBe(true);
+		expect(loaded.getItemNote("held")).toBe("belongs to the party");
+	});
 });
