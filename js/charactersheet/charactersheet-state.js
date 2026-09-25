@@ -43570,6 +43570,7 @@ class CharacterSheetState {
 			const ix = powers.findIndex(it => it.id === normalized.id);
 			if (~ix) powers[ix] = normalized;
 			else powers.push(normalized);
+			return normalized.id;
 		};
 		const parseSpellUid = raw => {
 			const [nameSource, levelRaw] = String(raw || "").split("#");
@@ -43771,17 +43772,19 @@ class CharacterSheetState {
 					isReferenceOnly: true,
 				});
 			} else if ((actionType || explicitActionType) && toggleEffectType) {
-				addPower({
-					id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
-					name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
-					kind: "toggle",
-					actionType: actionType || explicitActionType,
-					isToggle: true,
-					effectType: toggleEffectType,
-					description: text,
-					activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType || explicitActionType, text),
-					isReferenceOnly: false,
-				});
+				if (!item.itemPowers?.some(power => power.isToggle && !power.isReferenceOnly && power.effectType === toggleEffectType)) {
+					addPower({
+						id: CharacterSheetState._getItemPowerId(["toggle", item.name, toggleEffectType]),
+						name: `${item.name} ${toggleEffectType === "modifySpeed" ? "Speed" : "Damage"}`,
+						kind: "toggle",
+						actionType: actionType || explicitActionType,
+						isToggle: true,
+						effectType: toggleEffectType,
+						description: text,
+						activationFingerprint: CharacterSheetState._getItemActivationFingerprint(actionType || explicitActionType, text),
+						isReferenceOnly: false,
+					});
+				}
 			} else if (actionType && recurring) {
 				addPower({
 					id: CharacterSheetState._getItemPowerId(["ability", item.name, recurring.usageType]),
@@ -43840,12 +43843,16 @@ class CharacterSheetState {
 				isReferenceOnly: false,
 			});
 		}
-		for (const power of explicit) addPower(power);
+		const explicitReferenceIds = new Set();
+		for (const power of explicit) {
+			const id = addPower(power);
+			if (power.isReferenceOnly === true && id) explicitReferenceIds.add(id);
+		}
 
 		const nonSpell = powers.filter(it => it.kind !== "spell");
 		if (item.charges === 1 && nonSpell.length === 1 && !nonSpell[0].chargesCost) nonSpell[0].chargesCost = 1;
 		for (const power of nonSpell) {
-			if (power.chargesCost || power.usesMax || power.isDestructive) power.isReferenceOnly = false;
+			if ((power.chargesCost || power.usesMax || power.isDestructive) && !explicitReferenceIds.has(power.id)) power.isReferenceOnly = false;
 		}
 		return powers;
 	}

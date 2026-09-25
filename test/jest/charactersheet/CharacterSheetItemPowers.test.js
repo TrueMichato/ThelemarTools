@@ -664,6 +664,53 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: false}));
 	});
 
+	it.each([
+		["charges", {chargesCost: 1}, {charges: 4, chargesCurrent: 4}],
+		["uses", {usesMax: 2, usageType: "daily", usesKey: "manual:daily"}, {}],
+	])("does not turn an explicit reference-only power with %s into an invokable action", (_label, resource, itemFields) => {
+		const state = new CharacterSheetState();
+		state.addItem({
+			id: "manual-item",
+			name: "Manual Relic",
+			source: "Custom",
+			_isCustom: true,
+			type: "wondrous",
+			equipped: true,
+			itemPowers: [{
+				id: "manual-power",
+				name: "Manual result",
+				kind: "ability",
+				isReferenceOnly: true,
+				...resource,
+			}],
+			...itemFields,
+		});
+
+		expect(state.getItemPower("manual-item", "manual-power")).toMatchObject({
+			isReferenceOnly: true,
+			isAvailable: false,
+			unavailableReason: "Rules reference only; resolve this effect manually.",
+		});
+		expect(state.invokeItemPower("manual-item", "manual-power").ok).toBe(false);
+		expect(state.getItemRaw("manual-item").chargesCurrent).toBe(itemFields.chargesCurrent);
+		expect(state.getItemRaw("manual-item").itemPowerUses).toBeUndefined();
+
+		state.addItem({
+			id: "legacy-item",
+			name: "Legacy Relic",
+			source: "Custom",
+			_isCustom: true,
+			type: "wondrous",
+			equipped: true,
+			itemPowers: [{id: "legacy-power", name: "Track use", kind: "ability", ...resource}],
+			...itemFields,
+		});
+		expect(state.getItemPower("legacy-item", "legacy-power")).toMatchObject({
+			isReferenceOnly: false,
+			isAvailable: true,
+		});
+	});
+
 	it("normalizes prose-only daily item powers without item-name adapters", () => {
 		const state = new CharacterSheetState();
 		const dagger = items.find(it => it.name === "Dagger of Venom" && it.source === "DMG");

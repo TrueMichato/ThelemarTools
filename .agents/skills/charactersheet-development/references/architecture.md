@@ -59,7 +59,13 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │
 ├── CharacterSheetInventory (charactersheet-inventory.js, ~2,300 lines)
 │   Items, equipment, attunement (max 3), encumbrance, currency,
-│   charges, consumables, pagination.
+│   charges, consumables, pagination. Create/Modify takes an initial
+│   rendered form snapshot, diffs rebuilt fields, and merges only those
+│   differences into `getItemRaw()`; catalog clones copy the normalized
+│   raw entity first. Keep operational power IDs and attached-spell-derived
+│   powers in sync, without copying wrapper links or generated identities.
+│   Explicit reference-only powers stay inert even with charges or uses;
+│   missing flags and prose-derived powers retain legacy resource inference.
 │
 ├── CharacterSheetFeatures (charactersheet-features.js, ~1,600 lines)
 │   Feature display, resource pip tracking, feat picker,
