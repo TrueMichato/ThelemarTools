@@ -66,6 +66,35 @@ export class ItemEditorPage {
 		await this.modal.getByRole("navigation", {name: "Item editor groups"}).getByRole("button", {name}).click();
 	}
 
+	async toggleGroup (key: string): Promise<void> {
+		await this.modal.locator(`#custom-item-group-${key} .charsheet__custom-item-group-toggle`).click();
+	}
+
+	async isGroupExpanded (key: string): Promise<boolean> {
+		return (await this.modal.locator(`#custom-item-group-${key} .charsheet__custom-item-group-toggle`).getAttribute("aria-expanded")) === "true";
+	}
+
+	async getRiderDiceGuidance (index: number): Promise<{placeholder: string; hint: string}> {
+		const input = this.modal.locator(`[data-rider-index="${index}"] [data-rider-field="dice"]`);
+		const placeholder = await input.getAttribute("placeholder") || "";
+		const hint = await this.modal.locator(`[data-rider-index="${index}"] .charsheet__custom-item-hint`).innerText();
+		return {placeholder, hint};
+	}
+
+	async getAttackDamagePreview (id: string): Promise<string> {
+		await new CharacterSheetPage(this.page).tabCombat.click();
+		const attackId = await this.page.evaluate(id => {
+			const cs = (globalThis as any).charSheet;
+			const attack = cs._state.getAttacks().find((it: any) => it.sourceItem?.id === id)
+				|| cs._combat._cachedAttacks?.find((it: any) => it.sourceItem?.id === id);
+			if (!attack) throw new Error(`No attack for owned item ${id}`);
+			return attack.id;
+		}, id);
+		const row = this.page.locator(`.charsheet__attack-item[data-attack-id="${attackId}"]`);
+		await expect(row).toBeVisible();
+		return row.locator(".charsheet__attack-details").innerText();
+	}
+
 	async expectDiscardPrompt (): Promise<void> {
 		await expect(this.modal.getByRole("button", {name: "Discard changes"})).toBeVisible();
 	}

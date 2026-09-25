@@ -13,6 +13,33 @@ async function start (page: Page): Promise<ItemEditorPage> {
 test.describe("Shared responsive item editor", () => {
 	test.beforeEach(async ({page}) => clearCharacterStorage(page));
 
+	test("section shortcuts reopen collapsed weapon fields, explain dice entry, and show saved extra damage on the attack row", async ({page}) => {
+		const editor = await start(page);
+		await editor.openCreate();
+		await editor.selectType("weapon");
+		await editor.navigateGroup("Weapon & damage");
+		await editor.rename("Readable Blade");
+		await editor.setBaseDamage("1d8", "slashing");
+		await editor.addDamageRider("", "fire");
+		expect(await editor.getRiderDiceGuidance(0)).toEqual({
+			placeholder: "Enter, e.g. 1d6",
+			hint: "Type 1d6 for one six-sided die.",
+		});
+		await editor.toggleGroup("stats");
+		expect(await editor.isGroupExpanded("stats")).toBe(false);
+		await editor.navigateGroup("Weapon & damage");
+		expect(await editor.isGroupExpanded("stats")).toBe(true);
+		await editor.toggleGroup("stats");
+		await editor.save();
+		expect(await editor.isGroupExpanded("stats")).toBe(true);
+		await editor.expectRiderDiceFocused(0);
+		await editor.setRiderDice(0, "1d6");
+		await editor.save();
+		const [id] = await editor.findOwnedIds("Readable Blade");
+		await editor.equipAndAttune(id);
+		expect(await editor.getAttackDamagePreview(id)).toContain("+1d6 fire");
+	});
+
 	test("desktop Create authors typed dice, validates before Save, and rolls both lines", async ({page}) => {
 		const editor = await start(page);
 		await editor.openCreate();

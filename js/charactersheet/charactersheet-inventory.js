@@ -3250,8 +3250,9 @@ class CharacterSheetInventory {
 						</select>
 					</div>
 					<div class="charsheet__custom-item-field">
-						<label>Damage</label>
-						<input type="text" id="custom-item-damage" class="ve-form-control" placeholder="e.g., 1d8">
+						<label>Base damage dice</label>
+						<input type="text" id="custom-item-damage" class="ve-form-control" placeholder="Enter dice, e.g. 1d8" aria-describedby="custom-item-base-dice-hint">
+						<span class="charsheet__custom-item-hint" id="custom-item-base-dice-hint">Type a number, then d and the die size: 1d8 means one eight-sided die.</span>
 					</div>
 					<div class="charsheet__custom-item-field">
 						<label>Damage Type</label>
@@ -3888,8 +3889,8 @@ class CharacterSheetInventory {
 		const riderSection = e_({outer: `
 			<div class="charsheet__custom-item-field charsheet__custom-item-field--full charsheet__custom-item-riders">
 				<div class="charsheet__custom-item-riders-heading">
-					<div><strong>Extra damage dice</strong><div class="ve-muted ve-small">Each line rolls independently. All conditions on a line must apply (AND).</div></div>
-					<button type="button" id="custom-item-add-rider" class="ve-btn ve-btn-default ve-btn-xs">+ Add damage dice</button>
+					<div><strong>Extra damage on a hit</strong><div class="charsheet__custom-item-hint">Add a separate line for each die and damage type. For example: 1d8 slashing + 1d6 fire. Leave the conditions blank to add it on every hit.</div></div>
+					<button type="button" id="custom-item-add-rider" class="ve-btn ve-btn-default ve-btn-sm">+ Add extra damage dice</button>
 				</div>
 				<div id="custom-item-riders-list"></div>
 			</div>
@@ -3904,7 +3905,7 @@ class CharacterSheetInventory {
 					const chosenPower = itemPowers.find(power => power.id === conditions.powerId);
 					return `<div class="charsheet__custom-item-rider" data-rider-index="${index}">
 						<div class="charsheet__custom-item-rider-fields">
-							<label>Extra dice <input class="ve-form-control" data-rider-field="dice" value="${(rider.dice || "").qq()}" placeholder="1d6" aria-label="Extra damage dice ${index + 1}"></label>
+							<label>Extra dice (required) <input class="ve-form-control" data-rider-field="dice" value="${(rider.dice || "").qq()}" placeholder="Enter, e.g. 1d6" aria-label="Extra damage dice ${index + 1}" aria-describedby="custom-item-rider-hint-${index}"><span id="custom-item-rider-hint-${index}" class="charsheet__custom-item-hint">Type 1d6 for one six-sided die.</span></label>
 							<label>Damage type <select class="ve-form-control" data-rider-field="damageType" aria-label="Extra damage type ${index + 1}">
 								${damageTypes.map(type => `<option value="${type}"${type === rider.damageType ? " selected" : ""}>${type.toTitleCase()}</option>`).join("")}
 							</select></label>
@@ -3926,7 +3927,7 @@ class CharacterSheetInventory {
 						</div>
 					</div>`;
 				}).join("")
-				: `<p class="ve-muted ve-small">No extra damage dice. Base weapon damage still rolls normally.</p>`;
+				: `<p class="charsheet__custom-item-hint">No extra damage yet. Your weapon will roll only its base damage.</p>`;
 			ridersListEl.querySelectorAll("[data-rider-index]").forEach(row => {
 				const rider = damageRiders[Number(row.dataset.riderIndex)];
 				row.querySelectorAll("[data-rider-field]").forEach(input => {
@@ -4417,12 +4418,12 @@ class CharacterSheetInventory {
 
 		const groupDefs = [
 			{key: "basics", label: "Basics", sections: [typeGrid.parentElement, basicFields]},
-			{key: "stats", label: "Type-specific stats", sections: [weaponFields, armorFields, shieldFields]},
+			{key: "stats", label: "Item stats", sections: [weaponFields, armorFields, shieldFields]},
 			{key: "effects", label: "Bonuses & Effects", sections: [bonusesSection, effectsSection, defensesSection, speedSection, abilitySection, sensesSection]},
 			{key: "powers", label: "Powers & Spells", sections: [magicFields, powersSection, spellsSection, form.querySelector(".charsheet__custom-item-section--upgrades")]},
 			{key: "details", label: "Details", sections: [descSection]},
 		];
-		const nav = e_({outer: `<nav class="charsheet__custom-item-nav" aria-label="Item editor groups"></nav>`});
+		const nav = e_({outer: `<nav class="charsheet__custom-item-nav" aria-label="Item editor groups"><span class="charsheet__custom-item-nav-label">Sections</span><div class="charsheet__custom-item-nav-list"></div></nav>`});
 		const shell = e_({outer: `<div class="charsheet__custom-item-layout"></div>`});
 		const summaryPane = e_({outer: `
 			<aside class="charsheet__custom-item-summary" aria-label="Unsaved item summary">
@@ -4440,24 +4441,51 @@ class CharacterSheetInventory {
 			btnSummary.setAttribute("aria-expanded", String(isOpen));
 		});
 		if (topActions) form.append(topActions);
+		const setGroupOpen = (group, isOpen) => {
+			group.querySelector(".charsheet__custom-item-group-content").hidden = !isOpen;
+			const toggle = group.querySelector(".charsheet__custom-item-group-toggle");
+			toggle.setAttribute("aria-expanded", String(isOpen));
+			toggle.querySelector(".charsheet__custom-item-group-toggle-text").textContent = isOpen ? "Collapse" : "Expand";
+			group.classList.toggle("charsheet__custom-item-group--collapsed", !isOpen);
+		};
 		for (const {key, label, sections} of groupDefs) {
 			const group = e_({outer: `<section class="charsheet__custom-item-group" id="custom-item-group-${key}" data-item-group="${key}" aria-labelledby="custom-item-group-title-${key}">
-				<h3 id="custom-item-group-title-${key}">${label}</h3>
+				<h3 id="custom-item-group-title-${key}"><button type="button" class="charsheet__custom-item-group-toggle" aria-expanded="true" aria-controls="custom-item-group-content-${key}"><span class="charsheet__custom-item-group-label">${label}</span><span class="charsheet__custom-item-group-toggle-hint"><span class="charsheet__custom-item-group-toggle-text">Collapse</span> <span aria-hidden="true">⌄</span></span></button></h3>
+				<div class="charsheet__custom-item-group-content" id="custom-item-group-content-${key}"></div>
 			</section>`});
-			for (const section of sections.filter(Boolean)) group.append(section);
-			if (key === "basics" && topActions) group.insertBefore(topActions, group.children[1]);
-			if (key === "stats") group.append(e_({outer: `<p class="charsheet__custom-item-stats-empty ve-muted ve-small">This item type has no additional statistics. Add effects or powers in the next groups.</p>`}));
-			if (key === "details") group.append(e_({outer: `<p class="ve-muted ve-small charsheet__custom-item-provenance"></p>`}));
+			const content = group.querySelector(".charsheet__custom-item-group-content");
+			for (const section of sections.filter(Boolean)) content.append(section);
+			if (key === "basics" && topActions) content.prepend(topActions);
+			if (key === "stats") content.append(e_({outer: `<p class="charsheet__custom-item-stats-empty ve-muted ve-small">This item type has no additional statistics. Add effects or powers in the next groups.</p>`}));
+			if (key === "details") content.append(e_({outer: `<p class="ve-muted ve-small charsheet__custom-item-provenance"></p>`}));
 			form.append(group);
+			group.querySelector(".charsheet__custom-item-group-toggle").addEventListener("click", () => {
+				setGroupOpen(group, group.querySelector(".charsheet__custom-item-group-content").hidden);
+			});
 			const btn = e_({tag: "button",
 				clazz: "charsheet__custom-item-nav-btn",
-				txt: label,
-				attr: {type: "button", "aria-controls": group.id}});
-			btn.addEventListener("click", () => group.scrollIntoView({block: "start", behavior: "instant"}));
-			nav.append(btn);
+				txt: label});
+			btn.type = "button";
+			btn.setAttribute("aria-controls", group.id);
+			btn.addEventListener("click", () => {
+				setGroupOpen(group, true);
+				group.scrollIntoView({block: "start", behavior: "instant"});
+			});
+			nav.querySelector(".charsheet__custom-item-nav-list").append(btn);
 		}
 		shell.append(form, summaryPane);
 		modalInner.append(nav, shell);
+		const scroller = nav.closest(".ve-ui-modal__scroller");
+		const updateCurrentGroup = () => {
+			const groups = [...form.querySelectorAll(".charsheet__custom-item-group")];
+			const current = groups.reverse().find(group => group.getBoundingClientRect().top <= nav.getBoundingClientRect().bottom + 16) || groups.at(-1);
+			nav.querySelectorAll(".charsheet__custom-item-nav-btn").forEach(btn => {
+				if (btn.getAttribute("aria-controls") === current.id) btn.setAttribute("aria-current", "location");
+				else btn.removeAttribute("aria-current");
+			});
+		};
+		scroller?.addEventListener("scroll", updateCurrentGroup, {passive: true});
+		updateCurrentGroup();
 		const discardPanel = e_({outer: `<div class="charsheet__custom-item-discard" role="alert" hidden>
 			<span>Discard your unsaved item changes?</span>
 			<button type="button" class="ve-btn ve-btn-danger" data-discard>Discard changes</button>
@@ -4490,6 +4518,11 @@ class CharacterSheetInventory {
 			form.querySelector(".charsheet__custom-item-section--armor").style.display = selectedType === "armor" ? "" : "none";
 			form.querySelector(".charsheet__custom-item-section--shield").style.display = selectedType === "shield" ? "" : "none";
 			form.querySelector(".charsheet__custom-item-section--magic").style.display = ["wondrous", "wand", "ring", "potion", "scroll"].includes(selectedType) ? "" : "none";
+			const statsLabel = selectedType === "weapon" ? "Weapon & damage"
+				: selectedType === "armor" ? "Armor stats"
+					: selectedType === "shield" ? "Shield stats" : "Item stats";
+			form.querySelector("#custom-item-group-stats .charsheet__custom-item-group-label").textContent = statsLabel;
+			nav.querySelector("[aria-controls=\"custom-item-group-stats\"]").textContent = statsLabel;
 			const emptyStats = form.querySelector(".charsheet__custom-item-stats-empty");
 			if (emptyStats) emptyStats.hidden = ["weapon", "armor", "shield"].includes(selectedType);
 			renderUpgradeChoices();
@@ -4937,6 +4970,16 @@ class CharacterSheetInventory {
 		isDraftDirty = () => JSON.stringify(getDraft()) !== JSON.stringify(draftBaseline);
 		const errorsEl = e_({outer: `<div class="charsheet__custom-item-errors" role="alert" hidden></div>`});
 		modalInner.insertBefore(errorsEl, nav);
+		const focusErrorField = field => {
+			const target = form.querySelector(field);
+			const group = target?.closest(".charsheet__custom-item-group");
+			if (group) setGroupOpen(group, true);
+			const control = target?.matches("input, select, textarea, button")
+				? target
+				: target?.querySelector("input, select, textarea, button");
+			control?.scrollIntoView({block: "center"});
+			control?.focus();
+		};
 		const showErrors = (errors) => {
 			errorsEl.hidden = !errors.length;
 			errorsEl.replaceChildren();
@@ -4945,10 +4988,7 @@ class CharacterSheetInventory {
 					clazz: "charsheet__custom-item-error-link",
 					txt: error.message,
 					attr: {type: "button"}});
-				link.addEventListener("click", () => {
-					const target = form.querySelector(error.field);
-					(target?.matches("input, select, textarea, button") ? target : target?.querySelector("input, select, textarea, button"))?.focus();
-				});
+				link.addEventListener("click", () => focusErrorField(error.field));
 				errorsEl.append(link);
 			}
 			nav.querySelectorAll(".charsheet__custom-item-nav-btn").forEach(btn => {
@@ -5015,8 +5055,7 @@ class CharacterSheetInventory {
 			const errors = this._validateCustomItemDraft(draft);
 			if (errors.length) {
 				showErrors(errors);
-				const first = form.querySelector(errors[0].field);
-				(first?.matches("input, select, textarea, button") ? first : first?.querySelector("input, select, textarea, button"))?.focus();
+				focusErrorField(errors[0].field);
 				return;
 			}
 			if (Array.isArray(originalAttachedSpells) && options.attachedSpells) {
