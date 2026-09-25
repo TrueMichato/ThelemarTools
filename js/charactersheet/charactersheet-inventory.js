@@ -3195,7 +3195,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-section-title">📝 Basic Information</div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
-						<label>Name *</label>
+						<label for="custom-item-name">Item name *</label>
 						<input type="text" id="custom-item-name" class="ve-form-control" placeholder="e.g., Flaming Longsword">
 					</div>
 					<div class="charsheet__custom-item-field">
@@ -3265,20 +3265,26 @@ class CharacterSheetInventory {
 						<input type="text" id="custom-item-range" class="ve-form-control" placeholder="e.g., 80/320">
 					</div>
 					<div class="charsheet__custom-item-field">
-						<label>Magic Bonus (Attack & Damage)</label>
+						<label for="custom-item-weapon-bonus">This weapon: attack &amp; damage bonus</label>
 						<input type="number" id="custom-item-weapon-bonus" class="ve-form-control charsheet__signed-input" value="0" min="0" placeholder="0">
 					</div>
 					<div class="charsheet__custom-item-field">
-						<label>Attack Only Bonus</label>
+						<label for="custom-item-bonus-attack">This weapon: to-hit bonus only</label>
 						<input type="number" id="custom-item-bonus-attack" class="ve-form-control charsheet__signed-input" value="0">
 					</div>
 					<div class="charsheet__custom-item-field">
-						<label>Damage Only Bonus</label>
+						<label for="custom-item-bonus-damage">This weapon: flat damage bonus only</label>
 						<input type="number" id="custom-item-bonus-damage" class="ve-form-control charsheet__signed-input" value="0">
 					</div>
+					<p class="charsheet__custom-item-scope-note charsheet__custom-item-field--full"><strong>Only this weapon:</strong> These flat bonuses apply to attacks made with this weapon. For a bonus to your character's attacks with other weapons, use Modifiers &amp; Effects in Bonuses &amp; Effects.</p>
 					<div class="charsheet__custom-item-field">
 						<label>Bonus Crit Damage</label>
 						<input type="text" id="custom-item-crit-damage" class="ve-form-control" placeholder="e.g., 2d6 or 1d8 fire">
+					</div>
+					<div class="charsheet__custom-item-field">
+						<label for="custom-item-crit-threshold">Critical hit on (this weapon)</label>
+						<input type="number" id="custom-item-crit-threshold" class="ve-form-control" value="20" min="1" max="20">
+						<span class="charsheet__custom-item-hint">For example, 19 means this weapon crits on 19–20.</span>
 					</div>
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
 						<label>Weapon Masteries</label>
@@ -3491,7 +3497,7 @@ class CharacterSheetInventory {
 		const bonusesSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--bonuses charsheet__custom-item-section--legacy">
 				<div class="charsheet__custom-item-section-title">📈 Quick Bonuses (Optional)</div>
-				<div class="ve-muted ve-small mb-2">Shortcut fields for the most common flat bonuses. Negative and larger values are allowed. For anything beyond these (resistances, conditional bonuses, scaling, advantage…) use <b>⚙️ Modifiers &amp; Effects</b> below.</div>
+				<div class="ve-muted ve-small mb-2">Shortcuts for spell attacks, save DCs, saving throws and ability checks. Negative and larger values are allowed. For conditional bonuses, scaling, advantage and more, use Modifiers &amp; Effects below.</div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field">
 						<label>Spell Attack</label>
@@ -3512,10 +3518,6 @@ class CharacterSheetInventory {
 					<div class="charsheet__custom-item-field">
 						<label>All Ability Checks</label>
 						<input type="number" id="custom-item-bonus-checks" class="ve-form-control charsheet__signed-input" value="0" placeholder="0">
-					</div>
-					<div class="charsheet__custom-item-field">
-						<label>Crit on X or higher</label>
-						<input type="number" id="custom-item-crit-threshold" class="ve-form-control" value="20" min="1" max="20" placeholder="20">
 					</div>
 				</div>
 				<div class="charsheet__custom-item-subsection mt-2">
@@ -3852,7 +3854,8 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-section-title">⚙️ Modifiers &amp; Effects <span class="charsheet__custom-item-recommended-badge">Recommended</span></div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
-						<div class="ve-muted ve-small mb-2">The flexible, primary way to add bonuses/effects that apply while this item is equipped${""} (and attuned, if it requires attunement). Supports AC, saves, skills, carry capacity, resistances, advantage, scaling and more — positive or negative. Uses the same catalog as custom abilities.</div>
+						<p class="charsheet__custom-item-scope-note"><strong>Bonuses to your character, not just this item.</strong> While equipped (and attuned, if required), Attack Rolls and Damage Rolls here affect your character's matching attacks, including attacks with other weapons. To improve only this weapon's to-hit, flat damage, or extra dice, use Weapon &amp; damage instead.</p>
+						<p class="charsheet__custom-item-hint">Choose an effect such as AC, saving throws, skills or attack rolls; you can also add conditions or scaling. An effect left at +0 does nothing.</p>
 						<div id="custom-item-effects-list" class="custom-abilities__effects-list"></div>
 						<button type="button" id="custom-item-add-effect" class="ve-btn ve-btn-default ve-btn-xs mt-2">+ Add Effect</button>
 					</div>
@@ -3874,7 +3877,7 @@ class CharacterSheetInventory {
 				listEl: effectsListEl,
 				effects: itemEffects,
 				typeOptionsHtml: itemEffectTypeOptionsHtml,
-				emptyText: "No effects added. Add bonuses (AC, saves, carry capacity, resistances, …) that apply while equipped.",
+				emptyText: "No character bonuses yet. Add an effect to change your character's rolls or stats while this item is active.",
 			});
 		};
 		renderItemEffects();
@@ -3965,7 +3968,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-section-title">⚡ Powers (Optional)</div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
-						<div class="ve-muted ve-small mb-2">Add activated or rules-reference powers. Tracked charges and uses are spent atomically by the item-power controls.</div>
+						<div class="ve-muted ve-small mb-2">Choose Damage toggle for a power that turns extra weapon dice on or off; name it here, then select it on a damage line in Weapon &amp; damage. Reference-only powers show rules text but have no automatic effect.</div>
 						<div id="custom-item-powers-list"></div>
 						<button type="button" id="custom-item-add-power" class="ve-btn ve-btn-default ve-btn-xs mt-2">+ Add Power</button>
 					</div>
@@ -3988,10 +3991,12 @@ class CharacterSheetInventory {
 									${power.isToggle && power.effectType !== "damageRiders" ? `<option value="existing" selected>Existing toggle</option>` : ""}
 								</select>
 							</label>
-							<select class="ve-form-control mr-2" data-power-field="actionType" aria-label="Power action cost">
-								${["action", "bonus", "reaction", "onHit", "other"].map(type => `<option value="${type}"${power.actionType === type ? " selected" : ""}>${type}</option>`).join("")}
-							</select>
-							<button type="button" class="ve-btn ve-btn-danger ve-btn-xs" data-power-remove title="Remove power">×</button>
+							<label class="ve-small">Action cost
+								<select class="ve-form-control mr-2" data-power-field="actionType" aria-label="Power action cost">
+									${["action", "bonus", "reaction", "onHit", "other"].map(type => `<option value="${type}"${power.actionType === type ? " selected" : ""}>${type}</option>`).join("")}
+								</select>
+							</label>
+							<button type="button" class="ve-btn ve-btn-danger ve-btn-xs" data-power-remove aria-label="Remove power ${(power.name || "").qq()}">×</button>
 						</div>
 						<span class="ve-small ve-muted charsheet__custom-item-power-status">${power.isReferenceOnly ? "Reference only (no automatic effect)" : power.isToggle ? `Operational toggle${power.effectType === "modifySpeed" ? " · speed" : ""}` : "Operational power"}</span>
 						<textarea class="ve-form-control mb-1" data-power-field="description" rows="2" placeholder="Rules text">${(power.description || "").qq()}</textarea>
@@ -4109,11 +4114,12 @@ class CharacterSheetInventory {
 		const spellsSection = e_({outer: `
 			<div class="charsheet__custom-item-section charsheet__custom-item-section--spells">
 				<div class="charsheet__custom-item-section-title">✨ Attached Spells (Optional)</div>
+				<p class="charsheet__custom-item-hint">Search for a spell, add it, then set its use limit below. For charged items, Charge cost spends from the item's available charges.</p>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
 						<div class="charsheet__custom-item-spell-filters">
-							<input type="text" id="custom-item-spell-search" class="ve-form-control" placeholder="Search spells...">
-							<select id="custom-item-spell-level-filter" class="ve-form-control">
+							<input type="text" id="custom-item-spell-search" class="ve-form-control" placeholder="Search spells..." aria-label="Search item spells">
+							<select id="custom-item-spell-level-filter" class="ve-form-control" aria-label="Filter spells by level">
 								<option value="">All Levels</option>
 								<option value="0">Cantrips</option>
 								<option value="1">1st Level</option>
@@ -4126,7 +4132,7 @@ class CharacterSheetInventory {
 								<option value="8">8th Level</option>
 								<option value="9">9th Level</option>
 							</select>
-							<select id="custom-item-spell-school-filter" class="ve-form-control">
+							<select id="custom-item-spell-school-filter" class="ve-form-control" aria-label="Filter spells by school">
 								<option value="">All Schools</option>
 								<option value="A">Abjuration</option>
 								<option value="C">Conjuration</option>
@@ -4238,23 +4244,25 @@ class CharacterSheetInventory {
 						</div>
 						<div class="charsheet__custom-item-spell-selected-options">
 							${!isCantrip ? `
+								<label>Use
 								<select class="ve-form-control spell-usage-type" style="width: 90px;">
 									<option value="will" ${s.usageType === "will" ? "selected" : ""}>At Will</option>
 									<option value="daily" ${s.usageType === "daily" ? "selected" : ""}>X/Day</option>
 									<option value="charges" ${s.usageType === "charges" ? "selected" : ""}>Charges</option>
-								</select>
+								</select></label>
 								${s.usageType !== "will" ? `
-									<input type="number" class="ve-form-control spell-uses" value="${s.uses || 1}" min="1" style="width: 50px;" title="${s.usageType === "charges" ? "Charge cost" : "Uses per day"}">
+									<label>${s.usageType === "charges" ? "Charge cost" : "Uses per day"} <input type="number" class="ve-form-control spell-uses" value="${s.uses || 1}" min="1" style="width: 72px;"></label>
 									${s.usageType === "daily" ? `
-										<select class="ve-form-control spell-recharge" style="width: 70px;">
+										<label>Resets on
+										<select class="ve-form-control spell-recharge" style="width: 80px;">
 											<option value="long" ${s.recharge !== "short" ? "selected" : ""}>Long</option>
 											<option value="short" ${s.recharge === "short" ? "selected" : ""}>Short</option>
-										</select>
+										</select></label>
 									` : ""}
 								` : ""}
-							` : `<span class="ve-muted ve-small">At Will</span>`}
+							` : `<span class="ve-muted ve-small">At will</span>`}
 						</div>
-						<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__custom-item-spell-remove">&times;</button>
+						<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__custom-item-spell-remove" aria-label="Remove spell ${s.name.qq()}">&times;</button>
 					</div>
 				`;
 			}).join("");
@@ -4406,6 +4414,7 @@ class CharacterSheetInventory {
 				<div class="charsheet__custom-item-section-title">📖 Description (Optional)</div>
 				<div class="charsheet__custom-item-fields">
 					<div class="charsheet__custom-item-field charsheet__custom-item-field--full">
+						<label for="custom-item-desc">Rules text and lore</label>
 						<textarea id="custom-item-desc" class="ve-form-control" rows="3" placeholder="Describe any special properties, abilities, or lore..."></textarea>
 						<div id="custom-item-entries-fidelity" class="ve-muted ve-small mt-1" style="display: none;">
 							This item has structured entries (such as tables). Saving without changing this description preserves them; editing the description replaces them with plain text.
@@ -4417,11 +4426,11 @@ class CharacterSheetInventory {
 		form.append(descSection);
 
 		const groupDefs = [
-			{key: "basics", label: "Basics", sections: [typeGrid.parentElement, basicFields]},
-			{key: "stats", label: "Item stats", sections: [weaponFields, armorFields, shieldFields]},
-			{key: "effects", label: "Bonuses & Effects", sections: [bonusesSection, effectsSection, defensesSection, speedSection, abilitySection, sensesSection]},
-			{key: "powers", label: "Powers & Spells", sections: [magicFields, powersSection, spellsSection, form.querySelector(".charsheet__custom-item-section--upgrades")]},
-			{key: "details", label: "Details", sections: [descSection]},
+			{key: "basics", label: "Basics", hint: "Choose the item type and name first. The other identity fields are optional.", sections: [typeGrid.parentElement, basicFields]},
+			{key: "stats", label: "Item stats", hint: "Combat stats are available for weapons, armor and shields.", sections: [weaponFields, armorFields, shieldFields]},
+			{key: "effects", label: "Bonuses & Effects", hint: "<strong>Bonuses to your character, not just this item.</strong> While equipped (and attuned, if required), attack and damage effects can apply with other weapons too. For only this weapon, use Weapon & damage.", sections: [bonusesSection, effectsSection, defensesSection, speedSection, abilitySection, sensesSection]},
+			{key: "powers", label: "Powers & Spells", hint: "Create item powers and set up the spells this item grants.", sections: [magicFields, powersSection, spellsSection, form.querySelector(".charsheet__custom-item-section--upgrades")]},
+			{key: "details", label: "Details", hint: "Write rules and lore here. Use the earlier groups for bonuses and effects the sheet should track.", sections: [descSection]},
 		];
 		const nav = e_({outer: `<nav class="charsheet__custom-item-nav" aria-label="Item editor groups"><span class="charsheet__custom-item-nav-label">Sections</span><div class="charsheet__custom-item-nav-list"></div></nav>`});
 		const shell = e_({outer: `<div class="charsheet__custom-item-layout"></div>`});
@@ -4448,12 +4457,13 @@ class CharacterSheetInventory {
 			toggle.querySelector(".charsheet__custom-item-group-toggle-text").textContent = isOpen ? "Collapse" : "Expand";
 			group.classList.toggle("charsheet__custom-item-group--collapsed", !isOpen);
 		};
-		for (const {key, label, sections} of groupDefs) {
+		for (const {key, label, hint, sections} of groupDefs) {
 			const group = e_({outer: `<section class="charsheet__custom-item-group" id="custom-item-group-${key}" data-item-group="${key}" aria-labelledby="custom-item-group-title-${key}">
 				<h3 id="custom-item-group-title-${key}"><button type="button" class="charsheet__custom-item-group-toggle" aria-expanded="true" aria-controls="custom-item-group-content-${key}"><span class="charsheet__custom-item-group-label">${label}</span><span class="charsheet__custom-item-group-toggle-hint"><span class="charsheet__custom-item-group-toggle-text">Collapse</span> <span aria-hidden="true">⌄</span></span></button></h3>
 				<div class="charsheet__custom-item-group-content" id="custom-item-group-content-${key}"></div>
 			</section>`});
 			const content = group.querySelector(".charsheet__custom-item-group-content");
+			content.append(e_({outer: `<p class="charsheet__custom-item-group-intro">${hint}</p>`}));
 			for (const section of sections.filter(Boolean)) content.append(section);
 			if (key === "basics" && topActions) content.prepend(topActions);
 			if (key === "stats") content.append(e_({outer: `<p class="charsheet__custom-item-stats-empty ve-muted ve-small">This item type has no additional statistics. Add effects or powers in the next groups.</p>`}));
@@ -4522,6 +4532,11 @@ class CharacterSheetInventory {
 				: selectedType === "armor" ? "Armor stats"
 					: selectedType === "shield" ? "Shield stats" : "Item stats";
 			form.querySelector("#custom-item-group-stats .charsheet__custom-item-group-label").textContent = statsLabel;
+			form.querySelector("#custom-item-group-stats .charsheet__custom-item-group-intro").textContent = selectedType === "weapon"
+				? "These stats change attacks made with this weapon. Character-wide bonuses go in Bonuses & Effects."
+				: selectedType === "armor" ? "Set this armor's AC and requirements; wearer-wide effects go in Bonuses & Effects."
+					: selectedType === "shield" ? "Set this shield's AC; wearer-wide effects go in Bonuses & Effects."
+						: "Combat stats are available for weapons, armor and shields.";
 			nav.querySelector("[aria-controls=\"custom-item-group-stats\"]").textContent = statsLabel;
 			const emptyStats = form.querySelector(".charsheet__custom-item-stats-empty");
 			if (emptyStats) emptyStats.hidden = ["weapon", "armor", "shield"].includes(selectedType);

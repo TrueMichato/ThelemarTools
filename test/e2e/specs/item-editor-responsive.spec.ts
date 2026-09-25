@@ -13,6 +13,64 @@ async function start (page: Page): Promise<ItemEditorPage> {
 test.describe("Shared responsive item editor", () => {
 	test.beforeEach(async ({page}) => clearCharacterStorage(page));
 
+	test("editor distinguishes this weapon's bonus from character-wide attack and damage effects", async ({page}) => {
+		const editor = await start(page);
+		await editor.openCreate();
+		await editor.selectType("weapon");
+		expect(await editor.getGroupIntro("basics")).toContain("item type and name");
+		expect(await editor.getGroupIntro("stats")).toContain("this weapon");
+		expect(await editor.getGroupIntro("effects")).toContain("your character");
+		expect(await editor.getGroupIntro("powers")).toContain("spells this item grants");
+		expect(await editor.getGroupIntro("details")).toContain("rules and lore");
+		expect(await editor.getGroupIntro("effects")).toContain("other weapons");
+		expect(await editor.getWeaponScopeGuide()).toContain("Only this weapon");
+		expect(await editor.getCriticalThresholdFieldGroup()).toBe("stats");
+		await editor.rename("Focused Blade");
+		await editor.setBaseDamage("1d8", "slashing");
+		await editor.setWeaponMagicBonus(1);
+		await editor.save();
+		const [bladeId] = await editor.findOwnedIds("Focused Blade");
+		const clubId = await editor.addRawItem({name: "Training Club", source: "Custom", type: "M",
+			weaponCategory: "simple", dmg1: "1d8", dmgType: "B"});
+		await editor.equipAndAttune(bladeId);
+		await editor.equipAndAttune(clubId);
+		const baseline = await editor.getWeaponRollBonuses([bladeId, clubId]);
+		expect(baseline[0].attack - baseline[1].attack).toBe(1);
+		expect(baseline[0].damage - baseline[1].damage).toBe(1);
+
+		await editor.openCreate();
+		await editor.selectType("ring");
+		await editor.rename("Battle Band");
+		await editor.navigateGroup("Bonuses & Effects");
+		expect(await editor.getEffectsScopeGuide()).toContain("including attacks with other weapons");
+		await editor.addCharacterEffect("attack", 2);
+		await editor.addCharacterEffect("damage", 3);
+		expect(await editor.getWeaponRollBonuses([bladeId, clubId])).toEqual(baseline);
+		await editor.save();
+		const [ringId] = await editor.findOwnedIds("Battle Band");
+		await editor.equipAndAttune(ringId);
+		const boosted = await editor.getWeaponRollBonuses([bladeId, clubId]);
+		for (let i = 0; i < baseline.length; i++) {
+			expect(boosted[i].attack - baseline[i].attack).toBe(2);
+			expect(boosted[i].damage - baseline[i].damage).toBe(3);
+		}
+		await editor.setEquipmentState(ringId, {equipped: false});
+		expect(await editor.getWeaponRollBonuses([bladeId, clubId])).toEqual(baseline);
+	});
+
+	test("attached spell use settings explain whether a number is a charge cost or a daily limit", async ({page}) => {
+		const editor = await start(page);
+		await editor.openCreate();
+		await editor.selectType("wand");
+		await editor.navigateGroup("Powers & Spells");
+		await editor.addAttachedSpell("Magic Missile");
+		expect(await editor.getAttachedSpellUseLabels()).toEqual(expect.arrayContaining(["Use", "Charge cost"]));
+		await editor.setAttachedSpellUse("daily");
+		expect(await editor.getAttachedSpellUseLabels()).toEqual(expect.arrayContaining(["Use", "Uses per day", "Resets on"]));
+		await editor.setAttachedSpellUse("will");
+		expect(await editor.getAttachedSpellUseLabels()).toEqual(["Use"]);
+	});
+
 	test("section shortcuts reopen collapsed weapon fields, explain dice entry, and show saved extra damage on the attack row", async ({page}) => {
 		const editor = await start(page);
 		await editor.openCreate();
@@ -195,6 +253,7 @@ test.describe("Shared responsive item editor", () => {
 	});
 
 	test("editor fits desktop and narrow day/night viewports without hiding the footer", async ({page}, testInfo) => {
+		test.setTimeout(120_000);
 		const editor = await start(page);
 		await editor.openCreate();
 		await editor.selectType("weapon");
@@ -207,6 +266,12 @@ test.describe("Shared responsive item editor", () => {
 				const label = `${width}-${night ? "night" : "day"}`;
 				const layout = await editor.inspectEditorLayout(testInfo.outputPath(`editor-${label}.png`), night);
 				layouts.push({label, layout});
+				if (label === "1440-night" || label === "390-day") {
+					for (const [key, name] of [["stats", "Weapon & damage"], ["effects", "Bonuses & Effects"], ["powers", "Powers & Spells"], ["details", "Details"]]) {
+						const groupLayout = await editor.inspectEditorLayout(testInfo.outputPath(`editor-${label}-${key}.png`), night, name);
+						layouts.push({label: `${label}-${key}`, layout: groupLayout});
+					}
+				}
 			}
 		}
 		for (const {label, layout} of layouts) {
