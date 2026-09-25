@@ -11,6 +11,7 @@ import {
 	getEncounterPreset,
 	getEncounterPresetCitation,
 } from "./encounterworkspace-effects.js";
+import {getEncounterEffectiveMonster} from "./encounterworkspace-state.js";
 
 export const ENCOUNTER_ROLL_TYPES = [
 	{id: "initiative", name: "Initiative"},
@@ -67,10 +68,11 @@ export function getEncounterRollFromPackedDice (entry) {
 
 export async function pRollEncounterInstance ({
 	instance, name, rollType, key, label, skill = null, rollMode = "normal",
-	baseBonus = getNpcTrackerRollBonus({npc: {monster: instance.monster}, rollType, key, skill}),
+	baseBonus = getNpcTrackerRollBonus({npc: {monster: getEncounterEffectiveMonster(instance)}, rollType, key, skill}),
 	pRoll = pRollNpcTrackerD20, pConfirmContext = pConfirmRollContext,
 }) {
-	const npc = {monster: instance.monster, conditions: [...(instance.conditions || [])], alias: name};
+	const monster = getEncounterEffectiveMonster(instance);
+	const npc = {monster, conditions: [...(instance.conditions || [])], alias: name};
 	const npcRollType = rollType === "initiative" ? "ability" : rollType;
 	const npcKey = rollType === "skill" ? skill?.ability : key;
 	const conditionMeta = getNpcTrackerConditionRollMeta({npc, rollType: npcRollType, key: npcKey});
@@ -113,7 +115,7 @@ export async function pRollEncounterInstance ({
 		: modifier.name;
 	const bonusSources = modifiers.filter(it => it.bonus !== 0).map(it => `${sourceName(it)} ${getNpcTrackerSignedNumber(it.bonus)}`);
 	const additionalEffects = modifiers.filter(it => it.mode !== "normal").map(it => ({mode: it.mode, reason: sourceName(it)}));
-	const initiativeMode = instance.monster.initiative?.advantageMode;
+	const initiativeMode = monster.initiative?.advantageMode;
 	if (rollType === "initiative" && ["adv", "dis"].includes(initiativeMode)) {
 		additionalEffects.push({mode: initiativeMode === "adv" ? "advantage" : "disadvantage", reason: "Monster initiative"});
 	}
@@ -154,13 +156,14 @@ export async function pRollEncounterSelection ({
 		if (!selected.has(instance.id)) continue;
 		const name = names.get(instance.id);
 		try {
+			const monster = getEncounterEffectiveMonster(instance);
 			if (skill && !skill.ability) {
-				const explicit = getNpcTrackerMonsterSkillMeta({monster: instance.monster, skill})?.bonus;
+				const explicit = getNpcTrackerMonsterSkillMeta({monster, skill})?.bonus;
 				if (explicit == null || `${explicit}`.trim() === "" || !Number.isFinite(Number(explicit))) {
 					throw new Error(`No valid bonus or governing ability is available for ${skill.label}.`);
 				}
 			}
-			if (rollType === "initiative" && !Number.isSafeInteger(Renderer.monster.getInitiativeBonusNumber({mon: instance.monster}))) {
+			if (rollType === "initiative" && !Number.isSafeInteger(Renderer.monster.getInitiativeBonusNumber({mon: monster}))) {
 				throw new Error("No valid initiative bonus is available for this monster.");
 			}
 			results.push(await pRollEncounterInstance({

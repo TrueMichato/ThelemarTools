@@ -1,4 +1,8 @@
-import {EncounterWorkspaceState, EncounterWorkspaceStore} from "./encounterworkspace/encounterworkspace-state.js";
+import {EncounterWorkspaceState, EncounterWorkspaceStore, getEncounterEffectiveMonster} from "./encounterworkspace/encounterworkspace-state.js";
+import {EncounterWorkspacePostSaveError, EncounterWorkspaceQuickActionsAdapter} from "./encounterworkspace/encounterworkspace-quick-actions.js";
+import {BestiaryQuickActionsUi} from "./bestiary/bestiary-quick-actions-ui.js";
+import {BestiaryQuickActionsOperations} from "./bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsStructuredEditor} from "./bestiary/bestiary-quick-actions-structured.js";
 import {
 	ENCOUNTER_ROLL_TYPES,
 	getEncounterInstanceLabels,
@@ -93,6 +97,12 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart = document.getElementById("ew-turn-start");
 		this._btnTurnNext = document.getElementById("ew-turn-next");
 		this._btnTurnReset = document.getElementById("ew-turn-reset");
+		this._selBulkType = document.getElementById("ew-bulk-type");
+		this._selBulkChoice = document.getElementById("ew-bulk-choice");
+		this._inpBulkName = document.getElementById("ew-bulk-name");
+		this._inpBulkDescription = document.getElementById("ew-bulk-description");
+		this._inpBulkCost = document.getElementById("ew-bulk-cost");
+		this._btnBulkPreview = document.getElementById("ew-bulk-preview");
 		this._btnHandoffQueue = document.getElementById("ew-handoff-queue");
 		this._btnHandoffClear = document.getElementById("ew-handoff-clear");
 		this._eleHandoffPending = document.getElementById("ew-handoff-pending");
@@ -129,6 +139,8 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.addEventListener("click", () => this._pUpdateTurn("start"));
 		this._btnTurnNext.addEventListener("click", () => this._pUpdateTurn("next"));
 		this._btnTurnReset.addEventListener("click", () => this._pUpdateTurn("reset"));
+		this._selBulkType.addEventListener("change", () => this._pRenderBulkChoices());
+		this._btnBulkPreview.addEventListener("click", () => this._pPreviewBulkStatblock());
 		this._btnHandoffQueue.addEventListener("click", () => this._pQueueHandoff());
 		this._btnHandoffClear.addEventListener("click", () => this._pClearHandoff());
 		window.addEventListener("focus", () => this._pRefreshHandoff());
@@ -218,6 +230,14 @@ export class EncounterWorkspacePage {
 		this._btnHandoffQueue.disabled = this._isBusy || this._handoffReadError || !hasTargets || !this._state.sourceList;
 		this._btnHandoffClear.disabled = this._isBusy || !(this._pendingHandoff || this._corruptHandoffToken);
 		this._btnHandoffClear.textContent = this._corruptHandoffToken ? "Clear damaged queue" : "Clear queued snapshot";
+		this._selBulkType.disabled = this._isBusy || !hasTargets;
+		this._selBulkChoice.disabled = this._isBusy || !hasTargets;
+		[this._inpBulkName, this._inpBulkDescription, this._inpBulkCost].forEach(input => input.disabled = this._isBusy || !hasTargets);
+		this._btnBulkPreview.disabled = this._isBusy || !hasTargets;
+		this._tiles.forEach(tile => {
+			const button = tile.querySelector(".ew__statblock-edit");
+			if (button) button.disabled = this._isBusy;
+		});
 	}
 
 	_setHandoffStatus (text, {isError = false} = {}) {
@@ -372,7 +392,7 @@ export class EncounterWorkspacePage {
 	_pConfirmReplace () {
 		return InputUiUtil.pGetUserBoolean({
 			title: "Replace Working Encounter",
-			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, conditions, area notes, roll effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
+			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, statblock edits, conditions, notes, roll effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
 			textYes: "Replace Encounter",
 			textNo: "Keep Current",
 		});
@@ -564,8 +584,176 @@ export class EncounterWorkspacePage {
 	_getSkills () {
 		return getNpcTrackerSkillDescriptors({
 			skillCatalog: this._referenceData.skills,
-			monsters: this._state.instances.map(it => it.monster),
+			monsters: this._state.instances.map(getEncounterEffectiveMonster),
 		});
+	}
+
+	async _pCommitStatblockEdit ({state, changedIds, resetHpIds}) {
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			this._state = await this._store.pSave(state);
+			isSaved = true;
+			if (resetHpIds.length) this._hpUndo = this._hpUndo.filter(snapshots => !snapshots.some(it => resetHpIds.includes(it.id)));
+			this._render();
+			this._clearRollResults();
+			const names = this._getTargetNames(changedIds);
+			this._setStatus(`Saved statblock edits for ${names}.${resetHpIds.length
+				? ` Reset current and maximum HP for ${this._getTargetNames(resetHpIds)} to the new average (or Unset); temporary HP was preserved.`
+				: " Tracked HP was unchanged."}`);
+		} catch (e) {
+			if (isSaved) {
+				const savedError = new EncounterWorkspacePostSaveError(
+					`Statblock edits were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload this page to see the changes.`,
+					{cause: e},
+				);
+				this._setError(savedError.message);
+				throw savedError;
+			}
+			this._setError(`Statblock edits were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			throw e;
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	async _pOpenStatblockEditor (id) {
+		if (this._isBusy) return;
+		const instance = this._state.instances.find(it => it.id === id);
+		if (!instance) return this._setError("This encounter monster no longer exists.");
+		const adapter = new EncounterWorkspaceQuickActionsAdapter({
+			id,
+			getState: () => this._state,
+			pCommit: result => this._pCommitStatblockEdit(result),
+		});
+		try {
+			await BestiaryQuickActionsUi.pOpen({monster: instance.monster, registry: adapter});
+		} catch (e) {
+			this._setError(`Could not open statblock editor: ${this._getErrorMessage(e)}`);
+		}
+	}
+
+	async _pRenderBulkChoices () {
+		const type = this._selBulkType.value;
+		const isLegendary = type === "legendary";
+		const hasChoices = type === "lair" || type === "area";
+		const previousChoice = this._bulkChoiceType === type ? this._selBulkChoice.value : "";
+		this._bulkChoiceType = type;
+		const request = this._bulkChoiceRequest = (this._bulkChoiceRequest || 0) + 1;
+		for (const id of ["name", "description", "cost"]) {
+			document.getElementById(`ew-bulk-${id}`).hidden = !isLegendary;
+			document.getElementById(`ew-bulk-${id}-label`).hidden = !isLegendary;
+		}
+		this._selBulkChoice.hidden = document.getElementById("ew-bulk-choice-label").hidden = !hasChoices;
+		this._selBulkChoice.replaceChildren();
+		if (!hasChoices) return;
+		this._selBulkChoice.add(new Option("Loading available rules...", ""));
+		try {
+			const entries = type === "area"
+				? await BestiaryQuickActionsUi._pLoadAreaTraits()
+				: await BestiaryQuickActionsUi._pLoadLegendaryGroups();
+			if (request !== this._bulkChoiceRequest) return;
+			this._selBulkChoice.replaceChildren();
+			this._selBulkChoice.add(new Option(entries.length ? "Choose a loaded rule..." : "No matching rules loaded", ""));
+			const seen = new Set();
+			entries.forEach(entry => {
+				const uid = BestiaryQuickActionsUi.getRuleUid(entry);
+				if (seen.has(uid)) throw new Error(`Multiple loaded rules share the identity "${uid}".`);
+				seen.add(uid);
+				this._selBulkChoice.add(new Option(
+					type === "area" ? `${entry._areaName}: ${entry.name} (${entry.source})` : `${entry.name} (${entry.source})`,
+					uid,
+				));
+			});
+			if ([...this._selBulkChoice.options].some(it => it.value === previousChoice)) this._selBulkChoice.value = previousChoice;
+		} catch (e) {
+			if (request !== this._bulkChoiceRequest) return;
+			this._selBulkChoice.replaceChildren(new Option("Could not load rules; change type to retry", ""));
+			this._setError(`Bulk statblock rules could not be loaded: ${this._getErrorMessage(e)}`);
+		}
+	}
+
+	async _pPreviewBulkStatblock () {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		try {
+			const type = this._selBulkType.value;
+			let operation;
+			let editLabel;
+			if (type === "minion") {
+				operation = BestiaryQuickActionsOperations.minion();
+				editLabel = "Minion conversion";
+			} else if (type === "legendary") {
+				const name = this._inpBulkName.value.trim();
+				const description = this._inpBulkDescription.value.trim();
+				const cost = Number(this._inpBulkCost.value);
+				if (!name || !description || !Number.isSafeInteger(cost) || cost < 1 || cost > 9) {
+					throw new Error("Enter a legendary action name, action text, and a cost from 1 to 9.");
+				}
+				operation = BestiaryQuickActionsOperations.addEntry({
+					section: "legendary",
+					entry: {name: BestiaryQuickActionsStructuredEditor.getLegendaryActionName({name, cost}), entries: [description]},
+				});
+				editLabel = `Legendary action: ${operation.data.entry.name}`;
+			} else if (type === "area" || type === "lair") {
+				const selectedUid = this._selBulkChoice.value;
+				if (!selectedUid) throw new Error("Choose a loaded rule before previewing.");
+				const entries = type === "area"
+					? await BestiaryQuickActionsUi._pLoadAreaTraits()
+					: await BestiaryQuickActionsUi._pLoadLegendaryGroups();
+				if (type !== this._selBulkType.value || selectedUid !== this._selBulkChoice.value) {
+					throw new Error("The selected rule changed while loading. Preview it again.");
+				}
+				const matches = entries.filter(entry => BestiaryQuickActionsUi.getRuleUid(entry) === selectedUid);
+				if (!matches.length) throw new Error("That rule is no longer available. Choose a loaded rule again.");
+				if (matches.length > 1) throw new Error(`Multiple loaded rules share the identity "${selectedUid}". Choose another rule.`);
+				const entry = matches[0];
+				editLabel = type === "area"
+					? `Area trait: ${entry._areaName}: ${entry.name} (${entry.source})`
+					: `Lair-action group: ${entry.name} (${entry.source})`;
+				if (type === "lair") operation = BestiaryQuickActionsOperations.setLegendaryGroup(entry);
+				else {
+					const choices = await BestiaryQuickActionsUi._pGetAreaTraitChoices({traits: [entry]});
+					if (choices == null) return this._setStatus("Bulk area trait cancelled; no statblocks changed.");
+					if (type !== this._selBulkType.value || selectedUid !== this._selBulkChoice.value) {
+						throw new Error("The selected rule changed while configuring it. Preview it again.");
+					}
+					operation = BestiaryQuickActionsUi.getAreaTraitOperation({
+						trait: entry,
+						choices: choices.get(selectedUid) || {},
+					});
+				}
+			} else throw new Error("Choose a supported bulk statblock edit.");
+			operation.id = CryptUtil.uid();
+			const preview = EncounterWorkspaceState.previewBulkStatblockOperation(this._state, {operation});
+			const labels = getEncounterInstanceLabels(this._state.instances);
+			const skips = preview.skipped.map(({id, reason}) => `${labels.get(id)}: ${reason}`);
+			const reset = preview.resetHpIds.map(id => labels.get(id));
+			const description = [
+				`<p><b>Mechanical edit:</b> ${editLabel.qq()}</p>`,
+				`<p><b>${preview.changedIds.length} eligible:</b> ${preview.changedIds.map(id => labels.get(id).qq()).join(", ") || "none"}</p>`,
+				skips.length ? `<p><b>${skips.length} skipped:</b> ${skips.map(it => it.qq()).join("; ")}</p>` : "",
+				reset.length ? `<p><b>HP reset:</b> ${reset.map(it => it.qq()).join(", ")} will use the edited average (or Unset), retaining temporary HP.</p>` : "",
+				"<p>Only eligible monsters will be edited. All edits are saved together or none are saved.</p>",
+			].join("");
+			if (!preview.changedIds.length) {
+				this._setError(`No eligible monsters for this edit. ${skips.join("; ")}`);
+				return;
+			}
+			if (!await InputUiUtil.pGetUserBoolean({
+				title: "Apply Bulk Statblock Edit",
+				htmlDescription: description,
+				textYes: `Apply to ${preview.changedIds.length}`,
+				textNo: "Cancel",
+			})) return this._setStatus("Bulk statblock edit cancelled; no statblocks changed.");
+			await this._pCommitStatblockEdit(preview);
+			if (skips.length) this._setStatus(`${this._eleStatus.textContent} Skipped ${skips.length}: ${skips.join("; ")}.`);
+		} catch (e) {
+			if (e.isEncounterStatblockSaved) return;
+			this._setError(`Bulk statblock edit was not applied: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+		}
 	}
 
 	_renderRollKeys () {
@@ -864,6 +1052,8 @@ export class EncounterWorkspacePage {
 	}
 
 	_render () {
+		const previousRollType = this._selRollType.value;
+		const previousRollKey = this._selRollKey.value;
 		this._tiles.clear();
 		this._checks.clear();
 		this._conditionContainers.clear();
@@ -879,8 +1069,9 @@ export class EncounterWorkspacePage {
 		if (!sourceList) return;
 		this._selRollType.replaceChildren();
 		ENCOUNTER_ROLL_TYPES.filter(it => it.id !== "initiative").forEach(({id, name}) => this._selRollType.add(new Option(name, id)));
-		this._selRollType.value = "ability";
+		this._selRollType.value = ENCOUNTER_ROLL_TYPES.some(it => it.id === previousRollType && it.id !== "initiative") ? previousRollType : "ability";
 		this._renderRollKeys();
+		if ([...this._selRollKey.options].some(it => it.value === previousRollKey)) this._selRollKey.value = previousRollKey;
 		this._renderConditionPicker();
 		this._renderPresetSearch();
 
@@ -923,7 +1114,8 @@ export class EncounterWorkspacePage {
 			rowText.textContent = label;
 			const rowMeta = document.createElement("span");
 			rowMeta.className = "ew__roster-meta";
-			rowMeta.textContent = `${instance.monster.source} · CR ${instance.monster.cr?.cr || instance.monster.cr || "—"}`;
+			const effective = getEncounterEffectiveMonster(instance);
+			rowMeta.textContent = `${effective.source} · CR ${effective.cr?.cr || effective.cr || "—"}`;
 			row.append(check, rowText, rowMeta);
 			this._eleRoster.append(row);
 			this._checks.set(instance.id, check);
@@ -935,6 +1127,16 @@ export class EncounterWorkspacePage {
 			const title = document.createElement("h3");
 			title.className = "ew__statblock-title";
 			title.textContent = label;
+			const heading = document.createElement("div");
+			heading.className = "ew__statblock-heading";
+			const edit = document.createElement("button");
+			edit.type = "button";
+			edit.className = "ew__statblock-edit ve-btn ve-btn-default ve-btn-xs";
+			edit.textContent = `Edit statblock${instance.statblockOperations?.length ? ` (${instance.statblockOperations.length})` : ""}`;
+			edit.setAttribute("aria-label", `Edit statblock for ${label}`);
+			edit.disabled = this._isBusy;
+			edit.addEventListener("click", () => this._pOpenStatblockEditor(instance.id));
+			heading.append(title, edit);
 			const conditions = document.createElement("div");
 			conditions.className = "ew__conditions";
 			conditions.setAttribute("aria-label", `Conditions for ${label}`);
@@ -952,20 +1154,20 @@ export class EncounterWorkspacePage {
 			const body = document.createElement("tbody");
 			try {
 				body.innerHTML = Renderer.monster.getCompactRenderedString(
-					MiscUtil.copyFast(instance.monster),
+					MiscUtil.copyFast(effective),
 					{isShowScalers: false},
 				);
 			} catch (e) {
 				const failure = document.createElement("p");
 				failure.className = "ew__render-error";
 				failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-				tile.append(title, vitals, conditions, effects, failure);
+				tile.append(heading, vitals, conditions, effects, failure);
 				this._tiles.set(instance.id, tile);
 				this._eleStatblocks.append(tile);
 				continue;
 			}
 			table.append(body);
-			tile.append(title, vitals, conditions, effects, table);
+			tile.append(heading, vitals, conditions, effects, table);
 			this._tiles.set(instance.id, tile);
 			this._eleStatblocks.append(tile);
 		}
@@ -974,6 +1176,7 @@ export class EncounterWorkspacePage {
 		this._renderEffects();
 		this._renderTurnOrder();
 		this._updateTargets();
+		this._pRenderBulkChoices();
 	}
 
 	_renderVitals (ids = this._state.instances.map(it => it.id)) {
@@ -1105,7 +1308,7 @@ export class EncounterWorkspacePage {
 			...instance.modifiers.map(it => it.name),
 		];
 		meta.textContent = [
-			`${instance.monster.source} · CR ${instance.monster.cr?.cr || instance.monster.cr || "—"}`,
+			`${getEncounterEffectiveMonster(instance).source} · CR ${getEncounterEffectiveMonster(instance).cr?.cr || getEncounterEffectiveMonster(instance).cr || "—"}`,
 			`HP ${instance.hp.current == null ? "unset" : instance.hp.current}/${instance.hp.max == null ? "unset" : instance.hp.max}${instance.hp.temp ? ` +${instance.hp.temp} temp` : ""}`,
 			`Init ${instance.initiative == null ? "unrolled" : instance.initiative}`,
 			...activeConditions,
@@ -1122,7 +1325,7 @@ export class EncounterWorkspacePage {
 			this._renderRosterMeta(instance);
 			const entries = [
 				...instance.areaNotes.map(note => ({
-					title: `${note.kind === "lair" ? "Lair note (manual)" : "Area trait"}: ${note.name}`,
+					title: `${note.kind === "lair" ? "Lair reminder (text only)" : "Area reminder (text only)"}: ${note.name}`,
 					description: note.description,
 					onRemove: () => this._pUpdateAreaNote({isAdd: false, id: instance.id, noteId: note.id}),
 				})),

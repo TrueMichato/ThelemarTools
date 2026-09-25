@@ -215,6 +215,13 @@ export class BestiaryQuickActionsUi {
 		items: null,
 	};
 
+	static getRuleUid (rule) {
+		if (typeof rule?.name !== "string" || !rule.name.trim() || typeof rule?.source !== "string" || !rule.source.trim()) {
+			throw new Error("A loaded statblock rule must have a name and source.");
+		}
+		return _getUid(rule);
+	}
+
 	static getButtonHtml ({monster, registry = this._registry} = {}) {
 		const count = registry.getOperations({monster}).length;
 		const title = count
@@ -318,16 +325,19 @@ export class BestiaryQuickActionsUi {
 		const renderStatus = () => {
 			const operations = registry.getOperations({monster});
 			const current = registry.getOverride({monster});
+			const lifetime = registry.isPersistent ? "Saved in this encounter" : "Local override";
 			const statusTitle = _getElement("div", {clazz: "bqa__status-title"});
 			statusTitle.append(
 				_getElement("span", {clazz: `glyphicon ${operations.length ? "glyphicon-pencil" : "glyphicon-ok"}`, attrs: {"aria-hidden": "true"}}),
-				document.createTextNode(operations.length ? "Local override" : "Source creature"),
+				document.createTextNode(operations.length ? lifetime : "Source creature"),
 			);
 			const copy = _getElement("div", {
 				clazz: "bqa__status-copy",
 				text: operations.length
-					? `${operations.length} temporary change${operations.length === 1 ? "" : "s"}. Lost on refresh unless saved.`
-					: "No temporary changes. The source statblock is untouched.",
+					? registry.isPersistent
+						? `${operations.length} encounter edit${operations.length === 1 ? "" : "s"}. The original creature is untouched.`
+						: `${operations.length} temporary change${operations.length === 1 ? "" : "s"}. Lost on refresh unless saved.`
+					: "No statblock edits. The source creature is untouched.",
 			});
 			status.replaceChildren(statusTitle, copy);
 
@@ -343,13 +353,13 @@ export class BestiaryQuickActionsUi {
 				onClick: async () => {
 					if (!operations.length) return;
 					const isSure = await InputUiUtil.pGetUserBoolean({
-						title: "Clear Temporary Changes",
-						htmlDescription: "Remove every local override for this statblock? The source creature will remain unchanged.",
+						title: "Clear Statblock Changes",
+						htmlDescription: `Remove every ${registry.isPersistent ? "encounter edit" : "local override"} for this statblock? The source creature will remain unchanged.`,
 						textYes: "Clear Changes",
 						textNo: "Cancel",
 					});
 					if (!isSure) return;
-					registry.clear({monster});
+					await this._pApplyChange({registry, monster, removeIds: operations.map(it => it.id)});
 				},
 			});
 			btnClear.disabled = !operations.length;
@@ -366,12 +376,12 @@ export class BestiaryQuickActionsUi {
 				const main = _getElement("div", {clazz: "bqa__row-main"});
 				main.append(
 					_getElement("div", {clazz: "bqa__row-title", text: operation.label || this._getOperationLabel(operation)}),
-					_getElement("div", {clazz: "bqa__row-meta", text: this._getOperationMeta(operation)}),
+					_getElement("div", {clazz: "bqa__row-meta", text: this._getOperationMeta(operation, {isPersistent: registry.isPersistent})}),
 				);
 				row.append(main, _getButton({
 					text: "Remove",
 					clazz: "ve-btn ve-btn-default ve-btn-xs",
-					onClick: () => registry.removeOperation({monster, operationId: operation.id}),
+					onClick: () => this._pApplyChange({registry, monster, removeIds: [operation.id]}),
 				}));
 				changeList.append(row);
 			});
@@ -390,6 +400,23 @@ export class BestiaryQuickActionsUi {
 		await pRenderActive();
 	}
 
+	static async _pApplyChange ({registry, monster, addOperations = [], removeIds = [], error = null}) {
+		try {
+			const result = await registry.applyChanges({monster, addOperations, removeIds});
+			if (!result) throw new Error("The statblock edit was not applied.");
+			return true;
+		} catch (e) {
+			if (e.isEncounterStatblockSaved) {
+				if (error) error.textContent = e.message;
+				else JqueryUtil.doToast({type: "warning", content: e.message});
+				return false;
+			}
+			if (error) error.textContent = e.message;
+			else JqueryUtil.doToast({type: "danger", content: `Statblock edit failed: ${e.message}`});
+			return false;
+		}
+	}
+
 	static _getOperationLabel (operation) {
 		switch (operation.type) {
 			case "minion": return "Minion conversion";
@@ -402,13 +429,13 @@ export class BestiaryQuickActionsUi {
 		}
 	}
 
-	static _getOperationMeta (operation) {
+	static _getOperationMeta (operation, {isPersistent = false} = {}) {
 		if (operation.sourceName) return operation.sourceName;
 		if (operation.data?.item?.name) return operation.data.item.name;
 		if (operation.data?.area) return operation.data.area;
 		if (operation.legendaryGroup?.name) return operation.legendaryGroup.name;
 		if (operation.entry?.name) return operation.entry.name;
-		return "Local only";
+		return isPersistent ? "Encounter only" : "Local only";
 	}
 
 	static _getSection ({heading, copy}) {
@@ -505,17 +532,13 @@ export class BestiaryQuickActionsUi {
 		const btn = _getButton({
 			text: operation ? "Make Standard" : isSourceMinion ? "Source Minion" : "Make Minion",
 			clazz: operation ? "ve-btn ve-btn-warning ve-btn-sm" : "ve-btn ve-btn-primary ve-btn-sm",
-			onClick: () => {
-				if (operation) return registry.removeOperation({monster, operationId: operation.id});
-				try {
-					registry.addOperation({
-						monster,
-						operation: {id: _getOperationId(), type: "minion", label: "Flee, Mortals! minion"},
-					});
-				} catch (e) {
-					JqueryUtil.doToast({type: "danger", content: e.message});
-				}
-			},
+			onClick: () => this._pApplyChange({
+				registry,
+				monster,
+				...(operation
+					? {removeIds: [operation.id]}
+					: {addOperations: [{id: _getOperationId(), type: "minion", label: "Flee, Mortals! minion"}]}),
+			}),
 		});
 		btn.disabled = isSourceMinion;
 		row.append(main, btn);
@@ -574,21 +597,21 @@ export class BestiaryQuickActionsUi {
 				clazz: active.length === areaTraits.length ? "ve-btn ve-btn-warning ve-btn-xs" : "ve-btn ve-btn-default ve-btn-xs",
 				onClick: async () => {
 					if (active.length === areaTraits.length) {
-						active.forEach(trait => {
-							const operation = operations.find(it => it.type === "applyAreaTrait" && it.sourceUid === _getUid(trait));
-							if (operation) registry.removeOperation({monster, operationId: operation.id});
+						return this._pApplyChange({
+							registry,
+							monster,
+							removeIds: operations.filter(it => it.type === "applyAreaTrait" && active.some(trait => it.sourceUid === _getUid(trait)))
+								.map(it => it.id),
 						});
-						return;
 					}
 					const missing = areaTraits.filter(trait => !active.includes(trait));
 					const choices = await this._pGetAreaTraitChoices({traits: missing});
 					if (choices == null) return;
-					missing.forEach(trait => this._addAreaTraitOperation({
-						monster,
+					await this._pApplyChange({
 						registry,
-						trait,
-						choices: choices.get(_getUid(trait)) || {},
-					}));
+						monster,
+						addOperations: missing.map(trait => this.getAreaTraitOperation({trait, choices: choices.get(_getUid(trait)) || {}})),
+					});
 				},
 			});
 			header.append(heading, btnBatch);
@@ -611,10 +634,14 @@ export class BestiaryQuickActionsUi {
 					text: existing ? "Remove" : "Add",
 					clazz: existing ? "ve-btn ve-btn-warning ve-btn-xs" : "ve-btn ve-btn-default ve-btn-xs",
 					onClick: async () => {
-						if (existing) return registry.removeOperation({monster, operationId: existing.id});
+						if (existing) return this._pApplyChange({registry, monster, removeIds: [existing.id]});
 						const choices = await this._pGetAreaTraitChoices({traits: [trait]});
 						if (choices == null) return;
-						this._addAreaTraitOperation({monster, registry, trait, choices: choices.get(uid) || {}});
+						await this._pApplyChange({
+							registry,
+							monster,
+							addOperations: [this.getAreaTraitOperation({trait, choices: choices.get(uid) || {}})],
+						});
 					},
 				}));
 				rows.append(row);
@@ -626,26 +653,23 @@ export class BestiaryQuickActionsUi {
 		content.replaceChildren(section);
 	}
 
-	static _addAreaTraitOperation ({monster, registry, trait, choices}) {
+	static getAreaTraitOperation ({trait, choices = {}}) {
 		const meta = _getAreaTraitMeta(trait, choices);
 		const entries = _getAreaTraitEntries(trait, choices);
-		registry.addOperation({
-			monster,
-			operation: {
-				id: _getOperationId(),
-				type: "applyAreaTrait",
-				data: {
-					trait: {name: trait.name, source: trait.source},
-					area: trait._areaName,
-					entry: {name: trait.name, entries},
-					effects: meta.effects,
-					choices,
-				},
-				sourceUid: _getUid(trait),
-				sourceName: trait._areaName,
-				label: `Area trait: ${trait.name}`,
+		return {
+			id: _getOperationId(),
+			type: "applyAreaTrait",
+			data: {
+				trait: {name: trait.name, source: trait.source},
+				area: trait._areaName,
+				entry: {name: trait.name, entries},
+				effects: meta.effects,
+				choices,
 			},
-		});
+			sourceUid: _getUid(trait),
+			sourceName: trait._areaName,
+			label: `Area trait: ${trait.name}`,
+		};
 	}
 
 	static async _pGetAreaTraitChoices ({traits}) {
@@ -776,10 +800,11 @@ export class BestiaryQuickActionsUi {
 					clazz: isActive ? "ve-btn ve-btn-warning ve-btn-xs" : "ve-btn ve-btn-default ve-btn-xs",
 					onClick: async () => {
 						if (isActive) {
-							registry.getOperations({monster})
-								.filter(it => it.type === "setLegendaryGroup")
-								.forEach(it => registry.removeOperation({monster, operationId: it.id}));
-							return;
+							return this._pApplyChange({
+								registry,
+								monster,
+								removeIds: registry.getOperations({monster}).filter(it => it.type === "setLegendaryGroup").map(it => it.id),
+							});
 						}
 						if (current && (current.name !== group.name || current.source !== group.source)) {
 							const isSure = await InputUiUtil.pGetUserBoolean({
@@ -790,18 +815,17 @@ export class BestiaryQuickActionsUi {
 							});
 							if (!isSure) return;
 						}
-						registry.getOperations({monster})
-							.filter(it => it.type === "setLegendaryGroup")
-							.forEach(it => registry.removeOperation({monster, operationId: it.id}));
-						registry.addOperation({
+						await this._pApplyChange({
+							registry,
 							monster,
-							operation: {
+							removeIds: registry.getOperations({monster}).filter(it => it.type === "setLegendaryGroup").map(it => it.id),
+							addOperations: [{
 								id: _getOperationId(),
 								type: "setLegendaryGroup",
 								legendaryGroup: _copy(group),
 								sourceName: Parser.sourceJsonToFull(group.source),
 								label: `Lair actions: ${group.name}`,
-							},
+							}],
 						});
 					},
 				}));
@@ -962,7 +986,7 @@ export class BestiaryQuickActionsUi {
 		const btnApply = _getButton({
 			text: "Apply Item",
 			clazz: "ve-btn ve-btn-primary ve-btn-sm",
-			onClick: () => {
+			onClick: async () => {
 				let entries;
 				try {
 					entries = blockControls
@@ -984,9 +1008,10 @@ export class BestiaryQuickActionsUi {
 						entry: this._getItemAttack({monster: current, item, ability: selAbility.value, name: iptAttackName.value.trim() || item.name}),
 					});
 				}
-				registry.addOperation({
+				const applied = await this._pApplyChange({
+					registry,
 					monster,
-					operation: {
+					addOperations: [{
 						id: _getOperationId(),
 						type: "applyItem",
 						data: {
@@ -1002,9 +1027,9 @@ export class BestiaryQuickActionsUi {
 						sourceUid: _getUid(item),
 						sourceName: `${item.name} (${Parser.sourceJsonToAbv(item.source)})`,
 						label: `Magic item: ${item.name}`,
-					},
+					}],
 				});
-				JqueryUtil.doToast({type: "success", content: `${item.name} applied as a temporary override.`});
+				if (applied) JqueryUtil.doToast({type: "success", content: `${item.name} ${registry.isPersistent ? "saved to this encounter" : "applied as a temporary override"}.`});
 			},
 		});
 
@@ -1142,22 +1167,24 @@ export class BestiaryQuickActionsUi {
 		const btnApply = _getButton({
 			text: "Apply Quick Edit",
 			clazz: "ve-btn ve-btn-primary ve-btn-sm",
-			onClick: () => {
+			onClick: async () => {
 				error.textContent = "";
 				try {
 					const patch = this._getQuickEditPatch({current, fields, complexValues: complex.getValues()});
 					if (!Object.keys(patch.set).length && !patch.remove.length) throw new Error("Change at least one field before applying.");
-					registry.addOperation({
+					const applied = await this._pApplyChange({
+						registry,
 						monster,
-						operation: {
+						error,
+						addOperations: [{
 							id: _getOperationId(),
 							type: "patch",
 							patch,
 							sourceName: "Core stats and entries",
 							label: "Quick edit",
-						},
+						}],
 					});
-					JqueryUtil.doToast({type: "success", content: "Quick Edit applied as a temporary override."});
+					if (applied) JqueryUtil.doToast({type: "success", content: registry.isPersistent ? "Quick Edit saved in this encounter." : "Quick Edit applied as a temporary override."});
 				} catch (e) {
 					error.textContent = e.message;
 				}
