@@ -2508,7 +2508,7 @@ class CharacterSheetInventory {
 						usageType: power.usageType || "limited",
 						usesKey: power.usesKey || `custom:${power.id}`,
 					} : {}),
-					isReferenceOnly: !!power.isReferenceOnly && !chargesCost && !usesMax,
+					isReferenceOnly: !!power.isReferenceOnly,
 				};
 			});
 	}

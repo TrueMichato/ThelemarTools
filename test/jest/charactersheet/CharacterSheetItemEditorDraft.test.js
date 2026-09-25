@@ -512,4 +512,119 @@ describe("Custom item editor draft fidelity", () => {
 		expect(inventory._serializeCustomItemPowers(powers)).toEqual(powers.map(power =>
 			expect.objectContaining(power)));
 	});
+
+	test.each([
+		["charged", {chargesCost: 1}, {charges: 4, chargesCurrent: 3}],
+		["limited", {usesMax: 2, usageType: "daily", usesKey: "daily:reference"}, {}],
+	])("an explicit reference-only %s power stays inert through form serialization, edit, clone and reload", (_label, resource, itemFields) => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const originalPower = {
+			id: "manual-resolution",
+			name: "Resolve manually",
+			kind: "ability",
+			actionType: "bonus",
+			isReferenceOnly: true,
+			...resource,
+		};
+		state.addItem({
+			id: "reference-item",
+			name: "Mystery Relic",
+			source: "Custom",
+			_isCustom: true,
+			type: "wondrous",
+			equipped: true,
+			itemPowers: [originalPower],
+			...itemFields,
+		});
+		const seed = inventory._seedOptionsFromItem(state.getItemRaw("reference-item"));
+		const collectedPowers = inventory._serializeCustomItemPowers(seed.options.itemPowers);
+		expect(collectedPowers).toEqual([expect.objectContaining(originalPower)]);
+		const baseline = {
+			name: seed.name,
+			quantity: seed.quantity,
+			weight: seed.weight,
+			options: {...seed.options, itemPowers: collectedPowers},
+		};
+		editorSave(inventory, {...baseline, name: "Retitled Relic"}, {editItemId: "reference-item", baseline});
+		const edited = state.getItemRaw("reference-item");
+		expect(edited.itemPowers).toEqual([expect.objectContaining(originalPower)]);
+		expect(state.getItemPower("reference-item", originalPower.id)).toMatchObject({
+			isReferenceOnly: true,
+			isAvailable: false,
+			unavailableReason: "Rules reference only; resolve this effect manually.",
+		});
+		expect(state.invokeItemPower("reference-item", originalPower.id).ok).toBe(false);
+
+		const cloneId = editorSave(inventory, {...baseline, name: "Copied Relic"}, {
+			baseItem: edited,
+			baseline,
+		});
+		expect(state.getItemRaw(cloneId).itemPowers).toEqual([expect.objectContaining(originalPower)]);
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		expect(restored.getItemPower(cloneId, originalPower.id)).toMatchObject({
+			isReferenceOnly: true,
+			isAvailable: false,
+		});
+		expect(restored.invokeItemPower(cloneId, originalPower.id).ok).toBe(false);
+		expect(restored.getItemRaw("reference-item").chargesCurrent).toBe(itemFields.chargesCurrent);
+	});
+
+	test("explicit reference-only and missing flags remain distinct when switching or clearing powers", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const reference = {
+			id: "manual",
+			name: "Manual effect",
+			kind: "ability",
+			chargesCost: 1,
+			isReferenceOnly: true,
+		};
+		state.addItem({
+			id: "flagged",
+			name: "Charged Relic",
+			source: "Custom",
+			_isCustom: true,
+			type: "wondrous",
+			charges: 4,
+			chargesCurrent: 4,
+			equipped: true,
+			itemPowers: [reference],
+		});
+		const baseline = {
+			name: "Charged Relic",
+			quantity: 1,
+			weight: 0,
+			options: {...inventory._seedOptionsFromItem(state.getItemRaw("flagged")).options,
+				itemPowers: inventory._serializeCustomItemPowers([reference])},
+		};
+		const operational = {...reference, isReferenceOnly: false};
+		editorSave(inventory, {...baseline,
+			options: {...baseline.options, itemPowers: inventory._serializeCustomItemPowers([operational])}},
+		{editItemId: "flagged", baseline});
+		expect(state.getItemPower("flagged", reference.id)).toMatchObject({
+			isReferenceOnly: false, isAvailable: true,
+		});
+		expect(state.invokeItemPower("flagged", reference.id).ok).toBe(true);
+		expect(state.getItemRaw("flagged").chargesCurrent).toBe(3);
+
+		const operationalBaseline = {...baseline,
+			options: {...baseline.options, itemPowers: inventory._serializeCustomItemPowers([operational])}};
+		editorSave(inventory, baseline, {editItemId: "flagged", baseline: operationalBaseline});
+		expect(state.getItemPower("flagged", reference.id)).toMatchObject({
+			isReferenceOnly: true, isAvailable: false,
+		});
+		expect(state.invokeItemPower("flagged", reference.id).ok).toBe(false);
+		expect(state.getItemRaw("flagged").chargesCurrent).toBe(3);
+
+		editorSave(inventory, {...baseline, options: {...baseline.options, itemPowers: []}},
+			{editItemId: "flagged", baseline});
+		expect(state.getItemRaw("flagged").itemPowers).toEqual([]);
+
+		const legacyPower = {id: "legacy", name: "Legacy charged effect", kind: "ability", chargesCost: 1};
+		expect(inventory._serializeCustomItemPowers([legacyPower])).toEqual([
+			expect.objectContaining({id: "legacy", isReferenceOnly: false}),
+		]);
+	});
 });
