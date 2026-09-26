@@ -643,11 +643,21 @@ recklessAttack: {
         {type: "advantage", target: "attack:melee:str"},
         {type: "advantage", target: "attacksAgainst"},
     ],
-    duration: "This turn",
+    duration: "Until the start of your next turn",
     requiresClass: "barbarian",
     requiresClassLevel: 2,
 }
 ```
+
+The shared state grants Advantage on melee Strength attacks and exposes the
+Barbarian to incoming attack Advantage until the start of their next turn.
+XPHB/TGTT also grant Advantage on ranged Strength attacks (including thrown
+weapons); their Unarmed Strikes qualify, while PHB Unarmed Strikes do not.
+`resetTurnEconomy()` expires the state at the next own-turn boundary, not at
+an intervening creature's turn. The separate **Brutal Strike** attack button
+uses Reckless but deliberately forgoes *every* Advantage source on one eligible
+roll. It is not another persistent toggle; its once-per-turn use is tracked
+with a source-qualified turn receipt.
 
 #### Patient Defense (Monk)
 ```javascript

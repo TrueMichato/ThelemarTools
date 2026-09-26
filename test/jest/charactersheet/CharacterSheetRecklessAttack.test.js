@@ -276,7 +276,7 @@ describe("#7 _rollAttack — reckless advantage still cancels with disadvantage"
 // attack rows (not spell-attack rows, not for non-barbarians).
 // ---------------------------------------------------------------------------
 describe("#7 _renderAttackItem — reckless button gating", () => {
-	function mkRenderCombat ({barbarianLevel = 2, recklessActive = false} = {}) {
+	function mkRenderCombat ({barbarianLevel = 2, barbarianSource = "PHB", recklessActive = false} = {}) {
 		const combat = Object.create(CharacterSheetCombat.prototype);
 		combat._state = {
 			getWeaponAbilityMod: () => 4,
@@ -285,6 +285,7 @@ describe("#7 _renderAttackItem — reckless button gating", () => {
 			getCriticalRange: () => 20,
 			getActiveCombatMethodEffects: () => [],
 			getClassLevel: (cls) => (cls === "Barbarian" ? barbarianLevel : 0),
+			getClasses: () => barbarianLevel ? [{name: "Barbarian", source: barbarianSource, level: barbarianLevel}] : [],
 			isStateTypeActive: () => recklessActive,
 			getAttackNote: () => null,
 		};
@@ -323,6 +324,13 @@ describe("#7 _renderAttackItem — reckless button gating", () => {
 		const html = renderHtml(mkRenderCombat({barbarianLevel: 2, recklessActive: true}), WEAPON);
 		expect(html).toContain("charsheet__attack-reckless");
 		expect(html).toMatch(/ve-btn-warning[^"]*charsheet__attack-reckless/);
+	});
+
+	it("does not offer PHB Reckless on an Unarmed Strike, but offers it for 2024 Strength attacks", () => {
+		const unarmed = {...WEAPON, name: "Unarmed Strike", isUnarmedStrike: true};
+		expect(renderHtml(mkRenderCombat(), unarmed)).not.toContain("charsheet__attack-reckless");
+		expect(renderHtml(mkRenderCombat({barbarianSource: "XPHB", barbarianLevel: 9}), unarmed)).toContain("charsheet__attack-reckless");
+		expect(renderHtml(mkRenderCombat({barbarianSource: "XPHB", barbarianLevel: 9}), unarmed)).toContain("charsheet__attack-brutal");
 	});
 });
 

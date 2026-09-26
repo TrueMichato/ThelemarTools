@@ -11,9 +11,9 @@ For the full *what* and *why* of every check, see the
 the skill reference at
 [`.agents/skills/e2e-character-tests/references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md).
 
-## TGTT character specs (35 catalogued)
+## TGTT character specs (37 catalogued)
 
-> The table below lists 35 of the 51 `tgtt-*.spec.ts` files currently in
+> The table below lists 37 of the 51 `tgtt-*.spec.ts` files currently in
 > `test/e2e/specs/`. It has drifted behind the suite; rows are added as specs are
 > written, but the backlog has not been backfilled. Absence from this table does
 > **not** mean a spec does not exist — `tgtt-lycan-blood-hunter.spec.ts` is one
@@ -58,12 +58,14 @@ the skill reference at
 | 34 | `tgtt-efa-cartographer-artificer.spec.ts` | Cartographer Artificer (`Artificer|EFA`, `Cartographer|EFA`) · Dwarf | 1–20 | Exact EFA/TCE source isolation; all five XPHB spell thresholds without prepared-count consumption; Tools of the Trade proficiencies, duplicate replacements, and Spell Scroll-only crafting; real Long Rest Atlas create/recreate/undo/card/Awareness flow; Mapping Magic movement/targeting/free casts; Guided Precision shared receipt and concentration protection; committed Flash → Ingenious Movement; Safe Haven and Unerring Path; teardown and export round-trip. |
 | 35 | `tgtt-efa-artillerist-artificer.spec.ts` | Artillerist Artificer (`EFA`) · Human | 1–20 | Exact-source EFA progression and subclass spell grants, required Replicate Magic Item plan acquisition, Tools of the Trade, cannon resource/scaling, and rendered Combat/Play Mode lifecycle probes. `baseCannon` creates, activates, damages, repairs, renders, and cleans up a Force Ballista while asserting real Action/Bonus Action and free-use costs. `arcaneFirearm` binds an eligible stable inventory wrapper and proves once-per-committed-cast damage. `explosiveCannon` follows the damage-triggered Reaction modal through retirement. `fortifiedPosition` creates and activates two cannons, proves nonstacking Half Cover, and reconciles range loss. The isolated MEGA milestone and feature-matrix paths exercise these probes with no primary skips. |
 | 36 | `tgtt-efa-reanimator-artificer.spec.ts` | Reanimator Artificer (`Artificer|EFA`, `Reanimator|RHW`) · Dwarf | 1–20 | Exact EFA/RHW source isolation; all five XPHB subclass-spell thresholds; Alchemist's Supplies provenance and Jolt to Life scaling; real Manager and Play Mode companion surfaces; free and spell-slot creation payments; immutable Strange/Macabre/Superior modification receipts; Dreadful Swipe, Lightning Absorption, Improved Death Burst including zero targets, Gaunt, Moist, Arcane Conduit turn receipts, Facilitated Revival, and Life Transfer. The L20 probe round-trips exact owner/creature identities and verifies legal candidate-state Respec preservation plus wrong-source invalidation without mutating live state. The successful MEGA export is deliberately populated with exact creation, modification, Arcane Conduit, Refined Reanimation, Life Transfer, and resolved zero-target death receipts for manual inspection. |
+| 37 | `tgtt-tdcsr-juggernaut-barbarian.spec.ts` | Juggernaut Barbarian (`Barbarian|TGTT`) · Minotaur | 1–20 | Source-qualified XPHB Brutal Strike and both Improved Brutal Strike tiers; the L20 player-path probe clicks the Combat button, confirms a hit, chooses two different effects for a named target, and verifies four real d10 damage rolls of the weapon's type without modifying enemy state. |
 
 ## Other specs
 
 | Spec file | Purpose |
 |---|---|
 | `tgtt-player-party.spec.ts` | DM Screen Party Tracker integration smoke test (not a character build). |
+| `character-sheet-brutal-strike.spec.ts` | Focused XPHB Barbarian level-17 Combat UI probe with deterministic d20/damage rolls and two manual target effects; PHB Reckless Unarmed exclusion in Overview and Combat. |
 
 ## How to add a new entry
 

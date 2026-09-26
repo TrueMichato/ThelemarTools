@@ -585,6 +585,16 @@ the live receipt in place. This makes the retry rule deterministic: retry is
 legal only after the matching rollback, exact owner/source prune, or
 `resetTurnEconomy()`.
 
+Brutal Strike uses an exact `Brutal Strike|Barbarian|XPHB|9` feature source
+and the actual Barbarian class source in its receipt key. Commit on the
+eligible *attack roll*, even if the player later confirms a miss; only roll
+the weapon-typed 1d10/2d10 and offer on-hit effects after hit confirmation.
+The pending bonus is bound to the attack ID, roll ID, character data object,
+and turn ID and stays transient, so a fresh attack or a load cannot attach an
+old bonus to another roll. Reckless exposure is a separate active state that
+persists across other creatures' turns but expires on `resetTurnEconomy()`.
+Enemy-target effects are manual result text, not persisted target effects.
+
 `pruneTurnReceipts` requires both `ownerUid` and `sourceUid`; broad owner-only
 or source-only teardown is rejected. This prevents removing an unrelated
 same-named feature, companion, item, or class implementation. Consumers that

@@ -10967,6 +10967,9 @@ class CharacterSheetPage {
 		// Check if character has Reckless Attack (barbarian level 2+)
 		const barbarianClass = this._state._data.classes?.find(c => c.name?.toLowerCase() === "barbarian");
 		const hasRecklessAttack = barbarianClass && barbarianClass.level >= 2;
+		const recklessScope = ["XPHB", "TGTT"].includes(barbarianClass?.source)
+			? "Strength-based attack rolls"
+			: "melee weapon attack rolls using Strength";
 
 		// Get hover attributes for Dodge action
 		const dodgeHoverAttrs = this._getActionHoverAttrs("Dodge");
@@ -10976,7 +10979,7 @@ class CharacterSheetPage {
 			<button class="ve-btn ve-btn-xs ${activeStateTypeIds.has("dodge") ? "ve-btn-warning" : "ve-btn-default"} mr-1 charsheet__toggle-dodge-btn" ${dodgeHoverAttrs}>
 				💨 ${activeStateTypeIds.has("dodge") ? "End Dodge" : "Dodge"}
 			</button>
-			${hasRecklessAttack ? `<button class="ve-btn ve-btn-xs ${activeStateTypeIds.has("recklessAttack") ? "ve-btn-warning" : "ve-btn-default"} mr-1 charsheet__toggle-reckless-btn" title="Reckless Attack: You gain advantage on melee weapon attack rolls using Strength, but attack rolls against you have advantage until your next turn.">
+			${hasRecklessAttack ? `<button class="ve-btn ve-btn-xs ${activeStateTypeIds.has("recklessAttack") ? "ve-btn-warning" : "ve-btn-default"} mr-1 charsheet__toggle-reckless-btn" title="Reckless Attack: You gain advantage on ${recklessScope}, but attack rolls against you have advantage until your next turn.">
 				⚡ ${activeStateTypeIds.has("recklessAttack") ? "End Reckless" : "Reckless"}
 			</button>` : ""}
 			<button class="ve-btn ve-btn-xs ve-btn-default charsheet__apply-buff-btn" title="Apply a buff spell cast on you (e.g. Aid, Bless, Haste). Useful for non-casters tracking party buffs.">
@@ -17461,7 +17464,9 @@ class CharacterSheetPage {
 		}
 
 		const roll1 = this._state.rollD20?.("d20:first") ?? RollerUtil.randomise(20);
-		const roll2 = this._state.rollD20?.("d20:second") ?? RollerUtil.randomise(20);
+		const roll2 = mode === "advantage" || mode === "disadvantage"
+			? (this._state.rollD20?.("d20:second") ?? RollerUtil.randomise(20))
+			: null;
 
 		let roll;
 		if (mode === "advantage") {
@@ -20003,7 +20008,7 @@ class CharacterSheetPage {
 		const bladesongEnded = this._state.endBladesongForWeaponAttack(attack);
 
 		// Check for advantage/disadvantage from active states + opted-in conditionals.
-		const hasAdvantage = this._state.hasAdvantageFromStates(attackType) || aggregated.advantage;
+		const hasAdvantage = this._state.hasAdvantageFromStatesForAttack(attack, attackType) || aggregated.advantage;
 		const hasDisadvantage = this._state.hasDisadvantageFromStates(attackType) || aggregated.disadvantage;
 
 		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage, isAttack: true});

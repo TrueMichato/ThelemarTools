@@ -5996,6 +5996,170 @@ export class CharacterSheetPage {
 		});
 	}
 
+	/** Drive the rendered Brutal Strike attack, hit, target, and two-effect dialogs through a real damage roll. */
+	async probeBrutalStrikePlayerPath (source: "XPHB" | "TGTT"): Promise<void> {
+		const attackId = "brutal-strike-e2e";
+		const target = "Training Ogre";
+		const snapshot = await this.page.evaluate(({source, attackId}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			if (!state || !cs._combat) throw new Error("Character Sheet Combat is unavailable");
+			const original = state.toJson();
+			const barbarian = state.getClasses().find((cls: any) => cls.name === "Barbarian");
+			if (barbarian && (barbarian.source !== source || barbarian.level < 17)) {
+				throw new Error(`Expected ${source} Barbarian level 17+, got ${barbarian.source} level ${barbarian.level}`);
+			}
+			if (!barbarian) {
+				state.addClass({name: "Barbarian", source, level: 17});
+				state.setAbilityBase("str", 18);
+			}
+			state.addAttack({
+				id: attackId,
+				name: "Brutal Strike Test Javelin",
+				isRanged: true,
+				isMelee: false,
+				abilityMod: "str",
+				range: "30/120",
+				damage: "1d6",
+				damageType: "piercing",
+			});
+			cs._brutalStrikeProbe = {
+				rollDice: cs.rollDice,
+				d20Source: state._d20RollSource,
+				d20Contexts: [] as string[],
+				diceCalls: [] as {count: number; sides: number}[],
+			};
+			state.setD20RollSource({
+				nextInt: (_max: number, context: string) => {
+					cs._brutalStrikeProbe.d20Contexts.push(context);
+					return 20;
+				},
+			});
+			cs.rollDice = (count: number, sides: number) => {
+				cs._brutalStrikeProbe.diceCalls.push({count, sides});
+				return sides === 10 ? 7 : 3;
+			};
+			state.startCombat();
+			cs._combat._resetTurnActionUsage();
+			cs._renderCharacter();
+			return original;
+		}, {source, attackId});
+
+		try {
+			await this.switchToTab(this.tabCombat);
+			const row = this.page.locator(`.charsheet__attack-item[data-attack-id="${attackId}"]`);
+			const brutalButton = row.locator(".charsheet__attack-brutal");
+			await expect(brutalButton).toBeVisible();
+			await brutalButton.click({modifiers: ["Shift"]});
+			await expect(this._visibleModal(/Brutal Strike.*forgo Advantage/i)).toBeVisible();
+			await this.confirmPrompt("My turn — use Brutal Strike");
+			await expect(this.page.locator(".charsheet__dice-result-breakdown")).toContainText("1d20");
+			const afterAttack = await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs._state;
+				return {
+					d20Contexts: cs._brutalStrikeProbe.d20Contexts,
+					reckless: state.isStateTypeActive("recklessAttack"),
+					receipt: state.queryTurnReceipt(cs._combat._getBrutalStrikeReceipt().key).used,
+				};
+			});
+			expect(afterAttack).toEqual({d20Contexts: ["d20:first"], reckless: true, receipt: true});
+
+			await row.locator(".charsheet__attack-damage").click();
+			await expect(this._visibleModal(/Brutal Strike.*did this attack hit/i)).toBeVisible();
+			await this.confirmPrompt("Hit — apply Brutal Strike");
+			const targetModal = this._visibleModal(/Brutal Strike.*target name/i);
+			await targetModal.locator('input[type="text"]').fill(target);
+			await targetModal.getByRole("button", {name: /^OK$/i}).click();
+			for (const effect of ["Staggering Blow", "Sundering Blow"]) {
+				const modal = this._visibleModal(/Brutal Strike.*effect \d/i);
+				await expect(modal).toBeVisible();
+				await modal.locator("select").selectOption({label: effect});
+				await modal.getByRole("button", {name: /^OK$/i}).click();
+			}
+			const breakdown = this.page.locator(".charsheet__dice-result-breakdown");
+			await expect(breakdown).toContainText("+ 28 (Brutal Strike 4d10 piercing)");
+			await expect(breakdown).toContainText(`Brutal Strike on ${target}: Staggering Blow`);
+			await expect(breakdown).toContainText(`Sundering Blow — ${target}`);
+			await expect(breakdown).toContainText("next saving throw");
+			await expect(breakdown).toContainText("next attack roll made by another creature");
+			await expect(breakdown).toContainText("no enemy stats were changed");
+			const outcome = await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				return {
+					d10: cs._brutalStrikeProbe.diceCalls.filter((call: any) => call.sides === 10),
+					remaining: cs._combat._pendingBrutalStrike,
+					targetEffects: cs._state._data.targetEffects.length,
+				};
+			});
+			expect(outcome.d10).toEqual(Array.from({length: 4}, () => ({count: 1, sides: 10})));
+			expect(outcome.remaining).toBeNull();
+			expect(outcome.targetEffects).toBe(snapshot.targetEffects.length);
+		} finally {
+			await this.page.evaluate(async original => {
+				const cs: any = (globalThis as any).charSheet;
+				const probe = cs._brutalStrikeProbe;
+				if (!probe) return;
+				cs.rollDice = probe.rollDice;
+				cs._state.setD20RollSource(probe.d20Source);
+				delete cs._brutalStrikeProbe;
+				cs._state.loadFromJson(original);
+				cs._renderCharacter();
+			}, snapshot);
+		}
+	}
+
+	/** PHB Reckless does not turn an Overview Unarmed Strike into an Advantage roll. */
+	async probePhbRecklessUnarmed (): Promise<void> {
+		const snapshot = await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			if (!state || !cs._combat) throw new Error("Character Sheet Combat is unavailable");
+			const original = state.toJson();
+			state.addClass({name: "Barbarian", source: "PHB", level: 2});
+			state.setAbilityBase("str", 18);
+			state.addAttack({
+				id: "phb-unarmed-e2e",
+				name: "PHB Unarmed Strike",
+				isUnarmedStrike: true,
+				isMelee: true,
+				abilityMod: "str",
+				damage: "1d4",
+				damageType: "bludgeoning",
+			});
+			state.activateState("recklessAttack");
+			cs._phbUnarmedProbe = {d20Source: state._d20RollSource, d20Contexts: [] as string[]};
+			state.setD20RollSource({
+				nextInt: (_max: number, context: string) => {
+					cs._phbUnarmedProbe.d20Contexts.push(context);
+					return 12;
+				},
+			});
+			cs._renderCharacter();
+			return original;
+		});
+		try {
+			await this.switchToTab(this.tabOverview);
+			const row = this.page.locator(".charsheet__attack-row").filter({hasText: "PHB Unarmed Strike"});
+			await row.locator(".charsheet__attack-btn").click();
+			await expect(this.page.locator(".charsheet__dice-result-breakdown")).toContainText("1d20");
+			const contexts = await this.page.evaluate(() => (globalThis as any).charSheet._phbUnarmedProbe.d20Contexts);
+			expect(contexts).toEqual(["d20:first"]);
+			await this.switchToTab(this.tabCombat);
+			const combatRow = this.page.locator('.charsheet__attack-item[data-attack-id="phb-unarmed-e2e"]');
+			await expect(combatRow).toBeVisible();
+			expect(await combatRow.locator(".charsheet__attack-reckless, .charsheet__attack-brutal").count()).toBe(0);
+		} finally {
+			await this.page.evaluate(original => {
+				const cs: any = (globalThis as any).charSheet;
+				cs._state.setD20RollSource(cs._phbUnarmedProbe.d20Source);
+				delete cs._phbUnarmedProbe;
+				cs._state.loadFromJson(original);
+				cs._renderCharacter();
+			}, snapshot);
+		}
+	}
+
 	/**
 	 * Exercise the production Spectral Chains attack → hit confirmation → rider
 	 * path. When optional bookkeeping is on, this also resolves the compact

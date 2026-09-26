@@ -73979,12 +73979,13 @@ class CharacterSheetState {
 			id: "recklessAttack",
 			name: "Reckless Attack",
 			icon: "⚡",
-			description: "Advantage on melee attacks using STR, but attacks against you have advantage",
+			description: "Advantage on qualifying Strength attacks (PHB: melee weapon; 2024: Strength-based rolls), but attacks against you have advantage",
 			effects: [
 				{type: "advantage", target: "attack:melee:str"},
 				{type: "advantage", target: "attacksAgainst"},
 			],
-			duration: "This turn",
+			duration: "Until the start of your next turn",
+			expiresOnTurnEconomyReset: true,
 			detectPatterns: ["reckless attack"],
 			requiresClass: "barbarian",
 			requiresClassLevel: 2,
@@ -80055,6 +80056,12 @@ class CharacterSheetState {
 		if (stateTypeId === "wrathOfTheSea") return this._getWrathOfTheSeaStateEffects(state);
 		if (stateTypeId === "psionicToughness") return this._getPsionicToughnessStateEffects();
 		if (CharacterSheetState.LUNAR_PHASE_STATE_IDS.includes(stateTypeId)) return this._getLunarPhaseStateEffects(stateTypeId);
+		if (stateTypeId === "recklessAttack") {
+			const barbarian = this._data.classes.find(cls => cls.name === "Barbarian");
+			return ["XPHB", "TGTT"].includes(barbarian?.source)
+				? [{type: "advantage", target: "attack:ranged:str", source: "Reckless Attack"}]
+				: [];
+		}
 		if (stateTypeId !== "rage") return [];
 		const cls = this._data.classes.find(it => {
 			return it.name === "Barbarian" && this._isJuggernautSubclass(it.subclass);
@@ -82072,6 +82079,18 @@ class CharacterSheetState {
 			}
 			return false;
 		});
+	}
+
+	hasAdvantageFromStatesForAttack (attack, rollType) {
+		const phbBarbarian = this._data.classes.some(cls => cls.name === "Barbarian" && cls.source === "PHB");
+		if (!phbBarbarian || !attack?.isUnarmedStrike) return this.hasAdvantageFromStates(rollType);
+		return this.getActiveStateEffects().some(effect =>
+			effect.type === "advantage"
+			&& effect.stateTypeId !== "recklessAttack"
+			&& !effect.conditional
+			&& !effect.target?.includes("Against")
+			&& this._effectMatchesType(effect.target, rollType),
+		);
 	}
 
 	/**

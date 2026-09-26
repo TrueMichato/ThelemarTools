@@ -159,6 +159,38 @@ temporary-HP die is no longer available if its once-per-turn die was spent on
 damage first. Roll-changing fortune interventions remain blocking because later
 critical-hit and on-hit decisions depend on their outcome.
 
+### Barbarian Brutal Strike (XPHB and TGTT)
+
+At Barbarian 9+, a qualifying Strength-based weapon or Unarmed Strike row has a
+**Brutal Strike** control. On your turn, choose it to use Reckless Attack but
+give up **all** sources of Advantage on that one attack. A Disadvantage source,
+including Ctrl/Meta-click, disqualifies the choice even if Reckless would cancel
+the roll to normal; Shift cannot restore Advantage after committing the choice.
+An ineligible or already-used button press warns the player and rolls the
+ordinary attack instead, without applying Brutal Strike.
+The sheet asks you to confirm it is your turn because it does not track the
+active creature in the encounter. Cancelling before the roll spends nothing.
+After commitment the attack rolls one normal d20, the source-qualified use is
+spent for this turn even on a miss, and attackers retain Advantage against you
+until the start of your next turn. The receipt survives save/load and resets
+at your next turn; an older active Reckless state alone is not another use.
+Forgone Advantage does not satisfy Sneak Attack or other follow-ups that
+require an advantaged roll; another independent Sneak Attack trigger still can.
+
+Click **Damage** for that same attack and confirm the hit before choosing the
+target name and effect. A miss rolls no damage; closing the hit prompt leaves
+the pending attack available for a retry. A confirmed hit adds 1d10 at
+Barbarian 9-16 or 2d10 at 17+ of the attack's selected weapon/Unarmed damage
+type. A critical hit doubles these extra dice. Choose Forceful or Hamstring at
+9+, add Staggering and Sundering to the choices at 13+, or pick **two different**
+effects at 17+. The result names the target and gives the effect's actual
+duration/next-roll conditions; track movement, Speed changes, saving throws,
+and the next **other creature's** attack manually. The sheet does not create
+or update enemy records, and the pending on-hit bonus is never saved: a later
+attack, next turn, character switch, or reload cannot revive it. Ordinary PHB
+Reckless remains limited to Strength melee *weapon* attacks; PHB Barbarians
+use Brutal Critical, not this control.
+
 Combat and Play Mode render the same opted-in records as a creature name,
 Grappled/Restrained badges, the recurring force-damage reminder, chain capacity,
 and Release. They deliberately do not expose size, distance, coordinates,
