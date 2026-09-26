@@ -5868,6 +5868,55 @@ export class CharacterSheetPage {
 		}, {src: reSrc, flags: reFlags});
 	}
 
+	/** Create a plain, one-die attack through State; rolls still use the real Combat button and handler. */
+	async prepareDamageGestureAttack (): Promise<void> {
+		await this.switchToTab(this.tabCombat);
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			if (!cs?._state || !cs?._combat) throw new Error("Combat is unavailable");
+			cs._state.addAttack({
+				id: "crit-gesture-probe",
+				name: "Crit Gesture Probe",
+				damage: "1d8",
+				damageType: "slashing",
+				damageBonus: 0,
+				abilityMod: "str",
+				isMelee: true,
+			});
+			cs._damageGestureDiceCalls = [];
+			cs.rollDice = (count: number, sides: number) => {
+				cs._damageGestureDiceCalls.push({count, sides});
+				return count * 4;
+			};
+			cs._combat.renderAttacks();
+		});
+		const button = this.page.locator('.charsheet__attack-item[data-attack-id="crit-gesture-probe"] .charsheet__attack-damage');
+		await expect(button).toBeVisible();
+		await expect(button).toHaveAttribute("aria-label", /Shift-click or press Shift\+Enter for critical damage/i);
+		await expect(this.page.locator(".charsheet__damage-crit-hint")).toContainText(/Shift-click.*Damage.*critical damage/);
+	}
+
+	/** Read the real result toast after activating a Combat attack row's damage button. */
+	async rollCombatDamage ({critical = false, keyboard = false} = {}): Promise<{total: number; breakdown: string; diceCalls: {count: number; sides: number}[]; postAttackOffers: number}> {
+		const button = this.page.locator('.charsheet__attack-item[data-attack-id="crit-gesture-probe"] .charsheet__attack-damage');
+		await this.page.evaluate(() => { (globalThis as any).charSheet._damageGestureDiceCalls = []; });
+		if (keyboard) {
+			await button.focus();
+			await this.page.keyboard.press(critical ? "Shift+Enter" : "Enter");
+		} else await button.click({modifiers: critical ? ["Shift"] : []});
+		await expect(this.page.locator(".charsheet__dice-result-header")).toHaveText("Crit Gesture Probe Damage");
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const result = document.querySelector(".charsheet__dice-result");
+			return {
+				total: Number(result?.querySelector(".charsheet__dice-result-total")?.textContent?.trim()),
+				breakdown: result?.querySelector(".charsheet__dice-result-breakdown")?.textContent?.trim() || "",
+				diceCalls: cs._damageGestureDiceCalls,
+				postAttackOffers: document.querySelectorAll(".cs-post-roll-offer").length,
+			};
+		});
+	}
+
 	/**
 	 * Exercise the production Spectral Chains attack → hit confirmation → rider
 	 * path. When optional bookkeeping is on, this also resolves the compact

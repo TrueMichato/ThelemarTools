@@ -34,6 +34,35 @@ test.describe("Combat Tab", () => {
 		}
 	});
 
+	test("Combat damage button rolls normal dice or critical dice when Shift-clicked", async ({page}) => {
+		const {charSheet} = await createCharacterViaWizard(page, {
+			...PRESET_FIGHTER,
+			name: "Damage Gesture Fighter",
+			skipConditionalPrompt: true,
+		});
+		await charSheet.prepareDamageGestureAttack();
+
+		const normal = await charSheet.rollCombatDamage();
+		expect(normal.diceCalls).toEqual([{count: 1, sides: 8}]);
+		expect(normal.breakdown).not.toContain("(crit)");
+		expect(normal.postAttackOffers).toBe(0);
+
+		const critical = await charSheet.rollCombatDamage({critical: true});
+		expect(critical.diceCalls).toEqual([{count: 1, sides: 8}, {count: 1, sides: 8}]);
+		expect(critical.total).toBe(normal.total + 4);
+		expect(critical.breakdown).toContain("1d8 (crit)");
+		expect(critical.postAttackOffers).toBe(0);
+
+		const anotherNormal = await charSheet.rollCombatDamage();
+		expect(anotherNormal.total).toBe(normal.total);
+		expect(anotherNormal.diceCalls).toEqual(normal.diceCalls);
+		expect(anotherNormal.breakdown).not.toContain("(crit)");
+
+		const keyboardCritical = await charSheet.rollCombatDamage({critical: true, keyboard: true});
+		expect(keyboardCritical.diceCalls).toEqual(critical.diceCalls);
+		expect(keyboardCritical.total).toBe(critical.total);
+	});
+
 	test("should show weapons section", async ({page}) => {
 		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, name: "Weapons Fighter"});
 		await charSheet.switchToTab(charSheet.tabCombat);
