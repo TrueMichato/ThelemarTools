@@ -8335,6 +8335,15 @@ class CharacterSheetClassUtils {
 			const classData = getClassData(classEntry.name, classEntry.source);
 			if (!classData) continue;
 			classesProcessed++;
+			// Recovered features can need their owning class's skill list before the
+			// page has installed its full class catalog on the restored state.
+			const catalog = state._classCatalog || [];
+			const ownerIndex = catalog.findIndex(c => c.name === classEntry.name && c.source === classEntry.source);
+			if (typeof state.setClassCatalog === "function" && (ownerIndex < 0 || catalog[ownerIndex] !== classData)) {
+				state.setClassCatalog(ownerIndex < 0
+					? [...catalog, classData]
+					: catalog.map((entry, index) => index === ownerIndex ? classData : entry));
+			}
 
 			let fullSubclassData = null;
 			if (classEntry.subclass && classData.subclasses) {

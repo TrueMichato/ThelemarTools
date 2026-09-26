@@ -250,6 +250,12 @@ and stores the chosen grant against the feature, so removing the feature
 removes only that grant. A choice with no untrained skills remains pending
 with a warning instead of silently claiming a new proficiency.
 
+Class-feature reconciliation installs each resolved owner in the state class
+catalog before restoring features, so an old save missing this feature can
+queue the same source-correct choice even before the page's full
+brew-merged catalog is available. It refreshes only the matching owner entry
+and preserves other classes and editions in the catalog.
+
 ### Senses
 
 The character sheet models the four canonical D&D 5e senses uniformly.
