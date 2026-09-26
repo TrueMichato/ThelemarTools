@@ -142,20 +142,34 @@ test.describe("Operational item powers in Active States", () => {
 			charges: 1, chargesCurrent: 1,
 			itemPowers: [{
 				id: "charged-step", name: "Charged Step", kind: "toggle", isToggle: true,
-				effectType: "modifySpeed", actionType: "bonus", isReferenceOnly: false, chargesCost: 1,
+				effectType: "modifySpeed", actionType: "bonus", isReferenceOnly: false, chargesCost: 1, chargesCostMax: 2,
 			}],
 		});
 		await status.invokeFromInventory(id, "Charged Step", "Activate");
 		await status.expectWalkSpeed(60);
 		await status.expectActive("overview", id, "Charged Swift Boots");
 		await status.openFromStatusWithKeyboard("overview", id);
-		await status.expectPowerUnavailable("Charged Step");
+		await status.expectPowerFocused("Charged Step", "Deactivate");
 		await status.closeModalWithEscape();
 		await status.expectStatusFocus("overview", id);
 		await status.waitForPersistedPower(id, "charged-step", true);
 		await status.reload(id);
 		await status.expectActive("play", id, "Charged Swift Boots");
 		await status.expectWalkSpeed(60);
+		await status.expectActive("play", id, "Charged Swift Boots");
+		await status.openFromStatusWithKeyboard("play", id);
+		await status.expectPowerFocused("Charged Step", "Deactivate");
+		await status.deactivateFocusedPower("Charged Step");
+		await status.expectFallbackFocus("play");
+		await status.expectAbsent("play", id);
+		await status.expectWalkSpeed(30);
+		await status.waitForPersistedPower(id, "charged-step", false);
+		await status.reload(id);
+		await status.expectAbsent("overview", id);
+		await status.expectWalkSpeed(30);
+		expect(await editor.getRawItem(id)).toMatchObject({chargesCurrent: 0, itemPowerStates: {"charged-step": {active: false}}});
+		await status.openFromInventory(id);
+		await status.expectPowerUnavailable("Charged Step");
 		await status.expectNoSyntheticStates("Charged Swift Boots", "Charged Step");
 	});
 

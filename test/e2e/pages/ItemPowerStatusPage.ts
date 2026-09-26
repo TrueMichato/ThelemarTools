@@ -82,7 +82,7 @@ export class ItemPowerStatusPage {
 	}
 
 	async expectPowerUnavailable (powerName: string): Promise<void> {
-		await expect(this.powerButton(powerName)).toHaveText("Deactivate");
+		await expect(this.powerButton(powerName)).toHaveText("Activate");
 		await expect(this.powerButton(powerName)).toBeDisabled();
 	}
 

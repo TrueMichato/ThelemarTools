@@ -44198,6 +44198,7 @@ class CharacterSheetState {
 				if (power.activationFingerprint && usableFingerprints.has(`${item.id}|${power.activationFingerprint}`)) continue;
 				const requiresEquipped = power.requiresEquipped !== false;
 				const isActive = (!requiresEquipped || !!item.equipped) && (!item.requiresAttunement || !!item.attuned);
+				const isTogglingOff = !!power.isToggle && !!item.itemPowerStates?.[power.id]?.active;
 				if (activeOnly && !isActive) continue;
 				const chargesCurrent = item.chargesCurrent ?? item.charges ?? 0;
 				const usesCurrent = power.usesMax
@@ -44210,16 +44211,16 @@ class CharacterSheetState {
 						? "Equip this item to use its powers."
 						: item.requiresAttunement && !item.attuned
 							? "Attune to this item to use its powers."
-							: power.chargesCost > chargesCurrent
+							: !isTogglingOff && power.chargesCost > chargesCurrent
 								? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
-								: power.usesMax && usesCurrent <= 0
+								: !isTogglingOff && power.usesMax && usesCurrent <= 0
 									? `${power.name} has no uses remaining.`
-									: power.usageType === "resource" && !power.resourceName
+									: !isTogglingOff && power.usageType === "resource" && !power.resourceName
 										? "This power has no resource name configured."
-										: power.resourceName && !resource
+										: !isTogglingOff && power.resourceName && !resource
 											? `Resource "${power.resourceName}" is unavailable.`
-											: resource && resource.current < power.resourceCost
-												? `Requires ${power.resourceCost} ${power.resourceName}; ${resource.current} remaining.`
+											: !isTogglingOff && resource && resource.current < (power.resourceCost ?? 1)
+												? `Requires ${power.resourceCost ?? 1} ${power.resourceName}; ${resource.current} remaining.`
 												: null;
 				out.push({
 					...power,
@@ -44232,7 +44233,7 @@ class CharacterSheetState {
 					usesCurrent,
 					resourceCurrent: resource?.current ?? null,
 					resourceMax: resource?.max ?? null,
-					isActive: !!item.itemPowerStates?.[power.id]?.active,
+					isActive: isTogglingOff,
 					recharge: item.recharge || null,
 					isAvailable: !unavailableReason,
 					unavailableReason,
@@ -44438,32 +44439,34 @@ class CharacterSheetState {
 				isActive: power.isToggle ? !!found.gem.runtime.powerStates[localPowerId] : false,
 			};
 		}
-		if (power.isDestructive && !confirmed) return {ok: false, needsConfirmation: true, power};
+		const isDeactivating = power.isToggle && power.isActive;
+		if (power.isDestructive && !confirmed && !isDeactivating) return {ok: false, needsConfirmation: true, power};
 		const entry = this._findInventoryRow(itemId);
 		if (!entry?.item) return {ok: false, reason: "Item not found."};
-		let isActive = power.isActive;
-		if (power.isToggle) {
-			if (!entry.item.itemPowerStates) entry.item.itemPowerStates = {};
-			isActive = !entry.item.itemPowerStates[power.id]?.active;
-			entry.item.itemPowerStates[power.id] = {active: isActive};
+		const selectedChargesCost = isDeactivating ? 0 : chargesCost == null ? power.chargesCost : Number(chargesCost);
+		if (!isDeactivating && chargesCost != null && (!Number.isInteger(selectedChargesCost) || selectedChargesCost < (power.chargesCost || 0))) {
+			return {ok: false, reason: `Choose at least ${power.chargesCost || 0} charges for ${power.name}.`};
 		}
-		const selectedChargesCost = chargesCost == null ? power.chargesCost : Number(chargesCost);
-		if (power.chargesCostMax && (selectedChargesCost < power.chargesCost || selectedChargesCost > power.chargesCostMax)) {
+		if (!isDeactivating && power.chargesCostMax && (selectedChargesCost < power.chargesCost || selectedChargesCost > power.chargesCostMax)) {
 			return {ok: false, reason: `Choose between ${power.chargesCost} and ${power.chargesCostMax} charges.`};
 		}
+		const currentCharges = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
 		if (selectedChargesCost) {
-			const current = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
-			if (current < selectedChargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
-			entry.item.chargesCurrent = current - selectedChargesCost;
+			if (currentCharges < selectedChargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
 		}
-		if (power.resourceName && !this.useResourceCharge(power.resourceName, power.resourceCost)) {
+		const usesCurrent = power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null;
+		if (!isDeactivating && power.usesMax && usesCurrent <= 0) return {ok: false, reason: `No uses remaining for ${power.name}.`};
+		if (!isDeactivating && power.resourceName && !this.useResourceCharge(power.resourceName, power.resourceCost ?? 1)) {
 			return {ok: false, reason: `Not enough ${power.resourceName} for ${power.name}.`};
 		}
-		if (power.usesMax) {
-			if (!entry.item.itemPowerUses) entry.item.itemPowerUses = {};
-			const current = entry.item.itemPowerUses[power.usesKey] ?? power.usesMax;
-			if (current <= 0) return {ok: false, reason: `No uses remaining for ${power.name}.`};
-			entry.item.itemPowerUses[power.usesKey] = current - 1;
+		if (selectedChargesCost) entry.item.chargesCurrent = currentCharges - selectedChargesCost;
+		if (!isDeactivating && power.usesMax) {
+			entry.item.itemPowerUses ||= {};
+			entry.item.itemPowerUses[power.usesKey] = usesCurrent - 1;
+		}
+		if (power.isToggle) {
+			entry.item.itemPowerStates ||= {};
+			entry.item.itemPowerStates[power.id] = {active: !isDeactivating};
 		}
 		const result = {
 			ok: true,
@@ -44473,10 +44476,10 @@ class CharacterSheetState {
 			usesCurrent: power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null,
 			resourceCurrent: power.resourceName ? this.getResource(power.resourceName)?.current ?? null : null,
 			chargesCost: selectedChargesCost,
-			isActive,
-			destroyed: !!power.isDestructive,
+			isActive: power.isToggle ? !isDeactivating : power.isActive,
+			destroyed: !!power.isDestructive && !isDeactivating,
 		};
-		if (power.isDestructive) this.removeItem(itemId);
+		if (power.isDestructive && !isDeactivating) this.removeItem(itemId);
 		return result;
 	}
 

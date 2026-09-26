@@ -7032,7 +7032,7 @@ class CharacterSheetInventory {
 			return storedResult;
 		}
 		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
-		if (power?.chargesCostMax && (
+		if (power?.chargesCostMax && !(power.isToggle && power.isActive) && (
 			selectedChargesCost < power.chargesCost
 			|| selectedChargesCost > power.chargesCostMax
 			|| selectedChargesCost > power.chargesCurrent
@@ -7198,12 +7198,12 @@ class CharacterSheetInventory {
 					continue;
 				}
 				let chargeChoice = null;
-				if (power.chargesCostMax > power.chargesCost) {
+				if (power.chargesCostMax > power.chargesCost && !(power.isToggle && power.isActive)) {
 					chargeChoice = e_({tag: "select", clazz: "form-control input-xs", title: `Charges to spend on ${power.name}`});
 					const maxSpend = Math.min(power.chargesCostMax, power.chargesCurrent);
 					for (let cost = power.chargesCost; cost <= maxSpend; cost++) {
 						const castLevel = power.castLevel ? power.castLevel + cost - power.chargesCost : null;
-						chargeChoice.append(e_({tag: "option", value: String(cost), text: `${cost} charge${cost === 1 ? "" : "s"}${castLevel ? ` · level ${castLevel}` : ""}`}));
+						chargeChoice.append(e_({tag: "option", value: String(cost), txt: `${cost} charge${cost === 1 ? "" : "s"}${castLevel ? ` · level ${castLevel}` : ""}`}));
 					}
 					body.append(chargeChoice);
 				}

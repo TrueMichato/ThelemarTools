@@ -2435,6 +2435,10 @@ the existing Powers modal focused on that power and restores focus to the row
 or a stable tab/Full Sheet control on close. Resource unavailability does not
 hide a power that is still active. Rests and save/reload preserve the item's
 activation; deactivation and unequip/unattune remove the projected row.
+An active operational item toggle may be turned off through its existing power
+control even with no charges/uses/resources left; deactivation spends nothing.
+Activation validates all costs before mutating the item's power flag, charges,
+or uses, and still obeys equip/attunement and reference-only restrictions.
 
 **Typed weapon damage dice.** `damageRiders[]` lines carry a persistent `id`,
 `dice`, one `damageType` (a canonical 5e damage name), and optional
