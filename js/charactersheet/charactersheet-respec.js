@@ -4888,11 +4888,11 @@ class CharacterSheetRespec {
 		const featuresToRemove = removalPlan.features;
 		const willRemoveCount = featuresToRemove.length;
 
-		if (removalPlan.ambiguous.length) {
+		if (removalPlan.identityError || removalPlan.ambiguous.length) {
 			content.append(e_({
 				tag: "div",
 				clazz: "ve-alert ve-alert--danger mb-2",
-				txt: this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
+				txt: removalPlan.identityError || this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
 			}));
 		}
 
@@ -4973,12 +4973,14 @@ class CharacterSheetRespec {
 		cancelBtn.addEventListener("click", () => doClose());
 
 		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Change Subclass"});
-		applyBtn.disabled = !!removalPlan.ambiguous.length;
+		applyBtn.disabled = !!(removalPlan.identityError || removalPlan.ambiguous.length);
+		const errorMessage = e_({tag: "p", clazz: "text-danger mt-2"});
+		errorMessage.setAttribute("role", "alert");
 		applyBtn.addEventListener("click", async () => {
-			if (removalPlan.ambiguous.length) {
+			if (removalPlan.identityError || removalPlan.ambiguous.length) {
 				JqueryUtil.doToast({
 					type: "danger",
-					content: this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
+					content: removalPlan.identityError || this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
 				});
 				return;
 			}
@@ -5003,15 +5005,23 @@ class CharacterSheetRespec {
 
 			if (!confirmed) return;
 
-			await this._engine.stageCandidateMutation(async ({state}) => {
-				const previousState = this._state;
-				this._state = state;
-				try {
-					await this._applySubclassChange(level, history, currentSubclass, selectedSubclass);
-				} finally {
-					this._state = previousState;
-				}
-			});
+			applyBtn.disabled = true;
+			errorMessage.textContent = "";
+			try {
+				await this._engine.stageCandidateMutation(async ({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						await this._applySubclassChange(level, history, currentSubclass, selectedSubclass);
+					} finally {
+						this._state = previousState;
+					}
+				});
+			} catch (error) {
+				errorMessage.textContent = `Could not change subclass: ${error.message || String(error)}`;
+				applyBtn.disabled = false;
+				return;
+			}
 
 			doClose();
 			closeParentModal();
@@ -5020,9 +5030,41 @@ class CharacterSheetRespec {
 		});
 
 		btnRow.append(cancelBtn, applyBtn);
-		content.append(btnRow);
+		content.append(btnRow, errorMessage);
 
 		modalInner.append(content);
+	}
+
+	_getSubclassRemovalIdentity (subclass, classContext) {
+		if (!subclass) return {subclass: null};
+		if (!subclass.source) {
+			return {
+				subclass,
+				error: `Cannot safely change ${subclass.name || "this subclass"}: its source is missing from the saved choice.`,
+			};
+		}
+		if (subclass.shortName || !classContext?.name || !classContext?.source) return {subclass};
+
+		const matchesClass = cls => cls?.name === classContext.name && cls.source === classContext.source;
+		const matchesSubclass = candidate => candidate?.name === subclass.name && candidate.source === subclass.source;
+		const aliases = new Set([
+			...(this._state.getClasses() || [])
+				.filter(matchesClass)
+				.map(cls => cls.subclass)
+				.filter(matchesSubclass),
+			...(this._page.getClasses?.() || [])
+				.filter(matchesClass)
+				.flatMap(cls => cls.subclasses || [])
+				.filter(matchesSubclass),
+		].map(candidate => candidate.shortName).filter(Boolean));
+		if (aliases.size > 1) {
+			return {
+				subclass,
+				error: `Cannot safely change ${subclass.name}: its class and catalog disagree about the short name for ${subclass.source}.`,
+			};
+		}
+		const [shortName] = aliases;
+		return {subclass: shortName ? {...subclass, shortName} : subclass};
 	}
 
 	/**
@@ -5033,10 +5075,13 @@ class CharacterSheetRespec {
 	 * all identify the outgoing subclass exactly. Anything weaker is unsafe to
 	 * remove and must block the staged change instead of becoming stale state.
 	 * @param {object} subclass - The subclass {name, shortName, source}
-	 * @returns {{features:Array, ambiguous:Array}}
+	 * @returns {{features:Array, ambiguous:Array, identityError?:string}}
 	 */
 	_getSubclassFeatureRemovalPlan (subclass, classContext = null) {
 		if (!subclass) return {features: [], ambiguous: []};
+		const identity = this._getSubclassRemovalIdentity(subclass, classContext);
+		if (identity.error) return {features: [], ambiguous: [], identityError: identity.error};
+		subclass = identity.subclass;
 		const features = this._state.getFeatures();
 		const out = {features: [], ambiguous: []};
 		features.forEach(f => {
@@ -5050,7 +5095,11 @@ class CharacterSheetRespec {
 
 			const matchesName = (!!subclass.name && f.subclassName === subclass.name)
 				|| (!!subclass.shortName && f.subclassShortName === subclass.shortName);
-			if (!matchesName) return;
+			if (!matchesName) {
+				if (!subclass.shortName && f.subclassShortName && f.subclassSource === subclass.source
+					&& (!classContext?.name || f.className === classContext.name)) out.ambiguous.push(f);
+				return;
+			}
 
 			if (f.subclassSource) {
 				if (subclass.source && f.subclassSource !== subclass.source) return;
@@ -5075,6 +5124,9 @@ class CharacterSheetRespec {
 			.map(feature => `${feature.name || "Unnamed feature"}${feature.source ? `|${feature.source}` : ""}`)
 			.join(", ");
 		const remainder = ambiguousFeatures.length > 3 ? ` and ${ambiguousFeatures.length - 3} more` : "";
+		if (!subclass?.shortName && ambiguousFeatures.some(feature => feature.subclassShortName && feature.subclassSource)) {
+			return `Cannot safely change ${subclass?.name || "this subclass"}: ${ambiguousFeatures.length} feature${ambiguousFeatures.length === 1 ? "" : "s"} (${labels}${remainder}) use a subclass short name missing from this saved choice and unavailable in the class catalog. Restore the exact subclass identity before changing it.`;
+		}
 		return `Cannot safely change ${subclass?.name || "this subclass"}: ${ambiguousFeatures.length} legacy subclass feature${ambiguousFeatures.length === 1 ? "" : "s"} (${labels}${remainder}) ${ambiguousFeatures.length === 1 ? "is" : "are"} missing subclassSource and exact class/subclass/entity-source provenance. Repair ${ambiguousFeatures.length === 1 ? "it" : "them"} with subclassSource "${subclass?.source || "the correct source"}" or remove them manually, then reopen Respec.`;
 	}
 
@@ -5114,6 +5166,7 @@ class CharacterSheetRespec {
 		// Refuse the mutation before touching candidate state if legacy provenance is
 		// too weak to decide whether a source-less row belongs to this subclass.
 		const removalPlan = this._getSubclassFeatureRemovalPlan(oldSubclass, history.class);
+		if (removalPlan.identityError) throw new Error(removalPlan.identityError);
 		if (removalPlan.ambiguous.length) {
 			throw new Error(this._getSubclassFeatureAmbiguityMessage(oldSubclass, removalPlan.ambiguous));
 		}

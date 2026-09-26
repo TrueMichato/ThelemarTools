@@ -60,6 +60,27 @@ export interface StateTransactionStep {
 	expect?: StateTransactionExpectation[];
 }
 
+interface RespecFeatureSkillState {
+	subclass: {shortName: string; source: string} | null | undefined;
+	proficiencyBonus: number;
+	skills: Record<string, {level: number; total: number; proficiency: number}>;
+	grants: Record<string, string[]>;
+	features: Array<{
+		id: string;
+		className: string;
+		subclassShortName: string;
+		subclassSource: string;
+		source: string;
+	}>;
+}
+
+interface RespecClassSkillOwnerState {
+	subclass: {shortName?: string; source?: string} | null;
+	features: Array<{id: string; name: string; source: string; subclassSource: string}>;
+	grantSources: string[];
+	progressionSources: string[];
+}
+
 /**
  * Page Object Model for the Character Sheet page
  * Provides common navigation and interaction methods
@@ -1467,11 +1488,13 @@ export class CharacterSheetPage {
 
 	async getRespecNestedDecisionSnapshot (): Promise<Array<{
 		id: string;
+		semanticKey: string;
 		label: string;
 		type: string;
 		status: string;
 		characterLevel: number;
 		optionCount: number;
+		options: unknown[];
 		effectiveOptionCount: number;
 		meta: unknown;
 		provenance: {ownerUid?: string} | null;
@@ -1484,17 +1507,269 @@ export class CharacterSheetPage {
 				.filter((decision: any) => decision.scope === "nested")
 				.map((decision: any) => ({
 					id: decision.id,
+					semanticKey: decision.semanticKey,
 					label: decision.label,
 					type: decision.type,
 					status: decision.status,
 					characterLevel: decision.characterLevel,
 					optionCount: decision.options?.length || 0,
+					options: decision.options || [],
 					effectiveOptionCount: cs?._respec?._getDecisionOptions?.(decision)?.length || 0,
 					meta: decision.meta,
 					provenance: decision.provenance || null,
 					selection: decision.selection,
 				}));
 		});
+	}
+
+	async prepareJesterSkillRespecFixture (fixture: {state: object; feature: object}): Promise<void> {
+		await this.page.locator("#charsheet-btn-new").click();
+		await this.page.evaluate(({state: saved, feature}) => {
+			const cs: any = (globalThis as any).charSheet;
+			if (cs?._state?.loadFromJson(saved) === false) throw new Error("Could not load the Jester save");
+			cs._state.addFeature({...feature, featureType: "Subclass", isSubclassFeature: true});
+			const choices = cs._state.getPendingFeatureChoices().filter((choice: any) =>
+				choice.kind === "skill" && choice.featureName === "Bonus Proficiencies");
+			if (choices.length !== 1 || !cs._state.fulfillFeatureChoice(choices[0].id, "acrobatics")) {
+				throw new Error("Could not establish Jester's owned Acrobatics choice");
+			}
+			cs._renderCharacter();
+		}, fixture);
+	}
+
+	async getRespecFeatureSkillSnapshot (): Promise<{
+		live: RespecFeatureSkillState;
+		draft: RespecFeatureSkillState;
+		children: Array<{owner: string; status: string; selection: unknown}>;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const read = (state: any) => ({
+				subclass: state.getClasses().find((cls: any) => cls.name === "Bard" && cls.source === "TGTT")?.subclass,
+				proficiencyBonus: state.getProficiencyBonus(),
+				skills: Object.fromEntries(["acrobatics", "persuasion", "performance"].map(skill => [
+					skill,
+					{
+						level: state.getSkillProficiency(skill),
+						total: state.getSkillBreakdown(skill).total,
+						proficiency: state.getSkillBreakdown(skill).components
+							.filter((component: any) => component.type === "proficiency")
+							.reduce((sum: number, component: any) => sum + component.value, 0),
+					},
+				])),
+				grants: Object.fromEntries(["acrobatics", "persuasion", "performance"].map(skill => [
+					skill,
+					state._data.grantedProficiencies?.skills?.[skill] || [],
+				])),
+				features: state.getFeatures()
+					.filter((feature: any) => feature.name === "Bonus Proficiencies")
+					.map((feature: any) => ({
+						id: feature.id,
+						className: feature.className,
+						subclassShortName: feature.subclassShortName,
+						subclassSource: feature.subclassSource,
+						source: feature.source,
+					})),
+			});
+			return {
+				live: read(cs._state),
+				draft: read(cs._respec._engine.state),
+				children: cs._respec._engine.manifest.decisions
+					.filter((decision: any) => decision.type === "nestedSkill")
+					.map((decision: any) => ({
+						owner: decision.provenance?.ownerUid,
+						status: decision.status,
+						selection: decision.selection,
+					})),
+			};
+		});
+	}
+
+	async getRespecClassSkillOwnership (className: string, skill: string): Promise<{
+		live: RespecClassSkillOwnerState;
+		draft: RespecClassSkillOwnerState;
+	}> {
+		return this.page.evaluate(({className, skill}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const read = (state: any) => {
+				const cls = state.getClasses().find((entry: any) => entry.name === className);
+				if (!cls) throw new Error(`No ${className} class on the character`);
+				const skillKey = state._getProgressionOwnershipKey("skills", skill);
+				return {
+					subclass: cls.subclass ? {
+						shortName: cls.subclass.shortName,
+						source: cls.subclass.source,
+					} : null,
+					features: state.getFeatures()
+						.filter((feature: any) => feature.className === className && feature.subclassSource)
+						.map((feature: any) => ({
+							id: feature.id,
+							name: feature.name,
+							source: feature.source,
+							subclassSource: feature.subclassSource,
+						})),
+					grantSources: state._data.grantedProficiencies?.skills?.[skillKey] || [],
+					progressionSources: state._data.progressionOwnership?.values?.skills?.[skillKey]?.sources || [],
+				};
+			};
+			return {
+				live: read(cs._state),
+				draft: read(cs._respec?._engine?.state || cs._state),
+			};
+		}, {className, skill});
+	}
+
+	async getRespecLiveJson (): Promise<unknown> {
+		return this.page.evaluate(() => (globalThis as any).charSheet._state.toJson());
+	}
+
+	async getRespecBlockingDecisions (): Promise<Array<{
+		id: string;
+		type: string;
+		label: string;
+		status: string;
+		count: number;
+		characterLevel: number;
+		optionCount: number;
+	}>> {
+		return this.page.evaluate(() => {
+			const engine = (globalThis as any).charSheet._respec._engine;
+			const blocked = new Set(engine.getValidation().errors.map((issue: any) => issue.decisionId));
+			return engine.manifest.decisions
+				.filter((decision: any) => blocked.has(decision.id))
+				.map((decision: any) => ({
+					id: decision.id,
+					type: decision.type,
+					label: decision.label,
+					status: decision.status,
+					count: decision.count,
+					characterLevel: decision.characterLevel,
+					optionCount: decision.options?.length || 0,
+				}));
+		});
+	}
+
+	async stageRequiredRespecOptions (label: string, level: number): Promise<void> {
+		const decision = (await this.getRespecBlockingDecisions()).find(item =>
+			item.label === label && item.characterLevel === level);
+		if (!decision || !decision.count) throw new Error(`No missing ${label} decision at level ${level}`);
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator(`.charsheet__level-entry[data-level="${level}"] .charsheet__level-entry-edit`).click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
+		await expect(editor).toBeVisible();
+		const options = editor.locator(".charsheet__respec-option input:enabled");
+		expect(await options.count()).toBeGreaterThanOrEqual(decision.count);
+		for (let i = 0; i < decision.count; i++) await options.nth(i).check();
+		await editor.locator("button", {hasText: "Stage Choice"}).click();
+		await expect.poll(async () => (await this.getRespecBlockingDecisions())
+			.some(item => item.id === decision.id)).toBe(false);
+	}
+
+	async stageRequiredRespecOptionalFeatures (label: string, level: number): Promise<void> {
+		const decision = (await this.getRespecBlockingDecisions()).find(item =>
+			item.type === "optionalFeatures" && item.label === label && item.characterLevel === level);
+		if (!decision || !decision.count) throw new Error(`No missing ${label} optional feature decision at level ${level}`);
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator(`.charsheet__level-entry[data-level="${level}"] .charsheet__level-entry-edit`).click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		await expect(modal.locator("#respec-optfeat-count")).toHaveText("0");
+		const options = modal.locator('input[type="checkbox"]:enabled');
+		expect(await options.count()).toBeGreaterThanOrEqual(decision.count);
+		for (let i = 0; i < decision.count; i++) await options.nth(i).check();
+		await modal.locator("button.ve-btn-primary", {hasText: "Apply Changes"}).click();
+		await expect.poll(async () => (await this.getRespecBlockingDecisions())
+			.some(item => item.id === decision.id)).toBe(false);
+	}
+
+	async getRespecSubclassDecisionLabel (className: string): Promise<string> {
+		return this.page.evaluate(name => {
+			const decisions = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions || [];
+			const decision = decisions.find((item: any) => item.type === "subclass" && item.className === name);
+			if (!decision) throw new Error(`No ${name} subclass decision was discovered`);
+			return decision.label;
+		}, className);
+	}
+
+	async getRespecSkillBonusSnapshot (skill: string): Promise<{
+		live: {level: number; total: number; proficiency: number};
+		draft: {level: number; total: number; proficiency: number};
+		proficiencyBonus: number;
+	}> {
+		return this.page.evaluate(value => {
+			const cs: any = (globalThis as any).charSheet;
+			const read = (state: any) => {
+				const breakdown = state.getSkillBreakdown(value);
+				return {
+					level: state.getSkillProficiency(value),
+					total: breakdown.total,
+					proficiency: breakdown.components
+						.filter((component: any) => component.type === "proficiency")
+						.reduce((sum: number, component: any) => sum + component.value, 0),
+				};
+			};
+			return {
+				live: read(cs._state),
+				draft: read(cs._respec?._engine?.state || cs._state),
+				proficiencyBonus: cs._state.getProficiencyBonus(),
+			};
+		}, skill);
+	}
+
+	async failNextRespecSubclassChangeAfterMutation (message: string): Promise<void> {
+		await this.page.evaluate(errorMessage => {
+			const respec = (globalThis as any).charSheet._respec;
+			const original = respec._applySubclassChange;
+			respec._applySubclassChange = async (...args: any[]) => {
+				respec._applySubclassChange = original;
+				await original.apply(respec, args);
+				throw new Error(errorMessage);
+			};
+		}, message);
+	}
+
+	async stageRespecSubclassChoice (
+		label: string,
+		subclassName: string,
+		source: string,
+		level: number,
+		expectedError?: string,
+	): Promise<void> {
+		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: label}).first();
+		if (!await row.isVisible()) {
+			await this.page.locator(`.charsheet__level-entry[data-level="${level}"] .charsheet__level-entry-edit`).click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const modal = this.page.locator(".charsheet__respec-subclass-modal");
+		await expect(modal).toBeVisible();
+		await modal.locator('input[placeholder="Search subclasses..."]').fill(subclassName);
+		const selected = modal.locator(".charsheet__respec-feat-item")
+			.filter({has: this.page.locator(`a[data-vet-source="${source}"]`)})
+			.filter({hasText: subclassName}).first();
+		await expect(selected).toBeVisible({timeout: 10000});
+		await selected.click();
+		await modal.getByRole("button", {name: "Change Subclass"}).click();
+		await this.page.locator("button.ve-btn-primary").filter({hasText: "Change Subclass"}).click();
+		if (expectedError) {
+			await expect(modal.getByRole("alert")).toContainText(expectedError);
+			await expect(modal.getByRole("button", {name: "Change Subclass"})).toBeEnabled();
+			return;
+		}
+		await expect(modal).toHaveCount(0);
+	}
+
+	async retryRespecSubclassChoice (): Promise<void> {
+		const modal = this.page.locator(".charsheet__respec-subclass-modal");
+		await modal.getByRole("button", {name: "Change Subclass"}).click();
+		const confirm = this.page.locator("button.ve-btn-primary").filter({hasText: "Change Subclass"});
+		await expect(confirm).toBeVisible();
+		await confirm.click();
+		await expect(modal).toHaveCount(0);
 	}
 
 	async stageFirstNestedRespecChoice (): Promise<void> {
@@ -1546,9 +1821,9 @@ export class CharacterSheetPage {
 		throw new Error("Nested Respec choices did not converge after 12 staged decisions.");
 	}
 
-	async stageNestedRespecChoice (label: string, optionName: string, optionSource?: string): Promise<void> {
+	async stageNestedRespecChoice (label: string, optionName: string, optionSource?: string, type?: string): Promise<void> {
 		const nested = await this.getRespecNestedDecisionSnapshot();
-		const decision = nested.find(item => item.label === label);
+		const decision = nested.find(item => item.label === label && (!type || item.type === type));
 		if (!decision) throw new Error(`No nested Respec decision named "${label}" was discovered.`);
 		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
 		if (!await row.isVisible()) {

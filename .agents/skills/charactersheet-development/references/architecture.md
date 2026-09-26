@@ -661,6 +661,24 @@ overlapping manual, origin, and progression grants survive unrelated edits;
 materialized features, modifiers, spells, resources, and configuration are
 covered by receipts.
 
+Subclass-change preview and mutation use the same exact old-subclass identity:
+legacy history may have only `name|source`, while stored features identify their
+owner by `subclassShortName|subclassSource`. Respec can fill the missing alias
+from a matching class entry or unique catalog match; conflicts and missing
+source block the change. Feature-choice skill receipts relinquish only the
+outgoing owner's grant, while untracked legacy skills and independent owners
+remain preserved. Do not match or delete a feature by display name alone.
+New prose-derived feature skill prompts without a decision key are consumed
+only when the candidate's exact catalog feature maps to one manifest child
+with matching owner, level, count, legal options, and any provided parent key;
+unmatched prompts block the stage, while pre-existing unknown prompts remain
+untouched. Untagged "proficiency with one of the following skills of your
+choice" lists must produce the same descriptor as their pending prompt;
+scanning unrelated fixed proficiency or equipment prose must not invent a
+skill child. Mechanics may replace the level's decisions array via
+`updateLevelChoice`: stage finalization must reacquire the current decision
+row, or roll back if it vanished, rather than writing to a detached row.
+
 Exact `Artificer|EFA` Replicate Magic Item choices use the same graph. The
 `artificerPlan` family creates stable acquisition slots at class levels
 2/6/10/14/18; `artificerPlanReplacement` creates an optional opportunity at

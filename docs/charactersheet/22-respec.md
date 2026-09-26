@@ -531,6 +531,33 @@ from different sources do not share uses. Triggered pools such as Cruel restore
 their stable-key `turnReceipts` entry across a same-owner rebuild and prune that
 exact owner/source receipt when removed.
 
+When an older level-history subclass choice stores only `name` and `source`,
+Respec resolves its missing `shortName` from the matching current class or an
+exact class/subclass catalog entry before both the cascade preview and removal.
+It removes features by class and subclass provenance, not by feature display
+name. Conflicting aliases or missing source block the swap rather than leaving
+an old feature behind or removing another owner's grant. A feature choice with
+unique tracked provenance relinquishes only its own skill proficiency; an
+untracked legacy skill or overlapping manual/other-owner proficiency remains
+untouched. Newly required feature choices must be completed before Apply.
+Feature activation can also queue a prose-derived skill prompt without a
+decision key. A **new** prompt is consumed only when its exact feature belongs
+to the candidate level catalog and exactly one manifest skill child matches
+its source-qualified owner, level, count, options, and any supplied decision
+lineage. Unknown older prompts remain preserved; unmatched new prompts roll
+back the stage instead of silently disappearing. Rollback restores the
+previous draft and dirty/Undo state. Repeated replacements move only the
+outgoing owner's grant. If staging mechanics replace a level's decisions
+array, Respec writes the selection to the current row; if that decision was
+removed altogether, the transaction rolls back rather than reporting a
+completed choice. An explicit untagged list of named skills ("proficiency
+with one of the following skills of your choice") is also represented by a
+single skill decision; a fixed proficiency alongside unrelated equipment
+options is not. A fresh level-3 Monk can replace Shackled with Five Animals,
+choose Animal Versatility's skill, and Apply/Undo/reload without repairing an
+unrelated decision. The outgoing Performance proficiency is retired while an
+independent Acrobatics proficiency survives.
+
 The nested editor is rendered inline in the level editor rather than opening a
 second modal. Rows expose graph depth and resolved/deferred/missing/invalid/
 ambiguous status. After a parent or nested choice is staged, the still-open

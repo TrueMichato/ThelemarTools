@@ -31,6 +31,8 @@ export interface CharacterPreset {
 	skillCount?: number;
 	/** Exact class-skill choices to make before filling any remaining required slots. */
 	preferredSkills?: string[];
+	/** Opt in to a required class-step artisan-tool or instrument choice. */
+	classToolCategory?: "artisan" | "instrument";
 	masteryCount?: number;
 	optFeatCount?: number;
 	/** Starting-equipment branch. Defaults to gold for historical presets. */
@@ -1452,6 +1454,7 @@ export async function createCharacterViaWizard (
 	// Presets' `skillCount` can under-count what the class grants; top up from
 	// the live counter so the picker never silently gates Next.
 	await builder.topUpClassSkillsToRequired();
+	if (preset.classToolCategory) await builder.selectClassToolProficiency(preset.classToolCategory);
 	// Expertise (Rogue / Bard / TGTT-Ranger) — must come AFTER class skills
 	// are picked so the expertise list isn't empty.
 	await builder.selectFirstAvailableExpertise(4);

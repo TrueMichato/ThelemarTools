@@ -213,6 +213,40 @@ describe("CharacterSheetRespecEngine", () => {
 		expect(engine.isDirty).toBe(false);
 	});
 
+	it("persists a staged graph choice when its mechanics normalize the level history", () => {
+		engine.begin();
+		const decision = engine.manifest.decisions.find(item => item.type === "skills");
+		const liveBefore = state.toJson();
+
+		engine.stageGraphMutation(decision.id, ["perception"], {
+			apply: ({state: candidate}) => candidate.updateLevelChoice(1, {note: "Choice staged"}),
+		});
+
+		expect(engine.manifest.decisions.find(item => item.id === decision.id)).toMatchObject({
+			selection: ["perception"],
+			status: "resolved",
+		});
+		expect(engine.state.getLevelHistoryEntry(1).choices.skills).toEqual(["perception"]);
+		expect(state.toJson()).toEqual(liveBefore);
+	});
+
+	it("rolls back if mechanics remove the staged decision instead of replacing its row", () => {
+		engine.begin();
+		const decision = engine.manifest.decisions.find(item => item.type === "skills");
+		const beforeState = engine.state.toJson();
+		const beforeManifest = JSON.parse(JSON.stringify(engine.manifest));
+
+		expect(() => engine.stageGraphMutation(decision.id, ["perception"], {
+			apply: ({state: candidate}) => {
+				const entry = candidate.getLevelHistoryEntry(1);
+				entry.decisions = entry.decisions.filter(item => item.semanticKey !== decision.semanticKey);
+			},
+		})).toThrow("staged progression decision is no longer available");
+		expect(engine.state.toJson()).toEqual(beforeState);
+		expect(engine.manifest).toEqual(beforeManifest);
+		expect(engine.isDirty).toBe(false);
+	});
+
 	it("applies a valid candidate atomically and supports one-step undo", async () => {
 		engine.begin();
 		engine.state.updateLevelChoice(1, {skills: ["perception"]});
@@ -294,6 +328,7 @@ describe("CharacterSheetRespecEngine", () => {
 			});
 		})).rejects.toThrow(/unrepresented pending choice/i);
 		expect(engine.state.toJson()).toEqual(before);
+		expect(engine.isDirty).toBe(false);
 	});
 
 	it("preserves ledger ownership through an incomplete-to-complete manifest transition", async () => {

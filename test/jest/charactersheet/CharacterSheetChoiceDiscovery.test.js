@@ -12,6 +12,34 @@ const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
 
 describe("Character Sheet choice discovery contract", () => {
+	it("discovers an untagged subclass skill choice with named animal styles", () => {
+		const feature = {
+			name: "Animal Versatility",
+			source: "TGTT",
+			className: "Monk",
+			classSource: "TGTT",
+			subclassShortName: "Five Animals",
+			subclassSource: "TGTT",
+			level: 3,
+			entries: [
+				"You gain proficiency with one of the following skills of your choice: Acrobatics (Monkey), Perception (Snake), Athletics (Tiger), Insight (Crane), or Sleight of Hand (Mantis).",
+			],
+		};
+		const descriptors = CharacterSheetClassUtils.getChoiceDescriptors(feature, {sourcePath: feature.name})
+			.filter(descriptor => descriptor.kind === "skill");
+		expect(descriptors).toHaveLength(1);
+		expect(descriptors[0]).toMatchObject({count: 1});
+		expect(descriptors[0].options.toSorted()).toEqual([
+			"acrobatics", "perception", "athletics", "insight", "sleight of hand",
+		].toSorted());
+		expect(CharacterSheetClassUtils.getChoiceDescriptors({
+			...feature,
+			name: "Fixed Proficiencies",
+			entries: ["You gain proficiency with Acrobatics and Performance. Choose A or B for your equipment."],
+		}, {sourcePath: "Fixed Proficiencies"}).filter(descriptor => descriptor.kind === "skill"))
+			.toEqual([]);
+	});
+
 	it("normalizes union, ability, proficiency, and spell choice shapes", () => {
 		const entity = {
 			name: "Nested Example",
