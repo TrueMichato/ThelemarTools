@@ -5098,6 +5098,10 @@ class CharacterSheetClassUtils {
 			{
 				...(resolved || {}),
 				...(option || {}),
+				// The definition may be borrowed from another class source, but
+				// the acquired instance belongs to the class making the choice.
+				className: className || option?.className || resolved?.className,
+				classSource: classSource || option?.classSource || resolved?.classSource,
 				level: undefined,
 				entries: resolved?.entries ?? option?.entries,
 				description: resolved?.description || option?.description,
@@ -5105,8 +5109,8 @@ class CharacterSheetClassUtils {
 				acquisitionLevel: level,
 			},
 			{
-				className: option?.className || className,
-				classSource: option?.classSource || classSource,
+				className: className || option?.className,
+				classSource: classSource || option?.classSource,
 				level,
 				featureType,
 				subclassName: option?.subclassName || resolved?.subclassName || subclassName,
@@ -5187,15 +5191,27 @@ class CharacterSheetClassUtils {
 			subclassFeatures: page?.getSubclassFeatures?.() || [],
 			optionalFeatures: page?.getOptionalFeatures?.() || [],
 		};
+		const activeClass = page?.getClasses?.()?.find(cls =>
+			norm(cls?.name) === norm(className) && norm(cls?.source) === norm(classSource));
+		const declaredParent = activeClass && CharacterSheetClassUtils.getLevelFeatures(
+			activeClass,
+			acquisitionLevel,
+			null,
+			optionCatalogs.classFeatures || [],
+			optionCatalogs.subclassFeatures || [],
+		).find(feature => norm(feature.name) === norm(parentFeature) && norm(feature.className) === norm(className));
 		const parentDefinition = [
 			...(optionCatalogs.classFeatures || []),
 			...(optionCatalogs.subclassFeatures || []),
 		].find(feature =>
 			norm(feature?.name) === norm(parentFeature)
 				&& (!className || norm(feature?.className) === norm(className))
-				&& (!classSource || norm(feature?.classSource) === norm(classSource))
+				&& (declaredParent
+					? norm(feature?.classSource) === norm(declaredParent.classSource)
+						&& norm(feature?.source) === norm(declaredParent.source)
+					: !classSource || norm(feature?.classSource) === norm(classSource))
 				&& Number(feature?.level) === acquisitionLevel);
-		const effectiveParentSource = parentSource || parentDefinition?.source || null;
+		const effectiveParentSource = parentSource || parentDefinition?.source || declaredParent?.source || null;
 		const semanticKey = sourceDecisionKey
 			|| decision?.semanticKey
 			|| globalThis.CharacterSheetProgression?.getSemanticKey?.({
@@ -5219,12 +5235,38 @@ class CharacterSheetClassUtils {
 				|| (
 					norm(item?.name) === norm(oldChoice.choice || oldChoice.name)
 					&& (!oldChoice.source || norm(item?.source) === norm(oldChoice.source))
+					&& (!item.sourceDecisionKey || !semanticKey || item.sourceDecisionKey === semanticKey)
 				);
 
 			if (oldChoice) {
 				const oldFeatures = (state._data?.features || []).filter(item => matchesScope(item) && matchesOld(item));
-				oldFeatures.forEach(item => state.removeFeature(item.id || item.name, item.source));
-				if (!oldFeatures.length && oldChoice.choice) state.removeModifiersByName?.(oldChoice.choice);
+				if (!oldFeatures.length) {
+					const definitionClassSource = oldChoice.ref?.split("|")[2];
+					const legacyFeatures = (state._data?.features || []).filter(item =>
+						matchesOld(item)
+						&& norm(item?.parentFeature) === norm(parentFeature)
+						&& norm(item?.className) === norm(className)
+						&& Number(item?.acquisitionLevel || item?.level) === acquisitionLevel
+						&& (
+							(semanticKey && item.sourceDecisionKey === semanticKey)
+							|| (
+								definitionClassSource
+								&& norm(item?.classSource) === norm(definitionClassSource)
+								&& norm(definitionClassSource) !== norm(classSource)
+								&& (!item.sourceDecisionKey || item.sourceDecisionKey === semanticKey)
+								&& !state.getClasses().some(cls =>
+									norm(cls.name) === norm(className) && norm(cls.source) === norm(definitionClassSource))
+							)
+						),
+					);
+					if (legacyFeatures.length > 1) throw new Error(`Cannot identify a unique owner for the previous "${oldChoice.choice}" choice.`);
+					oldFeatures.push(...legacyFeatures);
+				}
+				oldFeatures.forEach(item => state.removeFeature(item));
+				if (!oldFeatures.length && oldChoice.choice
+					&& !(state._data?.features || []).some(item => matchesOld(item))) {
+					state.removeModifiersByName?.(oldChoice.choice);
+				}
 
 				state._data.chosenSubfeatures = (state._data.chosenSubfeatures || []).filter(record =>
 					!(
