@@ -2427,6 +2427,14 @@ ends the toggle. Catalog rehydration adds a missing speed power to older rows ev
 they already have unrelated powers, and replaces the old XDMG reference-only card.
 Custom items with `modifySpeed` and no authored speed power stay passive while equipped
 and attuned; never infer a toggle from a bare multiplier.
+`getActiveSpeedItemPowers()` is a read-only status projection of the first
+operational speed power on each exact equipped/attuned inventory wrapper. Overview,
+Combat, and Play Mode render it beside real active states, never in
+`_data.activeStates`; each row has only a **Manage power** button, which opens
+the existing Powers modal focused on that power and restores focus to the row
+or a stable tab/Full Sheet control on close. Resource unavailability does not
+hide a power that is still active. Rests and save/reload preserve the item's
+activation; deactivation and unequip/unattune remove the projected row.
 
 **Typed weapon damage dice.** `damageRiders[]` lines carry a persistent `id`,
 `dice`, one `damageType` (a canonical 5e damage name), and optional

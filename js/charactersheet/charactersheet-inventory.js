@@ -7140,15 +7140,19 @@ class CharacterSheetInventory {
 		return returnResult ? result : true;
 	}
 
-	async _showItemPowersModal (itemId) {
+	async _showItemPowersModal (itemId, {focusPowerId = null, getFocusRestoreTarget = null} = {}) {
 		const item = this._state.getItems().find(it => it.id === itemId);
 		const powers = this._state.getItemPowers?.()
 			.filter(power => power.itemId === itemId && !power.isInlinePrimary) || [];
-		if (!item || !powers.length) return;
+		if (!item || !powers.length || (focusPowerId && !powers.some(power => power.id === focusPowerId && !power.isReferenceOnly))) {
+			if (focusPowerId) JqueryUtil.doToast({type: "warning", content: "This item power is no longer available."});
+			return;
+		}
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${item.name} — Powers`,
 			isMinHeight0: true,
 			isWidth100: true,
+			getFocusRestoreTarget,
 		});
 		const root = e_({tag: "div", clazz: "charsheet__item-powers-modal cs-adaptive-panel"});
 		const status = e_({tag: "div", clazz: "charsheet__item-powers-status"});
@@ -7172,12 +7176,12 @@ class CharacterSheetInventory {
 			const entries = powers.filter(power => power.actionType === group.key);
 			if (!entries.length) continue;
 			const section = e_({tag: "section", clazz: "charsheet__item-power-group"});
-			section.append(e_({tag: "h5", clazz: "charsheet__item-power-group-title", text: group.label}));
+			section.append(e_({tag: "h5", clazz: "charsheet__item-power-group-title", txt: group.label}));
 			for (const power of entries) {
 				const row = e_({tag: "div", clazz: "charsheet__item-power"});
 				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 				const body = e_({tag: "div", clazz: "charsheet__item-power-body"});
-				body.append(e_({tag: "div", clazz: "charsheet__item-power-name", text: power.name}));
+				body.append(e_({tag: "div", clazz: "charsheet__item-power-name", txt: power.name}));
 				const metaParts = [];
 				if (power.chargesCost) metaParts.push(`${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
 				if (power.usesMax) metaParts.push(`${power.usesCurrent}/${power.usesMax} uses`);
@@ -7186,8 +7190,8 @@ class CharacterSheetInventory {
 				if (power.spellAttackBonus != null) metaParts.push(`${power.spellAttackBonus >= 0 ? "+" : ""}${power.spellAttackBonus} attack`);
 				if (power.isDestructive) metaParts.push("destroys item");
 				if (power.isReferenceOnly) metaParts.push("rules reference");
-				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", text: metaParts.join(" · ")}));
-				if (power.description) body.append(e_({tag: "div", clazz: "charsheet__item-power-description", text: power.description}));
+				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", txt: metaParts.join(" · ")}));
+				if (power.description) body.append(e_({tag: "div", clazz: "charsheet__item-power-description", txt: power.description}));
 				if (power.isReferenceOnly) {
 					row.append(body);
 					section.append(row);
@@ -7206,20 +7210,25 @@ class CharacterSheetInventory {
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
-					text: power.invokeLabel || (power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"),
+					txt: power.invokeLabel || (power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"),
 				});
+				if (power.id === focusPowerId) use.dataset.itemPowerFocus = "";
 				use.disabled = !power.isAvailable;
 				use.title = power.unavailableReason || `${power.invokeLabel || (power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke")} ${power.name}`;
-				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {
-					closeModal: () => doClose(true),
-					chargesCost: chargeChoice ? parseInt(chargeChoice.value, 10) : null,
-				}));
+				use.addEventListener("click", async () => {
+					const used = await this._pInvokeItemPower(itemId, power.id, {
+						closeModal: focusPowerId ? null : () => doClose(true),
+						chargesCost: chargeChoice ? parseInt(chargeChoice.value, 10) : null,
+					});
+					if (focusPowerId && used) doClose(true);
+				});
 				row.append(body, use);
 				section.append(row);
 			}
 			root.append(section);
 		}
 		modalInner.append(root);
+		if (focusPowerId) CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-item-power-focus]"});
 	}
 
 	_renderItemDetails (item) {

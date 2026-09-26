@@ -44390,6 +44390,26 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Display-only projection of active item speed powers. Speed applies the first
+	 * speed power on an equipped, attuned-if-required item; the status must follow
+	 * that same power rather than treating any saved toggle flag as an effect.
+	 */
+	getActiveSpeedItemPowers () {
+		return this.getItems().flatMap(item => {
+			if (!item.equipped || (item.requiresAttunement && !item.attuned) || !item.modifySpeed) return [];
+			const power = item.itemPowers?.find(it => it.effectType === "modifySpeed");
+			if (!power?.id || !power.isToggle || power.isReferenceOnly || !item.itemPowerStates?.[power.id]?.active) return [];
+			return [{
+				itemId: item.id,
+				itemName: item.name,
+				itemSource: item.source,
+				id: power.id,
+				name: power.name,
+			}];
+		});
+	}
+
+	/**
 	 * Atomically validate and consume an item power's resource.
 	 * Spell/result resolution remains with the calling UI, but charge mutation has one owner.
 	 */
