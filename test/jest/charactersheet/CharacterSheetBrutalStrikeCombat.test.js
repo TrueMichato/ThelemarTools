@@ -81,27 +81,29 @@ describe("Brutal Strike at the actual attack/damage call sites", () => {
 		const restored = new CharacterSheetState();
 		restored.loadFromJson(state.toJson());
 		expect(restored.queryTurnReceipt(receiptKey).used).toBe(true);
-		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
-		expect(combat._lastAttackContext.mode).toBe("advantage");
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true})).toBe(false);
+		expect(rolls).toHaveLength(1);
+		expect(combat._lastAttackContext.mode).toBe("normal");
 		state.advanceRound();
 		expect(state.queryTurnReceipt(receiptKey).used).toBe(false);
 	});
 
 	it.each(["ctrlKey", "metaKey"])("rejects a %s disadvantage source before the choice, even if Reckless would cancel it", async key => {
 		const {state, combat, rolls} = makeCombat();
-		await combat._rollRecklessAttack("sword", {[key]: true}, {brutalStrike: true});
+		expect(await combat._rollRecklessAttack("sword", {[key]: true}, {brutalStrike: true})).toBe(false);
 		expect(CharacterSheetModal.pGetUserBoolean).not.toHaveBeenCalled();
-		expect(combat._lastAttackContext.mode).toBe("normal");
+		expect(rolls).toHaveLength(0);
+		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
 		expect(state.queryTurnReceipt(combat._getBrutalStrikeReceipt().key).used).toBe(false);
 	});
 
 	it("rejects an active Disadvantage source even when Reckless cancels it to a normal roll", async () => {
-		const {state, combat} = makeCombat();
+		const {state, combat, rolls} = makeCombat();
 		state.activateState("prone");
-		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
-		expect(combat._lastAttackContext.mode).toBe("normal");
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true})).toBe(false);
+		expect(rolls).toHaveLength(0);
 		expect(CharacterSheetModal.pGetUserBoolean).not.toHaveBeenCalled();
-		expect(state.isStateTypeActive("recklessAttack")).toBe(true);
+		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
 		expect(state.queryTurnReceipt(combat._getBrutalStrikeReceipt().key).used).toBe(false);
 	});
 
@@ -130,17 +132,41 @@ describe("Brutal Strike at the actual attack/damage call sites", () => {
 		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
 	});
 
-	it("explains an already-used Brutal Strike when its button rolls an ordinary attack", async () => {
+	it("rejects an already-used Brutal Strike without rolling or changing Reckless exposure", async () => {
 		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
-		const {combat, rolls} = makeCombat();
+		const {state, combat, rolls} = makeCombat();
 		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
-		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
-		expect(rolls).toHaveLength(2);
-		expect(combat._lastAttackContext.mode).toBe("advantage");
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true})).toBe(false);
+		expect(rolls).toHaveLength(1);
+		expect(combat._lastAttackContext.mode).toBe("normal");
+		expect(state.isStateTypeActive("recklessAttack")).toBe(true);
 		expect(toast).toHaveBeenCalledWith(expect.objectContaining({
 			type: "warning",
 			content: expect.stringContaining("already used this turn"),
 		}));
+	});
+
+	it("retains out-of-combat use across reload until an explicit new turn without starting combat", async () => {
+		const {state, combat, rolls} = makeCombat();
+		state.endCombat();
+		const receiptKey = combat._getBrutalStrikeReceipt().key;
+		expect(state.isInCombat()).toBe(false);
+		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
+		expect(state.queryTurnReceipt(receiptKey).used).toBe(true);
+		state.loadFromJson(state.toJson());
+		expect(state.queryTurnReceipt(receiptKey).used).toBe(true);
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true})).toBe(false);
+		expect(rolls).toHaveLength(1);
+		state.resetTurnEconomy();
+		combat._resetTurnActionUsage();
+		expect(state.isInCombat()).toBe(false);
+		expect(state.queryTurnReceipt(receiptKey).used).toBe(false);
+		const nextTurn = new CharacterSheetState();
+		nextTurn.loadFromJson(state.toJson());
+		expect(nextTurn.queryTurnReceipt(receiptKey).used).toBe(false);
+		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
+		expect(rolls).toHaveLength(2);
+		expect(state.queryTurnReceipt(receiptKey).used).toBe(true);
 	});
 
 	it("does not deactivate an already-active Reckless state when the player cancels Brutal Strike", async () => {
@@ -160,17 +186,17 @@ describe("Brutal Strike at the actual attack/damage call sites", () => {
 		expect(state.isStateTypeActive("recklessAttack")).toBe(true);
 		state.resetTurnEconomy();
 		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
-		await combat._rollRecklessAttack("sword", null, {brutalStrike: true, isOwnTurn: false});
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true, isOwnTurn: false})).toBe(false);
 		expect(state.isStateTypeActive("recklessAttack")).toBe(false);
-		expect(rolls).toHaveLength(2);
-		expect(combat._pendingBrutalStrike).toBeNull();
+		expect(rolls).toHaveLength(1);
+		expect(combat._getPendingBrutalStrikeForAttack("sword")).toBeNull();
 	});
 
 	it("uses an already-active Reckless state on the player's turn but never offers Brutal Strike off-turn", async () => {
 		const {state, combat, rolls} = makeCombat();
 		state.activateState("recklessAttack");
-		await combat._rollRecklessAttack("sword", null, {brutalStrike: true, isOwnTurn: false});
-		expect(combat._lastAttackContext.mode).toBe("advantage");
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true, isOwnTurn: false})).toBe(false);
+		expect(rolls).toHaveLength(0);
 		expect(state.queryTurnReceipt(combat._getBrutalStrikeReceipt().key).used).toBe(false);
 		expect(state.isStateTypeActive("recklessAttack")).toBe(true);
 		await combat._rollRecklessAttack("sword", {shiftKey: true}, {brutalStrike: true});
@@ -185,15 +211,16 @@ describe("Brutal Strike at the actual attack/damage call sites", () => {
 			{source: "XPHB", attack: {...SWORD, abilityMod: "dex"}},
 			{source: "XPHB", attack: {...SWORD, isSpell: true}},
 		]) {
-			const {combat, rolls} = makeCombat(config);
-			await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
+			const {state, combat, rolls} = makeCombat(config);
+			expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true})).toBe(false);
 			expect(CharacterSheetModal.pGetUserBoolean).not.toHaveBeenCalled();
-			expect(rolls).toHaveLength(1);
+			expect(rolls).toHaveLength(0);
+			expect(state.isStateTypeActive("recklessAttack")).toBe(false);
 		}
 		const {combat, rolls} = makeCombat();
-		await combat._rollRecklessAttack("sword", null, {brutalStrike: true, isOwnTurn: false});
+		expect(await combat._rollRecklessAttack("sword", null, {brutalStrike: true, isOwnTurn: false})).toBe(false);
 		expect(CharacterSheetModal.pGetUserBoolean).not.toHaveBeenCalled();
-		expect(rolls).toHaveLength(1);
+		expect(rolls).toHaveLength(0);
 		expect(combat._state.isStateTypeActive("recklessAttack")).toBe(false);
 	});
 
@@ -321,11 +348,16 @@ describe("Brutal Strike at the actual attack/damage call sites", () => {
 	it("describes Forceful and Hamstring for the named target without inventing enemy state", async () => {
 		const {state, combat, results} = makeCombat();
 		const targetEffectsBefore = state._data.targetEffects.length;
+		state.setSpeed("walk", 35);
+		state._data.customModifiers.speed.walk = -5;
+		state._data.itemBonuses.speedBonus = {...state._data.itemBonuses.speedBonus, walk: 6};
+		expect(state.getWalkSpeed()).toBe(36);
 		await combat._rollRecklessAttack("sword", null, {brutalStrike: true});
 		await combat._rollDamage("sword");
 		expect(results.at(-1).subtitle).toContain("Brutal Strike on Ogre: Forceful Blow");
 		expect(results.at(-1).subtitle).toContain("pushed 15 feet straight away");
-		expect(results.at(-1).subtitle).toContain("half your Speed straight toward it");
+		expect(results.at(-1).subtitle).toContain("move up to 18 feet (half your current 36-foot Speed) straight toward it");
+		expect(results.at(-1).subtitle).toContain("move manually");
 		expect(results.at(-1).subtitle).not.toMatch(/DC \d+/);
 		state.resetTurnEconomy();
 		combat._resetTurnActionUsage();

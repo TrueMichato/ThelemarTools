@@ -599,6 +599,10 @@ The pending bonus is bound to the attack ID, roll ID, character data object,
 and turn ID and stays transient, so a fresh attack or a load cannot attach an
 old bonus to another roll. Reckless exposure is a separate active state that
 persists across other creatures' turns but expires on `resetTurnEconomy()`.
+The receipt also gates uses outside combat; Play Mode's visible **Reset turn**
+calls the same boundary and saves it without requiring start/stop combat. An
+invalid Brutal button click must not roll or activate Reckless. Forceful computes half the
+current `getWalkSpeed()` (rounded down) and displays it for manual movement.
 Enemy-target effects are manual result text, not persisted target effects.
 
 `pruneTurnReceipts` requires both `ownerUid` and `sourceUid`; broad owner-only

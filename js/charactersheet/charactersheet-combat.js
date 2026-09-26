@@ -1465,7 +1465,7 @@ class CharacterSheetCombat {
 			&& !attack.isSpell
 			&& !attack.isSpellAttack
 			&& abilityUsed === "str"
-			&& this._state.isStateTypeActive?.("recklessAttack")
+			&& (this._state.isStateTypeActive?.("recklessAttack") || opts.activateRecklessOnCommit)
 			&& !hasDisadvantage
 			&& !event?.ctrlKey
 			&& !event?.metaKey
@@ -1476,7 +1476,8 @@ class CharacterSheetCombat {
 				: hasDisadvantage || event?.ctrlKey || event?.metaKey
 					? "a Disadvantage source is present"
 					: "this attack does not qualify";
-			JqueryUtil.doToast({type: "warning", content: `Brutal Strike unavailable: ${reason}. Rolling this attack without it.`});
+			JqueryUtil.doToast({type: "warning", content: `Brutal Strike unavailable: ${reason}. No attack rolled; Reckless Attack unchanged.`});
+			return false;
 		}
 		let brutalReceipt = null;
 		if (isBrutalEligible) {
@@ -1498,6 +1499,19 @@ class CharacterSheetCombat {
 				return false;
 			}
 			brutalReceipt = committed.receipt;
+			if (opts.activateRecklessOnCommit && !this._state.isStateTypeActive?.("recklessAttack")) {
+				try {
+					this._state.activateState("recklessAttack");
+				} catch (error) {
+					this._state.rollbackTurnReceipt(brutalReceipt);
+					throw error;
+				}
+				if (!this._state.isStateTypeActive("recklessAttack")) {
+					this._state.rollbackTurnReceipt(brutalReceipt);
+					JqueryUtil.doToast({type: "danger", content: "Reckless Attack could not be activated; no Brutal Strike attack was rolled."});
+					return false;
+				}
+			}
 		}
 
 		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
@@ -1771,23 +1785,24 @@ class CharacterSheetCombat {
 		const attack = this._findAttackById?.(attackId);
 		if (!attack) return this._rollAttack(attackId, event);
 
-		// Activate provisionally so the normal roll pipeline sees the scoped
-		// advantage. Commit the UI/persistence only after all cancellable pre-roll
-		// prompts succeed; otherwise a cancelled attack must not expose the
-		// character to enemy advantage.
+		// Ordinary Reckless needs its state before resolving Advantage. Brutal
+		// Strike activates it only after eligibility and the player's choice.
 		const didActivate = !this._state.isStateTypeActive?.("recklessAttack");
-		if (opts.isOwnTurn === false) return this._rollAttack(attackId, event, {...opts, brutalStrike: false});
-		if (didActivate) this._state.activateState?.("recklessAttack");
+		if (opts.isOwnTurn === false && !opts.brutalStrike) return this._rollAttack(attackId, event, opts);
+		if (didActivate && !opts.brutalStrike) this._state.activateState?.("recklessAttack");
 
 		let didRoll;
 		try {
-			didRoll = await this._rollAttack(attackId, event, opts);
+			didRoll = await this._rollAttack(attackId, event, {
+				...opts,
+				activateRecklessOnCommit: opts.brutalStrike === true && didActivate,
+			});
 		} catch (e) {
-			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			if (didActivate && this._state.isStateTypeActive?.("recklessAttack")) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
 			throw e;
 		}
 		if (didRoll === false) {
-			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			if (didActivate && this._state.isStateTypeActive?.("recklessAttack")) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
 			return false;
 		}
 
@@ -1855,8 +1870,9 @@ class CharacterSheetCombat {
 			JqueryUtil.doToast({type: "warning", content: "Name the target to resolve Brutal Strike; no enemy state is stored."});
 			return false;
 		}
+		const walkSpeed = this._state.getWalkSpeed();
 		const options = [
-			["Forceful Blow", "pushed 15 feet straight away from you; you may move up to half your Speed straight toward it without provoking Opportunity Attacks"],
+			["Forceful Blow", `pushed 15 feet straight away from you; you may move up to ${Math.floor(walkSpeed / 2)} feet (half your current ${walkSpeed}-foot Speed) straight toward it without provoking Opportunity Attacks (move manually)`],
 			["Hamstring Blow", "Speed reduced by 15 feet until the start of your next turn; only the most recent Hamstring Blow applies"],
 		];
 		if (pending.barbarianLevel >= 13) {

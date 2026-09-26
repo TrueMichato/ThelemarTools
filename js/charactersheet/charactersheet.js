@@ -23648,6 +23648,7 @@ class CharacterSheetPage {
 		this._combat?.resetTurnAttackUsage?.();
 		this._renderCompanions?.();
 		this._playMode?._refreshOpenDrawer?.("companions");
+		void this._saveCurrentCharacter();
 	}
 
 	startCombat () {

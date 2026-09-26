@@ -65,7 +65,7 @@ the skill reference at
 | Spec file | Purpose |
 |---|---|
 | `tgtt-player-party.spec.ts` | DM Screen Party Tracker integration smoke test (not a character build). |
-| `character-sheet-brutal-strike.spec.ts` | Focused XPHB Barbarian level-17 Combat UI probe with deterministic d20/damage rolls and two manual target effects; PHB Reckless Unarmed exclusion in Overview and Combat. |
+| `character-sheet-brutal-strike.spec.ts` | Focused XPHB Barbarian level-17 Combat UI probe with deterministic d20/damage rolls and two manual target effects; PHB Reckless Unarmed exclusion in Overview and Combat; invalid-click rejection and out-of-combat Play Mode Reset turn with numeric Forceful movement. |
 
 ## How to add a new entry
 

@@ -12,3 +12,9 @@ test("PHB Barbarian keeps Reckless off Unarmed Strikes in the Overview and Comba
 	await sheet.goto();
 	await sheet.probePhbRecklessUnarmed();
 });
+
+test("2024 Brutal Strike rejects invalid clicks and resets a noncombat turn from Play Mode", async ({page}) => {
+	const sheet = new CharacterSheetPage(page);
+	await sheet.goto();
+	await sheet.probeBrutalStrikeOutOfCombatTurn();
+});

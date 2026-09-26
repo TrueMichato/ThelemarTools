@@ -9,7 +9,8 @@ npx playwright test test/e2e/specs/<name>.spec.ts  # single spec
 
 The local dev server is started automatically by `playwright.config.ts` on port 8080.
 `character-sheet-brutal-strike.spec.ts` exercises the rendered 2024 Barbarian
-Brutal Strike attack/damage dialogs and PHB Unarmed Reckless exclusion
+Brutal Strike attack/damage dialogs, PHB Unarmed Reckless exclusion, and
+out-of-combat **Reset turn** recovery with numeric Forceful movement
 independently of the full TGTT build; the
 Juggernaut MEGA spec repeats the same player-path check for a built TGTT Barbarian.
 

@@ -166,14 +166,18 @@ At Barbarian 9+, a qualifying Strength-based weapon or Unarmed Strike row has a
 give up **all** sources of Advantage on that one attack. A Disadvantage source,
 including Ctrl/Meta-click, disqualifies the choice even if Reckless would cancel
 the roll to normal; Shift cannot restore Advantage after committing the choice.
-An ineligible or already-used button press warns the player and rolls the
-ordinary attack instead, without applying Brutal Strike.
+An ineligible or already-used button press warns the player without rolling
+or changing Reckless Attack. Use the separate **Reckless** button for an
+ordinary Reckless attack instead.
 The sheet asks you to confirm it is your turn because it does not track the
 active creature in the encounter. Cancelling before the roll spends nothing.
 After commitment the attack rolls one normal d20, the source-qualified use is
 spent for this turn even on a miss, and attackers retain Advantage against you
 until the start of your next turn. The receipt survives save/load and resets
 at your next turn; an older active Reckless state alone is not another use.
+Outside combat the same once-per-turn limit applies: open **Play Mode** and
+click **Reset turn** when your next turn begins, without starting combat. This
+reset saves the cleared turn receipt so a reload does not restore the spent use.
 Forgone Advantage does not satisfy Sneak Attack or other follow-ups that
 require an advantaged roll; another independent Sneak Attack trigger still can.
 
@@ -184,7 +188,9 @@ Barbarian 9-16 or 2d10 at 17+ of the attack's selected weapon/Unarmed damage
 type. A critical hit doubles these extra dice. Choose Forceful or Hamstring at
 9+, add Staggering and Sundering to the choices at 13+, or pick **two different**
 effects at 17+. The result names the target and gives the effect's actual
-duration/next-roll conditions; track movement, Speed changes, saving throws,
+duration/next-roll conditions. Forceful shows half the current walking Speed
+in feet (rounded down); move the character and target manually. Track Speed
+changes, saving throws,
 and the next **other creature's** attack manually. The sheet does not create
 or update enemy records, and the pending on-hit bonus is never saved: a later
 attack, next turn, character switch, or reload cannot revive it. Ordinary PHB

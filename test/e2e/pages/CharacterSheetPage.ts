@@ -6165,6 +6165,125 @@ export class CharacterSheetPage {
 		}
 	}
 
+	/** Exercise the out-of-combat once-per-turn receipt using Play Mode's visible Reset turn control. */
+	async probeBrutalStrikeOutOfCombatTurn (): Promise<void> {
+		const attackId = "brutal-noncombat-e2e";
+		const snapshot = await this.page.evaluate(id => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			if (!state || !cs._combat) throw new Error("Character Sheet Combat is unavailable");
+			if (cs._currentCharacterId) throw new Error("Out-of-combat probe requires an unselected sheet");
+			const original = state.toJson();
+			cs._createNewCharacter();
+			const characterId = cs._currentCharacterId;
+			if (!characterId || state.getId() !== characterId) throw new Error("Could not create a saved character identity");
+			if (state.isInCombat()) throw new Error("Out-of-combat probe requires no active combat");
+			state.addClass({name: "Barbarian", source: "XPHB", level: 9});
+			state.setAbilityBase("str", 18);
+			state.addAttack({
+				id, name: "Noncombat Brutal Test Sword", isMelee: true,
+				abilityMod: "str", damage: "1d8", damageType: "slashing",
+			});
+			state.setSpeed("walk", 35);
+			state._data.customModifiers.speed.walk = -5;
+			cs._brutalNoncombatProbe = {source: state._d20RollSource, contexts: [] as string[]};
+			state.setD20RollSource({
+				nextInt: (_max: number, context: string) => {
+					cs._brutalNoncombatProbe.contexts.push(context);
+					return 12;
+				},
+			});
+			cs._renderCharacter();
+			return {original, characterId};
+		}, attackId);
+		const readTurn = () => this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			return {
+				inCombat: cs._state.isInCombat(),
+				reckless: cs._state.isStateTypeActive("recklessAttack"),
+				used: cs._state.queryTurnReceipt(cs._combat._getBrutalStrikeReceipt().key).used,
+				contexts: cs._brutalNoncombatProbe.contexts,
+			};
+		});
+		try {
+			await this.switchToTab(this.tabCombat);
+			const row = this.page.locator(`.charsheet__attack-item[data-attack-id="${attackId}"]`);
+			const button = row.locator(".charsheet__attack-brutal");
+			await expect(button).toBeVisible();
+			await button.click({modifiers: ["Meta"]});
+			expect(await readTurn()).toEqual({inCombat: false, reckless: false, used: false, contexts: []});
+
+			await button.click();
+			await this.confirmPrompt("My turn — use Brutal Strike");
+			expect(await readTurn()).toEqual({inCombat: false, reckless: true, used: true, contexts: ["d20:first"]});
+
+			await this.page.evaluate(async id => {
+				const cs: any = (globalThis as any).charSheet;
+				if (!await cs._saveCurrentCharacter({isReturnStatus: true})) throw new Error("First Brutal receipt was not persisted");
+				await cs._pLoadCharacter(id);
+				if (cs._currentCharacterId !== id) throw new Error("Persisted character did not reload");
+			}, snapshot.characterId);
+			expect(await readTurn()).toEqual({inCombat: false, reckless: true, used: true, contexts: ["d20:first"]});
+			await button.click();
+			expect(await readTurn()).toEqual({inCombat: false, reckless: true, used: true, contexts: ["d20:first"]});
+
+			await this.enterPlayMode();
+			const reset = this.page.locator(".pm-economy__reset");
+			await expect(reset).toBeVisible();
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const probe = cs._brutalNoncombatProbe;
+				probe.originalSave = cs._saveCurrentCharacter;
+				probe.resetSaves = 0;
+				cs._saveCurrentCharacter = (...args: any[]) => {
+					probe.resetSaves++;
+					probe.resetSavePromise = probe.originalSave.call(cs, ...args);
+					return probe.resetSavePromise;
+				};
+			});
+			await reset.click();
+			expect(await readTurn()).toEqual({inCombat: false, reckless: false, used: false, contexts: ["d20:first"]});
+			expect(await this.page.evaluate(() => (globalThis as any).charSheet._brutalNoncombatProbe.resetSaves)).toBeGreaterThan(0);
+			await this.page.evaluate(async id => {
+				const cs: any = (globalThis as any).charSheet;
+				await cs._brutalNoncombatProbe.resetSavePromise;
+				await cs._pLoadCharacter(id);
+				if (cs._currentCharacterId !== id) throw new Error("Reset character did not reload");
+			}, snapshot.characterId);
+			expect(await readTurn()).toEqual({inCombat: false, reckless: false, used: false, contexts: ["d20:first"]});
+
+			await this.exitPlayMode();
+			await this.switchToTab(this.tabCombat);
+			await button.click();
+			await this.confirmPrompt("My turn — use Brutal Strike");
+			expect(await readTurn()).toEqual({inCombat: false, reckless: true, used: true, contexts: ["d20:first", "d20:first"]});
+
+			const walkSpeed = await this.page.evaluate(() => (globalThis as any).charSheet._state.getWalkSpeed());
+			expect(walkSpeed).toBe(45);
+			await row.locator(".charsheet__attack-damage").click();
+			await this.confirmPrompt("Hit — apply Brutal Strike");
+			const targetModal = this._visibleModal(/Brutal Strike.*target name/i);
+			await targetModal.locator('input[type="text"]').fill("Training Ogre");
+			await targetModal.getByRole("button", {name: /^OK$/i}).click();
+			const effectModal = this._visibleModal(/Brutal Strike.*effect 1/i);
+			await effectModal.locator("select").selectOption({label: "Forceful Blow"});
+			await effectModal.getByRole("button", {name: /^OK$/i}).click();
+			await expect(this.page.locator(".charsheet__dice-result-breakdown"))
+				.toContainText("move up to 22 feet (half your current 45-foot Speed)");
+			await expect(this.page.locator(".charsheet__dice-result-breakdown")).toContainText("move manually");
+		} finally {
+			await this.page.evaluate(({original}) => {
+				const cs: any = (globalThis as any).charSheet;
+				if (cs._brutalNoncombatProbe.originalSave) cs._saveCurrentCharacter = cs._brutalNoncombatProbe.originalSave;
+				cs._state.setD20RollSource(cs._brutalNoncombatProbe.source);
+				delete cs._brutalNoncombatProbe;
+				cs._currentCharacterId = null;
+				cs._state.loadFromJson(original);
+				cs._renderCharacter();
+			}, snapshot);
+		}
+	}
+
 	/**
 	 * Exercise the production Spectral Chains attack → hit confirmation → rider
 	 * path. When optional bookkeeping is on, this also resolves the compact
