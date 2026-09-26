@@ -10004,7 +10004,7 @@ class CharacterSheetState {
 		const count = Number(this._data.relentlessRageAttempts);
 		this._data.relentlessRageAttempts = Number.isSafeInteger(count) && count >= 0 ? count : 0;
 		const features = (this._data.features || []).filter(feature => CharacterSheetState.isRelentlessRageFeature(feature));
-		const ids = new Set(features.map(feature => feature.id));
+		const ids = new Set(features.map(feature => feature.id).filter(id => typeof id === "string" && !!id.trim()));
 		features.forEach(feature => { delete feature.uses; });
 		this._data.resources = (this._data.resources || []).filter(resource => !ids.has(resource.featureId));
 	}
@@ -10012,7 +10012,8 @@ class CharacterSheetState {
 	_migrateChainedFuryImprisonmentStates () {
 		const ids = new Set((this._data.features || [])
 			.filter(feature => CharacterSheetState.isChainedFuryImprisonmentFeature(feature))
-			.map(feature => feature.id));
+			.map(feature => feature.id)
+			.filter(id => typeof id === "string" && !!id.trim()));
 		this._data.activeStates = (this._data.activeStates || []).filter(state =>
 			!(state.stateTypeId === "custom" && ids.has(state.sourceFeatureId) && state.name === "Chain Imprisonment"),
 		);

@@ -386,6 +386,32 @@ describe("Chained Fury — L6 Chain Imprisonment", () => {
 		expect(restored.toJson().activeStates.map(it => it.id)).toEqual(expect.arrayContaining(["unrelated", "foreign-level", "rage"]));
 	});
 
+	it.each([
+		["missing", undefined],
+		["null", null],
+		["empty", ""],
+		["blank", "   "],
+	])("preserves unowned states when the legacy Chain Imprisonment feature ID is %s", (_, legacyId) => {
+		const state = mkFury(6);
+		const feature = state._data.features.find(it => it.name === "Chain Imprisonment");
+		Object.assign(feature, imprisonment, {description: imprisonmentDescription});
+		const old = state.toJson();
+		if (legacyId === undefined) delete old.features.find(it => it.name === "Chain Imprisonment").id;
+		else old.features.find(it => it.name === "Chain Imprisonment").id = legacyId;
+		old.activeStates.push(
+			{id: "ambiguous-chain", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: legacyId, active: true},
+			{id: "unowned-chain", stateTypeId: "custom", name: "Chain Imprisonment", active: true},
+			{id: "unowned-null", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: null, active: true},
+			{id: "unowned-other", stateTypeId: "custom", name: "Other Effect", active: true},
+			{id: "foreign-chain", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: "other-feature", active: true},
+		);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(old);
+		expect(restored.toJson().activeStates.map(it => it.id))
+			.toEqual(expect.arrayContaining(["ambiguous-chain", "unowned-chain", "unowned-null", "unowned-other", "foreign-chain"]));
+	});
+
 	it("makes the chains count as magical", () => {
 		const state = rageAndManifest(mkFury(6));
 		expect(getChains(state).countsAsMagical).toBe(true);

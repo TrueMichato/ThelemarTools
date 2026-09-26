@@ -183,4 +183,30 @@ describe("Relentless Rage from PHB, XPHB and TGTT", () => {
 		expect(restored.getResources().map(it => it.id)).toContain("unrelated");
 		expect(restored.getResources().map(it => it.id)).toContain("foreign-rage");
 	});
+
+	it.each([
+		["missing", undefined],
+		["null", null],
+		["empty", ""],
+		["blank", "   "],
+	])("preserves unowned resources when the legacy Relentless Rage feature ID is %s", (_, legacyId) => {
+		const old = makeBarbarian("TGTT").toJson();
+		const feature = old.features.find(it => it.name === "Relentless Rage");
+		if (legacyId === undefined) delete feature.id;
+		else feature.id = legacyId;
+		feature.uses = {current: 1, max: 2, recharge: "short"};
+		old.resources.push(
+			{id: "ambiguous-rage", featureId: legacyId, name: "Relentless Rage", current: 1, max: 2},
+			{id: "unowned-rage", name: "Relentless Rage", current: 1, max: 2},
+			{id: "unowned-custom", name: "Custom Mana", current: 4, max: 4},
+			{id: "unowned-null", featureId: null, name: "Other Pool", current: 3, max: 3},
+			{id: "foreign-rage", featureId: "different-owner", name: "Relentless Rage", current: 1, max: 2},
+		);
+		const oldResourceIds = old.resources.map(it => it.id);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(old);
+		expect(restored.getFeatures().find(it => it.name === "Relentless Rage").uses).toBeUndefined();
+		expect(restored.getResources().map(it => it.id)).toEqual(expect.arrayContaining(oldResourceIds));
+	});
 });

@@ -1653,7 +1653,9 @@ HP at zero and end Rage along with other states that end on incapacitation.
 Both the rest dialog and direct `onShortRest()` / `onLongRest()` APIs reset the
 counter after a committed rest, including a short rest at full HP with no Hit
 Dice left. Load migration removes only the old Relentless Rage feature use
-counter and resource linked to that feature, not unrelated resource rows.
+counter and resources linked by a valid feature ID, not unrelated resource
+rows. An ID-less legacy feature still loses its spurious use counter, but
+unowned resources are preserved rather than guessed from their names.
 
 An intervention can publish a `selectionCost` descriptor. The shared
 `inventoryRows` contract supplies exact generated-item ownership, allowed
@@ -1852,7 +1854,8 @@ not persist records. Chain Imprisonment keeps its separate
 choice is resolved in the successful chain grapple, not by spending a separate
 bonus action or leaving an active-state toggle behind. Older custom toggles
 owned by the exact TGTT Chain Imprisonment feature are removed on load; foreign
-same-named states and Rage/Manifest Chains are preserved.
+same-named states and Rage/Manifest Chains are preserved. An ID-less legacy
+feature cannot prove toggle ownership, so unowned same-named states are kept.
 
 Legacy size, distance, movement, and shove-position fields remain load-compatible
 but are not authored or rendered by the current flow. Disabling tracking,
