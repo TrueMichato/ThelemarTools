@@ -8261,6 +8261,12 @@ class CharacterSheetClassUtils {
 		return false;
 	}
 
+	static isCanonicalBrutalStrikeFeature (/** @type {*} */ feature) {
+		if (feature?.source !== "XPHB" || feature.className !== "Barbarian" || feature.classSource !== "XPHB") return false;
+		return (feature.name === "Brutal Strike" && Number(feature.level) === 9)
+			|| (feature.name === "Improved Brutal Strike" && [13, 17].includes(Number(feature.level)));
+	}
+
 	/**
 	 * Dedup features and build state objects for addFeature().
 	 * Filters out ASI placeholders, gainSubclassFeature entries, and already-existing features.
@@ -8277,7 +8283,8 @@ class CharacterSheetClassUtils {
 			if (f.gainSubclassFeature) return false;
 			const nameLower = f.name.toLowerCase();
 			if (CharacterSheetClassUtils._isAsiPlaceholderName(nameLower)) return false;
-			if (!f.isSubclassFeature && !f.subclassName && existingFeatureNames.includes(nameLower)) return false;
+			if (!f.isSubclassFeature && !f.subclassName && existingFeatureNames.includes(nameLower)
+				&& !(Number(level) === 17 && CharacterSheetClassUtils.isCanonicalBrutalStrikeFeature(f))) return false;
 			return true;
 		});
 
