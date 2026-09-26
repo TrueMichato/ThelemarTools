@@ -345,6 +345,7 @@ class CharacterSheetCombat {
 		this._sneakAttackEnabled = false; // Toggle for including Sneak Attack in damage rolls
 		this._lastSneakAttackRoundUsed = null;
 		this._lastAttackContext = null;
+		this._pendingBrutalStrike = null;
 		this._sneakAttackHasAdjacentAlly = false;
 		this._selectedCunningStrikes = []; // Active CS option selections for current attack
 		this._weaponRiderEnabled = {}; // riderId -> bool: include this weapon damage rider in next damage roll
@@ -411,6 +412,13 @@ class CharacterSheetCombat {
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
 			this._rollRecklessAttack(attackId, e);
+		});
+
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const target = e.target.closest(".charsheet__attack-brutal");
+			if (!target) return;
+			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
+			void this._rollRecklessAttack(attackId, e, {brutalStrike: true});
 		});
 
 		// Roll damage (Shift=Critical)
@@ -1419,7 +1427,6 @@ class CharacterSheetCombat {
 		const conditionalAggregate = appliedConditionalIds.size
 			? this._state.aggregateModifiers(attackType, {appliedConditionalIds})
 			: conditionalProbe;
-		const bladesongEnded = this._state.endBladesongForWeaponAttack(attack);
 
 		// Check for advantage/disadvantage from active states and conditions. The
 		// hierarchical matcher in hasAdvantageFromStates already resolves a generic
@@ -1432,7 +1439,10 @@ class CharacterSheetCombat {
 		const maneuverAdvantage = !!this._pendingBattleMasterAttackAdvantage;
 		const shadowTargetAdvantage = !!this._shadowKnightDarkTarget && !!attack.isManifestShadowWeapon;
 		const pendingAttackAdvantage = pendingAttackStates.some(state => state.advantage);
-		const hasAdvantage = this._state.hasAdvantageFromStates?.(attackType)
+		const barbarian = this._getBrutalStrikeBarbarian();
+		const stateAdvantage = this._state.hasAdvantageFromStatesForAttack?.(attack, attackType) ??
+			this._state.hasAdvantageFromStates?.(attackType);
+		const hasAdvantage = stateAdvantage
 			|| conditionalAggregate.advantage
 			|| maneuverAdvantage
 			|| shadowTargetAdvantage
@@ -1443,6 +1453,66 @@ class CharacterSheetCombat {
 			|| resoluteWeaponDisadvantage;
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
+		const isBrutalRequested = opts.brutalStrike === true;
+		const brutalDescriptor = isBrutalRequested && ["XPHB", "TGTT"].includes(barbarian?.source)
+			? this._getBrutalStrikeReceipt()
+			: null;
+		const brutalUsed = brutalDescriptor && this._state.queryTurnReceipt(brutalDescriptor.key).used;
+		const isBrutalEligible = isBrutalRequested
+			&& opts.isOwnTurn !== false
+			&& ["XPHB", "TGTT"].includes(barbarian?.source)
+			&& barbarian.level >= 9
+			&& !attack.isSpell
+			&& !attack.isSpellAttack
+			&& abilityUsed === "str"
+			&& (this._state.isStateTypeActive?.("recklessAttack") || opts.activateRecklessOnCommit)
+			&& !hasDisadvantage
+			&& !event?.ctrlKey
+			&& !event?.metaKey
+			&& !brutalUsed;
+		if (isBrutalRequested && !isBrutalEligible) {
+			const reason = brutalUsed
+				? "already used this turn"
+				: hasDisadvantage || event?.ctrlKey || event?.metaKey
+					? "a Disadvantage source is present"
+					: "this attack does not qualify";
+			JqueryUtil.doToast({type: "warning", content: `Brutal Strike unavailable: ${reason}. No attack rolled; Reckless Attack unchanged.`});
+			return false;
+		}
+		let brutalReceipt = null;
+		if (isBrutalEligible) {
+			const accepted = await CharacterSheetModal.pGetUserBoolean({
+				title: "Brutal Strike — forgo Advantage?",
+				htmlDescription: `Only on your turn: use Reckless Attack but forgo <strong>all</strong> Advantage on this Strength-based attack, rolling one normal d20. If the attack misses, this turn's Brutal Strike is still spent. Attacks against you still have Advantage until your next turn.`,
+				textYes: "My turn — use Brutal Strike",
+				textNo: "Cancel attack",
+			});
+			if (accepted !== true) return false;
+			const committed = this._state.commitTurnReceipt(brutalDescriptor);
+			if (!committed.committed) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: committed.reason === "alreadyUsed"
+						? "Brutal Strike is already used this turn; no attack was rolled."
+						: `Could not commit Brutal Strike (${committed.reason}); no attack was rolled.`,
+				});
+				return false;
+			}
+			brutalReceipt = committed.receipt;
+			if (opts.activateRecklessOnCommit && !this._state.isStateTypeActive?.("recklessAttack")) {
+				try {
+					this._state.activateState("recklessAttack");
+				} catch (error) {
+					this._state.rollbackTurnReceipt(brutalReceipt);
+					throw error;
+				}
+				if (!this._state.isStateTypeActive("recklessAttack")) {
+					this._state.rollbackTurnReceipt(brutalReceipt);
+					JqueryUtil.doToast({type: "danger", content: "Reckless Attack could not be activated; no Brutal Strike attack was rolled."});
+					return false;
+				}
+			}
+		}
 
 		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
 		abilityResolution = attackBreakdown?.abilityResolution
@@ -1472,8 +1542,23 @@ class CharacterSheetCombat {
 		// are open; cancelling a conditional choice is not an attack.
 		if (this._pendingSpellRider) this._clearPendingSpellRider();
 
-		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
-		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
+		// Gestures are new Advantage/Disadvantage sources, not unconditional overrides.
+		// Brutal Strike alone removes every Advantage source before the roll.
+		let rollResult;
+		try {
+			rollResult = this._page.rollD20(brutalReceipt
+				? {mode: "normal", isAttack: true}
+				: isBrutalRequested || event?.shiftKey || event?.ctrlKey || event?.metaKey
+					? {event, stateAdvantage: !!hasAdvantage, stateDisadvantage: !!hasDisadvantage, isAttack: true}
+					: {event, mode: stateMode, isAttack: true});
+		} catch (error) {
+			if (brutalReceipt) this._state.rollbackTurnReceipt(brutalReceipt);
+			throw error;
+		}
+		const attackHasAdvantage = rollResult.mode === "advantage";
+		const attackHasDisadvantage = rollResult.mode === "disadvantage";
+		const bladesongEnded = this._state.endBladesongForWeaponAttack(attack);
+		this._pendingBrutalStrike = null;
 		this._dismissPostAttackOffer();
 		this._pendingBattleMasterAttackAdvantage = false;
 		const stateDice = this._page._rollStateDiceBonuses?.(attackType) || null;
@@ -1501,7 +1586,12 @@ class CharacterSheetCombat {
 		if (conditionalNote) resultNote = resultNote ? `${resultNote}\n${conditionalNote}` : conditionalNote;
 
 		// Build state effect label for display
-		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
+		const gestureCancelled = rollResult.mode === "normal"
+			&& (hasAdvantage || event?.shiftKey)
+			&& (hasDisadvantage || event?.ctrlKey || event?.metaKey);
+		const stateEffectLabel = brutalReceipt
+			? " (Brutal Strike: all Advantage forgone)"
+			: gestureCancelled ? " (adv+disadv cancel)" : this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
 		// Always-on prose riders ride the roll title so the player is reminded at the
 		// moment the roll resolves (e.g. "ignores half cover" on a ranged coin attack).
 		const riderNotes = this._state.getAttackRiderNotes?.(attack) || [];
@@ -1579,10 +1669,11 @@ class CharacterSheetCombat {
 			attackId,
 			rollId: attackRollId,
 			mode: rollResult.mode || "normal",
-			hasAdvantage,
-			hasDisadvantage,
+			hasAdvantage: attackHasAdvantage,
+			hasDisadvantage: attackHasDisadvantage,
 			total,
 		};
+		if (brutalReceipt) void this._page._saveCurrentCharacter?.();
 		this._recordAttackForTurn(attack);
 		if (this._state.isStateTypeActive?.("awakenedAstralSelf")) this.renderAttacks();
 
@@ -1595,9 +1686,9 @@ class CharacterSheetCombat {
 			// A state may licence Sneak Attack without the usual trigger (e.g. the
 			// Belly Dancer's Dance of the Country, in melee) — see
 			// `canSneakAttackWithoutAdvantage`.
-			const stateLicence = !hasDisadvantage
+			const stateLicence = !attackHasDisadvantage
 				&& this._state.canSneakAttackWithoutAdvantage?.({isMelee: attack?.isMelee !== false && !attack?.isRanged});
-			const triggerMet = (hasAdvantage && !hasDisadvantage) || this._sneakAttackHasAdjacentAlly || stateLicence;
+			const triggerMet = attackHasAdvantage || this._sneakAttackHasAdjacentAlly || stateLicence;
 			if (triggerMet && this._isSneakAttackWeaponEligible(attack)) {
 				this._sneakAttackEnabled = true;
 				this._renderSneakAttackToggle?.();
@@ -1631,8 +1722,8 @@ class CharacterSheetCombat {
 			attackId,
 			isMelee,
 			isRanged: !isMelee,
-			hasAdvantage,
-			hasDisadvantage,
+			hasAdvantage: attackHasAdvantage,
+			hasDisadvantage: attackHasDisadvantage,
 			rollResult,
 			total,
 			totalBonus,
@@ -1645,6 +1736,20 @@ class CharacterSheetCombat {
 			isFumble: rollResult.roll === 1,
 		};
 		await this._runPostAttackHooks(postCtx, {blocking: true});
+		if (brutalReceipt && !postCtx.isFumble) {
+			this._pendingBrutalStrike = {
+				state: this._state,
+				data: this._state._data,
+				characterId: this._state.getId(),
+				turnId: this._state.queryTurnReceipt(brutalReceipt.key).turnId,
+				attackId,
+				rollId: attackRollId,
+				isCrit: postCtx.isCrit,
+				damageDice: this._state.getFeatureCalculations().brutalStrikeDamage,
+				barbarianLevel: barbarian.level,
+				rollFollowup: postCtx.rollFollowup,
+			};
+		}
 		// Material Penetration is a deferred, toast-attached prompt. Read the live context when
 		// the player clicks it so a preceding fortune intervention cannot leave a stale total.
 		this._offerPenetratingBlow({
@@ -1667,7 +1772,7 @@ class CharacterSheetCombat {
 	/**
 	 * Roll a weapon attack "recklessly": ensure the persistent `recklessAttack` active
 	 * state is on, then roll through the normal `_rollAttack` path so the state's
-	 * advantage (scoped to melee-STR attacks) resolves via the standard
+	 * advantage (scoped to qualifying Strength attacks) resolves via the standard
 	 * advantage/disadvantage pipeline and still cancels with any disadvantage — we
 	 * never force raw advantage. The state is left ON (Reckless Attack lasts until the
 	 * character's next turn), matching the existing quick-toggle behaviour.
@@ -1675,27 +1780,29 @@ class CharacterSheetCombat {
 	 * @param {*} event
 	 * @returns {Promise<boolean>}
 	 */
-	async _rollRecklessAttack (attackId, event) {
+	async _rollRecklessAttack (attackId, event, opts = {}) {
 		// Validate the attack first so we never flip the state on without a roll.
 		const attack = this._findAttackById?.(attackId);
 		if (!attack) return this._rollAttack(attackId, event);
 
-		// Activate provisionally so the normal roll pipeline sees the scoped
-		// advantage. Commit the UI/persistence only after all cancellable pre-roll
-		// prompts succeed; otherwise a cancelled attack must not expose the
-		// character to enemy advantage.
+		// Ordinary Reckless needs its state before resolving Advantage. Brutal
+		// Strike activates it only after eligibility and the player's choice.
 		const didActivate = !this._state.isStateTypeActive?.("recklessAttack");
-		if (didActivate) this._state.activateState?.("recklessAttack");
+		if (opts.isOwnTurn === false && !opts.brutalStrike) return this._rollAttack(attackId, event, opts);
+		if (didActivate && !opts.brutalStrike) this._state.activateState?.("recklessAttack");
 
 		let didRoll;
 		try {
-			didRoll = await this._rollAttack(attackId, event);
+			didRoll = await this._rollAttack(attackId, event, {
+				...opts,
+				activateRecklessOnCommit: opts.brutalStrike === true && didActivate,
+			});
 		} catch (e) {
-			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			if (didActivate && this._state.isStateTypeActive?.("recklessAttack")) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
 			throw e;
 		}
 		if (didRoll === false) {
-			if (didActivate) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
+			if (didActivate && this._state.isStateTypeActive?.("recklessAttack")) this._state.deactivateState?.("recklessAttack", {reason: "cancelled attack"});
 			return false;
 		}
 
@@ -1708,6 +1815,88 @@ class CharacterSheetCombat {
 			this._updateQuickButtonStates?.();
 		}
 		return didRoll;
+	}
+
+	_getBrutalStrikeBarbarian () {
+		return (this._state.getClasses?.() || []).find(cls => cls.name === "Barbarian") || null;
+	}
+
+	_getBrutalStrikeReceipt () {
+		const classSource = this._getBrutalStrikeBarbarian()?.source;
+		const sourceUid = "Brutal Strike|Barbarian|XPHB|9";
+		return {
+			key: `${sourceUid}:Barbarian|${classSource}:attack`,
+			ownerUid: `Barbarian|${classSource}`,
+			sourceUid,
+			actionUid: "attack",
+		};
+	}
+
+	_getPendingBrutalStrikeForAttack (attackId) {
+		const pending = this._pendingBrutalStrike;
+		if (!pending) return null;
+		const receipt = this._state.queryTurnReceipt?.(this._getBrutalStrikeReceipt().key);
+		if (pending.state !== this._state
+			|| pending.data !== this._state._data
+			|| pending.characterId !== this._state.getId?.()
+			|| pending.turnId !== receipt?.turnId
+			|| !receipt?.used
+			|| pending.attackId !== attackId
+			|| pending.rollId !== this._lastAttackContext?.rollId
+			|| pending.attackId !== this._lastAttackContext?.attackId) {
+			this._pendingBrutalStrike = null;
+			return null;
+		}
+		return pending;
+	}
+
+	async _pChooseBrutalStrikeOutcome (pending) {
+		const didHit = await CharacterSheetModal.pGetUserBoolean({
+			title: "Brutal Strike — did this attack hit?",
+			htmlDescription: "Confirm the hit before rolling Brutal Strike damage or choosing target effects. A miss spends this turn's Brutal Strike but adds no damage.",
+			textYes: "Hit — apply Brutal Strike",
+			textNo: "Miss — no extra damage",
+			rollFollowup: pending.rollFollowup,
+		});
+		if (didHit === false) {
+			this._pendingBrutalStrike = null;
+			return null;
+		}
+		if (didHit !== true) return false;
+		const target = (await InputUiUtil.pGetUserString({
+			title: "Brutal Strike — target name (display only)",
+		}))?.trim();
+		if (!target) {
+			JqueryUtil.doToast({type: "warning", content: "Name the target to resolve Brutal Strike; no enemy state is stored."});
+			return false;
+		}
+		const walkSpeed = this._state.getWalkSpeed();
+		const options = [
+			["Forceful Blow", `pushed 15 feet straight away from you; you may move up to ${Math.floor(walkSpeed / 2)} feet (half your current ${walkSpeed}-foot Speed) straight toward it without provoking Opportunity Attacks (move manually)`],
+			["Hamstring Blow", "Speed reduced by 15 feet until the start of your next turn; only the most recent Hamstring Blow applies"],
+		];
+		if (pending.barbarianLevel >= 13) {
+			options.push(
+				["Staggering Blow", "Disadvantage on its next saving throw; can't make Opportunity Attacks until the start of your next turn"],
+				["Sundering Blow", "before the start of your next turn, the next attack roll made by another creature against it gains +5; at most one Sundering Blow bonus per attack roll"],
+			);
+		}
+		const selected = [];
+		for (let index = 0; index < (pending.barbarianLevel >= 17 ? 2 : 1); index++) {
+			const available = options.filter(([name]) => !selected.some(([chosen]) => chosen === name));
+			const choice = await CharacterSheetModal.pGetUserEnum({
+				title: `Brutal Strike — effect ${index + 1}`,
+				values: available.map(([name]) => name),
+				isResolveItem: false,
+				rollFollowup: pending.rollFollowup,
+			});
+			if (!Number.isInteger(choice) || choice < 0 || choice >= available.length) return false;
+			selected.push(available[choice]);
+		}
+		return {
+			target,
+			text: `Brutal Strike on ${target}: ${selected.map(([name, effect]) => `${name} — ${target} ${effect}`).join("; ")}. Resolve on the target manually; no enemy stats were changed.`,
+		};
 	}
 
 	/**
@@ -3787,6 +3976,13 @@ class CharacterSheetCombat {
 		}
 		if (!attack || !attack.damage) return;
 
+		const pendingBrutalStrike = this._getPendingBrutalStrikeForAttack(attackId);
+		const brutalStrikeOutcome = pendingBrutalStrike
+			? await this._pChooseBrutalStrikeOutcome(pendingBrutalStrike)
+			: null;
+		if (pendingBrutalStrike && !brutalStrikeOutcome) return;
+		if (brutalStrikeOutcome) isCrit = isCrit || pendingBrutalStrike.isCrit;
+
 		// Ask before any of the other prompts: Hand of Harm and combat methods can
 		// spend resources, while dismissing this question must leave the roll untouched.
 		const targetTypes = await this._pChooseTargetTypeContext(attack);
@@ -3850,6 +4046,10 @@ class CharacterSheetCombat {
 			});
 			if (!weaponDamageType) return;
 		}
+		const brutalStrikeRoll = brutalStrikeOutcome
+			? this._parseDamage(pendingBrutalStrike.damageDice, isCrit)
+			: null;
+		const brutalStrikeDamage = brutalStrikeRoll?.total || 0;
 		const acceptedDeferredFlatDamageRider = await this._pSelectDeferredFlatDamageRiderForAttack(attack);
 		const triggeredFeatDamage = await this._page._pRollTriggeredFeatDie?.({
 			trigger: "damage",
@@ -4199,7 +4399,7 @@ class CharacterSheetCombat {
 		const riderDiffTypeTotal = riderDamageTotal - riderSameTypeTotal;
 
 		const {damage: battleMasterDamage, name: battleMasterName} = this._consumeBattleMasterDamage(attackId, isCrit);
-		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage;
+		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage + brutalStrikeDamage;
 		const totalBeforeTargetMultiplier = baseDamageTotal
 			+ riderDiffTypeTotal
 			+ handOfHarmDamage
@@ -4239,7 +4439,9 @@ class CharacterSheetCombat {
 		// the trailing weapon-type word below.
 		if (doubleshotDamage) subtitle += ` + ${doubleshotDamage} (Doubleshot 2nd arrow ${doubleshotDie})`;
 		if (battleMasterDamage) subtitle += ` + ${battleMasterDamage} (${battleMasterName})`;
+		if (brutalStrikeRoll) subtitle += ` + ${brutalStrikeDamage} (Brutal Strike ${isCrit ? `${brutalStrikeRoll.numDice}d10` : pendingBrutalStrike.damageDice} ${weaponDamageType})`;
 		subtitle += ` ${weaponDamageType}`;
+		if (brutalStrikeOutcome) subtitle += ` | ${CharacterSheetClassUtils.escapeHtml(brutalStrikeOutcome.text)}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
 		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice}${arcaneFirearmResult?.ok ? ` + Arcane Firearm 1d8 (${arcaneFirearmResult.firearmRoll})` : ""})`;
@@ -4290,6 +4492,7 @@ class CharacterSheetCombat {
 		// single hard-coded d20. Each damage component contributes a group.
 		const diceGroups = [];
 		this._pushDiceGroup(diceGroups, damageRoll);
+		this._pushDiceGroup(diceGroups, brutalStrikeRoll);
 		this._pushDiceGroup(diceGroups, doubleshotRoll);
 		this._pushDiceGroup(diceGroups, sneakRollForAnim);
 		for (const rr of riderRollsForAnim) this._pushDiceGroup(diceGroups, rr);
@@ -4316,7 +4519,7 @@ class CharacterSheetCombat {
 		try {
 			this._page.showDiceResult({
 				title: `${attack.name} Damage`,
-				roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage + (triggeredFeatDamage?.roll || 0),
+				roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage + brutalStrikeDamage + (triggeredFeatDamage?.roll || 0),
 				modifier: totalBonus,
 				total: totalTitle || total,
 				subtitle,
@@ -4326,6 +4529,7 @@ class CharacterSheetCombat {
 			throw error;
 		}
 		if (committedItemRiderReceipts.length) this._page.saveCharacter?.();
+		if (pendingBrutalStrike) this._pendingBrutalStrike = null;
 
 		// Auto-disable sneak attack after use (once per turn)
 		if (sneakAttackDamage > 0 || cunningStrikeEffects.length) {
@@ -5880,17 +6084,23 @@ class CharacterSheetCombat {
 			if (summary && !upgradeNotesHtml) upgradeNotesHtml = `<div class="ve-small ve-muted charsheet__attack-upgrade-note">💎 ${summary}</div>`;
 		}
 
-		// Reckless Attack (Barbarian 2+): a one-click "roll recklessly" affordance that
-		// activates the persistent recklessAttack state (if not already on) and then
-		// rolls through the normal path. Only surfaced on weapon attacks — reckless is a
-		// weapon-attack mechanic and only grants advantage on melee Strength attacks
-		// (the roll pipeline scopes that correctly). The existing state toggle remains.
-		const hasReckless = (this._state.getClassLevel?.("Barbarian") || 0) >= 2;
+		// PHB requires a melee weapon; XPHB/TGTT also allow Strength-based
+		// ranged attacks and Unarmed Strikes. A non-qualifying row should not
+		// invite the player to expose themself for no roll benefit.
 		const recklessActive = this._state.isStateTypeActive?.("recklessAttack");
-		const recklessBtnHtml = (hasReckless && !attack.isSpell)
-			? `<button class="ve-btn ve-btn-sm ${recklessActive ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-reckless" title="Reckless Attack: advantage on melee weapon attack rolls using Strength; attack rolls against you have advantage until your next turn. Rolls this attack and keeps Reckless active.">
+		const barbarian = this._getBrutalStrikeBarbarian();
+		const is2024Barbarian = ["XPHB", "TGTT"].includes(barbarian?.source);
+		const hasReckless = barbarian?.level >= 2 && !attack.isSpell && !attack.isSpellAttack
+			&& abilityResolution.ability === "str"
+			&& (is2024Barbarian || (this._getAttackRollKind(attack).isMelee && !attack.isUnarmedStrike));
+		const recklessBtnHtml = hasReckless
+			? `<button class="ve-btn ve-btn-sm ${recklessActive ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-reckless" title="Reckless Attack: advantage on ${is2024Barbarian ? "Strength-based attack rolls" : "melee weapon attacks using Strength"}; attack rolls against you have advantage until your next turn. Rolls this attack and keeps Reckless active.">
 						<span>⚡</span> Reckless
 					</button>`
+			: "";
+		const brutalBtnHtml = is2024Barbarian && barbarian.level >= 9
+			&& !attack.isSpell && !attack.isSpellAttack && abilityResolution.ability === "str"
+			? `<button class="ve-btn ve-btn-sm ve-btn-default charsheet__attack-brutal" title="Brutal Strike: on your turn, use Reckless Attack but forgo all Advantage on this Strength-based roll with no Disadvantage. On a confirmed hit, add ${barbarian.level >= 17 ? "2d10 and two different effects" : "1d10 and one effect"}; once per turn.">Brutal Strike</button>`
 			: "";
 		const handsUsedHtml = this._renderHandsUsedToggle(attack);
 		// Always-on prose riders (e.g. Gambler's Coins ricochet ignoring half cover).
@@ -5932,6 +6142,7 @@ class CharacterSheetCombat {
 						<span class="glyphicon glyphicon-screenshot"></span> Attack${attackActionAllowance ? ` (${attackActionAllowance}/action)` : ""}
 					</button>
 					${recklessBtnHtml}
+					${brutalBtnHtml}
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage (Shift-click or Shift+Enter for critical damage)" aria-label="Roll damage; Shift-click or press Shift+Enter for critical damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>
@@ -11106,8 +11317,7 @@ class CharacterSheetCombat {
 			+ (damageBreakdown?.total ?? (Number(unarmedStrike.damageBonus) || 0));
 
 		// Check advantage/disadvantage
-		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:melee:str")
-			|| this._state.hasAdvantageFromStates?.("attack");
+		const hasAdvantage = this._state.hasAdvantageFromStatesForAttack(unarmedStrike, "attack:melee:str");
 		const hasDisadvantage = this._state.hasDisadvantageFromStates?.("attack:melee:str")
 			|| this._state.hasDisadvantageFromStates?.("attack");
 		let rollMode;

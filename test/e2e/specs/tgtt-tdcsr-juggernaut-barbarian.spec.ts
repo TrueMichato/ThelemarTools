@@ -9,6 +9,7 @@ describeCharacter({
 	megaCheckpoints: [3, 5, 11, 13, 17, 20],
 	prepareFinalExport: async charSheet => {
 		await charSheet.expectRenderedClassFeatureLevels("Improved Brutal Strike", "XPHB", [13, 17]);
+		await charSheet.probeBrutalStrikePlayerPath("TGTT");
 	},
 	usage: {
 		atLevel: 5,

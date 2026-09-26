@@ -8,6 +8,11 @@ npx playwright test test/e2e/specs/<name>.spec.ts  # single spec
 ```
 
 The local dev server is started automatically by `playwright.config.ts` on port 8080.
+`character-sheet-brutal-strike.spec.ts` exercises the rendered 2024 Barbarian
+Brutal Strike attack/damage dialogs, PHB Unarmed Reckless exclusion, and
+out-of-combat **Reset turn** recovery with numeric Forceful movement
+independently of the full TGTT build; the
+Juggernaut MEGA spec repeats the same player-path check for a built TGTT Barbarian.
 
 ---
 
@@ -63,6 +68,7 @@ a session. The maintained catalog is
 |20 | `tgtt-wicked-witch-sorcerer.spec.ts`            | Wicked Witch Sorcerer Dwarf (Ar8 via TGTT `_copy`) | 1→20 |
 |21 | `tgtt-efa-cartographer-artificer.spec.ts`       | EFA Cartographer Artificer Dwarf                   | 1→20 |
 |22 | `tgtt-efa-artillerist-artificer.spec.ts`         | EFA Artillerist Artificer Human                    | 1→20 |
+|23 | `tgtt-tdcsr-juggernaut-barbarian.spec.ts`       | Juggernaut Barbarian Minotaur (Brutal Strike UI)   | 1→20 |
 
 The `tgtt-player-party.spec.ts` file is a separate party-import smoke test (not part of the comprehensive build standard).
 

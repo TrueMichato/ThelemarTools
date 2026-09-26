@@ -169,10 +169,13 @@ weaponMasterySlots: 2 | 3 | 4,        // L1/L4/L10
 
 Brutal Strike is contextual to one Reckless Attack roll, not a standing active state.
 The Features tab keeps the level-13 and level-17 **Improved Brutal Strike**
-cards separately, including for older saves backfilled at load. The damage
-calculation above is informational only until the separate attack-mechanics
-milestone lands; it does not currently add dice to the Combat damage roll or
-apply the feature's on-hit choices.
+cards separately, including for older saves backfilled at load. The
+`brutalStrikeDamage` calculation feeds the Combat damage roll only after the
+player opts into an eligible, non-disadvantaged Strength attack, forgoes all
+Advantage, and confirms the hit. The rolled weapon-typed bonus is 1d10 at
+levels 9-16 or 2d10 at level 17+, doubled with the other dice on a critical
+hit. Target-facing effects are displayed for manual resolution, never written
+to enemy state. PHB Barbarians retain Brutal Critical instead.
 
 Relentless Rage is a damage-triggered zero-HP intervention, not a finite-use
 resource or an activatable toggle. While Rage was active when damage reduced the
