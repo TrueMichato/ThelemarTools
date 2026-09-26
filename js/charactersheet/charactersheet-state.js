@@ -75794,6 +75794,10 @@ class CharacterSheetState {
 	 * @returns {object|null} Activation info if this feature is activatable
 	 */
 	static detectActivatableFeature (feature) {
+		// The 2024 Barbarian feature is a choice on one Reckless attack, not a
+		// second Reckless Attack state. Its description mentions that state by
+		// name, which would otherwise match the generic state-name detector.
+		if (CharacterSheetClassUtils.isCanonicalBrutalStrikeFeature(feature)) return null;
 		// (CS-BUG-051) Pure "here are the options you gained" wrappers are never independently
 		// activatable — their children carry the mechanics and their own rows.
 		if (CharacterSheetState.isReferenceWrapperFeature(feature)) return null;

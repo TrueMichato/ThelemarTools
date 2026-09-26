@@ -6,6 +6,10 @@ describeCharacter({
 	preset: PRESET_FULL_JUGGERNAUT_BARBARIAN,
 	displayName: "TDCSR Juggernaut Barbarian",
 	signatureToggle: /rage/i,
+	megaCheckpoints: [3, 5, 11, 13, 17, 20],
+	prepareFinalExport: async charSheet => {
+		await charSheet.expectRenderedClassFeatureLevels("Improved Brutal Strike", "XPHB", [13, 17]);
+	},
 	usage: {
 		atLevel: 5,
 		useResourceName: "Rage",
@@ -48,8 +52,9 @@ describeCharacter({
 		// `brutalStrikeDamage` GROWS to 2d10 at level 17, so the L9 row needs a bound or it
 		// fails itself at the L17 checkpoint. Tiered rather than loosened to a range, so
 		// both values stay exactly asserted.
-		{level: 9, untilLevel: 16, name: /brutal strike/i, kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "1d10"}]},
-		{level: 17, name: /brutal strike/i, kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "2d10"}]},
+		{level: 9, untilLevel: 16, name: /^brutal strike$/i, featureUid: "Brutal Strike|Barbarian|XPHB|9", kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "1d10"}]},
+		{level: 13, untilLevel: 16, name: /^improved brutal strike$/i, featureUid: "Improved Brutal Strike|Barbarian|XPHB|13", kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "1d10"}]},
+		{level: 17, name: /^improved brutal strike$/i, featureUid: "Improved Brutal Strike|Barbarian|XPHB|17", kind: "passive", effects: [{kind: "featureCalculation", property: "brutalStrikeDamage", exact: "2d10"}]},
 		{level: 11, name: /relentless rage/i, kind: "passive", effects: [{kind: "featureCalculation", property: "relentlessRageBaseDc", exact: 10}]},
 		{level: 15, name: /persistent rage/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasPersistentRage", exact: true}]},
 		{level: 18, name: /indomitable might/i, kind: "passive", effects: [{kind: "featureCalculation", property: "hasIndomitableMight", exact: true}]},

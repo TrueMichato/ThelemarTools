@@ -5127,31 +5127,14 @@ class CharacterSheetLevelUp {
 			});
 		}
 
-		// Add new features to character
-		// Filter out placeholder features and ASI features (since ASI is handled separately)
-		const asiFeatureNames = [
-			"ability score improvement",
-			"ability score increase",
-			"asi",
-		];
-
-		// Get existing non-subclass feature names to prevent duplicates (like "Metamagic" at level 3 and 10)
-		// Only filter class features, not subclass features (those can have same-named features at different levels)
+		// Add new features to character. The shared helper filters placeholders and
+		// repeated names while preserving source-qualified level upgrades.
 		const existingClassFeatureNames = this._state.getFeatures()
 			.filter((/** @type {*} */ f) => f.className === classEntry.name && !f.subclassName && !f.isSubclassFeature)
 			.map((/** @type {*} */ f) => f.name.toLowerCase());
 
 		CharacterSheetClassUtils.dedupAndBuildFeatures(
-			newFeatures.filter((/** @type {*} */ f) => {
-				if (f.gainSubclassFeature) return false;
-				const nameLower = f.name.toLowerCase();
-				// Use the shared ASI-name predicate — a naive `includes("asi")`
-				// here used to match "evasion" and silently drop the Evasion
-				// class feature at Rogue/Monk 7. See _isAsiPlaceholderName.
-				if (CharacterSheetClassUtils._isAsiPlaceholderName(nameLower)) return false;
-				if (!f.isSubclassFeature && !f.subclassName && existingClassFeatureNames.includes(nameLower)) return false;
-				return true;
-			}),
+			newFeatures,
 			existingClassFeatureNames,
 			{
 				className: classEntry.name,

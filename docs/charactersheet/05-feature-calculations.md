@@ -160,10 +160,17 @@ hasPrimalChampion: true,          // Level 20+ - +4 STR/CON (max 24)
 // PHB-only
 brutalCritical: "+1 dice" | "+2 dice" | "+3 dice",  // L9/L13/L17
 
-// XPHB-only
+// XPHB and TGTT Barbarian (TGTT references the XPHB class features)
 brutalStrikeDamage: "1d10" | "2d10",  // L9/L17
 weaponMasterySlots: 2 | 3 | 4,        // L1/L4/L10
 ```
+
+Brutal Strike is contextual to one Reckless Attack roll, not a standing active state.
+The Features tab keeps the level-13 and level-17 **Improved Brutal Strike**
+cards separately, including for older saves backfilled at load. The damage
+calculation above is informational only until the separate attack-mechanics
+milestone lands; it does not currently add dice to the Combat damage roll or
+apply the feature's on-hit choices.
 
 #### Barbarian Subclasses
 

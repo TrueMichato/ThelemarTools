@@ -1081,6 +1081,23 @@ export class CharacterSheetPage {
 		}, uid);
 	}
 
+	async expectRenderedClassFeatureLevels (name: string, classSource: string, levels: number[]): Promise<void> {
+		const features: Array<{id: string; level: number}> = await this.page.evaluate(({name, classSource}) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return (state?.getFeatures?.() || [])
+				.filter((feature: any) => feature.name === name && feature.classSource === classSource)
+				.map((feature: any) => ({id: String(feature.id), level: Number(feature.level)}));
+		}, {name, classSource});
+		const expectedLevels = [...levels].sort((a, b) => a - b);
+		expect(features.map(feature => feature.level).sort((a, b) => a - b)).toEqual(expectedLevels);
+
+		const cards = this.page.locator("#charsheet-class-features .charsheet__feature")
+			.filter({has: this.page.locator(".charsheet__feature-name", {hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")})});
+		await expect(cards).toHaveCount(expectedLevels.length);
+		const renderedIds = await cards.evaluateAll(elements => elements.map(element => (element as HTMLElement).dataset.featureId));
+		expect(renderedIds.sort()).toEqual(features.map(feature => feature.id).sort());
+	}
+
 	async getMaxAttunement (): Promise<number> {
 		return this.page.evaluate(() => {
 			const state: any = (globalThis as any).charSheet?._state;
