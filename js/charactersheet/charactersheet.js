@@ -17999,6 +17999,9 @@ class CharacterSheetPage {
 				const selection = await this._pPickFeatureChoice(live);
 				if (selection == null) continue; // player deferred — leave it queued
 				if (this._state.fulfillFeatureChoice(live.id, selection, allSpells)) resolvedAny = true;
+				else if (live.fromClassSkillList) {
+					JqueryUtil.doToast({type: "warning", content: "That skill is already proficient or no longer available. Choose another skill."});
+				}
 			}
 
 			if (resolvedAny) {
@@ -18030,6 +18033,13 @@ class CharacterSheetPage {
 		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
 		const count = Number(choice.count) || 1;
 		const isSkill = choice.kind === "skill";
+		const options = choice.fromClassSkillList
+			? choice.options.filter(skill => this._state.getEffectiveSkillProficiency(skill) === 0)
+			: choice.options;
+		if (!options.length) {
+			JqueryUtil.doToast({type: "warning", content: `No untrained skills remain in ${choice.featureName}'s class skill list. The choice will remain pending.`});
+			return null;
+		}
 		const isTool = choice.kind === "tool";
 		const isSubfeature = choice.kind === "subfeature";
 		const kindLabel = isSkill ? ["a Skill Proficiency", "Skill Proficiencies"]
@@ -18079,7 +18089,7 @@ class CharacterSheetPage {
 				resolve(val);
 			};
 
-			const btnsHtml = choice.options.map((opt, i) => `
+			const btnsHtml = options.map((opt, i) => `
 				<button class="ve-btn ve-btn-default charsheet__feature-choice-opt" data-idx="${i}" style="display:block; width:100%; text-align:left; margin-bottom:6px;">
 					${optionLabel(opt)}
 				</button>
@@ -18111,7 +18121,7 @@ class CharacterSheetPage {
 			modalInner.querySelectorAll(".charsheet__feature-choice-opt").forEach((/** @type {*} */ el) => {
 				el.addEventListener("click", () => {
 					const idx = Number(el.getAttribute("data-idx"));
-					const opt = choice.options[idx];
+					const opt = options[idx];
 					if (count === 1) {
 						const value = optionValue(opt);
 						finalize(value);
@@ -18133,7 +18143,7 @@ class CharacterSheetPage {
 			});
 			confirm?.addEventListener("click", () => {
 				if (selected.size !== count) return;
-				const values = [...selected].map(idx => optionValue(choice.options[idx]));
+				const values = [...selected].map(idx => optionValue(options[idx]));
 				finalize(values);
 				doClose();
 			});
@@ -19574,7 +19584,7 @@ class CharacterSheetPage {
 			: null;
 
 		// Check for advantage/disadvantage from skill and check modifiers
-		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`, {appliedConditionalIds});
+		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`, {appliedConditionalIds, overrideAbility});
 		const hasAdvantage = advState?.advantage
 			|| aggregated.advantage
 			|| checkAggregated.advantage

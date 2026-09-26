@@ -54,6 +54,7 @@ const EXPECTED_SIGNATURES = {
 	],
 	"Mark of the Wilderness": [
 		signature("abilitySwap:intimidation", {newAbility: "str", oldAbility: "cha"}),
+		signature("abilitySwap:persuasion", {newAbility: "str", oldAbility: "cha"}),
 		signature("skill:intimidation", {proficiencyBonus: true}),
 	],
 	"Natural Tracker": [],
