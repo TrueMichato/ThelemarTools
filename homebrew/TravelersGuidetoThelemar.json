@@ -30235,7 +30235,7 @@
 					"items": [
 						"The range of your chains increases to 20 feet.",
 						"The chains count as magical for the purpose of overcoming resistance and immunity to nonmagical attacks and damage.",
-						"When you successfully grapple a creature using your chains, you can choose to attempt to restrain it. The creature must make a Strength saving throw (DC = 8 + your proficiency bonus + your Constitution modifier) or become {@condition restrained|tgtt} until the grapple ends. While a creature is {@condition restrained|tgtt} by your chains, it takes force damage equal to your barbarian level at the start of each of its turns. The creature can use its action to attempt to break free of the grapple."
+						"As part of successfully grappling a creature using your chains, you can choose to attempt to restrain it without using an additional action or bonus action. The creature must make a Strength saving throw (DC = 8 + your proficiency bonus + your Constitution modifier) or become {@condition restrained|tgtt} until the grapple ends. While a creature is {@condition restrained|tgtt} by your chains, it takes force damage equal to your barbarian level at the start of each of its turns. The creature can use its action to attempt to break free of the grapple."
 					]
 				}
 			]

@@ -165,6 +165,12 @@ Only authoritative mutations reconcile that marker. Passive `isDead()`,
 `getHp()`, rendering, serialization, and management getters remain pure. A
 raw pending zero-HP intervention defers finalization until
 `clearPendingZeroHpIntervention()` resolves success, failure, or decline.
+An intervention with edition-sensitive source text may provide `featureMatch`
+to require an exact stored feature and owning class in addition to `calcFlag`.
+Relentless Rage uses this gate for PHB, XPHB, and TGTT's XPHB feature reference;
+its persisted attempt count determines the next save DC and is reset by both
+rest entry points. A failed or declined intervention at 0 HP ends states whose
+rules end on incapacitation; a successful intervention retains them.
 Every valid generated row whose lifecycle registers
 `onDeath: "expire-after-1d4-days"` receives one persisted roll for that
 finalized death receipt only when its exact owner, including `featureSource`,

@@ -81,6 +81,7 @@ class CharacterSheetRest {
 			&& !companionHitDieTargets.length
 			&& !conditions.length
 			&& !isConcentrating
+			&& !(calcEarly.relentlessRageDc > 10)
 			&& !canReduceExhaustion
 			&& !canMemorizeSpell
 			&& !canRetuneEfaArmorModel
@@ -3001,6 +3002,7 @@ class CharacterSheetRest {
 	}
 
 	_restoreResources (restType) {
+		this._state.resetRelentlessRageDc();
 		// Restore class resources
 		const resources = this._state.getResources();
 		resources.forEach(resource => {

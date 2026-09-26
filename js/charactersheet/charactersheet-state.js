@@ -5620,6 +5620,7 @@ class CharacterSheetState {
 
 			// Features and traits
 			features: [], // [{name, source, description, uses: {current, max, recharge}}]
+			relentlessRageAttempts: 0,
 			feats: [], // [{name, source}]
 			adventurersAtlas: CharacterSheetState._getEmptyAdventurersAtlas(),
 			cartographerMappingMagic: CharacterSheetState._getEmptyCartographerMappingMagic(),
@@ -6431,6 +6432,8 @@ class CharacterSheetState {
 		// Repair old saves whose entries-only features predate use/resource parsing.
 		// Runs after subclass repair + featureType migration and is idempotent.
 		this._migrateFeatureUsesFromEntries();
+		this._migrateRelentlessRage();
+		this._migrateChainedFuryImprisonmentStates();
 
 		// Migrate Hunter's Prey: older saves stored it as a consumable resource/use.
 		// Convert to the toggle model (strip uses, drop the orphan resource).
@@ -9977,6 +9980,42 @@ class CharacterSheetState {
 
 			return f;
 		});
+	}
+
+	static isRelentlessRageFeature (feature) {
+		return feature?.name === "Relentless Rage"
+			&& feature.className === "Barbarian"
+			&& ["PHB", "XPHB"].includes(feature.source)
+			&& (!feature.classSource || feature.classSource === feature.source)
+			&& (feature.level == null || Number(feature.level) === 11);
+	}
+
+	static isChainedFuryImprisonmentFeature (feature) {
+		return feature?.name === "Chain Imprisonment"
+			&& feature.source === "TGTT"
+			&& feature.className === "Barbarian"
+			&& feature.classSource === "TGTT"
+			&& feature.subclassShortName === "Chained Fury"
+			&& feature.subclassSource === "TGTT"
+			&& (feature.level == null || Number(feature.level) === 6);
+	}
+
+	_migrateRelentlessRage () {
+		const count = Number(this._data.relentlessRageAttempts);
+		this._data.relentlessRageAttempts = Number.isSafeInteger(count) && count >= 0 ? count : 0;
+		const features = (this._data.features || []).filter(feature => CharacterSheetState.isRelentlessRageFeature(feature));
+		const ids = new Set(features.map(feature => feature.id));
+		features.forEach(feature => { delete feature.uses; });
+		this._data.resources = (this._data.resources || []).filter(resource => !ids.has(resource.featureId));
+	}
+
+	_migrateChainedFuryImprisonmentStates () {
+		const ids = new Set((this._data.features || [])
+			.filter(feature => CharacterSheetState.isChainedFuryImprisonmentFeature(feature))
+			.map(feature => feature.id));
+		this._data.activeStates = (this._data.activeStates || []).filter(state =>
+			!(state.stateTypeId === "custom" && ids.has(state.sourceFeatureId) && state.name === "Chain Imprisonment"),
+		);
 	}
 
 	_migrateFixedProficiencyFallbacks () {
@@ -14699,6 +14738,7 @@ class CharacterSheetState {
 	 * - `id`             stable key used by {@link applyZeroHpIntervention}
 	 * - `featureName`    the feature that grants it (also where the once-per-rest use lives)
 	 * - `calcFlag`       `getFeatureCalculations()` boolean that gates availability
+	 * - `featureMatch`   optional exact source/owner check on a stored feature
 	 * - `saveAbility`    ability for the save, or `null` for an automatic (no-roll) drop-to-1
 	 * - `dcBase`         DC constant …
 	 * - `dcAddsDamage`   … plus the damage taken, when true
@@ -14734,6 +14774,38 @@ class CharacterSheetState {
 	 * @type {Array<object>}
 	 */
 	static ZERO_HP_INTERVENTIONS = [
+		{
+			id: "relentlessRage",
+			featureName: "Relentless Rage",
+			calcFlag: "hasRelentlessRage",
+			featureMatch: (feature, state) => CharacterSheetState.isRelentlessRageFeature(feature)
+				&& state._data.classes.some(cls => cls.name === "Barbarian"
+					&& cls.level >= 11
+					&& (cls.source === "TGTT" ? "XPHB" : cls.source) === (feature.classSource || feature.source)),
+			saveAbility: "con",
+			dcBase: 10,
+			dcAddsDamage: false,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			requiresNonOutrightDeath: true,
+			armWhenUnavailable: false,
+			spendOn: "attempt",
+			usesMax: null,
+			recharge: null,
+			availability: ({pending}) => pending.rageActive
+				? {available: true}
+				: {available: false, unavailableReason: "Relentless Rage requires Rage to be active when you drop to 0 hit points."},
+			consumption: {
+				consume: ({state}) => {
+					state._data.relentlessRageAttempts++;
+					return {type: "escalatingDc", nextDc: 10 + 5 * state._data.relentlessRageAttempts};
+				},
+			},
+			hpOutcome: {
+				calculate: ({state}) => state.getFeatureCalculations().relentlessRageHp,
+			},
+			description: "While raging, make a Constitution save when you drop to 0 HP without dying outright. Each attempt raises the next DC by 5 until a short or long rest.",
+		},
 		{
 			id: "strengthOfTheGrave",
 			featureName: "Strength of the Grave",
@@ -15038,7 +15110,7 @@ class CharacterSheetState {
 	 * @param {boolean} [ctx.isCritical=false] whether it came from a critical hit.
 	 * @returns {Array<object>} descriptors; `available` is the single boolean to branch on.
 	 */
-	getZeroHpInterventions ({damage = 0, damageType = null, isCritical = false} = {}) {
+	getZeroHpInterventions ({damage = 0, damageType = null, isCritical = false, rageActive = this.isStateTypeActive("rage")} = {}) {
 		let calc = null;
 		const out = [];
 		for (const [order, def] of CharacterSheetState.ZERO_HP_INTERVENTIONS.entries()) {
@@ -15047,7 +15119,9 @@ class CharacterSheetState {
 				if (!calc[def.calcFlag]) continue;
 			}
 
-			const feature = (this._data.features || []).find(f => f.name === def.featureName);
+			const feature = (this._data.features || [])
+				.find(f => f.name === def.featureName && (!def.featureMatch || def.featureMatch(f, this)));
+			if (def.featureMatch && !feature) continue;
 			// A null usesMax means the intervention has no per-rest budget (Rite Revival):
 			// treat it as unlimited so the uses check never gates it.
 			const unlimited = def.usesMax == null;
@@ -15065,11 +15139,13 @@ class CharacterSheetState {
 				unavailableReason = `${label} requires at least ${selectionCost.minSelections} eligible item${selectionCost.minSelections === 1 ? "" : "s"}.`;
 			}
 
-			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
+			const dc = def.id === "relentlessRage"
+				? calc.relentlessRageDc
+				: (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
 			const context = {
 				state: this,
 				definition: def,
-				pending: {damage, damageType: dmgType, isCritical: !!isCritical},
+				pending: {damage, damageType: dmgType, isCritical: !!isCritical, rageActive},
 				feature,
 				usesRemaining,
 				dc,
@@ -15085,7 +15161,9 @@ class CharacterSheetState {
 				saveAbility: def.saveAbility,
 				saveModifier: def.saveAbility ? this.getSaveMod(def.saveAbility) : 0,
 				dc,
-				dcFormula: def.dcAddsDamage ? `${def.dcBase} + damage taken` : `${def.dcBase}`,
+				dcFormula: def.id === "relentlessRage"
+					? `10 + 5 × ${this._data.relentlessRageAttempts} prior attempt${this._data.relentlessRageAttempts === 1 ? "" : "s"}`
+					: def.dcAddsDamage ? `${def.dcBase} + damage taken` : `${def.dcBase}`,
 				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
 				excludeCritical: !!def.excludeCritical,
 				spendOn: def.spendOn,
@@ -15112,7 +15190,8 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore, isKilledOutright = false}) {
-		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
+		const rageActive = this.isStateTypeActive("rage");
+		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical, rageActive});
 		const actionableCandidates = isKilledOutright
 			? candidates.filter(candidate => candidate.surfaceWhenKilledOutright)
 			: candidates;
@@ -15123,6 +15202,7 @@ class CharacterSheetState {
 			damageType: damageType ? String(damageType).toLowerCase() : null,
 			damageTypeStated: damageType != null,
 			isCritical: !!isCritical,
+			rageActive,
 			hpBefore,
 		};
 	}
@@ -15162,6 +15242,9 @@ class CharacterSheetState {
 
 	/** Discard the armed 0-HP trigger (declined, or resolved some other way). */
 	clearPendingZeroHpIntervention () {
+		if (this._data._pendingZeroHpIntervention && this._data.hp.current === 0) {
+			this._deactivateStatesForEndCondition({isIncapacitated: true});
+		}
 		delete this._data._pendingZeroHpIntervention;
 		this.reconcileGeneratedFeatureItemDeathTransition({reason: "zero-hp-intervention-finalized"});
 	}
@@ -15476,6 +15559,9 @@ class CharacterSheetState {
 				resource.current = feature.uses.current;
 			}
 		}
+	}
+	resetRelentlessRageDc () {
+		this._data.relentlessRageAttempts = 0;
 	}
 	// #endregion
 
@@ -29263,9 +29349,12 @@ class CharacterSheetState {
 						calculations.hasFeralInstinct = true;
 					}
 
-					// Relentless Rage DC (level 11+) - starts at 10, increases by 5 each use
-					if (level >= 11) {
+					// Both editions gain a save at 0 HP; 2024/TGTT recover more HP.
+					if (level >= 11 && ["PHB", "XPHB", "TGTT"].includes(source)) {
+						calculations.hasRelentlessRage = true;
 						calculations.relentlessRageBaseDc = 10;
+						calculations.relentlessRageDc = 10 + 5 * this._data.relentlessRageAttempts;
+						calculations.relentlessRageHp = isXPHB ? level * 2 : 1;
 					}
 
 					// Persistent Rage (level 15+)
@@ -59812,6 +59901,7 @@ class CharacterSheetState {
 	_remintFeatureUsesFromText (feature) {
 		const text = feature?.description || CharacterSheetState._featureTextFromEntries(feature);
 		if (!feature || feature.uses || !text) return;
+		if (CharacterSheetState.isRelentlessRageFeature(feature)) return;
 		if (this._isResourceSystemFeature(feature)) return;
 
 		let uses = this._getCuratedFeatureUses(feature);
@@ -60186,8 +60276,9 @@ class CharacterSheetState {
 		// Auto-extract uses from feature description if not already provided
 		// Skip use detection for meta-features that describe resource systems rather than having their own uses
 		const isMetaFeature = this._isResourceSystemFeature(feature);
-		let uses = feature.uses;
-		if (!uses) {
+		const isRelentlessRage = CharacterSheetState.isRelentlessRageFeature(feature);
+		let uses = isRelentlessRage ? null : feature.uses;
+		if (!uses && !isRelentlessRage) {
 			// Curated TGTT overrides win over the generic parser (e.g. Healing Salves'
 			// once/long-rest creation vs. its 1+WIS doses; Ephemeral Insight's untracked count).
 			const curated = this._getCuratedFeatureUses(feature);
@@ -60216,6 +60307,7 @@ class CharacterSheetState {
 				: {}),
 			...(conditionalToolGrant ? {_conditionalToolGrant: conditionalToolGrant} : {}),
 		};
+		if (CharacterSheetState.isRelentlessRageFeature(featureData)) delete featureData.uses;
 		const fixedProficiencyFallback = this._beginFixedProficiencyFallbackTransaction(featureData);
 
 		// Add uses if detected or passed in
@@ -75959,6 +76051,8 @@ class CharacterSheetState {
 		// Reuses the existing `isZodiacFormFeature` predicate (subclass-gated, matched
 		// against ZODIAC_FORM_DEFS) so new tiers are covered as their defs are added.
 		if (CharacterSheetState.isZodiacFormFeature(feature)) return null;
+		if (CharacterSheetState.isRelentlessRageFeature(feature)
+			|| CharacterSheetState.isChainedFuryImprisonmentFeature(feature)) return null;
 		const name = feature?.name?.toLowerCase() || "";
 		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
 		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");
@@ -93544,6 +93638,7 @@ class CharacterSheetState {
 		});
 		if (!timeReceipt.ok) return timeReceipt;
 
+		this.resetRelentlessRageDc();
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
 		this.clearChainedFuryTargets();
@@ -93588,6 +93683,7 @@ class CharacterSheetState {
 		});
 		if (!timeReceipt.ok) return timeReceipt;
 
+		this.resetRelentlessRageDc();
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
 		this.clearChainedFuryTargets();
