@@ -774,6 +774,7 @@ class CharacterSheetMobile {
 			items.push(
 				{icon: "⚔️", label: "Roll Attack", action: () => rollBtn?.click()},
 				{icon: "💥", label: "Roll Damage", action: () => dmgBtn?.click()},
+				{icon: "💥", label: "Roll Critical Damage", action: () => this._simulateModifiedClick(dmgBtn, {shiftKey: true})},
 				{icon: "⬆️", label: "Attack (Advantage)", action: () => this._simulateModifiedClick(rollBtn, {shiftKey: true})},
 				{icon: "⬇️", label: "Attack (Disadvantage)", action: () => this._simulateModifiedClick(rollBtn, {ctrlKey: true})},
 				{separator: true},

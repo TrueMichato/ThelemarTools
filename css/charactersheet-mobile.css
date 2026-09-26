@@ -26,13 +26,17 @@
 	.cs-post-roll-offer {
 		top: max(0.75rem, env(safe-area-inset-top));
 		bottom: auto;
-		max-height: min(18rem, calc(100dvh - 16rem));
-		overflow-y: auto;
+		max-height: min(20rem, calc(100dvh - 12rem));
+		overflow: hidden;
+	}
+
+	.cs-post-roll-offer__summary,
+	.cs-post-roll-offer__footer {
+		flex-shrink: 0;
 	}
 
 	.cs-post-roll-offer__choices {
-		overflow: visible;
-		flex-shrink: 0;
+		overflow-y: auto;
 	}
 
 	.cs-post-roll-offer__dismiss {

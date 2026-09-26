@@ -147,6 +147,9 @@ control and keeps the triggering natural roll, total, and breakdown readable
 while the dice toast is present and after it expires. The offer persists through
 the damage roll; **Dismiss offers**, the next committed attack, or switching
 characters removes it.
+The roll context is highlighted separately from the available-effect list and
+the dismiss action in both day and night mode; the panel remains nonblocking
+and scrollable on a small screen.
 Cancelling a pre-roll choice leaves the old offer intact. An opened choice still
 uses the roll-aware full modal, but cancelling it does not spend a resource or
 remove its offer. Other **Open** controls pause until that choice closes.
@@ -357,37 +360,23 @@ the Spells tab or while casting.
 
 ### Rolling Damage
 
+The Combat attack row's **Damage** button rolls normal damage on click. Hold
+**Shift** while clicking it to roll critical damage: the same damage pipeline
+doubles ordinary damage dice once, includes crit-only riders once, and leaves
+flat bonuses unchanged. Keyboard users can press **Shift+Enter** on the focused
+button. The hint above the attack list and the button's accessible label
+describe the shortcut. On touch devices, long-press the attack row and choose
+**Roll Critical Damage** instead. A critical damage roll is not an attack roll
+and does not create critical-hit post-attack offers; those still depend on the
+actual attack d20.
+
 ```javascript
-_rollDamage(attackId, isCritical = false) {
-    const attack = this._getAttackById(attackId);
-    if (!attack) return;
-    
-    // Parse damage dice
-    const diceResult = this._rollDamageDice(attack.damage, isCritical);
-    
-    // Add damage bonus
-    let totalDamage = diceResult.total + attack.damageBonus;
-    
-    // Rage damage bonus
-    const calc = this._state.getFeatureCalculations();
-    if (this._state.isStateTypeActive("rage") && attack.isMelee) {
-        totalDamage += calc.rageDamage || 0;
-    }
-    
-    // Sneak Attack (if applicable)
-    if (this._canApplySneakAttack(attack)) {
-        const sneakDamage = this._rollSneakAttack(isCritical);
-        totalDamage += sneakDamage.total;
-    }
-    
-    // Display result
-    this._displayDamageRoll(attack, {
-        diceResult,
-        bonusDamage: attack.damageBonus,
-        rageDamage: calc.rageDamage,
-        totalDamage,
-        damageType: attack.damageType,
-    });
+// Combat's delegated button handler passes the gesture to the same roll path:
+this._rollDamage(attackId, event.shiftKey);
+
+// In _rollDamage, base dice and ordinary riders use isCrit:
+const damageRoll = rollTypedDamage(damageExpression, weaponDamageType);
+const riderRoll = this._parseDamage(rider.dice, isCrit && !criticalOnly);
 }
 ```
 

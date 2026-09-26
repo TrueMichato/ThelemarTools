@@ -413,12 +413,12 @@ class CharacterSheetCombat {
 			this._rollRecklessAttack(attackId, e);
 		});
 
-		// Roll damage
+		// Roll damage (Shift=Critical)
 		document.addEventListener("click", (/** @type {*} */ e) => {
 			const target = e.target.closest(".charsheet__attack-damage");
 			if (!target) return;
 			const attackId = target.closest(".charsheet__attack-item")?.dataset.attackId;
-			this._rollDamage(attackId);
+			this._rollDamage(attackId, e.shiftKey);
 		});
 
 		// Active ammunition selector (Bug #3) — on a ranged ammunition weapon, the
@@ -2673,11 +2673,15 @@ class CharacterSheetCombat {
 		const escape = CharacterSheetModal._escapeHtml;
 		const offer = e_({outer: `
 			<aside class="cs-post-roll-offer" role="region" aria-label="Optional follow-ups for ${escape(ctx.attack?.name || "attack")}">
-				<div class="cs-post-roll-offer__heading">${escape(ctx.attack?.name || "Attack")} · Optional follow-ups</div>
-				<div class="cs-post-roll-offer__caption">Natural ${escape(ctx.rollFollowup.naturalRoll)} · Total ${escape(ctx.rollFollowup.total)}${ctx.isCrit ? " · Critical hit" : ""}</div>
-				<div class="cs-post-roll-offer__breakdown">${escape(ctx.rollFollowup.breakdown)}</div>
-				<div class="cs-post-roll-offer__choices"></div>
-				<button type="button" class="cs-post-roll-offer__dismiss ve-btn ve-btn-xs ve-btn-default">Dismiss offers</button>
+				<div class="cs-post-roll-offer__summary">
+					<div class="cs-post-roll-offer__heading">${escape(ctx.attack?.name || "Attack")} · Optional follow-ups</div>
+					<div class="cs-post-roll-offer__caption">Natural ${escape(ctx.rollFollowup.naturalRoll)} · Total ${escape(ctx.rollFollowup.total)}${ctx.isCrit ? " · Critical hit" : ""}</div>
+					<div class="cs-post-roll-offer__breakdown">${escape(ctx.rollFollowup.breakdown)}</div>
+				</div>
+				<div class="cs-post-roll-offer__choices" role="group" aria-label="Available post-attack effects"></div>
+				<div class="cs-post-roll-offer__footer">
+					<button type="button" class="cs-post-roll-offer__dismiss ve-btn ve-btn-xs ve-btn-default">Dismiss offers</button>
+				</div>
 			</aside>
 		`});
 		const choices = offer.querySelector(".cs-post-roll-offer__choices");
@@ -5618,6 +5622,8 @@ class CharacterSheetCombat {
 			container.append(banner);
 		}
 
+		container.append(e_({outer: `<p class="charsheet__damage-crit-hint">Shift-click <strong>Damage</strong> (or press Shift+Enter) for critical damage. On touch, long-press an attack for the critical option.</p>`}));
+
 		attacks.forEach(attack => {
 			const item = this._renderAttackItem(attack, reachCtx);
 			container.append(item);
@@ -5926,7 +5932,7 @@ class CharacterSheetCombat {
 						<span class="glyphicon glyphicon-screenshot"></span> Attack${attackActionAllowance ? ` (${attackActionAllowance}/action)` : ""}
 					</button>
 					${recklessBtnHtml}
-					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage">
+					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage (Shift-click or Shift+Enter for critical damage)" aria-label="Roll damage; Shift-click or press Shift+Enter for critical damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>
 					${handsUsedHtml}

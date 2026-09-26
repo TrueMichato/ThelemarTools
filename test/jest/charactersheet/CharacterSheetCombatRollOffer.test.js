@@ -171,6 +171,9 @@ describe("post-attack roll offers at the real attack boundary", () => {
 		expect([...offer.options.keys()]).toEqual(["triggeredFeatCriticalHit", "featureOnHitOptions"]);
 		expect(offer.element.outerHTML).toContain("Natural 19 · Total 27 · Critical hit");
 		expect(offer.element.outerHTML).toContain("1d20 (19) + 8");
+		expect(offer.element.outerHTML).toContain("cs-post-roll-offer__summary");
+		expect(offer.element.outerHTML).toContain("role=\"group\" aria-label=\"Available post-attack effects\"");
+		expect(offer.element.outerHTML).toContain("cs-post-roll-offer__footer");
 		expect(combat._page._pRollTriggeredFeatDie).not.toHaveBeenCalled();
 		expect(buttonFocused).not.toHaveBeenCalled();
 		expect(combat._page.rollD20).toHaveBeenCalledTimes(1);
