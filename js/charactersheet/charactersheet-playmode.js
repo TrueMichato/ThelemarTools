@@ -1929,7 +1929,8 @@ export class CharacterSheetPlayMode {
 		const allStates = this._state.getActiveStates();
 		// Filter to show toggleable states the character has access to (not concentration — that's in status bar)
 		const toggleable = allStates.filter(s => s.stateTypeId !== "concentration");
-		if (!toggleable.length) return;
+		const activeItemPowers = this._state.getActiveSpeedItemPowers();
+		if (!toggleable.length && !activeItemPowers.length) return;
 
 		const card = this._makeCard(this._elActionsHub, "fire", "Active States");
 		const grid = this._ce("div", "pm-active-states", card);
@@ -1958,6 +1959,21 @@ export class CharacterSheetPlayMode {
 				this._renderActionsHub();
 			});
 		});
+
+		for (const power of activeItemPowers) {
+			const row = this._ce("div", "pm-active-state pm-active-state--on pm-active-state--item-power charsheet__active-item-power", grid);
+			row.dataset.itemId = power.itemId;
+			row.dataset.powerId = power.id;
+			const status = this._ce("span", "pm-active-state__toggle", row);
+			this._pip(true, {variant: "success", parent: status});
+			this._ce("span", "pm-active-state__name", row).textContent = power.itemName;
+			this._ce("span", "pm-active-state__item-power-label", row).textContent = `${power.name || "Speed"} active`;
+			const manage = this._ce("button", "ve-btn ve-btn-xs ve-btn-default charsheet__active-item-power-manage", row);
+			manage.type = "button";
+			manage.textContent = "Manage power";
+			manage.setAttribute("aria-label", `Manage ${power.name || "Speed"} power on ${power.itemName}`);
+			manage.addEventListener("click", () => this._page._openActiveItemPower(power, "play"));
+		}
 	}
 
 	async _pToggleActiveState (state) {

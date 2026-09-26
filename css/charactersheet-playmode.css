@@ -2303,6 +2303,18 @@
 	border-color: var(--cs-primary, #6366f1);
 }
 
+.pm-active-state--item-power {
+	cursor: default;
+	flex-wrap: wrap;
+	max-width: 100%;
+}
+
+.pm-active-state__item-power-label {
+	color: var(--cs-text-secondary, #9fadc0);
+	font-size: var(--cs-text-xs, 0.75rem);
+	overflow-wrap: anywhere;
+}
+
 .pm-active-state__toggle {
 	font-size: 0.95rem;
 	display: inline-flex;

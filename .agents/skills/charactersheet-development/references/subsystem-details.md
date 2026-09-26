@@ -165,6 +165,12 @@ Only authoritative mutations reconcile that marker. Passive `isDead()`,
 `getHp()`, rendering, serialization, and management getters remain pure. A
 raw pending zero-HP intervention defers finalization until
 `clearPendingZeroHpIntervention()` resolves success, failure, or decline.
+An intervention with edition-sensitive source text may provide `featureMatch`
+to require an exact stored feature and owning class in addition to `calcFlag`.
+Relentless Rage uses this gate for PHB, XPHB, and TGTT's XPHB feature reference;
+its persisted attempt count determines the next save DC and is reset by both
+rest entry points. A failed or declined intervention at 0 HP ends states whose
+rules end on incapacitation; a successful intervention retains them.
 Every valid generated row whose lifecycle registers
 `onDeath: "expire-after-1d4-days"` receives one persisted roll for that
 finalized death receipt only when its exact owner, including `featureSource`,
@@ -2437,6 +2443,18 @@ ends the toggle. Catalog rehydration adds a missing speed power to older rows ev
 they already have unrelated powers, and replaces the old XDMG reference-only card.
 Custom items with `modifySpeed` and no authored speed power stay passive while equipped
 and attuned; never infer a toggle from a bare multiplier.
+`getActiveSpeedItemPowers()` is a read-only status projection of the first
+operational speed power on each exact equipped/attuned inventory wrapper. Overview,
+Combat, and Play Mode render it beside real active states, never in
+`_data.activeStates`; each row has only a **Manage power** button, which opens
+the existing Powers modal focused on that power and restores focus to the row
+or a stable tab/Full Sheet control on close. Resource unavailability does not
+hide a power that is still active. Rests and save/reload preserve the item's
+activation; deactivation and unequip/unattune remove the projected row.
+An active operational item toggle may be turned off through its existing power
+control even with no charges/uses/resources left; deactivation spends nothing.
+Activation validates all costs before mutating the item's power flag, charges,
+or uses, and still obeys equip/attunement and reference-only restrictions.
 
 **Typed weapon damage dice.** `damageRiders[]` lines carry a persistent `id`,
 `dice`, one `damageType` (a canonical 5e damage name), and optional

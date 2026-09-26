@@ -5620,6 +5620,7 @@ class CharacterSheetState {
 
 			// Features and traits
 			features: [], // [{name, source, description, uses: {current, max, recharge}}]
+			relentlessRageAttempts: 0,
 			feats: [], // [{name, source}]
 			adventurersAtlas: CharacterSheetState._getEmptyAdventurersAtlas(),
 			cartographerMappingMagic: CharacterSheetState._getEmptyCartographerMappingMagic(),
@@ -6431,6 +6432,8 @@ class CharacterSheetState {
 		// Repair old saves whose entries-only features predate use/resource parsing.
 		// Runs after subclass repair + featureType migration and is idempotent.
 		this._migrateFeatureUsesFromEntries();
+		this._migrateRelentlessRage();
+		this._migrateChainedFuryImprisonmentStates();
 
 		// Migrate Hunter's Prey: older saves stored it as a consumable resource/use.
 		// Convert to the toggle model (strip uses, drop the orphan resource).
@@ -9977,6 +9980,43 @@ class CharacterSheetState {
 
 			return f;
 		});
+	}
+
+	static isRelentlessRageFeature (feature) {
+		return feature?.name === "Relentless Rage"
+			&& feature.className === "Barbarian"
+			&& ["PHB", "XPHB"].includes(feature.source)
+			&& (!feature.classSource || feature.classSource === feature.source)
+			&& (feature.level == null || Number(feature.level) === 11);
+	}
+
+	static isChainedFuryImprisonmentFeature (feature) {
+		return feature?.name === "Chain Imprisonment"
+			&& feature.source === "TGTT"
+			&& feature.className === "Barbarian"
+			&& feature.classSource === "TGTT"
+			&& feature.subclassShortName === "Chained Fury"
+			&& feature.subclassSource === "TGTT"
+			&& (feature.level == null || Number(feature.level) === 6);
+	}
+
+	_migrateRelentlessRage () {
+		const count = Number(this._data.relentlessRageAttempts);
+		this._data.relentlessRageAttempts = Number.isSafeInteger(count) && count >= 0 ? count : 0;
+		const features = (this._data.features || []).filter(feature => CharacterSheetState.isRelentlessRageFeature(feature));
+		const ids = new Set(features.map(feature => feature.id).filter(id => typeof id === "string" && !!id.trim()));
+		features.forEach(feature => { delete feature.uses; });
+		this._data.resources = (this._data.resources || []).filter(resource => !ids.has(resource.featureId));
+	}
+
+	_migrateChainedFuryImprisonmentStates () {
+		const ids = new Set((this._data.features || [])
+			.filter(feature => CharacterSheetState.isChainedFuryImprisonmentFeature(feature))
+			.map(feature => feature.id)
+			.filter(id => typeof id === "string" && !!id.trim()));
+		this._data.activeStates = (this._data.activeStates || []).filter(state =>
+			!(state.stateTypeId === "custom" && ids.has(state.sourceFeatureId) && state.name === "Chain Imprisonment"),
+		);
 	}
 
 	_migrateFixedProficiencyFallbacks () {
@@ -14699,6 +14739,7 @@ class CharacterSheetState {
 	 * - `id`             stable key used by {@link applyZeroHpIntervention}
 	 * - `featureName`    the feature that grants it (also where the once-per-rest use lives)
 	 * - `calcFlag`       `getFeatureCalculations()` boolean that gates availability
+	 * - `featureMatch`   optional exact source/owner check on a stored feature
 	 * - `saveAbility`    ability for the save, or `null` for an automatic (no-roll) drop-to-1
 	 * - `dcBase`         DC constant …
 	 * - `dcAddsDamage`   … plus the damage taken, when true
@@ -14734,6 +14775,38 @@ class CharacterSheetState {
 	 * @type {Array<object>}
 	 */
 	static ZERO_HP_INTERVENTIONS = [
+		{
+			id: "relentlessRage",
+			featureName: "Relentless Rage",
+			calcFlag: "hasRelentlessRage",
+			featureMatch: (feature, state) => CharacterSheetState.isRelentlessRageFeature(feature)
+				&& state._data.classes.some(cls => cls.name === "Barbarian"
+					&& cls.level >= 11
+					&& (cls.source === "TGTT" ? "XPHB" : cls.source) === (feature.classSource || feature.source)),
+			saveAbility: "con",
+			dcBase: 10,
+			dcAddsDamage: false,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			requiresNonOutrightDeath: true,
+			armWhenUnavailable: false,
+			spendOn: "attempt",
+			usesMax: null,
+			recharge: null,
+			availability: ({pending}) => pending.rageActive
+				? {available: true}
+				: {available: false, unavailableReason: "Relentless Rage requires Rage to be active when you drop to 0 hit points."},
+			consumption: {
+				consume: ({state}) => {
+					state._data.relentlessRageAttempts++;
+					return {type: "escalatingDc", nextDc: 10 + 5 * state._data.relentlessRageAttempts};
+				},
+			},
+			hpOutcome: {
+				calculate: ({state}) => state.getFeatureCalculations().relentlessRageHp,
+			},
+			description: "While raging, make a Constitution save when you drop to 0 HP without dying outright. Each attempt raises the next DC by 5 until a short or long rest.",
+		},
 		{
 			id: "strengthOfTheGrave",
 			featureName: "Strength of the Grave",
@@ -15038,7 +15111,7 @@ class CharacterSheetState {
 	 * @param {boolean} [ctx.isCritical=false] whether it came from a critical hit.
 	 * @returns {Array<object>} descriptors; `available` is the single boolean to branch on.
 	 */
-	getZeroHpInterventions ({damage = 0, damageType = null, isCritical = false} = {}) {
+	getZeroHpInterventions ({damage = 0, damageType = null, isCritical = false, rageActive = this.isStateTypeActive("rage")} = {}) {
 		let calc = null;
 		const out = [];
 		for (const [order, def] of CharacterSheetState.ZERO_HP_INTERVENTIONS.entries()) {
@@ -15047,7 +15120,9 @@ class CharacterSheetState {
 				if (!calc[def.calcFlag]) continue;
 			}
 
-			const feature = (this._data.features || []).find(f => f.name === def.featureName);
+			const feature = (this._data.features || [])
+				.find(f => f.name === def.featureName && (!def.featureMatch || def.featureMatch(f, this)));
+			if (def.featureMatch && !feature) continue;
 			// A null usesMax means the intervention has no per-rest budget (Rite Revival):
 			// treat it as unlimited so the uses check never gates it.
 			const unlimited = def.usesMax == null;
@@ -15065,11 +15140,13 @@ class CharacterSheetState {
 				unavailableReason = `${label} requires at least ${selectionCost.minSelections} eligible item${selectionCost.minSelections === 1 ? "" : "s"}.`;
 			}
 
-			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
+			const dc = def.id === "relentlessRage"
+				? calc.relentlessRageDc
+				: (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
 			const context = {
 				state: this,
 				definition: def,
-				pending: {damage, damageType: dmgType, isCritical: !!isCritical},
+				pending: {damage, damageType: dmgType, isCritical: !!isCritical, rageActive},
 				feature,
 				usesRemaining,
 				dc,
@@ -15085,7 +15162,9 @@ class CharacterSheetState {
 				saveAbility: def.saveAbility,
 				saveModifier: def.saveAbility ? this.getSaveMod(def.saveAbility) : 0,
 				dc,
-				dcFormula: def.dcAddsDamage ? `${def.dcBase} + damage taken` : `${def.dcBase}`,
+				dcFormula: def.id === "relentlessRage"
+					? `10 + 5 × ${this._data.relentlessRageAttempts} prior attempt${this._data.relentlessRageAttempts === 1 ? "" : "s"}`
+					: def.dcAddsDamage ? `${def.dcBase} + damage taken` : `${def.dcBase}`,
 				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
 				excludeCritical: !!def.excludeCritical,
 				spendOn: def.spendOn,
@@ -15112,7 +15191,8 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore, isKilledOutright = false}) {
-		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
+		const rageActive = this.isStateTypeActive("rage");
+		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical, rageActive});
 		const actionableCandidates = isKilledOutright
 			? candidates.filter(candidate => candidate.surfaceWhenKilledOutright)
 			: candidates;
@@ -15123,6 +15203,7 @@ class CharacterSheetState {
 			damageType: damageType ? String(damageType).toLowerCase() : null,
 			damageTypeStated: damageType != null,
 			isCritical: !!isCritical,
+			rageActive,
 			hpBefore,
 		};
 	}
@@ -15162,6 +15243,9 @@ class CharacterSheetState {
 
 	/** Discard the armed 0-HP trigger (declined, or resolved some other way). */
 	clearPendingZeroHpIntervention () {
+		if (this._data._pendingZeroHpIntervention && this._data.hp.current === 0) {
+			this._deactivateStatesForEndCondition({isIncapacitated: true});
+		}
 		delete this._data._pendingZeroHpIntervention;
 		this.reconcileGeneratedFeatureItemDeathTransition({reason: "zero-hp-intervention-finalized"});
 	}
@@ -15476,6 +15560,9 @@ class CharacterSheetState {
 				resource.current = feature.uses.current;
 			}
 		}
+	}
+	resetRelentlessRageDc () {
+		this._data.relentlessRageAttempts = 0;
 	}
 	// #endregion
 
@@ -29263,9 +29350,12 @@ class CharacterSheetState {
 						calculations.hasFeralInstinct = true;
 					}
 
-					// Relentless Rage DC (level 11+) - starts at 10, increases by 5 each use
-					if (level >= 11) {
+					// Both editions gain a save at 0 HP; 2024/TGTT recover more HP.
+					if (level >= 11 && ["PHB", "XPHB", "TGTT"].includes(source)) {
+						calculations.hasRelentlessRage = true;
 						calculations.relentlessRageBaseDc = 10;
+						calculations.relentlessRageDc = 10 + 5 * this._data.relentlessRageAttempts;
+						calculations.relentlessRageHp = isXPHB ? level * 2 : 1;
 					}
 
 					// Persistent Rage (level 15+)
@@ -44198,6 +44288,7 @@ class CharacterSheetState {
 				if (power.activationFingerprint && usableFingerprints.has(`${item.id}|${power.activationFingerprint}`)) continue;
 				const requiresEquipped = power.requiresEquipped !== false;
 				const isActive = (!requiresEquipped || !!item.equipped) && (!item.requiresAttunement || !!item.attuned);
+				const isTogglingOff = !!power.isToggle && !!item.itemPowerStates?.[power.id]?.active;
 				if (activeOnly && !isActive) continue;
 				const chargesCurrent = item.chargesCurrent ?? item.charges ?? 0;
 				const usesCurrent = power.usesMax
@@ -44210,16 +44301,16 @@ class CharacterSheetState {
 						? "Equip this item to use its powers."
 						: item.requiresAttunement && !item.attuned
 							? "Attune to this item to use its powers."
-							: power.chargesCost > chargesCurrent
+							: !isTogglingOff && power.chargesCost > chargesCurrent
 								? `Requires ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}; ${chargesCurrent} remaining.`
-								: power.usesMax && usesCurrent <= 0
+								: !isTogglingOff && power.usesMax && usesCurrent <= 0
 									? `${power.name} has no uses remaining.`
-									: power.usageType === "resource" && !power.resourceName
+									: !isTogglingOff && power.usageType === "resource" && !power.resourceName
 										? "This power has no resource name configured."
-										: power.resourceName && !resource
+										: !isTogglingOff && power.resourceName && !resource
 											? `Resource "${power.resourceName}" is unavailable.`
-											: resource && resource.current < power.resourceCost
-												? `Requires ${power.resourceCost} ${power.resourceName}; ${resource.current} remaining.`
+											: !isTogglingOff && resource && resource.current < (power.resourceCost ?? 1)
+												? `Requires ${power.resourceCost ?? 1} ${power.resourceName}; ${resource.current} remaining.`
 												: null;
 				out.push({
 					...power,
@@ -44232,7 +44323,7 @@ class CharacterSheetState {
 					usesCurrent,
 					resourceCurrent: resource?.current ?? null,
 					resourceMax: resource?.max ?? null,
-					isActive: !!item.itemPowerStates?.[power.id]?.active,
+					isActive: isTogglingOff,
 					recharge: item.recharge || null,
 					isAvailable: !unavailableReason,
 					unavailableReason,
@@ -44390,6 +44481,26 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Display-only projection of active item speed powers. Speed applies the first
+	 * speed power on an equipped, attuned-if-required item; the status must follow
+	 * that same power rather than treating any saved toggle flag as an effect.
+	 */
+	getActiveSpeedItemPowers () {
+		return this.getItems().flatMap(item => {
+			if (!item.equipped || (item.requiresAttunement && !item.attuned) || !item.modifySpeed) return [];
+			const power = item.itemPowers?.find(it => it.effectType === "modifySpeed");
+			if (!power?.id || !power.isToggle || power.isReferenceOnly || !item.itemPowerStates?.[power.id]?.active) return [];
+			return [{
+				itemId: item.id,
+				itemName: item.name,
+				itemSource: item.source,
+				id: power.id,
+				name: power.name,
+			}];
+		});
+	}
+
+	/**
 	 * Atomically validate and consume an item power's resource.
 	 * Spell/result resolution remains with the calling UI, but charge mutation has one owner.
 	 */
@@ -44418,32 +44529,34 @@ class CharacterSheetState {
 				isActive: power.isToggle ? !!found.gem.runtime.powerStates[localPowerId] : false,
 			};
 		}
-		if (power.isDestructive && !confirmed) return {ok: false, needsConfirmation: true, power};
+		const isDeactivating = power.isToggle && power.isActive;
+		if (power.isDestructive && !confirmed && !isDeactivating) return {ok: false, needsConfirmation: true, power};
 		const entry = this._findInventoryRow(itemId);
 		if (!entry?.item) return {ok: false, reason: "Item not found."};
-		let isActive = power.isActive;
-		if (power.isToggle) {
-			if (!entry.item.itemPowerStates) entry.item.itemPowerStates = {};
-			isActive = !entry.item.itemPowerStates[power.id]?.active;
-			entry.item.itemPowerStates[power.id] = {active: isActive};
+		const selectedChargesCost = isDeactivating ? 0 : chargesCost == null ? power.chargesCost : Number(chargesCost);
+		if (!isDeactivating && chargesCost != null && (!Number.isInteger(selectedChargesCost) || selectedChargesCost < (power.chargesCost || 0))) {
+			return {ok: false, reason: `Choose at least ${power.chargesCost || 0} charges for ${power.name}.`};
 		}
-		const selectedChargesCost = chargesCost == null ? power.chargesCost : Number(chargesCost);
-		if (power.chargesCostMax && (selectedChargesCost < power.chargesCost || selectedChargesCost > power.chargesCostMax)) {
+		if (!isDeactivating && power.chargesCostMax && (selectedChargesCost < power.chargesCost || selectedChargesCost > power.chargesCostMax)) {
 			return {ok: false, reason: `Choose between ${power.chargesCost} and ${power.chargesCostMax} charges.`};
 		}
+		const currentCharges = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
 		if (selectedChargesCost) {
-			const current = entry.item.chargesCurrent ?? entry.item.charges ?? 0;
-			if (current < selectedChargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
-			entry.item.chargesCurrent = current - selectedChargesCost;
+			if (currentCharges < selectedChargesCost) return {ok: false, reason: `Not enough charges for ${power.name}.`};
 		}
-		if (power.resourceName && !this.useResourceCharge(power.resourceName, power.resourceCost)) {
+		const usesCurrent = power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null;
+		if (!isDeactivating && power.usesMax && usesCurrent <= 0) return {ok: false, reason: `No uses remaining for ${power.name}.`};
+		if (!isDeactivating && power.resourceName && !this.useResourceCharge(power.resourceName, power.resourceCost ?? 1)) {
 			return {ok: false, reason: `Not enough ${power.resourceName} for ${power.name}.`};
 		}
-		if (power.usesMax) {
-			if (!entry.item.itemPowerUses) entry.item.itemPowerUses = {};
-			const current = entry.item.itemPowerUses[power.usesKey] ?? power.usesMax;
-			if (current <= 0) return {ok: false, reason: `No uses remaining for ${power.name}.`};
-			entry.item.itemPowerUses[power.usesKey] = current - 1;
+		if (selectedChargesCost) entry.item.chargesCurrent = currentCharges - selectedChargesCost;
+		if (!isDeactivating && power.usesMax) {
+			entry.item.itemPowerUses ||= {};
+			entry.item.itemPowerUses[power.usesKey] = usesCurrent - 1;
+		}
+		if (power.isToggle) {
+			entry.item.itemPowerStates ||= {};
+			entry.item.itemPowerStates[power.id] = {active: !isDeactivating};
 		}
 		const result = {
 			ok: true,
@@ -44453,10 +44566,10 @@ class CharacterSheetState {
 			usesCurrent: power.usesMax ? entry.item.itemPowerUses?.[power.usesKey] ?? power.usesMax : null,
 			resourceCurrent: power.resourceName ? this.getResource(power.resourceName)?.current ?? null : null,
 			chargesCost: selectedChargesCost,
-			isActive,
-			destroyed: !!power.isDestructive,
+			isActive: power.isToggle ? !isDeactivating : power.isActive,
+			destroyed: !!power.isDestructive && !isDeactivating,
 		};
-		if (power.isDestructive) this.removeItem(itemId);
+		if (power.isDestructive && !isDeactivating) this.removeItem(itemId);
 		return result;
 	}
 
@@ -59789,6 +59902,7 @@ class CharacterSheetState {
 	_remintFeatureUsesFromText (feature) {
 		const text = feature?.description || CharacterSheetState._featureTextFromEntries(feature);
 		if (!feature || feature.uses || !text) return;
+		if (CharacterSheetState.isRelentlessRageFeature(feature)) return;
 		if (this._isResourceSystemFeature(feature)) return;
 
 		let uses = this._getCuratedFeatureUses(feature);
@@ -60163,8 +60277,9 @@ class CharacterSheetState {
 		// Auto-extract uses from feature description if not already provided
 		// Skip use detection for meta-features that describe resource systems rather than having their own uses
 		const isMetaFeature = this._isResourceSystemFeature(feature);
-		let uses = feature.uses;
-		if (!uses) {
+		const isRelentlessRage = CharacterSheetState.isRelentlessRageFeature(feature);
+		let uses = isRelentlessRage ? null : feature.uses;
+		if (!uses && !isRelentlessRage) {
 			// Curated TGTT overrides win over the generic parser (e.g. Healing Salves'
 			// once/long-rest creation vs. its 1+WIS doses; Ephemeral Insight's untracked count).
 			const curated = this._getCuratedFeatureUses(feature);
@@ -60193,6 +60308,7 @@ class CharacterSheetState {
 				: {}),
 			...(conditionalToolGrant ? {_conditionalToolGrant: conditionalToolGrant} : {}),
 		};
+		if (CharacterSheetState.isRelentlessRageFeature(featureData)) delete featureData.uses;
 		const fixedProficiencyFallback = this._beginFixedProficiencyFallbackTransaction(featureData);
 
 		// Add uses if detected or passed in
@@ -62895,16 +63011,20 @@ class CharacterSheetState {
 	}
 
 	removeFeature (featureIdOrName, source) {
-		// Find the feature first to get its id
-		const feature = this._data.features.find(f =>
-			f.id === featureIdOrName || (f.name === featureIdOrName && f.source === source),
-		);
+		const isExactFeature = featureIdOrName != null && typeof featureIdOrName === "object";
+		const feature = this._data.features.find(f => isExactFeature
+			? f === featureIdOrName
+			: f.id === featureIdOrName || (f.name === featureIdOrName && f.source === source));
+		if (isExactFeature && !feature) throw new Error("The feature to remove is no longer in the character state.");
 
 		// Remove associated resource if it was auto-added
 		if (feature) {
+			const hasFeatureId = !!feature.id;
+			const hasAnotherFeatureWithName = this._data.features.some(other =>
+				other !== feature && other.name === feature.name);
 			this._removeFixedProficiencyFallbackTransaction(feature);
 			this._removeConditionalToolGrantDecision(feature);
-			for (const trackedSource of [`feature-choice:${feature.id}`, `feature:${feature.id}`]) {
+			for (const trackedSource of hasFeatureId ? [`feature-choice:${feature.id}`, `feature:${feature.id}`] : []) {
 				for (const [type, remove] of [
 					["skills", name => this.setSkillProficiency(name, 0)],
 					["saves", name => this.removeSaveProficiency(name)],
@@ -62918,47 +63038,50 @@ class CharacterSheetState {
 				}
 			}
 			const featureKey = feature.name.toLowerCase();
-			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
+			if (!hasAnotherFeatureWithName) {
+				this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
+			}
 			const featureToolKey = this._getFeatureToolChoiceFulfillmentKey({
 				featureUid: feature._fixedProficiencyFallbackOwnerUid || feature._sourceAwareFeatureUid,
 				featureName: feature.name,
 			});
 			const hasExactToolChoiceOwner = featureToolKey.startsWith("uid:");
 			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || [])
-				.filter(name => name !== featureToolKey && (hasExactToolChoiceOwner || name !== featureKey));
+				.filter(name => name !== featureToolKey && (hasExactToolChoiceOwner || hasAnotherFeatureWithName || name !== featureKey));
 			const removedResources = this._data.resources
 				.filter(r =>
-					r.featureId === feature.id
+					(hasFeatureId && r.featureId === feature.id)
 					|| (feature.sourceDecisionKey
 						? r.sourceDecisionKey === feature.sourceDecisionKey
-						: r.name === feature.name),
+						: !hasAnotherFeatureWithName && r.name === feature.name),
 				);
 			this._data.resources = this._data.resources.filter(r =>
-				r.featureId !== feature.id
+				(!hasFeatureId || r.featureId !== feature.id)
 				&& (feature.sourceDecisionKey
 					? r.sourceDecisionKey !== feature.sourceDecisionKey
-					: r.name !== feature.name),
+					: hasAnotherFeatureWithName || r.name !== feature.name),
 			);
 			this._pruneTurnReceiptsForResources(removedResources);
 			// Remove associated attack if it was auto-added (natural weapon)
-			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
+			this._data.attacks = this._data.attacks.filter(a =>
+				(!hasFeatureId || a.featureId !== feature.id) && (hasAnotherFeatureWithName || a.sourceFeature !== feature.name));
 			// Remove associated innate spells
-			this.removeInnateSpellsByFeature(feature.name);
+			if (!hasAnotherFeatureWithName) this.removeInnateSpellsByFeature(feature.name);
 			// Remove any unresolved prose "either A or B" choices queued by this feature
-			this.clearPendingFeatureChoicesByFeature(feature.id);
-			if (!feature.id) this.clearPendingFeatureChoicesByFeature(feature.name);
+			if (hasFeatureId) this.clearPendingFeatureChoicesByFeature(feature.id);
+			if (!feature.id && !hasAnotherFeatureWithName) this.clearPendingFeatureChoicesByFeature(feature.name);
 			// Remove any cantrip this feature granted as a player choice (sourceFeature is
 			// unique to the granting feature — e.g. Arcane Archer Lore's chosen cantrip).
-			if (this._data.spellcasting?.cantripsKnown?.length) {
+			if (!hasAnotherFeatureWithName && this._data.spellcasting?.cantripsKnown?.length) {
 				this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(
 					c => c.sourceFeature !== feature.name,
 				);
 			}
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
-			this.removeModifiersByName(feature.name);
+			if (!hasAnotherFeatureWithName) this.removeModifiersByName(feature.name);
 			for (const state of [...(this._data.activeStates || [])]) {
-				if (state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
+				if (hasFeatureId && state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
 			}
 
 			// Cascade-remove any feats granted by this optional feature
@@ -62979,6 +63102,7 @@ class CharacterSheetState {
 
 		// Remove the feature
 		this._data.features = this._data.features.filter(f => {
+			if (isExactFeature) return f !== feature;
 			if (f.id === featureIdOrName) return false;
 			if (f.name === featureIdOrName && f.source === source) return false;
 			return true;
@@ -75937,6 +76061,8 @@ class CharacterSheetState {
 		// Reuses the existing `isZodiacFormFeature` predicate (subclass-gated, matched
 		// against ZODIAC_FORM_DEFS) so new tiers are covered as their defs are added.
 		if (CharacterSheetState.isZodiacFormFeature(feature)) return null;
+		if (CharacterSheetState.isRelentlessRageFeature(feature)
+			|| CharacterSheetState.isChainedFuryImprisonmentFeature(feature)) return null;
 		const name = feature?.name?.toLowerCase() || "";
 		const isCrimsonRite = feature?.optionalFeatureTypes?.includes("CR");
 		const isBloodCurse = feature?.optionalFeatureTypes?.includes("BC");
@@ -93540,6 +93666,7 @@ class CharacterSheetState {
 		});
 		if (!timeReceipt.ok) return timeReceipt;
 
+		this.resetRelentlessRageDc();
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
 		this.clearChainedFuryTargets();
@@ -93584,6 +93711,7 @@ class CharacterSheetState {
 		});
 		if (!timeReceipt.ok) return timeReceipt;
 
+		this.resetRelentlessRageDc();
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
 		this.clearChainedFuryTargets();

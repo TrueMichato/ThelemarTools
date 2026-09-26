@@ -2281,6 +2281,9 @@ class CharacterSheetFeatures {
 			? CharacterSheetEfaExperimentalElixirUi.renderFeatureStatusHtml(this._state)
 			: null;
 		const hasUses = feature.uses && feature.uses.max > 0;
+		const relentlessRageDc = CharacterSheetState.isRelentlessRageFeature(feature)
+			? this._state.getZeroHpInterventions().find(it => it.id === "relentlessRage")?.dc
+			: null;
 		// (R21) Classified limited-use abilities (e.g. Healing Hands, Guided Strike, Forked
 		// Tongue) get a working Use button here even when they carry no `uses` pool of their
 		// own (Guided Strike spends Channel Divinity; Forked Tongue opens the swap modal).
@@ -2591,6 +2594,7 @@ class CharacterSheetFeatures {
 					<span class="charsheet__feature-name">${featureNameHtml}</span>
 					${feature.level ? `<span class="badge badge-secondary">Lvl ${feature.level}</span>` : ""}
 					${hasUses ? `<span class="badge badge-info">${feature.uses.current}/${feature.uses.max}</span>` : ""}
+					${relentlessRageDc != null ? `<span class="badge badge-info" title="Resets to DC 10 after a short or long rest">Next save DC ${relentlessRageDc}</span>` : ""}
 					${isPrimalFocus && this._state.hasPrimalFocus?.() ? `<span class="badge ${this._state.getPrimalFocusMode?.() === "predator" ? "badge-danger" : "badge-info"}">${this._state.getPrimalFocusMode?.() === "predator" ? "🎯" : "🛡️"} ${(this._state.getPrimalFocusMode?.() || "predator").toTitleCase()}</span>` : ""}
 					${primalFocusSwitchesBadge}
 					${primalFocusDodgeBadge}

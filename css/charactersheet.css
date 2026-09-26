@@ -7264,6 +7264,29 @@ body[data-font="readable"] {
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
 }
 
+.charsheet__active-item-power {
+	gap: var(--cs-space-xs, 0.25rem);
+	flex-wrap: wrap;
+	min-width: 0;
+}
+
+.charsheet__active-item-power .charsheet__state-name,
+.charsheet__active-item-power-name,
+.charsheet__active-item-power-label {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__active-item-power-label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-secondary, var(--rgb-text));
+}
+
+.charsheet__active-item-power-manage {
+	margin-inline-start: auto;
+	white-space: nowrap;
+}
+
 .charsheet__state-icon {
 	font-size: 1.4rem;
 	margin-right: var(--cs-space-sm, 0.5rem);
@@ -16338,6 +16361,16 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__combat-state-item:hover {
 	opacity: 0.8;
+}
+
+.charsheet__combat-state-item.charsheet__active-item-power {
+	cursor: default;
+	display: inline-flex;
+	align-items: center;
+}
+
+.charsheet__combat-state-item.charsheet__active-item-power:hover {
+	opacity: 1;
 }
 
 .charsheet__state-remove {

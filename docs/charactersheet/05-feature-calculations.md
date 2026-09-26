@@ -150,8 +150,10 @@ hasFastMovement: true,            // Level 5+
 fastMovementBonus: 10,            // +10 ft when not in heavy armor
 
 hasFeralInstinct: true,           // Level 7+ - advantage on initiative
-hasRelentlessRage: true,          // Level 11+ 
-relentlessRageBaseDc: 10,         // DC increases by 5 each use
+hasRelentlessRage: true,          // Level 11+, PHB/XPHB/TGTT only
+relentlessRageBaseDc: 10,
+relentlessRageDc: 10 + 5 * relentlessRageAttempts, // Next CON save DC
+relentlessRageHp: 1 | 2 * barbarianLevel, // PHB | XPHB/TGTT
 
 hasPersistentRage: true,          // Level 15+ - rage doesn't end early
 hasIndomitableMight: true,        // Level 18+ - STR check min = STR score
@@ -174,6 +176,15 @@ Advantage, and confirms the hit. The rolled weapon-typed bonus is 1d10 at
 levels 9-16 or 2d10 at level 17+, doubled with the other dice on a critical
 hit. Target-facing effects are displayed for manual resolution, never written
 to enemy state. PHB Barbarians retain Brutal Critical instead.
+
+Relentless Rage is a damage-triggered zero-HP intervention, not a finite-use
+resource or an activatable toggle. While Rage was active when damage reduced the
+Barbarian to 0 HP (without killing them outright), a successful CON save leaves
+them at 1 HP (PHB) or twice their Barbarian level (XPHB/TGTT). Each committed
+save attempt, including a failed one, raises the next DC by 5; declining the
+offer does not. A short or long rest resets the DC to 10. TGTT's class feature
+references `Relentless Rage|Barbarian|XPHB|11`, so it uses the 2024 outcome,
+not the PHB outcome.
 
 #### Barbarian Subclasses
 

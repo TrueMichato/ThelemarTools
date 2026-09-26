@@ -1641,6 +1641,22 @@ not branch on a class or feature. `_pendingZeroHpIntervention` stores the
 trigger context while the character remains at 0 HP and is deliberately
 removed by `toJson()`. Import/load never recreates a dismissed or stale prompt.
 
+Relentless Rage uses this transaction without a use pool: its exact PHB/XPHB
+class feature and Barbarian edition are checked before offering a CON save.
+The trigger records whether Rage was active when damage dropped HP to zero;
+the pending offer retains that fact until a save succeeds, fails, or is declined.
+`relentlessRageAttempts` persists the number of committed save attempts since
+the last short or long rest. The next DC is `10 + 5 * attempts`, including
+failed saves; a declined offer spends nothing. PHB success returns to 1 HP,
+XPHB and TGTT success to twice the Barbarian level. Failed/declined saves leave
+HP at zero and end Rage along with other states that end on incapacitation.
+Both the rest dialog and direct `onShortRest()` / `onLongRest()` APIs reset the
+counter after a committed rest, including a short rest at full HP with no Hit
+Dice left. Load migration removes only the old Relentless Rage feature use
+counter and resources linked by a valid feature ID, not unrelated resource
+rows. An ID-less legacy feature still loses its spurious use counter, but
+unowned resources are preserved rather than guessed from their names.
+
 An intervention can publish a `selectionCost` descriptor. The shared
 `inventoryRows` contract supplies exact generated-item ownership, allowed
 rarities, lifecycle/expiry gates, minimum selections, display copy, and a
@@ -1834,7 +1850,12 @@ explicit failed/succeeded save outcomes. Missing outcomes never imply failure.
 Only successful grapples consume one of the two chains (four from Barbarian
 level 14); ordinary shove, resisted saves, and the removed target-only route do
 not persist records. Chain Imprisonment keeps its separate
-`8 + PB + CON` Strength save and recurring force-damage reminder.
+`8 + PB + CON` Strength save and recurring force-damage reminder. The restrain
+choice is resolved in the successful chain grapple, not by spending a separate
+bonus action or leaving an active-state toggle behind. Older custom toggles
+owned by the exact TGTT Chain Imprisonment feature are removed on load; foreign
+same-named states and Rage/Manifest Chains are preserved. An ID-less legacy
+feature cannot prove toggle ownership, so unowned same-named states are kept.
 
 Legacy size, distance, movement, and shove-position fields remain load-compatible
 but are not authored or rendered by the current flow. Disabling tracking,

@@ -10704,6 +10704,7 @@ class CharacterSheetPage {
 		container.innerHTML = "";
 
 		const activeStates = this._state.getActiveStates();
+		const activeItemPowers = this._state.getActiveSpeedItemPowers();
 		const activatableFeatures = this._state.getActivatableFeatures();
 		const concentration = this._state.getConcentration();
 
@@ -10724,7 +10725,7 @@ class CharacterSheetPage {
 		const activeStateTypeIds = new Set(nonConditionStates.filter(s => s.active).map(s => s.stateTypeId));
 
 		// === Section 1: Currently Active States ===
-		const hasActiveStates = nonConditionStates.some(s => s.active) || concentration;
+		const hasActiveStates = nonConditionStates.some(s => s.active) || concentration || activeItemPowers.length;
 
 		if (hasActiveStates) {
 			const activeSection = e_({outer: `<div class="charsheet__active-states-section mb-3">
@@ -10739,6 +10740,23 @@ class CharacterSheetPage {
 				const row = this._renderActiveStateRow(state, stateType, true);
 				activeSection.append(row);
 			});
+
+			for (const power of activeItemPowers) {
+				const row = e_({tag: "div", clazz: "charsheet__state-row charsheet__state--active charsheet__active-item-power"});
+				row.dataset.itemId = power.itemId;
+				row.dataset.powerId = power.id;
+				row.append(
+					e_({tag: "span", clazz: "charsheet__state-icon", txt: "⚡"}),
+					e_({tag: "span", clazz: "charsheet__state-name", txt: power.itemName}),
+					e_({tag: "span", clazz: "charsheet__active-item-power-label", txt: `${power.name || "Speed"} active`}),
+				);
+				const manage = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default charsheet__active-item-power-manage", txt: "Manage power"});
+				manage.type = "button";
+				manage.setAttribute("aria-label", `Manage ${power.name || "Speed"} power on ${power.itemName}`);
+				manage.addEventListener("click", () => this._openActiveItemPower(power, "overview"));
+				row.append(manage);
+				activeSection.append(row);
+			}
 
 			// Show concentration if active
 			if (concentration) {
@@ -11367,6 +11385,24 @@ class CharacterSheetPage {
 		} catch (e) {
 			return escaped;
 		}
+	}
+
+	_openActiveItemPower (power, surface) {
+		const getFocusRestoreTarget = () => {
+			const root = surface === "play"
+				? document.getElementById("charsheet-play-mode")
+				: document.getElementById(surface === "combat" ? "charsheet-combat-states" : "charsheet-active-states");
+			const row = [...(root?.querySelectorAll(".charsheet__active-item-power") || [])]
+				.find(it => it.dataset.itemId === power.itemId && it.dataset.powerId === power.id);
+			const manage = row?.querySelector(".charsheet__active-item-power-manage");
+			if (manage) return manage;
+			if (surface === "play") {
+				return [...(root?.querySelectorAll(".pm-status__tool-btn") || [])]
+					.find(it => it.textContent.trim() === "Full Sheet") || null;
+			}
+			return document.querySelector(`#charsheet-tabs a[href="#charsheet-tab-${surface}"]`);
+		};
+		return this._inventory._showItemPowersModal(power.itemId, {focusPowerId: power.id, getFocusRestoreTarget});
 	}
 
 	_categoriseBuffEntry (spec) {
@@ -15786,7 +15822,7 @@ class CharacterSheetPage {
 			isCritical = wasCrit;
 		}
 
-		const recheck = this._state.getZeroHpInterventions({damage: pending.damage, damageType, isCritical})
+		const recheck = this._state.getZeroHpInterventions({damage: pending.damage, damageType, isCritical, rageActive: pending.rageActive})
 			.find(i => i.id === candidate.id);
 		if (!recheck?.available) {
 			if (recheck?.unavailableReason) JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: recheck.unavailableReason}));

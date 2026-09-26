@@ -1460,12 +1460,15 @@ class CharacterSheetRespec {
 	 * @param {Array} editableChoices - Editable choices
 	 */
 	async _showEditModal (level, history, editableChoices) {
+		let refreshEditor = null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Edit Level ${level} Choices`,
 			isMinHeight0: true,
 			isWidth100: true,
 			isUncappedWidth: true,
-			cbClose: () => {},
+			cbClose: () => {
+				if (this._activeLevelChoiceEditor?.refresh === refreshEditor) this._activeLevelChoiceEditor = null;
+			},
 		});
 
 		const content = e_({tag: "div", clazz: "charsheet__respec-modal"});
@@ -1475,30 +1478,40 @@ class CharacterSheetRespec {
 
 		const choicesList = e_({tag: "div", clazz: "charsheet__respec-choices-list"});
 		const nestedEditorHost = e_({tag: "div", clazz: "charsheet__respec-nested-editor-host"});
-		editableChoices.forEach(choice => {
-			const currentText = typeof choice.current === "object"
-				? (choice.current.name || JSON.stringify(choice.current))
-				: String(choice.current);
+		const renderChoices = (currentHistory, choices) => {
+			choicesList.replaceChildren();
+			nestedEditorHost.replaceChildren();
+			choices.forEach(choice => {
+				const currentText = typeof choice.current === "object"
+					? (choice.current.name || JSON.stringify(choice.current))
+					: String(choice.current);
 
-			const status = choice.decision?.status || "resolved";
-			const choiceRow = e_({outer: `
-				<div class="charsheet__respec-choice-row charsheet__respec-choice-row--${status}" style="--respec-choice-depth:${Number(choice.depth) || 0}">
-					<span class="charsheet__respec-choice-label">${choice.label}:</span>
-					<span class="charsheet__respec-choice-current">${currentText}</span>
-					<span class="charsheet__respec-choice-status">${status}</span>
-					${choice.hasCascade ? `<span class="charsheet__respec-choice-warning" title="Changing this will remove dependent features">\u26a0\ufe0f</span>` : ""}
-				</div>
-			`});
-			if (choice.decision?.id) choiceRow.dataset.decisionId = choice.decision.id;
+				const status = choice.decision?.status || "resolved";
+				const choiceRow = e_({outer: `
+					<div class="charsheet__respec-choice-row charsheet__respec-choice-row--${status}" style="--respec-choice-depth:${Number(choice.depth) || 0}">
+						<span class="charsheet__respec-choice-label">${choice.label}:</span>
+						<span class="charsheet__respec-choice-current">${currentText}</span>
+						<span class="charsheet__respec-choice-status">${status}</span>
+						${choice.hasCascade ? `<span class="charsheet__respec-choice-warning" title="Changing this will remove dependent features">\u26a0\ufe0f</span>` : ""}
+					</div>
+				`});
+				if (choice.decision?.id) choiceRow.dataset.decisionId = choice.decision.id;
 
-			const editBtn = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "Change"});
-			editBtn.addEventListener("click", () => this._editChoice(level, history, choice, doClose, {
-				inlineHost: nestedEditorHost,
-			}));
-			choiceRow.append(editBtn);
+				const editBtn = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "Change"});
+				editBtn.addEventListener("click", () => this._editChoice(level, currentHistory, choice, doClose, {
+					inlineHost: nestedEditorHost,
+				}));
+				choiceRow.append(editBtn);
 
-			choicesList.append(choiceRow);
-		});
+				choicesList.append(choiceRow);
+			});
+		};
+		renderChoices(history, editableChoices);
+		refreshEditor = () => {
+			const currentHistory = this._state.getLevelHistoryEntry(level);
+			if (currentHistory) renderChoices(currentHistory, this._getEditableChoices(level, currentHistory));
+		};
+		this._activeLevelChoiceEditor = {level, refresh: refreshEditor};
 		content.append(choicesList);
 		content.append(nestedEditorHost);
 
@@ -1830,6 +1843,8 @@ class CharacterSheetRespec {
 			actions.append(defer);
 		}
 		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage Choice"});
+		const errorMessage = e_({tag: "p", clazz: "text-danger mt-2"});
+		errorMessage.setAttribute("role", "alert");
 		apply.addEventListener("click", async () => {
 			if (selected.size !== decision.count) {
 				JqueryUtil.doToast({type: "warning", content: `Choose exactly ${decision.count} option${decision.count === 1 ? "" : "s"}.`});
@@ -1843,17 +1858,26 @@ class CharacterSheetRespec {
 				"knownSpells", "preparedSpells", "spellbookSpells", "cantrips",
 				"preparedCantrips", "nestedSpell", "nestedCantrip",
 			]);
-			await this._engine.stageGraphMutation(decision.id, selection, {
-				reverseParent: !setOwnedSpellTypes.has(decision.type),
-				apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, legalOptions, state),
-			});
+			apply.disabled = true;
+			errorMessage.textContent = "";
+			try {
+				await this._engine.stageGraphMutation(decision.id, selection, {
+					reverseParent: !setOwnedSpellTypes.has(decision.type),
+					apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, legalOptions, state),
+				});
+			} catch (error) {
+				errorMessage.textContent = `Could not stage ${decision.label}: ${error.message || String(error)}`;
+				apply.disabled = false;
+				return;
+			}
 			doClose();
 			if (!inlineHost) closeParentModal?.();
+			else if (this._activeLevelChoiceEditor?.level === level) this._activeLevelChoiceEditor.refresh();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `${decision.label} staged in the Respec draft.`});
 		});
 		actions.append(cancel, apply);
-		content.append(actions);
+		content.append(actions, errorMessage);
 		modalInner.append(content);
 		search.focus();
 	}
@@ -4298,30 +4322,30 @@ class CharacterSheetRespec {
 					.length,
 		) || 1;
 
-		// Find the parent feature that defines the options
-		const parentFeature = classFeatures.find(f =>
-			f.name === parentFeatureName
-				&& f.className === history.class.name
-				&& f.level === acquisitionLevel,
-		) || classFeatures.find(f =>
-			f.name === parentFeatureName
-				&& f.className === history.class.name,
-		);
-
-		if (!parentFeature) {
-			content.append(e_({outer: `<p class="text-danger">Could not find parent feature "${parentFeatureName}" to load options.</p>`}));
-			const closeBtn = e_({tag: "button", clazz: "ve-btn ve-btn-default mt-3", txt: "Close"});
-			closeBtn.addEventListener("click", () => doClose());
-			content.append(closeBtn);
-			modalInner.append(content);
-			return;
+		let optionGroups = [{options: choice.decision?.options || []}];
+		if (!choice.decision) {
+			const activeClass = this._page.getClasses().find(cls =>
+				cls.name === history.class.name && cls.source === history.class.source);
+			const declaredParent = activeClass && CharacterSheetClassUtils.getLevelFeatures(
+				activeClass,
+				acquisitionLevel,
+				null,
+				classFeatures,
+				this._page.getSubclassFeatures() || [],
+			).find(feature => feature.name === parentFeatureName && feature.className === history.class.name);
+			const parentFeature = declaredParent && classFeatures.find(feature =>
+				feature.name === declaredParent.name
+					&& feature.className === declaredParent.className
+					&& feature.classSource === declaredParent.classSource
+					&& feature.source === declaredParent.source
+					&& Number(feature.level) === acquisitionLevel);
+			optionGroups = parentFeature
+				? CharacterSheetClassUtils.findFeatureOptions(parentFeature, acquisitionLevel, classFeatures)
+				: [];
 		}
 
-		// Get options from the parent feature (static ClassUtils method — extracted from LevelUp)
-		const optionGroups = CharacterSheetClassUtils.findFeatureOptions(parentFeature, level, classFeatures);
-
 		if (!optionGroups.length || !optionGroups[0].options?.length) {
-			content.append(e_({outer: `<p class="text-danger">No alternative options found for this feature.</p>`}));
+			content.append(e_({tag: "p", clazz: "text-danger", txt: `No source-qualified options found for ${parentFeatureName} in ${history.class.name}|${history.class.source}.`}));
 			const closeBtn = e_({tag: "button", clazz: "ve-btn ve-btn-default mt-3", txt: "Close"});
 			closeBtn.addEventListener("click", () => doClose());
 			content.append(closeBtn);
@@ -4336,6 +4360,7 @@ class CharacterSheetRespec {
 			.filter(feature =>
 				feature.isFeatureOption
 					&& feature.className === history.class.name
+					&& feature.classSource === history.class.source
 					&& poolOptionNames.has(feature.name))
 			.map(feature => feature.name));
 
@@ -4396,6 +4421,8 @@ class CharacterSheetRespec {
 		cancelBtn.addEventListener("click", () => doClose());
 
 		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Apply Changes"});
+		const errorMessage = e_({tag: "p", clazz: "text-danger mt-2"});
+		errorMessage.setAttribute("role", "alert");
 		applyBtn.addEventListener("click", async () => {
 			if (!selectedOption) {
 				JqueryUtil.doToast({type: "warning", content: "Please select an option."});
@@ -4408,16 +4435,25 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			await this._applyFeatureChoiceChange(level, history, choice.index, currentChoice, selectedOption);
+			applyBtn.disabled = true;
+			errorMessage.textContent = "";
+			try {
+				await this._applyFeatureChoiceChange(level, history, choice.index, currentChoice, selectedOption);
+			} catch (error) {
+				errorMessage.textContent = `Could not change ${choice.label}: ${error.message || String(error)}`;
+				applyBtn.disabled = false;
+				return;
+			}
 
 			doClose();
 			if (!inlineHost) closeParentModal?.();
+			else if (this._activeLevelChoiceEditor?.level === level) this._activeLevelChoiceEditor.refresh();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `Changed ${choice.label} to ${selectedOption.name}.`});
 		});
 
 		btnRow.append(cancelBtn, applyBtn);
-		content.append(btnRow);
+		content.append(btnRow, errorMessage);
 
 		modalInner.append(content);
 	}

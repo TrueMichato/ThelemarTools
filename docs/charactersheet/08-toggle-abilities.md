@@ -15,6 +15,8 @@ Toggle abilities are features that can be activated and deactivated, providing t
 - Custom/homebrew toggle abilities
 - Automatic detection and categorization
 
+**Item-power status is separate from active-state storage.** An equipped, attuned-if-required item with an active operational `modifySpeed` toggle (for example, Boots of Speed) is *displayed* in Overview, Combat, and Play Mode Active States. The display reads the exact owned inventory wrapper's `itemPowerStates[power.id].active`; it does not create an `activeStates` record or offer an independent toggle. Use **Manage power** to reach the item's existing Powers modal, which owns activation and deactivation. Its active status persists through tab changes, rests, and reloads, but ends when the power is actually deactivated or the item is unequipped/unattuned. A passive speed item or a reference-only power is never shown as an activated status.
+
 ---
 
 ## Architecture
@@ -1680,6 +1682,11 @@ inventory row across toggles or reloads.
 Spectral Chains on-hit riders are reminders by default. They show the live
 grapple DC, the separate Chain Imprisonment DC, recurring damage, reposition
 distance, and the level-14 movement benefit without requiring a target record.
+Chain Imprisonment is not another toggle: choosing it as part of a successful
+chain grapple requires no additional action or bonus action, and only a failed
+Strength save restrains the target. Relentless Rage is likewise not a toggle
+or use pool; its next-save DC is shown on its feature card and changes after
+each attempted zero-HP save until a short or long rest.
 
 If **Remember chained creatures** is enabled, grapple, Chain Imprisonment, and
 Chain Control ask only for a creature name and explicit failed/succeeded save
