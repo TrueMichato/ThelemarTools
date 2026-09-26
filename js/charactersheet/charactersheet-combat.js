@@ -13789,6 +13789,7 @@ class CharacterSheetCombat {
 		const allStates = this._state?.getActiveStates?.() || [];
 		// Filter for only currently active, non-condition states
 		const activeStates = allStates.filter(s => s.active && !s.isCondition);
+		const activeItemPowers = this._state.getActiveSpeedItemPowers();
 
 		// Also check for concentration
 		const concentration = this._state.getConcentration?.();
@@ -13823,7 +13824,7 @@ class CharacterSheetCombat {
 		});
 
 		// === Section 1: Currently Active States ===
-		const hasActiveStates = activeStates.length > 0 || concentration;
+		const hasActiveStates = activeStates.length > 0 || concentration || activeItemPowers.length;
 
 		if (hasActiveStates) {
 			const activeSection = e_({outer: `<div class="charsheet__combat-active-section mb-2">
@@ -14007,6 +14008,22 @@ class CharacterSheetCombat {
 				}
 
 				activeSection.append(stateEl);
+			}
+
+			for (const power of activeItemPowers) {
+				const row = e_({tag: "div", clazz: "charsheet__combat-state-item charsheet__active-item-power badge badge-success mr-1 mb-1"});
+				row.dataset.itemId = power.itemId;
+				row.dataset.powerId = power.id;
+				row.append(
+					e_({tag: "span", clazz: "charsheet__active-item-power-name", txt: power.itemName}),
+					e_({tag: "span", clazz: "charsheet__active-item-power-label", txt: `${power.name || "Speed"} active`}),
+				);
+				const manage = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default charsheet__active-item-power-manage", txt: "Manage power"});
+				manage.type = "button";
+				manage.setAttribute("aria-label", `Manage ${power.name || "Speed"} power on ${power.itemName}`);
+				manage.addEventListener("click", () => this._page._openActiveItemPower(power, "combat"));
+				row.append(manage);
+				activeSection.append(row);
 			}
 
 			container.append(activeSection);

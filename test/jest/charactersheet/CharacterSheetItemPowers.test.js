@@ -762,6 +762,316 @@ describe("Catalog magic-item powers and passive normalization", () => {
 		expect(state.getSpeed()).toContain("30 ft.");
 	});
 
+	it.each(["DMG", "XDMG"])("projects only the authoritative %s Boots speed toggle as active item status", source => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === source);
+		const added = addCatalogItemViaInventory(state, inventory, boots);
+		inventory.syncItemDerivedState();
+		const power = state.getItemPowers().find(it => it.itemId === added.id && it.effectType === "modifySpeed");
+		const originalStates = state.toJson().activeStates;
+
+		expect(state.getActiveSpeedItemPowers()).toEqual([]);
+		state.invokeItemPower(added.id, power.id);
+		inventory.syncItemDerivedState();
+		expect(state.getWalkSpeed()).toBe(60);
+		expect(state.getActiveSpeedItemPowers()).toEqual([{
+			itemId: added.id,
+			itemName: added.name,
+			itemSource: source,
+			id: power.id,
+			name: power.name,
+		}]);
+		expect(state.toJson().activeStates).toEqual(originalStates);
+		expect(state.onShortRest()).toEqual(expect.objectContaining({ok: true}));
+		expect(state.onLongRest()).toEqual(expect.objectContaining({ok: true}));
+		expect(state.getActiveSpeedItemPowers()).toHaveLength(1);
+		inventory.syncItemDerivedState();
+		expect(state.getWalkSpeed()).toBe(60);
+
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(state.toJson());
+		expect(reloaded.getActiveSpeedItemPowers()).toEqual(state.getActiveSpeedItemPowers());
+		expect(reloaded.toJson().activeStates).toEqual(originalStates);
+
+		state.invokeItemPower(added.id, power.id);
+		inventory.syncItemDerivedState();
+		expect(state.getActiveSpeedItemPowers()).toEqual([]);
+		expect(state.getWalkSpeed()).toBe(30);
+	});
+
+	it("isolates identical custom speed items by wrapper and power ID", () => {
+		const state = new CharacterSheetState();
+		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "DMG");
+		for (const id of ["pair-a", "pair-b"]) state.addItem({...boots, id, source: "Custom", _isCustom: true}, 1, true, true);
+		const powerA = state.getItemPowers().find(it => it.itemId === "pair-a" && it.effectType === "modifySpeed");
+		const powerB = state.getItemPowers().find(it => it.itemId === "pair-b" && it.effectType === "modifySpeed");
+
+		state.invokeItemPower("pair-a", powerA.id);
+		expect(state.getActiveSpeedItemPowers()).toEqual([expect.objectContaining({itemId: "pair-a", id: powerA.id})]);
+		expect(state.getActiveSpeedItemPowers().some(it => it.itemId === "pair-b")).toBe(false);
+		state.invokeItemPower("pair-b", powerB.id);
+		expect(state.getActiveSpeedItemPowers().map(it => it.itemId)).toEqual(["pair-a", "pair-b"]);
+		state.setItemEquipped("pair-a", false);
+		expect(state.getActiveSpeedItemPowers().map(it => it.itemId)).toEqual(["pair-b"]);
+		state.setItemAttuned("pair-b", false);
+		expect(state.getActiveSpeedItemPowers()).toEqual([]);
+		expect(state.getItemRaw("pair-a").itemPowerStates[powerA.id].active).toBe(false);
+		expect(state.getItemRaw("pair-b").itemPowerStates[powerB.id].active).toBe(false);
+	});
+
+	it("keeps an active speed item visible after its activation spends the last charge", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		state.addItem({
+			id: "charged-boots",
+			name: "Charged Swift Boots",
+			source: "Custom",
+			_isCustom: true,
+			modifySpeed: {multiply: {walk: 2}},
+			charges: 1,
+			chargesCurrent: 1,
+			itemPowers: [{
+				id: "speed",
+				name: "Swift Step",
+				kind: "toggle",
+				isToggle: true,
+				effectType: "modifySpeed",
+				actionType: "bonus",
+				isReferenceOnly: false,
+				chargesCost: 1,
+			}],
+		}, 1, true);
+		inventory.syncItemDerivedState();
+		const originalStates = state.toJson().activeStates;
+
+		expect(state.invokeItemPower("charged-boots", "speed")).toEqual(expect.objectContaining({ok: true, isActive: true, chargesCurrent: 0}));
+		inventory.syncItemDerivedState();
+		expect(state.getItemPower("charged-boots", "speed")).toEqual(expect.objectContaining({
+			isActive: true,
+			isAvailable: true,
+			unavailableReason: null,
+		}));
+		expect(state.getWalkSpeed()).toBe(60);
+		expect(state.getActiveSpeedItemPowers()).toEqual([expect.objectContaining({
+			itemId: "charged-boots", id: "speed", name: "Swift Step",
+		})]);
+		expect(state.toJson().activeStates).toEqual(originalStates);
+
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(state.toJson());
+		const reloadedInventory = makeInventory(reloaded);
+		reloadedInventory.syncItemDerivedState();
+		expect(reloaded.getWalkSpeed()).toBe(60);
+		expect(reloaded.getItemPower("charged-boots", "speed").isAvailable).toBe(true);
+		expect(reloaded.invokeItemPower("charged-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: false, chargesCurrent: 0, chargesCost: 0,
+		}));
+		reloadedInventory.syncItemDerivedState();
+		expect(reloaded.getActiveSpeedItemPowers()).toEqual([]);
+		expect(reloaded.getWalkSpeed()).toBe(30);
+		expect(reloaded.getItemRaw("charged-boots").chargesCurrent).toBe(0);
+		expect(reloaded.getItemPower("charged-boots", "speed")).toEqual(expect.objectContaining({
+			isActive: false, isAvailable: false,
+		}));
+		expect(reloaded.invokeItemPower("charged-boots", "speed").ok).toBe(false);
+		expect(reloaded.getItemRaw("charged-boots").itemPowerStates.speed.active).toBe(false);
+	});
+
+	it.each(["uses", "resource"])("can deactivate an active item toggle with exhausted %s without spending again", costType => {
+		const state = new CharacterSheetState();
+		if (costType === "resource") state.addResource({name: "Swift Energy", max: 1, current: 1, recharge: "long"});
+		state.addItem({
+			id: "costly-boots",
+			name: "Costly Boots",
+			source: "Custom",
+			_isCustom: true,
+			modifySpeed: {multiply: {walk: 2}},
+			itemPowers: [{
+				id: "speed",
+				name: "Swift Step",
+				kind: "toggle",
+				isToggle: true,
+				effectType: "modifySpeed",
+				actionType: "bonus",
+				isReferenceOnly: false,
+				...(costType === "uses"
+					? {usesMax: 1, usageType: "daily", usesKey: "swift:daily"}
+					: {resourceName: "Swift Energy", resourceCost: 1}),
+			}],
+		}, 1, true);
+		expect(state.invokeItemPower("costly-boots", "speed").isActive).toBe(true);
+		const remaining = costType === "uses"
+			? state.getItemRaw("costly-boots").itemPowerUses["swift:daily"]
+			: state.getResource("Swift Energy").current;
+		expect(remaining).toBe(0);
+		expect(state.getItemPower("costly-boots", "speed")).toEqual(expect.objectContaining({
+			isActive: true, isAvailable: true,
+		}));
+		expect(state.invokeItemPower("costly-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: false,
+		}));
+		expect(costType === "uses"
+			? state.getItemRaw("costly-boots").itemPowerUses["swift:daily"]
+			: state.getResource("Swift Energy").current).toBe(0);
+		expect(state.getItemPower("costly-boots", "speed").isAvailable).toBe(false);
+		expect(state.invokeItemPower("costly-boots", "speed").ok).toBe(false);
+		expect(state.getItemRaw("costly-boots").itemPowerStates.speed.active).toBe(false);
+	});
+
+	it("does not charge again when turning off a toggle that still has charges remaining", () => {
+		const state = new CharacterSheetState();
+		state.addItem({
+			id: "reusable-boots",
+			name: "Reusable Boots",
+			source: "Custom",
+			_isCustom: true,
+			charges: 2,
+			chargesCurrent: 2,
+			itemPowers: [{
+				id: "speed",
+				name: "Swift Step",
+				kind: "toggle",
+				isToggle: true,
+				chargesCost: 1,
+				actionType: "bonus",
+			}],
+		}, 1, true);
+		expect(state.invokeItemPower("reusable-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: true, chargesCurrent: 1,
+		}));
+		expect(state.invokeItemPower("reusable-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: false, chargesCost: 0, chargesCurrent: 1,
+		}));
+		expect(state.invokeItemPower("reusable-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: true, chargesCurrent: 0,
+		}));
+		expect(state.invokeItemPower("reusable-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: false, chargesCost: 0, chargesCurrent: 0,
+		}));
+	});
+
+	it("validates all activation costs before changing a toggle, then spends them once", () => {
+		const state = new CharacterSheetState();
+		state.addResource({name: "Swift Energy", max: 1, current: 1, recharge: "long"});
+		state.addItem({
+			id: "triple-cost-boots",
+			name: "Triple Cost Boots",
+			source: "Custom",
+			_isCustom: true,
+			charges: 2,
+			chargesCurrent: 2,
+			modifySpeed: {multiply: {walk: 2}},
+			itemPowers: [{
+				id: "speed",
+				name: "Swift Step",
+				kind: "toggle",
+				isToggle: true,
+				effectType: "modifySpeed",
+				actionType: "bonus",
+				isReferenceOnly: false,
+				chargesCost: 1,
+				chargesCostMax: 3,
+				usesMax: 1,
+				usesKey: "swift:daily",
+				usageType: "daily",
+				resourceName: "Swift Energy",
+				resourceCost: 1,
+			}],
+		}, 1, true);
+		expect(state.invokeItemPower("triple-cost-boots", "speed", {chargesCost: 3}).ok).toBe(false);
+		expect(state.getItemRaw("triple-cost-boots").chargesCurrent).toBe(2);
+		expect(state.getItemRaw("triple-cost-boots").itemPowerStates?.speed?.active).not.toBe(true);
+		expect(state.getItemRaw("triple-cost-boots").itemPowerUses?.["swift:daily"]).toBeUndefined();
+		expect(state.getResource("Swift Energy").current).toBe(1);
+		const spend = jest.spyOn(state, "useResourceCharge").mockReturnValueOnce(false);
+		expect(state.invokeItemPower("triple-cost-boots", "speed", {chargesCost: 2}).ok).toBe(false);
+		spend.mockRestore();
+		expect(state.getItemRaw("triple-cost-boots").chargesCurrent).toBe(2);
+		expect(state.getItemRaw("triple-cost-boots").itemPowerStates?.speed?.active).not.toBe(true);
+		expect(state.getItemRaw("triple-cost-boots").itemPowerUses?.["swift:daily"]).toBeUndefined();
+		expect(state.getResource("Swift Energy").current).toBe(1);
+
+		expect(state.invokeItemPower("triple-cost-boots", "speed", {chargesCost: 2})).toEqual(expect.objectContaining({
+			ok: true, isActive: true, chargesCurrent: 0, usesCurrent: 0, resourceCurrent: 0,
+		}));
+		expect(state.getItemPower("triple-cost-boots", "speed").isAvailable).toBe(true);
+		expect(state.invokeItemPower("triple-cost-boots", "speed")).toEqual(expect.objectContaining({
+			ok: true, isActive: false, chargesCost: 0, chargesCurrent: 0, usesCurrent: 0, resourceCurrent: 0,
+		}));
+		expect(state.invokeItemPower("triple-cost-boots", "speed").ok).toBe(false);
+		expect(state.getItemRaw("triple-cost-boots").itemPowerStates.speed.active).toBe(false);
+	});
+
+	it("cannot bypass equipment, attunement, or reference-only rules to dismiss a stale active power", () => {
+		const state = new CharacterSheetState();
+		state.addItem({
+			id: "restricted-boots",
+			name: "Restricted Boots",
+			source: "Custom",
+			_isCustom: true,
+			reqAttune: true,
+			requiresAttunement: true,
+			modifySpeed: {multiply: {walk: 2}},
+			itemPowers: [{
+				id: "speed",
+				name: "Swift Step",
+				kind: "toggle",
+				isToggle: true,
+				effectType: "modifySpeed",
+				actionType: "bonus",
+				chargesCost: 1,
+			}],
+			charges: 1,
+			chargesCurrent: 0,
+			itemPowerStates: {speed: {active: true}},
+		}, 1, false, true);
+		const raw = state.getItemRaw("restricted-boots");
+		raw.itemPowerStates.speed.active = true;
+		expect(state.getItemPower("restricted-boots", "speed").isAvailable).toBe(false);
+		expect(state.invokeItemPower("restricted-boots", "speed").ok).toBe(false);
+		state.setItemEquipped("restricted-boots", true);
+		state.setItemAttuned("restricted-boots", false);
+		raw.itemPowerStates.speed.active = true;
+		expect(state.getItemPower("restricted-boots", "speed").isAvailable).toBe(false);
+		expect(state.invokeItemPower("restricted-boots", "speed").ok).toBe(false);
+		state.setItemAttuned("restricted-boots", true);
+		raw.itemPowerStates.speed.active = true;
+		raw.itemPowers[0].isReferenceOnly = true;
+		expect(state.getItemPower("restricted-boots", "speed").isAvailable).toBe(false);
+		expect(state.invokeItemPower("restricted-boots", "speed").ok).toBe(false);
+		expect(raw.itemPowerStates.speed.active).toBe(true);
+	});
+
+	it("does not project passive or reference-only speed items, even with a stale active flag", () => {
+		const state = new CharacterSheetState();
+		const inventory = makeInventory(state);
+		inventory._addCustomItem("Swift Boots", 1, 1, {
+			type: "wondrous",
+			modifySpeed: {multiply: {walk: 2}},
+		});
+		const passive = state.getItems().find(it => it.name === "Swift Boots");
+		state.setItemEquipped(passive.id, true);
+		state.addItem({
+			id: "reference-boots",
+			name: "Reference Boots",
+			source: "Custom",
+			_isCustom: true,
+			modifySpeed: {multiply: {walk: 2}},
+			itemPowers: [{id: "speed-reference",
+				name: "Speed reference",
+				kind: "toggle",
+				isToggle: true,
+				effectType: "modifySpeed",
+				isReferenceOnly: true,
+				actionType: "bonus"}],
+			itemPowerStates: {"speed-reference": {active: true}},
+		}, 1, true);
+		inventory.syncItemDerivedState();
+		expect(state.getActiveSpeedItemPowers()).toEqual([]);
+		expect(state.getWalkSpeed()).toBe(60);
+	});
+
 	it("repaints Overview speed and breakdown when Boots of Speed are invoked through the inventory UI", async () => {
 		const state = new CharacterSheetState();
 		const boots = items.find(it => it.name === "Boots of Speed" && it.source === "DMG");

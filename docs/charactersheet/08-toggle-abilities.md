@@ -15,6 +15,8 @@ Toggle abilities are features that can be activated and deactivated, providing t
 - Custom/homebrew toggle abilities
 - Automatic detection and categorization
 
+**Item-power status is separate from active-state storage.** An equipped, attuned-if-required item with an active operational `modifySpeed` toggle (for example, Boots of Speed) is *displayed* in Overview, Combat, and Play Mode Active States. The display reads the exact owned inventory wrapper's `itemPowerStates[power.id].active`; it does not create an `activeStates` record or offer an independent toggle. Use **Manage power** to reach the item's existing Powers modal, which owns activation and deactivation. Its active status persists through tab changes, rests, and reloads, but ends when the power is actually deactivated or the item is unequipped/unattuned. A passive speed item or a reference-only power is never shown as an activated status.
+
 ---
 
 ## Architecture
