@@ -166,6 +166,58 @@ describe("XPHB Primal Knowledge skill choice", () => {
 		expect(loaded.getPendingFeatureChoices()).toHaveLength(0);
 		expect(loaded.getSkillProficiency("might")).toBe(1);
 	});
+
+	test.each([
+		["XPHB", core.class, ["animalhandling", "athletics", "intimidation", "nature", "perception", "survival"], "perception"],
+		["TGTT", brew.class, ["animalhandling", "athletics", "endurance", "intimidation", "might", "nature", "perception", "survival"], "endurance"],
+	])("%s old save reconciles the owning class skill choice without a preloaded catalog", (source, classes, options, selected) => {
+		const original = new CharacterSheetState();
+		original.addClass({name: "Barbarian", source, level: 3});
+		const state = new CharacterSheetState();
+		state.loadFromJson(original.toJson());
+		expect(state.getFeatures()).toHaveLength(0);
+		expect(state._classCatalog || []).toHaveLength(0);
+		const classData = classes.find(cls => cls.name === "Barbarian" && cls.source === source);
+		const reconcile = () => globalThis.CharacterSheetClassUtils.reconcileClassFeatures(state, {
+			getClassData: (name, classSource) => name === "Barbarian" && classSource === source ? classData : null,
+			classFeatures: [...core.classFeature, ...brew.classFeature],
+		});
+		expect(reconcile().added).toBeGreaterThan(0);
+		const choices = state.getPendingFeatureChoices().filter(choice => choice.featureName === "Primal Knowledge");
+		expect(choices).toHaveLength(1);
+		expect(choices[0].options.slice().sort()).toEqual(options.slice().sort());
+		expect(state.fulfillFeatureChoice(choices[0].id, selected)).toBe(true);
+		expect(state.getSkillProficiency(selected)).toBe(1);
+		expect(reconcile().added).toBe(0);
+		expect(state.getPendingFeatureChoices()).toHaveLength(0);
+		expect(state.getSkillProficiency(selected)).toBe(1);
+	});
+
+	test("reconciliation refreshes only the owning class entry when a partial catalog is installed", () => {
+		const state = createBarbarian("TGTT");
+		const owner = brew.class.find(cls => cls.name === "Barbarian" && cls.source === "TGTT");
+		const unrelated = core.class.find(cls => cls.name === "Barbarian" && cls.source === "PHB");
+		state.setClassCatalog([unrelated, {...owner, startingProficiencies: {skills: []}}]);
+		expect(globalThis.CharacterSheetClassUtils.reconcileClassFeatures(state, {
+			getClassData: (name, source) => name === "Barbarian" && source === "TGTT" ? owner : null,
+			classFeatures: [...core.classFeature, ...brew.classFeature],
+		}).added).toBeGreaterThan(0);
+		expect(state._classCatalog[0]).toBe(unrelated);
+		expect(state._classCatalog[1]).toBe(owner);
+		const [choice] = state.getPendingFeatureChoices().filter(entry => entry.featureName === "Primal Knowledge");
+		expect(choice.options).toContain("endurance");
+		expect(choice.options).toContain("might");
+	});
+
+	test("reconciliation does not borrow another class's list when owner data lacks skills", () => {
+		const state = createBarbarian("XPHB");
+		const owner = core.class.find(cls => cls.name === "Barbarian" && cls.source === "XPHB");
+		state.setClassCatalog([core.class.find(cls => cls.name === "Barbarian" && cls.source === "PHB")]);
+		expect(() => globalThis.CharacterSheetClassUtils.reconcileClassFeatures(state, {
+			getClassData: () => ({...owner, startingProficiencies: {skills: []}}),
+			classFeatures: core.classFeature,
+		})).toThrow("Cannot resolve level-1 Barbarian skill list for Primal Knowledge (XPHB)");
+	});
 });
 
 describe("XPHB Primal Knowledge conditional Strength checks", () => {
