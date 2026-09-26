@@ -40,10 +40,17 @@ constructor() {
 | `_initUi()` | Creates DOM elements for the sheet |
 | `_initEventListeners()` | Binds all event handlers |
 | `getState()` | Returns the CharacterSheetState instance |
-| `saveCharacter()` | Persists current character to localStorage |
-| `loadCharacter(id)` | Loads a character by ID |
+| `saveCharacter()` | Persists the current character to IndexedDB with a synchronous recovery mirror |
+| `_pLoadCharacter(id)` | Loads a character by ID and selects its dropdown option after async work commits |
 | `renderAll()` | Re-renders entire UI |
 | `rollDice(count, sides)` | Utility for dice rolling |
+
+On startup, the saved-character list is populated before the URL character
+finishes loading. `_pLoadCharacter(id)` sets the select's **value** to the
+committed loaded ID after its async work, including when recovery from the
+active-character mirror supplies an option absent from the initial list.
+Choosing "Create New Character" still clears the select and starts a separate
+character; changing characters saves the previous one first.
 
 ### Data Caches
 
@@ -535,14 +542,19 @@ _addFeat(feat)
 _removeFeat(featId)
 
 // Features
-_renderFeatures()
+render()
 _getFeatureDescription(feature)
-_toggleFeatureExpand(featureId)
+_toggleFeatureExpansion(featureElement)
 
 // Feature Uses
 _useFeature(featureId)
 _recoverFeatureUses(featureId)
 ```
+
+Feature and feat cards share a button disclosure. The button's
+`aria-expanded`, `aria-controls`, and right/down chevron follow the same
+expanded state as its body on mouse click, Enter/Space, and re-render. Clicking
+the non-interactive header area also toggles the corresponding card.
 
 ---
 

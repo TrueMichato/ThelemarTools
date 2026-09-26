@@ -165,6 +165,9 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 7. The fully merged spell and class catalogs are injected into `CharacterSheetState` before any URL character load, spawn, Builder, Level Up, or Quick Build flow. Base-class `additionalSpells` reconciliation requires both catalogs: class data identifies the grant and spell data supplies canonical source/level metadata. `CharacterSheetRespecEngine.begin()` mirrors both catalogs into its isolated candidate before loading the draft snapshot.
 8. The URL-selected character, if any, is loaded from IndexedDB
 9. UI rendered
+   - After the async character load commits, the saved-character selector's
+     value must be set to the loaded ID (not just its displayed name); a
+     mirror-recovered character missing from the initial list needs an option.
 10. The page-wide active tab is restored from synchronous page-scoped storage after
    character-dependent tab visibility is finalized. Missing or hidden saved tabs
    fall back to Overview; tab preference is never serialized into character data.
