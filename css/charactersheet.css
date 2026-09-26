@@ -9057,6 +9057,13 @@ body[data-font="readable"] {
 	transition: all var(--cs-transition-normal, 0.25s ease);
 	flex-shrink: 0;
 	color: var(--cs-text-muted, var(--rgb-text-muted));
+	border: 0;
+	background: transparent;
+}
+
+.charsheet__feature-toggle:focus-visible {
+	outline: 2px solid var(--cs-primary, #6366f1);
+	outline-offset: 2px;
 }
 
 .charsheet__feature-toggle:hover {

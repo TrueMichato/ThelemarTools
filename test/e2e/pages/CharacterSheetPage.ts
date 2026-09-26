@@ -1570,15 +1570,77 @@ export class CharacterSheetPage {
 		const characterId = await this.page.evaluate(() => (globalThis as any).charSheet?._currentCharacterId);
 		await this.page.reload({waitUntil: "domcontentloaded"});
 		await this.page.locator("#charsheet-tab-overview, #charsheet-tab-main").first().waitFor({state: "visible"});
-		if (characterId) {
-			const selector = this.page.locator("#charsheet-sel-character");
-			await selector.locator(`option[value="${characterId}"]`).waitFor({state: "attached"});
-			await selector.selectOption(characterId);
-		}
 		await this.page.waitForFunction(() => {
 			const cs: any = (globalThis as any).charSheet;
 			return Boolean(cs?._state?.getLevelHistory?.()?.length);
 		});
+		if (characterId) await expect(this.page.locator("#charsheet-sel-character")).toHaveValue(characterId);
+	}
+
+	async spawnSavedCharacter (spec: string, name: string): Promise<string> {
+		const result = await this.page.evaluate(async ({spawnSpec, characterName}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const report = await cs.spawn(spawnSpec, {name: characterName});
+			return {
+				id: cs._currentCharacterId as string,
+				unresolved: report.unresolved as unknown[],
+				unhandledPrompts: report.unhandledPrompts as unknown[],
+			};
+		}, {spawnSpec: spec, characterName: name});
+		expect(result.unresolved, `spawn(${spec}) left choices unresolved`).toEqual([]);
+		expect(result.unhandledPrompts, `spawn(${spec}) opened an unhandled prompt`).toEqual([]);
+		return result.id;
+	}
+
+	async selectCharacter (id: string): Promise<void> {
+		await this.page.locator("#charsheet-sel-character").selectOption(id);
+		await this.page.waitForFunction(selectedId => {
+			const cs: any = (globalThis as any).charSheet;
+			return selectedId
+				? cs?._currentCharacterId === selectedId
+					&& cs?._state?.getName?.()
+					&& new URL(location.href).searchParams.get("id") === selectedId
+				: cs?._currentCharacterId && !cs?._state?.getName?.();
+		}, id);
+	}
+
+	async expectSelectedCharacter (id: string): Promise<void> {
+		await expect(this.page.locator("#charsheet-sel-character")).toHaveValue(id);
+	}
+
+	async expectDisclosureCycle (kind: "feature" | "feat"): Promise<void> {
+		const row = this.page.locator(kind === "feat"
+			? "#charsheet-tab-features .charsheet__feat[data-feat-id]"
+			: "#charsheet-tab-features .charsheet__feature[data-feature-id]").first();
+		await expect(row).toBeVisible();
+		const toggle = row.locator(".charsheet__feature-toggle");
+		const body = row.locator(".charsheet__feature-body");
+		await expect(toggle).toHaveClass(/glyphicon-chevron-right/);
+		await toggle.click();
+		await expect(body).toBeVisible();
+		await this.page.evaluate(() => (globalThis as any).charSheet._features.render());
+		await expect(toggle).toHaveClass(/glyphicon-chevron-down/);
+		await toggle.click();
+		await expect(body).toBeHidden();
+		await expect(toggle).toHaveClass(/glyphicon-chevron-right/);
+		await expect(toggle).not.toHaveClass(/glyphicon-chevron-down/);
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		expect(await toggle.getAttribute("aria-controls")).toBe(await body.getAttribute("id"));
+		await toggle.press("Enter");
+		await expect(body).toBeVisible();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await this.page.evaluate(() => (globalThis as any).charSheet._features.render());
+		await expect(toggle).toHaveClass(/glyphicon-chevron-down/);
+		await toggle.press("Space");
+		await expect(body).toBeHidden();
+		await expect(toggle).toHaveClass(/glyphicon-chevron-right/);
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await row.locator(".charsheet__feature-header").click({position: {x: 3, y: 3}});
+		await expect(body).toBeVisible();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await row.locator(".charsheet__feature-header").click({position: {x: 3, y: 3}});
+		await expect(body).toBeHidden();
+		await expect(toggle).toHaveClass(/glyphicon-chevron-right/);
 	}
 
 	async getRespecMechanicsSnapshot (): Promise<{

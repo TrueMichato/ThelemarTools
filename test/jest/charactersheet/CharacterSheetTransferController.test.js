@@ -61,6 +61,40 @@ describe("CharacterSheetPage transfer controller", () => {
 		}
 	});
 
+	it("selects a character recovered from the mirror even when the initial dropdown had no option", async () => {
+		const originalPGet = globalThis.StorageUtil.pGet;
+		globalThis.StorageUtil.pGet = jest.fn(async key => key === "charsheet-characters" ? [] : null);
+
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = new CharacterSheetState();
+		page._selCharacter = {options: [{value: ""}], value: ""};
+		page._updateCharacterDropdown = jest.fn(chars => {
+			page._selCharacter.options = chars.map(char => ({value: char.id}));
+		});
+		page._readActiveCharacterMirror = jest.fn(() => ({id: "rescued", name: "Recovered"}));
+		page._pApplyPendingCharacterTransfers = jest.fn(async () => []);
+		page._reconcileClassFeatures = jest.fn(() => ({added: 0, backfilled: 0}));
+		page._ensureLinguisticsSkillIfNeeded = jest.fn();
+		page._renderCharacter = jest.fn();
+		page._saveCurrentCharacter = jest.fn(async () => true);
+		page._pAcknowledgeCharacterTransfers = jest.fn(async () => {});
+		page._applyBackgroundTheme = jest.fn();
+		page._updateThemePickerSelection = jest.fn();
+		page._layout = null;
+		page._playMode = null;
+
+		try {
+			await page._pLoadCharacter("rescued");
+			expect(page._state.getName()).toBe("Recovered");
+			expect(page._updateCharacterDropdown).toHaveBeenCalledWith([
+				expect.objectContaining({id: "rescued", name: "Recovered"}),
+			]);
+			expect(page._selCharacter.value).toBe("rescued");
+		} finally {
+			globalThis.StorageUtil.pGet = originalPGet;
+		}
+	});
+
 	it("keeps an older load isolated when its delayed transfer finishes after a newer character loads", async () => {
 		const originalPGet = globalThis.StorageUtil.pGet;
 		globalThis.StorageUtil.pGet = jest.fn(async key => key === "charsheet-characters"

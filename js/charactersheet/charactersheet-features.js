@@ -134,13 +134,11 @@ class CharacterSheetFeatures {
 				return;
 			}
 
-			// Toggle feature expansion - only on the chevron toggle button
+			// Toggle the disclosure button (or the non-interactive header area).
 			const featureToggle = e.target.closest(".charsheet__feature-toggle");
 			if (featureToggle) {
 				e.stopPropagation();
-				const feature = featureToggle.closest(".charsheet__feature");
-				const featureId = feature?.dataset.featureId;
-				this._toggleFeatureExpansion(featureId);
+				this._toggleFeatureExpansion(featureToggle.closest(".charsheet__feature"));
 				return;
 			}
 
@@ -225,30 +223,33 @@ class CharacterSheetFeatures {
 			const featureHeader = e.target.closest(".charsheet__feature-header");
 			if (featureHeader) {
 				if (e.target.closest("a, button, .charsheet__feature-actions")) return;
-				const feature = featureHeader.closest(".charsheet__feature");
-				const featureId = feature?.dataset.featureId;
-				this._toggleFeatureExpansion(featureId);
+				this._toggleFeatureExpansion(featureHeader.closest(".charsheet__feature"));
 			}
 		});
 	}
 
-	_toggleFeatureExpansion (featureId) {
-		const featureEl = document.querySelector(`.charsheet__feature[data-feature-id="${featureId}"]`);
-		if (!featureEl) return;
-		const body = /** @type {*} */ (featureEl.querySelector(".charsheet__feature-body"));
-		const toggle = /** @type {*} */ (featureEl.querySelector(".charsheet__feature-toggle"));
+	_prepareFeatureDisclosure (featureEl, {id, name}) {
+		const body = featureEl.querySelector(".charsheet__feature-body");
+		const toggle = featureEl.querySelector(".charsheet__feature-toggle");
+		body.id = id;
+		toggle.setAttribute("aria-controls", id);
+		toggle.setAttribute("aria-label", `Toggle details for ${name}`);
+	}
 
-		if (this._expandedFeatures.has(featureId)) {
-			this._expandedFeatures.delete(featureId);
-			body.style.display = "none";
-			toggle.classList.remove("glyphicon-chevron-up");
-			toggle.classList.add("glyphicon-chevron-down");
-		} else {
-			this._expandedFeatures.add(featureId);
-			body.style.display = "block";
-			toggle.classList.remove("glyphicon-chevron-down");
-			toggle.classList.add("glyphicon-chevron-up");
-		}
+	_toggleFeatureExpansion (featureEl) {
+		const featureId = featureEl?.dataset.featureId
+			|| (featureEl?.dataset.featId ? `feat-${featureEl.dataset.featId}` : null);
+		if (!featureId) return;
+		const body = featureEl.querySelector(".charsheet__feature-body");
+		const toggle = featureEl.querySelector(".charsheet__feature-toggle");
+		const isExpanded = !this._expandedFeatures.has(featureId);
+
+		if (isExpanded) this._expandedFeatures.add(featureId);
+		else this._expandedFeatures.delete(featureId);
+		body.style.display = isExpanded ? "block" : "none";
+		toggle.setAttribute("aria-expanded", String(isExpanded));
+		toggle.classList.toggle("glyphicon-chevron-down", isExpanded);
+		toggle.classList.toggle("glyphicon-chevron-right", !isExpanded);
 	}
 
 	async _showFeatPicker () {
@@ -2586,7 +2587,7 @@ class CharacterSheetFeatures {
 		const featureEl = e_({outer: `
 			<div class="charsheet__feature" data-feature-id="${feature.id}">
 				<div class="charsheet__feature-header">
-					<span class="charsheet__feature-toggle glyphicon ${isExpanded ? "glyphicon-chevron-down" : "glyphicon-chevron-right"}"></span>
+					<button type="button" class="charsheet__feature-toggle glyphicon ${isExpanded ? "glyphicon-chevron-down" : "glyphicon-chevron-right"}" aria-expanded="${isExpanded}"></button>
 					<span class="charsheet__feature-name">${featureNameHtml}</span>
 					${feature.level ? `<span class="badge badge-secondary">Lvl ${feature.level}</span>` : ""}
 					${hasUses ? `<span class="badge badge-info">${feature.uses.current}/${feature.uses.max}</span>` : ""}
@@ -2622,6 +2623,7 @@ class CharacterSheetFeatures {
 				</div>
 			</div>
 		`});
+		this._prepareFeatureDisclosure(featureEl, {id: `charsheet-feature-body-${feature.id}`, name: feature.name});
 		featureEl.querySelector(".charsheet__feature-utility")?.addEventListener("click", evt => {
 			evt.stopPropagation();
 			if (featureUtility === "magicalAging") this._page?._pResolveMagicalAging?.(feature);
@@ -2759,7 +2761,7 @@ class CharacterSheetFeatures {
 			const featEl = e_({outer: `
 				<div class="charsheet__feat charsheet__feature" data-feat-id="${feat.id}">
 					<div class="charsheet__feat-header charsheet__feature-header">
-						<span class="charsheet__feature-toggle glyphicon ${isExpanded ? "glyphicon-chevron-down" : "glyphicon-chevron-right"}"></span>
+						<button type="button" class="charsheet__feature-toggle glyphicon ${isExpanded ? "glyphicon-chevron-down" : "glyphicon-chevron-right"}" aria-expanded="${isExpanded}"></button>
 						<span class="charsheet__feat-name charsheet__feature-name">${featNameHtml}</span>
 						${featUsesStr}
 						<div class="charsheet__feature-actions">
@@ -2778,6 +2780,7 @@ class CharacterSheetFeatures {
 					</div>
 				</div>
 			`});
+			this._prepareFeatureDisclosure(featEl, {id: `charsheet-feat-body-${feat.id}`, name: feat.name});
 
 			const activateBtnEl = featEl.querySelector(".charsheet__feat-activate");
 			if (activateBtnEl) {
@@ -2789,19 +2792,6 @@ class CharacterSheetFeatures {
 					});
 				});
 			}
-
-			// Toggle expansion
-			featEl.querySelector(".charsheet__feature-toggle").addEventListener("click", (e) => {
-				e.stopPropagation();
-				const featKey = `feat-${feat.id}`;
-				const isCurrentlyExpanded = this._expandedFeatures.has(featKey);
-				if (isCurrentlyExpanded) {
-					this._expandedFeatures.delete(featKey);
-				} else {
-					this._expandedFeatures.add(featKey);
-				}
-				this.render();
-			});
 
 			featEl.querySelector(".charsheet__feat-remove").addEventListener("click", (e) => {
 				e.stopPropagation();

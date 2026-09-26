@@ -1830,6 +1830,15 @@ class CharacterSheetPage {
 				this._playMode.deactivate();
 			}
 
+			// The dropdown was populated before the async URL load; keep its actual
+			// selection in sync with the character that won this load.
+			if (this._selCharacter) {
+				if (![...this._selCharacter.options].some(option => option.value === charId)) {
+					this._updateCharacterDropdown([...characters.filter(c => c.id !== charId), character]);
+				}
+				this._selCharacter.value = charId;
+			}
+
 			// Update URL
 			const url = new URL(/** @type {*} */ (window.location));
 			url.searchParams.set("id", charId);
