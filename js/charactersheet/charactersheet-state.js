@@ -944,7 +944,7 @@ class FeatureChoiceParser {
 		return typeof feature.description === "string" ? feature.description : "";
 	}
 
-	/** Find a "proficiency in either A or B [skill]" or "one of the following skills … of your choice: A, B, C, or D" choice clause and pull out the skills. */
+	/** Extract a single skill-proficiency pick from an explicit list or the owning class's level-1 list. */
 	static _extractSkillProficiencyChoice (text) {
 		// Primary: clause terminated by the word "skill"/"skills".
 		let m = /proficien(?:cy|t)\s+(?:in|with)\s+either\s+(.*?)\s+skills?\b/i.exec(text);
@@ -973,6 +973,9 @@ class FeatureChoiceParser {
 		// match it. Anchored on `proficien… in between` so ordinary prose that merely
 		// contains "between" cannot trigger it.
 		if (!m) m = /proficien(?:cy|t)\s+(?:in|with)\s+between\s+([^.]*)/i.exec(text);
+
+		const classList = !m && /proficiency\s+in\s+another\s+skill\s+of\s+your\s+choice\s+from\s+the\s+skill\s+list\s+available\s+to\s+(\w+)s\s+at\s+level\s+1\b/i.exec(text);
+		if (classList) return {options: [], count: 1, fromClassSkillList: classList[1]};
 
 		if (!m) return null;
 
@@ -1928,27 +1931,55 @@ class FeatureModifierParser {
 		// ===================
 		// "use your Dexterity modifier instead of your Strength modifier for Athletics checks"
 		// "use your Strength modifier instead of your Dexterity modifier for Acrobatics checks"
-		const abilitySwapPatterns = [
-			// For skill checks
-			{pattern: /use\s+(?:your\s+)?(\w+)\s+modifier\s+instead\s+of\s+(?:your\s+)?(\w+)\s+(?:modifier\s+)?for\s+(?:the\s+)?(?:\w+\s*\((?:{@skill\s*)?)?(\w+)/gi},
-			// For ability checks
-			{pattern: /use\s+(?:your\s+)?(\w+)\s+modifier\s+instead\s+of\s+(?:your\s+)?(\w+)\s+(?:modifier\s+)?for\s+(\w+)\s+(?:ability\s+)?checks/gi},
-		];
-		abilitySwapPatterns.forEach(({pattern}) => {
-			let match;
-			while ((match = pattern.exec(plainText)) !== null) {
-				const newAbility = match[1].toLowerCase().substring(0, 3);
-				const oldAbility = match[2].toLowerCase().substring(0, 3);
-				const skillOrCheck = match[3].toLowerCase().replace(/}?\)?$/, "");
+		const skillSwapPattern = /use\s+(?:your\s+)?(\w+)\s+modifier\s+instead\s+of\s+(?:your\s+)?(\w+)\s+(?:modifier\s+)?for\s+(?:the\s+)?([^.]*?)\bchecks\b/gi;
+		let skillSwap;
+		while ((skillSwap = skillSwapPattern.exec(plainText)) !== null) {
+			const newAbility = skillSwap[1].toLowerCase().substring(0, 3);
+			const oldAbility = skillSwap[2].toLowerCase().substring(0, 3);
+			for (const skill of FeatureChoiceParser._extractSkillsFromClause(skillSwap[3])) {
 				modifiers.push({
-					type: `abilitySwap:${skillOrCheck}`,
+					type: `abilitySwap:${skill}`,
 					value: 0,
 					note: sourceName,
 					newAbility,
 					oldAbility,
 				});
 			}
-		});
+		}
+
+		const checkSwapPattern = /use\s+(?:your\s+)?(\w+)\s+modifier\s+instead\s+of\s+(?:your\s+)?(\w+)\s+(?:modifier\s+)?for\s+(\w+)\s+(?:ability\s+)?checks/gi;
+		let checkSwap;
+		while ((checkSwap = checkSwapPattern.exec(plainText)) !== null) {
+			const skillOrCheck = checkSwap[3].toLowerCase();
+			// Skill checks are already handled above; keep the ability-check form distinct.
+			if (Object.keys(Parser.SKILL_TO_ATB_ABV).includes(skillOrCheck)) continue;
+			modifiers.push({
+				type: `abilitySwap:${skillOrCheck}`,
+				value: 0,
+				note: sourceName,
+				newAbility: checkSwap[1].toLowerCase().substring(0, 3),
+				oldAbility: checkSwap[2].toLowerCase().substring(0, 3),
+			});
+		}
+
+		const activeSkillChecks = /while\s+your\s+(\w+)\s+is\s+active\b[^.]*?\busing\s+one\s+of\s+the\s+following\s+skills\b[^.]*?\bmake\s+it\s+as\s+a\s+(\w+)\s+check\b[^:]*:\s*([^.]+)/gi;
+		let activeSkills;
+		while ((activeSkills = activeSkillChecks.exec(plainText)) !== null) {
+			const newAbility = activeSkills[2].toLowerCase().substring(0, 3);
+			if (!(Parser.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"]).includes(newAbility)) continue;
+			for (const skill of FeatureChoiceParser._extractSkillsFromClause(activeSkills[3])) {
+				const oldAbility = Parser.SKILL_TO_ATB_ABV[skill];
+				if (!oldAbility || oldAbility === newAbility) continue;
+				modifiers.push({
+					type: `abilitySwap:${skill}`,
+					value: 0,
+					note: sourceName,
+					newAbility,
+					oldAbility,
+					requiresStateTypeId: activeSkills[1].toLowerCase(),
+				});
+			}
+		}
 
 		// "use your choice of {A} or {B} to make {skill}, {skill}, … checks"
 		// (e.g. Forest Sage: "use your choice of Intelligence or Wisdom to make
@@ -9724,6 +9755,17 @@ class CharacterSheetState {
 			const swaps = parsed.filter(p => typeof p.type === "string" && p.type.startsWith("abilitySwap:") && p.newAbility);
 			if (!swaps.length) return;
 
+			if (source.name === "Mark of the Wilderness" && source.source === "TGTT") {
+				const before = this._data.namedModifiers.length;
+				this._data.namedModifiers = this._data.namedModifiers.filter(m => !(
+					m.sourceFeatureId === source.id
+					&& m.type === "abilitySwap:charisma"
+					&& m.newAbility === "str"
+					&& m.oldAbility === "cha"
+				));
+				added += before - this._data.namedModifiers.length;
+			}
+
 			swaps.forEach(swap => {
 				// Already linked to this source? Nothing to do.
 				const linked = this._data.namedModifiers.find(m =>
@@ -9731,7 +9773,13 @@ class CharacterSheetState {
 					&& m.newAbility === swap.newAbility
 					&& m.sourceFeatureId === source.id,
 				);
-				if (linked) return;
+				if (linked) {
+					if (swap.requiresStateTypeId && linked.requiresStateTypeId !== swap.requiresStateTypeId) {
+						linked.requiresStateTypeId = swap.requiresStateTypeId;
+						added++;
+					}
+					return;
+				}
 
 				// A legacy row minted before `sourceFeatureId` tracking existed (matched by
 				// the "From <name>" note). Backfill the link so `removeFeat`/`removeFeature`
@@ -9744,6 +9792,7 @@ class CharacterSheetState {
 				);
 				if (legacy) {
 					legacy.sourceFeatureId = source.id;
+					if (swap.requiresStateTypeId) legacy.requiresStateTypeId = swap.requiresStateTypeId;
 					added++;
 					return;
 				}
@@ -9757,6 +9806,7 @@ class CharacterSheetState {
 					sourceFeatureId: source.id,
 					newAbility: swap.newAbility,
 					oldAbility: swap.oldAbility,
+					requiresStateTypeId: swap.requiresStateTypeId,
 				});
 				added++;
 			});
@@ -17529,20 +17579,34 @@ class CharacterSheetState {
 		// Determine effective ability via the single resolver (base + pin + feature auto-MAX).
 		const resolved = this._resolveSkillAbility(normalizedSkill);
 		const ability = resolved.ability;
-		const swappedFrom = resolved.source === "swap" ? resolved.baseAbility : null;
+		const canonicalResolved = resolved.requiresStateTypeId
+			? this._resolveSkillAbility(normalizedSkill, {ignoreStateGatedSwaps: true})
+			: resolved;
+		const canonicalAbility = canonicalResolved.ability;
+		const swappedFrom = canonicalResolved.source === "swap" ? canonicalResolved.baseAbility : null;
 		const isPinned = resolved.source === "pinned";
 
 		const mod = ability ? this.getAbilityMod(ability) : 0;
-		if (mod !== 0) {
+		const canonicalMod = canonicalAbility ? this.getAbilityMod(canonicalAbility) : 0;
+		if (canonicalMod !== 0) {
 			let abilityLabel;
 			if (swappedFrom) {
-				abilityLabel = `${ability.toUpperCase()} modifier (swapped from ${swappedFrom.toUpperCase()})`;
+				abilityLabel = `${canonicalAbility.toUpperCase()} modifier (swapped from ${swappedFrom.toUpperCase()})`;
 			} else if (isPinned) {
-				abilityLabel = `${ability.toUpperCase()} modifier (pinned)`;
+				abilityLabel = `${canonicalAbility.toUpperCase()} modifier (pinned)`;
 			} else {
-				abilityLabel = `${ability.toUpperCase()} modifier`;
+				abilityLabel = `${canonicalAbility.toUpperCase()} modifier`;
 			}
-			components.push({type: "ability", name: abilityLabel, value: mod, icon: "🎲", isCanonical: true});
+			components.push({type: "ability", name: abilityLabel, value: canonicalMod, icon: "🎲", isCanonical: true});
+		}
+		if (mod !== canonicalMod) {
+			components.push({
+				type: "state",
+				name: `${resolved.swapSource} (${resolved.requiresStateTypeId}) ${ability.toUpperCase()} check`,
+				value: mod - canonicalMod,
+				icon: "🔮",
+				isCanonical: false,
+			});
 		}
 
 		const profLevel = this.getEffectiveSkillProficiency(normalizedSkill);
@@ -25391,7 +25455,8 @@ class CharacterSheetState {
 		if (!choice
 			|| !choice.kind
 			|| !Array.isArray(choice.options)
-			|| (!isFixedProficiencyFallback && choice.options.length < 2)
+			|| (!isFixedProficiencyFallback && !choice.fromClassSkillList && choice.options.length < 2)
+			|| (choice.fromClassSkillList && !choice.options.length)
 			|| (isFixedProficiencyFallback && !choice.options.length)) return false;
 		if (!this._data.pendingFeatureChoices) this._data.pendingFeatureChoices = [];
 
@@ -25431,6 +25496,7 @@ class CharacterSheetState {
 			kind: choice.kind,
 			options: choice.options,
 			count: choice.count || 1,
+			...(choice.fromClassSkillList ? {fromClassSkillList: true} : {}),
 			...(choice.unique ? {unique: true} : {}),
 			...(choice.expertiseIfProficient ? {expertiseIfProficient: true} : {}),
 			...(choice.sourceDecisionKey ? {sourceDecisionKey: choice.sourceDecisionKey} : {}),
@@ -25633,6 +25699,10 @@ class CharacterSheetState {
 
 		if (choice.kind === "skill") {
 			const skillKey = String(selection).toLowerCase().replace(/\s+/g, "");
+			if (choice.fromClassSkillList && (
+				!choice.options.includes(skillKey)
+				|| this.getEffectiveSkillProficiency(skillKey) > 0
+			)) return false;
 			// Some grants (e.g. Moloch's Blessing) upgrade an already-proficient choice to
 			// expertise instead of granting a redundant proficiency.
 			if (choice.expertiseIfProficient && (this._data.skillProficiencies?.[skillKey] || 0) >= 1) {
@@ -26351,7 +26421,7 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Parse prose "either A or B" choices from a feature and queue them. Returns the
+	 * Parse prose skill/spell choices from a feature and queue them. Returns the
 	 * skill/spell identities claimed by those choices so the greedy proficiency/spell
 	 * parsers can skip them (preventing double-granting). Identity-based — no text
 	 * surgery on the description.
@@ -26396,7 +26466,12 @@ class CharacterSheetState {
 		const racialSkillSets = isRacialFeature ? this._getRacialStructuredSkillChoiceSets() : [];
 
 		skillChoices.forEach(choice => {
-			const optionKeys = (choice.options || []).map(o => String(o).toLowerCase().replace(/\s+/g, ""));
+			const classOptions = choice.fromClassSkillList
+				? this._getClassSkillListForFeature(feature, choice.fromClassSkillList)
+				: null;
+			const untrained = classOptions?.filter(skill => this.getEffectiveSkillProficiency(skill) === 0);
+			const options = untrained?.length ? untrained : classOptions || choice.options;
+			const optionKeys = options.map(o => String(o).toLowerCase().replace(/\s+/g, ""));
 			// Suppress only on an EXACT option-set match with a structured racial choose
 			// set (not a mere subset) so an independent narrower racial choice that happens
 			// to share options is never wrongly dropped.
@@ -26407,12 +26482,13 @@ class CharacterSheetState {
 					featureName: feature.name,
 					featureId,
 					kind: "skill",
-					options: choice.options,
+					options,
 					count: choice.count,
 					expertiseIfProficient: !!choice.expertiseIfProficient,
+					...(choice.fromClassSkillList ? {fromClassSkillList: true} : {}),
 				});
 			}
-			choice.options.forEach(s => claimedSkills.add(s));
+			options.forEach(s => claimedSkills.add(s));
 		});
 
 		cantripChoices.forEach(choice => {
@@ -26427,6 +26503,29 @@ class CharacterSheetState {
 		});
 
 		return {claimedSkills, claimedSpells};
+	}
+
+	_getClassSkillListForFeature (feature, className) {
+		const ref = `${feature.name}|${feature.className}|${feature.classSource}|${feature.level}`.toLowerCase();
+		const owner = (this._data.classes || []).find(cls =>
+			cls.name?.toLowerCase() === className.toLowerCase()
+			&& cls.level >= Number(feature.level)
+			&& (this._classCatalog || []).some(data =>
+				data.name === cls.name
+				&& data.source === cls.source
+				&& data.classFeatures?.some(entry => {
+					const uid = typeof entry === "string" ? entry : entry?.classFeature;
+					return uid?.toLowerCase() === ref;
+				}),
+			),
+		);
+		const classData = owner && this._classCatalog.find(data => data.name === owner.name && data.source === owner.source);
+		const skills = classData?.startingProficiencies?.skills
+			?.flatMap(entry => entry.choose?.from || [])
+			.filter(skill => typeof skill === "string")
+			.map(skill => this._normalizeSkillKey(skill.split("|")[0]));
+		if (!skills?.length) throw new Error(`Cannot resolve level-1 ${className} skill list for ${feature.name} (${feature.source})`);
+		return [...new Set(skills)];
 	}
 
 	/**
@@ -60204,7 +60303,7 @@ class CharacterSheetState {
 			}
 		}
 
-		// Parse prose "either A or B" player choices (e.g. Arcane Archer Lore's skill +
+		// Parse prose player choices (e.g. Arcane Archer Lore's skill +
 		// cantrip picks) into pending feature choices, and collect the skill/spell
 		// identities they claim so the greedy parsers below don't also grant them.
 		const {claimedSkills, claimedSpells} = this._processFeatureChoices(featureData, featureData.id);
@@ -62340,6 +62439,7 @@ class CharacterSheetState {
 			if (mod.ignore) modifierData.ignore = true;
 			if (mod.newAbility) modifierData.newAbility = mod.newAbility;
 			if (mod.oldAbility) modifierData.oldAbility = mod.oldAbility;
+			if (mod.requiresStateTypeId) modifierData.requiresStateTypeId = mod.requiresStateTypeId;
 			if (mod.toolName) modifierData.toolName = mod.toolName;
 			if (mod.conditional) modifierData.conditional = mod.conditional;
 
@@ -62358,6 +62458,7 @@ class CharacterSheetState {
 				existing.sourceFeatureId === featureId
 				&& existing.type === modifierData.type
 				&& (existing.newAbility || null) === (modifierData.newAbility || null)
+				&& (existing.requiresStateTypeId || null) === (modifierData.requiresStateTypeId || null)
 				&& (existing.abilityMod || null) === (modifierData.abilityMod || null)
 				&& (existing.bonusDie || null) === (modifierData.bonusDie || null)
 				&& (existing.conditional || null) === (modifierData.conditional || null)
@@ -70027,6 +70128,7 @@ class CharacterSheetState {
 		// Ability swap (e.g., "use WIS instead of INT for Arcana checks")
 		if (modifier.newAbility) newModifier.newAbility = modifier.newAbility;
 		if (modifier.oldAbility) newModifier.oldAbility = modifier.oldAbility;
+		if (modifier.requiresStateTypeId) newModifier.requiresStateTypeId = modifier.requiresStateTypeId;
 
 		// A single feature can reach this method down more than one pipeline —
 		// `addFeat` runs BOTH `_processFeatureModifiers` (data-declared `modifiers`)
@@ -70071,7 +70173,7 @@ class CharacterSheetState {
 	_isSameNamedModifier (a, b) {
 		if (!a || !b) return false;
 		if (a.sourceFeatureId !== b.sourceFeatureId) return false;
-		const FIELDS = ["type", "name", "value", "conditional", "abilityMod", "newAbility", "oldAbility", "setValue", "equalTo", "bonusDie", "toolName", "damageType"];
+		const FIELDS = ["type", "name", "value", "conditional", "abilityMod", "newAbility", "oldAbility", "requiresStateTypeId", "setValue", "equalTo", "bonusDie", "toolName", "damageType"];
 		for (const field of FIELDS) {
 			if ((a[field] ?? null) !== (b[field] ?? null)) return false;
 		}
@@ -71544,7 +71646,7 @@ class CharacterSheetState {
 	 * @param {string} type - The roll type
 	 * @returns {{advantage: boolean, disadvantage: boolean, sources: string[]}}
 	 */
-	getAdvantageState (type, /** @type {*} */ {appliedConditionalIds} = {}) {
+	getAdvantageState (type, /** @type {*} */ {appliedConditionalIds, overrideAbility = null} = {}) {
 		const agg = this.aggregateModifiers(type, {appliedConditionalIds});
 		let hasAdvantage = agg.advantage;
 		let hasDisadvantage = agg.disadvantage;
@@ -71581,11 +71683,11 @@ class CharacterSheetState {
 
 			const stateName = state.name || stateType?.name || state.stateTypeId;
 			allEffects.forEach(effect => {
-				if (effect.type === "advantage" && this._effectMatchesType(effect.target, type)) {
+				if (effect.type === "advantage" && this._effectMatchesType(effect.target, type, {overrideAbility})) {
 					hasAdvantage = true;
 					if (!agg.sources.includes(stateName)) agg.sources.push(stateName);
 				}
-				if (effect.type === "disadvantage" && this._effectMatchesType(effect.target, type)) {
+				if (effect.type === "disadvantage" && this._effectMatchesType(effect.target, type, {overrideAbility})) {
 					hasDisadvantage = true;
 					if (!agg.sources.includes(stateName)) agg.sources.push(stateName);
 				}
@@ -71633,7 +71735,7 @@ class CharacterSheetState {
 	 * Check if an effect target matches a type (for active state effects)
 	 * @private
 	 */
-	_effectMatchesType (effectTarget, type) {
+	_effectMatchesType (effectTarget, type, {overrideAbility = null} = {}) {
 		if (!effectTarget || !type) return false;
 		if (effectTarget === type) return true;
 
@@ -71654,7 +71756,7 @@ class CharacterSheetState {
 
 		// Category match (e.g., "check:str" matches "skill:athletics" if athletics uses STR)
 		if (targetParts[0] === "check" && typeParts[0] === "skill") {
-			const skillAbility = this.getSkillAbility(typeParts[1]);
+			const skillAbility = overrideAbility || this.getSkillAbility(typeParts[1]);
 			return targetParts[1] === "all" || targetParts[1] === skillAbility;
 		}
 
@@ -71749,9 +71851,10 @@ class CharacterSheetState {
 	 * @param {string} skill - The skill key
 	 * @param {object} [opts]
 	 * @param {string|null} [opts.overrideAbility] - Transient per-roll ability
-	 * @returns {{ability: string|null, baseAbility: string|null, source: "override"|"pinned"|"swap"|"default"}}
+	 * @param {boolean} [opts.ignoreStateGatedSwaps] - Use only always-on swaps for the canonical breakdown
+	 * @returns {{ability: string|null, baseAbility: string|null, source: "override"|"pinned"|"swap"|"default", requiresStateTypeId?: string, swapSource?: string}}
 	 */
-	_resolveSkillAbility (skill, {overrideAbility = null} = {}) {
+	_resolveSkillAbility (skill, {overrideAbility = null, ignoreStateGatedSwaps = false} = {}) {
 		const normalizedSkill = skill?.toLowerCase().replace(/\s+/g, "");
 		const baseAbility = this._getBaseSkillAbility(normalizedSkill);
 
@@ -71774,20 +71877,30 @@ class CharacterSheetState {
 		// (3) Feature-granted auto-MAX among abilitySwap:<skill> modifiers (Forest Sage etc.).
 		if (baseAbility) {
 			const swapMods = this._data.namedModifiers.filter(m =>
-				m.enabled && m.type === `abilitySwap:${normalizedSkill}` && m.newAbility,
+				m.enabled && m.type === `abilitySwap:${normalizedSkill}` && m.newAbility
+				&& (!m.requiresStateTypeId || (!ignoreStateGatedSwaps && this.isStateTypeActive(m.requiresStateTypeId))),
 			);
 			if (swapMods.length) {
 				let bestAbility = baseAbility;
 				let bestMod = this.getAbilityMod(baseAbility);
+				let selectedSwap = null;
 				for (const swap of swapMods) {
 					const swapMod = this.getAbilityMod(swap.newAbility);
 					if (swapMod > bestMod) {
 						bestMod = swapMod;
 						bestAbility = swap.newAbility;
+						selectedSwap = swap;
 					}
 				}
 				if (bestAbility !== baseAbility) {
-					return {ability: bestAbility, baseAbility, source: "swap"};
+					return {
+						ability: bestAbility,
+						baseAbility,
+						source: "swap",
+						...(selectedSwap?.requiresStateTypeId
+							? {requiresStateTypeId: selectedSwap.requiresStateTypeId, swapSource: selectedSwap.name}
+							: {}),
+					};
 				}
 			}
 		}

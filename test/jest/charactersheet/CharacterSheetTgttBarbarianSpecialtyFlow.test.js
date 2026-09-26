@@ -144,6 +144,58 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("TGTT Barbarian selected Specialty flow", () => {
+	test("Mark of the Wilderness swaps both Charisma skills but grants PB only to Intimidation", async () => {
+		const state = createBarbarian();
+		state.setAbilityBase("str", 18);
+		state.setAbilityBase("cha", 8);
+		expect(state.getSkillMod("persuasion")).toBe(-1);
+		selectBuilderOption(state, "Mark of the Wilderness");
+
+		const mark = state.getFeatures().find(feature => feature.name === "Mark of the Wilderness");
+		expect(state._data.namedModifiers.filter(mod => mod.sourceFeatureId === mark.id).map(mod => mod.type).sort())
+			.toEqual(["abilitySwap:intimidation", "abilitySwap:persuasion", "skill:intimidation"]);
+		expect(state.getSkillAbility("persuasion")).toBe("str");
+		expect(state.getSkillMod("persuasion")).toBe(4);
+		expect(state.getSkillMod("intimidation")).toBe(4 + state.getProficiencyBonus());
+		expect(state.getSkillProficiency("persuasion")).toBe(0);
+
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = state;
+		page._combat = null;
+		page._getExhaustionPenalty = () => 0;
+		page._rollD20 = () => ({roll: 10, mode: "normal", thelemar_critBonus: 0});
+		page._pMaybeApplyRedCant = async ({effectiveRoll}) => ({effectiveRoll, applied: false, note: ""});
+		page._pMaybeApplyFortuneIntervention = async ({effectiveRoll}) => ({effectiveRoll, note: ""});
+		page._pMaybeApplyTacticalMind = async () => {};
+		page._pMaybeApplyBloodPrice = async () => {};
+		page.pAnimateD20 = async () => {};
+		page._showDiceResult = jest.fn();
+		expect((await page._rollSkillCheck("persuasion", "Persuasion", null)).total).toBe(14);
+		expect((await page._rollSkillCheck("intimidation", "Intimidation", null)).total).toBe(16);
+
+		const legacySave = state.toJson();
+		legacySave.namedModifiers = legacySave.namedModifiers.filter(mod => mod.sourceFeatureId !== mark.id || mod.type === "skill:intimidation");
+		legacySave.namedModifiers.push({
+			id: "legacy-misparsed-charisma",
+			name: "Mark of the Wilderness",
+			type: "abilitySwap:charisma",
+			value: 0,
+			newAbility: "str",
+			oldAbility: "cha",
+			enabled: true,
+			sourceFeatureId: mark.id,
+		});
+		const reloaded = createBarbarian();
+		reloaded.loadFromJson(legacySave);
+		expect(reloaded._data.namedModifiers.filter(mod => mod.sourceFeatureId === mark.id && mod.type.startsWith("abilitySwap:"))
+			.map(mod => mod.type).sort()).toEqual(["abilitySwap:intimidation", "abilitySwap:persuasion"]);
+		expect(reloaded.getSkillMod("persuasion")).toBe(4);
+
+		state.removeFeature(mark.id);
+		expect(state.getSkillMod("persuasion")).toBe(-1);
+		expect(state.getSkillMod("intimidation")).toBe(-1);
+	});
+
 	test("Builder and Quick Build install simultaneous choices through their real apply methods", () => {
 		const state = createBarbarian();
 		createBuilder(state, "Unyielding Might")._applySelectedFeatureOptions();

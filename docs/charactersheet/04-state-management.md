@@ -241,6 +241,15 @@ weaponProficiencies: ["simple", "martial"],
 armorProficiencies: ["light", "medium", "heavy", "shields"],
 ```
 
+The XPHB level-3 Barbarian feature **Primal Knowledge** (also used by the
+TGTT Barbarian) queues one skill proficiency from the owning class's
+`startingProficiencies.skills.choose.from` list. The TGTT list includes
+Endurance and Might; a PHB/TCE optional feature with the same name is
+separate. The shared feature-choice picker excludes skills already proficient
+and stores the chosen grant against the feature, so removing the feature
+removes only that grant. A choice with no untrained skills remains pending
+with a warning instead of silently claiming a new proficiency.
+
 ### Senses
 
 The character sheet models the four canonical D&D 5e senses uniformly.
