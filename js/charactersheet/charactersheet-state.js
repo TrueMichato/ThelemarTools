@@ -63011,16 +63011,20 @@ class CharacterSheetState {
 	}
 
 	removeFeature (featureIdOrName, source) {
-		// Find the feature first to get its id
-		const feature = this._data.features.find(f =>
-			f.id === featureIdOrName || (f.name === featureIdOrName && f.source === source),
-		);
+		const isExactFeature = featureIdOrName != null && typeof featureIdOrName === "object";
+		const feature = this._data.features.find(f => isExactFeature
+			? f === featureIdOrName
+			: f.id === featureIdOrName || (f.name === featureIdOrName && f.source === source));
+		if (isExactFeature && !feature) throw new Error("The feature to remove is no longer in the character state.");
 
 		// Remove associated resource if it was auto-added
 		if (feature) {
+			const hasFeatureId = !!feature.id;
+			const hasAnotherFeatureWithName = this._data.features.some(other =>
+				other !== feature && other.name === feature.name);
 			this._removeFixedProficiencyFallbackTransaction(feature);
 			this._removeConditionalToolGrantDecision(feature);
-			for (const trackedSource of [`feature-choice:${feature.id}`, `feature:${feature.id}`]) {
+			for (const trackedSource of hasFeatureId ? [`feature-choice:${feature.id}`, `feature:${feature.id}`] : []) {
 				for (const [type, remove] of [
 					["skills", name => this.setSkillProficiency(name, 0)],
 					["saves", name => this.removeSaveProficiency(name)],
@@ -63034,47 +63038,50 @@ class CharacterSheetState {
 				}
 			}
 			const featureKey = feature.name.toLowerCase();
-			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
+			if (!hasAnotherFeatureWithName) {
+				this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
+			}
 			const featureToolKey = this._getFeatureToolChoiceFulfillmentKey({
 				featureUid: feature._fixedProficiencyFallbackOwnerUid || feature._sourceAwareFeatureUid,
 				featureName: feature.name,
 			});
 			const hasExactToolChoiceOwner = featureToolKey.startsWith("uid:");
 			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || [])
-				.filter(name => name !== featureToolKey && (hasExactToolChoiceOwner || name !== featureKey));
+				.filter(name => name !== featureToolKey && (hasExactToolChoiceOwner || hasAnotherFeatureWithName || name !== featureKey));
 			const removedResources = this._data.resources
 				.filter(r =>
-					r.featureId === feature.id
+					(hasFeatureId && r.featureId === feature.id)
 					|| (feature.sourceDecisionKey
 						? r.sourceDecisionKey === feature.sourceDecisionKey
-						: r.name === feature.name),
+						: !hasAnotherFeatureWithName && r.name === feature.name),
 				);
 			this._data.resources = this._data.resources.filter(r =>
-				r.featureId !== feature.id
+				(!hasFeatureId || r.featureId !== feature.id)
 				&& (feature.sourceDecisionKey
 					? r.sourceDecisionKey !== feature.sourceDecisionKey
-					: r.name !== feature.name),
+					: hasAnotherFeatureWithName || r.name !== feature.name),
 			);
 			this._pruneTurnReceiptsForResources(removedResources);
 			// Remove associated attack if it was auto-added (natural weapon)
-			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
+			this._data.attacks = this._data.attacks.filter(a =>
+				(!hasFeatureId || a.featureId !== feature.id) && (hasAnotherFeatureWithName || a.sourceFeature !== feature.name));
 			// Remove associated innate spells
-			this.removeInnateSpellsByFeature(feature.name);
+			if (!hasAnotherFeatureWithName) this.removeInnateSpellsByFeature(feature.name);
 			// Remove any unresolved prose "either A or B" choices queued by this feature
-			this.clearPendingFeatureChoicesByFeature(feature.id);
-			if (!feature.id) this.clearPendingFeatureChoicesByFeature(feature.name);
+			if (hasFeatureId) this.clearPendingFeatureChoicesByFeature(feature.id);
+			if (!feature.id && !hasAnotherFeatureWithName) this.clearPendingFeatureChoicesByFeature(feature.name);
 			// Remove any cantrip this feature granted as a player choice (sourceFeature is
 			// unique to the granting feature — e.g. Arcane Archer Lore's chosen cantrip).
-			if (this._data.spellcasting?.cantripsKnown?.length) {
+			if (!hasAnotherFeatureWithName && this._data.spellcasting?.cantripsKnown?.length) {
 				this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(
 					c => c.sourceFeature !== feature.name,
 				);
 			}
 			// Remove associated modifiers (by ID and by name for orphaned modifiers)
 			this.removeModifiersByFeature(feature.id);
-			this.removeModifiersByName(feature.name);
+			if (!hasAnotherFeatureWithName) this.removeModifiersByName(feature.name);
 			for (const state of [...(this._data.activeStates || [])]) {
-				if (state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
+				if (hasFeatureId && state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
 			}
 
 			// Cascade-remove any feats granted by this optional feature
@@ -63095,6 +63102,7 @@ class CharacterSheetState {
 
 		// Remove the feature
 		this._data.features = this._data.features.filter(f => {
+			if (isExactFeature) return f !== feature;
 			if (f.id === featureIdOrName) return false;
 			if (f.name === featureIdOrName && f.source === source) return false;
 			return true;

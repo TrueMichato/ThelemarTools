@@ -225,6 +225,17 @@ candidate back on failure. A future rules-driven switch flow can use the same
 transaction with history persistence and canonical synchronization instead of
 maintaining a second model-specific state path.
 
+The selected option keeps its source-qualified definition and reference for
+lookup, even when the owning class uses a different source (for example,
+`Cleric|TGTT` selecting `Thaumaturge|Cleric|XPHB`). The acquired feature and
+chosen-subfeature record belong to the character's class, not the definition's
+class source. Replacement removes an old definition-bound instance only when
+its saved reference and active class identify a unique owner. When another
+feature has the same name, removal keeps that other owner's resources,
+modifiers, and name-only grants instead of treating the name as ownership.
+The editor offers options from the active progression decision; legacy
+fallbacks require a source-qualified parent in the owning class's catalog.
+
 Fixed-proficiency fallback features ("gain X; if already proficient, choose
 Y") expose their pending/resolved transaction as a normal `nestedTool`
 decision. The descriptor carries the full feature/class/subclass source UID,
@@ -522,9 +533,14 @@ exact owner/source receipt when removed.
 
 The nested editor is rendered inline in the level editor rather than opening a
 second modal. Rows expose graph depth and resolved/deferred/missing/invalid/
-ambiguous status, and Review lists actionable discovery diagnostics. The
-candidate remains isolated until Apply; Cancel, failed-save rollback, reload,
-and one-step Undo operate on the same serialized snapshot.
+ambiguous status. After a parent or nested choice is staged, the still-open
+level editor rebuilds its rows from the candidate manifest: removed branches
+disappear, new required children become selectable without reopening, and
+statuses reflect the staged selection. Failed stages keep the picker and draft
+open with an error instead of claiming success. Review lists actionable
+discovery diagnostics. The candidate remains isolated until Apply; Cancel,
+failed-save rollback, reload, and one-step Undo operate on the same serialized
+snapshot.
 
 The current `npm run test:data` and `npm run test:tags` failures are unrelated
 repository data baselines in `data/crafting.json` and

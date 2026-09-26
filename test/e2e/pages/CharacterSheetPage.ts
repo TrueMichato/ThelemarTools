@@ -1474,6 +1474,7 @@ export class CharacterSheetPage {
 		optionCount: number;
 		effectiveOptionCount: number;
 		meta: unknown;
+		provenance: {ownerUid?: string} | null;
 		selection: unknown;
 	}>> {
 		return this.page.evaluate(() => {
@@ -1490,6 +1491,7 @@ export class CharacterSheetPage {
 					optionCount: decision.options?.length || 0,
 					effectiveOptionCount: cs?._respec?._getDecisionOptions?.(decision)?.length || 0,
 					meta: decision.meta,
+					provenance: decision.provenance || null,
 					selection: decision.selection,
 				}));
 		});
@@ -1563,8 +1565,8 @@ export class CharacterSheetPage {
 		await inlineEditor.locator("button", {hasText: "Stage Choice"}).click();
 	}
 
-	async stageRespecFeatureChoice (featureName: string, optionName: string): Promise<void> {
-		const entry = this.page.locator(".charsheet__level-entry[data-level='1']").first();
+	async stageRespecFeatureChoice (featureName: string, optionName: string, level = 1): Promise<void> {
+		const entry = this.page.locator(`.charsheet__level-entry[data-level="${level}"]`).first();
 		await entry.locator(".charsheet__level-entry-edit").click();
 		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: featureName}).last();
 		await row.locator("button", {hasText: "Change"}).click();
@@ -1587,11 +1589,14 @@ export class CharacterSheetPage {
 		const characterId = await this.page.evaluate(() => (globalThis as any).charSheet?._currentCharacterId);
 		await this.page.reload({waitUntil: "domcontentloaded"});
 		await this.page.locator("#charsheet-tab-overview, #charsheet-tab-main").first().waitFor({state: "visible"});
-		await this.page.waitForFunction(() => {
+		const selector = this.page.locator("#charsheet-sel-character");
+		if (characterId && await selector.inputValue() !== characterId) await selector.selectOption(characterId);
+		await this.page.waitForFunction(expectedId => {
 			const cs: any = (globalThis as any).charSheet;
-			return Boolean(cs?._state?.getLevelHistory?.()?.length);
-		});
-		if (characterId) await expect(this.page.locator("#charsheet-sel-character")).toHaveValue(characterId);
+			return Boolean(cs?._state?.getLevelHistory?.()?.length)
+				&& (!expectedId || cs._currentCharacterId === expectedId);
+		}, characterId);
+		if (characterId) await expect(selector).toHaveValue(characterId);
 	}
 
 	async spawnSavedCharacter (spec: string, name: string): Promise<string> {
