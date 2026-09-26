@@ -15819,7 +15819,7 @@ class CharacterSheetPage {
 			isCritical = wasCrit;
 		}
 
-		const recheck = this._state.getZeroHpInterventions({damage: pending.damage, damageType, isCritical})
+		const recheck = this._state.getZeroHpInterventions({damage: pending.damage, damageType, isCritical, rageActive: pending.rageActive})
 			.find(i => i.id === candidate.id);
 		if (!recheck?.available) {
 			if (recheck?.unavailableReason) JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: recheck.unavailableReason}));

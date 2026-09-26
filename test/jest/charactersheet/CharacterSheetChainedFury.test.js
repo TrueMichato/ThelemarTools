@@ -23,6 +23,7 @@
  */
 
 import "./setup.js";
+import fs from "node:fs";
 
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
@@ -53,6 +54,9 @@ const FEATURE_TEXT = {
 	"Unchained Fury": "You manifest 4 sets of chains when you enter rage instead of 2. You can grapple any creature with your chains, regardless of size.",
 };
 const FEATURE_LEVELS = [[3, "Manifest Chains"], [6, "Chain Imprisonment"], [10, "Chain Control"], [14, "Unchained Fury"]];
+const sourceData = JSON.parse(fs.readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url)));
+const imprisonment = sourceData.subclassFeature.find(it => it.name === "Chain Imprisonment" && it.source === "TGTT");
+const imprisonmentDescription = imprisonment.entries.map(entry => typeof entry === "string" ? entry : entry.items.join(" ")).join(" ");
 const GENERATED_CHAIN_ID = "tgtt-chained-fury:spectral-chains";
 const STEP_MATERIAL = {
 	name: "Steeline",
@@ -335,6 +339,79 @@ describe("Chained Fury — L3 Manifest Chains", () => {
 });
 
 describe("Chained Fury — L6 Chain Imprisonment", () => {
+	it("classifies the actual TGTT feature as a grapple rider, not a bonus-action toggle", () => {
+		const subclass = sourceData.subclass.find(it => it.shortName === "Chained Fury" && it.classSource === "TGTT");
+		expect(subclass.subclassFeatures).toContain("Chain Imprisonment|Barbarian|TGTT|Chained Fury|TGTT|6");
+		const state = mkFury(6);
+		const feature = state._data.features.find(it => it.name === "Chain Imprisonment");
+		Object.assign(feature, imprisonment, {description: imprisonmentDescription});
+		expect(CharacterSheetState.detectActivatableFeature(feature)).toBeNull();
+		expect(state.getActivatableFeatures().some(it => it.feature.id === feature.id)).toBe(false);
+		const restrain = state.getFeatureCalculations().attackOnHitOptions.find(it => it.id === "chains-restrain");
+		expect(restrain).toMatchObject({attackSourceFeature: "Manifest Chains", save: {ability: "str", dc: 14}});
+	});
+
+	it("resolves restraint as part of a successful grapple without spending a bonus action", () => {
+		const state = rageAndManifest(mkFury(6));
+		state.setChainedFuryTargetTrackingEnabled(true);
+		const bonusBefore = state.isBonusActionAvailable();
+		const result = state.applyTargetEffect({
+			source: "chained-fury",
+			targetName: "Ogre",
+			effect: "restrain",
+			riderId: "chains-restrain",
+			grappleSaveFailed: true,
+			restraintSaveFailed: true,
+		});
+		expect(result).toMatchObject({ok: true, grappled: true, restrained: true});
+		expect(state.isBonusActionAvailable()).toBe(bonusBefore);
+		expect(state.getActiveStates().some(it => it.name === "Chain Imprisonment")).toBe(false);
+	});
+
+	it("removes only legacy custom toggles owned by the exact TGTT feature on load", () => {
+		const state = mkFury(6);
+		const feature = state._data.features.find(it => it.name === "Chain Imprisonment");
+		Object.assign(feature, imprisonment, {description: imprisonmentDescription});
+		const old = state.toJson();
+		old.features.push({...feature, id: "foreign-level-feature", level: 7});
+		old.activeStates.push(
+			{id: "legacy-chain", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: feature.id, active: true},
+			{id: "unrelated", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: "foreign", active: true},
+			{id: "foreign-level", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: "foreign-level-feature", active: true},
+			{id: "rage", stateTypeId: "rage", name: "Rage", active: true},
+		);
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(old);
+		expect(restored.toJson().activeStates.map(it => it.id)).not.toContain("legacy-chain");
+		expect(restored.toJson().activeStates.map(it => it.id)).toEqual(expect.arrayContaining(["unrelated", "foreign-level", "rage"]));
+	});
+
+	it.each([
+		["missing", undefined],
+		["null", null],
+		["empty", ""],
+		["blank", "   "],
+	])("preserves unowned states when the legacy Chain Imprisonment feature ID is %s", (_, legacyId) => {
+		const state = mkFury(6);
+		const feature = state._data.features.find(it => it.name === "Chain Imprisonment");
+		Object.assign(feature, imprisonment, {description: imprisonmentDescription});
+		const old = state.toJson();
+		if (legacyId === undefined) delete old.features.find(it => it.name === "Chain Imprisonment").id;
+		else old.features.find(it => it.name === "Chain Imprisonment").id = legacyId;
+		old.activeStates.push(
+			{id: "ambiguous-chain", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: legacyId, active: true},
+			{id: "unowned-chain", stateTypeId: "custom", name: "Chain Imprisonment", active: true},
+			{id: "unowned-null", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: null, active: true},
+			{id: "unowned-other", stateTypeId: "custom", name: "Other Effect", active: true},
+			{id: "foreign-chain", stateTypeId: "custom", name: "Chain Imprisonment", sourceFeatureId: "other-feature", active: true},
+		);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(old);
+		expect(restored.toJson().activeStates.map(it => it.id))
+			.toEqual(expect.arrayContaining(["ambiguous-chain", "unowned-chain", "unowned-null", "unowned-other", "foreign-chain"]));
+	});
+
 	it("makes the chains count as magical", () => {
 		const state = rageAndManifest(mkFury(6));
 		expect(getChains(state).countsAsMagical).toBe(true);

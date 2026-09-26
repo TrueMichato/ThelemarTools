@@ -313,6 +313,12 @@ exactly the RAW "they vanish when your rage ends". It inherits Rage's
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
 
+Chain Imprisonment's restrain choice is part of a successful chain grapple:
+resolve the separate Strength save there, with no extra action or bonus action.
+It is a rider, never an independent persistent toggle. Old saved `custom`
+states tied to this exact TGTT subclass feature are discarded on load without
+touching another feature's state.
+
 Target bookkeeping is optional and defaults off. With it off, all attacks and
 riders still work and present concise rules reminders. With it on, only a
 creature name plus explicit save outcomes are collected; successful grapples

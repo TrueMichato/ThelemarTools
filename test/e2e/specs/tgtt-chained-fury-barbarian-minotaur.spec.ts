@@ -150,8 +150,39 @@ describeCharacter({
 			name: /relentless rage/i,
 			kind: "passive",
 			effects: [
-				// Relentless Rage triggers off the recovery CON save — barb is proficient in CON.
-				{kind: "rollSavingThrow", ability: "con"},
+				{
+					kind: "stateTransaction",
+					steps: [
+						{method: "resetRelentlessRageDc"},
+						{method: "getResource", args: ["Relentless Rage"], expect: [{isNull: true}]},
+						{method: "getFeatureCalculations", expect: [{path: "relentlessRageDc", exact: 10}, {path: "relentlessRageHp", min: 22}]},
+						{method: "setHp", args: [10, 70]},
+						{method: "activateState", args: ["rage"], expect: [{truthy: true}]},
+						{method: "takeDamage", args: [10], expect: [{exact: true}]},
+						{method: "getPendingZeroHpIntervention", expect: [
+							{path: "interventions.0.id", exact: "relentlessRage"},
+							{path: "interventions.0.dc", exact: 10},
+							{path: "interventions.0.usesMax", isNull: true},
+						]},
+						{method: "getFeatureCalculations", saveAs: "before", expect: [{path: "relentlessRageHp", min: 22}]},
+						{method: "applyZeroHpIntervention", args: ["relentlessRage", {total: 10}], expect: [
+							{path: "success", exact: true},
+							{path: "hp", equalsRef: "before.relentlessRageHp"},
+						]},
+						{method: "getFeatureCalculations", expect: [{path: "relentlessRageDc", exact: 15}]},
+						{method: "setHp", args: [10, 70]},
+						{method: "takeDamage", args: [10]},
+						{method: "applyZeroHpIntervention", args: ["relentlessRage", {total: 14}], expect: [
+							{path: "success", exact: false},
+							{path: "hp", exact: 0},
+						]},
+						{method: "isStateTypeActive", args: ["rage"], expect: [{exact: false}]},
+						{method: "getFeatureCalculations", expect: [{path: "relentlessRageDc", exact: 20}]},
+						{method: "setHp", args: [70, 70]},
+						{method: "onShortRest", expect: [{path: "ok", exact: true}]},
+						{method: "getFeatureCalculations", expect: [{path: "relentlessRageDc", exact: 10}]},
+					],
+				},
 			],
 		},
 		// Persistent Rage L15: rage no longer ends from "no attack/no damage taken for a turn".
@@ -232,11 +263,33 @@ describeCharacter({
 			kind: "passive",
 			effects: [
 				{kind: "featureCalculation", property: "chainsAreMagical", exact: true},
-				// Restrain DC is derived (8 + prof + STR), not a constant.
+				// Restrain DC is derived (8 + prof + CON), not a constant.
 				{kind: "featureCalculation", property: "chainRestrainDc", min: 12},
 				// Recurring force damage equals barbarian level.
 				{kind: "featureCalculation", property: "chainRestrainDamage", min: 6},
 				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-restrain"},
+				{
+					kind: "stateTransaction",
+					steps: [
+						{method: "setChainedFuryTargetTrackingEnabled", args: [true]},
+						{method: "activateState", args: ["rage"], expect: [{truthy: true}]},
+						{method: "activateState", args: ["manifestChains"], expect: [{truthy: true}]},
+						{method: "isBonusActionAvailable", saveAs: "bonusBefore"},
+						{method: "applyTargetEffect", args: [{
+							source: "chained-fury",
+							targetName: "E2E ogre",
+							effect: "restrain",
+							riderId: "chains-restrain",
+							grappleSaveFailed: true,
+							restraintSaveFailed: true,
+						}], expect: [
+							{path: "ok", exact: true},
+							{path: "grappled", exact: true},
+							{path: "restrained", exact: true},
+						]},
+						{method: "isBonusActionAvailable", expect: [{equalsRef: "bonusBefore"}]},
+					],
+				},
 			],
 		},
 		{
