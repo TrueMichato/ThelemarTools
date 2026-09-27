@@ -1303,6 +1303,137 @@ export class CharacterSheetPage {
 		return ((await this.page.locator("#charsheet-respec-draft-status").textContent()) || "").trim();
 	}
 
+	async prepareLevelFeatSkillRespecFixture (): Promise<string> {
+		const result = await this.page.evaluate(async () => {
+			const cs: any = (globalThis as any).charSheet;
+			cs._state.setSetting("allowedSources", ["PHB", "XPHB"]);
+			cs._state.setSetting("prioritySources", ["XPHB"]);
+			const report = await cs.spawn({
+				classes: [{name: "Fighter", source: "XPHB", subclass: "Champion", subclassSource: "XPHB", level: 4}],
+				race: "Dwarf",
+				background: "Soldier",
+				seed: "respec-skill-expert",
+			}, {name: "Skill Expert Respec"});
+			const state = cs._state;
+			const champion = state.getClasses()[0]?.subclass;
+			if (!champion || champion.source !== "XPHB") {
+				throw new Error(`The Fighter Champion fixture was not acquired: ${JSON.stringify({
+					classes: state.getClasses().map((cls: any) => ({name: cls.name, source: cls.source, subclass: cls.subclass})),
+					unresolved: report.unresolved,
+				})}`);
+			}
+			// Spawn records the subclass on level 1, while this Fighter's subclass opportunity is at level 3.
+			state.recordLevelChoice({
+				level: 3,
+				class: {name: "Fighter", source: "XPHB"},
+				choices: {subclass: {name: champion.name, shortName: champion.shortName, source: champion.source}},
+			});
+			await cs._saveCurrentCharacter();
+			cs._renderCharacter();
+			return {
+				oldFeat: state.getLevelHistory().find((entry: any) => entry.level === 4)?.choices?.feat?.name,
+				unresolved: report.unresolved,
+				unhandledPrompts: report.unhandledPrompts,
+			};
+		});
+		expect(result.unresolved).toEqual([]);
+		expect(result.unhandledPrompts).toEqual([]);
+		expect(result.oldFeat).toBeTruthy();
+		expect(result.oldFeat).not.toBe("Skill Expert");
+		return result.oldFeat;
+	}
+
+	async stageLevel4SkillExpert (skill: string, expertise: string): Promise<void> {
+		await this.page.locator('.charsheet__level-entry[data-level="4"] .charsheet__level-entry-edit').click();
+		const decisionId = await this.page.evaluate(() => (globalThis as any).charSheet._respec._engine.manifest.decisions
+			.find((decision: any) => decision.type === "feat" && decision.characterLevel === 4)?.id);
+		if (!decisionId) throw new Error("The Fighter level-4 feat decision was not discovered");
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decisionId}"]`);
+		await row.locator("button", {hasText: "Change"}).click();
+		const modal = this.page.locator(".charsheet__respec-feat-modal");
+		await modal.locator('input[placeholder="Search feats..."]').fill("Skill Expert");
+		const feat = modal.locator(".charsheet__respec-feat-item")
+			.filter({has: this.page.locator('a[data-vet-source="XPHB"]')})
+			.filter({hasText: "Skill Expert"});
+		await feat.click();
+		const proficiencySection = modal.locator('.mb-2:has(> label.ve-small:has-text("Choose 1 skill:"))');
+		await proficiencySection.getByRole("button", {name: skill, exact: true}).click({timeout: 10000});
+		const expertiseSection = modal.locator('.mb-2:has(> label.ve-small:has-text("for expertise:"))');
+		await expect(expertiseSection.getByRole("button", {name: skill, exact: true})).toBeVisible();
+		await expertiseSection.getByRole("button", {name: expertise, exact: true}).click();
+		await modal.locator(".charsheet__feat-ability-grid button", {hasText: "Constitution"}).click();
+		await modal.locator("button", {hasText: "Apply Changes"}).click();
+	}
+
+	async getLevelFeatSkillRespecSnapshot (): Promise<{
+		live: {skills: Record<string, {level: number; total: number; mod: number}>; feat: string | null; proficiencyBonus: number};
+		draft: {skills: Record<string, {level: number; total: number; mod: number}>; feat: string | null; proficiencyBonus: number; choices: any; receipt: any};
+		children: Array<{type: string; status: string; selection: string[]; options: string[]}>;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const read = (state: any) => {
+				const feat = state.getFeats().find((item: any) => item.name === "Skill Expert" && item.source === "XPHB");
+				return {
+					skills: Object.fromEntries(["stealth", "deception", "athletics"].map(skill => [
+						skill, {
+							level: state.getSkillProficiency(skill),
+							total: state.getSkillBreakdown(skill).total,
+							mod: state.getSkillMod(skill),
+						},
+					])),
+					feat: feat?.name || null,
+					proficiencyBonus: state.getProficiencyBonus(),
+					choices: feat?.choices || null,
+					receipt: feat?.appliedEffects?.skillProficiencies || null,
+				};
+			};
+			return {
+				live: read(cs._state),
+				draft: read(cs._respec._engine.state),
+				children: cs._respec._engine.manifest.decisions
+					.filter((decision: any) => decision.characterLevel === 4
+						&& decision.provenance?.ownerUid === "skill expert|xphb"
+						&& ["nestedSkill", "nestedExpertise"].includes(decision.type))
+					.map((decision: any) => ({
+						type: decision.type,
+						status: decision.status,
+						selection: decision.selection,
+						options: decision.options,
+					})),
+			};
+		});
+	}
+
+	async rollFixedSkillCheck (skill: string): Promise<number> {
+		return this.page.evaluate(async skillName => {
+			const cs: any = (globalThis as any).charSheet;
+			const original = Object.fromEntries([
+				"_rollD20",
+				"pAnimateD20",
+				"_pMaybeApplyRedCant",
+				"_pMaybeApplyFortuneIntervention",
+				"_pRollTriggeredFeatDie",
+				"_pMaybeApplyEfaFlashOfGenius",
+				"_pMaybeApplyTacticalMind",
+			].map(key => [key, cs[key]]));
+			cs._rollD20 = () => ({roll: 10, roll1: 10, roll2: 10, mode: "normal", thelemar_critBonus: 0});
+			cs.pAnimateD20 = async () => {};
+			cs._pMaybeApplyRedCant = async ({effectiveRoll}: any) => ({effectiveRoll, applied: false, note: ""});
+			cs._pMaybeApplyFortuneIntervention = async ({effectiveRoll}: any) => ({effectiveRoll, note: ""});
+			cs._pRollTriggeredFeatDie = async () => null;
+			cs._pMaybeApplyEfaFlashOfGenius = async () => null;
+			cs._pMaybeApplyTacticalMind = async () => {};
+			try {
+				const result = await cs._rollSkillCheck(skillName, skillName[0].toUpperCase() + skillName.slice(1), null);
+				if (!result || result.roll !== 10) throw new Error("The fixed skill roll did not complete");
+				return result.total;
+			} finally {
+				for (const [key, value] of Object.entries(original)) cs[key] = value;
+			}
+		}, skill);
+	}
+
 	async prepareLegacyEpicBoonRepairFixture (): Promise<{con: number; abilityTotal: number}> {
 		return this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
