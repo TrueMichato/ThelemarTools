@@ -2,10 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import {expect, test} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
+import {LevelUpPage} from "../pages/LevelUpPage";
 import {clearCharacterStorage} from "../utils/characterStorage";
 import {
 	createCharacterViaWizard,
 	levelUpTo,
+	PRESET_BARD,
 	PRESET_CLERIC,
 	PRESET_FIGHTER,
 	PRESET_FULL_JESTER_DENDULRA,
@@ -21,6 +23,156 @@ const BARD_FIXTURE = JSON.parse(fs.readFileSync(
 test.describe("Respec workspace", () => {
 	test.beforeEach(async ({page}) => {
 		await clearCharacterStorage(page);
+	});
+
+	test("Bard Magical Secrets uses real level-10 known-spell Level Up choices", async ({page}) => {
+		test.setTimeout(240_000);
+		await gotoWithThelemar(page);
+		const {charSheet} = await createCharacterViaWizard(page, {
+			...PRESET_BARD, name: "Level-Up Secrets Bard", background: "Soldier", bgSource: "PHB",
+			subclassName: "College of Valor", subclassSource: "TGTT-2024",
+		});
+		await levelUpTo(page, 9, {subclassName: "College of Valor", subclassSource: "TGTT-2024"});
+		const characterId = await charSheet.getCurrentCharacterId();
+		const levelUp = new LevelUpPage(page);
+		await charSheet.beginLevelUp();
+		await levelUp.waitForModal();
+
+		const picker = await levelUp.getSpellPickerSnapshot();
+		expect((await charSheet.getLevelTenBardSpellEvidence()).classSource).toBe("TGTT");
+		expect(picker.accordion).toBe("knownspells");
+		expect(picker.title).toContain("Spells Known");
+		expect(picker.options).toEqual(expect.arrayContaining([
+			{name: "Spirit Guardians", source: "PHB'24", level: 3},
+			{name: "Conjure Animals", source: "TGTT", level: 3},
+			{name: "Shield", source: "PHB'24", level: 1},
+		]));
+		for (const excluded of [
+			{name: "Fire Bolt", source: "PHB'24", level: 0},
+			{name: "Heal", source: "PHB'24", level: 6},
+		]) expect(picker.options).not.toContainEqual(excluded);
+
+		await levelUp.selectHpOption("average");
+		await levelUp.chooseKnownSpell("Spirit Guardians", "PHB'24");
+		await levelUp.autoFillAllSelections();
+		await levelUp.finish();
+		await levelUp.expectModalClosed();
+		const result = await charSheet.getLevelTenBardSpellEvidence();
+		expect(result.classSource).toBe("TGTT");
+		expect(result.choice.knownSpells).toEqual(expect.arrayContaining([
+			expect.objectContaining({name: "Spirit Guardians", source: "XPHB", level: 3}),
+		]));
+		expect(result.choice.knownCantrips).toHaveLength(1);
+		expect(result.choice.preparedSpells).toBeUndefined();
+		expect(result.choice.preparedCantrips).toBeUndefined();
+		expect(result.spells).toEqual(expect.arrayContaining([
+			expect.objectContaining({name: "Spirit Guardians", source: "XPHB", sourceFeature: "Spells Known", sourceClass: "Bard", sourceClassSource: "TGTT", prepared: false}),
+		]));
+
+		await charSheet.reloadCharacterSheet();
+		expect(await charSheet.getLevelTenBardSpellEvidence()).toMatchObject({
+			choice: {knownSpells: [expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})]},
+		});
+		await charSheet.openRespec();
+		const recorded = await charSheet.getLevelTenBardRespecDecision();
+		expect(recorded.status, JSON.stringify({
+			selection: recorded.selection,
+			matchingOptions: recorded.options.filter(option => ["Spirit Guardians", "Shield"].includes(option.name)),
+			issues: recorded.issues,
+		})).toBe("resolved");
+		expect(recorded.issues).toEqual([]);
+		expect(recorded.selection).toEqual([expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})]);
+		expect(recorded.options).toEqual(expect.arrayContaining([
+			{name: "Spirit Guardians", source: "XPHB"},
+			{name: "Shield", source: "XPHB"},
+		]));
+		const original = await charSheet.getLevelTenBardSpellEvidence();
+
+		await charSheet.stageLevelTenBardKnownSpell("Shield", "XPHB");
+		expect(await charSheet.getLevelTenBardSpellEvidence()).toEqual(original);
+		await charSheet.cancelRespecDraft();
+		expect(await charSheet.getLevelTenBardSpellEvidence()).toEqual(original);
+		expect((await charSheet.getLevelTenBardRespecDecision()).selection)
+			.toEqual([expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})]);
+
+		await charSheet.stageLevelTenBardKnownSpell("Shield", "XPHB");
+		// CS-BUG-177: repair the Builder's unrelated L1 spell gap before Apply.
+		await charSheet.repairBardStartingSpellsForRespec();
+		await charSheet.applyRespecDraft();
+		const applied = await charSheet.getLevelTenBardSpellEvidence();
+		expect(applied.choice.knownSpells).toEqual([expect.objectContaining({name: "Shield", source: "XPHB", level: 1})]);
+		expect(applied.spells.filter(spell => ["Shield", "Spirit Guardians"].includes(spell.name))).toEqual([
+			expect.objectContaining({name: "Shield", source: "XPHB", sourceFeature: "Spells Known", sourceClass: "Bard", sourceClassSource: "TGTT", prepared: false}),
+		]);
+
+		const reloadedPage = await page.context().newPage();
+		const reloadedSheet = new CharacterSheetPage(reloadedPage);
+		await reloadedPage.goto("/charactersheet.html?_brewloaded=1");
+		await reloadedSheet.selectCharacter(characterId);
+		expect(await reloadedSheet.getLevelTenBardSpellEvidence()).toEqual(applied);
+		await reloadedSheet.openRespec();
+		expect(await reloadedSheet.getLevelTenBardRespecDecision()).toMatchObject({
+			status: "resolved",
+			selection: [expect.objectContaining({name: "Shield", source: "XPHB"})],
+			issues: [],
+		});
+
+		await charSheet.undoAppliedRespec();
+		expect(await charSheet.getLevelTenBardSpellEvidence()).toEqual(original);
+	});
+
+	test("XPHB Bard level-10 Level Up persists a Magical Secrets known spell for Respec", async ({page}) => {
+		test.slow();
+		await gotoWithThelemar(page);
+		const charSheet = new CharacterSheetPage(page);
+		await charSheet.setPrioritySources(["XPHB"]);
+		await charSheet.spawnSavedCharacter("bard[XPHB]/9/human", "XPHB Secrets Bard");
+		await charSheet.beginLevelUp();
+		const levelUp = new LevelUpPage(page);
+		await levelUp.waitForModal();
+		const picker = await levelUp.getSpellPickerSnapshot();
+		expect(picker.accordion).toBe("knownspells");
+		expect(picker.options).toEqual(expect.arrayContaining([
+			{name: "Spirit Guardians", source: "PHB'24", level: 3},
+			{name: "Shield", source: "PHB'24", level: 1},
+		]));
+		expect(picker.options).not.toContainEqual({name: "Fire Bolt", source: "PHB'24", level: 0});
+		await levelUp.selectHpOption("average");
+		await levelUp.chooseKnownSpell("Spirit Guardians", "PHB'24");
+		await levelUp.autoFillAllSelections();
+		await levelUp.finish();
+		await levelUp.expectModalClosed();
+		await charSheet.reloadCharacterSheet();
+		const evidence = await charSheet.getLevelTenBardSpellEvidence();
+		expect(evidence.classSource).toBe("XPHB");
+		expect(evidence.choice).toMatchObject({
+			knownSpells: [expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})],
+		});
+		expect(evidence.spells).toEqual(expect.arrayContaining([
+			expect.objectContaining({name: "Spirit Guardians", source: "XPHB", sourceFeature: "Spells Known", sourceClassSource: "XPHB", prepared: false}),
+		]));
+		await charSheet.openRespec();
+		expect(await charSheet.getLevelTenBardRespecDecision()).toMatchObject({
+			status: "resolved",
+			selection: [expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})],
+			issues: [],
+		});
+	});
+
+	test("TGTT Bard level-9 Level Up keeps Magical Secrets spells out of its picker", async ({page}) => {
+		test.slow();
+		await gotoWithThelemar(page);
+		const charSheet = new CharacterSheetPage(page);
+		await charSheet.spawnSavedCharacter("bard[TGTT]/8/human", "Pre-Secrets Bard");
+		await charSheet.beginLevelUp();
+		const levelUp = new LevelUpPage(page);
+		await levelUp.waitForModal();
+		const picker = await levelUp.getSpellPickerSnapshot();
+		expect(picker.accordion).toBe("knownspells");
+		for (const excluded of [
+			{name: "Spirit Guardians", source: "PHB'24", level: 3},
+			{name: "Shield", source: "PHB'24", level: 1},
+		]) expect(picker.options).not.toContainEqual(excluded);
 	});
 
 	test("repairs a skipped decision atomically and supports cancel, apply, undo, and mobile controls", async ({page}) => {

@@ -415,6 +415,36 @@ export class LevelUpPage {
 
 	// ========== KNOWN SPELLS SECTION ==========
 
+	async getSpellPickerSnapshot (): Promise<{
+		title: string;
+		accordion: string;
+		options: Array<{name: string; source: string; level: number}>;
+	}> {
+		return this.page.locator(".charsheet__levelup-wizard .charsheet__spell-picker-container").first().evaluate(picker => ({
+			title: (picker.querySelector(".charsheet__levelup-section-title")?.textContent || "").trim(),
+			accordion: picker.closest("[data-accordion-id]")?.getAttribute("data-accordion-id") || "",
+			options: [...picker.querySelectorAll(".charsheet__spell-picker-section")].flatMap(section => {
+				const title = section.querySelector(".charsheet__spell-picker-section-title")?.textContent || "";
+				const level = /Cantrips/i.test(title) ? 0 : Number(title.match(/Level\s+(\d+)/)?.[1]);
+				return [...section.querySelectorAll(".charsheet__spell-picker-item")].map(row => ({
+					name: (row.querySelector(".charsheet__spell-picker-item-name")?.textContent || "").trim(),
+					source: (row.querySelector(".charsheet__spell-picker-item-source")?.textContent || "").trim(),
+					level,
+				}));
+			}),
+		}));
+	}
+
+	async chooseKnownSpell (name: string, source: string): Promise<void> {
+		await this.expandAccordion("knownspells");
+		const row = this.accordionKnownSpells.locator(".charsheet__spell-picker-item")
+			.filter({has: this.page.locator(".charsheet__spell-picker-item-name").getByText(name, {exact: true})})
+			.filter({has: this.page.locator(".charsheet__spell-picker-item-source").getByText(source, {exact: true})});
+		await expect(row).toHaveCount(1);
+		await row.locator("button.spell-toggle").click();
+		await expect(row).toHaveClass(/--selected/);
+	}
+
 	/**
 	 * Add a spell to known spells
 	 */

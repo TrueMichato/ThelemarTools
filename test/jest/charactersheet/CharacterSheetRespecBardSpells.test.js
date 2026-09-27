@@ -157,7 +157,13 @@ function getDescendants (root) {
 	return [root, ...(root?._children || []).flatMap(getDescendants)];
 }
 
-function getRecordedBard ({source = "TGTT", level = 10, acquiredSecret = false, acquiredWrongSource = false} = {}) {
+function getRecordedBard ({
+	source = "TGTT",
+	level = 10,
+	acquiredSecret = false,
+	acquiredWrongSource = false,
+	legacyPreparedFrom = null,
+} = {}) {
 	const published = PUBLISHED_BARDS.get(source);
 	const subclass = source === "TGTT"
 		? {name: "Jester", shortName: "Jester", source}
@@ -222,18 +228,30 @@ function getRecordedBard ({source = "TGTT", level = 10, acquiredSecret = false, 
 			chosenSpells[0] = acquiredWrongSource ? wrongSource : borrowed;
 		}
 		const chosenCantrips = normalCantrips.slice(cantripOffset, cantripOffset + cantripCount);
+		const isLegacyLevel = legacyPreparedFrom != null && classLevel >= legacyPreparedFrom;
 		state.recordLevelChoice({
 			level: classLevel,
 			class: {name: "Bard", source},
 			choices: {
 				...(classLevel === 3 ? {subclass: copy(subclass)} : {}),
 				...([4, 8].includes(classLevel) ? {asi: {cha: 2}} : {}),
-				...(spellCount ? {knownSpells: chosenSpells.map(({name, source, level}) => ({name, source, level}))} : {}),
-				...(cantripCount ? {cantrips: chosenCantrips.map(({name, source, level}) => ({name, source, level}))} : {}),
+				...(spellCount ? {[isLegacyLevel ? "preparedSpells" : "knownSpells"]: chosenSpells.map(({name, source, level}) => ({name, source, level}))} : {}),
+				...(cantripCount ? {[isLegacyLevel ? "preparedCantrips" : "cantrips"]: chosenCantrips.map(({name, source, level}) => ({name, source, level}))} : {}),
 			},
 		});
-		chosenSpells.forEach(entry => state.addSpell({...entry, sourceClass: "Bard", sourceFeature: "Spells Known"}));
-		chosenCantrips.forEach(entry => state.addCantrip({...entry, sourceClass: "Bard", sourceFeature: "Cantrips Known"}));
+		chosenSpells.forEach(entry => state.addSpell({
+			...entry,
+			sourceClass: "Bard",
+			sourceClassSource: source,
+			sourceFeature: isLegacyLevel ? "Prepared Spells" : "Spells Known",
+			prepared: isLegacyLevel,
+		}));
+		chosenCantrips.forEach(entry => state.addCantrip({
+			...entry,
+			sourceClass: "Bard",
+			sourceClassSource: source,
+			sourceFeature: isLegacyLevel ? "Prepared Spells" : "Cantrips Known",
+		}));
 		spellOffset += spellCount;
 		cantripOffset += cantripCount;
 	}
@@ -276,6 +294,217 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 	});
 
 	describe("Character Sheet Respec recorded Bard Magical Secrets", () => {
+		it("prefers multiple recorded Level Up acquisitions over a stale cumulative marker", () => {
+			const {state, page, borrowed} = getRecordedBard({acquiredSecret: true});
+			const history = state.getLevelHistory();
+			history[9].decisions = ["knownSpells", "cantrips"].map(type => ({
+				type,
+				meta: {legacyCumulative: true},
+				selection: [{name: borrowed.name, source: borrowed.source}],
+			}));
+			const spellPool = CharacterSheetProgression._getClassSpellPools(state, page, history).get("bard");
+			expect(CharacterSheetProgression._isLegacyCumulativeSpellProgression({
+				className: "Bard", classSource: "TGTT", history, spellPool,
+			})).toBe(false);
+		});
+
+		it("keeps a genuinely cumulative repertoire when only one later level has recorded acquisitions", () => {
+			const {state, page, borrowed} = getRecordedBard({acquiredSecret: true});
+			const history = state.getLevelHistory();
+			const startingCantrips = history[0].choices.cantrips;
+			for (const entry of history.slice(0, 8)) {
+				delete entry.choices.knownSpells;
+				delete entry.choices.cantrips;
+			}
+			history[0].choices.cantrips = startingCantrips;
+			history[8].decisions = [{
+				type: "knownSpells",
+				meta: {legacyCumulative: true},
+				selection: [{name: borrowed.name, source: borrowed.source}],
+			}];
+			const spellPool = CharacterSheetProgression._getClassSpellPools(state, page, history).get("bard");
+			expect(CharacterSheetProgression._isLegacyCumulativeSpellProgression({
+				className: "Bard", classSource: "TGTT", history, spellPool,
+			})).toBe(true);
+		});
+
+		it.each([
+			["one verified old-Level-Up acquisition followed by a swap", true],
+			["two swap-only levels", false],
+		])("keeps the saved cumulative Bard repertoire with %s", (_, withPreparedGain) => {
+			const {state, bard, borrowed, clericSecret, spellData} = getRecordedBard({level: 12});
+			const shield = {
+				name: "Shield",
+				source: "XPHB",
+				level: 1,
+				classes: {fromClassList: [{name: "Wizard", source: "XPHB"}]},
+			};
+			const repertoire = Array.from({length: 15}, (_, ix) => ({
+				name: `Bard Tune ${ix + 1}`,
+				source: "XPHB",
+				level: 1,
+			}));
+			const history = state.getLevelHistory();
+			for (const entry of history) {
+				for (const key of ["knownSpells", "knownCantrips", "cantrips", "preparedSpells", "preparedCantrips"]) {
+					delete entry.choices[key];
+				}
+			}
+			history[9].choices.knownSpells = copy(repertoire);
+			history[9].decisions = [CharacterSheetProgression._makeDecision({
+				characterLevel: 10,
+				className: "Bard",
+				classSource: "TGTT",
+				classLevel: 10,
+				type: "knownSpells",
+				label: "Current Spell Repertoire",
+				sourceKey: "legacy-known-spell-repertoire",
+				count: repertoire.length,
+				selection: copy(repertoire),
+				meta: {legacyCumulative: true, maxSpellLevel: 5},
+			})];
+
+			if (withPreparedGain) {
+				expect(CharacterSheetClassUtils.getKnownSpellsAtLevel(PUBLISHED_BARDS.get("TGTT"), "Bard", 11)).toBe(16);
+				expect(CharacterSheetClassUtils.getKnownSpellsAtLevel(PUBLISHED_BARDS.get("TGTT"), "Bard", 12)).toBe(16);
+				history[10].choices = {preparedSpells: [{name: shield.name, source: shield.source, level: shield.level}]};
+				state.removeSpell("Bard Tune 16", "XPHB");
+				state.addSpell({
+					...shield,
+					sourceClass: "Bard",
+					sourceClassSource: "TGTT",
+					sourceFeature: "Prepared Spells",
+					prepared: true,
+				});
+			} else {
+				history[10].choices = {spellSwap: {removed: repertoire[0], added: borrowed}};
+				state.removeSpell(repertoire[0].name, repertoire[0].source);
+				state.addSpell({
+					...borrowed,
+					sourceClass: "Bard",
+					sourceClassSource: "TGTT",
+					sourceFeature: "Spells Known",
+				});
+			}
+			const removed = repertoire[withPreparedGain ? 0 : 1];
+			const added = withPreparedGain ? borrowed : clericSecret;
+			history[11].choices = {spellSwap: {removed, added}};
+			state.removeSpell(removed.name, removed.source);
+			state.addSpell({
+				...added,
+				sourceClass: "Bard",
+				sourceClassSource: "TGTT",
+				sourceFeature: "Spells Known",
+			});
+
+			const saved = state.toJson();
+			const loaded = new CharacterSheetState();
+			const catalog = [...spellData, shield];
+			loaded.setSpellData(catalog);
+			expect(loaded.loadFromJson(saved)).not.toBe(false);
+			const page = getPage(loaded, bard);
+			page.getSpells = () => copy(catalog);
+			page.getFilteredSpellData = () => copy(catalog);
+			const respec = new CharacterSheetRespec({page, state: loaded});
+			respec._engine.begin();
+			const known = respec._engine.manifest.decisions.filter(it => it.type === "knownSpells");
+			expect(known).toEqual([
+				expect.objectContaining({
+					classLevel: 12,
+					sourceKey: "legacy-known-spell-repertoire",
+					meta: expect.objectContaining({legacyCumulative: true}),
+				}),
+			]);
+			expect(loaded.getLevelHistoryEntry(10).decisions)
+				.toEqual(expect.arrayContaining([expect.objectContaining({meta: expect.objectContaining({legacyCumulative: true})})]));
+			if (withPreparedGain) {
+				expect(loaded.getLevelHistoryEntry(11).choices.preparedSpells)
+					.toEqual([{name: "Shield", source: "XPHB", level: 1}]);
+				expect(loaded.getSpellsKnown().find(it => it.name === "Shield" && it.source === "XPHB"))
+					.toMatchObject({sourceClass: "Bard", sourceClassSource: "TGTT", sourceFeature: "Prepared Spells", prepared: true});
+			}
+		});
+
+		it.each(["TGTT", "XPHB"])("reads a saved old-Level-Up %s Bard spell without changing it on open, Cancel, or unrelated Apply", async source => {
+			const {state, page, borrowed} = getRecordedBard({source, acquiredSecret: true, legacyPreparedFrom: 10});
+			const original = state.toJson();
+			const respec = new CharacterSheetRespec({page, state});
+			respec._engine.begin();
+			const decision = respec._engine.manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10);
+			expect(decision).toMatchObject({
+				status: "resolved",
+				selection: [expect.objectContaining({name: borrowed.name, source: borrowed.source})],
+			});
+			expect(respec._engine.getValidation().errors.filter(error => error.decisionId === decision.id)).toEqual([]);
+			expect(state.toJson()).toEqual(original);
+			respec._engine.cancel();
+			expect(state.toJson()).toEqual(original);
+
+			respec._engine.begin();
+			const hp = respec._engine.manifest.decisions.find(it => it.type === "hp" && it.classLevel === 9);
+			respec._engine.updateDecisionSelection(hp.id, {method: "average"});
+			await respec._engine.apply();
+			expect(state.getLevelHistoryEntry(10).choices.preparedSpells).toEqual(original.levelHistory[9].choices.preparedSpells);
+			expect(state.getLevelHistoryEntry(10).choices.knownSpells).toBeUndefined();
+			expect(state.getSpellsKnown().find(it => it.name === borrowed.name && it.source === borrowed.source))
+				.toMatchObject({sourceFeature: "Prepared Spells", prepared: true, sourceClassSource: source});
+			await respec._engine.undo();
+			expect(state.getLevelHistoryEntry(10).choices).toEqual(original.levelHistory[9].choices);
+			expect(state.getSpellsKnown().find(it => it.name === borrowed.name && it.source === borrowed.source))
+				.toMatchObject({sourceFeature: "Prepared Spells", prepared: true, sourceClassSource: source});
+		});
+
+		it("keeps an all-prepared-history Bard level-specific and converts only a staged old pick", async () => {
+			const {state, page, borrowed, clericSecret, spellData} = getRecordedBard({
+				acquiredSecret: true,
+				legacyPreparedFrom: 1,
+			});
+			const original = state.toJson();
+			const respec = new CharacterSheetRespec({page, state});
+			respec._engine.begin();
+			respec._state = respec._engine.state;
+			const decisions = respec._engine.manifest.decisions.filter(it => it.type === "knownSpells");
+			expect(decisions).toHaveLength(10);
+			const tenth = decisions.find(it => it.classLevel === 10);
+			expect(tenth).toMatchObject({
+				status: "resolved",
+				selection: [expect.objectContaining({name: borrowed.name, source: borrowed.source})],
+			});
+			expect(respec._engine.manifest.decisions.filter(it => it.type === "cantrips" && it.classLevel === 10))
+				.toEqual([expect.objectContaining({status: "resolved", count: 1})]);
+			const selected = [{name: clericSecret.name, source: clericSecret.source}];
+			respec._engine.stageGraphMutation(tenth.id, selected, {
+				apply: ({state: candidate}) => respec._applyManifestSelectionMechanics(tenth, selected, tenth.options, candidate),
+			});
+			const draft = respec._engine.state;
+			expect(draft.getLevelHistoryEntry(10).choices.preparedSpells).toBeUndefined();
+			expect(draft.getLevelHistoryEntry(10).choices.knownSpells)
+				.toEqual([expect.objectContaining({name: clericSecret.name, source: clericSecret.source})]);
+			expect(draft.getLevelHistoryEntry(10).choices.preparedCantrips)
+				.toEqual(original.levelHistory[9].choices.preparedCantrips);
+			expect(draft.getLevelHistoryEntry(9).choices.preparedSpells).toEqual(original.levelHistory[8].choices.preparedSpells);
+			expect(draft.getSpellsKnown().filter(it => [borrowed.name, clericSecret.name].includes(it.name)))
+				.toEqual([expect.objectContaining({name: clericSecret.name, sourceFeature: "Spells Known", prepared: false})]);
+			expect(state.toJson()).toEqual(original);
+			expect(respec._engine.getValidation().errors).toEqual([]);
+			await respec._engine.apply();
+			const reloaded = new CharacterSheetState();
+			reloaded.setSpellData(spellData);
+			expect(reloaded.loadFromJson(state.toJson())).not.toBe(false);
+			const reopenedPage = getPage(reloaded, page.getClasses()[0]);
+			reopenedPage.getSpells = () => copy(spellData);
+			reopenedPage.getFilteredSpellData = () => copy(spellData);
+			const reopened = new CharacterSheetRespec({page: reopenedPage, state: reloaded});
+			reopened._engine.begin();
+			expect(reopened._engine.manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10))
+				.toMatchObject({status: "resolved", selection: [expect.objectContaining({name: clericSecret.name, source: clericSecret.source})]});
+			expect(await respec._engine.undo()).toBe(true);
+			expect(state.getLevelHistoryEntry(10).choices).toEqual(original.levelHistory[9].choices);
+			expect(state.getSpellsKnown().find(it => it.name === borrowed.name && it.source === borrowed.source))
+				.toMatchObject({sourceFeature: "Prepared Spells", prepared: true, sourceClassSource: "TGTT"});
+			expect(state.getSpellsKnown().some(it => it.name === clericSecret.name)).toBe(false);
+		});
+
 		it.each(["TGTT", "XPHB"])("accepts a recorded %s level-10 Wizard spell in the manifest and editor", source => {
 			const {state, page, borrowed, clericSecret, druidSecret, wrongSource, tooHigh} = getRecordedBard({source, acquiredSecret: true});
 			const saved = state.toJson();
@@ -341,7 +570,14 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 				expect(respec._getDecisionOptions(levelNine).map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
 					CharacterSheetRespec._getDecisionOptionKey(borrowed),
 				);
-				if (source === "PHB") continue; // PHB Magical Secrets grants two any-class spells at specific levels.
+				if (source === "PHB") {
+					const tenth = respec._engine.manifest.decisions.find(it =>
+						it.type === "knownSpells" && it.classLevel === 10);
+					expect(tenth.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
+						CharacterSheetRespec._getDecisionOptionKey(borrowed),
+					);
+					continue; // PHB Magical Secrets grants two any-class spells at specific levels.
+				}
 				const cantrip = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 10);
 				expect(cantrip.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
 					CharacterSheetRespec._getDecisionOptionKey(borrowedCantrip),
@@ -353,6 +589,57 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 			expect(CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
 				className: "Sorcerer", classSource: "XPHB", classLevel: 10,
 			})).not.toContain("Wizard");
+		});
+
+		it("does not reinterpret a Cleric's prepared-spell history as a known Bard acquisition", () => {
+			const cleric = {
+				name: "Cleric",
+				source: "XPHB",
+				edition: "one",
+				level: 1,
+				hd: {faces: 8},
+				casterProgression: "full",
+				spellcastingAbility: "wis",
+				preparedSpellsProgression: [4],
+				cantripProgression: [3],
+				classFeatures: [],
+			};
+			const healingWord = {
+				name: "Healing Word",
+				source: "XPHB",
+				level: 1,
+				classes: {fromClassList: [{name: "Cleric", source: "XPHB"}]},
+			};
+			const state = new CharacterSheetState();
+			state.setSpellData([healingWord]);
+			state.addClass(cleric);
+			state.recordLevelChoice({
+				level: 1,
+				class: {name: "Cleric", source: "XPHB"},
+				choices: {preparedSpells: [{name: healingWord.name, source: healingWord.source, level: 1}]},
+			});
+			state.addSpell({
+				...healingWord,
+				sourceClass: "Cleric",
+				sourceClassSource: "XPHB",
+				sourceFeature: "Prepared Spells",
+				prepared: true,
+			});
+			const page = getPage(state, cleric);
+			page.getSpells = () => [healingWord];
+			page.getFilteredSpellData = () => [healingWord];
+			const history = state.getLevelHistory();
+			expect(CharacterSheetProgression._getLegacyBardPreparedSelection({
+				entry: history[0], type: "knownSpells", state, history,
+			})).toBeNull();
+			const pool = CharacterSheetProgression._getClassSpellPools(state, page, history).get("cleric");
+			expect(pool.knownSpells).toEqual([]);
+			expect(pool.preparedSpells).toEqual([expect.objectContaining({
+				name: healingWord.name, sourceFeature: "Prepared Spells", prepared: true,
+			})]);
+			expect(CharacterSheetClassUtils.getClassSpellcastingModel({
+				name: cleric.name, source: cleric.source, classData: cleric,
+			})).toBe("prepared");
 		});
 
 		it("rejects a recorded same-name spell from an ineligible source", () => {

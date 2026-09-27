@@ -2108,6 +2108,125 @@ export class CharacterSheetPage {
 		if (characterId) await expect(selector).toHaveValue(characterId);
 	}
 
+	async beginLevelUp (): Promise<void> {
+		await this.btnLevelUp.click();
+	}
+
+	async getLevelTenBardSpellEvidence (): Promise<{
+		classSource: string;
+		choice: {
+			knownSpells?: Array<{name: string; source: string}>;
+			knownCantrips?: Array<{name: string; source: string}>;
+			preparedSpells?: Array<{name: string; source: string}>;
+			preparedCantrips?: Array<{name: string; source: string}>;
+		};
+		spells: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string; prepared: boolean}>;
+	}> {
+		return this.page.evaluate(() => {
+			const state = (globalThis as any).charSheet._state;
+			return {
+				classSource: state.getClasses().find((cls: any) => cls.name === "Bard")?.source,
+				choice: state.getLevelHistoryEntry(10)?.choices || {},
+				spells: state.getSpellsKnown().map((spell: any) => ({
+					name: spell.name,
+					source: spell.source,
+					sourceFeature: spell.sourceFeature,
+					sourceClass: spell.sourceClass,
+					sourceClassSource: spell.sourceClassSource,
+					prepared: spell.prepared,
+				})),
+			};
+		});
+	}
+
+	async getCurrentCharacterId (): Promise<string> {
+		return this.page.evaluate(() => {
+			const id = (globalThis as any).charSheet?._currentCharacterId;
+			if (!id) throw new Error("No saved character is selected");
+			return id;
+		});
+	}
+
+	async getLevelTenBardRespecDecision (): Promise<{
+		id: string;
+		status: string;
+		selection: Array<{name: string; source: string}>;
+		options: Array<{name: string; source: string}>;
+		issues: unknown[];
+	}> {
+		return this.page.evaluate(() => {
+			const engine = (globalThis as any).charSheet?._respec?._engine;
+			if (!engine) throw new Error("Respec is not open");
+			const decision = engine.manifest.decisions.find((it: any) =>
+				it.type === "knownSpells" && it.className === "Bard" && it.classLevel === 10);
+			if (!decision) throw new Error("Bard level-10 known-spell decision is missing");
+			return {
+				id: decision.id,
+				status: decision.status,
+				selection: decision.selection,
+				options: decision.options.map((it: any) => ({name: it.name, source: it.source})),
+				issues: engine.getValidation().errors.filter((it: any) => it.decisionId === decision.id),
+			};
+		});
+	}
+
+	async stageLevelTenBardKnownSpell (name: string, source: string): Promise<void> {
+		const decision = await this.getLevelTenBardRespecDecision();
+		if (decision.selection?.length !== 1) throw new Error("Expected one existing level-10 Bard known-spell pick");
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator('.charsheet__level-entry[data-level="10"] .charsheet__level-entry-edit').click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
+		await expect(editor).toBeVisible();
+		await editor.locator('input[type="search"]').fill(name);
+		const option = editor.locator(".charsheet__respec-option")
+			.filter({has: this.page.locator(`input[data-source="${source}"]`)})
+			.filter({has: this.page.locator("span").getByText(new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(`))});
+		await expect(option).toHaveCount(1);
+		await option.locator("input").check();
+		await editor.locator("button", {hasText: "Stage Choice"}).click();
+		await expect.poll(async () => (await this.getLevelTenBardRespecDecision()).selection)
+			.toEqual([expect.objectContaining({name, source})]);
+	}
+
+	async repairBardStartingSpellsForRespec (): Promise<void> {
+		const repair = await this.page.evaluate(() => {
+			const decisions = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions || [];
+			const first = decisions.find((it: any) =>
+				it.className === "Bard" && it.classLevel === 1 && it.type === "knownSpells" && it.status === "invalid");
+			if (!first) throw new Error("No invalid level-1 Bard spells to repair");
+			const later = new Set(decisions
+				.filter((it: any) => it.className === "Bard" && it.classLevel > 1 && it.type === "knownSpells")
+				.flatMap((it: any) => it.selection || [])
+				.map((it: any) => `${it.name}|${it.source}`.toLowerCase()));
+			const options = first.options.filter((it: any) =>
+				it.source === "XPHB" && !later.has(`${it.name}|${it.source}`.toLowerCase()));
+			if (options.length < first.count) throw new Error("Too few legal, unowned level-1 Bard spells");
+			return {id: first.id, count: first.count, options: options.slice(0, first.count).map((it: any) => it.name)};
+		});
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${repair.id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator('.charsheet__level-entry[data-level="1"] .charsheet__level-entry-edit').click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
+		const checked = editor.locator(".charsheet__respec-option input:checked");
+		while (await checked.count()) await checked.first().uncheck();
+		for (const name of repair.options) {
+			await editor.locator('input[type="search"]').fill(name);
+			const choice = editor.locator(".charsheet__respec-option")
+				.filter({has: this.page.locator('input[data-source="XPHB"]')})
+				.filter({has: this.page.locator("span").getByText(new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(`))});
+			await expect(choice).toHaveCount(1);
+			await choice.locator("input").check();
+		}
+		await editor.locator("button", {hasText: "Stage Choice"}).click();
+		await expect.poll(async () => (await this.getRespecBlockingDecisions())
+			.some(it => it.id === repair.id)).toBe(false);
+	}
+
 	async spawnSavedCharacter (spec: string, name: string): Promise<string> {
 		const result = await this.page.evaluate(async ({spawnSpec, characterName}) => {
 			const cs: any = (globalThis as any).charSheet;

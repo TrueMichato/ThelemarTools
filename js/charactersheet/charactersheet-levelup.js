@@ -245,6 +245,11 @@ class CharacterSheetLevelUp {
 		const spellsKnownProg = classData.spellsKnownProgression;
 		const cantripProg = classData.cantripProgression;
 		const casterProg = classData.casterProgression;
+		const spellModel = CharacterSheetClassUtils.getClassSpellcastingModel({
+			name: classEntry.name,
+			source: classEntry.source,
+			classData,
+		});
 
 		// Fallback tables for 2014 casters
 		const spellsKnownTables = {
@@ -259,9 +264,8 @@ class CharacterSheetLevelUp {
 			"Warlock": [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
 		};
 
-		// Check if this is a known-spell caster (NOT wizard, NOT prepared caster)
-		if (!isWizard && !classData.preparedSpellsProgression) {
-			const prog = spellsKnownProg || (/** @type {*} */ (spellsKnownTables))[classEntry.name];
+		if (!isWizard && spellModel === "known") {
+			const prog = spellsKnownProg || classData.preparedSpellsProgression || (/** @type {*} */ (spellsKnownTables))[classEntry.name];
 			if (prog) {
 				isKnownCaster = true;
 				const currentKnown = prog[newLevel - 2] || 0; // Previous level
@@ -283,13 +287,13 @@ class CharacterSheetLevelUp {
 		/** @type {*} */ let selectedKnownSpells = [];
 		/** @type {*} */ let selectedKnownCantrips = [];
 
-		// Prepared-spell caster detection (XPHB Warlock has preparedSpellsProgression)
+		// Prepared casters have a separate progression model from 2024 known casters.
 		let isPreparedCaster = false;
 		let preparedSpellsGain = 0;
 		let preparedCantripsGain = 0;
 		let preparedMaxSpellLevel = 0;
 
-		if (!isWizard && !isKnownCaster && classData.preparedSpellsProgression) {
+		if (!isWizard && spellModel === "prepared" && classData.preparedSpellsProgression) {
 			isPreparedCaster = true;
 			const prog = classData.preparedSpellsProgression;
 			const currentPrepared = prog[newLevel - 2] || 0;
@@ -308,6 +312,21 @@ class CharacterSheetLevelUp {
 
 		/** @type {*} */ let selectedPreparedSpells = [];
 		/** @type {*} */ let selectedPreparedCantrips = [];
+
+		const getKnownSpellListClasses = (subclass, subclassChoice) => ({
+			additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+				className: classEntry.name,
+				subclass,
+				subclassChoice,
+			}),
+			additionalLeveledClassNames: CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
+				className: classEntry.name,
+				classSource: classEntry.source,
+				classLevel: newLevel,
+				subclass,
+				subclassChoice,
+			}),
+		});
 
 		// ========== FILTER ASI FEATURES ==========
 		const filterAsiFeatures = (/** @type {*} */ features) => {
@@ -680,11 +699,7 @@ class CharacterSheetLevelUp {
 						getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 						subclass: selectedSubclass || fullClassSubclassData,
 						subclassChoice: selectedSubclassChoice,
-						additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
-							className: classEntry.name,
-							subclass: selectedSubclass || fullClassSubclassData,
-							subclassChoice: selectedSubclassChoice,
-						}),
+						...getKnownSpellListClasses(selectedSubclass || fullClassSubclassData, selectedSubclassChoice),
 						onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 							selectedKnownSpells = spells;
 							selectedKnownCantrips = cantrips;
@@ -1209,11 +1224,7 @@ class CharacterSheetLevelUp {
 				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
 				subclass: selectedSubclass || fullClassSubclassData,
 				subclassChoice: selectedSubclassChoice,
-				additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
-					className: classEntry.name,
-					subclass: selectedSubclass || fullClassSubclassData,
-					subclassChoice: selectedSubclassChoice,
-				}),
+				...getKnownSpellListClasses(selectedSubclass || fullClassSubclassData, selectedSubclassChoice),
 				onSelect: (/** @type {*} */ spells, /** @type {*} */ cantrips) => {
 					selectedKnownSpells = spells;
 					selectedKnownCantrips = cantrips;
@@ -1240,7 +1251,7 @@ class CharacterSheetLevelUp {
 			accordions.knownspells.setComplete(true, knownInitialParts.join(", "));
 		}
 
-		// ========== 8c. PREPARED SPELLS (XPHB Warlock, etc.) ==========
+		// ========== 8c. PREPARED SPELLS ==========
 		if (isPreparedCaster && (preparedSpellsGain > 0 || preparedCantripsGain > 0)) {
 			const totalGain = preparedSpellsGain + preparedCantripsGain;
 			summaryItems.append(createSummaryItem("preparedspells", "✨", "Prepared Spells", {required: false}));
@@ -4513,8 +4524,10 @@ class CharacterSheetLevelUp {
 			const currentSubclass = typeof selectedSubclass === "function" ? selectedSubclass() : selectedSubclass;
 			const currentSubclassChoice = typeof selectedSubclassChoice === "function" ? selectedSubclassChoice() : selectedSubclassChoice;
 
-			const additionalClasses = CharacterSheetClassUtils.getAdditionalSpellListClasses({
+			const additionalClasses = CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
 				className: classEntry.name,
+				classSource: classEntry.source,
+				classLevel: newLevel,
 				subclass: currentSubclass || classEntry.subclass,
 				subclassChoice: currentSubclassChoice,
 			});

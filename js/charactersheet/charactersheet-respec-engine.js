@@ -494,6 +494,32 @@ class CharacterSheetRespecEngine {
 		});
 	}
 
+	_normalizeStagedLegacyBardSpellChoice (decision, selection, container, stored) {
+		if (!decision.meta?.legacyBardPrepared) return;
+		const key = decision.type === "knownSpells" ? "preparedSpells" : "preparedCantrips";
+		const previous = container?.choices?.[key];
+		if (!Array.isArray(previous) || !previous.length) {
+			throw new Error("The original Bard spell choice is no longer available to convert.");
+		}
+		const uid = CharacterSheetProgression.getEntityUid;
+		const previousIds = new Set(previous.map(value => uid(value)));
+		const retainedIds = new Set((Array.isArray(selection) ? selection : [selection])
+			.filter(Boolean).map(value => uid(value)));
+		const spells = decision.type === "knownSpells"
+			? this._candidateState.getSpellsKnown()
+			: this._candidateState.getCantripsKnown();
+		for (const spell of spells) {
+			if (!previousIds.has(uid(spell)) || !retainedIds.has(uid(spell))
+				|| spell.sourceFeature !== "Prepared Spells"
+				|| spell.sourceClass !== "Bard"
+				|| spell.sourceClassSource !== decision.classSource) continue;
+			spell.sourceFeature = decision.type === "knownSpells" ? "Spells Known" : "Cantrips Known";
+			if (decision.type === "knownSpells") spell.prepared = false;
+		}
+		delete container.choices[key];
+		stored.meta = {...stored.meta, legacyBardPrepared: false};
+	}
+
 	/**
 	 * Stage one linked graph edit.  The snapshot is intentionally at the state
 	 * boundary rather than just the ledger boundary: controller callbacks may
@@ -556,6 +582,7 @@ class CharacterSheetRespecEngine {
 			}, currentContainer);
 			Object.assign(currentStored, updated);
 			if (!["origin", "unplaced"].includes(decision.scope)) {
+				this._normalizeStagedLegacyBardSpellChoice(decision, effectiveSelection, currentContainer, currentStored);
 				Object.assign(currentContainer, CharacterSheetProgression.projectDecisionsToChoices(currentContainer));
 			}
 			this._setDirty();
