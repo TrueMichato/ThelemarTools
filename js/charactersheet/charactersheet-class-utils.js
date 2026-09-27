@@ -5128,6 +5128,12 @@ class CharacterSheetClassUtils {
 		);
 	}
 
+	static isTgttBarbarianSpecialtySkillBonus (modifier) {
+		return (modifier?.name === "Unyielding Might" && modifier.type === "skill:might")
+			|| (modifier?.name === "Lead the Pack"
+				&& ["skill:athletics", "skill:acrobatics"].includes(modifier.type));
+	}
+
 	/**
 	 * Apply or replace one structured feature option as a single state transaction.
 	 * Acquisition flows can omit `oldChoice`/`persistHistory`; Respec and future
@@ -5228,6 +5234,10 @@ class CharacterSheetClassUtils {
 				slot: choiceIndex,
 			})
 			|| null;
+		const isBarbarianSpecialty = norm(className) === "barbarian"
+			&& norm(classSource) === "tgtt"
+			&& norm(parentFeature) === "specialties"
+			&& [1, 6].includes(acquisitionLevel);
 
 		try {
 			const matchesScope = item =>
@@ -5267,8 +5277,12 @@ class CharacterSheetClassUtils {
 					if (legacyFeatures.length > 1) throw new Error(`Cannot identify a unique owner for the previous "${oldChoice.choice}" choice.`);
 					oldFeatures.push(...legacyFeatures);
 				}
-				oldFeatures.forEach(item => state.removeFeature(item));
-				if (!oldFeatures.length && oldChoice.choice
+				oldFeatures.forEach(item => state.removeFeature(item, undefined, {
+					preserveUnattributedModifiers: isBarbarianSpecialty,
+				}));
+				if (isBarbarianSpecialty) {
+					state.removeModifiersBySourceDecision?.(semanticKey);
+				} else if (!oldFeatures.length && oldChoice.choice
 					&& !(state._data?.features || []).some(item => matchesOld(item))) {
 					state.removeModifiersByName?.(oldChoice.choice);
 				}

@@ -42,6 +42,7 @@ class CharacterSheetRespecEngine {
 		if (this._candidateState.loadFromJson(this._originalSnapshot) === false) {
 			throw new Error("Could not initialize the Respec draft.");
 		}
+		this._candidateState.captureRespecSpecialtyBonusProvenance();
 		this._candidateState.setClassFeatureCatalog?.(
 			this._page.getClassFeatures?.() || [],
 			this._page.getSubclassFeatures?.() || [],
@@ -83,8 +84,57 @@ class CharacterSheetRespecEngine {
 			state: this._candidateState,
 		});
 		this._addPreexistingPendingWarnings(this._manifest);
+		this._addUnattributedSpecialtyModifierWarnings(this._manifest);
 		if (persist) this._persistManifest();
 		return this._manifest;
+	}
+
+	_addUnattributedSpecialtyModifierWarnings (manifest) {
+		if (!this._originalManifest || !this._originalSnapshot) return;
+		const originalFeatures = this._originalSnapshot.features || [];
+		const knownFeatureIds = new Set(originalFeatures.map(feature => feature.id).filter(Boolean));
+		const knownDecisionKeys = new Set((this._originalManifest.decisions || []).map(decision => decision.semanticKey));
+		const candidateFeatureIds = new Set(this._candidateState.getFeatures().map(feature => feature.id));
+		const candidateModifiers = this._candidateState.getNamedModifiers?.() || [];
+		const selectionName = selection => {
+			const value = Array.isArray(selection) ? selection[0] : selection;
+			return value?.choice || value?.name || (typeof value === "string" ? value : null);
+		};
+		for (const before of this._originalManifest.decisions || []) {
+			if (before.type !== "featureChoice"
+				|| before.className !== "Barbarian"
+				|| before.classSource !== "TGTT"
+				|| ![1, 6].includes(Number(before.classLevel))
+				|| before.sourceKey !== "Specialties") continue;
+			const outgoingName = selectionName(before.selection);
+			if (!["Unyielding Might", "Lead the Pack"].includes(outgoingName)) continue;
+			const after = (manifest.decisions || []).find(decision => decision.semanticKey === before.semanticKey);
+			const originalOwnerStillPresent = originalFeatures.some(feature =>
+				feature.name === outgoingName
+					&& feature.parentFeature === "Specialties"
+					&& feature.className === "Barbarian"
+					&& feature.classSource === "TGTT"
+					&& Number(feature.acquisitionLevel || feature.level) === Number(before.classLevel)
+					&& candidateFeatureIds.has(feature.id));
+			if (!after || (selectionName(after.selection) === outgoingName
+				&& (!this._isDirty || originalOwnerStillPresent))) continue;
+			for (const modifier of this._originalSnapshot.namedModifiers || []) {
+				if (modifier.name !== outgoingName
+					|| !CharacterSheetClassUtils.isTgttBarbarianSpecialtySkillBonus(modifier)
+					|| (modifier.sourceFeatureId && knownFeatureIds.has(modifier.sourceFeatureId))
+					|| (modifier.sourceDecisionKey && knownDecisionKeys.has(modifier.sourceDecisionKey))
+					|| !candidateModifiers.some(candidate => modifier.id
+						? candidate.id === modifier.id
+						: candidate.name === modifier.name && candidate.type === modifier.type
+							&& candidate.value === modifier.value)) continue;
+				manifest.issues.push({
+					severity: "warning",
+					code: "unattributed-specialty-modifier",
+					level: before.characterLevel,
+					message: `An unattributed "${outgoingName}" bonus to ${modifier.type.slice("skill:".length)}${modifier.enabled === false ? " (currently disabled)" : ""} was preserved because its owner cannot be proven. Review this named modifier after applying Respec; ${selectionName(after.selection) === outgoingName ? "remove it manually only if it is an unintended extra bonus." : "remove it manually if it belonged to the old Specialty."}`,
+				});
+			}
+		}
 	}
 
 	_getPendingCompatibilityItems (state = this._candidateState) {
@@ -698,6 +748,18 @@ class CharacterSheetRespecEngine {
 		return changes;
 	}
 
+	_restoreLiveSnapshot (snapshot, rawData) {
+		try {
+			if (this._liveState.loadFromJson(snapshot) === false) {
+				throw new Error("The character could not be restored after the failed Respec transaction.");
+			}
+		} finally {
+			// Loading an older save can create migration fields and new modifier IDs.
+			// Restore the exact data so the draft's unchanged-live guard allows retry.
+			this._liveState._data = rawData;
+		}
+	}
+
 	async apply () {
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
 		const validation = this.getValidation();
@@ -709,15 +771,16 @@ class CharacterSheetRespecEngine {
 		if (JSON.stringify(beforeApply) !== JSON.stringify(this._originalSnapshot)) {
 			throw new Error("The live character changed while this Respec draft was open. Cancel and reopen Respec to preserve those newer changes.");
 		}
+		const beforeApplyData = CharacterSheetProgression._copy(this._liveState._data);
 		const candidate = this._candidateState.toJson();
-		if (this._liveState.loadFromJson(candidate) === false) throw new Error("The rebuilt character could not be loaded.");
-		this._liveState.reconcileFeatureCompanionGrants?.({reason: "respecApply"});
 
 		try {
+			if (this._liveState.loadFromJson(candidate) === false) throw new Error("The rebuilt character could not be loaded.");
+			this._liveState.reconcileFeatureCompanionGrants?.({reason: "respecApply"});
 			await this._page.saveCharacter();
 			this._page.renderCharacter();
 		} catch (error) {
-			this._liveState.loadFromJson(beforeApply);
+			this._restoreLiveSnapshot(beforeApply, beforeApplyData);
 			throw error;
 		}
 
@@ -734,12 +797,13 @@ class CharacterSheetRespecEngine {
 		if (!this._undoSnapshot) return false;
 		const restore = this._undoSnapshot;
 		const current = this._liveState.toJson();
-		if (this._liveState.loadFromJson(restore) === false) throw new Error("The previous character snapshot could not be restored.");
+		const currentData = CharacterSheetProgression._copy(this._liveState._data);
 		try {
+			if (this._liveState.loadFromJson(restore) === false) throw new Error("The previous character snapshot could not be restored.");
 			await this._page.saveCharacter();
 			this._page.renderCharacter();
 		} catch (error) {
-			this._liveState.loadFromJson(current);
+			this._restoreLiveSnapshot(current, currentData);
 			throw error;
 		}
 		this._undoSnapshot = null;

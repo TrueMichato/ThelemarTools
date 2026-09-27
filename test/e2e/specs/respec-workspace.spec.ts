@@ -11,6 +11,7 @@ import {
 	PRESET_FULL_JESTER_DENDULRA,
 	PRESET_TGTT_MERCY_MONK,
 } from "../utils/characterBuilder";
+import {gotoWithThelemar} from "../utils/homebrewLoader";
 
 const BARD_FIXTURE = JSON.parse(fs.readFileSync(
 	path.resolve(process.cwd(), "test/jest/charactersheet/fixtures/respec-juli-minimized.json"),
@@ -273,6 +274,37 @@ test.describe("Respec workspace", () => {
 		await charSheet.closeRespecLevelEditor();
 		await charSheet.cancelRespecDraft();
 		expect(await page.evaluate(() => (globalThis as any).charSheet._state.toJson())).toEqual(before);
+	});
+
+	test("stages a Barbarian named-bonus Specialty without losing an unattributed overlap", async ({page}) => {
+		test.slow();
+		await gotoWithThelemar(page);
+		const charSheet = new CharacterSheetPage(page);
+		await charSheet.btnNew.click();
+		await charSheet.prepareBarbarianSpecialtyRespecFixture();
+		await charSheet.openRespec();
+		const before = await charSheet.getBarbarianSpecialtyRespecSnapshot();
+		expect(before.live).toEqual({might: 5, athletics: 6, acrobatics: 5, choice: "Lead the Pack"});
+		expect(before.draft).toEqual(before.live);
+		expect(before.namedBonusChildren).toBe(0);
+
+		await charSheet.stageRespecFeatureChoice("Specialties", "Path of Drowning Springs", 6);
+		await charSheet.closeRespecLevelEditor();
+		const staged = await charSheet.getBarbarianSpecialtyRespecSnapshot();
+		expect(staged.live).toEqual(before.live);
+		expect(staged.draft).toEqual({might: 5, athletics: 3, acrobatics: 2, choice: "Path of Drowning Springs"});
+		expect(staged.namedBonusChildren).toBe(0);
+		expect(staged.warnings).toEqual(expect.arrayContaining([
+			expect.stringContaining('unattributed "Lead the Pack" bonus to athletics'),
+		]));
+		expect(await charSheet.rollFixedSkillCheck("athletics", true)).toBe(13);
+		expect(await charSheet.rollFixedSkillCheck("athletics")).toBe(16);
+		expect(await charSheet.getRespecReviewText()).toContain("Review this named modifier after applying Respec");
+
+		await charSheet.cancelRespecDraft();
+		const cancelled = await charSheet.getBarbarianSpecialtyRespecSnapshot();
+		expect(cancelled.live).toEqual(before.live);
+		expect(cancelled.draft).toEqual(before.live);
 	});
 
 	test("retires an owned subclass skill feature when legacy history lacks the short name", async ({page}) => {
