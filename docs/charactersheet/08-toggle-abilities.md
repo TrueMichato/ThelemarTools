@@ -524,14 +524,16 @@ are suppressed while the immunity applies, then resume when Rage ends.
 #### Manifest Chains (Path of the Chained Fury Barbarian, TGTT)
 
 `manifestChains` is a **rage-gated sub-state** — the reference example of
-`requiresStates` on a homebrew subclass. The RAW is "when you enter your rage,
-you can choose to manifest spectral chains", so manifesting is a *choice made
-within* rage rather than a second resource:
+`requiresStates` on a homebrew subclass. When starting Rage (Overview,
+Combat quick button, or Play Mode), choose **Rage with chains** or **Rage
+without chains**. Cancel spends nothing. Either committed choice spends one
+Rage use and, in combat, Rage's one Bonus Action; there is no later Manifest
+Chains action. An old save with Rage but no chains remains unmanifested.
 
 ```javascript
 manifestChains: {
     requiresStates: ["rage"],   // cannot activate until raging; cascades off with rage
-    activationAction: "free",
+    activationAction: "free", // internal timing; no separate player action
     resourceCost: 0,
     preferCuratedEffects: true,
     duration: "While raging",
@@ -540,8 +542,8 @@ manifestChains: {
 
 Three consequences fall out of `requiresStates` for free (see `astralBody`):
 `activateState("manifestChains")` returns `null` while not raging,
-`getActivatableFeatures()` omits the row entirely so the toggle is not even
-offered, and `deactivateState("rage")` cascades the chains off.
+`getActivatableFeatures()` never offers a separate Chained Fury activation
+row, and `deactivateState("rage")` cascades the chains off.
 
 The subclass permanently grants one equipped **Spectral Chains** inventory
 weapon. The row carries stable generated-item provenance, so renaming or editing
@@ -549,6 +551,13 @@ it cannot break ownership, and the sheet can migrate legacy characters,
 deduplicate repeated reconciliation, and remove the item if the subclass is
 removed. Materials, upgrades, item bonuses, attack notes, and custom edits stay
 on that row.
+
+The subclass's **base die** is 1d8 (Barbarian 3–5), 1d10 (6–9), 1d12
+(10–13), or 2d6 (14+). The Inventory, Combat, Play Mode, and damage-roll
+readouts show the progression from base through item material/upgrades to
+the attack die. A Paradox Metal chain at level 6 therefore rolls **2d6**,
+not the base 1d10; the material improves the *formula*, not the rolled
+values. A player-authored attack damage override is reported separately.
 
 The generated attack resolves from the live inventory item and is gated by
 `requiresState: "manifestChains"`, so Combat hides it while the chains are not
@@ -1673,9 +1682,12 @@ is a companion-record flag. See [Beastheart](./22-beastheart.md) §2.2.
 
 ## Chained Fury
 
-Rage and Manifest Chains are separate toggles. Spectral Chains persist as one
-editable generated inventory weapon, while its item-backed Combat attack is
-visible only during Manifest Chains. The attack therefore inherits the backing
+Manifest Chains is an optional choice **as Rage begins**, not a separate
+Bonus Action or a toggle offered afterward. Cancel leaves Rage and its use
+unchanged; declining chains keeps their attack hidden until a future Rage.
+Spectral Chains persist as one editable generated inventory weapon, while
+its item-backed Combat attack is visible only during Manifest Chains.
+The attack therefore inherits the backing
 item's materials, upgrades, bonuses, notes, and edits without duplicating the
 inventory row across toggles or reloads.
 

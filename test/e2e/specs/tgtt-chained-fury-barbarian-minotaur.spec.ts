@@ -214,9 +214,8 @@ describeCharacter({
 		// comment "aren't surfaced as state-probeable fields". They are now, and the
 		// features are no longer inert, so each level gets real effect probes.
 		//
-		// Manifest Chains is a RAGE-GATED toggle (`requiresStates: ["rage"]`), so the
-		// toggle probes declare `requiresStates` — without it the harness cannot even
-		// activate the row, because a non-raging barbarian is correctly not offered it.
+		// Manifest Chains is chosen as Rage starts, not offered as a later toggle.
+		// Check the resulting state and attack without expecting a second button.
 		// NOTE ON BANDING: `assertFeaturesMatrix` re-runs every row whose
 		// `level <= currentLevel`, so a row pinning an exact scaled value is
 		// re-checked at L11 and L20 too. Anything read from
@@ -227,12 +226,13 @@ describeCharacter({
 		{
 			level: 3,
 			name: /manifest chains/i,
-			kind: "toggle",
-			toggleDelta: "none",
-			requiresStates: ["rage"],
+			kind: "passive",
 			effects: [
-				// The chains are a real weapon on the Combat tab, and ONLY while manifested.
-				{kind: "toggleAddsAttack", namePattern: /spectral chains/i},
+				{kind: "stateTransaction", steps: [
+					{method: "activateState", args: ["rage"], expect: [{truthy: true}]},
+					{method: "activateState", args: ["manifestChains"], expect: [{truthy: true}]},
+					{method: "getFeatureGrantedAttacks", expect: [{contains: "Spectral Chains"}]},
+				]},
 				// Grapple + shove riders are offered at every level from 3 up.
 				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-grapple"},
 				{kind: "stateCall", method: "getFeatureCalculations", path: "attackOnHitOptions", contains: "chains-shove"},
@@ -244,9 +244,7 @@ describeCharacter({
 			level: 3,
 			untilLevel: 5,
 			name: /manifest chains/i,
-			kind: "toggle",
-			toggleDelta: "none",
-			requiresStates: ["rage"],
+			kind: "passive",
 			effects: [
 				// Scaling comes from the subclass table, not a hardcoded ladder.
 				{kind: "featureCalculation", property: "chainDamageDie", exact: "1d8"},

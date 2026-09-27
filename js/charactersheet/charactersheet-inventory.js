@@ -8695,6 +8695,7 @@ class CharacterSheetInventory {
 		const damageTitle = dmg?.isModified
 			? "Includes material and upgrade effects — printed value differs"
 			: "Weapon damage";
+		const chainedDamage = this._state.getChainedFuryDamageExplanation?.(item.id);
 
 		return e_({outer: `
 			<div class="charsheet__item ${item.equipped ? "equipped" : ""} ${item.starred ? "starred" : ""}" data-item-id="${item.id}">
@@ -8724,6 +8725,7 @@ class CharacterSheetInventory {
 					</div>
 					<div class="charsheet__item-details">
 						${damageStr ? `<span class="ve-small${dmg?.isModified ? " charsheet__item-dmg--derived" : ""}" title="${damageTitle}">Dmg: ${damageStr}</span>` : ""}
+						${chainedDamage?.text ? `<span class="ve-small ve-muted charsheet__chained-fury-damage">${CharacterSheetClassUtils.escapeHtml(chainedDamage.text)}</span>` : ""}
 						${dmg?.attackBonus ? `<span class="ve-small charsheet__item-dmg--derived" title="Attack bonus from material and upgrades">Atk: ${dmg.attackBonus > 0 ? "+" : ""}${dmg.attackBonus}</span>` : ""}
 						${dmg && dmg.critThreshold < 20 ? `<span class="ve-small charsheet__item-dmg--derived" title="Critical hit range, widened by upgrades">Crit: ${dmg.critThreshold}\u201320</span>` : ""}
 						${item.ac ? `<span class="ve-small">AC: ${item.ac}</span>` : ""}

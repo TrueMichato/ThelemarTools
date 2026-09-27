@@ -73267,17 +73267,9 @@ class CharacterSheetState {
 			preferCuratedEffects: true,
 		},
 		/**
-		 * Manifest Chains (Barbarian: Path of the Chained Fury, TGTT L3).
-		 *
-		 * "When you rage, you can CHOOSE to manifest a pair of spectral chains… they
-		 * vanish when your rage ends." Modelled as a free, resource-less sub-state
-		 * gated on `rage`: it only becomes offerable once raging (getActivatableFeatures
-		 * hides features whose `requiresStates` gate is unmet) and cascades off
-		 * automatically when Rage is deactivated (deactivateState's dependent sweep).
-		 *
-		 * The chains' ATTACK is not declared here — it is a `grantedAttacks` descriptor
-		 * carrying `requiresState: "manifestChains"`, so its damage/reach scale off the
-		 * subclass progression table rather than a frozen effect literal.
+		 * Manifest Chains is an optional sub-state chosen when Chained Fury Rage
+		 * starts, not a later action. The separate state gates the item attack and
+		 * cascades off when Rage ends.
 		 */
 		manifestChains: {
 			id: "manifestChains",
@@ -76832,7 +76824,11 @@ class CharacterSheetState {
 				stateTypeId,
 				stateType,
 				matchedBy,
-				activationAction: activationAction || stateType.activationAction,
+				// Manifest Chains' later bonus-action sentence concerns moving grappled
+				// creatures, not manifesting. Its timing is owned by Rage activation.
+				activationAction: stateTypeId === "manifestChains" && name === "manifest chains"
+					? stateType.activationAction
+					: activationAction || stateType.activationAction,
 				effects: (stateType.preferCuratedEffects && stateType.effects?.length) || parsedEffects.length === 0 ? stateType.effects : parsedEffects,
 				duration: toggleAnalysis.duration || stateType.duration,
 				endConditions: toggleAnalysis.endConditions.length > 0 ? toggleAnalysis.endConditions : stateType.endConditions,
@@ -78237,6 +78233,7 @@ class CharacterSheetState {
 		for (const feature of this._data.features) {
 			const activationInfo = CharacterSheetState.detectActivatableFeature(feature);
 			if (!activationInfo) continue;
+			if (activationInfo.stateTypeId === "manifestChains") continue;
 			if (activationInfo.interactionMode === "passive") continue;
 			// Combat actions and reactions are routed to the combat tab, not active states
 			if (activationInfo.interactionMode === "combat" || activationInfo.interactionMode === "reaction") continue;
@@ -83041,6 +83038,31 @@ class CharacterSheetState {
 				(level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15),
 			countsAsMagical: level >= 6,
 		};
+	}
+
+	/**
+	 * Explain the difference between the subclass's die and the item/attack die
+	 * without changing material, upgrade, rider, or custom-override mechanics.
+	 */
+	getChainedFuryDamageExplanation (itemId, {attack = null} = {}) {
+		const cls = this._getChainedFuryClass();
+		const raw = this.getItemRaw(itemId);
+		if (!cls || !raw || raw._generatedItemId !== CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID) return null;
+		const projected = this.getItems().find(it => it.id === itemId);
+		const effective = this.getEffectiveWeaponDamage(itemId);
+		const baseDie = this._getChainedFuryChainStats(cls).damage;
+		const effectiveDie = effective?.dice || projected?.dmg1 || raw.dmg1;
+		const parts = [`Barbarian L${cls.level} base ${baseDie}`];
+		if (raw.dmg1 !== baseDie) parts.push(`custom item ${raw.dmg1}`);
+		if (projected?.dmg1 && projected.dmg1 !== raw.dmg1) {
+			parts.push(`${raw.material?.name || "material"} ${projected.dmg1}`);
+		}
+		if (effectiveDie !== projected?.dmg1) parts.push(`upgrades ${effectiveDie}`);
+		const attackDie = attack?.damage || raw.attackOverrides?.damage;
+		if (attackDie && attackDie !== effectiveDie) parts.push(`attack override ${attackDie}`);
+		const isDerived = parts.length > 1;
+		if (isDerived) parts.push(`attack die ${attackDie || effectiveDie}`);
+		return {baseDie, effectiveDie, attackDie: attackDie || effectiveDie, text: isDerived ? parts.join(" → ") : ""};
 	}
 
 	_isLegacyChainedFuryChainItem (item) {

@@ -24143,6 +24143,12 @@ body:not(.ve-night-mode) .charsheet__socket-modal .badge-secondary { --cs-badge-
 	line-height: 1.3;
 }
 
+.charsheet__chained-fury-damage {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	line-height: 1.35;
+}
+
 /* ========================================================================
    Favourites (Overview) — pinned features, attacks, spells, items, etc.
    ======================================================================== */
