@@ -261,6 +261,7 @@ class CharacterSheetSpellPicker {
 	 * @param {Array} [opts.preSelectedSpells] - Pre-selected leveled spells
 	 * @param {Array} [opts.preSelectedCantrips] - Pre-selected cantrips
 	 * @param {Array} [opts.additionalClassNames] - Additional class names whose spell lists to include (e.g. ["Cleric"] for Divine Soul)
+	 * @param {Array} [opts.additionalLeveledClassNames] - Additional class names for leveled spells only; defaults to additionalClassNames
 	 * @param {string} [opts.subclass] - Subclass short name (used for spell-source filtering, e.g. Divine Soul)
 	 * @param {*} [opts.subclassChoice] - Subclass choice (e.g. Divine Soul affinity) used for affinity-aware spell-list resolution
 	 * @returns {HTMLElement} The section element
@@ -280,6 +281,7 @@ class CharacterSheetSpellPicker {
 			preSelectedSpells = [],
 			preSelectedCantrips = [],
 			additionalClassNames = [],
+			additionalLeveledClassNames = additionalClassNames,
 			subclass,
 			subclassChoice,
 		} = opts;
@@ -348,7 +350,7 @@ class CharacterSheetSpellPicker {
 				className,
 				subclass,
 				subclassChoice,
-				additionalClassNames,
+				additionalClassNames: spell.level === 0 ? additionalClassNames : additionalLeveledClassNames,
 			});
 		}).sort((a, b) => {
 			if (a.level !== b.level) return a.level - b.level;

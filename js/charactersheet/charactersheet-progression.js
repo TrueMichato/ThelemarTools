@@ -2174,9 +2174,11 @@ class CharacterSheetProgression {
 			scholar: ["scholarSkill"],
 			hp: ["hpRoll"],
 		};
-		const representedTypes = new Set((normalized.decisions || []).map(decision => decision.type));
-		for (const type of representedTypes) {
-			for (const key of managedKeysByType[type] || []) delete choices[key];
+		for (const decision of normalized.decisions || []) {
+			for (const key of managedKeysByType[decision.type] || []) {
+				if (decision.meta?.legacyBardPrepared && key === "preparedCantrips") continue;
+				delete choices[key];
+			}
 		}
 		if ((normalized.decisions || []).some(decision => decision.type === "feat" && decision.meta?.improvement?.kind === "feat")) {
 			delete choices.asi;
@@ -2216,8 +2218,14 @@ class CharacterSheetProgression {
 				case "classFeatProgressionFeat": append("classFeatProgressionFeats", [selection]); break;
 				case "weaponMasteries": choices.weaponMasteries = CharacterSheetProgression._copy(selection); break;
 				case "spellbookSpells": append("spellbookSpells", selection); break;
-				case "knownSpells": append("knownSpells", selection); break;
-				case "cantrips": append(/prepared/i.test(decision.sourceKey) ? "preparedCantrips" : "knownCantrips", selection); break;
+				case "knownSpells":
+					if (!decision.meta?.legacyBardPrepared) append("knownSpells", selection);
+					break;
+				case "cantrips":
+					if (!decision.meta?.legacyBardPrepared) {
+						append(/prepared/i.test(decision.sourceKey) ? "preparedCantrips" : "knownCantrips", selection);
+					}
+					break;
 				case "preparedSpells": append("preparedSpells", selection); break;
 				case "preparedCantrips": append("preparedCantrips", selection); break;
 				case "spellSwap": choices.spellSwap = CharacterSheetProgression._copy(selection); break;
@@ -2502,6 +2510,20 @@ class CharacterSheetProgression {
 	static _getClassSpellPools (state, page, history = []) {
 		const pools = new Map();
 		const loadedClasses = page?.getClasses?.() || [];
+		const legacyBardPicks = {
+			knownSpells: new Set(),
+			cantrips: new Set(),
+		};
+		for (const entry of history || []) {
+			for (const type of ["knownSpells", "cantrips"]) {
+				const selections = CharacterSheetProgression._getLegacyBardPreparedSelection({
+					entry, type, state, history,
+				});
+				for (const selection of selections || []) {
+					legacyBardPicks[type].add(CharacterSheetProgression.getEntityUid(selection));
+				}
+			}
+		}
 		const spellcastingClasses = (state?.getClasses?.() || []).filter(stored => {
 			const classData = loadedClasses.find(it =>
 				CharacterSheetProgression._normalize(it.name) === CharacterSheetProgression._normalize(stored.name)
@@ -2526,13 +2548,20 @@ class CharacterSheetProgression {
 			if (!classKey) return;
 			if (!pools.has(classKey)) pools.set(classKey, {knownSpells: [], cantrips: [], preparedSpells: [], preparedCantrips: [], spellbookSpells: []});
 			const pool = pools.get(classKey);
+			const isLegacyBardPick = ownerName === "Bard"
+				&& CharacterSheetClassUtils.is2024Source(spell.sourceClassSource)
+				&& spell.sourceFeature === "Prepared Spells"
+				&& legacyBardPicks[kind === "cantrip" ? "cantrips" : "knownSpells"]
+					.has(CharacterSheetProgression.getEntityUid(spell));
 			if (spell.inSpellbook || spell.sourceFeature === "Wizard Spellbook") pool.spellbookSpells.push(spell);
 			if (kind === "cantrip") {
-				if (/prepared/i.test(spell.sourceFeature || "")) pool.preparedCantrips.push(spell);
+				if (isLegacyBardPick) pool.cantrips.push(spell);
+				else if (/prepared/i.test(spell.sourceFeature || "")) pool.preparedCantrips.push(spell);
 				else pool.cantrips.push(spell);
 				return;
 			}
-			if (/prepared/i.test(spell.sourceFeature || "")) pool.preparedSpells.push(spell);
+			if (isLegacyBardPick) pool.knownSpells.push(spell);
+			else if (/prepared/i.test(spell.sourceFeature || "")) pool.preparedSpells.push(spell);
 			else if (!spell.alwaysPrepared && !spell.grantedByClass) pool.knownSpells.push(spell);
 		};
 		(state?.getSpellsKnown?.() || []).forEach(spell => add(spell, "spell"));
@@ -2574,6 +2603,34 @@ class CharacterSheetProgression {
 		return pools;
 	}
 
+	static _getLegacyBardPreparedSelection ({entry, type, state, history = []}) {
+		if (entry?.class?.name !== "Bard" || !CharacterSheetClassUtils.is2024Source(entry.class.source)) return null;
+		const key = type === "knownSpells" ? "preparedSpells" : "preparedCantrips";
+		const newKey = type === "knownSpells" ? "knownSpells" : "knownCantrips";
+		if (entry.choices?.[newKey]?.length) return null;
+		const selections = entry.choices?.[key];
+		if (!Array.isArray(selections) || !selections.length) return null;
+		const owned = type === "knownSpells" ? state?.getSpellsKnown?.() || [] : state?.getCantripsKnown?.() || [];
+		const isVerified = selection => {
+			if (!selection?.name || !selection?.source) return false;
+			const uid = CharacterSheetProgression.getEntityUid(selection);
+			if (owned.some(spell =>
+				CharacterSheetProgression.getEntityUid(spell) === uid
+				&& spell.sourceClass === "Bard"
+				&& spell.sourceClassSource === entry.class.source
+				&& spell.sourceFeature === "Prepared Spells"
+				&& (type !== "knownSpells" || spell.prepared === true),
+			)) return true;
+			return type === "knownSpells" && history.some(later =>
+				Number(later.level) > Number(entry.level)
+				&& CharacterSheetProgression.getClassUid(later.class) === CharacterSheetProgression.getClassUid(entry.class)
+				&& later.choices?.spellSwap?.removed?.prepared === true
+				&& CharacterSheetProgression.getEntityUid(later.choices.spellSwap.removed) === uid,
+			);
+		};
+		return selections.every(isVerified) ? selections : null;
+	}
+
 	static _takeReconstructedSelection ({pool, key, count, cursor}) {
 		if (!count || !pool?.[key]?.length) return null;
 		const start = cursor[key] || 0;
@@ -2612,19 +2669,37 @@ class CharacterSheetProgression {
 		if (!classHistory.length) return false;
 
 		const acquisitionTypes = new Set(["knownSpells", "cantrips"]);
-		if (classHistory.some(entry =>
-			(entry.decisions || []).some(decision =>
-				acquisitionTypes.has(decision.type) && decision.meta?.legacyCumulative,
-			),
-		)) return true;
-
-		const hasRecordedAcquisition = classHistory.some(entry =>
-			["knownSpells", "knownCantrips", "cantrips", "spellSwap", "spellSwaps"].some(key => {
-				const value = entry.choices?.[key];
-				return Array.isArray(value) ? value.length : value != null;
-			}),
-		);
-		return !hasRecordedAcquisition;
+		const hasChoice = (entry, keys) => keys.some(key => {
+			const value = entry.choices?.[key];
+			return Array.isArray(value) ? value.length : value != null;
+		});
+		const hasLegacyBardChoice = (entry, choiceKey, poolKey) =>
+			className === "Bard" && CharacterSheetClassUtils.is2024Source(classSource)
+				&& (entry.choices?.[choiceKey] || []).some(selection =>
+					spellPool?.[poolKey]?.some(spell =>
+						spell.sourceFeature === "Prepared Spells"
+						&& CharacterSheetProgression.getEntityUid(spell) === CharacterSheetProgression.getEntityUid(selection),
+					),
+				);
+		const hasSpells = entry => hasChoice(entry, ["knownSpells", "spellSwap", "spellSwaps"])
+			|| hasLegacyBardChoice(entry, "preparedSpells", "knownSpells");
+		const hasCantrips = entry => hasChoice(entry, ["knownCantrips", "cantrips"])
+			|| hasLegacyBardChoice(entry, "preparedCantrips", "cantrips");
+		const cumulativeTypes = new Set(classHistory
+			.flatMap(entry => entry.decisions || [])
+			.filter(decision => acquisitionTypes.has(decision.type) && decision.meta?.legacyCumulative)
+			.map(decision => decision.type));
+		if (cumulativeTypes.size) {
+			const recordedWithoutCumulativeMarker = classHistory.filter(entry =>
+				!(entry.decisions || []).some(decision =>
+					acquisitionTypes.has(decision.type) && decision.meta?.legacyCumulative,
+				),
+			);
+			return ![...cumulativeTypes].every(type =>
+				recordedWithoutCumulativeMarker.filter(type === "cantrips" ? hasCantrips : hasSpells).length > 1,
+			);
+		}
+		return !classHistory.some(entry => hasSpells(entry) || hasCantrips(entry));
 	}
 
 	static _getExistingSelection ({
@@ -3405,6 +3480,9 @@ class CharacterSheetProgression {
 				// Cantrips are permanent learned choices even for prepared casters.
 				// Keep them out of the runtime prepared-spell loadout bucket.
 				const key = "cantrips";
+				const legacyBardPrepared = CharacterSheetProgression._getLegacyBardPreparedSelection({
+					entry: historyEntry, type: key, state, history: normalizedHistory,
+				});
 				const fallback = CharacterSheetProgression._takeReconstructedSelection({pool: spellPool, key, count: cantripGain, cursor: spellCursor});
 				addDecision(levelInfo, {
 					type: key,
@@ -3413,10 +3491,12 @@ class CharacterSheetProgression {
 					required: !isLegacyUntrackedSpellProgression,
 					count: cantripGain,
 					options: getLegalSpellOptions(0),
-					fallbackSelection: fallback,
+					fallbackSelection: legacyBardPrepared || fallback,
 					fallbackStatus: "resolved",
+					preferFallback: !!legacyBardPrepared,
 					meta: {
 						maxSpellLevel: 0,
+						...(legacyBardPrepared ? {legacyBardPrepared: true} : {}),
 						...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
 					},
 				});
@@ -3430,6 +3510,9 @@ class CharacterSheetProgression {
 				const count = Math.max(0, Number(current || 0) - Number(previous || 0));
 				if (count > 0) {
 					const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel);
+					const legacyBardPrepared = CharacterSheetProgression._getLegacyBardPreparedSelection({
+						entry: historyEntry, type: "knownSpells", state, history: normalizedHistory,
+					});
 					const fallback = CharacterSheetProgression._takeReconstructedSelection({pool: spellPool, key: "knownSpells", count, cursor: spellCursor});
 					addDecision(levelInfo, {
 						type: "knownSpells",
@@ -3438,10 +3521,12 @@ class CharacterSheetProgression {
 						required: !isLegacyUntrackedSpellProgression,
 						count,
 						options: getLegalSpellOptions(maxSpellLevel, {includeProgressionAdditionalLists: true}),
-						fallbackSelection: fallback,
+						fallbackSelection: legacyBardPrepared || fallback,
 						fallbackStatus: "resolved",
+						preferFallback: !!legacyBardPrepared,
 						meta: {
 							maxSpellLevel,
+							...(legacyBardPrepared ? {legacyBardPrepared: true} : {}),
 							...(progressionAdditionalClassNames.length ? {additionalClassNames: progressionAdditionalClassNames} : {}),
 							...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
 						},

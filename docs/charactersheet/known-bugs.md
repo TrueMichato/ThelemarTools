@@ -221,6 +221,22 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
+### CS-BUG-177 — Builder Bard starting spell choices can block later Respec Apply — OPEN
+
+**Status**: Open; not part of the level-10 Magical Secrets repair.
+**Repro**: Build a TGTT Bard through the ordinary Builder, then use Level Up
+through level 10 and open Respec. The level-10 Magical Secrets pick is resolved,
+but Review reports an invalid level-1 `Spells Known` choice (four required;
+the recorded selection may have only two spells, including a level-2 spell).
+An unrelated Respec Apply is blocked until the starting repertoire is repaired.
+**Suspected cause**: Builder's initial known-spell count or acquisition
+attribution differs from the class's level-1 progression; not yet isolated.
+**Affected test**: `respec-workspace.spec.ts` completes the separate level-10
+Stage/Apply/reload/Undo check by first repairing this level-1 fixture gap via
+the Respec UI. The level-10 spell is selected through the real Level Up wizard,
+not synthesized in history. Fix the starting-spell producer independently;
+remove the test's repair step only once the unmodified Builder path applies.
+
 ### CS-BUG-106 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
 
 **Status**: Open (not fixed here — found during the CS-BUG-016 sweep).

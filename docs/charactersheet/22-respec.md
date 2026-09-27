@@ -502,21 +502,26 @@ level-specific decisions. A legacy known caster whose save contains only the
 final repertoire instead gets a stable cumulative editor at the current class
 level. The editor validates the complete set, applies source-owned set
 differences, and round-trips through Apply, reload, Cancel, and one-step Undo.
-For an XPHB or TGTT Bard from Bard level 10 onward, both recorded level-specific
-known-spell gains and legacy cumulative repertoires admit leveled spells from
-the Cleric, Druid, and Wizard lists granted by Magical Secrets. Level-specific
-spell replacements use the same expanded lists. The manifest and editor both
+For an XPHB or TGTT Bard from Bard level 10 onward, ordinary Level Up records
+its new spells as known-spell acquisitions. Its leveled-spell picker,
+replacements, recorded level-specific Respec gains, and legacy cumulative
+repertoires admit leveled spells from the Cleric, Druid, and Wizard lists
+granted by Magical Secrets. The manifest and editor both
 preserve the class-level eligibility and exact `name|source` spell identity; a
 same-name spell from an ineligible source remains invalid. Level-9 gains and
 cantrips keep their ordinary list rules. PHB Bard's different Magical Secrets
 rule (two spells from any class at levels 10, 14, and 18) is not implemented
 by this 2024 list expansion.
 
-The separate Level Up and Quick Build spell pickers still pass only subclass
-list expansions, so they do not offer spells whose eligibility comes solely
-from Magical Secrets. Level Up also records its 2024 Bard picks as prepared
-spells rather than known-spell acquisitions. This Respec rule does not change
-either acquisition path.
+Older XPHB/TGTT Bard saves produced by Level Up may instead record the pick in
+`choices.preparedSpells` (or `preparedCantrips`) with a Bard-owned spell labeled
+`sourceFeature: "Prepared Spells"`. Respec recognizes a matching level-owned
+pick as a known-spell decision without changing the saved history on open,
+Cancel, or an unrelated Apply. Editing that specific pick converts its history
+and retained spell metadata to known-spell ownership; Undo on the active
+Respec instance restores the original pick. Other prepared casters retain
+their prepared-spell model. Quick Build's separate spell picker remains
+unchanged and may still omit Magical Secrets-only options.
 
 If real level-specific choices are missing, Review groups unresolved spell
 decisions into one repair item. The spell-repair flow prevents assigning the
