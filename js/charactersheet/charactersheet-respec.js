@@ -2180,7 +2180,63 @@ class CharacterSheetRespec {
 					return [skill, skill ? this._state.getSkillProficiency(skill) : 0];
 				}),
 			);
+			const isLevelFeatChoice = !!decision.meta?.levelFeatChoice
+				&& ["nestedSkill", "nestedExpertise"].includes(decision.type);
+			const featParent = isLevelFeatChoice
+				? this._engine?.manifest?.decisions?.find(candidate =>
+					candidate.semanticKey === decision.parentSemanticKey)
+				: null;
+			const levelFeat = isLevelFeatChoice
+				? this._state._data.feats.find(candidate =>
+					candidate.id === decision.meta.featId
+					&& candidate.sourceDecisionKey === featParent?.semanticKey
+					&& CharacterSheetProgression.getEntityUid(candidate) === decision.provenance?.ownerUid)
+				: null;
+			if (isLevelFeatChoice && !levelFeat) {
+				throw new Error("The level-owned feat could not be identified; its skill choice was not changed.");
+			}
+			if (isLevelFeatChoice) {
+				const wasPresentBeforeDraft = (this._engine?._originalSnapshot?.feats || []).some(original =>
+					(original.id && original.id === levelFeat.id)
+					|| (original.name === levelFeat.name && original.source === levelFeat.source),
+				);
+				if (wasPresentBeforeDraft) this._assertLevelFeatSkillReceipt(levelFeat);
+				for (const value of previous) {
+					const skill = normalizeSkill(value);
+					const transition = levelFeat.appliedEffects?.skillProficiencies?.[skill];
+					const threshold = decision.type === "nestedExpertise" ? 2 : 1;
+					if (!transition
+						|| !Number.isFinite(Number(transition.before))
+						|| !Number.isFinite(Number(transition.after))
+						|| Number(transition.before) >= threshold
+						|| Number(transition.after) < threshold) {
+						throw new Error(`Cannot safely change ${levelFeat.name}'s ${decision.meta.featChoiceKey}: the saved feat does not prove which grant it owns. Keep the original choice or repair its legacy ownership first.`);
+					}
+				}
+				for (const value of previous.filter(value =>
+					!nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))) {
+					const skill = normalizeSkill(value);
+					const stillExpert = decision.type === "nestedSkill"
+						&& (levelFeat.choices?.expertise || []).some(selected => normalizeSkill(selected) === skill);
+					if (!stillExpert) {
+						this._state.releaseProgressionOwnership(
+							decision.type === "nestedExpertise" ? "expertise" : "skills",
+							skill,
+							`feat:${levelFeat.id}`,
+						);
+					}
+				}
+			}
 			applySetChoice(nestedSet.type, nestedSet.add, nestedSet.remove);
+			if (isLevelFeatChoice) {
+				for (const value of next) {
+					this._state.claimProgressionOwnership(
+						decision.type === "nestedExpertise" ? "expertise" : "skills",
+						normalizeSkill(value),
+						`feat:${levelFeat.id}`,
+					);
+				}
+			}
 			if (pendingFeatureChoice) {
 				this._state._recordFulfilledFeatureToolChoice?.(pendingFeatureChoice);
 				this._state.removePendingFeatureChoice?.(pendingFeatureChoice.id);
@@ -2207,11 +2263,12 @@ class CharacterSheetRespec {
 					...next.map(value => ({type: "tool", value: valueName(value)})),
 				];
 			}
-			if (decision.meta?.unplacedFeatChoice && ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
+			if ((decision.meta?.unplacedFeatChoice || isLevelFeatChoice)
+				&& ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
 				const parent = this._engine?.manifest?.decisions?.find(candidate =>
-					candidate.semanticKey === decision.rootSemanticKey,
+					candidate.semanticKey === (isLevelFeatChoice ? decision.parentSemanticKey : decision.rootSemanticKey),
 				);
-				const feat = this._state._data.feats.find(candidate =>
+				const feat = levelFeat || this._state._data.feats.find(candidate =>
 					candidate.id === parent?.meta?.featId
 						|| candidate.sourceDecisionKey === parent?.semanticKey,
 				);
@@ -2232,6 +2289,16 @@ class CharacterSheetRespec {
 					for (const value of previous) {
 						const skill = normalizeSkill(value);
 						if (skill && !stillSelected.has(skill)) delete feat.appliedEffects.skillProficiencies[skill];
+					}
+					if (isLevelFeatChoice && decision.type === "nestedExpertise") {
+						for (const value of previous) {
+							const skill = normalizeSkill(value);
+							if (!skill || stillSelected.has(skill)) continue;
+							const ownership = this._state._getProgressionOwnershipEntry?.("skills", skill);
+							if (!ownership?.preserved && !ownership?.sources?.length) {
+								this._state.setSkillProficiency(skill, 0);
+							}
+						}
 					}
 					for (const skill of stillSelected) {
 						const existing = feat.appliedEffects.skillProficiencies[skill];
@@ -4094,7 +4161,12 @@ class CharacterSheetRespec {
 					this._state = state;
 					try {
 						const previous = decision.selection;
-						if (previous?.name) state.removeFeat(previous.name, previous.source);
+						if (previous?.name) {
+							const stored = state.getFeats().find(feat =>
+								feat.name === previous.name && feat.source === previous.source);
+							this._assertLevelFeatSkillReceipt(stored);
+							state.removeFeat(previous.name, previous.source);
+						}
 						const feat = MiscUtil.copyFast(nextFeat);
 						feat.choices = MiscUtil.copyFast(featChoices);
 						feat._featChoices = MiscUtil.copyFast(featChoices);
@@ -4659,6 +4731,34 @@ class CharacterSheetRespec {
 		}
 	}
 
+	_assertLevelFeatSkillReceipt (feat) {
+		if (!feat) return;
+		const canonical = (this._page.getFeats?.() || []).find(candidate =>
+			candidate.name === feat.name && candidate.source === feat.source);
+		const spec = CharacterSheetClassUtils.buildFeatChoicesSpec(canonical || feat, {
+			state: this._state,
+			page: this._page,
+		});
+		if (!spec.skills || !spec.expertise) return;
+		for (const [key, threshold] of [["skills", 1], ["expertise", 2]]) {
+			const selected = feat.choices?.[key];
+			if (!Array.isArray(selected) || selected.length !== spec[key].count) {
+				throw new Error(`Cannot safely replace ${feat.name}: its saved ${key} choice is incomplete. Repair this feat's ownership first.`);
+			}
+			for (const value of selected) {
+				const skill = this._state.normalizeSkillProficiencyKey(value);
+				const transition = feat.appliedEffects?.skillProficiencies?.[skill];
+				if (!transition
+					|| !Number.isFinite(Number(transition.before))
+					|| !Number.isFinite(Number(transition.after))
+					|| Number(transition.before) >= threshold
+					|| Number(transition.after) < threshold) {
+					throw new Error(`Cannot safely replace ${feat.name}: the saved feat does not prove which ${key} grant it owns. Keep it until its legacy ownership is repaired.`);
+				}
+			}
+		}
+	}
+
 	_applyImprovementChangeInner (
 		decision,
 		next,
@@ -4727,6 +4827,7 @@ class CharacterSheetRespec {
 					else this._state._data.features = this._state._data.features.filter(it => it !== feature);
 				});
 			if (previousFeat?.name && ownsPreviousFeat) {
+				this._assertLevelFeatSkillReceipt(storedPreviousFeat);
 				this._state.removeFeat(storedPreviousFeat.id || previousFeat.name, previousFeat.source, {
 					skipAbilityDeltas: skipPreviousFeatAbilityDeltas,
 				});

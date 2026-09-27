@@ -2514,6 +2514,7 @@ class CharacterSheetLevelUp {
 			container.append(listSection);
 		}
 
+		let renderExpertise = () => {};
 		// Skill choices
 		if (choices.skills) {
 			const skillSection = e_({outer: `<div class="mb-2"></div>`});
@@ -2546,6 +2547,7 @@ class CharacterSheetLevelUp {
 								feat._featChoices.skills.push(skill);
 							}
 							renderSkills();
+							renderExpertise();
 						});
 					}
 					skillGrid.append(btn);
@@ -2638,13 +2640,14 @@ class CharacterSheetLevelUp {
 			expertiseSection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose ${choices.expertise.count} skill${choices.expertise.count > 1 ? "s" : ""} for expertise:</label>`);
 			const expertiseGrid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
 
-			// Get proficient skills that don't already have expertise
+			// Keep this feat's current pick while excluding expertise from other sources.
 			const existingProf = Object.keys(this._state.getSkillProficiencies?.() || {});
 			const existingExpertise = new Set((this._state.getExpertise?.() || []).map((/** @type {*} */ e) => e.toLowerCase()));
-			const availableForExpertise = existingProf.filter((/** @type {*} */ s) => !existingExpertise.has(s.toLowerCase()));
+			const availableForExpertise = existingProf.filter((/** @type {*} */ skill) =>
+				!existingExpertise.has(skill.toLowerCase())
+				|| feat._featChoices.expertise.some((/** @type {*} */ selected) => selected.toLowerCase() === skill.toLowerCase()),
+			);
 
-			// Also include skills being added by this feat
-			const newFeatSkills = feat._featChoices.skills || [];
 			// Include fixed skill proficiencies from the feat itself (e.g., Boon of Skill grants all 18 skills)
 			// feat.skillProficiencies is an array of objects like [{athletics: true, acrobatics: true, ...}]
 			const fixedFeatSkills = (feat.skillProficiencies || []).flatMap((/** @type {*} */ sp) =>
@@ -2653,28 +2656,36 @@ class CharacterSheetLevelUp {
 					.map(([s]) => s.toLowerCase()),
 			);
 
-			const renderExpertise = () => {
+			renderExpertise = () => {
 				expertiseGrid.innerHTML = "";
-				[...availableForExpertise, ...newFeatSkills, ...fixedFeatSkills].forEach((/** @type {*} */ skill) => {
-					const isSelected = feat._featChoices.expertise.includes(skill);
-					const displayName = skill.replace(/([A-Z])/g, " $1").trim().toTitleCase();
+				const validSkills = [...new Set([
+					...availableForExpertise,
+					...(feat._featChoices.skills || []),
+					...fixedFeatSkills,
+				])];
+				const available = new Set(validSkills);
+				[...validSkills, ...(feat._featChoices.expertise || []).filter((/** @type {*} */ skill) => !available.has(skill))]
+					.forEach((/** @type {*} */ skill) => {
+						const isSelected = feat._featChoices.expertise.includes(skill);
+						const isInvalid = !available.has(skill);
+						const displayName = skill.replace(/([A-Z])/g, " $1").trim().toTitleCase();
 
-					const btn = e_({outer: `
+						const btn = e_({outer: `
 						<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}">
-							${displayName}
+							${displayName}${isInvalid ? " (no longer proficient)" : ""}
 						</button>
 					`});
 
-					btn.addEventListener("click", () => {
-						if (isSelected) {
-							feat._featChoices.expertise = feat._featChoices.expertise.filter((/** @type {*} */ s) => s !== skill);
-						} else if (feat._featChoices.expertise.length < choices.expertise.count) {
-							feat._featChoices.expertise.push(skill);
-						}
-						renderExpertise();
+						btn.addEventListener("click", () => {
+							if (isSelected) {
+								feat._featChoices.expertise = feat._featChoices.expertise.filter((/** @type {*} */ s) => s !== skill);
+							} else if (feat._featChoices.expertise.length < choices.expertise.count) {
+								feat._featChoices.expertise.push(skill);
+							}
+							renderExpertise();
+						});
+						expertiseGrid.append(btn);
 					});
-					expertiseGrid.append(btn);
-				});
 				expertiseSection.querySelector(".expertise-count").textContent = `${feat._featChoices.expertise.length}/${choices.expertise.count}`;
 			};
 

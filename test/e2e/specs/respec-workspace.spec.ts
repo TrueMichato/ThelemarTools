@@ -54,6 +54,73 @@ test.describe("Respec workspace", () => {
 		await charSheet.expectRespecToolbarFitsViewport();
 	});
 
+	test("replaces a level-owned feat's dependent skill and expertise without leaking the old grant", async ({page}) => {
+		test.slow();
+		const charSheet = new CharacterSheetPage(page);
+		await charSheet.goto();
+		await charSheet.prepareLevelFeatSkillRespecFixture();
+		await charSheet.openRespec();
+		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
+		const baseline = await charSheet.getLevelFeatSkillRespecSnapshot();
+		expect(baseline.live.skills.stealth.level).toBe(0);
+		expect(baseline.live.skills.deception.level).toBe(0);
+
+		await charSheet.stageLevel4SkillExpert("Stealth", "Stealth");
+		const acquired = await charSheet.getLevelFeatSkillRespecSnapshot();
+		expect(acquired.children).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "nestedSkill", selection: ["stealth"], status: "resolved"}),
+			expect.objectContaining({type: "nestedExpertise", selection: ["stealth"], status: "resolved"}),
+		]));
+		expect(acquired.draft.skills.stealth.level).toBe(2);
+		expect(acquired.live).toEqual(baseline.live);
+		await charSheet.stageNestedRespecChoice("Skill Expert Skill Proficiency", "Deception", undefined, "nestedSkill");
+		const invalid = await charSheet.getLevelFeatSkillRespecSnapshot();
+		expect(invalid.children).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "nestedExpertise", selection: ["stealth"], status: "invalid"}),
+		]));
+		expect(invalid.children.find(child => child.type === "nestedExpertise")?.options).toContain("deception");
+		await expect(page.locator("#charsheet-respec-apply")).toBeDisabled();
+		expect(invalid.live).toEqual(baseline.live);
+		await charSheet.closeRespecLevelEditor();
+		await charSheet.cancelRespecDraft();
+		expect((await charSheet.getLevelFeatSkillRespecSnapshot()).live).toEqual(baseline.live);
+
+		await charSheet.stageLevel4SkillExpert("Stealth", "Stealth");
+		await charSheet.stageNestedRespecChoice("Skill Expert Skill Proficiency", "Deception", undefined, "nestedSkill");
+		await charSheet.stageNestedRespecChoice("Skill Expert Expertise", "Deception", undefined, "nestedExpertise");
+		const staged = await charSheet.getLevelFeatSkillRespecSnapshot();
+		expect(staged.children.every(child => child.status === "resolved")).toBe(true);
+		expect(staged.draft.choices).toMatchObject({skills: ["deception"], expertise: ["deception"]});
+		expect(staged.draft.receipt).toMatchObject({deception: {before: 0, after: 2}});
+		expect(staged.draft.receipt).not.toHaveProperty("stealth");
+		expect(staged.draft.skills.stealth.level).toBe(0);
+		expect(staged.draft.skills.deception.level).toBe(2);
+		expect(staged.draft.skills.deception.total - staged.live.skills.deception.total)
+			.toBe(2 * staged.draft.proficiencyBonus);
+		expect(staged.live).toEqual(baseline.live);
+		await charSheet.closeRespecLevelEditor();
+		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
+		await charSheet.applyRespecDraft();
+		const applied = await charSheet.getLevelFeatSkillRespecSnapshot();
+		expect(applied.live.skills).toEqual(staged.draft.skills);
+		expect(await charSheet.rollFixedSkillCheck("deception")).toBe(10 + applied.live.skills.deception.mod);
+		await charSheet.undoAppliedRespec();
+		expect((await charSheet.getLevelFeatSkillRespecSnapshot()).live).toEqual(baseline.live);
+
+		await charSheet.stageLevel4SkillExpert("Stealth", "Stealth");
+		await charSheet.stageNestedRespecChoice("Skill Expert Skill Proficiency", "Deception", undefined, "nestedSkill");
+		await charSheet.stageNestedRespecChoice("Skill Expert Expertise", "Deception", undefined, "nestedExpertise");
+		await charSheet.closeRespecLevelEditor();
+		await charSheet.applyRespecDraft();
+		await charSheet.reloadCharacterSheet();
+		const reloaded = await charSheet.getLevelFeatSkillRespecSnapshot();
+		expect(reloaded.live.skills).toEqual(staged.draft.skills);
+		expect(reloaded.children).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "nestedSkill", selection: ["deception"], status: "resolved"}),
+			expect.objectContaining({type: "nestedExpertise", selection: ["deception"], status: "resolved"}),
+		]));
+	});
+
 	test("repairs a legacy level-19 ASI into an Epic Boon even when no feat was originally chosen", async ({page}) => {
 		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, name: "Legacy Boon Repair"});
 		const before = await charSheet.prepareLegacyEpicBoonRepairFixture();

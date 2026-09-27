@@ -582,6 +582,61 @@ class CharacterSheetProgression {
 		return descriptors;
 	}
 
+	static _getFeatSkillExpertiseOptions ({
+		feat,
+		choiceSpec,
+		page,
+		state,
+		currentSkills,
+		currentExpertise,
+		skillSemanticKey,
+		expertiseSemanticKey,
+		isLevelOwned = false,
+	}) {
+		const byKey = new Map();
+		const normalize = value => CharacterSheetProgression._normalize(value).replace(/['\s]+/g, "");
+		for (const skill of [
+			...(choiceSpec.skills?.from || []),
+			...(page?.getSkillsList?.() || []).map(skill => skill?.name || skill),
+		].filter(Boolean)) {
+			const key = normalize(skill);
+			if (key && !byKey.has(key)) byKey.set(key, skill);
+		}
+		const catalog = [...byKey.values()];
+		const isSelected = (values, value) => values.some(selected => normalize(selected) === normalize(value));
+		const isIndependent = (type, value, sourceDecisionKey) => {
+			const key = normalize(value);
+			const entry = state?._getProgressionOwnershipEntry?.(type, key);
+			const ignored = new Set([sourceDecisionKey, `feat:${feat.id}`].filter(Boolean));
+			if (entry?.preserved || entry?.sources?.some(source => !ignored.has(source))) return true;
+			const grants = state?._data?.grantedProficiencies?.skills?.[key] || [];
+			return !!grants.length && (type !== "expertise" || Number(state?.getSkillProficiency?.(key)) >= 2);
+		};
+		const skillOptions = catalog.filter(skill => {
+			const current = isSelected(currentSkills, skill);
+			if (current && (isLevelOwned || !isIndependent("skills", skill, skillSemanticKey))) return true;
+			return Number(state?.getSkillProficiency?.(normalize(skill))) < 1;
+		});
+		const selectedKeys = new Set(currentSkills.map(normalize));
+		const expertiseOptions = [...byKey.keys()].filter(skill => {
+			const current = isSelected(currentExpertise, skill);
+			const owned = state?._getProgressionOwnershipEntry?.("skills", skill);
+			const independentProficiency = owned?.preserved
+				|| owned?.sources?.some(source => ![skillSemanticKey, `feat:${feat.id}`].includes(source))
+				|| (state?._data?.grantedProficiencies?.skills?.[skill] || []).length;
+			const proficient = selectedKeys.has(skill)
+				|| (isLevelOwned
+					? !!independentProficiency
+					: (state?._data?.progressionOwnership?.initialized
+						? !!(owned?.preserved || owned?.sources?.length)
+						: Number(state?.getSkillProficiency?.(skill)) >= 1));
+			if (!proficient) return false;
+			if (isIndependent("expertise", skill, expertiseSemanticKey) && !(isLevelOwned && current)) return false;
+			return Number(state?.getSkillProficiency?.(skill)) < 2 || current;
+		});
+		return {skillOptions, expertiseOptions};
+	}
+
 	/**
 	 * A recurring class-feature reference (for example the Warlock Specialty
 	 * pool) points at the complete feature definition, including future-level
@@ -911,6 +966,81 @@ class CharacterSheetProgression {
 			optionalFeatures: page?.getOptionalFeatures?.() || [],
 			feats: page?.getFeats?.() || [],
 		});
+		const isLevelFeat = parentDecision?.scope === "level"
+			&& ["feat", "asiOrFeat", "classFeatProgressionFeat", "nestedFeat"].includes(parentDecision.type);
+		const featChoiceSpec = isLevelFeat
+			? CharacterSheetClassUtils.buildFeatChoicesSpec(entity, {page, state})
+			: null;
+		if (featChoiceSpec?.skills && featChoiceSpec.expertise) {
+			const choices = entity.choices || entity._featChoices || {};
+			const currentSkills = Array.isArray(choices.skills) ? choices.skills : [];
+			const currentExpertise = Array.isArray(choices.expertise) ? choices.expertise : [];
+			const childAcquisitionKey = acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
+				ownerType: "feat",
+				ownerUid: CharacterSheetProgression.getEntityUid(entity),
+				classLevel: levelInfo?.classLevel,
+				sourcePath: parentDecision.sourceKey,
+			});
+			const keyFor = (key, slot) => CharacterSheetProgression.getNestedSemanticKey({
+				parentSemanticKey: parentDecision.semanticKey,
+				acquisitionKey: childAcquisitionKey,
+				grantKey: key,
+				occurrence: 0,
+				slot,
+				identityMode: "opportunity",
+			});
+			const skillSemanticKey = keyFor("skills", 1);
+			const expertiseSemanticKey = keyFor("expertise", 2);
+			const {skillOptions, expertiseOptions} = CharacterSheetProgression._getFeatSkillExpertiseOptions({
+				feat: entity,
+				choiceSpec: featChoiceSpec,
+				page,
+				state,
+				currentSkills,
+				currentExpertise,
+				skillSemanticKey,
+				expertiseSemanticKey,
+				isLevelOwned: true,
+			});
+			descriptors = descriptors.filter(descriptor =>
+				!["skill", "expertise"].includes(descriptor.kind)
+					|| !/skillProficiencies|expertise/i.test(descriptor.sourcePath || ""),
+			);
+			descriptors.push(...[
+				{
+					kind: "skill",
+					label: `${entity.name} Skill Proficiency`,
+					count: featChoiceSpec.skills.count,
+					options: skillOptions,
+					grantKey: "skills",
+					sourcePath: "feat.skills",
+					rules: {
+						featChoiceKey: "skills",
+						selectedValues: currentSkills.length ? currentSkills : null,
+						acquisitionKey: childAcquisitionKey,
+						pickSlot: 1,
+						identityMode: "opportunity",
+						optionSource: {kind: "explicitList", values: skillOptions},
+					},
+				},
+				{
+					kind: "expertise",
+					label: `${entity.name} Expertise`,
+					count: featChoiceSpec.expertise.count,
+					options: expertiseOptions,
+					grantKey: "expertise",
+					sourcePath: "feat.expertise",
+					rules: {
+						featChoiceKey: "expertise",
+						selectedValues: currentExpertise.length ? currentExpertise : null,
+						acquisitionKey: childAcquisitionKey,
+						pickSlot: 2,
+						identityMode: "opportunity",
+						optionSource: {kind: "proficientSkillsAtDecision", values: expertiseOptions},
+					},
+				},
+			]);
+		}
 		descriptors = descriptors.map(descriptor =>
 			CharacterSheetProgression._filterDescriptorOptionsForLevel(descriptor, levelInfo?.classLevel),
 		);
@@ -1000,6 +1130,26 @@ class CharacterSheetProgression {
 				options: descriptor.options,
 				type,
 			});
+			const featChoiceKey = descriptor.rules?.featChoiceKey;
+			const featReceiptSkills = entity.appliedEffects?.skillProficiencies || {};
+			const expectedLevel = featChoiceKey === "expertise" ? 2 : 1;
+			const selectedFeatSkills = (Array.isArray(selection) ? selection : [selection]).filter(Boolean);
+			const hasExactFeatEvidence = !!featChoiceKey
+				&& !!selectedFeatSkills.length
+				&& selectedFeatSkills.every(value => {
+					const key = CharacterSheetProgression._normalize(value).replace(/['\s]+/g, "");
+					const transition = featReceiptSkills[key];
+					return Number(transition?.before) < expectedLevel
+						&& Number(transition?.after) >= expectedLevel;
+				});
+			const isAmbiguousFeatChoice = !!featChoiceKey && !!selectedFeatSkills.length && !hasExactFeatEvidence;
+			const childReceipt = exact?.receipt || (hasExactFeatEvidence
+				? CharacterSheetProgression._getDecisionReceipt({
+					semanticKey,
+					type,
+					selection,
+				})
+				: null);
 			const decision = CharacterSheetProgression._makeDecision({
 				...levelInfo,
 				characterLevel: levelInfo?.characterLevel || 0,
@@ -1014,10 +1164,29 @@ class CharacterSheetProgression {
 				count: descriptor.count,
 				options: descriptor.options,
 				selection,
-				status: exact?.status || null,
-				receipt: exact?.receipt || null,
+				status: (!isValid && featChoiceKey) || isAmbiguousFeatChoice ? "invalid" : exact?.status || null,
+				receipt: childReceipt,
 				isValid,
-				meta: {descriptorRules: descriptor.rules},
+				meta: {
+					descriptorRules: descriptor.rules,
+					...(featChoiceKey
+						? {
+							levelFeatChoice: true,
+							featChoiceKey,
+							featId: entity.id,
+							...(isAmbiguousFeatChoice
+								? {validationMessage: `Cannot safely change ${entity.name}'s ${featChoiceKey}: the saved feat does not prove which grant it owns. Keep the original choice or repair its legacy ownership first.`}
+								: {}),
+							...(featChoiceKey === "expertise"
+								? {dependsOnSemanticKeys: [decisions.find(previous =>
+									previous.parentSemanticKey === parentDecision?.semanticKey
+									&& previous.meta?.levelFeatChoice
+									&& previous.meta?.featChoiceKey === "skills",
+								)?.semanticKey].filter(Boolean)}
+								: {}),
+						}
+						: {}),
+				},
 				scope,
 				parentSemanticKey,
 				rootSemanticKey: rootSemanticKey || descriptor.rules?.rootSemanticKey || parentSemanticKey || semanticKey,
@@ -1663,35 +1832,19 @@ class CharacterSheetProgression {
 			});
 			if (!isAbilitySkillExpertise) continue;
 
-			const skillCatalogByKey = new Map();
-			for (const skill of [
-				...(choiceSpec.skills?.from || []),
-				...(page?.getSkillsList?.() || []).map(skill => skill?.name || skill),
-			].filter(Boolean)) {
-				const key = CharacterSheetProgression._normalize(skill).replace(/['\s]+/g, "");
-				if (key && !skillCatalogByKey.has(key)) skillCatalogByKey.set(key, skill);
-			}
-			const skillCatalog = [...skillCatalogByKey.values()];
 			const currentSkills = Array.isArray(featChoices.skills) ? featChoices.skills : [];
 			const currentExpertise = Array.isArray(featChoices.expertise) ? featChoices.expertise : [];
 			const skillSemanticKey = getChildSemanticKey("skills", 1);
 			const expertiseSemanticKey = getChildSemanticKey("expertise", 2);
-			const isIndependent = (type, value, sourceDecisionKey = null) => {
-				const key = CharacterSheetProgression._normalize(value).replace(/['\s]+/g, "");
-				const entry = state?._getProgressionOwnershipEntry?.(type, key);
-				const ignoredSources = new Set([sourceDecisionKey, `feat:${feat.id}`].filter(Boolean));
-				if (entry?.preserved || entry?.sources?.some(source => !ignoredSources.has(source))) return true;
-				const grants = state?._data?.grantedProficiencies?.skills?.[key] || [];
-				return !!grants.length && (type !== "expertise" || Number(state?.getSkillProficiency?.(key)) >= 2);
-			};
-			const isSelected = (values, value) => values.some(selected =>
-				CharacterSheetProgression._normalize(selected) === CharacterSheetProgression._normalize(value),
-			);
-			const skillOptions = skillCatalog.filter(skill => {
-				const key = CharacterSheetProgression._normalize(skill).replace(/['\s]+/g, "");
-				const isCurrent = isSelected(currentSkills, skill);
-				if (isCurrent && !isIndependent("skills", key, skillSemanticKey)) return true;
-				return Number(state?.getSkillProficiency?.(key)) < 1;
+			const {skillOptions} = CharacterSheetProgression._getFeatSkillExpertiseOptions({
+				feat,
+				choiceSpec,
+				page,
+				state,
+				currentSkills,
+				currentExpertise,
+				skillSemanticKey,
+				expertiseSemanticKey,
 			});
 			const skill = appendChild({
 				choiceKey: "skills",
@@ -1703,24 +1856,16 @@ class CharacterSheetProgression {
 				rules: {count: choiceSpec.skills.count},
 				meta: {unplacedFeatSkill: true},
 			});
-			const selectedSkillKeys = new Set((Array.isArray(skill.selection) ? skill.selection : [skill.selection])
-				.filter(Boolean)
-				.map(value => CharacterSheetProgression._normalize(value).replace(/['\s]+/g, "")));
-			const expertiseOptions = skillCatalog
-				.map(skill => CharacterSheetProgression._normalize(skill).replace(/['\s]+/g, ""))
-				.filter((skill, ix, all) => skill && all.indexOf(skill) === ix)
-				.filter(skill => {
-					const isCurrent = isSelected(currentExpertise, skill);
-					const skillOwnership = state?._getProgressionOwnershipEntry?.("skills", skill);
-					const hasOwnedProficiency = skillOwnership?.preserved || skillOwnership?.sources?.length;
-					const hasProficiency = selectedSkillKeys.has(skill)
-						|| (state?._data?.progressionOwnership?.initialized
-							? !!hasOwnedProficiency
-							: Number(state?.getSkillProficiency?.(skill)) >= 1);
-					if (!hasProficiency) return false;
-					if (isIndependent("expertise", skill, expertiseSemanticKey)) return false;
-					return Number(state?.getSkillProficiency?.(skill)) < 2 || isCurrent;
-				});
+			const {expertiseOptions} = CharacterSheetProgression._getFeatSkillExpertiseOptions({
+				feat,
+				choiceSpec,
+				page,
+				state,
+				currentSkills: (Array.isArray(skill.selection) ? skill.selection : [skill.selection]).filter(Boolean),
+				currentExpertise,
+				skillSemanticKey,
+				expertiseSemanticKey,
+			});
 			appendChild({
 				choiceKey: "expertise",
 				type: "nestedExpertise",
@@ -3431,8 +3576,12 @@ class CharacterSheetProgression {
 			}
 			for (const parentDecision of decisions.slice(levelDecisionsStart)) {
 				if (!parentDecision.selection) continue;
-				const values = Array.isArray(parentDecision.selection) ? parentDecision.selection : [parentDecision.selection];
-				if (!["featureChoice", "optionalFeatures", "feat", "classFeatProgressionFeat", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(parentDecision.type)) continue;
+				if (!["featureChoice", "optionalFeatures", "feat", "asiOrFeat", "classFeatProgressionFeat", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(parentDecision.type)) continue;
+				if (parentDecision.type === "asiOrFeat" && parentDecision.selection.mode !== "feat") continue;
+				const selection = parentDecision.type === "asiOrFeat"
+					? parentDecision.selection.feat
+					: parentDecision.selection;
+				const values = Array.isArray(selection) ? selection : [selection];
 				values.forEach((value, valueIx) => {
 					let selectedEntity = CharacterSheetProgression._resolveNestedEntity({option: value, page, parentEntity: classData});
 					if (!selectedEntity) return;
@@ -3440,9 +3589,16 @@ class CharacterSheetProgression {
 					// copy carries acquisition-time subchoice values (notably feat
 					// ability choices). Merge those values before recursively
 					// discovering children so the graph reflects the candidate.
-					const stateEntity = state?.getFeats?.().find(candidate =>
+					const matchingFeats = (state?.getFeats?.() || []).filter(candidate =>
 						CharacterSheetProgression.getEntityUid(candidate) === CharacterSheetProgression.getEntityUid(selectedEntity),
 					);
+					const isFeatParent = ["feat", "asiOrFeat", "classFeatProgressionFeat", "nestedFeat"].includes(parentDecision.type);
+					const stateEntity = isFeatParent
+						? matchingFeats.find(candidate => candidate.sourceDecisionKey === parentDecision.semanticKey)
+							|| (matchingFeats.length === 1 && !matchingFeats[0].sourceDecisionKey
+								? matchingFeats[0]
+								: null)
+						: matchingFeats[0];
 					if (stateEntity) {
 						selectedEntity = {
 							...selectedEntity,

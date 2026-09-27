@@ -381,6 +381,23 @@ The selected ability and other sub-choices are stored on the candidate feat,
 and its exact effect receipt is committed atomically with the resolved
 progression decision.
 
+For a level-owned feat with both a selectable skill proficiency and expertise
+(such as Skill Expert), the feat's recorded `choices.skills` and
+`choices.expertise` become linked children of that level's feat decision.
+This includes a classic ASI-or-feat opportunity when its selected mode is
+`feat` (verified with PHB Fighter at level 4); selecting `asi` does not create
+feat children. Other feat choice families are not implied by this coverage.
+Changing the proficiency updates the expertise options immediately. An
+expertise selection that depended on the old proficiency remains visible but
+invalid, so Apply stays blocked until the player selects a proficient skill.
+The candidate releases only the feat's proven old grant, updates the feat's
+choice and effect receipt, and preserves independent grants; Cancel, Apply,
+Undo, and reload retain the corresponding skill modifiers. If a legacy save
+cannot prove which proficiency or expertise the feat owns, Respec shows a
+specific ownership-repair item and blocks Apply rather than assigning that
+grant to the feat by guesswork. This does not yet generalize the dependency
+rules for other multi-family feat shapes.
+
 Changing a parent choice is a staged graph transaction: the candidate snapshot
 is captured, descendants are reversed/removed deepest-first, the parent
 mechanics are applied, the manifest is rediscovered, and only exact child
