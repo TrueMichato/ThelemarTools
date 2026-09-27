@@ -24,19 +24,27 @@
 
 import "./setup.js";
 import fs from "node:fs";
+import {jest} from "@jest/globals";
 
+globalThis.window ||= {addEventListener () {}};
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
 		addEventListener () {},
 		getElementById () { return null; },
 		querySelector () { return null; },
 		querySelectorAll () { return []; },
+		body: {classList: {add () {}, remove () {}}},
 	};
 }
+globalThis.Renderer.item ||= {};
+globalThis.Renderer.item.addPrereleaseBrewPropertiesAndTypesFrom ||= () => {};
 
 let CharacterSheetState;
 let CharacterSheetClassUtils;
 let CharacterSheetInventory;
+let CharacterSheetPage;
+let CharacterSheetCombat;
+let CharacterSheetPlayMode;
 
 beforeAll(async () => {
 	await import("../../../js/charactersheet/charactersheet-materials.js");
@@ -44,6 +52,9 @@ beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 	CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 	CharacterSheetInventory = (await import("../../../js/charactersheet/charactersheet-inventory.js")).CharacterSheetInventory;
+	CharacterSheetPage = (await import("../../../js/charactersheet/charactersheet.js")).CharacterSheetPage;
+	CharacterSheetCombat = (await import("../../../js/charactersheet/charactersheet-combat.js")).CharacterSheetCombat;
+	CharacterSheetPlayMode = (await import("../../../js/charactersheet/charactersheet-playmode.js")).CharacterSheetPlayMode;
 });
 
 /** The real subclass-feature text, verbatim from `homebrew/TravelersGuidetoThelemar.json`. */
@@ -57,6 +68,9 @@ const FEATURE_LEVELS = [[3, "Manifest Chains"], [6, "Chain Imprisonment"], [10, 
 const sourceData = JSON.parse(fs.readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url)));
 const imprisonment = sourceData.subclassFeature.find(it => it.name === "Chain Imprisonment" && it.source === "TGTT");
 const imprisonmentDescription = imprisonment.entries.map(entry => typeof entry === "string" ? entry : entry.items.join(" ")).join(" ");
+const manifestFeature = sourceData.subclassFeature.find(it => it.name === "Manifest Chains" && it.source === "TGTT");
+const manifestDescription = manifestFeature.entries.map(entry => typeof entry === "string" ? entry : entry.items.join(" ")).join(" ");
+const paradoxMetal = sourceData.itemMaterial.find(it => it.name === "Paradox Metal" && it.source === "TGTT");
 const GENERATED_CHAIN_ID = "tgtt-chained-fury:spectral-chains";
 const STEP_MATERIAL = {
 	name: "Steeline",
@@ -100,6 +114,335 @@ const getChains = (state) => (state.getFeatureGrantedAttacks() || []).find(a => 
 const getChainItems = (state) => state.getItems().filter(item => item._generatedItemId === GENERATED_CHAIN_ID);
 const getChainItem = (state) => getChainItems(state)[0];
 
+const makePage = (state) => {
+	state.addResource({name: "Rage", max: 4, current: 4, recharge: "long"});
+	const page = Object.create(CharacterSheetPage.prototype);
+	page._state = state;
+	page._saveCurrentCharacter = jest.fn();
+	page._renderCharacter = jest.fn();
+	return page;
+};
+
+describe("Chained Fury — player-facing activation and dice", () => {
+	const originalChoice = InputUiUtil.pGetUserEnum;
+	afterEach(() => { InputUiUtil.pGetUserEnum = originalChoice; });
+
+	it("cancels a Rage choice without spending a use or Bonus Action", async () => {
+		const state = mkFury(3);
+		state.startCombat();
+		const page = makePage(state);
+		InputUiUtil.pGetUserEnum = jest.fn().mockResolvedValue(null);
+
+		expect(await page._pActivateChainedFuryRage()).toBe(false);
+		expect(state.isStateTypeActive("rage")).toBe(false);
+		expect(state.isStateTypeActive("manifestChains")).toBe(false);
+		expect(state.isBonusActionAvailable()).toBe(true);
+		expect(state.getResources().find(it => it.name === "Rage").current).toBe(4);
+		expect(page._saveCurrentCharacter).not.toHaveBeenCalled();
+	});
+
+	it("labels manifestation as part of Rage and rejects an invalid choice without spending", async () => {
+		const state = mkFury(3);
+		state.startCombat();
+		const page = makePage(state);
+		InputUiUtil.pGetUserEnum = jest.fn().mockResolvedValue("unexpected");
+
+		expect(await page._pActivateChainedFuryRage()).toBe(false);
+		const prompt = InputUiUtil.pGetUserEnum.mock.calls[0][0];
+		expect(prompt.title).toContain("manifest chains?");
+		expect(prompt.fnDisplay("manifest")).toContain("same Bonus Action");
+		expect(state.isStateTypeActive("rage")).toBe(false);
+		expect(state.isBonusActionAvailable()).toBe(true);
+		expect(state.getResources().find(it => it.name === "Rage").current).toBe(4);
+	});
+
+	it.each([["manifest", true], ["without", false]])(
+		"starts Rage with the %s choice, spending only Rage's Bonus Action",
+		async (choice, manifested) => {
+			const state = mkFury(3);
+			state.startCombat();
+			const page = makePage(state);
+			InputUiUtil.pGetUserEnum = jest.fn().mockResolvedValue(choice);
+			await page._activateFeatureState({name: "Rage", source: "TGTT"}, "rage", CharacterSheetState.ACTIVE_STATE_TYPES.rage, null, 1);
+
+			expect(state.isStateTypeActive("rage")).toBe(true);
+			expect(state.isStateTypeActive("manifestChains")).toBe(manifested);
+			expect(state.isBonusActionAvailable()).toBe(false);
+			expect(state.getResources().find(it => it.name === "Rage").current).toBe(3);
+			expect(!!getChains(state)).toBe(manifested);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+			expect(page._renderCharacter).toHaveBeenCalledTimes(1);
+			expect(state.getActivatableFeatures().some(it => it.stateTypeId === "manifestChains")).toBe(false);
+		},
+	);
+
+	it("refuses an unavailable combat Bonus Action before offering the choice", async () => {
+		const state = mkFury(6);
+		state.startCombat();
+		state.spendBonusAction();
+		const page = makePage(state);
+		InputUiUtil.pGetUserEnum = jest.fn().mockResolvedValue("manifest");
+		expect(await page._pActivateChainedFuryRage()).toBe(false);
+		expect(InputUiUtil.pGetUserEnum).not.toHaveBeenCalled();
+		expect(state.getResources().find(it => it.name === "Rage").current).toBe(4);
+		expect(state.isStateTypeActive("rage")).toBe(false);
+	});
+
+	it("rechecks action economy when another interaction spends the Bonus Action while the choice is open", async () => {
+		const state = mkFury(6);
+		state.startCombat();
+		const page = makePage(state);
+		InputUiUtil.pGetUserEnum = jest.fn(async () => {
+			state.spendBonusAction();
+			return "manifest";
+		});
+		expect(await page._pActivateChainedFuryRage()).toBe(false);
+		expect(state.isStateTypeActive("rage")).toBe(false);
+		expect(state.isStateTypeActive("manifestChains")).toBe(false);
+		expect(state.getResources().find(it => it.name === "Rage").current).toBe(4);
+	});
+
+	it("routes Combat's quick Rage button through the shared choice", async () => {
+		const state = mkFury(3);
+		state.startCombat();
+		const page = makePage(state);
+		InputUiUtil.pGetUserEnum = jest.fn().mockResolvedValue("manifest");
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = page;
+		const originalGetElementById = document.getElementById;
+		const originalCreateElement = document.createElement;
+		const elements = new Map();
+		document.getElementById = id => {
+			if (!elements.has(id)) elements.set(id, e_({}));
+			return elements.get(id);
+		};
+		document.createElement = () => ({firstChild: {attributes: []}});
+		try {
+			combat._initQuickStateButtons();
+			await elements.get("charsheet-combat-rage").onclick();
+			expect(state.isStateTypeActive("manifestChains")).toBe(true);
+			expect(state.getResources().find(it => it.name === "Rage").current).toBe(3);
+			expect(state.isBonusActionAvailable()).toBe(false);
+			expect(page._renderCharacter).toHaveBeenCalledTimes(1);
+		} finally {
+			document.getElementById = originalGetElementById;
+			document.createElement = originalCreateElement;
+		}
+	});
+
+	it("routes Play Mode's ended Rage through the choice without waking old chains", async () => {
+		const state = mkFury(6);
+		state.startCombat();
+		const page = makePage(state);
+		state.activateState("rage");
+		state.deactivateState("rage");
+		const endedRage = state.getActiveStates().find(it => it.stateTypeId === "rage");
+		expect(endedRage?.active).toBe(false);
+		InputUiUtil.pGetUserEnum = jest.fn().mockResolvedValue("without");
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._state = state;
+		playMode._page = page;
+		page._renderActiveStates = jest.fn();
+		expect(await playMode._pToggleActiveState(endedRage)).toBe(true);
+		expect(state.isStateTypeActive("rage")).toBe(true);
+		expect(state.isStateTypeActive("manifestChains")).toBe(false);
+		expect(state.getResources().find(it => it.name === "Rage").current).toBe(3);
+		expect(state.isBonusActionAvailable()).toBe(false);
+	});
+
+	it("does not offer a Chained Fury choice to a different Barbarian", () => {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Barbarian", source: "PHB", level: 3, subclass: {name: "Path of the Berserker", shortName: "Berserker", source: "PHB"}});
+		const page = makePage(state);
+		expect(page._isChainedFuryRageChoiceAvailable()).toBe(false);
+	});
+
+	it("never offers a second Manifest Chains action after Rage, despite the unrelated movement bonus-action prose", () => {
+		const state = mkFury(6);
+		state.addFeature({name: "Manifest Chains", source: "TGTT", description: manifestDescription});
+		const detection = CharacterSheetState.detectActivatableFeature({name: "Manifest Chains", source: "TGTT", description: manifestDescription});
+		expect(detection.stateTypeId).toBe("manifestChains");
+		expect(detection.activationAction).not.toBe("bonus");
+		state.activateState("rage");
+		expect(state.getActivatableFeatures().some(it => it.stateTypeId === "manifestChains")).toBe(false);
+	});
+
+	it.each([[3, "1d8", "1d12"], [6, "1d10", "2d6"], [10, "1d12", "2d8"], [14, "2d6", "2d10"]])(
+		"keeps the L%s subclass die %s distinct from the Paradox Metal attack die %s",
+		(level, baseDie, effectiveDie) => {
+			const state = rageAndManifest(mkFury(level));
+			state.setItemMaterialCatalog([paradoxMetal]);
+			const item = getChainItem(state);
+			state.setItemMaterial(item.id, paradoxMetal);
+			const raw = state.getItemRaw(item.id);
+			const attack = getChains(state);
+			expect(raw.dmg1).toBe(baseDie);
+			expect(raw._generatedItemBase.dmg1).toBe(baseDie);
+			expect(state.getItems().find(it => it.id === item.id).dmg1).toBe(effectiveDie);
+			expect(attack.damage).toBe(effectiveDie);
+			expect(state.getChainedFuryDamageExplanation(item.id, {attack})).toEqual(expect.objectContaining({
+				baseDie,
+				effectiveDie,
+				text: expect.stringContaining(`Paradox Metal`),
+			}));
+		},
+	);
+
+	it.each([
+		[3, "1d8", "1d8", false], [6, "1d10", "1d10", false],
+		[10, "1d12", "1d12", false], [14, "2d6", "2d6", false],
+		[3, "1d8", "1d12", true], [6, "1d10", "2d6", true],
+		[10, "1d12", "2d8", true], [14, "2d6", "2d10", true],
+	])(
+		"rolls L%s base %s as %s with material=%s from the real Combat producer",
+		async (level, baseDie, attackDie, withMaterial) => {
+			const state = rageAndManifest(mkFury(level));
+			const item = getChainItem(state);
+			if (withMaterial) {
+				state.setItemMaterialCatalog([paradoxMetal]);
+				state.setItemMaterial(item.id, paradoxMetal);
+			}
+			const attack = getChains(state);
+			const combat = Object.create(CharacterSheetCombat.prototype);
+			combat._state = state;
+			combat._cachedAttacks = [attack];
+			let result;
+			combat._page = {
+				rollDice: () => 1,
+				pAnimateDamageDice: async () => {},
+				showDiceResult: payload => { result = payload; },
+			};
+			combat._canApplySneakAttack = () => false;
+			combat._promptUseCombatMethod = async () => null;
+			combat._pChooseTargetTypeContext = async () => [];
+			combat._pChooseJuggernautTargetContext = async () => null;
+			combat._pResolveJuggernautHitEffects = async () => "";
+			await combat._rollDamage(attack.id);
+			expect(result.subtitle).toContain(`${attackDie} +`);
+			if (withMaterial) {
+				expect(result.subtitle).toContain(`Barbarian L${level} base ${baseDie}`);
+				expect(result.subtitle).toContain("Paradox Metal");
+			} else {
+				expect(result.subtitle).not.toContain("Paradox Metal");
+				expect(state.getChainedFuryDamageExplanation(item.id).text).toBe("");
+			}
+			expect(result.roll).toBe(Number(attackDie.split("d")[0]));
+		},
+	);
+
+	it("keeps material, the separate acid rider, and player edits through leveling and reload", () => {
+		const state = rageAndManifest(mkFury(3));
+		state.setItemMaterialCatalog([paradoxMetal]);
+		const item = getChainItem(state);
+		state.setItemMaterial(item.id, paradoxMetal);
+		const raw = state.getItemRaw(item.id);
+		state.replaceItem(item.id, {
+			...raw,
+			name: "Paradox-linked Chains",
+			bonusDamageDice: "1d6",
+			bonusDamageType: "acid",
+		});
+		expect(getChains(state).damage).toBe("1d12");
+		const cls = state.getClasses().find(it => it.name === "Barbarian");
+		cls.level = 6;
+		state.applyClassFeatureEffects();
+		expect(getChainItem(state)).toMatchObject({
+			id: item.id,
+			name: "Paradox-linked Chains",
+			dmg1: "2d6",
+			bonusDamageDice: "1d6",
+			bonusDamageType: "acid",
+		});
+		expect(state.getItemRaw(item.id).dmg1).toBe("1d10");
+		expect(getChains(state).damage).toBe("2d6");
+
+		const loaded = new CharacterSheetState();
+		loaded.setItemMaterialCatalog([paradoxMetal]);
+		loaded.loadFromJson(state.toJson());
+		expect(getChainItem(loaded)).toMatchObject({
+			id: item.id,
+			name: "Paradox-linked Chains",
+			dmg1: "2d6",
+			bonusDamageDice: "1d6",
+			bonusDamageType: "acid",
+		});
+		expect(loaded.getChainedFuryDamageExplanation(item.id).text).toContain("L6 base 1d10");
+		loaded.deactivateState("rage");
+		expect(loaded.isStateTypeActive("manifestChains")).toBe(false);
+		expect(getChains(loaded)).toBeUndefined();
+	});
+
+	it("preserves a deliberately edited chain die and attack override across level changes and reload", () => {
+		const state = rageAndManifest(mkFury(3));
+		const item = getChainItem(state);
+		state.replaceItem(item.id, {
+			...state.getItemRaw(item.id),
+			dmg1: "2d4",
+			attackOverrides: {damage: "3d4"},
+		});
+		const cls = state.getClasses().find(it => it.name === "Barbarian");
+		cls.level = 14;
+		state.applyClassFeatureEffects();
+		expect(state.getItemRaw(item.id).dmg1).toBe("2d4");
+		expect(getChains(state).damage).toBe("3d4");
+		expect(state.getChainedFuryDamageExplanation(item.id, {attack: getChains(state)}).text)
+			.toBe("Barbarian L14 base 2d6 → custom item 2d4 → attack override 3d4 → attack die 3d4");
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.getItemRaw(item.id).dmg1).toBe("2d4");
+		expect(getChains(loaded).damage).toBe("3d4");
+	});
+
+	it.each([[3, "1d8", "1d12"], [6, "1d10", "2d6"], [10, "1d12", "2d8"], [14, "2d6", "2d10"]])(
+		"labels the L%s base %s and actual attack %s in Inventory, Combat, and Play Mode",
+		(level, baseDie, attackDie) => {
+			const state = rageAndManifest(mkFury(level));
+			state.setItemMaterialCatalog([paradoxMetal]);
+			const item = getChainItem(state);
+			state.setItemMaterial(item.id, paradoxMetal);
+			const explanation = `Barbarian L${level} base ${baseDie}`;
+			const inventory = new CharacterSheetInventory({
+				getState: () => state,
+				renderCharacter () {},
+				saveCharacter () {},
+			});
+			expect(inventory._renderItemRow(getChainItem(state)).outerHTML).toContain(explanation);
+
+			const combat = Object.create(CharacterSheetCombat.prototype);
+			combat._state = state;
+			combat._page = {};
+			combat._channelCantripsCache = [];
+			const attack = getChains(state);
+			const combatHtml = combat._renderAttackItem(attack, {meleeReach: state.getMeleeReach()}).outerHTML;
+			expect(combatHtml).toContain(explanation);
+			expect(combatHtml).toContain(attackDie);
+
+			const elements = [];
+			const playMode = Object.create(CharacterSheetPlayMode.prototype);
+			playMode._state = state;
+			playMode._page = {};
+			playMode._elActionsHub = e_({});
+			playMode._makeCard = () => e_({});
+			playMode._ce = (tag, className, parent) => {
+				const element = e_({tag, clazz: className});
+				element.className = className;
+				parent?.appendChild(element);
+				elements.push(element);
+				return element;
+			};
+			playMode._getEntityNote = () => "";
+			playMode._setIcon = () => {};
+			playMode._makeClickable = () => {};
+			playMode._isFavorite = () => false;
+			playMode._renderAttacks();
+			const labels = elements.filter(it => it.className === "pm-attack__provenance").map(it => it.textContent);
+			expect(labels.some(label => label.includes(explanation) && label.includes(`attack die ${attackDie}`))).toBe(true);
+		},
+	);
+});
+
 describe("Chained Fury — L3 Manifest Chains", () => {
 	it("creates one equipped inventory weapon with stable generated-item provenance", () => {
 		const state = mkFury(3);
@@ -141,11 +484,11 @@ describe("Chained Fury — L3 Manifest Chains", () => {
 		expect(state.isStateTypeActive("manifestChains")).toBe(false);
 	});
 
-	it("offers the chains toggle once raging", () => {
+	it("does not offer an after-the-fact chains action once raging", () => {
 		const state = mkFury(3);
 		state.activateState("rage");
 		const names = (state.getActivatableFeatures() || []).map(f => f.activationInfo?.stateType?.name);
-		expect(names).toContain("Manifest Chains");
+		expect(names).not.toContain("Manifest Chains");
 	});
 
 	it("puts NO chain weapon in the attack list until manifested", () => {
@@ -576,6 +919,7 @@ describe("Chained Fury — persistence", () => {
 		expect(getChainItems(state)).toHaveLength(0);
 		expect(getChains(state)).toBeUndefined();
 		expect(state.isStateTypeActive("manifestChains")).toBe(false);
+		expect(state.getActivatableFeatures().some(it => it.stateTypeId === "manifestChains")).toBe(false);
 	});
 });
 

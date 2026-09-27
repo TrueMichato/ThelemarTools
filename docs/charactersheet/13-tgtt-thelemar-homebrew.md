@@ -304,11 +304,15 @@ The chains are a **rage-gated sub-state**, not an always-on grant. `manifestChai
 (`ACTIVE_STATE_TYPES`) declares `requiresStates: ["rage"]`, so it cannot be
 activated outside Rage, and `deactivateState("rage")` cascades it off — which is
 exactly the RAW "they vanish when your rage ends". It inherits Rage's
-`breaksConcentration` and `exclusiveWith` without restating either.
+`breaksConcentration` and `exclusiveWith` without restating either. The player
+chooses to manifest (or not) when activating Rage through Overview, Combat,
+or Play Mode; that choice is part of Rage's one Bonus Action and use, not an
+independent activation. Cancel makes no change, and loaded non-manifested
+Rages remain non-manifested.
 
 | Level | Feature | Implementation |
 |---|---|---|
-| 3 | Manifest Chains | `manifestChains` toggle; one equipped generated Spectral Chains inventory weapon with stable feature provenance; an item-backed `grantedAttacks` descriptor (finesse, force, `requiresState: "manifestChains"`) that appears in Combat with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
+| 3 | Manifest Chains | Rage-time optional `manifestChains` state; one equipped generated Spectral Chains inventory weapon with stable feature provenance; an item-backed `grantedAttacks` descriptor (finesse, force, `requiresState: "manifestChains"`) that appears in Combat with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
 | 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + CON` and recurring damage equal to current Barbarian level |
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |

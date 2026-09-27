@@ -4035,6 +4035,7 @@ class CharacterSheetCombat {
 		const damageExpression = isAutoWeapon && attack.sourceItem?.attackOverrides?.damage == null
 			? this._getEffectiveWeaponDamageDie(attack.sourceItem)
 			: attack.damage;
+		const chainedDamage = this._state.getChainedFuryDamageExplanation?.(attack.sourceItem?.id, {attack});
 		const weaponDamageTypes = this._state.getWeaponDamageTypeChoices?.(attack.riteWeaponId || attack.id, attack.damageType) || [attack.damageType];
 		let weaponDamageType = weaponDamageTypes[0];
 		if (weaponDamageTypes.length > 1) {
@@ -4441,6 +4442,7 @@ class CharacterSheetCombat {
 		if (battleMasterDamage) subtitle += ` + ${battleMasterDamage} (${battleMasterName})`;
 		if (brutalStrikeRoll) subtitle += ` + ${brutalStrikeDamage} (Brutal Strike ${isCrit ? `${brutalStrikeRoll.numDice}d10` : pendingBrutalStrike.damageDice} ${weaponDamageType})`;
 		subtitle += ` ${weaponDamageType}`;
+		if (chainedDamage?.text) subtitle += ` | ${CharacterSheetClassUtils.escapeHtml(chainedDamage.text)}`;
 		if (brutalStrikeOutcome) subtitle += ` | ${CharacterSheetClassUtils.escapeHtml(brutalStrikeOutcome.text)}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
@@ -6119,6 +6121,7 @@ class CharacterSheetCombat {
 			: null;
 		const attackNoteStorage = this._resolveAttackNoteStorage(attack);
 		const attackNote = attackNoteStorage?.storage ? this._getAttackNote(attack) : "";
+		const chainedDamage = this._state.getChainedFuryDamageExplanation?.(attack.sourceItem?.id, {attack});
 
 		return e_({outer: `
 			<div class="charsheet__attack-item" data-attack-id="${attack.id}">
@@ -6135,6 +6138,7 @@ class CharacterSheetCombat {
 						${masteryHtml}
 					</span>
 					${upgradeNotesHtml}
+					${chainedDamage?.text ? `<div class="ve-small ve-muted charsheet__chained-fury-damage">${CharacterSheetClassUtils.escapeHtml(chainedDamage.text)}</div>` : ""}
 					${riderHtml}
 				</div>
 				<div class="charsheet__attack-actions">
@@ -14147,11 +14151,14 @@ class CharacterSheetCombat {
 				const targetsLabel = targetNames.length
 					? ` <span class="charsheet__combat-state-targets" title="${`Affected targets: ${targetNames.join(", ")}`.qq()}">🎯 ${targetNames.map(name => name.qq()).join(", ")}</span>`
 					: "";
+				const actionLabel = state.stateTypeId === "manifestChains"
+					? "with Rage"
+					: stateType?.activationAction ? this._getActionTypeShortLabel(stateType.activationAction) : null;
 
 				const stateEl = e_({outer: `
 					<div class="charsheet__combat-state-item badge ${this._getStateBadgeClass(state.stateTypeId)} mr-1 mb-1" data-state-id="${state.id}" title="${tooltip}">
 						${state.icon || stateType?.icon || "⚡"} <span class="charsheet__state-name-link">${stateNameHtml}</span>${temporalLabel}${roundsLabel}${targetsLabel}
-						${stateType?.activationAction ? `<span class="ve-small" style="opacity: 0.7"> (${this._getActionTypeShortLabel(stateType.activationAction)})</span>` : ""}
+						${actionLabel ? `<span class="ve-small" style="opacity: 0.7"> (${actionLabel})</span>` : ""}
 						${triggerHtml}
 						${temporalControls}
 						${isEndable ? `<span class="charsheet__state-remove ml-1" title="End">&times;</span>` : ""}
@@ -14519,7 +14526,11 @@ class CharacterSheetCombat {
 		}
 
 		// Rage button
-		document.getElementById("charsheet-combat-rage").onclick = () => {
+		document.getElementById("charsheet-combat-rage").onclick = async () => {
+			if (!this._state.isStateTypeActive?.("rage") && this._page._isChainedFuryRageChoiceAvailable?.()) {
+				await this._page._pActivateChainedFuryRage();
+				return;
+			}
 			if (this._state.isStateTypeActive?.("rage")) {
 				this._state.deactivateState("rage");
 			} else {

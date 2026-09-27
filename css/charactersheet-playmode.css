@@ -2348,6 +2348,24 @@
 	color: var(--cs-text-muted, #64748b);
 }
 
+.pm-attack--with-provenance {
+	flex-wrap: wrap;
+}
+
+.pm-attack--with-provenance .pm-attack__name {
+	min-width: 8rem;
+}
+
+.pm-attack__provenance {
+	order: 1;
+	flex: 1 0 100%;
+	min-width: 0;
+	padding-left: 1.5rem;
+	overflow-wrap: anywhere;
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-secondary, #94a3b8);
+}
+
 /* Pact slot label */
 .pm-slots__label--pact {
 	color: var(--cs-primary, #6366f1);

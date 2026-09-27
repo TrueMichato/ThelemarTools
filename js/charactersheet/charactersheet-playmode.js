@@ -1928,7 +1928,8 @@ export class CharacterSheetPlayMode {
 	_renderActiveStates () {
 		const allStates = this._state.getActiveStates();
 		// Filter to show toggleable states the character has access to (not concentration — that's in status bar)
-		const toggleable = allStates.filter(s => s.stateTypeId !== "concentration");
+		const toggleable = allStates.filter(s => s.stateTypeId !== "concentration"
+			&& (s.stateTypeId !== "manifestChains" || s.active));
 		const activeItemPowers = this._state.getActiveSpeedItemPowers();
 		if (!toggleable.length && !activeItemPowers.length) return;
 
@@ -1989,7 +1990,10 @@ export class CharacterSheetPlayMode {
 				.find(it => state.stateTypeId === "custom"
 					? it.feature?.id === state.sourceFeatureId
 					: it.stateTypeId === state.stateTypeId);
-			if (activatableFeature && this._page?._activateFeatureState) {
+			if (state.stateTypeId === "rage" && this._page?._isChainedFuryRageChoiceAvailable?.()) {
+				isPageActivation = true;
+				await this._page._pActivateChainedFuryRage(activatableFeature?.feature);
+			} else if (activatableFeature && this._page?._activateFeatureState) {
 				isPageActivation = true;
 				const stateType = activatableFeature.activationInfo?.stateType
 					|| this._state.constructor?.ACTIVE_STATE_TYPES?.[activatableFeature.stateTypeId];
@@ -2156,8 +2160,9 @@ export class CharacterSheetPlayMode {
 			const dmgStr = totalDmgBonus >= 0 ? `${attack.damage}+${totalDmgBonus}` : `${attack.damage}${totalDmgBonus}`;
 			const damageTypes = this._state.getWeaponDamageTypeChoices?.(weaponId, attack.damageType) || [attack.damageType];
 			const critRange = this._state.getCriticalRange?.({attack}) || 20;
+			const chainedDamage = this._state.getChainedFuryDamageExplanation?.(attack.sourceItem?.id, {attack});
 
-			const row = this._ce("div", "pm-attack", card);
+			const row = this._ce("div", `pm-attack${chainedDamage?.text ? " pm-attack--with-provenance" : ""}`, card);
 
 			const icon = this._ce("span", "pm-attack__icon", row);
 			icon.textContent = attack.isMelee ? "weapon-melee" : "weapon-ranged";
@@ -2172,6 +2177,10 @@ export class CharacterSheetPlayMode {
 			bonus.textContent = this._fmtMod(totalBonus);
 			const dmg = this._ce("span", "pm-attack__damage", row);
 			dmg.textContent = dmgStr;
+			if (chainedDamage?.text) {
+				const provenance = this._ce("span", "pm-attack__provenance", row);
+				provenance.textContent = chainedDamage.text;
+			}
 			const type = this._ce("span", "pm-attack__type", row);
 			type.textContent = damageTypes.filter(Boolean).join("/");
 			if (critRange < 20) {

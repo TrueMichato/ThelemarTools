@@ -10911,7 +10911,7 @@ class CharacterSheetPage {
 		}
 
 		// === Section 3: Inactive/Ended States (can be removed) ===
-		const endedStates = nonConditionStates.filter(s => !s.active);
+		const endedStates = nonConditionStates.filter(s => !s.active && s.stateTypeId !== "manifestChains");
 		if (endedStates.length > 0) {
 			const endedSection = e_({outer: `<div class="charsheet__ended-states-section mt-2">
 				<div class="charsheet__section-subtitle ve-flex-v-center mb-1">
@@ -10933,6 +10933,10 @@ class CharacterSheetPage {
 				`});
 
 				row.querySelector(".charsheet__reactivate-btn").addEventListener("click", () => {
+					if (state.stateTypeId === "rage" && this._isChainedFuryRageChoiceAvailable()) {
+						void this._pActivateChainedFuryRage();
+						return;
+					}
 					// (R42/B4) An expired DF narrative boon must NOT be reactivated for free —
 					// route through the 1/day choke point so it's refused when the daily use is
 					// spent (and consumes it + restarts the toggle when a use is available).
@@ -14836,6 +14840,9 @@ class CharacterSheetPage {
 	}
 
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		if (stateTypeId === "rage" && this._isChainedFuryRageChoiceAvailable() && !this._state.isStateTypeActive("rage")) {
+			return this._pActivateChainedFuryRage(feature);
+		}
 		if (stateTypeId === "bladesong") {
 			const issue = this._state.getBladesongEquipmentIssue();
 			if (issue) {
@@ -15231,6 +15238,64 @@ class CharacterSheetPage {
 		if (stateType?.trigger?.onActivate) this._combat?._useActiveStateTrigger?.(stateTypeId, {skipActionCost: true});
 		this._combat?.renderCombatStates?.();
 		this._renderCharacter();
+	}
+
+	_isChainedFuryRageChoiceAvailable () {
+		return (Number(this._state._getChainedFuryClass?.()?.level) || 0) >= 3;
+	}
+
+	async _pActivateChainedFuryRage (feature = null) {
+		if (!this._isChainedFuryRageChoiceAvailable() || this._state.isStateTypeActive("rage")) return false;
+		const findRage = () => this._state.getResources().find(it => /^rages?$/i.test(it.name));
+		const resource = findRage();
+		if (!resource || resource.current < 1) {
+			JqueryUtil.doToast({type: "warning", content: "No Rage uses remaining."});
+			return false;
+		}
+		const inCombat = this._state.isInCombat();
+		if (inCombat && !this._state.isBonusActionAvailable()) {
+			JqueryUtil.doToast({type: "warning", content: "Bonus Action already used this round."});
+			return false;
+		}
+
+		const choice = await InputUiUtil.pGetUserEnum({
+			title: "Enter Rage — manifest chains?",
+			values: ["manifest", "without"],
+			fnDisplay: it => it === "manifest" ? "Rage with chains (same Bonus Action)" : "Rage without chains",
+			isResolveItem: true,
+		});
+		if (choice == null) return false;
+		if (choice !== "manifest" && choice !== "without") {
+			JqueryUtil.doToast({type: "warning", content: "Choose whether to manifest chains before entering Rage."});
+			return false;
+		}
+
+		const liveResource = findRage();
+		if (!this._isChainedFuryRageChoiceAvailable() || this._state.isStateTypeActive("rage")
+			|| !liveResource || liveResource.current < 1) {
+			JqueryUtil.doToast({type: "warning", content: "Rage is no longer available."});
+			return false;
+		}
+		if (inCombat && !this._state.spendBonusAction()) {
+			JqueryUtil.doToast({type: "warning", content: "Bonus Action already used this round."});
+			return false;
+		}
+		const rageId = this._state.activateState("rage", {
+			sourceFeatureId: feature?.id,
+			resourceId: liveResource.id,
+			name: "Rage",
+			description: feature?.description,
+		});
+		if (!rageId || (choice === "manifest" && !this._state.activateState("manifestChains"))) {
+			if (rageId) this._state.deactivateState("rage");
+			if (inCombat) this._state.resetBonusAction();
+			JqueryUtil.doToast({type: "warning", content: "Unable to enter Rage with chains."});
+			return false;
+		}
+		this._state.setResourceCurrent(liveResource.id, liveResource.current - 1);
+		this._saveCurrentCharacter();
+		this._renderCharacter();
+		return true;
 	}
 
 	_tryConsumeActiveStateToggleAction (stateTypeId, stateType, activationInfo = null) {
