@@ -502,9 +502,21 @@ level-specific decisions. A legacy known caster whose save contains only the
 final repertoire instead gets a stable cumulative editor at the current class
 level. The editor validates the complete set, applies source-owned set
 differences, and round-trips through Apply, reload, Cancel, and one-step Undo.
-For a 2024 Bard at level 10 or later, the leveled-spell opportunity also admits
-the Cleric, Druid, and Wizard lists granted by Magical Secrets. Cantrips keep
-their own list rules.
+For an XPHB or TGTT Bard from Bard level 10 onward, both recorded level-specific
+known-spell gains and legacy cumulative repertoires admit leveled spells from
+the Cleric, Druid, and Wizard lists granted by Magical Secrets. Level-specific
+spell replacements use the same expanded lists. The manifest and editor both
+preserve the class-level eligibility and exact `name|source` spell identity; a
+same-name spell from an ineligible source remains invalid. Level-9 gains and
+cantrips keep their ordinary list rules. PHB Bard's different Magical Secrets
+rule (two spells from any class at levels 10, 14, and 18) is not implemented
+by this 2024 list expansion.
+
+The separate Level Up and Quick Build spell pickers still pass only subclass
+list expansions, so they do not offer spells whose eligibility comes solely
+from Magical Secrets. Level Up also records its 2024 Bard picks as prepared
+spells rather than known-spell acquisitions. This Respec rule does not change
+either acquisition path.
 
 If real level-specific choices are missing, Review groups unresolved spell
 decisions into one repair item. The spell-repair flow prevents assigning the

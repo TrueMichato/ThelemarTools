@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import "./setup.js";
 import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
@@ -8,6 +10,7 @@ import "../../../js/charactersheet/charactersheet-modal.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetModal = globalThis.CharacterSheetModal;
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -31,6 +34,16 @@ const BARD_SPELLS = [
 	spell("Bard Secret", 5),
 	spell("Mocking Note", 0),
 ];
+
+const PUBLISHED_BARDS = new Map([
+	["PHB", "data/class/class-bard.json"],
+	["XPHB", "data/class/class-bard.json"],
+	["TGTT", "homebrew/TravelersGuidetoThelemar.json"],
+].map(([source, file]) => [
+	source,
+	JSON.parse(fs.readFileSync(path.resolve(process.cwd(), file), "utf8"))
+		.class.find(cls => cls.name === "Bard" && cls.source === source),
+]));
 
 function getBard ({level = 3, knownProgression = [3, 3, 4], cantripProgression = [1, 1, 1]} = {}) {
 	return {
@@ -144,6 +157,92 @@ function getDescendants (root) {
 	return [root, ...(root?._children || []).flatMap(getDescendants)];
 }
 
+function getRecordedBard ({source = "TGTT", level = 10, acquiredSecret = false, acquiredWrongSource = false} = {}) {
+	const published = PUBLISHED_BARDS.get(source);
+	const subclass = source === "TGTT"
+		? {name: "Jester", shortName: "Jester", source}
+		: {name: "College of Lore", shortName: "Lore", source};
+	const bard = {
+		name: "Bard",
+		source,
+		edition: published.edition,
+		level,
+		hd: {faces: 8},
+		casterProgression: "full",
+		spellcastingAbility: "cha",
+		preparedSpellsProgression: published.preparedSpellsProgression,
+		spellsKnownProgression: published.spellsKnownProgression,
+		cantripProgression: published.cantripProgression,
+		classFeatures: [],
+		subclass,
+	};
+	const normalSpells = Array.from({length: CharacterSheetClassUtils.getKnownSpellsAtLevel(published, "Bard", level)}, (_, ix) => ({
+		name: `Bard Tune ${ix + 1}`,
+		source: "XPHB",
+		level: 1,
+		classes: {fromClassList: [{name: "Bard", source: "XPHB"}]},
+	}));
+	const normalCantrips = Array.from({length: published.cantripProgression[level - 1]}, (_, ix) => ({
+		name: `Bard Cantrip ${ix + 1}`,
+		source: "XPHB",
+		level: 0,
+		classes: {fromClassList: [{name: "Bard", source: "XPHB"}]},
+	}));
+	const borrowed = {
+		name: "Borrowed Secret",
+		source: "XPHB",
+		level: 5,
+		classes: {fromClassList: [{name: "Wizard", source: "XPHB"}]},
+	};
+	const clericSecret = {...borrowed, name: "Cleric Secret", classes: {fromClassList: [{name: "Cleric", source: "XPHB"}]}};
+	const druidSecret = {...borrowed, name: "Druid Secret", classes: {fromClassList: [{name: "Druid", source: "XPHB"}]}};
+	const wrongSource = {
+		...borrowed,
+		source: "PHB",
+		classes: {fromClassList: [{name: "Sorcerer", source: "PHB"}]},
+	};
+	const borrowedCantrip = {...borrowed, name: "Borrowed Cantrip", level: 0};
+	const tooHigh = {...borrowed, name: "Borrowed Too High", level: 6};
+	const spellData = [...normalSpells, ...normalCantrips, borrowed, clericSecret, druidSecret, wrongSource, borrowedCantrip, tooHigh];
+	const state = new CharacterSheetState();
+	state.setSpellData(spellData);
+	state.addClass(copy(bard));
+	state.setSubclass("Bard", copy(subclass));
+	state.setSetting("thelemar_asiFeat", false);
+	state.setAbilityBase("cha", 14);
+	let spellOffset = 0;
+	let cantripOffset = 0;
+	for (let classLevel = 1; classLevel <= level; ++classLevel) {
+		const spellCount = CharacterSheetClassUtils.getKnownSpellsAtLevel(published, "Bard", classLevel)
+			- (classLevel === 1 ? 0 : CharacterSheetClassUtils.getKnownSpellsAtLevel(published, "Bard", classLevel - 1));
+		const cantripCount = published.cantripProgression[classLevel - 1]
+			- (published.cantripProgression[classLevel - 2] || 0);
+		const chosenSpells = normalSpells.slice(spellOffset, spellOffset + spellCount);
+		if (classLevel === 10 && (acquiredSecret || acquiredWrongSource)) {
+			chosenSpells[0] = acquiredWrongSource ? wrongSource : borrowed;
+		}
+		const chosenCantrips = normalCantrips.slice(cantripOffset, cantripOffset + cantripCount);
+		state.recordLevelChoice({
+			level: classLevel,
+			class: {name: "Bard", source},
+			choices: {
+				...(classLevel === 3 ? {subclass: copy(subclass)} : {}),
+				...([4, 8].includes(classLevel) ? {asi: {cha: 2}} : {}),
+				...(spellCount ? {knownSpells: chosenSpells.map(({name, source, level}) => ({name, source, level}))} : {}),
+				...(cantripCount ? {cantrips: chosenCantrips.map(({name, source, level}) => ({name, source, level}))} : {}),
+			},
+		});
+		chosenSpells.forEach(entry => state.addSpell({...entry, sourceClass: "Bard", sourceFeature: "Spells Known"}));
+		chosenCantrips.forEach(entry => state.addCantrip({...entry, sourceClass: "Bard", sourceFeature: "Cantrips Known"}));
+		spellOffset += spellCount;
+		cantripOffset += cantripCount;
+	}
+	const page = getPage(state, bard);
+	page.getSpells = () => copy(spellData);
+	page.getFilteredSpellData = () => copy(spellData);
+	return {state, page, bard, borrowed, clericSecret, druidSecret, wrongSource, borrowedCantrip, tooHigh, spellData};
+}
+
 describe("Character Sheet Respec cumulative Bard spell choices", () => {
 	it("replaces Juli-style false per-level reconstruction with stable cumulative repertoire decisions", () => {
 		const state = getState();
@@ -174,6 +273,165 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 			}),
 		]);
 		expect(manifest.unresolved.filter(it => ["knownSpells", "cantrips"].includes(it.type))).toEqual([]);
+	});
+
+	describe("Character Sheet Respec recorded Bard Magical Secrets", () => {
+		it.each(["TGTT", "XPHB"])("accepts a recorded %s level-10 Wizard spell in the manifest and editor", source => {
+			const {state, page, borrowed, clericSecret, druidSecret, wrongSource, tooHigh} = getRecordedBard({source, acquiredSecret: true});
+			const saved = state.toJson();
+			expect(saved.levelHistory[9].choices.knownSpells).toEqual([
+				expect.objectContaining({name: borrowed.name, source: borrowed.source}),
+			]);
+			const loaded = new CharacterSheetState();
+			loaded.setSpellData(page.getSpells());
+			expect(loaded.loadFromJson(saved)).not.toBe(false);
+
+			const manifest = CharacterSheetProgression.buildManifest({page, state: loaded});
+			const decision = manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10);
+			expect(decision).toMatchObject({
+				sourceKey: "known-spells",
+				count: 1,
+				status: "resolved",
+				meta: {additionalClassNames: ["Cleric", "Druid", "Wizard"]},
+			});
+			for (const option of [borrowed, clericSecret, druidSecret]) {
+				expect(decision.options.map(CharacterSheetRespec._getDecisionOptionKey))
+					.toContain(CharacterSheetRespec._getDecisionOptionKey(option));
+			}
+			expect(decision.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain("borrowed secret|phb");
+			expect(decision.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain("borrowed too high|xphb");
+			const respec = new CharacterSheetRespec({page, state: loaded});
+			respec._engine.begin();
+			respec._state = respec._engine.state;
+			const editorDecision = respec._engine.manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10);
+			for (const option of [borrowed, clericSecret, druidSecret]) {
+				expect(respec._getDecisionOptions(editorDecision).map(CharacterSheetRespec._getDecisionOptionKey))
+					.toContain(CharacterSheetRespec._getDecisionOptionKey(option));
+			}
+			expect(respec._getDecisionOptions(editorDecision).map(CharacterSheetRespec._getDecisionOptionKey))
+				.not.toContain(CharacterSheetRespec._getDecisionOptionKey(wrongSource));
+			expect(respec._getDecisionOptions(editorDecision).map(CharacterSheetRespec._getDecisionOptionKey))
+				.not.toContain(CharacterSheetRespec._getDecisionOptionKey(tooHigh));
+		});
+
+		it("keeps all three expanded lists available on later 2024 Bard levels", () => {
+			const {state, page, borrowed, clericSecret, druidSecret} = getRecordedBard({level: 11});
+			const decision = CharacterSheetProgression.buildManifest({page, state})
+				.decisions.find(it => it.type === "knownSpells" && it.classLevel === 11);
+			expect(decision).toMatchObject({
+				status: "resolved",
+				meta: {additionalClassNames: ["Cleric", "Druid", "Wizard"]},
+			});
+			for (const option of [borrowed, clericSecret, druidSecret]) {
+				expect(decision.options.map(CharacterSheetRespec._getDecisionOptionKey))
+					.toContain(CharacterSheetRespec._getDecisionOptionKey(option));
+			}
+		});
+
+		it("keeps level-9, cantrip, PHB Bard, and non-Bard eligibility distinct", () => {
+			for (const source of ["TGTT", "XPHB", "PHB"]) {
+				const {state, page, borrowed, borrowedCantrip} = getRecordedBard({source});
+				const respec = new CharacterSheetRespec({page, state});
+				respec._engine.begin();
+				respec._state = respec._engine.state;
+				const levelNine = respec._engine.manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 9);
+				expect(levelNine.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
+					CharacterSheetRespec._getDecisionOptionKey(borrowed),
+				);
+				expect(respec._getDecisionOptions(levelNine).map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
+					CharacterSheetRespec._getDecisionOptionKey(borrowed),
+				);
+				if (source === "PHB") continue; // PHB Magical Secrets grants two any-class spells at specific levels.
+				const cantrip = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 10);
+				expect(cantrip.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
+					CharacterSheetRespec._getDecisionOptionKey(borrowedCantrip),
+				);
+				expect(respec._getDecisionOptions(cantrip).map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain(
+					CharacterSheetRespec._getDecisionOptionKey(borrowedCantrip),
+				);
+			}
+			expect(CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
+				className: "Sorcerer", classSource: "XPHB", classLevel: 10,
+			})).not.toContain("Wizard");
+		});
+
+		it("rejects a recorded same-name spell from an ineligible source", () => {
+			const {state, page, wrongSource} = getRecordedBard({acquiredWrongSource: true});
+			const manifest = CharacterSheetProgression.buildManifest({page, state});
+			const decision = manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10);
+			expect(decision.selection).toEqual([{name: wrongSource.name, source: wrongSource.source, level: wrongSource.level}]);
+			expect(decision.options.map(CharacterSheetRespec._getDecisionOptionKey)).toContain("borrowed secret|xphb");
+			expect(decision.options.map(CharacterSheetRespec._getDecisionOptionKey)).not.toContain("borrowed secret|phb");
+			expect(decision.status).toBe("invalid");
+		});
+
+		it("admits Wizard replacements after level 10 without broadening earlier swaps", () => {
+			const {state, page, borrowed} = getRecordedBard();
+			const manifest = CharacterSheetProgression.buildManifest({page, state});
+			for (const classLevel of [9, 10]) {
+				const swap = manifest.decisions.find(it => it.type === "spellSwap" && it.classLevel === classLevel);
+				const hasSecret = swap.options.some(option => CharacterSheetRespec._getDecisionOptionKey(option) === "borrowed secret|xphb");
+				expect(hasSecret).toBe(classLevel === 10);
+				const respec = new CharacterSheetRespec({page, state});
+				respec._engine.begin();
+				respec._state = respec._engine.state;
+				expect(respec._getDecisionOptions(swap).some(option =>
+					CharacterSheetRespec._getDecisionOptionKey(option) === CharacterSheetRespec._getDecisionOptionKey(borrowed),
+				)).toBe(classLevel === 10);
+			}
+		});
+
+		it("stages a source-qualified level-10 spell, applies it, reopens it, and undoes it", async () => {
+			const {state, page, borrowed, spellData} = getRecordedBard();
+			const original = state.toJson();
+			const originalSpells = state.getSpellsKnown().map(CharacterSheetRespec._getDecisionOptionKey).sort();
+			const respec = new CharacterSheetRespec({page, state});
+			respec._engine.begin();
+			respec._state = respec._engine.state;
+			respec.render = jest.fn();
+			const decision = respec._engine.manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10);
+			const modalInner = e_({tag: "div"});
+			const originalPGetShow = CharacterSheetModal.pGetShow;
+			CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
+			try {
+				await respec._editManifestOptions(10, null, {decision}, jest.fn());
+				const row = getDescendants(modalInner).find(it =>
+					it._clazz?.includes("charsheet__respec-option")
+						&& it._children?.[1]?.textContent?.includes("Borrowed Secret (XPHB)"),
+				);
+				expect(row).toBeDefined();
+				expect(row._children[1].textContent).not.toContain("no longer legal");
+				row._children[0].checked = true;
+				row._children[0]._handlers.change();
+				const stage = getDescendants(modalInner).find(it => it.textContent === "Stage Choice");
+				await stage._handlers.click();
+				expect(respec._engine.getDecision(decision.id)).toMatchObject({
+					status: "resolved",
+					selection: [{name: borrowed.name, source: borrowed.source}],
+				});
+				expect(respec._state.getSpellsKnown().map(CharacterSheetRespec._getDecisionOptionKey)).toContain("borrowed secret|xphb");
+				expect(state.toJson()).toEqual(original);
+				expect(respec._engine.getValidation().errors).toEqual([]);
+				expect(await respec._engine.apply()).toBe(true);
+				expect(state.getSpellsKnown().map(CharacterSheetRespec._getDecisionOptionKey)).toContain("borrowed secret|xphb");
+
+				const loaded = new CharacterSheetState();
+				loaded.setSpellData(spellData);
+				expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+				const reopenedPage = getPage(loaded, page.getClasses()[0]);
+				reopenedPage.getSpells = () => copy(spellData);
+				reopenedPage.getFilteredSpellData = () => copy(spellData);
+				const reopened = new CharacterSheetRespec({page: reopenedPage, state: loaded});
+				reopened._engine.begin();
+				expect(reopened._engine.manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10))
+					.toMatchObject({status: "resolved", selection: [{name: borrowed.name, source: borrowed.source}]});
+				expect(await respec._engine.undo()).toBe(true);
+				expect(state.getSpellsKnown().map(CharacterSheetRespec._getDecisionOptionKey).sort()).toEqual(originalSpells);
+				expect(state.getLevelHistoryEntry(10).choices.knownSpells).toEqual(original.levelHistory[9].choices.knownSpells);
+			} finally {
+				CharacterSheetModal.pGetShow = originalPGetShow;
+			}
+		});
 	});
 
 	it("uses the level-10 TGTT Bard Magical Secrets lists for the cumulative leveled-spell opportunity", () => {
