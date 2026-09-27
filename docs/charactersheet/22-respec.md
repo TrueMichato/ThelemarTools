@@ -236,6 +236,21 @@ modifiers, and name-only grants instead of treating the name as ownership.
 The editor offers options from the active progression decision; legacy
 fallbacks require a source-qualified parent in the owning class's catalog.
 
+For `Barbarian|TGTT` Specialties at levels 1 and 6, Unyielding Might grants
+proficiency bonus to **Might** (not Athletics); Lead the Pack grants that bonus
+separately to **Athletics** and **Acrobatics**. These are fixed bonuses of the
+selected parent feature, not selectable skill proficiencies or nested skill
+decisions. Replacing either Specialty retires only modifiers linked to its
+exact feature ID or parent decision key. A same-named bonus without provable
+ownership, including a legacy class-feature bonus with a missing owner, is
+preserved rather than removed by name. The Review dialog warns which skill
+still has that bonus and asks the player to inspect the named modifier after
+Apply; the warning alone does not block Apply. Other incomplete required
+decisions still block Apply. An independent grant or a grant linked to a
+different decision remains in place. Recalculation does not add a second
+identical feature bonus when a legacy save contains only an unlinked copy, but
+it keeps both bonuses when a distinct feature-owned copy was already present.
+
 Fixed-proficiency fallback features ("gain X; if already proficient, choose
 Y") expose their pending/resolved transaction as a normal `nestedTool`
 decision. The descriptor carries the full feature/class/subclass source UID,
@@ -403,6 +418,12 @@ is captured, descendants are reversed/removed deepest-first, the parent
 mechanics are applied, the manifest is rediscovered, and only exact child
 identities which remain legal are retained. Any failure restores both the
 candidate state and the manifest snapshot.
+
+If saving Apply or Undo fails, the live character's exact pre-transaction
+data is restored. Reloading an older save can create migration fields and
+regenerate unrelated modifier IDs, so rollback also restores the original
+data snapshot after rebuilding state internals; the user can retry without a
+false concurrent-change conflict.
 
 All legacy editors use the same engine-level candidate snapshot boundary. Their
 mechanics callback runs inside the staged mutation; no controller mutates the

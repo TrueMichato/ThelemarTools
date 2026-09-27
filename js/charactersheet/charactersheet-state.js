@@ -38494,6 +38494,15 @@ class CharacterSheetState {
 		return calculations[key] ?? null;
 	}
 
+	_isUnattributedTgttBarbarianSpecialtySkillBonus (modifier) {
+		return modifier.sourceType === "classFeature"
+			&& CharacterSheetClassUtils.isTgttBarbarianSpecialtySkillBonus(modifier)
+			&& (!modifier.sourceDecisionKey
+				|| !this._data.features.some(feature => feature.sourceDecisionKey === modifier.sourceDecisionKey))
+			&& (!modifier.sourceFeatureId
+				|| !this._data.features.some(feature => feature.id === modifier.sourceFeatureId));
+	}
+
 	/**
 	 * Apply actual mechanical effects from class features to the character.
 	 * This method reads the standardized _effects array from getFeatureCalculations()
@@ -38502,6 +38511,24 @@ class CharacterSheetState {
 	 */
 	applyClassFeatureEffects () {
 		const shouldReconcileJesterCombatAccess = this._isJesterBard();
+		const specialtyOwners = new Map((this._data.features || [])
+			.filter(feature => feature.className === "Barbarian"
+				&& feature.classSource === "TGTT"
+				&& feature.parentFeature === "Specialties"
+				&& [1, 6].includes(Number(feature.acquisitionLevel || feature.level)))
+			.map(feature => [feature.id, feature]));
+		const sameFixedBonus = (a, b) =>
+			a.name === b.name
+			&& a.type === b.type
+			&& a.value === b.value
+			&& !!a.proficiencyBonus === !!b.proficiencyBonus
+			&& a.enabled === b.enabled
+			&& (a.conditional || null) === (b.conditional || null);
+		const legacyWithoutOwnedCopy = (this._data.namedModifiers || [])
+			.filter(modifier => this._isUnattributedTgttBarbarianSpecialtySkillBonus(modifier))
+			.filter(legacy => !(this._data.namedModifiers || []).some(modifier =>
+				specialtyOwners.get(modifier.sourceFeatureId)?.name === legacy.name
+					&& sameFixedBonus(modifier, legacy)));
 
 		// First, clear all previously applied class feature effects
 		this._clearClassFeatureEffects();
@@ -38548,6 +38575,14 @@ class CharacterSheetState {
 				? new Set([CharacterSheetState.normalizeToolKey(transaction.fixedProficiency)])
 				: null;
 			this._processFeatureModifiers(feature, feature.id, {claimedTools});
+		}
+		if (legacyWithoutOwnedCopy.length) {
+			// The original save had only an unlinked copy of this exact bonus.
+			// Keep its effect without silently materializing a second copy.
+			this._data.namedModifiers = this._data.namedModifiers.filter(modifier =>
+				!specialtyOwners.get(modifier.sourceFeatureId)
+					|| !legacyWithoutOwnedCopy.some(legacy => sameFixedBonus(modifier, legacy)));
+			this._recalculateCustomModifiers();
 		}
 		this._reconcileFixedProficiencyFallbackGrants();
 
@@ -39252,9 +39287,11 @@ class CharacterSheetState {
 			this._data.acFormulas = this._data.acFormulas.filter(f => f.sourceType !== "classFeature");
 		}
 
-		// Remove class feature modifiers (named modifiers with sourceType)
+		// Unknown owners of these named TGTT bonuses cannot be recreated from
+		// an active feature; preserve them for Respec to warn about rather than
+		// silently losing their effect when class features are recalculated.
 		this._data.namedModifiers = this._data.namedModifiers.filter(
-			m => m.sourceType !== "classFeature",
+			m => m.sourceType !== "classFeature" || this._isUnattributedTgttBarbarianSpecialtySkillBonus(m),
 		);
 		this._recalculateCustomModifiers();
 
@@ -63010,7 +63047,7 @@ class CharacterSheetState {
 		this.removePendingProgressionChoicesBySourceDecision(semanticKey);
 	}
 
-	removeFeature (featureIdOrName, source) {
+	removeFeature (featureIdOrName, source, {preserveUnattributedModifiers = false} = {}) {
 		const isExactFeature = featureIdOrName != null && typeof featureIdOrName === "object";
 		const feature = this._data.features.find(f => isExactFeature
 			? f === featureIdOrName
@@ -63077,9 +63114,9 @@ class CharacterSheetState {
 					c => c.sourceFeature !== feature.name,
 				);
 			}
-			// Remove associated modifiers (by ID and by name for orphaned modifiers)
+			// Remove associated modifiers by owner; legacy callers may also clear orphaned name matches.
 			this.removeModifiersByFeature(feature.id);
-			if (!hasAnotherFeatureWithName) this.removeModifiersByName(feature.name);
+			if (!preserveUnattributedModifiers && !hasAnotherFeatureWithName) this.removeModifiersByName(feature.name);
 			for (const state of [...(this._data.activeStates || [])]) {
 				if (hasFeatureId && state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
 			}

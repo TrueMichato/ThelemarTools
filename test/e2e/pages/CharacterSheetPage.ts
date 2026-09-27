@@ -1405,9 +1405,14 @@ export class CharacterSheetPage {
 		});
 	}
 
-	async rollFixedSkillCheck (skill: string): Promise<number> {
-		return this.page.evaluate(async skillName => {
+	async rollFixedSkillCheck (skill: string, draft = false): Promise<number> {
+		return this.page.evaluate(async ({skillName, useDraft}) => {
 			const cs: any = (globalThis as any).charSheet;
+			const liveState = cs._state;
+			if (useDraft) {
+				if (!cs._respec?._engine?.isDraftActive) throw new Error("No Respec draft is active for the skill roll");
+				cs._state = cs._respec._engine.state;
+			}
 			const original = Object.fromEntries([
 				"_rollD20",
 				"pAnimateD20",
@@ -1430,8 +1435,9 @@ export class CharacterSheetPage {
 				return result.total;
 			} finally {
 				for (const [key, value] of Object.entries(original)) cs[key] = value;
+				cs._state = liveState;
 			}
-		}, skill);
+		}, {skillName: skill, useDraft: draft});
 	}
 
 	async prepareLegacyEpicBoonRepairFixture (): Promise<{con: number; abilityTotal: number}> {
@@ -1850,6 +1856,103 @@ export class CharacterSheetPage {
 				proficiencyBonus: cs._state.getProficiencyBonus(),
 			};
 		}, skill);
+	}
+
+	async prepareBarbarianSpecialtyRespecFixture (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs._state;
+			const classFeatures = cs.getClassFeatures();
+			const utils = (globalThis as any).CharacterSheetClassUtils;
+			const progression = (globalThis as any).CharacterSheetProgression;
+			if (!cs.getClasses().some((cls: any) => cls.name === "Barbarian" && cls.source === "TGTT")) {
+				throw new Error("The TGTT Barbarian catalog was not loaded");
+			}
+			state.addClass({name: "Barbarian", source: "TGTT", level: 6});
+			state.setAbilityBase("str", 14);
+			state.setAbilityBase("dex", 14);
+			for (let level = 1; level <= 6; ++level) {
+				const name = ({1: "Unyielding Might", 6: "Lead the Pack"} as Record<number, string>)[level];
+				const choices: any = {};
+				if (name) {
+					const wrapper = classFeatures.find((feature: any) =>
+						feature.name === "Specialties"
+						&& feature.className === "Barbarian"
+						&& feature.classSource === "TGTT"
+						&& feature.level === level);
+					if (!wrapper) throw new Error(`No level-${level} Barbarian Specialties catalog`);
+					const option = utils.findFeatureOptions(wrapper, level, classFeatures)
+						.flatMap((group: any) => group.options)
+						.find((item: any) => item.name === name);
+					if (!option) throw new Error(`No ${name} Specialty option at level ${level}`);
+					const semanticKey = progression.getSemanticKey({
+						className: "Barbarian",
+						classSource: "TGTT",
+						classLevel: level,
+						type: "featureChoice",
+						sourceKey: "Specialties",
+						slot: 0,
+					});
+					const feature = utils.materializeFeatureOption(option, {
+						className: "Barbarian",
+						classSource: "TGTT",
+						acquisitionLevel: level,
+						parentFeature: "Specialties",
+						catalogs: {classFeatures, subclassFeatures: cs.getSubclassFeatures()},
+					});
+					state.addFeature(feature, {sourceDecisionKey: semanticKey});
+					choices.featureChoices = [{
+						featureName: "Specialties",
+						choice: name,
+						source: "TGTT",
+						acquisitionLevel: level,
+						ref: option.ref,
+						type: "classFeature",
+					}];
+				}
+				state.recordLevelChoice({level, class: {name: "Barbarian", source: "TGTT"}, choices});
+			}
+			state.applyClassFeatureEffects();
+			state.addNamedModifier({name: "Lead the Pack", type: "skill:athletics", value: 1});
+			cs._renderCharacter();
+		});
+	}
+
+	async getBarbarianSpecialtyRespecSnapshot (): Promise<{
+		live: {might: number; athletics: number; acrobatics: number; choice: string};
+		draft: {might: number; athletics: number; acrobatics: number; choice: string};
+		warnings: string[];
+		namedBonusChildren: number;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const read = (state: any) => ({
+				might: state.getSkillBreakdown("might").total,
+				athletics: state.getSkillBreakdown("athletics").total,
+				acrobatics: state.getSkillBreakdown("acrobatics").total,
+				choice: state.getLevelHistoryEntry(6).choices.featureChoices[0].choice,
+			});
+			return {
+				live: read(cs._state),
+				draft: read(cs._respec?._engine?.isDraftActive ? cs._respec._engine.state : cs._state),
+				warnings: cs._respec?._engine?.isDraftActive
+					? cs._respec._engine.getValidation().warnings.map((issue: any) => issue.message)
+					: [],
+				namedBonusChildren: (cs._respec?._engine?.manifest?.decisions || [])
+					.filter((decision: any) => decision.type === "nestedSkillBonus"
+						&& ["unyielding might|tgtt", "lead the pack|tgtt"].includes(decision.provenance?.ownerUid))
+					.length,
+			};
+		});
+	}
+
+	async getRespecReviewText (): Promise<string> {
+		await this.page.locator("#charsheet-respec-review").click();
+		const review = this.page.locator(".charsheet__respec-review");
+		await expect(review).toBeVisible();
+		const text = (await review.textContent()) || "";
+		await review.locator("button", {hasText: "Close"}).click();
+		return text;
 	}
 
 	async failNextRespecSubclassChangeAfterMutation (message: string): Promise<void> {
