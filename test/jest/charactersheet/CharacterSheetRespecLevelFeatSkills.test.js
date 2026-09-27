@@ -32,26 +32,39 @@ const FIGHTER = {
 const OLD_FEAT = {name: "Old Feat", source: "TST", category: "G"};
 const SKILLS = ["Athletics", "Deception", "Stealth", "Persuasion"];
 
-function getFixture () {
+function getFixture ({classic = false, asi = false} = {}) {
 	const state = new CharacterSheetState();
+	if (classic) state.setSetting("thelemar_asiFeat", false);
 	state.setAbilityBase("str", 16);
 	state.setAbilityBase("dex", 14);
 	state.setAbilityBase("cha", 10);
-	state.addClass(copy(FIGHTER));
+	const champion = classic ? {...CHAMPION, source: "PHB", classSource: "PHB"} : CHAMPION;
+	const fighter = classic
+		? {
+			...FIGHTER,
+			source: "PHB",
+			subclass: champion,
+			subclasses: [champion],
+			classFeatures: [[], [], [], ["Ability Score Improvement|Fighter|PHB|4"]],
+		}
+		: FIGHTER;
+	state.addClass(copy(fighter));
 	state.addSkillProficiency("athletics");
 	for (let level = 1; level <= 4; level++) {
 		state.recordLevelChoice({
 			level,
-			class: {name: FIGHTER.name, source: FIGHTER.source},
+			class: {name: fighter.name, source: fighter.source},
 			choices: level === 4
-				? {asi: {str: 2}, feat: {name: OLD_FEAT.name, source: OLD_FEAT.source}}
-				: level === 3 ? {subclass: copy(CHAMPION)} : {},
+				? classic
+					? asi ? {asi: {str: 2}} : {feat: {name: OLD_FEAT.name, source: OLD_FEAT.source}}
+					: {asi: {str: 2}, feat: {name: OLD_FEAT.name, source: OLD_FEAT.source}}
+				: level === 3 ? {subclass: copy(champion)} : {},
 		});
 	}
-	state.addFeat(copy(OLD_FEAT));
+	if (!asi) state.addFeat(copy(OLD_FEAT));
 	const page = {
 		getState: () => state,
-		getClasses: () => [copy(FIGHTER)],
+		getClasses: () => [copy(fighter)],
 		getClassFeatures: () => [],
 		getSubclassFeatures: () => [],
 		getOptionalFeatures: () => [],
@@ -102,6 +115,72 @@ async function stageChild (respec, type, selection) {
 }
 
 describe("Respec level-owned feat skill and expertise", () => {
+	it("discovers and edits Skill Expert beneath a classic PHB Fighter's ASI-or-feat choice", async () => {
+		const {respec, state, page} = getFixture({classic: true});
+		const parent = respec._engine.manifest.decisions.find(decision =>
+			decision.characterLevel === 4 && decision.type === "asiOrFeat");
+		expect(parent).toMatchObject({
+			selection: {mode: "feat", feat: {name: OLD_FEAT.name, source: OLD_FEAT.source}},
+		});
+		const choices = {skills: ["stealth"], expertise: ["stealth"], ability: "con"};
+		expect(respec._applyImprovementChange(parent, {
+			mode: "feat",
+			feat: {...copy(SKILL_EXPERT), choices: copy(choices)},
+			featChoices: copy(choices),
+		})).toBe(true);
+		expect(getChild(respec, "nestedSkill")).toMatchObject({
+			parentSemanticKey: parent.semanticKey,
+			selection: ["stealth"],
+			status: "resolved",
+		});
+		expect(getChild(respec, "nestedExpertise")).toMatchObject({
+			parentSemanticKey: parent.semanticKey,
+			selection: ["stealth"],
+			status: "resolved",
+		});
+		expect(state.getSkillProficiency("stealth")).toBe(0);
+		await stageChild(respec, "nestedSkill", ["deception"]);
+		expect(getChild(respec, "nestedExpertise")).toMatchObject({
+			selection: ["stealth"],
+			status: "invalid",
+		});
+		expect(getChild(respec, "nestedExpertise").options).toContain("deception");
+		expect(respec._engine.getValidation().isValid).toBe(false);
+		await stageChild(respec, "nestedExpertise", ["deception"]);
+		const candidate = respec._engine.state;
+		expect(respec._engine.manifest.decisions.find(decision => decision.semanticKey === parent.semanticKey).selection)
+			.toMatchObject({mode: "feat", feat: {name: "Skill Expert", source: "XPHB"}});
+		expect(candidate.getSkillProficiency("deception")).toBe(2);
+		expect(candidate.getSkillProficiency("stealth")).toBe(0);
+		expect(candidate.getSkillBreakdown("deception").total - state.getSkillBreakdown("deception").total).toBe(4);
+		expect(candidate.getFeats().find(feat => feat.name === "Skill Expert").appliedEffects.skillProficiencies)
+			.toEqual({deception: {before: 0, after: 2}});
+		expect(state.getSkillProficiency("deception")).toBe(0);
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		await expect(respec._engine.apply()).resolves.toBe(true);
+		expect(state.getSkillProficiency("deception")).toBe(2);
+		const reloaded = new CharacterSheetState();
+		expect(reloaded.loadFromJson(state.toJson())).not.toBe(false);
+		const reopened = new CharacterSheetRespec({page: {...page, getState: () => reloaded}, state: reloaded});
+		reopened._engine.begin();
+		expect(getChild(reopened, "nestedSkill").selection).toEqual(["deception"]);
+		expect(getChild(reopened, "nestedExpertise").selection).toEqual(["deception"]);
+		await expect(respec._engine.undo()).resolves.toBe(true);
+		expect(state.getSkillProficiency("deception")).toBe(0);
+		expect(state.getFeats().some(feat => feat.name === OLD_FEAT.name)).toBe(true);
+	});
+
+	it("leaves a classic Fighter's ASI choice free of feat children", () => {
+		const {respec} = getFixture({classic: true, asi: true});
+		const parent = respec._engine.manifest.decisions.find(decision =>
+			decision.characterLevel === 4 && decision.type === "asiOrFeat");
+		expect(parent).toMatchObject({selection: {mode: "asi", asi: {str: 2}}});
+		expect(respec._engine.manifest.decisions.filter(decision =>
+			decision.parentSemanticKey === parent.semanticKey && decision.scope === "nested",
+		)).toEqual([]);
+		expect(getChild(respec, "nestedSkill")).toBeUndefined();
+	});
+
 	it("discovers the actual Skill Expert selections after a real improvement transaction", () => {
 		const {respec, state} = getFixture();
 		const liveBefore = state.toJson();

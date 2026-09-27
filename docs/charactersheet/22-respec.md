@@ -384,6 +384,9 @@ progression decision.
 For a level-owned feat with both a selectable skill proficiency and expertise
 (such as Skill Expert), the feat's recorded `choices.skills` and
 `choices.expertise` become linked children of that level's feat decision.
+This includes a classic ASI-or-feat opportunity when its selected mode is
+`feat` (verified with PHB Fighter at level 4); selecting `asi` does not create
+feat children. Other feat choice families are not implied by this coverage.
 Changing the proficiency updates the expertise options immediately. An
 expertise selection that depended on the old proficiency remains visible but
 invalid, so Apply stays blocked until the player selects a proficient skill.

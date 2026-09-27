@@ -3576,8 +3576,12 @@ class CharacterSheetProgression {
 			}
 			for (const parentDecision of decisions.slice(levelDecisionsStart)) {
 				if (!parentDecision.selection) continue;
-				const values = Array.isArray(parentDecision.selection) ? parentDecision.selection : [parentDecision.selection];
-				if (!["featureChoice", "optionalFeatures", "feat", "classFeatProgressionFeat", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(parentDecision.type)) continue;
+				if (!["featureChoice", "optionalFeatures", "feat", "asiOrFeat", "classFeatProgressionFeat", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(parentDecision.type)) continue;
+				if (parentDecision.type === "asiOrFeat" && parentDecision.selection.mode !== "feat") continue;
+				const selection = parentDecision.type === "asiOrFeat"
+					? parentDecision.selection.feat
+					: parentDecision.selection;
+				const values = Array.isArray(selection) ? selection : [selection];
 				values.forEach((value, valueIx) => {
 					let selectedEntity = CharacterSheetProgression._resolveNestedEntity({option: value, page, parentEntity: classData});
 					if (!selectedEntity) return;
