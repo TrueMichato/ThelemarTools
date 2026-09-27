@@ -102,6 +102,7 @@ class CharacterSheetRespecEngine {
 				family,
 				value: normalized,
 				key: `${family}:${JSON.stringify(normalized)}`,
+				id: value?.id,
 				sourceDecisionKey: value?.sourceDecisionKey || value?.parentSemanticKey || null,
 				label: value?.featureName || value?.featureId || value?.slotKey || family,
 			};
@@ -129,6 +130,40 @@ class CharacterSheetRespecEngine {
 		}
 	}
 
+	_getRepresentedSkillChoice (item, manifest) {
+		if (item.family !== "feature" || item.value?.kind !== "skill") return null;
+		const feature = this._candidateState.getFeatures?.().find(candidate => candidate.id === item.value.featureId);
+		if (!feature) return null;
+		const levels = (manifest?.levels || []).filter(level =>
+			level.className === feature.className
+			&& Number(level.classLevel) === Number(feature.level)
+			&& (level.features || []).some(entity =>
+				CharacterSheetProgression._matchesFeatureEntity(feature, entity)),
+		);
+		if (levels.length !== 1) return null;
+		const ownerUid = CharacterSheetProgression.getEntityUid(feature);
+		const normalize = value => String((value?.value ?? value?.name ?? value) || "")
+			.trim().toLowerCase().replace(/['\s]+/g, "");
+		const pendingOptions = (item.value.options || []).map(normalize).sort();
+		const matches = (manifest?.decisions || []).filter(decision => {
+			if (decision.type !== "nestedSkill"
+				|| CharacterSheetProgression._normalize(decision.provenance?.ownerUid) !== CharacterSheetProgression._normalize(ownerUid)
+				|| decision.characterLevel !== levels[0].characterLevel
+				|| decision.className !== feature.className
+				|| Number(decision.classLevel) !== Number(feature.level)
+				|| Number(decision.count) !== Number(item.value.count || 1)) return false;
+			if (item.sourceDecisionKey && ![
+				decision.semanticKey,
+				decision.parentSemanticKey,
+				decision.rootSemanticKey,
+			].includes(item.sourceDecisionKey)) return false;
+			const options = (decision.options || []).map(normalize).sort();
+			return options.length === pendingOptions.length
+				&& options.every((option, ix) => option === pendingOptions[ix]);
+		});
+		return matches.length === 1 ? matches[0] : null;
+	}
+
 	_assertNoNewUnrepresentedPending (beforePending, manifest) {
 		const beforeKeys = new Set(beforePending.map(item => item.key));
 		const represented = new Set((manifest?.decisions || []).flatMap(decision => [
@@ -136,11 +171,26 @@ class CharacterSheetRespecEngine {
 			decision.parentSemanticKey,
 			decision.rootSemanticKey,
 		]).filter(Boolean));
-		const unexpected = this._getPendingCompatibilityItems()
-			.filter(item => !beforeKeys.has(item.key) && !represented.has(item.sourceDecisionKey));
-		if (!unexpected.length) return;
-		const labels = unexpected.map(item => item.label).join(", ");
-		throw new Error(`The staged change created an unrepresented pending choice (${labels}); the mutation was rolled back.`);
+		const newPending = this._getPendingCompatibilityItems()
+			.filter(item => !beforeKeys.has(item.key));
+		const skillChoices = new Map(newPending.map(item => [
+			item.id,
+			this._getRepresentedSkillChoice(item, manifest),
+		]));
+		const unexpected = newPending.filter(item =>
+			item.family === "feature" && item.value?.kind === "skill"
+				? !skillChoices.get(item.id) || (item.sourceDecisionKey && !represented.has(item.sourceDecisionKey))
+				: !represented.has(item.sourceDecisionKey),
+		);
+		if (unexpected.length) {
+			const labels = unexpected.map(item => item.label).join(", ");
+			throw new Error(`The staged change created an unrepresented pending choice (${labels}); the mutation was rolled back.`);
+		}
+		// The manifest owns these new skill decisions; retain the decision, not
+		// a second compatibility prompt which would survive Apply.
+		for (const item of newPending) {
+			if (skillChoices.get(item.id)) this._candidateState.removePendingFeatureChoice(item.id);
+		}
 	}
 
 	_persistManifest () {
@@ -441,15 +491,22 @@ class CharacterSheetRespecEngine {
 			const effectiveStatus = applyResult && Object.prototype.hasOwnProperty.call(applyResult, "status")
 				? applyResult.status
 				: status;
+			// Mechanics may call updateLevelChoice, which replaces the decisions
+			// array; write to its current row rather than a detached snapshot.
+			const {container: currentContainer} = this._getDecisionStore(decision);
+			const currentStored = currentContainer?.decisions?.find(item =>
+				item.id === decisionId || item.semanticKey === decision.semanticKey,
+			);
+			if (!currentStored) throw new Error("The staged progression decision is no longer available in the draft ledger.");
 			const updated = CharacterSheetProgression.normalizeDecision({
-				...stored,
+				...currentStored,
 				selection: CharacterSheetProgression._copy(effectiveSelection),
 				status: effectiveStatus,
 				receipt: this._makeDecisionReceipt(decision, effectiveSelection, this._candidateState),
-			}, container);
-			Object.assign(stored, updated);
+			}, currentContainer);
+			Object.assign(currentStored, updated);
 			if (!["origin", "unplaced"].includes(decision.scope)) {
-				Object.assign(container, CharacterSheetProgression.projectDecisionsToChoices(container));
+				Object.assign(currentContainer, CharacterSheetProgression.projectDecisionsToChoices(currentContainer));
 			}
 			this._setDirty();
 			const refreshed = this.refreshManifest({persist: false});
@@ -558,6 +615,8 @@ class CharacterSheetRespecEngine {
 		const stateSnapshot = this._candidateState.toJson();
 		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
+		const isDirtySnapshot = this._isDirty;
+		const undoSnapshot = this._undoSnapshot;
 		try {
 			const result = await apply({state: this._candidateState});
 			this._setDirty();
@@ -568,6 +627,8 @@ class CharacterSheetRespecEngine {
 		} catch (error) {
 			this._candidateState.loadFromJson(stateSnapshot);
 			this._manifest = manifestSnapshot;
+			this._isDirty = isDirtySnapshot;
+			this._undoSnapshot = undoSnapshot;
 			throw error;
 		}
 	}

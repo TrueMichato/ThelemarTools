@@ -4430,7 +4430,12 @@ class CharacterSheetClassUtils {
 			const explicitChoiceClause = skillGrantText.match(
 				/\b(?:can\s+)?(?:choose|select|pick)\b[\s\S]*?\b(?:between|from(?:\s+among)?|one\s+of)\b([\s\S]*)/i,
 			);
-			const skills = getTaggedValues(explicitChoiceClause?.[1] || skillGrantText || text, "skill");
+			const taggedSkills = getTaggedValues(explicitChoiceClause?.[1] || skillGrantText || text, "skill");
+			const skills = taggedSkills.length
+				? taggedSkills
+				: /\bproficiency\s+(?:in|with)\s+one\s+of\s+the\s+following\s+skills\s+of\s+your\s+choice\s*:/i.test(skillGrantText)
+					? CharacterSheetClassUtils.extractSkillListFromText(skillGrantText)
+					: [];
 			if (
 				skills.length
 				&& /proficien(?:cy|cies)|choose to gain proficiency/.test(skillGrantText.toLowerCase())

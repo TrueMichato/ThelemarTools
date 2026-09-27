@@ -460,6 +460,18 @@ export class BuilderWizardPage {
 		if (remaining > 0) await this.selectFirstAvailableSkills(remaining);
 	}
 
+	async selectClassToolProficiency (category: "artisan" | "instrument"): Promise<void> {
+		const section = this.page.locator(".charsheet__builder-tool-choice").first();
+		await expect(section).toBeVisible();
+		const selects = section.locator("select");
+		await selects.first().selectOption(category);
+		const tool = selects.nth(1);
+		await expect(tool).toBeVisible();
+		expect(await tool.locator("option").count()).toBeGreaterThan(1);
+		await tool.selectOption({index: 1});
+		expect(await tool.inputValue()).not.toBe("");
+	}
+
 	/**
 	 * Fill every optional-feature group on the current step up to the count it
 	 * declares ("Choose N" / "Selected: x/N"), skipping combat-method DOM.
