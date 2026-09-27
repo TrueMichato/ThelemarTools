@@ -502,6 +502,9 @@ level-specific decisions. A legacy known caster whose save contains only the
 final repertoire instead gets a stable cumulative editor at the current class
 level. The editor validates the complete set, applies source-owned set
 differences, and round-trips through Apply, reload, Cancel, and one-step Undo.
+Later spell swaps change that repertoire but do not prove additional
+acquisition levels; repeated recorded gains are needed to replace a saved
+cumulative decision with level-specific ones.
 For an XPHB or TGTT Bard from Bard level 10 onward, ordinary Level Up records
 its new spells as known-spell acquisitions. Its leveled-spell picker,
 replacements, recorded level-specific Respec gains, and legacy cumulative

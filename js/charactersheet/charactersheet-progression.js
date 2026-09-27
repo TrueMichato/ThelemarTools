@@ -2681,8 +2681,9 @@ class CharacterSheetProgression {
 						&& CharacterSheetProgression.getEntityUid(spell) === CharacterSheetProgression.getEntityUid(selection),
 					),
 				);
-		const hasSpells = entry => hasChoice(entry, ["knownSpells", "spellSwap", "spellSwaps"])
+		const hasSpells = entry => hasChoice(entry, ["knownSpells"])
 			|| hasLegacyBardChoice(entry, "preparedSpells", "knownSpells");
+		const hasSpellActivity = entry => hasSpells(entry) || hasChoice(entry, ["spellSwap", "spellSwaps"]);
 		const hasCantrips = entry => hasChoice(entry, ["knownCantrips", "cantrips"])
 			|| hasLegacyBardChoice(entry, "preparedCantrips", "cantrips");
 		const cumulativeTypes = new Set(classHistory
@@ -2695,11 +2696,12 @@ class CharacterSheetProgression {
 					acquisitionTypes.has(decision.type) && decision.meta?.legacyCumulative,
 				),
 			);
+			// A swap changes the repertoire without proving an acquisition level.
 			return ![...cumulativeTypes].every(type =>
 				recordedWithoutCumulativeMarker.filter(type === "cantrips" ? hasCantrips : hasSpells).length > 1,
 			);
 		}
-		return !classHistory.some(entry => hasSpells(entry) || hasCantrips(entry));
+		return !classHistory.some(entry => hasSpellActivity(entry) || hasCantrips(entry));
 	}
 
 	static _getExistingSelection ({

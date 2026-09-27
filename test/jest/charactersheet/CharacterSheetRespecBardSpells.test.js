@@ -328,6 +328,103 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 			})).toBe(true);
 		});
 
+		it.each([
+			["one verified old-Level-Up acquisition followed by a swap", true],
+			["two swap-only levels", false],
+		])("keeps the saved cumulative Bard repertoire with %s", (_, withPreparedGain) => {
+			const {state, bard, borrowed, clericSecret, spellData} = getRecordedBard({level: 12});
+			const shield = {
+				name: "Shield",
+				source: "XPHB",
+				level: 1,
+				classes: {fromClassList: [{name: "Wizard", source: "XPHB"}]},
+			};
+			const repertoire = Array.from({length: 15}, (_, ix) => ({
+				name: `Bard Tune ${ix + 1}`,
+				source: "XPHB",
+				level: 1,
+			}));
+			const history = state.getLevelHistory();
+			for (const entry of history) {
+				for (const key of ["knownSpells", "knownCantrips", "cantrips", "preparedSpells", "preparedCantrips"]) {
+					delete entry.choices[key];
+				}
+			}
+			history[9].choices.knownSpells = copy(repertoire);
+			history[9].decisions = [CharacterSheetProgression._makeDecision({
+				characterLevel: 10,
+				className: "Bard",
+				classSource: "TGTT",
+				classLevel: 10,
+				type: "knownSpells",
+				label: "Current Spell Repertoire",
+				sourceKey: "legacy-known-spell-repertoire",
+				count: repertoire.length,
+				selection: copy(repertoire),
+				meta: {legacyCumulative: true, maxSpellLevel: 5},
+			})];
+
+			if (withPreparedGain) {
+				expect(CharacterSheetClassUtils.getKnownSpellsAtLevel(PUBLISHED_BARDS.get("TGTT"), "Bard", 11)).toBe(16);
+				expect(CharacterSheetClassUtils.getKnownSpellsAtLevel(PUBLISHED_BARDS.get("TGTT"), "Bard", 12)).toBe(16);
+				history[10].choices = {preparedSpells: [{name: shield.name, source: shield.source, level: shield.level}]};
+				state.removeSpell("Bard Tune 16", "XPHB");
+				state.addSpell({
+					...shield,
+					sourceClass: "Bard",
+					sourceClassSource: "TGTT",
+					sourceFeature: "Prepared Spells",
+					prepared: true,
+				});
+			} else {
+				history[10].choices = {spellSwap: {removed: repertoire[0], added: borrowed}};
+				state.removeSpell(repertoire[0].name, repertoire[0].source);
+				state.addSpell({
+					...borrowed,
+					sourceClass: "Bard",
+					sourceClassSource: "TGTT",
+					sourceFeature: "Spells Known",
+				});
+			}
+			const removed = repertoire[withPreparedGain ? 0 : 1];
+			const added = withPreparedGain ? borrowed : clericSecret;
+			history[11].choices = {spellSwap: {removed, added}};
+			state.removeSpell(removed.name, removed.source);
+			state.addSpell({
+				...added,
+				sourceClass: "Bard",
+				sourceClassSource: "TGTT",
+				sourceFeature: "Spells Known",
+			});
+
+			const saved = state.toJson();
+			const loaded = new CharacterSheetState();
+			const catalog = [...spellData, shield];
+			loaded.setSpellData(catalog);
+			expect(loaded.loadFromJson(saved)).not.toBe(false);
+			const page = getPage(loaded, bard);
+			page.getSpells = () => copy(catalog);
+			page.getFilteredSpellData = () => copy(catalog);
+			const respec = new CharacterSheetRespec({page, state: loaded});
+			respec._engine.begin();
+			const known = respec._engine.manifest.decisions.filter(it => it.type === "knownSpells");
+			expect(known).toEqual([
+				expect.objectContaining({
+					classLevel: 12,
+					sourceKey: "legacy-known-spell-repertoire",
+					meta: expect.objectContaining({legacyCumulative: true}),
+				}),
+			]);
+			expect(loaded.getLevelHistoryEntry(10).decisions)
+				.toEqual(expect.arrayContaining([expect.objectContaining({meta: expect.objectContaining({legacyCumulative: true})})]));
+			if (withPreparedGain) {
+				expect(loaded.getLevelHistoryEntry(11).choices.preparedSpells)
+					.toEqual([{name: "Shield", source: "XPHB", level: 1}]);
+				expect(loaded.getSpellsKnown().find(it => it.name === "Shield" && it.source === "XPHB"))
+					.toMatchObject({sourceClass: "Bard", sourceClassSource: "TGTT", sourceFeature: "Prepared Spells", prepared: true});
+			}
+		});
+
 		it.each(["TGTT", "XPHB"])("reads a saved old-Level-Up %s Bard spell without changing it on open, Cancel, or unrelated Apply", async source => {
 			const {state, page, borrowed} = getRecordedBard({source, acquiredSecret: true, legacyPreparedFrom: 10});
 			const original = state.toJson();
