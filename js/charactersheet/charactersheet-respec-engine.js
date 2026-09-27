@@ -42,6 +42,7 @@ class CharacterSheetRespecEngine {
 		if (this._candidateState.loadFromJson(this._originalSnapshot) === false) {
 			throw new Error("Could not initialize the Respec draft.");
 		}
+		this._candidateState.captureRespecSpecialtyBonusProvenance();
 		this._candidateState.setClassFeatureCatalog?.(
 			this._page.getClassFeatures?.() || [],
 			this._page.getSubclassFeatures?.() || [],
@@ -93,6 +94,7 @@ class CharacterSheetRespecEngine {
 		const originalFeatures = this._originalSnapshot.features || [];
 		const knownFeatureIds = new Set(originalFeatures.map(feature => feature.id).filter(Boolean));
 		const knownDecisionKeys = new Set((this._originalManifest.decisions || []).map(decision => decision.semanticKey));
+		const candidateFeatureIds = new Set(this._candidateState.getFeatures().map(feature => feature.id));
 		const candidateModifiers = this._candidateState.getNamedModifiers?.() || [];
 		const selectionName = selection => {
 			const value = Array.isArray(selection) ? selection[0] : selection;
@@ -107,7 +109,15 @@ class CharacterSheetRespecEngine {
 			const outgoingName = selectionName(before.selection);
 			if (!["Unyielding Might", "Lead the Pack"].includes(outgoingName)) continue;
 			const after = (manifest.decisions || []).find(decision => decision.semanticKey === before.semanticKey);
-			if (!after || selectionName(after.selection) === outgoingName) continue;
+			const originalOwnerStillPresent = originalFeatures.some(feature =>
+				feature.name === outgoingName
+					&& feature.parentFeature === "Specialties"
+					&& feature.className === "Barbarian"
+					&& feature.classSource === "TGTT"
+					&& Number(feature.acquisitionLevel || feature.level) === Number(before.classLevel)
+					&& candidateFeatureIds.has(feature.id));
+			if (!after || (selectionName(after.selection) === outgoingName
+				&& (!this._isDirty || originalOwnerStillPresent))) continue;
 			for (const modifier of this._originalSnapshot.namedModifiers || []) {
 				if (modifier.name !== outgoingName
 					|| !CharacterSheetClassUtils.isTgttBarbarianSpecialtySkillBonus(modifier)
@@ -121,7 +131,7 @@ class CharacterSheetRespecEngine {
 					severity: "warning",
 					code: "unattributed-specialty-modifier",
 					level: before.characterLevel,
-					message: `An unattributed "${outgoingName}" bonus to ${modifier.type.slice("skill:".length)}${modifier.enabled === false ? " (currently disabled)" : ""} was preserved because its owner cannot be proven. Review this named modifier after applying Respec; remove it manually if it belonged to the old Specialty.`,
+					message: `An unattributed "${outgoingName}" bonus to ${modifier.type.slice("skill:".length)}${modifier.enabled === false ? " (currently disabled)" : ""} was preserved because its owner cannot be proven. Review this named modifier after applying Respec; ${selectionName(after.selection) === outgoingName ? "remove it manually only if it is an unintended extra bonus." : "remove it manually if it belonged to the old Specialty."}`,
 				});
 			}
 		}

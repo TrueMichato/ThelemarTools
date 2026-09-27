@@ -38503,14 +38503,7 @@ class CharacterSheetState {
 				|| !this._data.features.some(feature => feature.id === modifier.sourceFeatureId));
 	}
 
-	/**
-	 * Apply actual mechanical effects from class features to the character.
-	 * This method reads the standardized _effects array from getFeatureCalculations()
-	 * and applies each effect generically based on its type.
-	 * Should be called when class configuration changes.
-	 */
-	applyClassFeatureEffects () {
-		const shouldReconcileJesterCombatAccess = this._isJesterBard();
+	_getTgttBarbarianSpecialtyLegacyBonusContext () {
 		const specialtyOwners = new Map((this._data.features || [])
 			.filter(feature => feature.className === "Barbarian"
 				&& feature.classSource === "TGTT"
@@ -38524,11 +38517,36 @@ class CharacterSheetState {
 			&& !!a.proficiencyBonus === !!b.proficiencyBonus
 			&& a.enabled === b.enabled
 			&& (a.conditional || null) === (b.conditional || null);
-		const legacyWithoutOwnedCopy = (this._data.namedModifiers || [])
+		const namedModifiers = this._data.namedModifiers || [];
+		const withoutOwnedCopy = namedModifiers
 			.filter(modifier => this._isUnattributedTgttBarbarianSpecialtySkillBonus(modifier))
-			.filter(legacy => !(this._data.namedModifiers || []).some(modifier =>
+			.filter(legacy => !namedModifiers.some(modifier =>
 				specialtyOwners.get(modifier.sourceFeatureId)?.name === legacy.name
 					&& sameFixedBonus(modifier, legacy)));
+		return {specialtyOwners, sameFixedBonus, withoutOwnedCopy};
+	}
+
+	captureRespecSpecialtyBonusProvenance () {
+		const {specialtyOwners, withoutOwnedCopy} = this._getTgttBarbarianSpecialtyLegacyBonusContext();
+		// Draft-only evidence survives staging/rollback without assigning an owner to the legacy modifier.
+		this._respecSpecialtyBonusesWithoutOwnedCopy = new Set(withoutOwnedCopy
+			.filter(legacy => legacy.id && [...specialtyOwners.values()].some(owner => owner.name === legacy.name))
+			.map(legacy => legacy.id));
+	}
+
+	/**
+	 * Apply actual mechanical effects from class features to the character.
+	 * This method reads the standardized _effects array from getFeatureCalculations()
+	 * and applies each effect generically based on its type.
+	 * Should be called when class configuration changes.
+	 */
+	applyClassFeatureEffects () {
+		const shouldReconcileJesterCombatAccess = this._isJesterBard();
+		const {specialtyOwners, sameFixedBonus, withoutOwnedCopy} = this._getTgttBarbarianSpecialtyLegacyBonusContext();
+		const legacyWithoutOwnedCopy = (this._data.namedModifiers || [])
+			.filter(modifier => this._isUnattributedTgttBarbarianSpecialtySkillBonus(modifier))
+			.filter(modifier => this._respecSpecialtyBonusesWithoutOwnedCopy?.has(modifier.id)
+				|| withoutOwnedCopy.includes(modifier));
 
 		// First, clear all previously applied class feature effects
 		this._clearClassFeatureEffects();

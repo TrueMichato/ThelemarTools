@@ -332,8 +332,57 @@ describe("Respec TGTT Barbarian Specialty ownership", () => {
 		expect(reloaded.getSkillMod("athletics")).toBe(5);
 	});
 
+	it("keeps a sole unlinked legacy PB bonus single when replacing and restoring its Specialty", async () => {
+		const state = makeState({complete: true});
+		const owner = state.getFeatures().find(feature => feature.name === "Lead the Pack");
+		const legacy = state.getNamedModifiers().find(modifier =>
+			modifier.sourceFeatureId === owner.id && modifier.type === "skill:athletics");
+		delete legacy.sourceFeatureId;
+		state._recalculateCustomModifiers();
+		const before = state.toJson();
+		const {respec} = getRespec(state);
+		expect(respec._state.getSkillBreakdown("athletics").total).toBe(5);
+
+		await replaceSpecialty(respec, 6, "Path of Drowning Springs");
+		expect(respec._state.getSkillBreakdown("athletics").total).toBe(5);
+		expect(respec._engine.getValidation().warnings).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "unattributed-specialty-modifier"}),
+		]));
+		jest.spyOn(respec._state, "addFeature").mockImplementationOnce(() => {
+			throw new Error("Feature materialization failed");
+		});
+		await expect(replaceSpecialty(respec, 6, "Lead the Pack")).rejects.toThrow("Feature materialization failed");
+		expect(respec._state.getSkillBreakdown("athletics").total).toBe(5);
+		jest.restoreAllMocks();
+		await replaceSpecialty(respec, 6, "Lead the Pack");
+		expect(respec._state.getSkillBreakdown("athletics").total).toBe(5);
+		expect(await rollFixedSkill(respec._state, "athletics")).toBe(15);
+		expect(respec._state.getNamedModifiers().filter(modifier =>
+			modifier.name === "Lead the Pack" && modifier.type === "skill:athletics",
+		).map(modifier => modifier.id)).toEqual([legacy.id]);
+		expect(respec._engine.getValidation().warnings).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				code: "unattributed-specialty-modifier",
+				message: expect.stringContaining("remove it manually only if it is an unintended extra bonus"),
+			}),
+		]));
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		expect(state.toJson()).toEqual(before);
+		await expect(respec._engine.apply()).resolves.toBe(true);
+		expect(state.getSkillBreakdown("athletics").total).toBe(5);
+		const reloaded = new CharacterSheetState();
+		expect(reloaded.loadFromJson(copy(state.toJson()))).not.toBe(false);
+		expect(reloaded.getSkillBreakdown("athletics").total).toBe(5);
+		expect(await rollFixedSkill(reloaded, "athletics")).toBe(15);
+		await expect(respec._engine.undo()).resolves.toBe(true);
+		expect(state.getSkillBreakdown("athletics").total).toBe(5);
+		expect(state.getNamedModifiers().filter(modifier =>
+			modifier.name === "Lead the Pack" && modifier.type === "skill:athletics",
+		).map(modifier => modifier.id)).toEqual([legacy.id]);
+	});
+
 	it("does not collapse a separately owned PB bonus when an identical orphan also exists", async () => {
-		const state = makeState();
+		const state = makeState({complete: true});
 		const originalFeature = state.getFeatures().find(feature => feature.name === "Lead the Pack");
 		const orphanId = state.addNamedModifier({
 			name: "Lead the Pack",
@@ -356,6 +405,21 @@ describe("Respec TGTT Barbarian Specialty ownership", () => {
 		expect(respec._engine.getValidation().warnings).toEqual(expect.arrayContaining([
 			expect.objectContaining({code: "unattributed-specialty-modifier"}),
 		]));
+		await replaceSpecialty(respec, 6, "Lead the Pack");
+		expect(respec._state.getSkillMod("athletics")).toBe(8);
+		expect(respec._state.getNamedModifiers()).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: orphanId, proficiencyBonus: true}),
+			expect.objectContaining({name: "Lead the Pack", type: "skill:athletics", sourceType: "classFeature"}),
+		]));
+		expect(respec._engine.getValidation().warnings).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "unattributed-specialty-modifier"}),
+		]));
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		await expect(respec._engine.apply()).resolves.toBe(true);
+		expect(state.getSkillMod("athletics")).toBe(8);
+		const reloaded = new CharacterSheetState();
+		expect(reloaded.loadFromJson(copy(state.toJson()))).not.toBe(false);
+		expect(reloaded.getSkillMod("athletics")).toBe(8);
 	});
 
 	it("does not guess ownership when a legacy choice has no matching materialized feature in the candidate", async () => {

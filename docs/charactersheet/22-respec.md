@@ -250,6 +250,12 @@ decisions still block Apply. An independent grant or a grant linked to a
 different decision remains in place. Recalculation does not add a second
 identical feature bonus when a legacy save contains only an unlinked copy, but
 it keeps both bonuses when a distinct feature-owned copy was already present.
+Respec retains that distinction from the start of the draft if the player
+replaces a Specialty and later selects it again: reselecting cannot turn a
+single unlinked bonus into two, and a separate original feature-owned bonus
+remains separate. An orphaned bonus stays unattributed, so Review continues
+to warn after reselecting the original Specialty; Apply never assigns it an
+owner.
 
 Fixed-proficiency fallback features ("gain X; if already proficient, choose
 Y") expose their pending/resolved transaction as a normal `nestedTool`
