@@ -484,7 +484,12 @@ class CharacterSheetProgression {
 		};
 		const optionKeys = new Set(options.flatMap(option => [...getOptionKeys(option)]));
 		const selectedValues = Array.isArray(selection) ? selection : [selection];
-		return selectedValues.every(value => [...getOptionKeys(value)].some(key => optionKeys.has(key)));
+		return selectedValues.every(value => {
+			if (type === "knownSpells" && value?.source) {
+				return optionKeys.has(CharacterSheetProgression.getEntityUid(value));
+			}
+			return [...getOptionKeys(value)].some(key => optionKeys.has(key));
+		});
 	}
 
 	static _getPreFeatureProficiencySnapshot ({entity, state}) {
@@ -3432,11 +3437,12 @@ class CharacterSheetProgression {
 						sourceKey: "known-spells",
 						required: !isLegacyUntrackedSpellProgression,
 						count,
-						options: getLegalSpellOptions(maxSpellLevel),
+						options: getLegalSpellOptions(maxSpellLevel, {includeProgressionAdditionalLists: true}),
 						fallbackSelection: fallback,
 						fallbackStatus: "resolved",
 						meta: {
 							maxSpellLevel,
+							...(progressionAdditionalClassNames.length ? {additionalClassNames: progressionAdditionalClassNames} : {}),
 							...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
 						},
 					});
@@ -3486,8 +3492,11 @@ class CharacterSheetProgression {
 					sourceKey: "spell-swap",
 					count: 1,
 					required: false,
-					options: getLegalSpellOptions(maxSpellLevel),
-					meta: {maxSpellLevel},
+					options: getLegalSpellOptions(maxSpellLevel, {includeProgressionAdditionalLists: true}),
+					meta: {
+						maxSpellLevel,
+						...(progressionAdditionalClassNames.length ? {additionalClassNames: progressionAdditionalClassNames} : {}),
+					},
 				});
 			}
 
