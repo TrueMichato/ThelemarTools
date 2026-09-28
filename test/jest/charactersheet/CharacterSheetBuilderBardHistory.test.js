@@ -94,6 +94,41 @@ describe("CS-BUG-177 (FIXED): Builder level-1 Bard spell ownership", () => {
 			expect(after.cantrips).toMatchObject({count: 2, status: "resolved", required: true, selection: choice.knownCantrips});
 		});
 
+		test(`${source} reapplied Spells step clears deselected level-1 picks without revisiting Class`, () => {
+			const {builder, state, page} = build({source});
+			builder._selectedKnownSpells = [];
+			builder._selectedKnownCantrips = [];
+			builder._currentStep = 6;
+			builder._applyCurrentStep();
+			expect(state.getLevelHistoryEntry(1).choices).toMatchObject({
+				knownSpells: [],
+				knownCantrips: [],
+				builderSpellPicks: {knownSpells: [], cantrips: []},
+			});
+			expect(state.getSpellsKnown()).toEqual([]);
+			expect(state.getCantripsKnown()).toEqual([]);
+			const after = decisions({state, page});
+			expect(after.spells).toMatchObject({status: "deferred", required: false, selection: []});
+			expect(after.cantrips).toMatchObject({status: "deferred", required: false, selection: []});
+		});
+
+		test(`${source} reapplied Spells step retains only still-selected level-1 choices`, () => {
+			const {builder, state, page} = build({source});
+			const retained = state.getSpellsKnown()[0];
+			builder._selectedKnownSpells = bardSpells.slice(0, 2);
+			builder._selectedKnownCantrips = bardCantrips.slice(0, 1);
+			builder._currentStep = 6;
+			builder._applyCurrentStep();
+			expect(state.getSpellsKnown().map(it => `${it.name}|${it.source}`))
+				.toEqual(bardSpells.slice(0, 2).map(it => `${it.name}|${it.source}`));
+			expect(state.getSpellsKnown()[0].id).toBe(retained.id);
+			expect(state.getCantripsKnown().map(it => `${it.name}|${it.source}`))
+				.toEqual(bardCantrips.slice(0, 1).map(it => `${it.name}|${it.source}`));
+			const after = decisions({state, page});
+			expect(after.spells).toMatchObject({status: "deferred", required: false, selection: after.reloaded.getLevelHistoryEntry(1).choices.knownSpells});
+			expect(after.cantrips).toMatchObject({status: "deferred", required: false, selection: after.reloaded.getLevelHistoryEntry(1).choices.knownCantrips});
+		});
+
 		for (const {label, spells, cantrips} of [
 			{label: "partial", spells: bardSpells.slice(0, 2), cantrips: bardCantrips.slice(0, 1)},
 			{label: "empty", spells: [], cantrips: []},
@@ -115,6 +150,68 @@ describe("CS-BUG-177 (FIXED): Builder level-1 Bard spell ownership", () => {
 				engine.cancel();
 			});
 		}
+	}
+
+	test("empty Builder history with orphaned Bard-owned spells is invalid, not deferred", () => {
+		const {state, page} = build({source: "TGTT"});
+		state.updateLevelChoice(1, {
+			knownSpells: [],
+			knownCantrips: [],
+			builderSpellPicks: {classUid: "Bard|TGTT", knownSpells: [], cantrips: []},
+		});
+		const after = decisions({state, page});
+		expect(after.spells.status).toBe("invalid");
+		expect(after.cantrips.status).toBe("invalid");
+		const engine = new CharacterSheetRespecEngine({state: after.reloaded, page});
+		engine.begin();
+		expect(engine.getValidation().isValid).toBe(false);
+	});
+
+	test("reapplying level-1 Builder spells preserves a later recorded Bard acquisition", () => {
+		const laterSpell = spell("Shatter", "XPHB", 2);
+		const {builder, state, page} = build({
+			source: "TGTT", catalog: [...bardSpells, ...bardCantrips, laterSpell],
+		});
+		state.addClass({name: "Bard", source: "TGTT", level: 3});
+		state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(laterSpell, {
+			sourceFeature: "Spells Known", sourceClass: "Bard", sourceClassSource: "TGTT",
+		}));
+		state.recordLevelChoice({
+			level: 3,
+			class: {name: "Bard", source: "TGTT"},
+			classLevel: 3,
+			choices: {knownSpells: [{name: laterSpell.name, source: laterSpell.source, level: laterSpell.level}]},
+		});
+		builder._selectedKnownSpells = [];
+		builder._selectedKnownCantrips = [];
+		builder._currentStep = 6;
+		builder._applyCurrentStep();
+		expect(state.getSpellsKnown().map(it => `${it.name}|${it.source}`)).toEqual(["Shatter|XPHB"]);
+		expect(state.getLevelHistoryEntry(3).choices.knownSpells)
+			.toEqual([{name: "Shatter", source: "XPHB", level: 2}]);
+		const after = decisions({state, page});
+		expect(after.spells).toMatchObject({status: "deferred", required: false, selection: []});
+	});
+
+	for (const {label, spells, cantrips} of [
+		{label: "partial", spells: bardSpells.slice(0, 2), cantrips: bardCantrips.slice(0, 1)},
+		{label: "empty", spells: [], cantrips: []},
+	]) {
+		test(`Defer on already-${label} Builder spells keeps the picks and does not block Respec`, () => {
+			const {state, page} = build({source: "TGTT", spells, cantrips});
+			const engine = new CharacterSheetRespecEngine({state, page});
+			engine.begin();
+			const before = engine.manifest.decisions.find(it => it.classLevel === 1 && it.type === "knownSpells");
+			expect(before).toMatchObject({status: "deferred", required: false});
+			engine.updateDecisionSelection(before.id, null, {status: "deferred"});
+			const after = engine.getDecision(before.id);
+			expect(after).toMatchObject({status: "deferred", required: false, selection: before.selection});
+			expect(engine.state.getLevelHistoryEntry(1).choices.knownSpells).toEqual(before.selection);
+			expect(engine.state.getSpellsKnown().map(it => `${it.name}|${it.source}`))
+				.toEqual(spells.map(it => `${it.name}|${it.source}`));
+			expect(engine.getValidation().errors.filter(it => it.decisionId === before.id)).toEqual([]);
+			expect(engine.isDirty).toBe(false);
+		});
 	}
 
 	test("PHB Bard stays a known caster without 2024-only partial deferral", () => {

@@ -2171,6 +2171,22 @@ export class CharacterSheetPage {
 		});
 	}
 
+	async deferLevelOneBardStartingSpells (): Promise<void> {
+		const id = await this.page.evaluate(() => {
+			const decision = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions.find((it: any) =>
+				it.className === "Bard" && it.classLevel === 1 && it.type === "knownSpells");
+			if (decision?.status !== "deferred") throw new Error("Bard starting spells are not deferred");
+			return decision.id;
+		});
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator('.charsheet__level-entry[data-level="1"] .charsheet__level-entry-edit').click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
+		await editor.getByRole("button", {name: "Defer", exact: true}).click();
+	}
+
 	async stageLevelOneBardSkillSwap (): Promise<void> {
 		const initial = await this.page.evaluate(() => {
 			const cs = (globalThis as any).charSheet;

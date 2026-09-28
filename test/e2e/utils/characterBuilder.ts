@@ -59,6 +59,8 @@ export interface CharacterPreset {
 		spells: Array<{name: string; source: string}>;
 		cantrips: Array<{name: string; source: string}>;
 	};
+	/** Return from Details to Spells and deselect the initial picks through the picker UI. */
+	clearStartingSpellsOnRevisit?: boolean;
 	/**
 	 * Optional preference regex tested against each class-feat-progression
 	 * option's visible text (e.g. Fighter L1 "Fighting Style") during
@@ -1525,6 +1527,14 @@ export async function createCharacterViaWizard (
 			divineSoulAffinity: preset.divineSoulAffinity,
 			signatureSpells: preset.signatureSpells,
 		});
+	}
+	if (preset.clearStartingSpellsOnRevisit) {
+		if (!preset.startingSpellPicks) throw new Error("Revisiting starting spells requires exact initial picks");
+		await builder.clickNext();
+		if (await builder.getCurrentStep() !== 7) throw new Error("Builder did not advance to Details before revisiting Spells");
+		await builder.clickPrev();
+		if (await builder.getCurrentStep() !== 6) throw new Error("Builder did not return to Spells");
+		await builder.chooseStartingSpells(preset.startingSpellPicks, {deselect: true});
 	}
 	await builder.clickNext();
 	// If we under-filled spells/cantrips, the wizard pops a "Skip Spell

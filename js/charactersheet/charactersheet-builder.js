@@ -9703,6 +9703,64 @@ class CharacterSheetBuilder {
 		}
 	}
 
+	_reconcileBuilderBardSpellPicks (knownInfo) {
+		const marker = this._state.getLevelHistoryEntry?.(1)?.choices?.builderSpellPicks;
+		if (!marker) return;
+		const classUid = CharacterSheetProgression.getClassUid(knownInfo.className, knownInfo.classSource);
+		if (CharacterSheetProgression._normalize(marker.classUid) !== classUid
+			|| !Array.isArray(marker.knownSpells) || !Array.isArray(marker.cantrips)) {
+			throw new Error("Cannot reconcile the Builder's starting spells: level-1 ownership is inconsistent.");
+		}
+		for (const {key, type, feature, selected, live, sourceKey} of [
+			{
+				key: "knownSpells",
+				type: "spells",
+				feature: "Spells Known",
+				selected: this._selectedKnownSpells,
+				live: this._state.getSpellsKnown(),
+				sourceKey: "known-spells",
+			},
+			{
+				key: "cantrips",
+				type: "cantrips",
+				feature: "Cantrips Known",
+				selected: this._selectedKnownCantrips,
+				live: this._state.getCantripsKnown(),
+				sourceKey: "known-cantrips",
+			},
+		]) {
+			const keep = new Set(selected.map(CharacterSheetProgression.getEntityUid));
+			const laterOwned = CharacterSheetProgression._getLaterClassSpellUids({
+				history: this._state.getLevelHistory?.(),
+				className: knownInfo.className,
+				classSource: knownInfo.classSource,
+				type: key,
+			});
+			const level1Key = CharacterSheetProgression.getSemanticKey({
+				className: knownInfo.className,
+				classSource: knownInfo.classSource,
+				classLevel: 1,
+				type: key,
+				sourceKey,
+			});
+			for (const previousUid of marker[key]) {
+				const uid = CharacterSheetProgression._normalize(previousUid);
+				if (keep.has(uid) || laterOwned.has(uid)) continue;
+				const spell = live.find(it =>
+					CharacterSheetProgression.getEntityUid(it) === uid
+					&& it.sourceClass === knownInfo.className
+					&& it.sourceClassSource === knownInfo.classSource
+					&& it.sourceFeature === feature,
+				);
+				if (!spell || spell.grantedByClass || spell.alwaysPrepared || spell.classGrantOwners?.length) continue;
+				const owner = this._state._getProgressionOwnershipEntry?.(type, spell);
+				if (owner?.preserved || owner?.sources?.some(source => source !== level1Key)) continue;
+				if (owner?.sources?.includes(level1Key)) this._state.releaseProgressionOwnership(type, spell, level1Key);
+				this._state.removeSpell(spell.id);
+			}
+		}
+	}
+
 	_applyBuilderSpellChoices () {
 		const knownInfo = this._getKnownCasterInfoForBuilder();
 		if (!knownInfo) return;
@@ -9711,6 +9769,7 @@ class CharacterSheetBuilder {
 			&& knownInfo.isKnownCaster;
 
 		this._state.setSubclassChoice(knownInfo.className, this._divineSoulAffinity);
+		if (is2024Bard) this._reconcileBuilderBardSpellPicks(knownInfo);
 
 		if (knownInfo.isSpellbookCaster) {
 			// Wizard-family: add spellbook spells (inSpellbook: true) + cantrips

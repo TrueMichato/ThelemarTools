@@ -529,6 +529,19 @@ class CharacterSheetRespecEngine {
 		const decision = this.getDecision(decisionId);
 		if (!decision) throw new Error("That progression decision is no longer available.");
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
+		// Already-deferred Builder picks are still owned live choices. Confirming
+		// "Defer" must not reverse their effects or erase that evidence.
+		if (decision.status === "deferred" && !decision.required
+			&& selection == null && status === "deferred"
+			&& Number(decision.characterLevel) === 1
+			&& ["knownSpells", "cantrips"].includes(decision.type)
+			&& CharacterSheetProgression._hasBuilderBardSpellPicks({
+				className: decision.className,
+				classSource: decision.classSource,
+				history: this._candidateState.getLevelHistory?.(),
+			})) {
+			return this._manifest;
+		}
 		const stateSnapshot = this._candidateState.toJson();
 		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);

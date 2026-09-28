@@ -642,7 +642,10 @@ after applying them to live state. For TGTT/XPHB Bard, use the shared
 known-caster model rather than treating `preparedSpellsProgression` as proof
 of daily preparation. Explicitly underfilled starting picks retain their
 Builder provenance so Respec can defer only legal, Bard-owned choices without
-inventing spells or reassigning later acquisitions to level 1.
+inventing spells or reassigning later acquisitions to level 1. Reapplying
+the Spells step removes deselected Builder-owned picks, not later acquisitions
+or independently owned spells; Respec's **Defer** on an already-deferred
+choice leaves its partial selection in place.
 
 Quick Build's known-caster Spells step retains selections by character level,
 then writes each `knownSpells`/`knownCantrips` choice to that level's history

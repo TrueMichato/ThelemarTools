@@ -473,6 +473,10 @@ and illegal picks still block. Jest covers the production boundary and
 PHB/prepared/spellbook controls; `respec-workspace.spec.ts` covers full,
 partial, and empty TGTT/XPHB Builder saves and an unrelated Apply. Its level-10
 Magical Secrets Apply/reload/Undo test no longer repairs the starting fixture.
+The follow-up regression guards Builder Spells-step reapplication (removing
+deselected level-1 picks but keeping later-owned spells), rejects orphaned live
+Builder spells as invalid rather than deferred, and makes **Defer** on an
+already-deferred partial choice preserve its selections.
 
 ### CS-BUG-176 — EFA Artificer level-4 ASI was absent — FIXED
 

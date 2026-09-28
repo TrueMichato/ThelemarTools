@@ -2663,6 +2663,20 @@ class CharacterSheetProgression {
 			);
 	}
 
+	static _getLaterClassSpellUids ({history, className, classSource, type}) {
+		const choiceKey = type === "cantrips" ? "knownCantrips" : "knownSpells";
+		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
+		return new Set((history || [])
+			.filter(entry => Number(entry.level) > 1 && CharacterSheetProgression.getClassUid(entry.class) === classUid)
+			.flatMap(entry => [
+				...(entry.choices?.[choiceKey] || []),
+				...(entry.decisions || []).filter(decision => decision.type === type)
+					.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : []),
+				entry.choices?.spellSwap?.added,
+			].filter(Boolean))
+			.map(CharacterSheetProgression.getEntityUid));
+	}
+
 	static _isBuilderDeferredBardSpellPick ({state, history, levelInfo, type, selection, count, options}) {
 		if (Number(levelInfo.characterLevel) !== 1 || Number(levelInfo.classLevel) !== 1
 			|| !CharacterSheetProgression._hasBuilderBardSpellPicks({
@@ -2683,6 +2697,16 @@ class CharacterSheetProgression {
 			|| new Set(picks.map(CharacterSheetProgression.getEntityUid)).size !== picks.length
 			|| !Array.isArray(selection) || selection.length !== picks.length
 			|| selection.length >= count || !options?.length) return false;
+		const selected = new Set(picks.map(CharacterSheetProgression.getEntityUid));
+		const laterOwned = CharacterSheetProgression._getLaterClassSpellUids({
+			history, className: levelInfo.className, classSource: levelInfo.classSource, type,
+		});
+		if (owned.some(spell =>
+			spell.sourceClass === levelInfo.className
+			&& spell.sourceClassSource === levelInfo.classSource
+			&& spell.sourceFeature === (isCantrip ? "Cantrips Known" : "Spells Known")
+			&& !selected.has(CharacterSheetProgression.getEntityUid(spell))
+			&& !laterOwned.has(CharacterSheetProgression.getEntityUid(spell)))) return false;
 		return picks.every((pick, ix) => {
 			const uid = CharacterSheetProgression.getEntityUid(pick);
 			return pick?.name && pick?.source
@@ -2958,7 +2982,10 @@ class CharacterSheetProgression {
 				fallbackStatus: config.fallbackStatus,
 				preferFallback: config.preferFallback,
 			});
-			const builderDeferred = config.builderPartial && matched.status !== "ambiguous"
+			const hasBuilderMarker = config.builderPartial && CharacterSheetProgression._hasBuilderBardSpellPicks({
+				className: levelInfo.className, classSource: levelInfo.classSource, history: normalizedHistory,
+			});
+			const builderDeferred = hasBuilderMarker && config.isValid !== false && matched.status !== "ambiguous"
 				&& CharacterSheetProgression._isBuilderDeferredBardSpellPick({
 					state,
 					history: normalizedHistory,
@@ -2974,18 +3001,20 @@ class CharacterSheetProgression {
 				options: config.options,
 				type: config.type,
 			}));
+			let decisionStatus = null;
+			if (matched.status === "ambiguous") decisionStatus = matched.status;
+			else if (builderDeferred) decisionStatus = "deferred";
+			else if (hasBuilderMarker && Array.isArray(matched.selection)
+				&& !matched.selection.length && !isValid) decisionStatus = "invalid";
+			else if (matched.status === "deferred" && matched.selection == null && !hasBuilderMarker) {
+				decisionStatus = matched.status;
+			}
 			const decision = CharacterSheetProgression._makeDecision({
 				...levelInfo,
 				...config,
 				selection: matched.selection,
 				required: builderDeferred ? false : config.required,
-				status: matched.status === "ambiguous"
-					? matched.status
-					: builderDeferred ? "deferred"
-						: matched.status === "deferred" && matched.selection == null
-							&& !CharacterSheetProgression._hasBuilderBardSpellPicks({
-								className: levelInfo.className, classSource: levelInfo.classSource, history: normalizedHistory,
-							}) ? matched.status : null,
+				status: decisionStatus,
 				receipt: storedPool.get(semanticKey)?.find(item => item.selection != null)?.receipt || null,
 				isValid,
 			});

@@ -1045,7 +1045,7 @@ export class BuilderWizardPage {
 	async chooseStartingSpells (picks: {
 		spells: Array<{name: string; source: string}>;
 		cantrips: Array<{name: string; source: string}>;
-	}): Promise<void> {
+	}, {deselect = false}: {deselect?: boolean} = {}): Promise<void> {
 		await expect(this.page.locator("#builder-spell-picker .charsheet__spell-picker-container")).toBeVisible();
 		for (const [kind, entries] of [["spells", picks.spells], ["cantrips", picks.cantrips]] as const) {
 			for (const pick of entries) {
@@ -1060,13 +1060,13 @@ export class BuilderWizardPage {
 				await expect(row, `Builder picker must offer ${pick.name}|${pick.source}`).toHaveCount(1);
 				await row.locator("button.spell-toggle").click();
 				await expect.poll(async () => (await this.getStartingSpellSelections())[kind]
-					.some(selected => selected.name === pick.name && selected.source === pick.source)).toBe(true);
+					.some(selected => selected.name === pick.name && selected.source === pick.source)).toBe(!deselect);
 				await search.fill("");
 			}
 		}
 		const selected = await this.getStartingSpellSelections();
-		expect(selected.spells.map(({name, source}) => ({name, source}))).toEqual(picks.spells);
-		expect(selected.cantrips.map(({name, source}) => ({name, source}))).toEqual(picks.cantrips);
+		expect(selected.spells.map(({name, source}) => ({name, source}))).toEqual(deselect ? [] : picks.spells);
+		expect(selected.cantrips.map(({name, source}) => ({name, source}))).toEqual(deselect ? [] : picks.cantrips);
 	}
 
 	// ========== ABILITIES STEP ==========

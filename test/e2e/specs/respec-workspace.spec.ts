@@ -100,6 +100,10 @@ test.describe("Respec workspace", () => {
 					]));
 				};
 				await assertDecisions();
+				if (label !== "full") {
+					await charSheet.deferLevelOneBardStartingSpells();
+					await assertDecisions();
+				}
 				await charSheet.stageLevelOneBardSkillSwap();
 				await assertDecisions();
 				await charSheet.applyRespecDraft();
@@ -111,6 +115,42 @@ test.describe("Respec workspace", () => {
 			});
 		}
 	}
+
+	test("TGTT Bard revisiting Builder Spells clears deselected live picks before Respec", async ({page}) => {
+		test.setTimeout(120_000);
+		await gotoWithThelemar(page);
+		const {charSheet, builder} = await createCharacterViaWizard(page, {
+			...PRESET_BARD,
+			name: "Revisited Builder Bard",
+			background: "Soldier",
+			bgSource: "PHB",
+			startingSpellPicks: {
+				spells: ["Cure Wounds", "Dissonant Whispers", "Faerie Fire", "Healing Word"]
+					.map(name => ({name, source: "XPHB"})),
+				cantrips: ["Mage Hand", "Vicious Mockery"].map(name => ({name, source: "XPHB"})),
+			},
+			clearStartingSpellsOnRevisit: true,
+		});
+		expect(await builder.getStartingSpellSelections()).toEqual({spells: [], cantrips: []});
+		const assertEmpty = async () => {
+			const evidence = await charSheet.getLevelOneBardSpellEvidence();
+			expect(evidence.choices.knownSpells).toEqual([]);
+			expect(evidence.choices.knownCantrips).toEqual([]);
+			expect(evidence.spells.filter(it => it.sourceClass === "Bard" && it.sourceFeature === "Spells Known")).toEqual([]);
+			expect(evidence.cantrips.filter(it => it.sourceClass === "Bard" && it.sourceFeature === "Cantrips Known")).toEqual([]);
+		};
+		await assertEmpty();
+		await charSheet.reloadCharacterSheet();
+		await assertEmpty();
+		await charSheet.openRespec();
+		expect(await charSheet.getLevelOneBardRespecDecisions()).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "knownSpells", status: "deferred", required: false, selection: [], issues: []}),
+			expect.objectContaining({type: "cantrips", status: "deferred", required: false, selection: [], issues: []}),
+		]));
+		await charSheet.stageLevelOneBardSkillSwap();
+		await charSheet.applyRespecDraft();
+		await assertEmpty();
+	});
 
 	for (const {source, startLevel} of [{source: "TGTT", startLevel: 9}, {source: "XPHB", startLevel: 8}]) {
 		test(`${source} Bard Quick Build L${startLevel}→10 keeps Magical Secrets in its level-10 Respec decision`, async ({page}) => {

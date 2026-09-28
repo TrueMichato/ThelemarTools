@@ -518,7 +518,12 @@ other group's deferral. Only matching, legal level-1 picks with matching live
 ownership qualify. Invalid or contradictory picks and older partial saves
 without this Builder evidence remain blocking rather than being silently
 converted or filled in. PHB Bard and genuine prepared/spellbook classes do not
-use this deferral exception.
+use this deferral exception. Reapplying the Builder's Spells step reconciles
+previously selected level-1 Bard spells/cantrips against the new picks while
+preserving recorded later acquisitions and independent owners; orphaned live
+Builder spells cannot make empty history look like an intentional omission.
+Selecting **Defer** on a choice that is already deferred keeps any valid
+partial picks and does not dirty or block the Respec draft.
 For an XPHB or TGTT Bard from Bard level 10 onward, ordinary Level Up records
 its new spells as known-spell acquisitions. Its leveled-spell picker,
 replacements, recorded level-specific Respec gains, and legacy cumulative
