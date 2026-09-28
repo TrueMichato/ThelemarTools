@@ -2660,7 +2660,7 @@ class CharacterSheetProgression {
 		return classHistory.every(entry => entry.manifestComplete !== true);
 	}
 
-	static _isLegacyCumulativeSpellProgression ({className, classSource, history, spellPool}) {
+	static _isLegacyCumulativeSpellProgression ({className, classSource, history, spellPool, type = "knownSpells"}) {
 		if (!Object.values(spellPool || {}).some(spells => spells?.length)) return false;
 		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
 		const classHistory = (history || []).filter(entry =>
@@ -2693,15 +2693,15 @@ class CharacterSheetProgression {
 		if (cumulativeTypes.size) {
 			const recordedWithoutCumulativeMarker = classHistory.filter(entry =>
 				!(entry.decisions || []).some(decision =>
-					acquisitionTypes.has(decision.type) && decision.meta?.legacyCumulative,
+					decision.type === type && decision.meta?.legacyCumulative,
 				),
 			);
 			// A swap changes the repertoire without proving an acquisition level.
-			return ![...cumulativeTypes].every(type =>
-				recordedWithoutCumulativeMarker.filter(type === "cantrips" ? hasCantrips : hasSpells).length > 1,
-			);
+			if (cumulativeTypes.has(type)) {
+				return recordedWithoutCumulativeMarker.filter(type === "cantrips" ? hasCantrips : hasSpells).length <= 1;
+			}
 		}
-		return !classHistory.some(entry => hasSpellActivity(entry) || hasCantrips(entry));
+		return !classHistory.some(type === "cantrips" ? hasCantrips : hasSpellActivity);
 	}
 
 	static _getExistingSelection ({
@@ -2952,15 +2952,22 @@ class CharacterSheetProgression {
 				source: classData.source,
 				classData,
 			});
-			const isLegacyCumulativeSpellProgression = spellModel === "known"
+			const isLegacyCumulativeKnownSpells = spellModel === "known"
 				&& CharacterSheetProgression._isLegacyCumulativeSpellProgression({
 					className: classData.name,
 					classSource: classData.source,
 					history: normalizedHistory,
 					spellPool,
 				});
-			const isLegacyCumulativeSpellLevel = isLegacyCumulativeSpellProgression
-				&& Number(levelInfo.classLevel) === Number(stateClass?.level);
+			const isLegacyCumulativeCantrips = spellModel === "known"
+				&& CharacterSheetProgression._isLegacyCumulativeSpellProgression({
+					className: classData.name,
+					classSource: classData.source,
+					history: normalizedHistory,
+					spellPool,
+					type: "cantrips",
+				});
+			const isLegacyCumulativeSpellLevel = Number(levelInfo.classLevel) === Number(stateClass?.level);
 			const progressionAdditionalClassNames = CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
 				className: classData.name,
 				classSource: classData.source,
@@ -3403,7 +3410,7 @@ class CharacterSheetProgression {
 			});
 
 			const isWizard = CharacterSheetProgression._normalize(classData.name) === "wizard";
-			if (isLegacyCumulativeSpellLevel) {
+			if (isLegacyCumulativeSpellLevel && isLegacyCumulativeCantrips) {
 				const currentCantrips = CharacterSheetClassUtils.getCantripsAtLevel(classData, classData.name, levelInfo.classLevel);
 				if (currentCantrips > 0) {
 					addDecision(levelInfo, {
@@ -3424,6 +3431,8 @@ class CharacterSheetProgression {
 						},
 					});
 				}
+			}
+			if (isLegacyCumulativeSpellLevel && isLegacyCumulativeKnownSpells) {
 				const currentSpells = CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, classData.name, levelInfo.classLevel);
 				if (currentSpells > 0) {
 					addDecision(levelInfo, {
@@ -3448,7 +3457,8 @@ class CharacterSheetProgression {
 						},
 					});
 				}
-			} else if (isWizard) {
+			}
+			if (isWizard) {
 				const spellbookCount = levelInfo.classLevel === 1 ? 6 : 2;
 				const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel);
 				const fallback = CharacterSheetProgression._takeReconstructedSelection({
@@ -3478,7 +3488,7 @@ class CharacterSheetProgression {
 				? CharacterSheetClassUtils.getCantripsAtLevel(classData, classData.name, levelInfo.classLevel - 1)
 				: 0;
 			const cantripGain = Math.max(0, Number(currentCantrips || 0) - Number(previousCantrips || 0));
-			if (!isLegacyCumulativeSpellProgression && cantripGain > 0) {
+			if (!isLegacyCumulativeCantrips && cantripGain > 0) {
 				// Cantrips are permanent learned choices even for prepared casters.
 				// Keep them out of the runtime prepared-spell loadout bucket.
 				const key = "cantrips";
@@ -3504,7 +3514,7 @@ class CharacterSheetProgression {
 				});
 			}
 
-			if (!isLegacyCumulativeSpellProgression && !isWizard && spellModel === "known") {
+			if (!isLegacyCumulativeKnownSpells && !isWizard && spellModel === "known") {
 				const current = CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, classData.name, levelInfo.classLevel);
 				const previous = levelInfo.classLevel > 1
 					? CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, classData.name, levelInfo.classLevel - 1)
@@ -3571,7 +3581,7 @@ class CharacterSheetProgression {
 			}
 
 			const swapCount = CharacterSheetClassUtils.getSpellSwapCount?.(classData.name, classData.source, levelInfo.classLevel) || 0;
-			if (!isLegacyCumulativeSpellProgression && swapCount > 0) {
+			if (!isLegacyCumulativeKnownSpells && swapCount > 0) {
 				const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel);
 				addDecision(levelInfo, {
 					type: "spellSwap",

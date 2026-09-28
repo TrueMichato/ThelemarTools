@@ -308,6 +308,31 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 			})).toBe(false);
 		});
 
+		it.each(["TGTT", "XPHB"])("does not let an incomplete cantrip repertoire erase a recorded %s Bard level-10 secret", source => {
+			const {state, page, borrowed} = getRecordedBard({source, acquiredSecret: true});
+			const history = state.getLevelHistory();
+			delete history[0].choices.cantrips;
+			for (const entry of history) {
+				if (entry.level !== 4) delete entry.choices.cantrips;
+			}
+			history[8].decisions = [{
+				type: "cantrips",
+				meta: {legacyCumulative: true},
+				selection: [{name: "Bard Cantrip 1", source: "XPHB", level: 0}],
+			}];
+
+			const manifest = CharacterSheetProgression.buildManifest({page, state});
+			const secret = manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 10);
+			expect(secret).toMatchObject({
+				sourceKey: "known-spells",
+				count: 1,
+				status: "resolved",
+				selection: [{name: borrowed.name, source: borrowed.source, level: 5}],
+			});
+			expect(manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 10))
+				.toMatchObject({meta: {legacyCumulative: true}});
+		});
+
 		it("keeps a genuinely cumulative repertoire when only one later level has recorded acquisitions", () => {
 			const {state, page, borrowed} = getRecordedBard({acquiredSecret: true});
 			const history = state.getLevelHistory();

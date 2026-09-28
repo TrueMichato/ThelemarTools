@@ -524,7 +524,18 @@ Cancel, or an unrelated Apply. Editing that specific pick converts its history
 and retained spell metadata to known-spell ownership; Undo on the active
 Respec instance restores the original pick. Other prepared casters retain
 their prepared-spell model. Quick Build's separate spell picker remains
-unchanged and may still omit Magical Secrets-only options.
+level-specific: it presents one acquisition level at a time, with the spells
+and cantrips gained there and that level's spell-level limit. TGTT/XPHB Bard
+level-10 (and later) acquisitions include Cleric/Druid/Wizard leveled spells
+without adding off-list cantrips; earlier acquisitions retain their ordinary
+list. Selections remain optional, but each picked spell is recorded under its
+own class-level history row rather than assigned from a pooled array. Saved
+level-owned choices reopen resolved in Respec when the exact source-qualified
+spell remains legal. Other known casters use the same level-aware selector;
+prepared-caster spell selection is unchanged.
+If an older save has a cumulative cantrip repertoire but recorded known-spell
+acquisitions, Respec retains the cumulative cantrip evidence without
+reclassifying those level-owned spells as one final repertoire.
 
 If real level-specific choices are missing, Review groups unresolved spell
 decisions into one repair item. The spell-repair flow prevents assigning the

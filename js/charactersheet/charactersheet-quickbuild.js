@@ -171,6 +171,7 @@ class CharacterSheetQuickBuild {
 			signatureSpells: [],
 			knownSpells: [], // Known-caster spells (Sorcerer, Bard, etc.)
 			knownCantrips: [], // Known-caster cantrips
+			knownSpellsByLevel: {}, // {characterLevel: {className, classSource, classLevel, spells, cantrips}}
 			preparedSpells: [], // Prepared-caster spells (XPHB Warlock, etc.)
 			preparedCantrips: [], // Prepared-caster cantrips
 			spells: [],
@@ -185,6 +186,7 @@ class CharacterSheetQuickBuild {
 		this._steps = [];
 		this._currentStep = 0;
 		this._hpRollsManual = new Set();
+		this._activeKnownSpellCharacterLevel = null;
 	}
 
 	// ==========================================
@@ -688,54 +690,18 @@ class CharacterSheetQuickBuild {
 		});
 		const spellbookLevels = analysis.filter(a => a.isSpellbookLevel);
 
-		// Aggregate known-spell gains across all levels for this QB
+		// Keep known-caster acquisitions grouped by their owning level.
 		const knownCasterLevels = analysis.filter(a => a.isKnownCaster && (a.knownSpellsGainAtLevel > 0 || a.knownCantripsGainAtLevel > 0));
-		let totalKnownSpellsGain = 0;
-		let totalKnownCantripsGain = 0;
-		let knownMaxSpellLevel = 0;
-		let knownCasterClassName = null;
-		let knownCasterClassSource = null;
-		for (const a of knownCasterLevels) {
-			totalKnownSpellsGain += a.knownSpellsGainAtLevel;
-			totalKnownCantripsGain += a.knownCantripsGainAtLevel;
-			knownMaxSpellLevel = Math.max(knownMaxSpellLevel, a.knownMaxSpellLevel);
-			knownCasterClassName = a.className;
-			knownCasterClassSource = a.classSource;
-		}
-		// Resolve subclass for the known caster to support features like Divine Soul
-		let knownCasterSubclass = null;
-		let knownCasterSubclassChoice = null;
-		if (knownCasterClassName) {
-			const subclassKey = `${knownCasterClassName}_${knownCasterClassSource}`;
-			const sub = this._selections.subclasses[subclassKey] || this._getSubclassForClass(knownCasterClassName, knownCasterClassSource, 0);
-			knownCasterSubclass = sub || null;
-			knownCasterSubclassChoice = this._selections.subclassChoices[subclassKey] || null;
-			// Also check existing character state
-			if (!knownCasterSubclass) {
-				const existing = this._state.getClasses().find(c => c.name === knownCasterClassName && c.source === knownCasterClassSource);
-				knownCasterSubclass = existing?.subclass || null;
-				knownCasterSubclassChoice = knownCasterSubclassChoice || existing?.subclassChoice || null;
-			}
-			// Resolve shallow `{name, source}` refs (from state.getClasses()) to the
-			// canonical full subclass so spell pickers can read `additionalSpells`
-			// and other lazy properties. Without this, expanded-spell filter blocks
-			// (e.g. Chronurgy's "source=EGW", Divine Soul's Cleric list) match nothing.
-			knownCasterSubclass = this._resolveSubclassFull(knownCasterSubclass, knownCasterClassName, knownCasterClassSource);
-		}
-		const knownCasterInfo = totalKnownSpellsGain > 0 || totalKnownCantripsGain > 0 ? {
-			className: knownCasterClassName,
-			classSource: knownCasterClassSource,
-			subclass: knownCasterSubclass,
-			subclassChoice: knownCasterSubclassChoice,
-			totalSpells: totalKnownSpellsGain,
-			totalCantrips: totalKnownCantripsGain,
-			maxSpellLevel: knownMaxSpellLevel,
+		const knownCasterInfo = knownCasterLevels.length ? {
+			levels: knownCasterLevels,
 			levelBreakdown: knownCasterLevels.map(a => ({
 				level: a.classLevel,
+				className: a.className,
 				spellsGain: a.knownSpellsGainAtLevel,
 				cantripsGain: a.knownCantripsGainAtLevel,
 			})),
 		} : null;
+		this._pruneKnownSpellSelections(knownCasterLevels);
 
 		// Aggregate prepared-spell gains across all levels (XPHB Warlock, etc.)
 		const preparedCasterLevels = analysis.filter(a => a.isPreparedCaster && (a.preparedSpellsGainAtLevel > 0 || a.preparedCantripsGainAtLevel > 0));
@@ -4194,64 +4160,218 @@ class CharacterSheetQuickBuild {
 	 * Uses the shared CharacterSheetSpellPicker component.
 	 */
 	_renderKnownSpellPicker (step, knownCasterInfo) {
-		const {className, classSource, totalSpells, totalCantrips, maxSpellLevel, levelBreakdown} = knownCasterInfo;
+		const {levels, levelBreakdown} = knownCasterInfo;
+		if (!levels?.length) throw new Error("Quick Build known-spell levels are missing.");
 
 		if (levelBreakdown && levelBreakdown.length > 1) {
-			const breakdown = this._renderLevelBreakdownPanel(levelBreakdown, className);
+			const breakdown = this._renderLevelBreakdownPanel(levelBreakdown);
 			step.append(breakdown);
 		}
 
-		const knownSpells = this._state.getSpells?.() || [];
-		const knownCantrips = this._state.getCantripsKnown?.() || [];
-		const knownSpellIds = new Set([...knownSpells, ...knownCantrips].map(s => `${s.name}|${s.source}`));
-
 		const sourceFiltered = this._page.getFilteredSpellData();
-
-		// Resolve subclass/subclassChoice from current selections (may have been updated in subclass step
-		// after knownCasterInfo was captured at step-build time)
-		const subclassKey = `${className}_${classSource}`;
-		const rawResolvedSubclass = this._selections.subclasses[subclassKey] || knownCasterInfo.subclass;
-		// Ensure full subclass object (with `additionalSpells`) — shallow stored
-		// refs from `state.getClasses()` would otherwise silently lose expanded
-		// spell blocks (Chronurgy, Divine Soul list, etc.).
-		const resolvedSubclass = this._resolveSubclassFull(rawResolvedSubclass, className, classSource);
-		const resolvedSubclassChoice = this._selections.subclassChoices[subclassKey] || knownCasterInfo.subclassChoice;
-
-		const additionalClassNames = CharacterSheetClassUtils.getAdditionalSpellListClasses({
-			className,
-			subclass: resolvedSubclass,
-			subclassChoice: resolvedSubclassChoice,
+		const selectorLabel = e_({tag: "label", clazz: "ve-bold", txt: "Spells gained at class level"});
+		const selector = e_({tag: "select", clazz: "ve-form-control charsheet__qb-known-level-select"});
+		selector.id = "quickbuild-known-spell-level";
+		selectorLabel.setAttribute("for", selector.id);
+		const optionsByLevel = new Map();
+		for (const level of levels) {
+			const option = e_({tag: "option", txt: `${level.className} ${level.classLevel} (${level.classSource}) · Character ${level.characterLevel}`});
+			option.value = String(level.characterLevel);
+			selector.append(option);
+			optionsByLevel.set(level.characterLevel, option);
+		}
+		const progress = e_({tag: "div", clazz: "charsheet__qb-known-level-progress"});
+		progress.setAttribute("aria-live", "polite");
+		const pickerHost = e_({tag: "div"});
+		const updateProgress = () => {
+			progress.innerHTML = "";
+			for (const level of levels) {
+				const picked = this._selections.knownSpellsByLevel[level.characterLevel];
+				const counts = [];
+				if (level.knownSpellsGainAtLevel) counts.push(`${picked?.spells?.length || 0}/${level.knownSpellsGainAtLevel} spells`);
+				if (level.knownCantripsGainAtLevel) counts.push(`${picked?.cantrips?.length || 0}/${level.knownCantripsGainAtLevel} cantrips`);
+				optionsByLevel.get(level.characterLevel).dataset.remaining = String(
+					level.knownSpellsGainAtLevel + level.knownCantripsGainAtLevel
+						- (picked?.spells?.length || 0) - (picked?.cantrips?.length || 0),
+				);
+				const item = e_({tag: "span", clazz: "charsheet__qb-known-level-count", txt: `${level.className} ${level.classLevel}: ${counts.join(", ")}`});
+				item.dataset.characterLevel = String(level.characterLevel);
+				progress.append(item);
+			}
+		};
+		const renderLevel = () => {
+			const level = levels.find(it => it.characterLevel === Number(this._activeKnownSpellCharacterLevel)) || levels[0];
+			this._activeKnownSpellCharacterLevel = level.characterLevel;
+			selector.value = String(level.characterLevel);
+			pickerHost.innerHTML = "";
+			const {className, classSource, classLevel, characterLevel} = level;
+			const {subclass, subclassChoice, additionalClassNames, additionalLeveledClassNames} = this._getKnownSpellEligibility(level);
+			const otherLevelSpells = levels
+				.filter(it => it.characterLevel !== characterLevel)
+				.flatMap(it => {
+					const picked = this._selections.knownSpellsByLevel[it.characterLevel];
+					return [...(picked?.spells || []), ...(picked?.cantrips || [])];
+				});
+			const knownSpellIds = new Set([
+				...(this._state.getSpells?.() || []),
+				...(this._state.getCantripsKnown?.() || []),
+				...otherLevelSpells,
+			].map(spell => `${spell.name}|${spell.source}`));
+			const selected = this._selections.knownSpellsByLevel[characterLevel];
+			const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
+				className,
+				classSource,
+				spellCount: level.knownSpellsGainAtLevel,
+				cantripCount: level.knownCantripsGainAtLevel,
+				maxSpellLevel: level.knownMaxSpellLevel,
+				allSpells: sourceFiltered,
+				knownSpellIds,
+				subclass,
+				subclassChoice,
+				additionalClassNames,
+				additionalLeveledClassNames,
+				onSelect: (spells, cantrips) => {
+					this._selections.knownSpellsByLevel[characterLevel] = {className, classSource, classLevel, spells, cantrips};
+					this._syncKnownSpellSelections();
+					updateProgress();
+				},
+				getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
+				getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
+				preSelectedSpells: selected?.spells || [],
+				preSelectedCantrips: selected?.cantrips || [],
+			});
+			pickerHost.append(section);
+			updateProgress();
+		};
+		selector.addEventListener("change", () => {
+			this._activeKnownSpellCharacterLevel = Number(selector.value);
+			renderLevel();
 		});
+		step.append(selectorLabel, selector, progress, pickerHost);
+		renderLevel();
+	}
 
-		const section = CharacterSheetSpellPicker.renderKnownSpellPicker({
-			className,
-			classSource,
-			spellCount: totalSpells,
-			cantripCount: totalCantrips,
-			maxSpellLevel,
-			allSpells: sourceFiltered,
-			knownSpellIds,
-			subclass: resolvedSubclass,
-			subclassChoice: resolvedSubclassChoice,
-			additionalClassNames,
-			onSelect: (spells, cantrips) => {
-				this._selections.knownSpells = spells;
-				this._selections.knownCantrips = cantrips;
-			},
-			getHoverLink: (page, name, source) => CharacterSheetPage.getHoverLink(page, name, source),
-			getSpellHoverLink: this._page.buildSpellHoverLinkFn(),
-			preSelectedSpells: this._selections.knownSpells,
-			preSelectedCantrips: this._selections.knownCantrips,
+	_getKnownSpellSubclass (level) {
+		const {className, classSource, classLevel, classData} = level;
+		if (classLevel < CharacterSheetClassUtils.getSubclassLevel(classData)) return {subclass: null, subclassChoice: null};
+		const key = `${className}_${classSource}`;
+		const raw = this._selections.subclasses[key] || this._getSubclassForClass(className, classSource, classLevel);
+		return {
+			subclass: this._resolveSubclassFull(raw, className, classSource),
+			subclassChoice: this._selections.subclassChoices[key]
+				|| this._state.getClasses()?.find(cls => cls.name === className && cls.source === classSource)?.subclassChoice
+				|| null,
+		};
+	}
+
+	_getKnownSpellEligibility (level) {
+		const {subclass, subclassChoice} = this._getKnownSpellSubclass(level);
+		return {
+			subclass,
+			subclassChoice,
+			additionalClassNames: CharacterSheetClassUtils.getAdditionalSpellListClasses({
+				className: level.className, subclass, subclassChoice,
+			}),
+			additionalLeveledClassNames: CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
+				className: level.className, classSource: level.classSource, classLevel: level.classLevel, subclass, subclassChoice,
+			}),
+		};
+	}
+
+	_isKnownSpellLegalAtLevel (spell, level, isCantrip, eligibility) {
+		if (!spell || (isCantrip ? spell.level !== 0 : spell.level < 1 || spell.level > level.knownMaxSpellLevel)) return false;
+		return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
+			className: level.className,
+			subclass: eligibility.subclass,
+			subclassChoice: eligibility.subclassChoice,
+			additionalClassNames: isCantrip ? eligibility.additionalClassNames : eligibility.additionalLeveledClassNames,
 		});
+	}
 
-		step.append(section);
+	_syncKnownSpellSelections () {
+		const ordered = (this._levelAnalysis || []).filter(level => level.isKnownCaster);
+		this._selections.knownSpells = ordered.flatMap(level => this._selections.knownSpellsByLevel[level.characterLevel]?.spells || []);
+		this._selections.knownCantrips = ordered.flatMap(level => this._selections.knownSpellsByLevel[level.characterLevel]?.cantrips || []);
+	}
+
+	_getKnownSpellSelectionIssue (levels, allSpells) {
+		const allowed = new Map(allSpells.map(spell => [`${spell.name}|${spell.source}`.toLowerCase(), spell]));
+		const used = new Set([...(this._state.getSpells?.() || []), ...(this._state.getCantripsKnown?.() || [])]
+			.map(spell => `${spell.name}|${spell.source}`.toLowerCase()));
+		for (const level of levels) {
+			const selected = this._selections.knownSpellsByLevel[level.characterLevel];
+			if (!selected) continue;
+			if (selected.className !== level.className || selected.classSource !== level.classSource || selected.classLevel !== level.classLevel) {
+				return `${level.className} ${level.classLevel} spell choices belong to a different class level.`;
+			}
+			const eligibility = this._getKnownSpellEligibility(level);
+			for (const [spells, count, isCantrip] of [
+				[selected.spells || [], level.knownSpellsGainAtLevel, false],
+				[selected.cantrips || [], level.knownCantripsGainAtLevel, true],
+			]) {
+				if (spells.length > count) return `Too many spells selected at ${level.className} ${level.classLevel}.`;
+				for (const selectedSpell of spells) {
+					const id = `${selectedSpell.name}|${selectedSpell.source}`.toLowerCase();
+					const spell = allowed.get(id);
+					if (used.has(id) || !this._isKnownSpellLegalAtLevel(spell, level, isCantrip, eligibility)) {
+						return `${selectedSpell.name} (${selectedSpell.source}) is not available at ${level.className} ${level.classLevel}.`;
+					}
+					used.add(id);
+				}
+			}
+		}
+		return null;
+	}
+
+	_pruneKnownSpellSelections (levels) {
+		const selected = this._selections.knownSpellsByLevel;
+		if (!Object.keys(selected).length) return;
+		const validLevels = new Set(levels.map(level => String(level.characterLevel)));
+		let removed = 0;
+		for (const key of Object.keys(selected)) {
+			if (validLevels.has(key)) continue;
+			removed += (selected[key].spells?.length || 0) + (selected[key].cantrips?.length || 0);
+			delete selected[key];
+		}
+		const allowed = new Map(this._page.getFilteredSpellData()
+			.map(spell => [`${spell.name}|${spell.source}`.toLowerCase(), spell]));
+		const used = new Set([...(this._state.getSpells?.() || []), ...(this._state.getCantripsKnown?.() || [])]
+			.map(spell => `${spell.name}|${spell.source}`.toLowerCase()));
+		for (const level of levels) {
+			const old = selected[level.characterLevel];
+			if (!old) continue;
+			const sameOwner = old.className === level.className && old.classSource === level.classSource && old.classLevel === level.classLevel;
+			if (!sameOwner) {
+				removed += (old.spells?.length || 0) + (old.cantrips?.length || 0);
+				delete selected[level.characterLevel];
+				continue;
+			}
+			const eligibility = this._getKnownSpellEligibility(level);
+			for (const [field, count, isCantrip] of [
+				["spells", level.knownSpellsGainAtLevel, false],
+				["cantrips", level.knownCantripsGainAtLevel, true],
+			]) {
+				const candidates = old[field] || [];
+				let kept = 0;
+				old[field] = candidates.filter(spell => {
+					const id = `${spell.name}|${spell.source}`.toLowerCase();
+					const legal = kept < count && !used.has(id)
+						&& this._isKnownSpellLegalAtLevel(allowed.get(id), level, isCantrip, eligibility);
+					if (legal) { kept++; used.add(id); }
+					return legal;
+				});
+				removed += candidates.length - old[field].length;
+			}
+		}
+		this._syncKnownSpellSelections();
+		if (removed) JqueryUtil.doToast({type: "warning", content: `${removed} Quick Build spell choice${removed === 1 ? "" : "s"} no longer fit the selected levels or spell lists and were removed. Please review your spell picks.`});
 	}
 
 	/**
 	 * Render a collapsible panel showing per-level spell gain breakdown.
 	 * Helps users understand where their spell budget comes from in multi-level builds.
 	 */
-	_renderLevelBreakdownPanel (levelBreakdown, className) {
+	_renderLevelBreakdownPanel (levelBreakdown) {
 		const totalSpells = levelBreakdown.reduce((sum, l) => sum + l.spellsGain, 0);
 		const totalCantrips = levelBreakdown.reduce((sum, l) => sum + l.cantripsGain, 0);
 
@@ -4282,7 +4402,7 @@ class CharacterSheetQuickBuild {
 			chevron.classList.toggle("charsheet__qb-level-breakdown-chevron--expanded", !isExpanded);
 		});
 
-		levelBreakdown.forEach(({level, spellsGain, cantripsGain}) => {
+		levelBreakdown.forEach(({level, className, spellsGain, cantripsGain}) => {
 			const gains = [];
 			if (spellsGain > 0) gains.push(`+${spellsGain} spell${spellsGain !== 1 ? "s" : ""}`);
 			if (cantripsGain > 0) gains.push(`+${cantripsGain} cantrip${cantripsGain !== 1 ? "s" : ""}`);
@@ -4379,6 +4499,14 @@ class CharacterSheetQuickBuild {
 		const crossesSignatureSpells = this._levelAnalysis.some(a => a.className === "Wizard" && a.classLevel === 20);
 		if (crossesSignatureSpells && (this._selections.signatureSpells.length !== 2 || new Set(this._selections.signatureSpells.map(s => `${s.name}|${s.source}`)).size !== 2)) {
 			JqueryUtil.doToast({type: "warning", content: "Choose two different level 3 Signature Spells."});
+			return false;
+		}
+		const knownLevels = knownCasterInfo?.levels || [];
+		const knownIssue = knownLevels.length
+			? this._getKnownSpellSelectionIssue(knownLevels, this._page.getFilteredSpellData())
+			: null;
+		if (knownIssue) {
+			JqueryUtil.doToast({type: "warning", content: knownIssue});
 			return false;
 		}
 		return true;
@@ -4958,6 +5086,11 @@ class CharacterSheetQuickBuild {
 			JqueryUtil.doToast({type: "danger", content: featIssues[0]});
 			return;
 		}
+		const knownLevels = this._levelAnalysis.filter(level => level.isKnownCaster);
+		const knownIssue = knownLevels.length
+			? this._getKnownSpellSelectionIssue(knownLevels, this._page.getFilteredSpellData())
+			: null;
+		if (knownIssue) throw new Error(`Quick Build spell selection: ${knownIssue}`);
 		const conMod = this._state.getAbilityMod("con");
 		const pendingHistoryEntries = [];
 
@@ -5251,30 +5384,21 @@ class CharacterSheetQuickBuild {
 		if (this._selections.spellMasterySpells.length) this._state.setSpellMasterySpells(this._selections.spellMasterySpells);
 		if (this._selections.signatureSpells.length) this._state.setSignatureSpells(this._selections.signatureSpells);
 
-		// Apply known spells (Sorcerer, Bard, Ranger, Warlock, etc.)
-		if (this._selections.knownSpells.length > 0) {
-			const knownClass = this._classAllocations.find(a =>
-				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
-			);
-			this._selections.knownSpells.forEach(spell => {
+		// Apply known spells and cantrips from their actual class-level owners.
+		for (const level of knownLevels) {
+			const selected = this._selections.knownSpellsByLevel[level.characterLevel];
+			(selected?.spells || []).forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Spells Known",
-					sourceClass: knownClass?.className || "",
-					sourceClassSource: knownClass?.classSource || null,
+					sourceClass: level.className,
+					sourceClassSource: level.classSource,
 				}));
 			});
-		}
-
-		// Apply known cantrips
-		if (this._selections.knownCantrips.length > 0) {
-			const knownClass = this._classAllocations.find(a =>
-				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
-			);
-			this._selections.knownCantrips.forEach(spell => {
+			(selected?.cantrips || []).forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
-					sourceClass: knownClass?.className || "",
-					sourceClassSource: knownClass?.classSource || null,
+					sourceClass: level.className,
+					sourceClassSource: level.classSource,
 				}));
 			});
 		}
@@ -5725,18 +5849,9 @@ class CharacterSheetQuickBuild {
 			if (spellbook.length) entry.choices.spellbookSpells = spellbook;
 		}
 		if (analysis.isKnownCaster) {
-			const knownSpells = takeProgressionSelections({
-				field: "knownSpells",
-				gainField: "knownSpellsGainAtLevel",
-				matches: candidate => candidate.isKnownCaster,
-			});
-			const cantrips = takeProgressionSelections({
-				field: "knownCantrips",
-				gainField: "knownCantripsGainAtLevel",
-				matches: candidate => candidate.isKnownCaster,
-			});
-			if (knownSpells.length) entry.choices.knownSpells = knownSpells;
-			if (cantrips.length) entry.choices.knownCantrips = cantrips;
+			const selected = this._selections.knownSpellsByLevel[analysis.characterLevel];
+			if (selected?.spells?.length) entry.choices.knownSpells = toHistorySpells(selected.spells);
+			if (selected?.cantrips?.length) entry.choices.knownCantrips = toHistorySpells(selected.cantrips);
 		}
 		if (analysis.isPreparedCaster) {
 			const preparedSpells = takeProgressionSelections({

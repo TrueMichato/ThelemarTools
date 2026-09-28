@@ -493,6 +493,18 @@ class CharacterSheetSpawnAutoFill {
 				return picked.length;
 			}
 		}
+		const levelSelector = this._root.querySelector(".charsheet__qb-known-level-select");
+		if (levelSelector) {
+			const options = [...levelSelector.options];
+			const current = options.findIndex(option => option.value === levelSelector.value);
+			const next = [...options.slice(current + 1), ...options.slice(0, current)]
+				.find(option => Number(option.dataset.remaining) > 0);
+			if (next) {
+				levelSelector.value = next.value;
+				levelSelector.dispatchEvent(new Event("change", {bubbles: true}));
+				return 1;
+			}
+		}
 		return 0;
 	}
 
