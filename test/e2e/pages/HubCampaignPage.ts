@@ -1,4 +1,4 @@
-import {expect, Page, Request, Route} from "@playwright/test";
+import {expect, type Locator, Page, Request, Route} from "@playwright/test";
 import {waitForToolsLoaded} from "../utils/waitHelpers";
 
 type HubSession = {
@@ -1250,6 +1250,19 @@ export class HubCampaignPage {
 		return result.body;
 	}
 
+	private async openSharingControls (): Promise<Locator> {
+		const sharing = this.page.locator(".charsheet__sharing");
+		const toggle = sharing.getByRole("button", {name: /What other players can see/});
+		const content = sharing.locator("#charsheet-sharing-content");
+		await expect(sharing).toBeVisible();
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute("aria-controls", "charsheet-sharing-content");
+		if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(content).toBeVisible();
+		return sharing;
+	}
+
 	/**
 	 * Drive the real sharing controls and the real Save button.
 	 *
@@ -1258,8 +1271,7 @@ export class HubCampaignPage {
 	 * request the browser actually sends.
 	 */
 	async changeSharingPresetAndSave ({preset, expectPreviewText}: {preset: string; expectPreviewText: string}): Promise<void> {
-		const sharing = this.page.locator(".charsheet__sharing");
-		await expect(sharing).toBeVisible();
+		const sharing = await this.openSharingControls();
 		await sharing.locator(`input[name='charsheet-sharing-preset'][value='${preset}']`).check();
 		await sharing.locator(".charsheet__sharing-save").click();
 		await expect(sharing.locator(".charsheet__sharing-feedback--success")).toHaveText("Sharing settings saved.");
@@ -1268,7 +1280,7 @@ export class HubCampaignPage {
 
 	/** Set one field to "Show instead" and save, exercising the generated typed controls. */
 	async replaceSharedFieldAndSave ({field, expectPreviewText}: {field: string; expectPreviewText: string}): Promise<void> {
-		const sharing = this.page.locator(".charsheet__sharing");
+		const sharing = await this.openSharingControls();
 		await sharing.locator(`input[name='charsheet-sharing-${field}'][value='replace']`).check();
 		await expect(sharing.locator(".charsheet__sharing-replacement").first()).toBeVisible();
 		await sharing.locator(".charsheet__sharing-save").click();
@@ -1281,8 +1293,7 @@ export class HubCampaignPage {
 	 * preview must reflect the server's own peer profile.
 	 */
 	async expectSharingControls ({previewText}: {previewText: string}): Promise<void> {
-		const sharing = this.page.locator(".charsheet__sharing");
-		await expect(sharing).toBeVisible();
+		const sharing = await this.openSharingControls();
 		await expect(sharing.locator(".charsheet__sharing-presets legend")).toHaveText("Sharing level");
 		await expect(sharing.locator("input[name='charsheet-sharing-preset'][value='minimal']")).toBeChecked();
 		await expect(sharing.locator(".charsheet__sharing-preview")).toContainText(previewText);
@@ -1301,7 +1312,8 @@ export class HubCampaignPage {
 		replacedText: string;
 		omittedText: string;
 	}): Promise<void> {
-		const preview = this.page.locator(".charsheet__sharing-preview");
+		const sharing = await this.openSharingControls();
+		const preview = sharing.locator(".charsheet__sharing-preview");
 		await expect(preview).toContainText(sharedText);
 		await expect(preview.locator(".charsheet__sharing-preview-status--replace")).toHaveText("Shown instead");
 		await expect(preview.locator(".charsheet__sharing-preview-status--replace").locator("xpath=..")).toContainText(replacedText);
@@ -1364,6 +1376,33 @@ export class HubCampaignPage {
 			path: `/charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`,
 			name,
 		});
+	}
+
+	async expectSharingDisclosurePreservesDraft (): Promise<void> {
+		const toggle = this.page.locator(".charsheet__sharing-toggle");
+		const content = this.page.locator("#charsheet-sharing-content");
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute("aria-controls", "charsheet-sharing-content");
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(toggle).toContainText("Expand");
+		await expect(content).toBeHidden();
+
+		await toggle.press("Enter");
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(toggle).toContainText("Collapse");
+		await expect(content).toBeVisible();
+
+		const openPreset = this.page.getByLabel("Open book");
+		await openPreset.check();
+		await expect(openPreset).toBeChecked();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+		await toggle.press(" ");
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(content).toBeHidden();
+		await toggle.press("Enter");
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(openPreset).toBeChecked();
 	}
 
 	async waitForCharacterRealtimeLive (): Promise<void> {

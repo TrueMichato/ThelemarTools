@@ -209,6 +209,39 @@ test.describe("device-scoped active campaign context", () => {
 		}
 	});
 
+	test("uses the same accessible sharing disclosure from campaign and direct Character Sheet entry", async ({browser}) => {
+		test.setTimeout(180_000);
+		const context = await browser.newContext(contextOptions);
+		try {
+			const hub = new HubCampaignPage(await context.newPage());
+			await hub.signInSynthetic({providerSubject: "sharing-entry-dm", displayName: "Sharing Entry DM", secret: secret!});
+			const campaignId = await hub.createCampaign("Sharing Entry E2E");
+			const campaignCharacter = await hub.createCharacter({campaignId, name: "Campaign Entry Hero"});
+			const directCharacter = await hub.createCharacter({campaignId, name: "Direct Entry Hero"});
+
+			await hub.gotoCampaign(campaignId);
+			const campaignLink = hub.page.locator("#campaign-character-list .hub-data-row", {hasText: "Campaign Entry Hero"});
+			await expect(campaignLink).toHaveAttribute(
+				"href",
+				`charactersheet.html?id=${encodeURIComponent(campaignCharacter.id)}&hubCampaign=${encodeURIComponent(campaignId)}`,
+			);
+			await campaignLink.click();
+			await hub.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await hub.expectSharingDisclosurePreservesDraft();
+
+			const direct = new HubCampaignPage(await context.newPage());
+			await direct.openCharacterSheet({campaignId, characterId: directCharacter.id, name: "Direct Entry Hero"});
+			await direct.expectSharingDisclosurePreservesDraft();
+
+			const local = new HubCampaignPage(await context.newPage());
+			await local.page.goto("/charactersheet.html?local=1");
+			await local.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(local.page.locator(".charsheet__sharing")).toHaveCount(0);
+		} finally {
+			await pCloseContext(context);
+		}
+	});
+
 	test("survives a BFCache round trip without losing campaign rules", async ({browser}) => {
 		test.setTimeout(180_000);
 		const context = await browser.newContext(contextOptions);

@@ -239,6 +239,7 @@ export class CharacterSheetSharing {
 		this._replacementDrafts = {};
 		this._isSaving = false;
 		this._expandedField = null;
+		this._isExpanded = false;
 	}
 
 	getState () {
@@ -419,20 +420,47 @@ export class CharacterSheetSharing {
 
 	render ({fnRerender}) {
 		const root = el("section", {className: "charsheet__sharing", attrs: {"aria-labelledby": "charsheet-sharing-heading"}});
-		root.append(el("h3", {className: "charsheet__sharing-heading", text: "What other players can see", attrs: {id: "charsheet-sharing-heading"}}));
+		const heading = el("h3", {className: "charsheet__sharing-heading", attrs: {id: "charsheet-sharing-heading"}});
+		const content = el("div", {className: "charsheet__sharing-content", attrs: {id: "charsheet-sharing-content"}});
+		const toggle = el("button", {
+			className: "charsheet__sharing-toggle",
+			attrs: {
+				type: "button",
+				"aria-controls": "charsheet-sharing-content",
+			},
+		});
+		const toggleLabel = el("span", {className: "charsheet__sharing-toggle-label", text: "What other players can see"});
+		const toggleState = el("span", {className: "charsheet__sharing-toggle-state"});
+		const toggleIcon = el("span", {attrs: {"aria-hidden": "true"}});
+		const toggleStateText = el("span", {className: "charsheet__sharing-toggle-state-text"});
+		toggleState.append(toggleIcon, toggleStateText);
+		toggle.append(toggleLabel, toggleState);
+		const syncDisclosure = () => {
+			toggle.setAttribute("aria-expanded", `${this._isExpanded}`);
+			content.hidden = !this._isExpanded;
+			toggleIcon.className = `glyphicon glyphicon-chevron-${this._isExpanded ? "down" : "right"}`;
+			toggleStateText.textContent = this._isExpanded ? "Collapse" : "Expand";
+		};
+		toggle.addEventListener("click", () => {
+			this._isExpanded = !this._isExpanded;
+			syncDisclosure();
+		});
+		syncDisclosure();
+		heading.append(toggle);
+		root.append(heading, content);
 
 		if (this._state === "loading") {
-			root.append(el("p", {className: "charsheet__sharing-loading", text: "Loading sharing settings…", attrs: {role: "status", "aria-live": "polite"}}));
+			content.append(el("p", {className: "charsheet__sharing-loading", text: "Loading sharing settings…", attrs: {role: "status", "aria-live": "polite"}}));
 			return root;
 		}
 		if (this._state === "unavailable") return root;
 		if (this._state === "error") {
-			root.append(el("p", {className: "charsheet__sharing-feedback charsheet__sharing-feedback--error", text: this._feedback?.text || "Sharing settings are unavailable.", attrs: {role: "alert"}}));
+			content.append(el("p", {className: "charsheet__sharing-feedback charsheet__sharing-feedback--error", text: this._feedback?.text || "Sharing settings are unavailable.", attrs: {role: "alert"}}));
 			return root;
 		}
-		if (this._state === "invalid") root.append(this._renderInvalidBanner({fnRerender}));
+		if (this._state === "invalid") content.append(this._renderInvalidBanner({fnRerender}));
 
-		root.append(
+		content.append(
 			el("p", {className: "charsheet__sharing-intro", text: "You choose what the rest of the table sees. Your DM always sees your full sheet.", attrs: {id: "charsheet-sharing-intro"}}),
 			this._renderPresets({fnRerender}),
 			this._renderFields({fnRerender}),
@@ -440,7 +468,7 @@ export class CharacterSheetSharing {
 			this._renderSaveRow({fnRerender}),
 		);
 		if (this._feedback) {
-			root.append(el("p", {
+			content.append(el("p", {
 				className: `charsheet__sharing-feedback charsheet__sharing-feedback--${this._feedback.type}`,
 				text: this._feedback.text,
 				attrs: {role: this._feedback.type === "error" ? "alert" : "status", "aria-live": "polite"},
