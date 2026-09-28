@@ -630,11 +630,22 @@ UI, PDF/export, and E2E coverage remain later milestones.
 | Builder | SpellPicker | Known spell / cantrip selection |
 | LevelUp | ClassUtils | Feature extraction, expertise, languages |
 | LevelUp | SpellPicker | Spell selection at level up |
-| QuickBuild | ClassUtils + SpellPicker | Same as above, batched |
+| QuickBuild | ClassUtils + SpellPicker | One known-spell picker per acquisition level within a batched Spells step; prepared selections remain batched |
 | Combat | State | getBonusFromStates(), conditions, AC |
 | Rest | State | HP recovery, slot restoration, hit dice |
 | NpcExporter | State | Read-only conversion to monster format |
 | Features | State | getFeatureCalculations(), resource tracking |
+
+Quick Build's known-caster Spells step retains selections by character level,
+then writes each `knownSpells`/`knownCantrips` choice to that level's history
+row. The level selector passes the owning class level, that level's spell-slot
+limit, and `getProgressionAdditionalSpellListClassNames()` for leveled spells
+to the shared `CharacterSheetSpellPicker`. Ordinary subclass lists still apply
+to cantrips; TGTT/XPHB Bard Magical Secrets never expand cantrip eligibility.
+On reanalysis, obsolete or newly illegal picks are removed with a warning.
+Respec distinguishes cumulative legacy cantrips from recorded level-specific
+spells independently, so a missing Builder cantrip history cannot turn a
+Quick Build level-10 spell into a cumulative repertoire decision.
 
 ### Progression and Respec graph
 

@@ -19,6 +19,7 @@
  */
 
 import "../../../js/charactersheet/charactersheet-spawn-autofill.js";
+import {jest} from "@jest/globals";
 
 const CharacterSheetSpawnAutoFill = globalThis.CharacterSheetSpawnAutoFill;
 
@@ -49,6 +50,33 @@ describe("CharacterSheetSpawnAutoFill button-grid label classifier", () => {
 			"Choose abilities to increase",
 		])("%s → 1", (label) => {
 			expect(wantCountFor(label)).toBe(1);
+		});
+	});
+
+	describe("CharacterSheetSpawnAutoFill Quick Build spell levels", () => {
+		it("visits every remaining acquisition level instead of stopping at the first completed picker", () => {
+			const options = [
+				{value: "9", dataset: {remaining: "0"}},
+				{value: "10", dataset: {remaining: "2"}},
+				{value: "11", dataset: {remaining: "1"}},
+			];
+			const selector = {value: "9", options, dispatchEvent: jest.fn()};
+			const fill = Object.create(CharacterSheetSpawnAutoFill.prototype);
+			fill._root = {
+				querySelectorAll: () => [],
+				querySelector: name => name === ".charsheet__qb-known-level-select" ? selector : null,
+			};
+			expect(fill._fillSpellPickers()).toBe(1);
+			expect(selector.value).toBe("10");
+			expect(selector.dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({type: "change"}));
+			options[1].dataset.remaining = "0";
+			expect(fill._fillSpellPickers()).toBe(1);
+			expect(selector.value).toBe("11");
+			options[2].dataset.remaining = "0";
+			expect(fill._fillSpellPickers()).toBe(0);
+			options[0].dataset.remaining = "1";
+			expect(fill._fillSpellPickers()).toBe(1);
+			expect(selector.value).toBe("9");
 		});
 	});
 

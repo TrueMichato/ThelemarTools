@@ -23242,6 +23242,26 @@ body.is-charsheet-page .ve-ui-modal__scroller:has(.charsheet__custom-item-layout
    QuickBuild Level Breakdown Panel
    =========================================== */
 
+.charsheet__qb-known-level-select {
+	display: block;
+	max-width: 32rem;
+	margin: 0.5rem 0 0.75rem;
+}
+
+.charsheet__qb-known-level-progress {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	margin-bottom: 0.75rem;
+}
+
+.charsheet__qb-known-level-count {
+	padding: 0.25rem 0.55rem;
+	border: 1px solid var(--cs-border, #ddd);
+	border-radius: var(--cs-radius-full, 9999px);
+	font-size: 0.8rem;
+}
+
 .charsheet__qb-level-breakdown {
 	border: 1px solid rgba(99, 102, 241, 0.15);
 	border-radius: var(--cs-radius-md, 10px);

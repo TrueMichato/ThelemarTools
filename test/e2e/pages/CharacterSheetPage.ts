@@ -1799,7 +1799,11 @@ export class CharacterSheetPage {
 		await expect(editor).toBeVisible();
 		const options = editor.locator(".charsheet__respec-option input:enabled");
 		expect(await options.count()).toBeGreaterThanOrEqual(decision.count);
-		for (let i = 0; i < decision.count; i++) await options.nth(i).check();
+		const selected = editor.locator(".charsheet__respec-option input:checked");
+		for (let count = await selected.count(); count < decision.count; count++) {
+			await editor.locator(".charsheet__respec-option input:enabled:not(:checked)").first().check();
+		}
+		expect(await selected.count()).toBe(decision.count);
 		await editor.locator("button", {hasText: "Stage Choice"}).click();
 		await expect.poll(async () => (await this.getRespecBlockingDecisions())
 			.some(item => item.id === decision.id)).toBe(false);

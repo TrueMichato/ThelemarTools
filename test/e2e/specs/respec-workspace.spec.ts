@@ -3,6 +3,7 @@ import path from "node:path";
 import {expect, test} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {LevelUpPage} from "../pages/LevelUpPage";
+import {QuickBuildPage} from "../pages/QuickBuildPage";
 import {clearCharacterStorage} from "../utils/characterStorage";
 import {
 	createCharacterViaWizard,
@@ -24,6 +25,90 @@ test.describe("Respec workspace", () => {
 	test.beforeEach(async ({page}) => {
 		await clearCharacterStorage(page);
 	});
+
+	for (const {source, startLevel} of [{source: "TGTT", startLevel: 9}, {source: "XPHB", startLevel: 8}]) {
+		test(`${source} Bard Quick Build L${startLevel}→10 keeps Magical Secrets in its level-10 Respec decision`, async ({page}) => {
+			test.setTimeout(240_000);
+			await gotoWithThelemar(page);
+			const {charSheet} = await createCharacterViaWizard(page, {
+				...PRESET_BARD,
+				name: `${source} Quick Build Secrets`,
+				background: "Soldier",
+				bgSource: "PHB",
+				classSource: source === "XPHB" ? "PHB'24" : "TGTT",
+				...(source === "XPHB" ? {prioritySources: ["XPHB"]} : {}),
+				subclassName: "College of Valor",
+				subclassSource: source === "XPHB" ? "PHB'24" : "TGTT-2024",
+			});
+			await levelUpTo(page, startLevel, {
+				subclassName: "College of Valor",
+				subclassSource: source === "XPHB" ? "PHB'24" : "TGTT-2024",
+			});
+			const quickBuild = new QuickBuildPage(page);
+			await quickBuild.open();
+			await quickBuild.setTargetLevel(10);
+			await quickBuild.advanceToSpells();
+			let levelNinePicks: Array<{name: string; source: string}> = [];
+			if (startLevel === 8) {
+				await quickBuild.selectAcquisitionLevel(9);
+				expect(await quickBuild.getSpellOptions("Spirit Guardians")).toEqual([]);
+				expect(await quickBuild.getSpellOptions("Heal")).toEqual([]);
+				const first = await quickBuild.selectFirstAvailableSpell();
+				const second = await quickBuild.selectFirstAvailableSpell();
+				expect(first.name).toBeTruthy();
+				expect(second.name).toBeTruthy();
+				expect(second).not.toEqual(first);
+				levelNinePicks = [first, second];
+				expect(await quickBuild.getLevelProgress(9)).toContain("2/2 spells");
+			}
+			await quickBuild.selectAcquisitionLevel(10);
+			expect(await quickBuild.getSpellOptions("Spirit Guardians")).toContainEqual({
+				name: "Spirit Guardians", source: "PHB'24", level: 3,
+			});
+			expect(await quickBuild.getSpellOptions("Shield")).toContainEqual({
+				name: "Shield", source: "PHB'24", level: 1,
+			});
+			expect(await quickBuild.getSpellOptions("Fire Bolt")).toEqual([]);
+			expect(await quickBuild.getSpellOptions("Heal")).toEqual([]);
+			await quickBuild.selectSpell("Spirit Guardians", "PHB'24");
+			const cantrip = await quickBuild.selectFirstAvailableCantrip();
+			expect(cantrip.name).not.toBe("Fire Bolt");
+			expect(await quickBuild.getLevelProgress(10)).toContain("1/1 spells");
+			expect(await quickBuild.getLevelProgress(10)).toContain("1/1 cantrips");
+			await quickBuild.finish();
+			await charSheet.expectLevel(10);
+			if (startLevel === 8) {
+				const levelNine = await quickBuild.getRecordedLevelSpells(9);
+				expect(levelNine.choices).toHaveLength(2);
+				expect(levelNine.choices.map(({name}) => name)).toEqual(levelNinePicks.map(({name}) => name));
+				expect(levelNine.choices.map(({name}) => name)).not.toContain("Spirit Guardians");
+				expect(levelNine.live).toEqual(expect.arrayContaining(levelNine.choices.map(({name, source: spellSource}) =>
+					expect.objectContaining({name, source: spellSource, sourceClass: "Bard", sourceClassSource: source})),
+				));
+			}
+			const built = await charSheet.getLevelTenBardSpellEvidence();
+			expect(built.classSource).toBe(source);
+			expect(built.choice.knownSpells).toEqual([{name: "Spirit Guardians", source: "XPHB", level: 3}]);
+			expect(built.choice.knownCantrips).toHaveLength(1);
+			expect(built.choice.knownCantrips?.[0].name).toBe(cantrip.name);
+			expect(built.choice.preparedSpells).toBeUndefined();
+			expect(built.spells).toEqual(expect.arrayContaining([
+				expect.objectContaining({
+					name: "Spirit Guardians", source: "XPHB", sourceFeature: "Spells Known",
+					sourceClass: "Bard", sourceClassSource: source, prepared: false,
+				}),
+			]));
+			await charSheet.reloadCharacterSheet();
+			if (startLevel === 8) expect((await quickBuild.getRecordedLevelSpells(9)).choices).toHaveLength(2);
+			expect((await charSheet.getLevelTenBardSpellEvidence()).choice).toMatchObject(built.choice);
+			await charSheet.openRespec();
+			const decision = await charSheet.getLevelTenBardRespecDecision();
+			expect(decision.status, JSON.stringify(decision.issues)).toBe("resolved");
+			expect(decision.id).toContain("knownspells:known-spells:");
+			expect(decision.issues).toEqual([]);
+			expect(decision.selection).toEqual([expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})]);
+		});
+	}
 
 	test("Bard Magical Secrets uses real level-10 known-spell Level Up choices", async ({page}) => {
 		test.setTimeout(240_000);
