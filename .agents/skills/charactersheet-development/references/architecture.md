@@ -671,6 +671,16 @@ decisions, and actionable issues. Permanent nested acquisitions use stable
 semantic keys with parent/root links, provenance, occurrence, pick slot, and
 compact source receipts. Origin decisions are persisted in
 `characterBase.decisions`; class decisions remain on level-history entries.
+Builder and Respec share `CharacterSheetClassUtils.raceProvidesAbilityBonuses`:
+race ability data owns its ASI regardless of class edition; otherwise a
+background may own its weighted picks. Race choices are keyed by exact
+`name|source` and a `count: 2` racial ability descriptor reads both
+`choose_<set>_0` and `choose_<set>_1` with reversible bonus receipts. Present
+owner-qualified partial picks invalidate a stale resolved base ledger; a
+parent species-picker edit must not rehydrate an old child selection over
+newly recorded picks. Builder persists Tasha reassignment on the later
+Abilities step; Respec never reconstructs absent Tasha choices from
+aggregate scores.
 
 Choice discovery is catalog-backed but catalog-transient. The production census
 must classify structured options, union grants, recurring pools,

@@ -601,8 +601,8 @@ class CharacterSheetRespecEngine {
 			this._setDirty();
 			const refreshed = this.refreshManifest({persist: false});
 			// A parent replacement may leave some child identities legal (for
-			// example, a recurring pool slot). Rehydrate only exact semantic
-			// matches whose old selections are still present in the new catalog.
+			// example, a recurring pool slot). Rehydrate only when the old
+			// selection remains legal and the mutation has not chosen another.
 			const keyOf = value => typeof value === "string"
 				? value.toLowerCase()
 				: `${String(value?.name || value?.value || value?.choice || "").toLowerCase()}|${String(value?.source || "").toLowerCase()}`;
@@ -612,6 +612,11 @@ class CharacterSheetRespecEngine {
 				const selected = Array.isArray(snapshot.selection) ? snapshot.selection : [snapshot.selection];
 				const legal = new Set((next.options || []).map(keyOf));
 				if (selected.length !== next.count || selected.some(value => !legal.has(keyOf(value)))) continue;
+				const discovered = Array.isArray(next.selection) ? next.selection : [next.selection];
+				if (next.selection != null && (
+					discovered.length !== selected.length
+					|| discovered.some((value, ix) => keyOf(value) !== keyOf(selected[ix]))
+				)) continue;
 				const nextStore = this._getDecisionStore(next).container;
 				if (!nextStore?.decisions) continue;
 				const nextStored = CharacterSheetProgression.normalizeDecision({

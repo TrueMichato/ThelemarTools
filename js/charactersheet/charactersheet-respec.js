@@ -1170,10 +1170,17 @@ class CharacterSheetRespec {
 					});
 				}
 				if (raceUserChoices.selectedAbilityChoices) {
+					const ownerUids = this._getRaceAbilityOwnerUids(race);
 					Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
-						if (key.includes("_weight")) return;
-						const bonus = raceUserChoices.selectedAbilityChoices[`${key}_weight`] || 0;
-						addBonus(/** @type {*} */ (value), bonus);
+						if (value && typeof value === "object") {
+							if (!ownerUids.has(key.trim().toLowerCase())) return;
+							Object.entries(value).forEach(([pickKey, ability]) => {
+								if (!/^choose_\d+_\d+$/.test(pickKey)) return;
+								addBonus(/** @type {*} */ (ability), value[`${pickKey}_amount`]);
+							});
+						} else if (!key.endsWith("_weight") && !key.endsWith("_amount")) {
+							addBonus(/** @type {*} */ (value), raceUserChoices.selectedAbilityChoices[`${key}_weight`] || 0);
+						}
 					});
 				}
 			}
@@ -2350,7 +2357,7 @@ class CharacterSheetRespec {
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
 				const isOriginAbility = decision.scope === "origin"
 					&& ["race", "background"].includes(decision.provenance?.ownerType);
-				next.forEach(value => {
+				next.forEach((value, pickIndex) => {
 					const ability = String(value || "").toLowerCase();
 					if (!ability) return;
 					if (isOriginAbility) {
@@ -2374,8 +2381,8 @@ class CharacterSheetRespec {
 							};
 							const choiceIndex = Number(String(decision.provenance?.sourcePath || "")
 								.match(/ability\[(\d+)\]/)?.[1] || 0);
-							ownerChoices[`choose_${choiceIndex}_0`] = ability;
-							ownerChoices[`choose_${choiceIndex}_0_amount`] = amount;
+							ownerChoices[`choose_${choiceIndex}_${pickIndex}`] = ability;
+							ownerChoices[`choose_${choiceIndex}_${pickIndex}_amount`] = amount;
 							this._state.setBaseRaceUserChoices(choices);
 						} else if (decision.provenance?.ownerType === "background") {
 							const choices = MiscUtil.copyFast(this._state.getBaseBackgroundUserChoices?.() || {});
@@ -5411,7 +5418,7 @@ class CharacterSheetRespec {
 
 	async _stageSameRaceAbilityChoices (userChoices) {
 		const selections = Object.entries(userChoices?.selectedAbilityChoices || {})
-			.filter(([key, value]) => !key.endsWith("_weight") && value)
+			.filter(([key, value]) => /^rc_\d+$/.test(key) && value)
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([, value]) => value);
 		const parent = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originRace");
@@ -5422,18 +5429,21 @@ class CharacterSheetRespec {
 				&& decision.provenance?.ownerType === "race",
 			)
 			.sort((a, b) => Number(a.slot) - Number(b.slot));
-		if (!selections.length || selections.length !== decisions.length) return false;
+		if (!selections.length || selections.length !== decisions.reduce((sum, decision) => sum + decision.count, 0)) return false;
 
+		let selectionIndex = 0;
 		for (let ix = 0; ix < decisions.length; ++ix) {
 			const current = this._engine.manifest.base.decisions.find(decision =>
 				decision.semanticKey === decisions[ix].semanticKey,
 			);
 			if (!current) return false;
-			await this._engine.stageGraphMutation(current.id, selections[ix], {
+			const picks = selections.slice(selectionIndex, selectionIndex + current.count);
+			selectionIndex += current.count;
+			await this._engine.stageGraphMutation(current.id, current.count === 1 ? picks[0] : picks, {
 				reverseParent: true,
 				apply: ({state}) => this._applyManifestSelectionMechanics(
 					current,
-					selections[ix],
+					current.count === 1 ? picks[0] : picks,
 					current.options,
 					state,
 				),
@@ -5762,7 +5772,9 @@ class CharacterSheetRespec {
 						if (langPicker) currentPickers.push(langPicker);
 						const toolPicker = this._renderToolChoicePickers(choicesPanel, bg, () => fnUpdateApplyState?.());
 						if (toolPicker) currentPickers.push(toolPicker);
-						const abiPicker = this._renderAbilityChoicePickers(choicesPanel, bg, "bg", () => fnUpdateApplyState?.());
+						const abiPicker = CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())
+							? null
+							: this._renderAbilityChoicePickers(choicesPanel, bg, "bg", () => fnUpdateApplyState?.());
 						if (abiPicker) currentPickers.push(abiPicker);
 					}
 					fnUpdateApplyState?.();
@@ -6009,6 +6021,33 @@ class CharacterSheetRespec {
 					}
 				}
 			});
+			const flatPicks = Object.entries(userChoices.selectedAbilityChoices)
+				.filter(([key, value]) => /^rc_\d+$/.test(key) && value)
+				.sort(([a], [b]) => Number(a.slice(3)) - Number(b.slice(3)));
+			if (flatPicks.length) {
+				const selectedSet = userChoices.selectedAbilityChoices.rc_abilitySetIndex;
+				const matchingSets = (newRace.ability || [])
+					.map((set, index) => ({choose: set.choose, index}))
+					.filter(({choose, index}) => {
+						if (!choose) return false;
+						if (selectedSet != null && index !== selectedSet) return false;
+						const weights = choose.weighted?.weights
+							|| Array(Number(choose.count) || 0).fill(Number(choose.amount) || 1);
+						const allowed = choose.weighted?.from || choose.from || Parser.ABIL_ABVS;
+						return weights.length === flatPicks.length
+							&& flatPicks.every(([key, ability], ix) =>
+								weights[ix] === Number(userChoices.selectedAbilityChoices[`${key}_weight`])
+								&& allowed.includes(ability));
+					});
+				if (matchingSets.length !== 1) throw new Error("The selected species ability choices do not identify one ability set.");
+				const {index} = matchingSets[0];
+				userChoices.selectedAbilityChoices = {
+					[`${newRace.name}|${newRace.source}`]: Object.fromEntries(flatPicks.flatMap(([key, ability], ix) => [
+						[`choose_${index}_${ix}`, ability],
+						[`choose_${index}_${ix}_amount`, Number(userChoices.selectedAbilityChoices[`${key}_weight`])],
+					])),
+				};
+			}
 		}
 
 		// Persist the origin choices to the character base node (single source of truth used by Respec).
@@ -6096,7 +6135,7 @@ class CharacterSheetRespec {
 
 		// Reapply newly-selected background ability bonuses
 		// For 2024 backgrounds with ability choices, apply fixed bonuses only
-		if (newBg.ability) {
+		if (newBg.ability && !CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())) {
 			newBg.ability.forEach(abiSet => {
 				Object.entries(abiSet).forEach(([abi, bonus]) => {
 					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
@@ -6122,7 +6161,7 @@ class CharacterSheetRespec {
 		}
 
 		// Apply user-chosen ability bonuses
-		if (userChoices.selectedAbilityBonuses) {
+		if (userChoices.selectedAbilityBonuses && !CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())) {
 			Object.entries(userChoices.selectedAbilityBonuses).forEach(([key, value]) => {
 				if (!key.includes("_weight") && value) {
 					const weightKey = `${key}_weight`;
@@ -6518,7 +6557,9 @@ class CharacterSheetRespec {
 
 		return {
 			type: "ability",
-			getSelections: () => ({...selections}),
+			getSelections: () => prefix === "rc"
+				? {...selections, rc_abilitySetIndex: data.ability.indexOf(chooseSets[activeSetIdx])}
+				: {...selections},
 			isComplete: () => {
 				const totalRequired = Object.keys(selections).filter(k => !k.includes("_weight")).length;
 				let filled = 0;
@@ -6814,8 +6855,25 @@ class CharacterSheetRespec {
 	 * Reapply racial ability bonuses after they were cleared (e.g., when background changes).
 	 * Uses the race data stored on state to derive fixed bonuses.
 	 */
+	_getRaceAbilityOwnerUids (race) {
+		return new Set([race, this._state.getSubrace?.()]
+			.filter(Boolean)
+			.map(owner => `${owner.name}|${owner.source}`.trim().toLowerCase()));
+	}
+
 	_reapplyRacialAbilityBonuses (history) {
 		const race = this._state.getRace();
+		const raceUserChoices = (this._state.getBaseRaceUserChoices ? this._state.getBaseRaceUserChoices() : null) || history?.choices?.raceUserChoices;
+		if (raceUserChoices?.useTashasRules && raceUserChoices.tashasAbilityBonuses) {
+			Object.entries(raceUserChoices.tashasAbilityBonuses).forEach(([key, ability]) => {
+				if (key.endsWith("_amount")) return;
+				const amount = Number(raceUserChoices.tashasAbilityBonuses[`${key}_amount`]) || 0;
+				if (amount && Parser.ABIL_ABVS.includes(ability)) {
+					this._state.setAbilityBonus(ability, this._state.getAbilityBonus(ability) + amount);
+				}
+			});
+			return;
+		}
 		if (race?.ability) {
 			race.ability.forEach(abiSet => {
 				Object.entries(abiSet).forEach(([abi, bonus]) => {
@@ -6828,17 +6886,19 @@ class CharacterSheetRespec {
 		}
 
 		// Also reapply user-chosen racial ability bonuses from the character base node (fallback: history)
-		const raceUserChoices = (this._state.getBaseRaceUserChoices ? this._state.getBaseRaceUserChoices() : null) || history?.choices?.raceUserChoices;
 		if (raceUserChoices?.selectedAbilityChoices) {
+			const ownerUids = this._getRaceAbilityOwnerUids(race);
 			Object.entries(raceUserChoices.selectedAbilityChoices).forEach(([key, value]) => {
-				if (!key.includes("_weight") && value) {
-					const weightKey = `${key}_weight`;
-					const bonus = raceUserChoices.selectedAbilityChoices[weightKey] || 0;
-					if (bonus && Parser.ABIL_ABVS.includes(value)) {
-						const current = this._state.getAbilityBonus(value) || 0;
-						this._state.setAbilityBonus(value, current + bonus);
+				if (value && typeof value === "object" && !ownerUids.has(key.trim().toLowerCase())) return;
+				const picks = value && typeof value === "object"
+					? Object.entries(value).filter(([pickKey]) => /^choose_\d+_\d+$/.test(pickKey))
+						.map(([pickKey, ability]) => [ability, Number(value[`${pickKey}_amount`]) || 0])
+					: key.endsWith("_weight") || key.endsWith("_amount") ? [] : [[value, Number(raceUserChoices.selectedAbilityChoices[`${key}_weight`]) || 0]];
+				picks.forEach(([ability, amount]) => {
+					if (amount && Parser.ABIL_ABVS.includes(ability)) {
+						this._state.setAbilityBonus(ability, this._state.getAbilityBonus(ability) + amount);
 					}
-				}
+				});
 			});
 		}
 	}
@@ -6848,6 +6908,7 @@ class CharacterSheetRespec {
 	 * Uses stored user choices from level history.
 	 */
 	_reapplyBackgroundAbilityBonuses (history) {
+		if (CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())) return;
 		const bgUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history.choices?.backgroundUserChoices;
 		if (!bgUserChoices?.selectedAbilityBonuses) return;
 		Object.entries(bgUserChoices.selectedAbilityBonuses).forEach(([key, value]) => {

@@ -123,7 +123,7 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 	});
 
 	describe("Step 2 (Background) clearing", () => {
-		test("re-applying step 2 does not double background ASI", () => {
+		test("re-applying step 2 ignores background ASI when the PHB race owns it", () => {
 			const state = createMockState();
 			// Simulate racial bonuses already applied
 			state.setAbilityBonus("str", 2);
@@ -139,19 +139,19 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 			// Simulate step 2 applied (first time) — Background is now step 2
 			builder._currentStep = 2;
 			builder._applyCurrentStep();
-			// racial (str: 2, con: 2) + background (int: 2, wis: 1)
+			// The PHB race grants its own ASI; stale XPHB background picks cannot stack.
 			expect(state.bonuses.str).toBe(2);
 			expect(state.bonuses.con).toBe(2);
-			expect(state.bonuses.int).toBe(2);
-			expect(state.bonuses.wis).toBe(1);
+			expect(state.bonuses.int).toBe(0);
+			expect(state.bonuses.wis).toBe(0);
 
 			// Re-apply step 2 (simulates going back to step 2 and forward again)
 			builder._applyCurrentStep();
 			// Should be same as before, NOT doubled
 			expect(state.bonuses.str).toBe(2);
 			expect(state.bonuses.con).toBe(2);
-			expect(state.bonuses.int).toBe(2); // NOT 4
-			expect(state.bonuses.wis).toBe(1); // NOT 2
+			expect(state.bonuses.int).toBe(0);
+			expect(state.bonuses.wis).toBe(0);
 		});
 
 		test("re-applying step 2 preserves racial bonuses", () => {
@@ -177,20 +177,20 @@ describe("CharacterSheetBuilder ability score bonus accumulation", () => {
 
 			builder._currentStep = 2;
 			builder._applyCurrentStep();
-			// racial: cha +2, str +1, con +1. background: wis +2, int +1.
+			// Racial: CHA +2, STR +1, CON +1; background picks are ignored.
 			expect(state.bonuses.cha).toBe(2);
 			expect(state.bonuses.str).toBe(1);
 			expect(state.bonuses.con).toBe(1);
-			expect(state.bonuses.wis).toBe(2);
-			expect(state.bonuses.int).toBe(1);
+			expect(state.bonuses.wis).toBe(0);
+			expect(state.bonuses.int).toBe(0);
 
 			// Re-apply — should be identical
 			builder._applyCurrentStep();
 			expect(state.bonuses.cha).toBe(2);
 			expect(state.bonuses.str).toBe(1);
 			expect(state.bonuses.con).toBe(1);
-			expect(state.bonuses.wis).toBe(2);
-			expect(state.bonuses.int).toBe(1);
+			expect(state.bonuses.wis).toBe(0);
+			expect(state.bonuses.int).toBe(0);
 		});
 	});
 

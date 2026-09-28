@@ -139,10 +139,7 @@ class CharacterSheetBuilder {
 	// Check if race uses 2024 ASI rules (ASI comes from background, not race)
 	_raceUses2024ASI () {
 		if (!this._selectedRace) return false;
-		// Data-driven: if the race has ability data, it provides its own ASI (even if source is 2024-era like TGTT)
-		if (this._selectedRace.ability && this._selectedRace.ability.length) return false;
-		// No ability data — ASI comes from background (true 2024 species or races without bonuses)
-		return true;
+		return !CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._selectedRace);
 	}
 
 	// Check if background provides ASI (2024 backgrounds)
@@ -743,7 +740,8 @@ class CharacterSheetBuilder {
 						if (this._selectedLanguages?.length) {
 							level1History.choices.backgroundUserChoices.selectedLanguages = this._selectedLanguages.map((/** @type {*} */ c) => ({...c}));
 						}
-						if (this._selectedAbilityBonuses && Object.keys(this._selectedAbilityBonuses).length) {
+						if (this._selectedAbilityBonuses && Object.keys(this._selectedAbilityBonuses).length
+							&& this._raceUses2024ASI()) {
 							level1History.choices.backgroundUserChoices.selectedAbilityBonuses = {...this._selectedAbilityBonuses};
 						}
 					}
@@ -775,6 +773,23 @@ class CharacterSheetBuilder {
 				});
 				// Re-apply racial ability bonuses with current Tasha state
 				this._applyRacialAbilityBonuses();
+				if (this._raceUses2024ASI()) this._applySelectedBackgroundAbilityBonuses();
+				if (this._selectedRace && this._state.getBaseRaceUserChoices) {
+					const raceChoices = {...this._state.getBaseRaceUserChoices()};
+					if (this._useTashasRules) {
+						raceChoices.useTashasRules = true;
+						raceChoices.tashasAbilityBonuses = {...this._tashasAbilityBonuses};
+						raceChoices.tashasSkillReplacements = [...this._tashasSkillReplacements];
+						raceChoices.tashasLanguageReplacements = [...this._tashasLanguageReplacements];
+					} else {
+						delete raceChoices.useTashasRules;
+						delete raceChoices.tashasAbilityBonuses;
+						delete raceChoices.tashasSkillReplacements;
+						delete raceChoices.tashasLanguageReplacements;
+					}
+					this._state.setBaseRaceUserChoices(raceChoices);
+					this._state.updateLevelChoice(1, {raceUserChoices: raceChoices});
+				}
 				// Apply chosen Lore Skills allocation (TGTT variant rule).
 				this._applyLoreSkillAllocation();
 				break;
@@ -2133,22 +2148,24 @@ class CharacterSheetBuilder {
 		});
 	}
 
+	_applySelectedBackgroundAbilityBonuses () {
+		if (!this._raceUses2024ASI() || !this._selectedAbilityBonuses) return;
+		Object.entries(this._selectedAbilityBonuses).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
+			if (key.startsWith("bg_") && !key.includes("weight") && value) {
+				const weightKey = `${key}_weight`;
+				const bonus = this._selectedAbilityBonuses[weightKey] || 0;
+				if (bonus && Parser.ABIL_ABVS.includes(value)) {
+					const current = this._state.getAbilityBonus(value);
+					this._state.setAbilityBonus(value, current + bonus);
+				}
+			}
+		});
+	}
+
 	_applyBackgroundFeatures () {
 		if (!this._selectedBackground) return;
 
-		// Apply selected ability bonuses from 2024 background
-		if (this._selectedAbilityBonuses) {
-			Object.entries(this._selectedAbilityBonuses).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
-				if (key.startsWith("bg_") && !key.includes("weight") && value) {
-					const weightKey = `${key}_weight`;
-					const bonus = this._selectedAbilityBonuses[weightKey] || 0;
-					if (bonus && Parser.ABIL_ABVS.includes(value)) {
-						const current = this._state.getAbilityBonus(value);
-						this._state.setAbilityBonus(value, current + bonus);
-					}
-				}
-			});
-		}
+		this._applySelectedBackgroundAbilityBonuses();
 
 		// Skill proficiencies
 		if (this._selectedBackground.skillProficiencies) {
