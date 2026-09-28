@@ -22,6 +22,9 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   fixes local/campaign route and repository-authority restoration. Its reviewed head
   `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;
   it merged into `multiplayer-hub` as `df9e0b0a6aba82c19ee4e146209725f6c8ee18e2`.
+  Exact-merge review found a retained Party Inventory BFCache generation fence; the normal descendant
+  `dd1522955c86a6cbbccf651da5d8e2fcc855f63a` restores attachment and refresh after an authorized
+  Back navigation, with red-first unit and real-stack regressions.
   Local same-ID and real-stack tests did not reproduce a canonical Hub overwrite; they cannot establish
   what happened to the original live character or replace physical verification after deployment.
 - **Related sharing UX in code, not on Oracle:**
@@ -35,6 +38,11 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   [#288](https://github.com/TrueMichato/ThelemarTools/pull/288) (multi-target server, migration 0011)
   remain stacked drafts, unmerged/undeployed with their runtime capability default-off. The existing
   delivery hold has **not** been lifted by this document.
+- **Current release stop (read-only preflight 2026-09-28T21:50Z):** the newest verified trusted
+  off-machine encrypted backup was 7.82 days old, beyond the 30-hour hard threshold. Host-private
+  checks (current container/ledger/monitor/outbox/disk/restore evidence) could not be completed because
+  operator SSH authentication was unavailable. Public health/readiness passed, but that does not
+  waive either stop. No new tag, Oracle dry run, deployment, or targeting enablement has occurred.
 
 Implemented, merged, tagged, deployed, enabled for a specific campaign, and physically proven are distinct
 states. A green PR is not a new game-day release. The repository's GitHub Issues feature is disabled; use
@@ -64,7 +72,7 @@ finding.
 | Design | **GD-FIND-008** | Participants want fewer routine stash approvals, transparent withdrawals and shared-weight handling. | Decide custody, concurrent debit/approval, carry ownership, activity and notifications before changing inventory authority. **B0/B3 decision; ADR if authority changes**. |
 | Design | **GD-FIND-010** | DM requested direct player-sheet editing/transfers with player notification; current arbitrary edit authority is intentionally limited. | Choose explicit typed, auditable DM operations and recipient notices; do not bypass owner leases or grant arbitrary writes. **Wave A/B authority decision**. |
 | Design | **GD-FIND-011** | A condition installed only as personal/site homebrew was unavailable in campaign authority, as designed. | If desired, design an explicit reviewed publish/select-to-campaign flow; never silently import personal brew. **Content-publication decision**. |
-| Resolved | **GD-FIND-001** | Newest encrypted backup was initially absent off-machine. | Closed before play by a matching off-machine filename, size, and hash; refresh backup/restore preflight for every future release. **Operations**. |
+| Resolved for r10; new release stop | **GD-FIND-001** | Newest encrypted backup was initially absent off-machine and then copied before the game day. The prospective r11 preflight later found the trusted off-machine copy stale again. | Preserve the r10 closure evidence; obtain and verify a fresh matching encrypted off-machine copy and current host backup/restore age before any new tag or promotion. **Operations**. |
 
 The 2026-09-13 game-day findings are historical, not silently closed by this list. R10 reproduced earlier
 entry-path finding #3 and rollout finding #18; its P1 is a *separate convergence-class recurrence*
@@ -89,7 +97,8 @@ remain untested or insufficiently evidenced unless the private report explicitly
    commit reachable from `origin/multiplayer-hub`, an immutable annotated `hub-*` tag, fresh read-only host
    preflight, separately authorized host dry run, and a human-confirmed
    `deploy/hub/release.sh` promotion. Recheck migration policy, rollback compatibility, backup/off-machine
-   copy, restore age, roles, current health, and image identity. Do not run a release from this backlog
+   copy, restore age, roles, current health, and image identity. The stale off-machine copy and missing
+   host-private evidence from the 2026-09-28 preflight are current hard stops. Do not run a release from this backlog
    or treat merge as deployment.
 4. **Enable only the intended targeting slice.** The r10 one-target PHB/XPHB Cure Wounds flow already has a
    separate campaign-ID-gated rollout. Check its current exact release and rules prerequisites; use
