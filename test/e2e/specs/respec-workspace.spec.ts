@@ -26,6 +26,68 @@ test.describe("Respec workspace", () => {
 		await clearCharacterStorage(page);
 	});
 
+	test("Bard spell repair rejects a second level owner and persists a distinct cantrip across reload", async ({page}) => {
+		test.setTimeout(180_000);
+		await gotoWithThelemar(page);
+		const {charSheet} = await createCharacterViaWizard(page, {
+			...PRESET_BARD,
+			name: "Cantrip repair Bard",
+			background: "Soldier",
+			bgSource: "PHB",
+			startingSpellPicks: {
+				spells: ["Cure Wounds", "Dissonant Whispers", "Faerie Fire", "Healing Word"]
+					.map(name => ({name, source: "XPHB"})),
+				cantrips: ["Mage Hand", "Vicious Mockery"].map(name => ({name, source: "XPHB"})),
+			},
+		});
+		await levelUpTo(page, 4, {subclassName: "College of Valor", subclassSource: "TGTT-2024"});
+		const {first, displaced} = await charSheet.prepareSavedBardCantripRepairFixture();
+		await charSheet.reloadCharacterSheet();
+		await charSheet.openRespec();
+		const blocked = await charSheet.getRespecBlockingDecisions();
+		expect(blocked).toEqual([expect.objectContaining({type: "cantrips", characterLevel: 4, status: "invalid"})]);
+		const before = await charSheet.getBardCantripRepairSnapshot();
+		expect(before.levels).toEqual(expect.arrayContaining([
+			expect.objectContaining({level: 1, status: "resolved", selection: expect.arrayContaining([first])}),
+			expect.objectContaining({level: 4, status: "invalid", selection: [first, displaced]}),
+		]));
+		expect(before.owners[`${first.name}|${first.source}`.toLowerCase()]).toHaveLength(2);
+		expect(before.errors).toEqual(expect.arrayContaining([expect.objectContaining({message: expect.stringContaining("Level 1")})]));
+
+		await charSheet.openBardCantripRepair();
+		await charSheet.reduceOverfullBardCantripRepair(displaced);
+		await charSheet.expectBardCantripRepairConflict(first);
+		const replacement = await charSheet.stageDistinctBardCantripRepair([
+			...before.levels.find(level => level.level === 1)!.selection,
+			displaced,
+		]);
+		const staged = await charSheet.getBardCantripRepairSnapshot();
+		expect(staged.errors).toEqual([]);
+		expect(staged.live).toEqual(before.live);
+		expect(staged.levels).toEqual(expect.arrayContaining([
+			expect.objectContaining({level: 1, status: "resolved", selection: expect.arrayContaining([first])}),
+			expect.objectContaining({level: 4, status: "resolved", selection: [replacement]}),
+		]));
+		expect(staged.owners[`${first.name}|${first.source}`.toLowerCase()]).toHaveLength(1);
+		await charSheet.applyRespecDraft();
+		await charSheet.reloadCharacterSheet();
+		await charSheet.openRespec();
+		const saved = await charSheet.getBardCantripRepairSnapshot();
+		expect(saved.errors).toEqual([]);
+		expect(saved.levels).toEqual(staged.levels);
+		expect(saved.live).toEqual(expect.arrayContaining([first, replacement]));
+		expect(saved.live).not.toContainEqual(displaced);
+		const acquired = saved.levels.flatMap(level => level.selection.map(spell => ({
+			...spell, level: level.level,
+		})));
+		expect(saved.live.map(spell => `${spell.name}|${spell.source}`).sort())
+			.toEqual(acquired.map(spell => `${spell.name}|${spell.source}`).sort());
+		for (const spell of acquired) {
+			expect(saved.owners[`${spell.name}|${spell.source}`.toLowerCase()])
+				.toEqual([expect.stringContaining(`:cl${spell.level}:cantrips:`)]);
+		}
+	});
+
 	for (const source of ["TGTT", "XPHB"] as const) {
 		for (const {label, spells, cantrips} of [
 			{

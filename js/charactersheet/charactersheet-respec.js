@@ -254,21 +254,17 @@ class CharacterSheetRespec {
 			const {options, invalidOptionKeys} = CharacterSheetRespec._getDecisionEditorOptions(legalOptions, current);
 			const legalOptionKeys = new Set(legalOptions.map(CharacterSheetRespec._getDecisionOptionKey));
 			const selected = new Map(current.map(value => [CharacterSheetRespec._getDecisionOptionKey(value), value]));
-			const usedByOtherDecisions = new Set((this._engine.manifest?.decisions || [])
-				.filter(other =>
-					other.id !== decision.id
-					&& other.className === decision.className
-					&& other.type === decision.type
-					&& other.status === "resolved",
-				)
-				.flatMap(other => Array.isArray(other.selection) ? other.selection : [])
-				.map(CharacterSheetRespec._getDecisionOptionKey));
+			const usedByOtherDecisions = CharacterSheetProgression._getPermanentSpellAcquisitionOwners({
+				decisions: this._engine.manifest?.decisions || [],
+				decision,
+			});
+			const getConflictingSelections = () => [...selected.keys()].filter(key => usedByOtherDecisions.has(key));
 
 			const content = e_({tag: "div", clazz: "charsheet__respec-decision-editor"});
 			content.append(
 				e_({tag: "div", clazz: "charsheet__respec-selection-count", txt: `Step ${ix + 1} of ${decisionIds.length}`}),
 				e_({tag: "h4", txt: `Level ${decision.characterLevel}: ${decision.label}`}),
-				e_({tag: "p", clazz: "ve-muted", txt: `Choose exactly ${decision.count}. Choices already assigned to another ${decision.className} level are unavailable.`}),
+				e_({tag: "p", clazz: "ve-muted", txt: `Choose exactly ${decision.count}. A spell assigned at an earlier ${decision.className} level must be removed before staging this step.`}),
 			);
 			const search = e_({tag: "input", clazz: "ve-form-control mb-2"});
 			search.type = "search";
@@ -280,8 +276,9 @@ class CharacterSheetRespec {
 			let next;
 			const updateSelectionState = () => {
 				const invalidSelectedCount = [...selected.keys()].filter(key => !legalOptionKeys.has(key)).length;
-				count.textContent = `${selected.size}/${decision.count} selected${invalidSelectedCount ? ` · ${invalidSelectedCount} no longer legal` : ""}`;
-				if (next) next.disabled = selected.size !== decision.count || invalidSelectedCount > 0;
+				const conflictingCount = getConflictingSelections().length;
+				count.textContent = `${selected.size}/${decision.count} selected${invalidSelectedCount ? ` · ${invalidSelectedCount} no longer legal` : ""}${conflictingCount ? ` · ${conflictingCount} already chosen at another level` : ""}`;
+				if (next) next.disabled = selected.size !== decision.count || invalidSelectedCount > 0 || conflictingCount > 0;
 			};
 
 			const renderOptions = () => {
@@ -291,15 +288,16 @@ class CharacterSheetRespec {
 				filtered.slice(0, 150).forEach(option => {
 					const key = CharacterSheetRespec._getDecisionOptionKey(option);
 					const isInvalid = invalidOptionKeys.has(key);
+					const owner = usedByOtherDecisions.get(key);
 					const isUnavailable = !isInvalid && usedByOtherDecisions.has(key) && !selected.has(key);
 					const row = e_({tag: "label", clazz: `charsheet__respec-option${isUnavailable ? " charsheet__respec-option--disabled" : ""}`});
 					const input = e_({tag: "input"});
-					input.type = decision.count === 1 ? "radio" : "checkbox";
+					input.type = decision.count === 1 && selected.size <= 1 ? "radio" : "checkbox";
 					input.name = `respec-spell-repair-${decision.id}`;
 					input.checked = selected.has(key);
 					input.disabled = isUnavailable;
 					input.addEventListener("change", () => {
-						if (decision.count === 1) selected.clear();
+						if (input.checked && input.type === "radio") selected.clear();
 						if (input.checked) {
 							if (selected.size >= decision.count) {
 								input.checked = false;
@@ -312,7 +310,7 @@ class CharacterSheetRespec {
 					});
 					row.append(input, e_({
 						tag: "span",
-						txt: `${CharacterSheetRespec._getDecisionOptionLabel(option)}${isInvalid ? " — currently selected, no longer legal" : (isUnavailable ? " · chosen at another level" : "")}`,
+						txt: `${CharacterSheetRespec._getDecisionOptionLabel(option)}${isInvalid ? " — currently selected, no longer legal" : ""}${owner ? ` · chosen at Level ${owner.characterLevel}${selected.has(key) ? " — remove or replace" : ""}` : ""}`,
 					}));
 					list.append(row);
 				});
@@ -334,8 +332,15 @@ class CharacterSheetRespec {
 				txt: ix === decisionIds.length - 1 ? "Stage & Finish" : "Stage & Next",
 			});
 			next.addEventListener("click", () => {
-				if (selected.size !== decision.count) {
-					JqueryUtil.doToast({type: "warning", content: `Choose exactly ${decision.count} spell${decision.count === 1 ? "" : "s"}.`});
+				const conflictingCount = getConflictingSelections().length;
+				const invalidSelectedCount = [...selected.keys()].filter(key => !legalOptionKeys.has(key)).length;
+				if (selected.size !== decision.count || conflictingCount || invalidSelectedCount) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: conflictingCount
+							? "Remove spells already chosen at an earlier class level before staging."
+							: `Choose exactly ${decision.count} legal spell${decision.count === 1 ? "" : "s"}.`,
+					});
 					return;
 				}
 				const selection = [...selected.values()];

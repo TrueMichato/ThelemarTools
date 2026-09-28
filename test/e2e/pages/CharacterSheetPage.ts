@@ -2172,6 +2172,118 @@ export class CharacterSheetPage {
 		});
 	}
 
+	async prepareSavedBardCantripRepairFixture (): Promise<{first: {name: string; source: string}; displaced: {name: string; source: string}}> {
+		return this.page.evaluate(async () => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs._state;
+			const firstEntry = state.getLevelHistoryEntry(1);
+			const fourthEntry = state.getLevelHistoryEntry(4);
+			if (state.getClasses().find((cls: any) => cls.name === "Bard")?.source !== "TGTT" || !firstEntry || !fourthEntry) {
+				throw new Error("A saved TGTT Bard with four recorded levels is required");
+			}
+			const first = (firstEntry.choices.cantrips || firstEntry.choices.knownCantrips || [])[0];
+			const key = fourthEntry.choices.knownCantrips ? "knownCantrips" : "cantrips";
+			const displaced = fourthEntry.choices[key]?.[0];
+			if (!first?.name || !first?.source || !displaced?.name || !displaced?.source
+				|| `${first.name}|${first.source}` === `${displaced.name}|${displaced.source}`) {
+				throw new Error("The spawned Bard needs distinct source-qualified L1 and L4 cantrip acquisitions");
+			}
+			if (!state.updateLevelChoice(4, {[key]: [
+				{name: first.name, source: first.source, level: 0},
+				{name: displaced.name, source: displaced.source, level: 0},
+			]})) {
+				throw new Error("Could not set the saved level-4 repair fixture");
+			}
+			await cs.saveCharacter();
+			return {first: {name: first.name, source: first.source}, displaced: {name: displaced.name, source: displaced.source}};
+		});
+	}
+
+	async getBardCantripRepairSnapshot (): Promise<{
+		live: Array<{name: string; source: string}>;
+		draft: Array<{name: string; source: string}>;
+		levels: Array<{level: number; status: string; selection: Array<{name: string; source: string}>}>;
+		owners: Record<string, string[]>;
+		errors: Array<{decisionId: string; message: string}>;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const engine = cs._respec._engine;
+			const identity = (spell: any) => ({name: spell.name, source: spell.source});
+			const levels = engine.manifest.decisions
+				.filter((decision: any) => decision.className === "Bard" && decision.type === "cantrips"
+					&& [1, 4].includes(decision.classLevel))
+				.map((decision: any) => ({
+					level: decision.classLevel, status: decision.status,
+					selection: (decision.selection || []).map(identity),
+				}));
+			const ownership = engine.state._data.progressionOwnership?.values?.cantrips || {};
+			return {
+				live: cs._state.getCantripsKnown().filter((spell: any) => spell.sourceClass === "Bard").map(identity),
+				draft: engine.state.getCantripsKnown().filter((spell: any) => spell.sourceClass === "Bard").map(identity),
+				levels,
+				owners: Object.fromEntries(Object.entries(ownership).map(([uid, entry]: [string, any]) => [uid, entry.sources || []])),
+				errors: engine.getValidation().errors.map((error: any) => ({decisionId: error.decisionId, message: error.message})),
+			};
+		});
+	}
+
+	async openBardCantripRepair (): Promise<void> {
+		await this.page.locator("#charsheet-respec-review").click();
+		const review = this.page.locator(".charsheet__respec-review:visible");
+		await review.getByRole("button", {name: /Repair.*spell/i}).click();
+		await expect(this.page.locator(".charsheet__respec-decision-editor:visible")).toBeVisible();
+	}
+
+	async expectBardCantripRepairConflict (spell: {name: string; source: string}): Promise<void> {
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible");
+		const label = await this.page.evaluate(value =>
+			(globalThis as any).CharacterSheetRespec._getDecisionOptionLabel(value), spell);
+		const row = editor.locator(".charsheet__respec-option")
+			.filter({has: this.page.locator("span").getByText(label, {exact: false})});
+		await expect(row).toHaveCount(1);
+		await expect(row.locator("input")).toBeChecked();
+		await expect(row).toContainText(/Level 1.*remove or replace/i);
+		await expect(editor.getByRole("button", {name: "Stage & Finish"})).toBeDisabled();
+		await expect(this.page.locator("#charsheet-respec-apply")).toBeDisabled();
+	}
+
+	async reduceOverfullBardCantripRepair (displaced: {name: string; source: string}): Promise<void> {
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible");
+		const label = await this.page.evaluate(value =>
+			(globalThis as any).CharacterSheetRespec._getDecisionOptionLabel(value), displaced);
+		await expect(editor.locator(".charsheet__respec-selection-count").last()).toContainText("2/1 selected");
+		await expect(editor.locator('.charsheet__respec-option input[type="checkbox"]:checked')).toHaveCount(2);
+		const row = editor.locator(".charsheet__respec-option")
+			.filter({has: this.page.locator("span").getByText(label, {exact: true})});
+		await row.locator("input").uncheck();
+		await expect(editor.locator(".charsheet__respec-selection-count").last()).toContainText("1/1 selected");
+		await expect(editor.locator('.charsheet__respec-option input[type="radio"]:checked')).toHaveCount(1);
+	}
+
+	async stageDistinctBardCantripRepair (excluded: Array<{name: string; source: string}>): Promise<{name: string; source: string}> {
+		const pick = await this.page.evaluate(excludedUids => {
+			const respec: any = (globalThis as any).charSheet._respec;
+			const decision = respec._engine.manifest.decisions.find((it: any) => it.className === "Bard"
+				&& it.type === "cantrips" && it.classLevel === 4);
+			if (!decision) throw new Error("No level-4 Bard cantrip decision");
+			const excludedSet = new Set(excludedUids);
+			const option = respec._getDecisionOptions(decision).find((spell: any) =>
+				!excludedSet.has(`${spell.name}|${spell.source}`) && spell.name && spell.source);
+			if (!option) throw new Error("No distinct legal Bard cantrip is available for repair");
+			return {name: option.name, source: option.source, label: (globalThis as any).CharacterSheetRespec._getDecisionOptionLabel(option)};
+		}, excluded.map(spell => `${spell.name}|${spell.source}`));
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible");
+		const row = editor.locator(".charsheet__respec-option").filter({has: this.page.locator("span")
+			.getByText(pick.label, {exact: true})});
+		await expect(row).toHaveCount(1);
+		await row.locator("input").check();
+		await expect(editor.getByRole("button", {name: "Stage & Finish"})).toBeEnabled();
+		await editor.getByRole("button", {name: "Stage & Finish"}).click();
+		await expect(this.page.locator(".charsheet__respec-decision-editor:visible")).toHaveCount(0);
+		return {name: pick.name, source: pick.source};
+	}
+
 	async deferLevelOneBardStartingSpells (): Promise<void> {
 		const id = await this.page.evaluate(() => {
 			const decision = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions.find((it: any) =>
