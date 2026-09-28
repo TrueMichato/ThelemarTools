@@ -233,8 +233,9 @@ describe("Character Sheet repository seam", () => {
 				return true;
 			}),
 			_closeCharacterScopedTransientUi: jest.fn(() => order.push("close")),
-			_detachHubRealtime: jest.fn(() => order.push("detach")),
-			_hubActiveCampaign: {dispose: jest.fn(() => order.push("dispose"))},
+			_fenceHubGeneration: jest.fn(() => order.push("fence")),
+			_hubRealtime: {suspend: jest.fn(() => order.push("realtime-suspend"))},
+			_hubActiveCampaign: {suspend: jest.fn(() => order.push("context-suspend"))},
 		};
 		const fnNavigate = jest.fn(href => order.push(`navigate:${href}`));
 		const previousGeneration = host._characterLoadGeneration;
@@ -249,8 +250,9 @@ describe("Character Sheet repository seam", () => {
 		expect(order).toEqual([
 			"save",
 			"close",
-			"detach",
-			"dispose",
+			"fence",
+			"realtime-suspend",
+			"context-suspend",
 			"navigate:charactersheet.html?local=1&returnHubCampaign=33333333-3333-4333-8333-333333333333&returnHubCharacter=66666666-6666-4666-8666-666666666666",
 		]);
 	});
@@ -263,8 +265,9 @@ describe("Character Sheet repository seam", () => {
 			_isAuthorityNavigationPending: false,
 			_saveCurrentCharacter: jest.fn(async () => false),
 			_closeCharacterScopedTransientUi: jest.fn(),
-			_detachHubRealtime: jest.fn(),
-			_hubActiveCampaign: {dispose: jest.fn()},
+			_fenceHubGeneration: jest.fn(),
+			_hubRealtime: {suspend: jest.fn()},
+			_hubActiveCampaign: {suspend: jest.fn()},
 		};
 		const fnNavigate = jest.fn();
 
@@ -275,8 +278,9 @@ describe("Character Sheet repository seam", () => {
 
 		expect(result).toBe(false);
 		expect(host._characterLoadGeneration).toBe(7);
-		expect(host._detachHubRealtime).not.toHaveBeenCalled();
-		expect(host._hubActiveCampaign.dispose).not.toHaveBeenCalled();
+		expect(host._fenceHubGeneration).not.toHaveBeenCalled();
+		expect(host._hubRealtime.suspend).not.toHaveBeenCalled();
+		expect(host._hubActiveCampaign.suspend).not.toHaveBeenCalled();
 		expect(fnNavigate).not.toHaveBeenCalled();
 	});
 
@@ -289,8 +293,9 @@ describe("Character Sheet repository seam", () => {
 			_isAuthorityNavigationPending: false,
 			_saveCurrentCharacter: jest.fn(() => save.promise),
 			_closeCharacterScopedTransientUi: jest.fn(),
-			_detachHubRealtime: jest.fn(),
-			_hubActiveCampaign: {dispose: jest.fn()},
+			_fenceHubGeneration: jest.fn(),
+			_hubRealtime: {suspend: jest.fn()},
+			_hubActiveCampaign: {suspend: jest.fn()},
 		};
 		const fnNavigate = jest.fn();
 		const pending = CharacterSheetPage.prototype._pNavigateCharacterAuthority.call(host, {
@@ -300,14 +305,16 @@ describe("Character Sheet repository seam", () => {
 
 		await Promise.resolve();
 		expect(host._characterLoadGeneration).toBe(7);
-		expect(host._detachHubRealtime).not.toHaveBeenCalled();
+		expect(host._hubRealtime.suspend).not.toHaveBeenCalled();
 		expect(fnNavigate).not.toHaveBeenCalled();
 
 		save.resolve(true);
 		await pending;
 
 		expect(host._characterLoadGeneration).toBe(8);
-		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(host._fenceHubGeneration).toHaveBeenCalledTimes(1);
+		expect(host._hubRealtime.suspend).toHaveBeenCalledTimes(1);
+		expect(host._hubActiveCampaign.suspend).toHaveBeenCalledTimes(1);
 		expect(fnNavigate).toHaveBeenCalledTimes(1);
 	});
 

@@ -278,6 +278,10 @@ test.describe("device-scoped active campaign context", () => {
 
 			// The explicit authority transition saves the current campaign document, fences its
 			// callbacks, and carries an exact route back without putting the Hub id in local `id`.
+			const bfcacheToken = await ordinary.page.evaluate(() => {
+				(window as any).__authorityBfcacheToken = crypto.randomUUID();
+				return (window as any).__authorityBfcacheToken;
+			});
 			await ordinary.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
 			await ordinary.page.waitForURL(url =>
 				url.searchParams.get("local") === "1"
@@ -285,6 +289,29 @@ test.describe("device-scoped active campaign context", () => {
 				&& url.searchParams.get("returnHubCharacter") === character.id,
 			{timeout: 60_000});
 			expect(new URL(ordinary.page.url()).searchParams.get("id")).toBeNull();
+			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
+
+			await ordinary.page.goBack();
+			await ordinary.page.waitForURL(url =>
+				url.searchParams.get("id") === character.id
+				&& url.searchParams.get("hubCampaign") === campaignId,
+			{timeout: 60_000});
+			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			const restoredBfcacheToken = await ordinary.page.evaluate(() => (window as any).__authorityBfcacheToken || null);
+			if (restoredBfcacheToken != null) expect(restoredBfcacheToken).toBe(bfcacheToken);
+			await expect.poll(
+				() => ordinary.page.evaluate(() => (window as any).charSheet?._hubActiveCampaign?.state || null),
+				{timeout: 30_000},
+			).toBe("active");
+			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Campaign authority");
+
+			await ordinary.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
+			await ordinary.page.waitForURL(url =>
+				url.searchParams.get("local") === "1"
+				&& url.searchParams.get("returnHubCampaign") === campaignId
+				&& url.searchParams.get("returnHubCharacter") === character.id,
+			{timeout: 60_000});
 			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
 			const canonicalAtLocalEntry = await hub.getCharacter(character.id);

@@ -191,8 +191,10 @@ documents deliberately use the same id.
 
 Leaving one Character Sheet authority for another first completes the current repository's ordinary
 save/recovery flow. A refused recovery keeps the user on the current page. A successful transition
-advances the character generation and detaches realtime/projections before navigation; a temporary
-cloud id accepted as a different canonical id rewrites the return descriptor before the page leaves.
+advances the character generation, fences callbacks, and suspends realtime/context before navigation.
+`pagehide.persisted` retains those owners for BFCache; terminal page hide performs detach/disposal.
+A temporary cloud id accepted as a different canonical id rewrites the return descriptor before the
+page leaves.
 
 `navigation.js` remains the navigation owner on ordinary heavy pages. It may decorate campaign-capable links
 from an already-validated effective context, but it must not perform authenticated fetches, activate brew, or

@@ -136,8 +136,9 @@ down immediately, pinned or not.
 
 Cross-authority Character Sheet navigation has its own final save fence. It completes the current
 repository's ordinary save/recovery flow before navigation, then advances the character-load
-generation, closes character-scoped UI, detaches realtime/projections, disposes the campaign
-coordinator, and only then leaves the page. If save or recovery refuses, navigation does not occur.
+generation, closes character-scoped UI, fences realtime callbacks, and suspends the realtime/context
+owners. The existing `pagehide` owner then preserves them for BFCache or performs terminal
+detach/disposal. If save or recovery refuses, navigation does not occur.
 If a temporary cloud id canonicalizes during that save, the local return descriptor is rewritten to
 the accepted canonical id before navigation.
 

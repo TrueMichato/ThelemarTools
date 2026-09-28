@@ -3337,8 +3337,9 @@ class CharacterSheetPage {
 			});
 			this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
 			this._closeCharacterScopedTransientUi?.();
-			this._detachHubRealtime?.();
-			this._hubActiveCampaign?.dispose?.();
+			this._fenceHubGeneration?.();
+			this._hubRealtime?.suspend?.();
+			this._hubActiveCampaign?.suspend?.();
 			fnNavigate(target);
 			return true;
 		} finally {
