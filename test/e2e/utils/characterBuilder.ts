@@ -26,6 +26,8 @@ export interface CharacterPreset {
 	skipConditionalPrompt?: boolean;
 	background: string;
 	bgSource: string;
+	/** Make the visible 2024 background ability distribution before advancing. */
+	selectBackgroundAbilityBonuses?: boolean;
 	name: string;
 	quickBuildTargetLevel?: number;
 	skillCount?: number;
@@ -33,6 +35,8 @@ export interface CharacterPreset {
 	preferredSkills?: string[];
 	/** Opt in to a required class-step artisan-tool or instrument choice. */
 	classToolCategory?: "artisan" | "instrument";
+	/** Select this many distinct starting instruments from a class's direct tool selectors. */
+	classInstrumentCount?: number;
 	masteryCount?: number;
 	optFeatCount?: number;
 	/** Starting-equipment branch. Defaults to gold for historical presets. */
@@ -50,6 +54,13 @@ export interface CharacterPreset {
 	 * level-up wizards instead of relying on auto-fill. See pickSignatureSpells.
 	 */
 	signatureSpells?: string[];
+	/** Exact UI-selected starting spells; an empty list deliberately defers all picks. */
+	startingSpellPicks?: {
+		spells: Array<{name: string; source: string}>;
+		cantrips: Array<{name: string; source: string}>;
+	};
+	/** Return from Details to Spells and deselect the initial picks through the picker UI. */
+	clearStartingSpellsOnRevisit?: boolean;
 	/**
 	 * Optional preference regex tested against each class-feat-progression
 	 * option's visible text (e.g. Fighter L1 "Fighting Style") during
@@ -1424,6 +1435,7 @@ export async function createCharacterViaWizard (
 
 	// Step 2: Background
 	await builder.selectBackgroundExact(preset.background, preset.bgSource);
+	if (preset.selectBackgroundAbilityBonuses) await builder.selectBackgroundAbilityBonuses();
 	// Backgrounds (esp. 2024) may have skill/tool/feat sub-pickers — these
 	// are harmless no-ops if the background has no choices.
 	await builder.selectFirstAvailableFeatureOptions(10);
@@ -1455,6 +1467,7 @@ export async function createCharacterViaWizard (
 	// the live counter so the picker never silently gates Next.
 	await builder.topUpClassSkillsToRequired();
 	if (preset.classToolCategory) await builder.selectClassToolProficiency(preset.classToolCategory);
+	if (preset.classInstrumentCount) await builder.selectClassInstruments(preset.classInstrumentCount);
 	// Expertise (Rogue / Bard / TGTT-Ranger) — must come AFTER class skills
 	// are picked so the expertise list isn't empty.
 	await builder.selectFirstAvailableExpertise(4);
@@ -1507,10 +1520,22 @@ export async function createCharacterViaWizard (
 	// creation / level-up" but had only ever been passed to level-up, so
 	// L1 builds took an alphabetical auto-pick (or, before the picker
 	// driver was fixed, nothing at all).
-	await builder.autoFillStartingSpells({
-		divineSoulAffinity: preset.divineSoulAffinity,
-		signatureSpells: preset.signatureSpells,
-	});
+	if (preset.startingSpellPicks) {
+		await builder.chooseStartingSpells(preset.startingSpellPicks);
+	} else {
+		await builder.autoFillStartingSpells({
+			divineSoulAffinity: preset.divineSoulAffinity,
+			signatureSpells: preset.signatureSpells,
+		});
+	}
+	if (preset.clearStartingSpellsOnRevisit) {
+		if (!preset.startingSpellPicks) throw new Error("Revisiting starting spells requires exact initial picks");
+		await builder.clickNext();
+		if (await builder.getCurrentStep() !== 7) throw new Error("Builder did not advance to Details before revisiting Spells");
+		await builder.clickPrev();
+		if (await builder.getCurrentStep() !== 6) throw new Error("Builder did not return to Spells");
+		await builder.chooseStartingSpells(preset.startingSpellPicks, {deselect: true});
+	}
 	await builder.clickNext();
 	// If we under-filled spells/cantrips, the wizard pops a "Skip Spell
 	// Selection?" confirmation modal — accept it so we reach Details.

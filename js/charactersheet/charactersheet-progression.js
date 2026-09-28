@@ -2252,6 +2252,17 @@ class CharacterSheetProgression {
 					break;
 			}
 		}
+		if (CharacterSheetProgression._hasBuilderBardSpellPicks({
+			className: normalized.class?.name,
+			classSource: normalized.class?.source,
+			history: [normalized],
+		})) {
+			// Empty Builder picks are explicit choices, not absent history. The
+			// projection above omits zero-length arrays; retain them for later
+			// manifest discovery after an unrelated Respec edit.
+			choices.knownSpells ??= [];
+			choices.knownCantrips ??= [];
+		}
 		normalized.choices = choices;
 		normalized.complete = !(normalized.decisions || []).some(decision => decision.required && decision.status !== "resolved");
 		return normalized;
@@ -2643,7 +2654,80 @@ class CharacterSheetProgression {
 		return selected.length ? selected : null;
 	}
 
+	static _hasBuilderBardSpellPicks ({className, classSource, history}) {
+		return className === "Bard" && ["TGTT", "XPHB"].includes(classSource)
+			&& (history || []).some(entry =>
+				Number(entry.level) === 1
+				&& CharacterSheetProgression.getClassUid(entry.class) === CharacterSheetProgression.getClassUid(className, classSource)
+				&& entry.choices?.builderSpellPicks != null,
+			);
+	}
+
+	static _getLaterClassSpellUids ({history, className, classSource, type}) {
+		const choiceKey = type === "cantrips" ? "knownCantrips" : "knownSpells";
+		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
+		return new Set((history || [])
+			.filter(entry => Number(entry.level) > 1 && CharacterSheetProgression.getClassUid(entry.class) === classUid)
+			.flatMap(entry => [
+				...(entry.choices?.[choiceKey] || []),
+				...(entry.decisions || []).filter(decision => decision.type === type)
+					.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : []),
+				entry.choices?.spellSwap?.added,
+			].filter(Boolean))
+			.map(CharacterSheetProgression.getEntityUid));
+	}
+
+	static _isBuilderDeferredBardSpellPick ({state, history, levelInfo, type, selection, count, options}) {
+		if (Number(levelInfo.characterLevel) !== 1 || Number(levelInfo.classLevel) !== 1
+			|| !CharacterSheetProgression._hasBuilderBardSpellPicks({
+				className: levelInfo.className, classSource: levelInfo.classSource, history,
+			})) return false;
+		const choices = levelInfo.history?.choices;
+		const marker = choices?.builderSpellPicks;
+		if (typeof marker?.classUid !== "string"
+			|| CharacterSheetProgression._normalize(marker.classUid) !== CharacterSheetProgression.getClassUid(levelInfo.className, levelInfo.classSource)) return false;
+		if (!["cantrips", "knownSpells"].includes(type)) return false;
+		const isCantrip = type === "cantrips";
+		const key = isCantrip ? "knownCantrips" : "knownSpells";
+		const picks = choices[key];
+		const markerPicks = marker[isCantrip ? "cantrips" : "knownSpells"];
+		const owned = isCantrip ? state?.getCantripsKnown?.() || [] : state?.getSpellsKnown?.() || [];
+		if (!Array.isArray(picks) || !Array.isArray(markerPicks)
+			|| picks.length !== markerPicks.length
+			|| new Set(picks.map(CharacterSheetProgression.getEntityUid)).size !== picks.length
+			|| !Array.isArray(selection) || selection.length !== picks.length
+			|| selection.length >= count || !options?.length) return false;
+		const selected = new Set(picks.map(CharacterSheetProgression.getEntityUid));
+		const laterOwned = CharacterSheetProgression._getLaterClassSpellUids({
+			history, className: levelInfo.className, classSource: levelInfo.classSource, type,
+		});
+		if (owned.some(spell =>
+			spell.sourceClass === levelInfo.className
+			&& spell.sourceClassSource === levelInfo.classSource
+			&& spell.sourceFeature === (isCantrip ? "Cantrips Known" : "Spells Known")
+			&& !selected.has(CharacterSheetProgression.getEntityUid(spell))
+			&& !laterOwned.has(CharacterSheetProgression.getEntityUid(spell))
+			&& spell.addedFromSpellsTab !== true)) return false;
+		return picks.every((pick, ix) => {
+			const uid = CharacterSheetProgression.getEntityUid(pick);
+			return pick?.name && pick?.source
+				&& Number(pick.level) === (isCantrip ? 0 : 1)
+				&& typeof markerPicks[ix] === "string"
+				&& uid === CharacterSheetProgression._normalize(markerPicks[ix])
+				&& uid === CharacterSheetProgression.getEntityUid(selection[ix])
+				&& Number(pick.level) === Number(selection[ix].level)
+				&& options.some(option => uid === CharacterSheetProgression.getEntityUid(option)
+					&& Number(option.level) === Number(pick.level))
+				&& owned.some(spell => CharacterSheetProgression.getEntityUid(spell) === uid
+					&& spell.sourceClass === levelInfo.className
+					&& spell.sourceClassSource === levelInfo.classSource
+					&& spell.sourceFeature === (isCantrip ? "Cantrips Known" : "Spells Known")
+					&& (isCantrip || spell.prepared === false));
+		});
+	}
+
 	static _isLegacyUntrackedSpellProgression ({className, classSource, history, spellPool}) {
+		if (CharacterSheetProgression._hasBuilderBardSpellPicks({className, classSource, history})) return false;
 		if (Object.values(spellPool || {}).some(spells => spells?.length)) return false;
 		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
 		const classHistory = (history || []).filter(entry =>
@@ -2661,6 +2745,7 @@ class CharacterSheetProgression {
 	}
 
 	static _isLegacyCumulativeSpellProgression ({className, classSource, history, spellPool, type = "knownSpells"}) {
+		if (CharacterSheetProgression._hasBuilderBardSpellPicks({className, classSource, history})) return false;
 		if (!Object.values(spellPool || {}).some(spells => spells?.length)) return false;
 		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
 		const classHistory = (history || []).filter(entry =>
@@ -2898,19 +2983,39 @@ class CharacterSheetProgression {
 				fallbackStatus: config.fallbackStatus,
 				preferFallback: config.preferFallback,
 			});
-			const isValid = config.isValid !== false && CharacterSheetProgression._isSelectionValid({
+			const hasBuilderMarker = config.builderPartial && CharacterSheetProgression._hasBuilderBardSpellPicks({
+				className: levelInfo.className, classSource: levelInfo.classSource, history: normalizedHistory,
+			});
+			const builderDeferred = hasBuilderMarker && config.isValid !== false && matched.status !== "ambiguous"
+				&& CharacterSheetProgression._isBuilderDeferredBardSpellPick({
+					state,
+					history: normalizedHistory,
+					levelInfo,
+					type: config.type,
+					selection: matched.selection,
+					count: config.count,
+					options: config.options,
+				});
+			const isValid = config.isValid !== false && (builderDeferred || CharacterSheetProgression._isSelectionValid({
 				selection: matched.selection,
 				count: config.count,
 				options: config.options,
 				type: config.type,
-			});
+			}));
+			let decisionStatus = null;
+			if (matched.status === "ambiguous") decisionStatus = matched.status;
+			else if (builderDeferred) decisionStatus = "deferred";
+			else if (hasBuilderMarker && Array.isArray(matched.selection)
+				&& !matched.selection.length && !isValid) decisionStatus = "invalid";
+			else if (matched.status === "deferred" && matched.selection == null && !hasBuilderMarker) {
+				decisionStatus = matched.status;
+			}
 			const decision = CharacterSheetProgression._makeDecision({
 				...levelInfo,
 				...config,
 				selection: matched.selection,
-				status: matched.status === "ambiguous" || (matched.status === "deferred" && matched.selection == null)
-					? matched.status
-					: null,
+				required: builderDeferred ? false : config.required,
+				status: decisionStatus,
 				receipt: storedPool.get(semanticKey)?.find(item => item.selection != null)?.receipt || null,
 				isValid,
 			});
@@ -3500,6 +3605,7 @@ class CharacterSheetProgression {
 					type: key,
 					label: "Cantrips Known",
 					sourceKey: `${spellModel || "spell"}-cantrips`,
+					builderPartial: true,
 					required: !isLegacyUntrackedSpellProgression,
 					count: cantripGain,
 					options: getLegalSpellOptions(0),
@@ -3530,6 +3636,7 @@ class CharacterSheetProgression {
 						type: "knownSpells",
 						label: "Spells Known",
 						sourceKey: "known-spells",
+						builderPartial: true,
 						required: !isLegacyUntrackedSpellProgression,
 						count,
 						options: getLegalSpellOptions(maxSpellLevel, {includeProgressionAdditionalLists: true}),

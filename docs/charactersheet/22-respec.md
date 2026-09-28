@@ -505,6 +505,30 @@ differences, and round-trips through Apply, reload, Cancel, and one-step Undo.
 Later spell swaps change that repertoire but do not prove additional
 acquisition levels; repeated recorded gains are needed to replace a saved
 cumulative decision with level-specific ones.
+The ordinary Builder records level-1 spell choices when its Spells step is
+applied, after the earlier Class step has established the history row. TGTT and
+XPHB Bards have a fixed known repertoire even though their class data uses
+`preparedSpellsProgression`: their selected spells and cantrips are saved as
+source-qualified `knownSpells` and `knownCantrips`, with Bard-owned live spell
+metadata. The history's `builderSpellPicks` records the exact original
+selections, including explicit empty arrays. If the player intentionally
+leaves either group underfilled, Respec keeps that group's choices deferred
+without blocking an unrelated Apply; completing one group does not erase the
+other group's deferral. Only matching, legal level-1 picks with matching live
+ownership qualify. Invalid or contradictory picks and older partial saves
+without this Builder evidence remain blocking rather than being silently
+converted or filled in. PHB Bard and genuine prepared/spellbook classes do not
+use this deferral exception. Reapplying the Builder's Spells step reconciles
+previously selected level-1 Bard spells/cantrips against the new picks while
+preserving recorded later acquisitions and independent owners; orphaned live
+Builder spells cannot make empty history look like an intentional omission.
+Spells added later through the sheet's Add Spell action carry a persisted
+`addedFromSpellsTab` marker on the live spell/cantrip, not in level-1 history.
+Those independent additions do not turn an otherwise valid partial Builder
+choice into an orphan or a level-1 acquisition. Unmarked extra Bard-owned
+spells remain invalid: older saves are not silently reclassified as manual.
+Selecting **Defer** on a choice that is already deferred keeps any valid
+partial picks and does not dirty or block the Respec draft.
 For an XPHB or TGTT Bard from Bard level 10 onward, ordinary Level Up records
 its new spells as known-spell acquisitions. Its leveled-spell picker,
 replacements, recorded level-specific Respec gains, and legacy cumulative

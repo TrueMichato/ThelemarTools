@@ -2361,6 +2361,7 @@ class CharacterSheetSpells {
 			components: this._getComponents(spell),
 			duration: this._getDuration(spell),
 			subschools: spell.subschools || [], // Include rarity/legality tags
+			addedFromSpellsTab: true,
 			...(attribution.sourceFeature ? {sourceFeature: attribution.sourceFeature} : {}),
 			...(attribution.sourceClass ? {sourceClass: attribution.sourceClass} : {}),
 			...(attribution.sourceClassSource ? {sourceClassSource: attribution.sourceClassSource} : {}),

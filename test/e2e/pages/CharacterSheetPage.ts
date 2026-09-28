@@ -2116,6 +2116,118 @@ export class CharacterSheetPage {
 		await this.btnLevelUp.click();
 	}
 
+	async getLevelOneBardSpellEvidence (): Promise<{
+		classSource: string;
+		choices: {
+			knownSpells?: Array<{name: string; source: string; level: number}>;
+			knownCantrips?: Array<{name: string; source: string; level: number}>;
+			preparedSpells?: Array<{name: string; source: string; level: number}>;
+			builderSpellPicks?: {classUid: string; knownSpells: string[]; cantrips: string[]};
+		};
+		spells: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string; prepared: boolean; addedFromSpellsTab?: boolean}>;
+		cantrips: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string; addedFromSpellsTab?: boolean}>;
+	}> {
+		return this.page.evaluate(() => {
+			const state = (globalThis as any).charSheet._state;
+			const identity = (entry: any) => ({
+				name: entry.name,
+				source: entry.source,
+				sourceFeature: entry.sourceFeature,
+				sourceClass: entry.sourceClass,
+				sourceClassSource: entry.sourceClassSource,
+				addedFromSpellsTab: entry.addedFromSpellsTab,
+			});
+			return {
+				classSource: state.getClasses().find((cls: any) => cls.name === "Bard")?.source,
+				choices: state.getLevelHistoryEntry(1)?.choices || {},
+				spells: state.getSpellsKnown().map((entry: any) => ({...identity(entry), prepared: entry.prepared})),
+				cantrips: state.getCantripsKnown().map(identity),
+			};
+		});
+	}
+
+	async getLevelOneBardRespecDecisions (): Promise<Array<{
+		type: string;
+		count: number;
+		status: string;
+		required: boolean;
+		selection: Array<{name: string; source: string; level: number}>;
+		issues: unknown[];
+	}>> {
+		return this.page.evaluate(() => {
+			const engine = (globalThis as any).charSheet?._respec?._engine;
+			if (!engine) throw new Error("Respec is not open");
+			const errors = engine.getValidation().errors;
+			return engine.manifest.decisions
+				.filter((decision: any) => decision.className === "Bard" && decision.classLevel === 1
+					&& ["knownSpells", "cantrips"].includes(decision.type))
+				.map((decision: any) => ({
+					type: decision.type,
+					count: decision.count,
+					status: decision.status,
+					required: decision.required,
+					selection: decision.selection,
+					issues: errors.filter((error: any) => error.decisionId === decision.id),
+				}));
+		});
+	}
+
+	async deferLevelOneBardStartingSpells (): Promise<void> {
+		const id = await this.page.evaluate(() => {
+			const decision = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions.find((it: any) =>
+				it.className === "Bard" && it.classLevel === 1 && it.type === "knownSpells");
+			if (decision?.status !== "deferred") throw new Error("Bard starting spells are not deferred");
+			return decision.id;
+		});
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator('.charsheet__level-entry[data-level="1"] .charsheet__level-entry-edit').click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
+		await editor.getByRole("button", {name: "Defer", exact: true}).click();
+	}
+
+	async stageLevelOneBardSkillSwap (): Promise<void> {
+		const initial = await this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			const decision = cs?._respec?._engine?.manifest?.decisions.find((it: any) =>
+				it.className === "Bard" && it.classLevel === 1 && it.type === "skills");
+			if (!decision?.selection?.length) throw new Error("No Bard starting skill decision to stage");
+			const live = Object.entries(cs._state.getSkillProficiencies())
+				.filter(([, rank]) => Number(rank) >= 1)
+				.map(([name]) => name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+			return {id: decision.id, selection: decision.selection, live};
+		});
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${initial.id}"]`);
+		if (!await row.isVisible()) {
+			await this.page.locator('.charsheet__level-entry[data-level="1"] .charsheet__level-entry-edit').click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
+		const selected = editor.locator('.charsheet__respec-option input[type="checkbox"]:checked');
+		await expect(selected).toHaveCount(initial.selection.length);
+		await selected.last().uncheck();
+		const options = editor.locator('.charsheet__respec-option input[type="checkbox"]:not(:checked)');
+		let replacement = null;
+		for (let ix = 0; ix < await options.count(); ++ix) {
+			const option = options.nth(ix);
+			const name = ((await option.locator("xpath=..").innerText()) || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+			if (await option.isEnabled() && !initial.live.includes(name)
+				&& !initial.selection.some((skill: string) => skill.toLowerCase().replace(/[^a-z0-9]/g, "") === name)) {
+				replacement = option;
+				break;
+			}
+		}
+		if (!replacement) throw new Error("No unowned Bard starting skill remains for the unrelated Respec stage");
+		await replacement.check();
+		await editor.locator("button", {hasText: "Stage Choice"}).click();
+		await expect.poll(async () => this.page.evaluate((decisionId) =>
+			(globalThis as any).charSheet?._respec?._engine?.manifest?.decisions
+				.find((decision: any) => decision.id === decisionId)?.selection, initial.id))
+			.not.toEqual(initial.selection);
+	}
+
 	async getLevelTenBardSpellEvidence (): Promise<{
 		classSource: string;
 		choice: {
@@ -2193,42 +2305,6 @@ export class CharacterSheetPage {
 		await editor.locator("button", {hasText: "Stage Choice"}).click();
 		await expect.poll(async () => (await this.getLevelTenBardRespecDecision()).selection)
 			.toEqual([expect.objectContaining({name, source})]);
-	}
-
-	async repairBardStartingSpellsForRespec (): Promise<void> {
-		const repair = await this.page.evaluate(() => {
-			const decisions = (globalThis as any).charSheet?._respec?._engine?.manifest?.decisions || [];
-			const first = decisions.find((it: any) =>
-				it.className === "Bard" && it.classLevel === 1 && it.type === "knownSpells" && it.status === "invalid");
-			if (!first) throw new Error("No invalid level-1 Bard spells to repair");
-			const later = new Set(decisions
-				.filter((it: any) => it.className === "Bard" && it.classLevel > 1 && it.type === "knownSpells")
-				.flatMap((it: any) => it.selection || [])
-				.map((it: any) => `${it.name}|${it.source}`.toLowerCase()));
-			const options = first.options.filter((it: any) =>
-				it.source === "XPHB" && !later.has(`${it.name}|${it.source}`.toLowerCase()));
-			if (options.length < first.count) throw new Error("Too few legal, unowned level-1 Bard spells");
-			return {id: first.id, count: first.count, options: options.slice(0, first.count).map((it: any) => it.name)};
-		});
-		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${repair.id}"]`);
-		if (!await row.isVisible()) {
-			await this.page.locator('.charsheet__level-entry[data-level="1"] .charsheet__level-entry-edit').click();
-		}
-		await row.locator("button", {hasText: "Change"}).click();
-		const editor = this.page.locator(".charsheet__respec-decision-editor:visible").last();
-		const checked = editor.locator(".charsheet__respec-option input:checked");
-		while (await checked.count()) await checked.first().uncheck();
-		for (const name of repair.options) {
-			await editor.locator('input[type="search"]').fill(name);
-			const choice = editor.locator(".charsheet__respec-option")
-				.filter({has: this.page.locator('input[data-source="XPHB"]')})
-				.filter({has: this.page.locator("span").getByText(new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(`))});
-			await expect(choice).toHaveCount(1);
-			await choice.locator("input").check();
-		}
-		await editor.locator("button", {hasText: "Stage Choice"}).click();
-		await expect.poll(async () => (await this.getRespecBlockingDecisions())
-			.some(it => it.id === repair.id)).toBe(false);
 	}
 
 	async spawnSavedCharacter (spec: string, name: string): Promise<string> {

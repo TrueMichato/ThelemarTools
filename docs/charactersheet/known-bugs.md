@@ -221,22 +221,6 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
-### CS-BUG-177 — Builder Bard starting spell choices can block later Respec Apply — OPEN
-
-**Status**: Open; not part of the level-10 Magical Secrets repair.
-**Repro**: Build a TGTT Bard through the ordinary Builder, then use Level Up
-through level 10 and open Respec. The level-10 Magical Secrets pick is resolved,
-but Review reports an invalid level-1 `Spells Known` choice (four required;
-the recorded selection may have only two spells, including a level-2 spell).
-An unrelated Respec Apply is blocked until the starting repertoire is repaired.
-**Suspected cause**: Builder's initial known-spell count or acquisition
-attribution differs from the class's level-1 progression; not yet isolated.
-**Affected test**: `respec-workspace.spec.ts` completes the separate level-10
-Stage/Apply/reload/Undo check by first repairing this level-1 fixture gap via
-the Respec UI. The level-10 spell is selected through the real Level Up wizard,
-not synthesized in history. Fix the starting-spell producer independently;
-remove the test's repair step only once the unmodified Builder path applies.
-
 ### CS-BUG-106 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
 
 **Status**: Open (not fixed here — found during the CS-BUG-016 sweep).
@@ -470,6 +454,33 @@ issue numbers stay stable.
 ---
 
 ## Resolved
+
+### CS-BUG-177 — Builder Bard starting spells lost their level-1 ownership — FIXED
+
+**Status**: Fixed in `78373c276`.
+**Symptom**: A TGTT or XPHB Bard built with legal starting spells had live
+spells but no matching level-1 known-spell history. Respec could reconstruct
+the wrong acquisition, flag level 1 invalid, and block an unrelated Apply.
+**Root cause**: Builder recorded level-1 history at its Class step, before
+the Spells step applied the player's picks; it also treated the 2024 Bard's
+`preparedSpellsProgression` as daily preparation rather than a fixed known
+repertoire.
+**Fix and guard**: The Spells step records exact `name|source` level-1
+choices with matching Bard-owned live metadata. Deliberately partial or
+empty Builder picks carry explicit provenance and remain deferred only when
+legal and matched to live ownership. Old partial saves without that evidence
+and illegal picks still block. Jest covers the production boundary and
+PHB/prepared/spellbook controls; `respec-workspace.spec.ts` covers full,
+partial, and empty TGTT/XPHB Builder saves and an unrelated Apply. Its level-10
+Magical Secrets Apply/reload/Undo test no longer repairs the starting fixture.
+The follow-up regression guards Builder Spells-step reapplication (removing
+deselected level-1 picks but keeping later-owned spells), rejects orphaned live
+Builder spells as invalid rather than deferred, and makes **Defer** on an
+already-deferred partial choice preserve its selections.
+Sheet Add Spell now persists independent live-spell provenance after a partial
+Builder save, so a later manually added Bard spell does not make that deferred
+level-1 choice invalid or block an unrelated Respec Apply. Unmarked orphaned
+Builder spells still block.
 
 ### CS-BUG-176 — EFA Artificer level-4 ASI was absent — FIXED
 
