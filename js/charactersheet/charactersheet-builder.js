@@ -572,23 +572,6 @@ class CharacterSheetBuilder {
 							.filter(Boolean);
 					}
 
-					const toHistorySpells = (/** @type {*[]} */ spells) => (spells || []).map((/** @type {*} */ spell) => ({
-						name: spell.name,
-						source: spell.source,
-						level: spell.level,
-					}));
-					const knownInfo = this._getKnownCasterInfoForBuilder();
-					if (knownInfo?.isSpellbookCaster && this._selectedSpellbookSpells?.length) {
-						level1History.choices.spellbookSpells = toHistorySpells(this._selectedSpellbookSpells);
-					} else if (knownInfo?.isPreparedCaster && this._selectedKnownSpells?.length) {
-						level1History.choices.preparedSpells = toHistorySpells(this._selectedKnownSpells);
-					} else if (this._selectedKnownSpells?.length) {
-						level1History.choices.knownSpells = toHistorySpells(this._selectedKnownSpells);
-					}
-					if (this._selectedKnownCantrips?.length) {
-						level1History.choices.knownCantrips = toHistorySpells(this._selectedKnownCantrips);
-					}
-
 					// Record subclass if selected at level 1 (Cleric, Sorcerer, Warlock)
 					if (this._selectedSubclass) {
 						level1History.choices.subclass = {
@@ -9493,8 +9476,16 @@ class CharacterSheetBuilder {
 			? CharacterSheetClassUtils.getMagicianBonusCantripCount(Object.values(this._selectedFeatureOptions || {}).flat())
 			: 0;
 		const isSpellbookCaster = !!cls.spellsKnownProgressionFixed; // Wizard-family: permanent spellbook
-		const isPreparedCaster = !!cls.preparedSpellsProgression && !isSpellbookCaster; // Cleric/Druid/XPHB casters
-		const isKnownCaster = !isSpellbookCaster && !isPreparedCaster;
+		const spellModel = CharacterSheetClassUtils.getClassSpellcastingModel({
+			name: className,
+			source: cls.source,
+			classData: cls,
+		});
+		// Keep the Builder's existing initial-preparation flow for other 2024
+		// casters; Bard's fixed repertoire is owned as known spells.
+		const isPreparedCaster = !!cls.preparedSpellsProgression && !isSpellbookCaster
+			&& !(className === "Bard" && spellModel === "known");
+		const isKnownCaster = !isSpellbookCaster && !isPreparedCaster && spellModel === "known";
 
 		const knownAtLevel1 = isKnownCaster
 			? CharacterSheetClassUtils.getKnownSpellsAtLevel(cls, className, 1)
@@ -9715,6 +9706,9 @@ class CharacterSheetBuilder {
 	_applyBuilderSpellChoices () {
 		const knownInfo = this._getKnownCasterInfoForBuilder();
 		if (!knownInfo) return;
+		const is2024Bard = knownInfo.className === "Bard"
+			&& ["TGTT", "XPHB"].includes(knownInfo.classSource)
+			&& knownInfo.isKnownCaster;
 
 		this._state.setSubclassChoice(knownInfo.className, this._divineSoulAffinity);
 
@@ -9740,7 +9734,7 @@ class CharacterSheetBuilder {
 					sourceFeature,
 					sourceClass: knownInfo.className,
 					sourceClassSource: knownInfo.classSource,
-					prepared: true,
+					prepared: !is2024Bard,
 				}));
 			}
 		}
@@ -9753,6 +9747,32 @@ class CharacterSheetBuilder {
 				sourceClassSource: knownInfo.classSource,
 			}));
 		}
+
+		const toHistorySpells = (/** @type {*[]} */ spells) => spells.map((/** @type {*} */ spell) => ({
+			name: spell.name,
+			source: spell.source,
+			level: spell.level,
+		}));
+		/** @type {*} */
+		const choices = {};
+		if (knownInfo.isSpellbookCaster && this._selectedSpellbookSpells.length) {
+			choices.spellbookSpells = toHistorySpells(this._selectedSpellbookSpells);
+		} else if (knownInfo.isPreparedCaster && this._selectedKnownSpells.length) {
+			choices.preparedSpells = toHistorySpells(this._selectedKnownSpells);
+		} else if (this._selectedKnownSpells.length || is2024Bard) {
+			choices.knownSpells = toHistorySpells(this._selectedKnownSpells);
+		}
+		if (this._selectedKnownCantrips.length || is2024Bard) {
+			choices.knownCantrips = toHistorySpells(this._selectedKnownCantrips);
+		}
+		if (is2024Bard) {
+			choices.builderSpellPicks = {
+				classUid: `${knownInfo.className}|${knownInfo.classSource}`,
+				knownSpells: choices.knownSpells.map((/** @type {*} */ spell) => `${spell.name}|${spell.source}`),
+				cantrips: choices.knownCantrips.map((/** @type {*} */ cantrip) => `${cantrip.name}|${cantrip.source}`),
+			};
+		}
+		if (Object.keys(choices).length) this._state.updateLevelChoice?.(1, choices);
 
 		if (knownInfo.className === "Sorcerer" && CharacterSheetClassUtils.isDivineSoulSubclass(this._selectedSubclass)) {
 			this._state.ensureDivineSoulKnownSpell(knownInfo.className);

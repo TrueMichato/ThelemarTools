@@ -26,6 +26,92 @@ test.describe("Respec workspace", () => {
 		await clearCharacterStorage(page);
 	});
 
+	for (const source of ["TGTT", "XPHB"] as const) {
+		for (const {label, spells, cantrips} of [
+			{
+				label: "full",
+				spells: ["Cure Wounds", "Dissonant Whispers", "Faerie Fire", "Healing Word"],
+				cantrips: ["Mage Hand", "Vicious Mockery"],
+			},
+			{label: "partial", spells: ["Cure Wounds", "Healing Word"], cantrips: ["Vicious Mockery"]},
+			{label: "empty", spells: [], cantrips: []},
+		]) {
+			test(`${source} Builder Bard ${label} level-1 spells stay owned through save and unrelated Respec Apply`, async ({page}) => {
+				test.setTimeout(120_000);
+				await gotoWithThelemar(page);
+				const picks = {
+					spells: spells.map(name => ({name, source: "XPHB"})),
+					cantrips: cantrips.map(name => ({name, source: "XPHB"})),
+				};
+				const {charSheet, builder} = await createCharacterViaWizard(page, {
+					...PRESET_BARD,
+					name: `${source} ${label} Builder Bard`,
+					...(source === "XPHB" ? {race: "Dwarf", raceSource: "PHB'24"} : {}),
+					background: "Soldier", bgSource: source === "XPHB" ? "PHB'24" : "PHB",
+					classSource: source === "XPHB" ? "PHB'24" : source,
+					...(source === "XPHB" ? {prioritySources: ["XPHB"], classInstrumentCount: 3, selectBackgroundAbilityBonuses: true} : {}),
+					startingSpellPicks: picks,
+				});
+				const expectedSpells = picks.spells.map(pick => ({...pick, level: 1}));
+				const expectedCantrips = picks.cantrips.map(pick => ({...pick, level: 0}));
+				expect(await builder.getStartingSpellSelections()).toEqual({
+					spells: expectedSpells, cantrips: expectedCantrips,
+				});
+				const assertEvidence = async () => {
+					const evidence = await charSheet.getLevelOneBardSpellEvidence();
+					expect(evidence.classSource).toBe(source);
+					expect(evidence.choices.knownSpells).toEqual(expectedSpells);
+					expect(evidence.choices.knownCantrips).toEqual(expectedCantrips);
+					expect(evidence.choices.preparedSpells).toBeUndefined();
+					expect(evidence.choices.builderSpellPicks).toEqual({
+						classUid: `Bard|${source}`,
+						knownSpells: picks.spells.map(({name, source: spellSource}) => `${name}|${spellSource}`),
+						cantrips: picks.cantrips.map(({name, source: spellSource}) => `${name}|${spellSource}`),
+					});
+					expect(evidence.spells.filter(spell => spell.sourceClass === "Bard" && spell.sourceFeature === "Spells Known"))
+						.toEqual(expectedSpells.map(({name, source: spellSource}) =>
+							expect.objectContaining({
+								name, source: spellSource, sourceFeature: "Spells Known",
+								sourceClass: "Bard", sourceClassSource: source, prepared: false,
+							})));
+					expect(evidence.cantrips.filter(cantrip => cantrip.sourceClass === "Bard" && cantrip.sourceFeature === "Cantrips Known"))
+						.toEqual(expectedCantrips.map(({name, source: spellSource}) =>
+							expect.objectContaining({
+								name, source: spellSource, sourceFeature: "Cantrips Known",
+								sourceClass: "Bard", sourceClassSource: source,
+							})));
+				};
+				await assertEvidence();
+				await charSheet.reloadCharacterSheet();
+				await assertEvidence();
+				await charSheet.openRespec();
+				const assertDecisions = async () => {
+					const decisions = await charSheet.getLevelOneBardRespecDecisions();
+					expect(decisions).toHaveLength(2);
+					expect(decisions).toEqual(expect.arrayContaining([
+						expect.objectContaining({
+							type: "knownSpells", count: 4, status: label === "full" ? "resolved" : "deferred",
+							required: label === "full", selection: expectedSpells, issues: [],
+						}),
+						expect.objectContaining({
+							type: "cantrips", count: 2, status: label === "full" ? "resolved" : "deferred",
+							required: label === "full", selection: expectedCantrips, issues: [],
+						}),
+					]));
+				};
+				await assertDecisions();
+				await charSheet.stageLevelOneBardSkillSwap();
+				await assertDecisions();
+				await charSheet.applyRespecDraft();
+				await assertEvidence();
+				await charSheet.reloadCharacterSheet();
+				await assertEvidence();
+				await charSheet.openRespec();
+				await assertDecisions();
+			});
+		}
+	}
+
 	for (const {source, startLevel} of [{source: "TGTT", startLevel: 9}, {source: "XPHB", startLevel: 8}]) {
 		test(`${source} Bard Quick Build L${startLevel}→10 keeps Magical Secrets in its level-10 Respec decision`, async ({page}) => {
 			test.setTimeout(240_000);
@@ -181,8 +267,6 @@ test.describe("Respec workspace", () => {
 			.toEqual([expect.objectContaining({name: "Spirit Guardians", source: "XPHB"})]);
 
 		await charSheet.stageLevelTenBardKnownSpell("Shield", "XPHB");
-		// CS-BUG-177: repair the Builder's unrelated L1 spell gap before Apply.
-		await charSheet.repairBardStartingSpellsForRespec();
 		await charSheet.applyRespecDraft();
 		const applied = await charSheet.getLevelTenBardSpellEvidence();
 		expect(applied.choice.knownSpells).toEqual([expect.objectContaining({name: "Shield", source: "XPHB", level: 1})]);

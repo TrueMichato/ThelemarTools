@@ -472,6 +472,22 @@ export class BuilderWizardPage {
 		expect(await tool.inputValue()).not.toBe("");
 	}
 
+	async selectClassInstruments (count: number): Promise<void> {
+		const selects = this.page.locator(".charsheet__builder-tool-choice select");
+		await expect(selects).toHaveCount(count);
+		const chosen = new Set<string>();
+		for (let ix = 0; ix < count; ++ix) {
+			const select = selects.nth(ix);
+			const options = await select.locator("option").evaluateAll(items =>
+				items.map((item: HTMLOptionElement) => item.value).filter(Boolean));
+			const next = options.find(value => !chosen.has(value));
+			if (!next) throw new Error(`No distinct starting instrument remains for slot ${ix + 1}`);
+			await select.selectOption(next);
+			chosen.add(next);
+			expect(await select.inputValue()).toBe(next);
+		}
+	}
+
 	/**
 	 * Fill every optional-feature group on the current step up to the count it
 	 * declares ("Choose N" / "Selected: x/N"), skipping combat-method DOM.
@@ -1010,6 +1026,49 @@ export class BuilderWizardPage {
 		});
 	}
 
+	async getStartingSpellSelections (): Promise<{
+		spells: Array<{name: string; source: string; level: number}>;
+		cantrips: Array<{name: string; source: string; level: number}>;
+	}> {
+		return this.page.evaluate(() => {
+			const builder = (globalThis as any).charSheet?._builder;
+			if (!builder) throw new Error("The Builder is not available");
+			const identities = (entries: Array<{name: string; source: string; level: number}>) =>
+				entries.map(({name, source, level}) => ({name, source, level}));
+			return {
+				spells: identities(builder._selectedKnownSpells),
+				cantrips: identities(builder._selectedKnownCantrips),
+			};
+		});
+	}
+
+	async chooseStartingSpells (picks: {
+		spells: Array<{name: string; source: string}>;
+		cantrips: Array<{name: string; source: string}>;
+	}): Promise<void> {
+		await expect(this.page.locator("#builder-spell-picker .charsheet__spell-picker-container")).toBeVisible();
+		for (const [kind, entries] of [["spells", picks.spells], ["cantrips", picks.cantrips]] as const) {
+			for (const pick of entries) {
+				const sourceLabel = await this.page.evaluate(
+					source => (globalThis as any).Parser.sourceJsonToAbv(source), pick.source,
+				);
+				const search = this.page.locator("#builder-spell-picker input.charsheet__spell-picker-search");
+				await search.fill(pick.name);
+				const row = this.page.locator("#builder-spell-picker .charsheet__spell-picker-item")
+					.filter({has: this.page.locator(".charsheet__spell-picker-item-name").getByText(pick.name, {exact: true})})
+					.filter({has: this.page.locator(".charsheet__spell-picker-item-source").getByText(sourceLabel, {exact: true})});
+				await expect(row, `Builder picker must offer ${pick.name}|${pick.source}`).toHaveCount(1);
+				await row.locator("button.spell-toggle").click();
+				await expect.poll(async () => (await this.getStartingSpellSelections())[kind]
+					.some(selected => selected.name === pick.name && selected.source === pick.source)).toBe(true);
+				await search.fill("");
+			}
+		}
+		const selected = await this.getStartingSpellSelections();
+		expect(selected.spells.map(({name, source}) => ({name, source}))).toEqual(picks.spells);
+		expect(selected.cantrips.map(({name, source}) => ({name, source}))).toEqual(picks.cantrips);
+	}
+
 	// ========== ABILITIES STEP ==========
 
 	/**
@@ -1162,6 +1221,15 @@ export class BuilderWizardPage {
 			}
 		}
 		throw new Error(`Background "${backgroundName}" with source "${sourceAbbv}" not found`);
+	}
+
+	async selectBackgroundAbilityBonuses (): Promise<void> {
+		const selects = this.backgroundPreview.locator(".charsheet__builder-asi-choices select");
+		await expect(selects).toHaveCount(2);
+		await selects.nth(0).selectOption("dex");
+		await selects.nth(1).selectOption("con");
+		expect(await selects.nth(0).inputValue()).toBe("dex");
+		expect(await selects.nth(1).inputValue()).toBe("con");
 	}
 
 	// ========== EQUIPMENT STEP ==========

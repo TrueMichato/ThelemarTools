@@ -636,6 +636,14 @@ UI, PDF/export, and E2E coverage remain later milestones.
 | NpcExporter | State | Read-only conversion to monster format |
 | Features | State | getFeatureCalculations(), resource tracking |
 
+The ordinary Builder's Class step establishes the level-1 history row; its
+Spells step writes the selected source-qualified spell and cantrip choices
+after applying them to live state. For TGTT/XPHB Bard, use the shared
+known-caster model rather than treating `preparedSpellsProgression` as proof
+of daily preparation. Explicitly underfilled starting picks retain their
+Builder provenance so Respec can defer only legal, Bard-owned choices without
+inventing spells or reassigning later acquisitions to level 1.
+
 Quick Build's known-caster Spells step retains selections by character level,
 then writes each `knownSpells`/`knownCantrips` choice to that level's history
 row. The level selector passes the owning class level, that level's spell-slot
