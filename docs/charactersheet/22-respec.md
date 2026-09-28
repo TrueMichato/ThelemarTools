@@ -84,15 +84,30 @@ removing the first class level cannot orphan species/background choices.
 Legacy level-1 origin copies remain readable and are migrated to the base node
 without losing user selections.
 
-Background ability alternatives are represented as a required distribution
-parent with weighted ability children. For example, the 2024 `+2/+1` and
-`+1/+1/+1` alternatives are one mode opportunity, not two independent ability
-choices. Selecting a mode creates only its required children; changing the
-mode removes the previous children and reverses only their receipt-owned bonus
-deltas. Legacy saves without `backgroundUserChoices.selectedAbilityBonuses`
-remain explicitly incomplete instead of inferring ownership from aggregate
-ability bonuses, and the Base card links to the existing background editor to
-complete the missing history.
+Origin ASI ownership follows the selected species/race's ability data, not
+the class edition: a race with its own ASI (including PHB races paired with
+XPHB classes/backgrounds) owns its racial picks, while an ASI-less species
+may receive bonuses from its background. Source-qualified Builder racial
+choices such as `selectedAbilityChoices["Half-Elf|PHB"]` retain *both*
+`choose_0_0` and `choose_0_1`; Respec keeps them as one two-pick origin
+decision with reversible bonus receipts. The Base card shows the fixed and
+chosen racial bonuses. When Tasha's reassignment is explicitly recorded,
+the chosen distribution replaces the race defaults; Respec does not infer
+Tasha choices from total scores on older saves.
+
+When the race does not provide an ASI, background ability alternatives are
+represented as a required distribution parent with weighted ability children.
+For example, the 2024 `+2/+1` and `+1/+1/+1` alternatives are one mode
+opportunity, not two independent ability choices. Selecting a mode creates
+only its required children; changing the mode removes the previous children
+and reverses only their receipt-owned bonus deltas. Legacy saves without
+`backgroundUserChoices.selectedAbilityBonuses` remain explicitly incomplete
+instead of inferring ownership from aggregate ability bonuses, and the Base
+card links to the existing background editor to complete the missing history.
+An ASI-granting PHB race ignores the XPHB background's weighted picker.
+The separate free ASI that Builder offers an ASI-less XPHB species with a PHB
+background has no background-provided weighted distribution or Respec editor
+yet; existing recorded choices are preserved, not relabeled as PHB grants.
 
 Fixed species/background feats are also origin child decisions, even though
 the player does not choose them. Their semantic key is derived from the origin

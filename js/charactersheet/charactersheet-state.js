@@ -12429,26 +12429,29 @@ class CharacterSheetState {
 				const isOriginAbility = decision.scope === "origin"
 					&& ["race", "background"].includes(decision.provenance?.ownerType);
 				if (isOriginAbility) {
-					const ability = String(decision.selection).toLowerCase();
+					const abilities = (Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+						.map(value => String(value).toLowerCase());
 					const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
-					const current = Number(this._data.abilityBonuses?.[ability]) || 0;
-					if (current >= amount) {
-						const before = current - amount;
+					if (new Set(abilities).size === abilities.length
+						&& abilities.length === Number(decision.count || 1)
+						&& abilities.every(ability => (Number(this._data.abilityBonuses?.[ability]) || 0) >= amount)) {
 						decision.meta ||= {};
-						decision.meta.receiptPreviousAbilityBonus = {
-							...(decision.meta.receiptPreviousAbilityBonus || {}),
-							[ability]: before,
-						};
-						decision.receipt = {
-							version: 1,
-							sourceDecisionKey: decision.semanticKey,
-							effects: [{
+						decision.meta.receiptPreviousAbilityBonus = {...(decision.meta.receiptPreviousAbilityBonus || {})};
+						const effects = abilities.map(ability => {
+							const before = (Number(this._data.abilityBonuses?.[ability]) || 0) - amount;
+							decision.meta.receiptPreviousAbilityBonus[ability] = before;
+							return {
 								type: "abilityBonusDelta",
 								sourceDecisionKey: decision.semanticKey,
 								ability,
 								amount,
 								before,
-							}],
+							};
+						});
+						decision.receipt = {
+							version: 1,
+							sourceDecisionKey: decision.semanticKey,
+							effects,
 						};
 						const stored = this._data.characterBase?.decisions?.find(candidate =>
 							candidate.semanticKey === decision.semanticKey,

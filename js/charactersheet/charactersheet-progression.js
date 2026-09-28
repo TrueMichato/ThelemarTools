@@ -770,8 +770,12 @@ class CharacterSheetProgression {
 					.find(([key, value]) =>
 						value && typeof value === "object" && CharacterSheetProgression._normalize(key) === ownerUid,
 					)?.[1] || selectedAbilityChoices;
-				const selected = ownerChoices[`choose_${choiceIndex}_0`] ??
-					ownerChoices[sourcePath.match(/ability\[(\d+)\]/)?.[1] || choiceIndex];
+				const count = Number(descriptor.count) || 1;
+				const picks = Array.from({length: count}, (_, ix) => ownerChoices[`choose_${choiceIndex}_${ix}`])
+					.filter(value => value != null);
+				const selected = picks.length
+					? count === 1 ? picks[0] : picks
+					: ownerChoices[sourcePath.match(/ability\[(\d+)\]/)?.[1] || choiceIndex];
 				if (selected != null) return CharacterSheetProgression._copy(selected);
 				const backgroundSelected = originChoices.selectedAbilityBonuses?.[`bg_${choiceIndex}`];
 				if (backgroundSelected != null) return backgroundSelected;
@@ -1480,14 +1484,17 @@ class CharacterSheetProgression {
 					ownerUid: originUid,
 				});
 			}
-			const abilityDistributionDecisions = CharacterSheetProgression._buildOriginAbilityDistribution({
+			const originAbilityIsOwned = originType === "race"
+				? !choices?.useTashasRules
+				: !CharacterSheetClassUtils.raceProvidesAbilityBonuses(state?.getRace?.());
+			const abilityDistributionDecisions = originAbilityIsOwned ? CharacterSheetProgression._buildOriginAbilityDistribution({
 				originType,
 				entity,
 				choices,
 				originUid,
 				entityKey,
 				storedBasePool,
-			});
+			}) : [];
 			base.decisions.push(...abilityDistributionDecisions);
 			const hasAbilityDistribution = abilityDistributionDecisions.length > 0;
 			(entity.feats || []).forEach((featEntry, featIx) => {
@@ -1544,6 +1551,8 @@ class CharacterSheetProgression {
 				});
 			});
 			descriptors.forEach((descriptor, slot) => {
+				if (!originAbilityIsOwned && descriptor.kind === "ability"
+					&& String(descriptor.sourcePath || "").startsWith(`${originType}.ability[`)) return;
 				if (
 					hasAbilityDistribution
 						&& descriptor.kind === "ability"
@@ -1575,17 +1584,41 @@ class CharacterSheetProgression {
 					state,
 					legacyChoices: choices,
 				});
-				const selectedFallback = storedDecision?.selection ?? selected ??
+				const selectedFallback = descriptor.kind === "ability"
+					&& originType === "race"
+					&& Array.isArray(selected)
+					&& selected.length === descriptor.count
+					? selected
+					: storedDecision?.selection ?? selected ??
 					choices?.[`selected${descriptor.kind[0].toUpperCase()}${descriptor.kind.slice(1)}s`] ??
 					(descriptor.kind === "ability" && descriptor.sourcePath.includes("additionalSpells")
 						? descriptor.options?.[0]
 						: null);
+				const isDistinctRaceAbilityChoice = descriptor.kind !== "ability"
+					|| originType !== "race"
+					|| !Array.isArray(selectedFallback)
+					|| new Set(selectedFallback.map(value => String(value).toLowerCase())).size === selectedFallback.length;
+				const storedReceipt = storedDecision?.receipt;
+				const selectedAbilities = Array.isArray(selectedFallback) ? selectedFallback : [selectedFallback];
+				const expectedAmount = Number(descriptor.rules?.amount) || 1;
+				const receiptAbilities = (storedReceipt?.effects || [])
+					.filter(effect => effect.type === "abilityBonusDelta"
+						&& Number(effect.amount) === expectedAmount
+						&& Number.isFinite(Number(effect.before)))
+					.map(effect => String(effect.ability).toLowerCase());
+				const hasCompleteRaceAbilityReceipt = descriptor.kind !== "ability" || originType !== "race"
+					|| !Array.isArray(selectedFallback) || (
+					receiptAbilities.length === selectedAbilities.length
+					&& selectedAbilities.every(ability => receiptAbilities.includes(String(ability).toLowerCase()))
+				);
 				// Some legacy Builder paths allowed the character to continue without
 				// assigning a bonus from an origin's weighted ability block. Keep those
 				// rows visible and editable, but do not make an absent historical
 				// assignment block an otherwise unrelated Respec Apply.
-				const hasAssignedAbilityChoice = Object.values(choices?.selectedAbilityChoices || {})
-					.some(value => value && typeof value === "object" && Object.keys(value).some(key => !key.endsWith("_amount")));
+				const hasAssignedAbilityChoice = Object.entries(choices?.selectedAbilityChoices || {})
+					.some(([owner, value]) => CharacterSheetProgression._normalize(owner) === originUid
+						&& value && typeof value === "object"
+						&& Object.keys(value).some(key => !key.endsWith("_amount")));
 				const hasAssignedAbilityBonus = Object.keys(choices?.selectedAbilityBonuses || {}).some(key => !key.endsWith("_weight"));
 				const isUnassignedLegacyAbility = descriptor.kind === "ability"
 					&& selectedFallback == null
@@ -1604,7 +1637,15 @@ class CharacterSheetProgression {
 					required: descriptor.required && !isUnassignedLegacyAbility,
 					options: descriptor.options,
 					selection: selectedFallback,
-					receipt: storedDecision?.receipt || null,
+					isValid: descriptor.kind !== "ability" || originType !== "race" || (
+						isDistinctRaceAbilityChoice && CharacterSheetProgression._isSelectionValid({
+							selection: selectedFallback,
+							count: descriptor.count,
+							options: descriptor.options,
+							type,
+						})
+					),
+					receipt: hasCompleteRaceAbilityReceipt ? storedReceipt || null : null,
 					meta: {descriptorRules: descriptor.rules},
 					scope: "origin",
 					semanticKeyOverride: key,

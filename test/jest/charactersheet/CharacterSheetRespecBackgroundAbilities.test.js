@@ -13,9 +13,8 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const copy = value => JSON.parse(JSON.stringify(value));
 
 const RACE = {
-	name: "Dendulra",
-	source: "TGTT",
-	ability: [{cha: 2, choose: {from: ["wis", "dex"], count: 1, amount: 1}}],
+	name: "Human",
+	source: "XPHB",
 };
 
 const BACKGROUND = {
@@ -45,15 +44,9 @@ function getState ({backgroundChoices = {}, backgroundBonuses = {}} = {}) {
 	});
 	state.setRace(copy(RACE));
 	state.setBackground(copy(BACKGROUND));
-	state.setBaseRaceUserChoices({
-		selectedAbilityChoices: {
-			"Dendulra|TGTT": {
-				choose_0_0: "dex",
-				choose_0_0_amount: 1,
-			},
-		},
-	});
+	state.setBaseRaceUserChoices({});
 	state.setBaseBackgroundUserChoices(copy(backgroundChoices));
+	// Existing bonuses unrelated to the background must survive receipt replacement.
 	state.setAbilityBonus("dex", 1);
 	state.setAbilityBonus("cha", 2);
 	for (const [ability, amount] of Object.entries(backgroundBonuses)) {

@@ -12,6 +12,10 @@ class CharacterSheetClassUtils {
 	// Pure Utility Methods
 	// ==========================================
 
+	static raceProvidesAbilityBonuses (race) {
+		return !!race?.ability?.length;
+	}
+
 	/**
 	 * (S2 #15) Canonical name of the single shared resource pool that every Hochling
 	 * "Divine Manifestation" Channel-Divinity option draws on. Kept here so the option
