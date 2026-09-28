@@ -18,11 +18,12 @@ identifiers, provider subjects, tokens, or private evidence into Git.
 - **Physical result:** final **NO-GO** at 2026-09-28T20:02:31Z. GD-FIND-014 is a confirmed P1
   refresh-persistent local/campaign Character Sheet divergence. GD-FIND-012 records that the
   campaign's player-targeting rollout was disabled. Several scenarios lack participant/device evidence.
-- **P1 remediation in code, not on Oracle:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
-  fixes local/campaign route and repository-authority restoration. Its exact head
-  `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E,
-  but remains an unmerged draft. Local same-ID and real-stack tests did not reproduce a canonical Hub
-  overwrite; they cannot establish what happened to the original live character.
+- **P1 remediation merged, not on Oracle:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
+  fixes local/campaign route and repository-authority restoration. Its reviewed head
+  `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;
+  it merged into `multiplayer-hub` as `df9e0b0a6aba82c19ee4e146209725f6c8ee18e2`.
+  Local same-ID and real-stack tests did not reproduce a canonical Hub overwrite; they cannot establish
+  what happened to the original live character or replace physical verification after deployment.
 - **Related sharing UX in code, not on Oracle:**
   [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) adds an accessible outer sharing
   disclosure. Its exact head `2048973d37198da04681ec86d5a7fb82af49ca1b` passed all four CI jobs,
@@ -50,7 +51,7 @@ finding.
 
 | Priority | Finding | Observation and current disposition | Next acceptance evidence / lane |
 |---|---|---|---|
-| P1 | **GD-FIND-014** | General-site/local and Campaign Hub sheet routes diverged, with no clear return path; refresh did not reconcile them. PR #331 is code-complete, not live-proven. Canonical live impact remains unknown. | Read-only owner/DM/local identity and revision comparison; integrate and deploy the reviewed route fix; repeat both entry paths, local return, refresh, BFCache, two-device and DM-truth convergence without crossing save authority. **Release re-entry**. |
+| P1 | **GD-FIND-014** | General-site/local and Campaign Hub sheet routes diverged, with no clear return path; refresh did not reconcile them. PR #331 is merged but not deployed or live-proven. Canonical live impact remains unknown. | Read-only owner/DM/local identity and revision comparison; deploy the reviewed route fix; repeat both entry paths, local return, refresh, BFCache, two-device and DM-truth convergence without crossing save authority. **Release re-entry**. |
 | P2 | **GD-FIND-012** | Cure Wounds targeting was absent because the peer source-cost campaign rollout was disabled. This does not prove a missing server template. | Operator-approved exact-campaign enrollment using the checked-in preflight; physical reject/cancel/expiry/accept/self-target checks with no early cost and one accepted cost/effect. **Release re-entry / Wave A**. |
 | P2, reproduce | **GD-FIND-003** | Character-information view opened from Campaign Overview closed after about ten seconds; interaction/timeout conditions were not captured. | Reproduce with pointer and keyboard interaction, distinguish intentional expiry from premature dismissal, keep a readable/focus-safe view, and test the real browser. **Overview UX**. |
 | P2 | **GD-FIND-006** | Inventory **Share** began a second step in a lower sheet panel without moving focus, scrolling, or announcing it; action looked stalled. No asset loss was reported. | Focus/announce the next actionable control; distinguish draft/pending/committed states and prove no duplicate submission. **B0/B2**. |
@@ -77,8 +78,8 @@ remain untested or insufficiently evidenced unless the private report explicitly
    separate local view. Record which authority held each value. If canonical data is altered or the
    difference is still unexplained, stop and triage recovery under the current runbook; never copy a local
    document over Hub truth as an ad hoc repair.
-2. **Prepare a focused correction candidate.** Review and integrate P1 routing PR #331 into
-   `multiplayer-hub`. PR #289 is useful but not required for the P1/targeting retest; keep its separate
+2. **Prepare the focused correction candidate.** P1 routing PR #331 is merged into `multiplayer-hub`.
+   PR #289 is useful but not required for the P1/targeting retest; keep its separate
    draft hold unless deliberately included. If integrated together, resolve their shared CSS, Character
    Sheet campaign test and campaign-context browser spec with normal descendant commits, no history rewrite.
    Rerun route/convergence and, if included, disclosure/projection-privacy journeys on the *integrated*
@@ -99,7 +100,7 @@ remain untested or insufficiently evidenced unless the private report explicitly
    offline convergence, and the previously reported P2 findings. Record each result or explicit skip and
    refresh operational preflight. Only the decision owner can replace the final NO-GO with a new GO.
 
-The existing hold on A0-A3 is a delivery decision, not a technical requirement for testing the focused
+The existing hold on A0-A3 is a delivery decision, not a technical requirement for testing the merged
 PR #331 fix or the already-implemented Cure Wounds slice. To physically test **new** Wave A server
 capabilities, first decide whether to lift that hold, then integrate A0 -> A1 -> A2 -> A3 in reviewed order;
 verify migrations 0010/0011, previous-app/rollback rules, protocol 6, and default-off campaign enrollment

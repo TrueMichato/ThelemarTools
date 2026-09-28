@@ -3,8 +3,8 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** R10 identity/onboarding changes merged; gameplay waves A0-A3 and game-day UI fixes
-> remain draft/unmerged
+> **Implementation:** R10 identity/onboarding and P1 campaign-sheet routing fix merged; gameplay waves
+> A0-A3 and the separate sharing UX PR remain draft/unmerged
 > **Deployment:** The last facilitator-verified Oracle release is `hub-staging-2026-09-21-r10` at
 > `cc3a7290d12f645907688a9731b5b7ae400e28eb`; the 2026-09-28 physical rerun ended **NO-GO**
 > **Last reviewed:** 2026-09-29
