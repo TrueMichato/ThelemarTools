@@ -2,6 +2,13 @@
 
 Status: Accepted; first protocol-4 Cure Wounds client/server slice implemented (2026-09-04)
 
+> **Extended by [ADR 0020](0020-consented-multi-target-operations.md) (2026-09-21):** the future multi-target
+> contract preserves this ADR's no-reservation and one-cost atomicity rules, but replaces the singular target
+> acceptance transaction with independent fixed-candidate responses followed by one source-selected all-or-none
+> finalization. A reviewed multi-target healing template with `allowTargetNoOp=true` may pay for a selected
+> full-HP target leg without disclosing that state to the source, narrowly superseding this ADR's blanket
+> target-no-op prohibition. The current one-target protocol-4 implementation remains unchanged.
+
 ## Context
 
 [ADR 0012](0012-idempotent-semantic-character-operations.md) defines source-derived peer proposals, explicit

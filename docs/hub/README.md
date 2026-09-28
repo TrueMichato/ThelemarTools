@@ -114,6 +114,8 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0017: atomic DM item-award batches](adr/0017-atomic-dm-item-awards.md)
 - [ADR 0018: invite-gated first account access](adr/0018-invite-gated-first-access.md)
 - [ADR 0019: provider-neutral account entitlements and reauthentication](adr/0019-provider-neutral-account-entitlements.md)
+- [ADR 0020: consented multi-target semantic operations](adr/0020-consented-multi-target-operations.md) —
+  accepted Wave A0 design proof; not implemented
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
@@ -129,6 +131,11 @@ context. Its persistence/server foundation is implemented, but new-account admis
 the stacked provider-neutral `campaign:create` entitlement layer lands.
 ADR 0019 defines that entitlement layer, provider-bound reauthentication, hidden operator administration, and
 the staged enablement/rollback boundary.
+ADR 0020 defines the accepted protocol-6 model with at most eight fixed target legs, opaque per-leg invitations,
+per-character owner consent, one exact source-selected subset, and one-cost atomic finalization. It requires a
+future normalized migration 0011 after A2's reserved migration 0010; this design/proof change contains no
+production migration and changes no live
+capability.
 
 ## Local BFF setup
 
