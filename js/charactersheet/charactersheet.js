@@ -1546,6 +1546,20 @@ class CharacterSheetPage {
 			pResumed
 				.then(() => {
 					if (this._hubActiveCampaign && !this._hubActiveCampaign.activeCampaignId) return;
+					const characterId = this._currentCharacterId;
+					if (
+						this._partyInventory?.isAttachedTo?.({characterId}) === true
+						&& this._partyInventory.isAttachedTo({
+							characterId,
+							generation: this._characterLoadGeneration,
+						}) !== true
+					) {
+						this._reattachRetainedHubCharacterIntegrations?.({
+							characterId,
+							generation: this._characterLoadGeneration,
+							isPartyInventoryAttached: true,
+						});
+					}
 					this._hubRealtime?.resume();
 				})
 				// eslint-disable-next-line no-console

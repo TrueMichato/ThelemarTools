@@ -37,6 +37,20 @@ describe("Character Sheet party inventory", () => {
 		expect(realtime.on).not.toHaveBeenCalled();
 	});
 
+	it("distinguishes a retained attachment from one fenced by a newer character generation", () => {
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			campaignId: "campaign-1",
+			repository: null,
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 7};
+
+		expect(partyInventory.isAttachedTo({characterId: "character-1"})).toBe(true);
+		expect(partyInventory.isAttachedTo({characterId: "character-1", generation: 7})).toBe(true);
+		expect(partyInventory.isAttachedTo({characterId: "character-1", generation: 8})).toBe(false);
+	});
+
 	it("preserves the active transfer draft until it is reconciled", () => {
 		const partyInventory = new CharacterSheetPartyInventory({
 			api: {},

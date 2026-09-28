@@ -318,6 +318,58 @@ describe("Character Sheet repository seam", () => {
 		expect(fnNavigate).toHaveBeenCalledTimes(1);
 	});
 
+	it("reattaches fenced party inventory after BFCache return without resetting a current attachment", async () => {
+		const originalAddEventListener = globalThis.window.addEventListener;
+		const handlers = {};
+		globalThis.window.addEventListener = (name, handler) => { handlers[name] = handler; };
+		const characterId = "55555555-5555-4555-8555-555555555555";
+		const attachment = {characterId, generation: 7};
+		const inventory = {
+			isAttachedTo: jest.fn(({characterId: id, generation}) => (
+				id === attachment.characterId
+				&& (generation === undefined || generation === attachment.generation)
+			)),
+			pAttach: jest.fn(async ({characterId: id, generation}) => {
+				attachment.characterId = id;
+				attachment.generation = generation;
+				return true;
+			}),
+		};
+		const host = {
+			_isHubCharacter: true,
+			_currentCharacterId: characterId,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 8,
+			_partyInventory: inventory,
+			_hubActiveCampaign: {
+				activeCampaignId: "33333333-3333-4333-8333-333333333333",
+				suspend: jest.fn(),
+				pResume: jest.fn(async () => {}),
+			},
+			_hubRealtime: {suspend: jest.fn(), resume: jest.fn()},
+			isCurrentCharacterReadOnly: () => false,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
+		};
+		try {
+			CharacterSheetPage.prototype._initHubRealtimeTeardown.call(host);
+			handlers.pagehide({persisted: true});
+			handlers.pageshow({persisted: true});
+			await Promise.resolve();
+			await Promise.resolve();
+
+			expect(inventory.pAttach).toHaveBeenCalledTimes(1);
+			expect(inventory.pAttach).toHaveBeenCalledWith({characterId, generation: 8});
+			expect(host._hubRealtime.resume).toHaveBeenCalledTimes(1);
+
+			handlers.pageshow({persisted: true});
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(inventory.pAttach).toHaveBeenCalledTimes(1);
+		} finally {
+			globalThis.window.addEventListener = originalAddEventListener;
+		}
+	});
+
 	it("does not claim recovery or clear the retained Hub selector after a fenced roster cancellation", async () => {
 		const repository = makeRepository();
 		repository.pList.mockResolvedValueOnce(null);

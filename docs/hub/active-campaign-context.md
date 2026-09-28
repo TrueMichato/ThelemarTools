@@ -141,6 +141,9 @@ owners. The existing `pagehide` owner then preserves them for BFCache or perform
 detach/disposal. If save or recovery refuses, navigation does not occur.
 If a temporary cloud id canonicalizes during that save, the local return descriptor is rewritten to
 the accepted canonical id before navigation.
+After BFCache restores the campaign sheet, context revalidation precedes realtime resume. A retained
+owner Party Inventory whose attachment was fenced by the pre-navigation character generation reattaches
+under the current generation and refreshes its authoritative view; a current attachment is left alone.
 
 ### The rules-teardown trap
 

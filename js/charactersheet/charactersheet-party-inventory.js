@@ -302,8 +302,10 @@ export class CharacterSheetPartyInventory {
 		return this._pActivate(active);
 	}
 
-	isAttachedTo ({characterId}) {
-		return !!this._active && this._active.characterId === characterId;
+	isAttachedTo ({characterId, generation = null}) {
+		return !!this._active
+			&& this._active.characterId === characterId
+			&& (generation == null || this._active.generation === generation);
 	}
 
 	async _pActivate (active) {

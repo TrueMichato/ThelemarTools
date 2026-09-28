@@ -1,5 +1,6 @@
 import {expect, test, type BrowserContext} from "@playwright/test";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
+import {HubCharacterSheetPartyInventoryPage} from "../pages/HubCharacterSheetPartyInventoryPage";
 
 async function pCloseContext (context: BrowserContext): Promise<void> {
 	await Promise.race([
@@ -305,6 +306,7 @@ test.describe("device-scoped active campaign context", () => {
 				{timeout: 30_000},
 			).toBe("active");
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Campaign authority");
+			await new HubCharacterSheetPartyInventoryPage(ordinary.page).expectRefreshAfterAuthorityReturn();
 
 			await ordinary.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
 			await ordinary.page.waitForURL(url =>

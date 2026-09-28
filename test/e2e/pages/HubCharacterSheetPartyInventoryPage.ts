@@ -202,6 +202,14 @@ export class HubCharacterSheetPartyInventoryPage {
 		return this.page.locator("[data-charsheet-party-inventory]");
 	}
 
+	async expectRefreshAfterAuthorityReturn (): Promise<void> {
+		await this.openInventoryTab();
+		const refresh = this.root().getByRole("button", {name: "Refresh", exact: true});
+		await expect(refresh).toBeEnabled();
+		await refresh.click();
+		await expect(this.root()).toContainText("Party stash refreshed.");
+	}
+
 	async _expectTransferSubmitted (): Promise<void> {
 		try {
 			await expect(this.root().locator("[data-party-inventory-live]"))
