@@ -1,8 +1,12 @@
 # Campaign Hub staging plan
 
-> **Status:** Release r7 deployed; V1-G1 complete; physical game day remains
-> **Last reviewed:** 2026-09-13
+> **Status:** Last facilitator-verified release r10; V1-G1 complete; r10 physical rerun **NO-GO**
+> **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
+
+The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r10 findings, focused
+correction release, and physical re-entry gate. Earlier r7 drills below are historical evidence, not a
+claim that r7 is still deployed or that the r10 findings have been resolved.
 
 ## Objectives
 
@@ -16,8 +20,9 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- Annotated release `hub-staging-2026-09-10-r7` at
-  `77d955c053dcdfe949235620db93f7eba477af34` is deployed; Phase 6G is complete.
+- The last facilitator-verified deployed release is annotated `hub-staging-2026-09-21-r10` at
+  `cc3a7290d12f645907688a9731b5b7ae400e28eb`, with migrations `0001`-`0009`;
+  Phase 6G is complete. Recheck live identity before the next promotion.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup
   passed on 2026-09-12.
@@ -28,8 +33,9 @@ environment and must not use copied production characters.
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
   campaign operation page, and human-readable interaction controls are deployed and pass Oracle smoke checks.
-- The [living roadmap](roadmap.md) gates the V1 decision on the physical
-  [one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go.
+- The [living roadmap](roadmap.md) gates private-pilot expansion on a new physical
+  [one-DM/two-player game day](runbooks/private-game-day.md) after the r10 NO-GO remediation,
+  with an explicit new go/no-go.
 
 ## Environment requirements
 

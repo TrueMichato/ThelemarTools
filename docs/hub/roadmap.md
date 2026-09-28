@@ -1,13 +1,15 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-20
+> **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
 gates. [Implementation status](implementation-status.md) records what exists, while
 [implementation history](implementation-history.md), the [private-V1 snapshot](private-v1-roadmap.md), and the
 [post-V1 snapshot](post-v1-roadmap.md) preserve how earlier plans and decisions evolved.
+The current physical findings, prioritized remediation, and Wave A/B/D delivery gates are tracked in the
+[game-day backlog and delivery plan](game-day-backlog.md); earlier milestone evidence below remains historical.
 
 ## Status labels
 
@@ -27,7 +29,7 @@ rather than inferring deployment or enablement from merged code.
 | Status | Milestone | Evidence or remaining decision |
 |---|---|---|
 | **shipped** | Private invite-only Hub implementation through Phase 6F | Server, browser, Character Sheet, DM Screen, lifecycle, migration, operations, CI, and real-stack evidence are summarized in [implementation status](implementation-status.md) |
-| **shipped** | Phase 6G Oracle deployment | Annotated release `hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34` is deployed to the private Hub-only Oracle Always Free environment; HTTPS, GitHub OAuth, PostgreSQL, static, BFF, API, and WebSocket checks pass |
+| **shipped** | Phase 6G Oracle deployment | The latest facilitator-verified Oracle release is annotated `hub-staging-2026-09-21-r10` at `cc3a7290d12f645907688a9731b5b7ae400e28eb`, with migrations `0001`-`0009`; this is dated game-day evidence, not a fresh host check |
 | **shipped** | V2-T0 release automation and live promotion | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) implemented the release path; the r7 dry-run/promotion, immutable evidence, image preservation, and non-disruptive rollback prerequisites were proven on Oracle |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
 | **shipped** | Coordinated implementation closeout | All 59 planned implementation todos are complete. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241) merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`; [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) integrated source/species/edition content enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`; [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` |
@@ -35,23 +37,26 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | V2-T5 whole-site campaign context | Device-scoped selection, cross-tab convergence, temporary rules/brew activation, and ordered teardown are implemented |
 | **shipped** | V2-T9 Campaign Overview redesign | The pinned session brief, role-specific continuation action, preserved workbench, responsive/accessibility coverage, and authority hardening are merged in PR #243 |
 | **shipped** | V1 external Oracle host-operations proof | Manual and genuine scheduled maintenance/backup, five-minute external monitoring, off-machine backup, authenticated isolated restore, RPO/RTO, exact-r6 rollback, exact-r7 return, cleanup, and zero-disruption identity checks passed by 2026-09-13 |
-| **active** | V1 physical game day | V1-G1 is complete; execute the [one-DM/two-player runbook](runbooks/private-game-day.md) on physical devices and record the go/no-go |
+| **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
+| **active** | r10 game-day fix candidates | Draft [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331) (context routing) and [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) (outer sharing disclosure) have exact-head CI proof but are not merged, deployed, or physically retested. |
+| **next** | Wave A gameplay delivery | Stacked draft PRs [#285](https://github.com/TrueMichato/ThelemarTools/pull/285)-[#288](https://github.com/TrueMichato/ThelemarTools/pull/288) remain held/unmerged. A4/A5, inventory Wave B, and rules Wave D follow the [delivery plan](game-day-backlog.md). |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 provider rollout retain their own acceptance gates |
-| **active** | r9 invite-gated identity | ADR 0018/migration 0008 foundation, ADR 0019/migration 0009 provider-neutral entitlements, and ADR 0014 account link/unlink implementation are complete; entitlement, identity-linking, new-account-admission, and Discord/Google enablement switches remain default-off until their separate release preflights |
+| **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 participant-level provider verification retain their own acceptance gates |
+| **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
-Oracle runs annotated release `hub-staging-2026-09-10-r7` at
-`77d955c053dcdfe949235620db93f7eba477af34`, deployed by PR #253's hardened release path. Later repository
-changes are not target-environment evidence until separately reviewed, tagged, approved, and promoted.
+The last facilitator-verified Oracle identity is annotated release `hub-staging-2026-09-21-r10` at
+`cc3a7290d12f645907688a9731b5b7ae400e28eb`. Draft PRs and later repository changes are not
+target-environment evidence until separately reviewed, merged, tagged, approved, and promoted.
 
 ## V1 launch closeout
 
-Phase 6G and V1-G1 are complete. V1 has one remaining launch gate: the physical game day and explicit
-private-launch go/no-go. This rollout gate proceeds in parallel with V2 engineering and gates expansion of the
-private pilot, not implementation or merging of independently safe V2 work.
+Phase 6G and V1-G1 are complete. The 2026-09-28 r10 physical game day returned **NO-GO**. The remaining launch
+gate is remediation followed by a new observed physical run and explicit private-launch GO/NO-GO. This rollout
+gate proceeds in parallel with V2 engineering and gates expansion of the private pilot, not implementation
+or merging of independently safe V2 work; the current held Wave A stack retains its separate delivery hold.
 
 ### V1-G1 — host-operations proof (**complete 2026-09-13**)
 
@@ -103,10 +108,11 @@ Final scheduled evidence completed on 2026-09-13:
 V1-G1 is complete. Continue normal scheduled observation; do not treat this evidence as permission to skip
 future failures or freshness policies.
 
-### V1-G2 — physical one-DM/two-player game day (**active**)
+### V1-G2 — physical one-DM/two-player game day (**NO-GO; remediation active**)
 
-Dependency: V1-G1 passed on 2026-09-13, so this gate is unblocked. Execute
-[the private game-day runbook](runbooks/private-game-day.md); its existence is not evidence that V1-G2 has run.
+V1-G1 passed on 2026-09-13. The r10 run on 2026-09-28 found a P1 convergence failure and disabled
+targeting; the final decision was NO-GO. The [private game-day runbook](runbooks/private-game-day.md)
+governs the next run; the [backlog](game-day-backlog.md) lists all findings, follow-ups, and re-entry evidence.
 
 Scope:
 
@@ -451,7 +457,7 @@ Acceptance:
 - source-cost and target failures remain privacy-preserving and non-enumerating;
 - disabled downstream capabilities cannot be targeted through API or stale UI.
 
-### V2-T8 — Discord and Google identity-provider framework (**active — implementation complete; rollout incomplete**)
+### V2-T8 — Discord and Google identity-provider framework (**active — deployed; physical acceptance incomplete**)
 
 Deliver:
 
@@ -471,12 +477,13 @@ Implemented:
   and required-provider retention, account-level security UI, and all-session/lease/socket rotation;
 - paired first-enable acceptance of successful sign-in or linked outcomes and optional-legacy-allowlist rollback
   preflight;
-- deterministic memory/PostgreSQL/production-stack coverage while normal production configuration remains
-  GitHub-only.
+- deterministic memory/PostgreSQL/production-stack coverage. The r10 game-day public metadata advertised
+  GitHub, Discord, and Google as available; it did not record every participant's linked-provider outcome.
 
-Still to deliver:
+Still to verify:
 
-- separately approved capability and paired-provider production rollout.
+- participant-by-participant linked-provider sign-in, same-account/membership continuity, and reauthentication
+  on the deployed release; do not infer these from public provider availability alone.
 
 Acceptance:
 
@@ -546,7 +553,7 @@ flowchart LR
     T1[V2-T1 shipped]
     T2[V2-T2 shipped]
     P13[ADR 0013 shipped] --> T5[V2-T5 shipped]
-    P14[ADR 0014 shipped] --> T8[V2-T8 implementation shipped; rollout next]
+    P14[ADR 0014 shipped] --> T8[V2-T8 deployed; physical verification next]
     P15[ADR 0015 shipped] --> T6[V2-T6 active; content/carry shipped]
     P16[ADR 0016 shipped] --> T7[V2-T7 active; Cure Wounds shipped]
   end
@@ -578,9 +585,9 @@ flowchart LR
 V1-G1/G2 intentionally have no dependency edge into V2 engineering. They gate private-pilot expansion, not
 implementation or merge. V2-T0, T1, T2, T5, and T9 are shipped. T4 has shipped player-stash/transfer/carry and
 DM-award slices; T6 has shipped content/carry enforcement while its other non-content rules remain Advisory; T7 has
-shipped only the narrow Cure Wounds slice. T8's provider adapters/framework exist, but account linking and rollout
-remain incomplete. T0 plus V1-G1's live operational proof gate promotion of the merged head and any newly merged V2
-product scope on Oracle.
+shipped only the narrow Cure Wounds slice. T8's adapters, account linking, and provider enablement reached r10,
+but participant-level physical acceptance was not fully recorded. T0 plus V1-G1's live operational proof gate
+promotion of any newly merged V2 product scope on Oracle.
 
 ## Deferred horizons A-F
 

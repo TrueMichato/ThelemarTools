@@ -1,23 +1,25 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-20
+> **Last updated:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-Private invite-only V1 release `hub-staging-2026-09-10-r7` at
-`77d955c053dcdfe949235620db93f7eba477af34` is deployed on the reused, Hub-only Oracle Always Free ARM
+The last facilitator-verified private invite-only release is `hub-staging-2026-09-21-r10` at
+`cc3a7290d12f645907688a9731b5b7ae400e28eb` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
-GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket checks pass. Phase 6G deployment and the
-authenticated recovery/rollback and genuine scheduled-operations evidence for V1-G1 are complete. The physical
-one-DM/two-player game day remains V1-G2. Semi-public onboarding remains intentionally disabled.
+PostgreSQL, static site, BFF, API, and WebSocket checks passed the r10 game-day preflight. Phase 6G deployment
+and V1-G1 host-operations evidence are complete. The 2026-09-28 physical rerun returned **NO-GO** for a P1
+Character Sheet context divergence and disabled player targeting; see the
+[prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
 
-All 59 planned implementation todos in the coordinating program are complete. The only remaining V1 evidence is
-V1-G2's physical one-DM/two-player game day and explicit private-launch go/no-go.
+The original 59 planned implementation todos in the coordinating program are complete. That historical
+closeout does not close the new physical findings: the r10 rerun needs remediation, a new physical run, and
+an explicit private-launch GO/NO-GO.
 
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
@@ -25,8 +27,8 @@ Google OIDC adapters, bounded provider HTTP/JWKS validation, paired first-enable
 guidance, and deterministic memory/PostgreSQL/real-stack coverage. Layer 3 adds capability-gated own-identity
 listing, fresh-reauth provider linking, different-identity unlinking, required-provider retention, complete
 session/lease/socket rotation, account-level security UI, linked-outcome preflight support, and Memory/PostgreSQL
-parity. Normal production configuration remains GitHub-only and `account.identity_linking.v1` remains
-default-off pending rollout evidence.
+parity. R10 public metadata now advertises GitHub, Discord, and Google as available and identity linking
+as enabled; participant-by-participant linked-provider sign-in was not fully recorded.
 
 The first r9 identity layer now adds ADR 0018 and migration 0008: signed-out invite links exchange the raw token
 once for a five-minute server-side context bound to one durable OAuth transaction. Existing identities sign in
@@ -44,8 +46,9 @@ The stacked r9 entitlement layer adds migration 0009, provider-neutral `campaign
 reauthentication with session rotation, transaction-local freshness checks, hidden idempotent operator
 administration, lifecycle/export protection, an ordinary-user account reauthentication/deletion flow, stable
 UUID disambiguation for duplicate account names, and focused creator/operator browser states. Enforcement remains
-default-off until release preflight. The descendant account-linking layer reuses that ordinary-user
-account-level reauthentication authority and adds no migration.
+default-off for a new installation until release preflight; r10 preflight confirmed the entitlement rollout
+enabled on Oracle. The descendant account-linking layer reuses that ordinary-user account-level
+reauthentication authority and adds no migration.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback
@@ -155,13 +158,14 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34` is live on the Oracle VM
-originally repurposed from Foundry. The deployment and recovery checks pass. Only genuine daily
-maintenance/backup timer evidence and the physical one-DM/two-player game day remain before the V1 go/no-go.
+`hub-staging-2026-09-21-r10` at `cc3a7290d12f645907688a9731b5b7ae400e28eb` was the last verified
+Oracle identity. Deployment, recovery, and genuine daily timer evidence were recorded; the physical r10
+rerun subsequently returned NO-GO. The [backlog](game-day-backlog.md) owns the re-entry work.
 
 ## Implemented
 
-- Existing-identity OAuth sign-in, default-off invite-gated first access, server sessions, CSRF/origin checks,
+- Existing-identity OAuth sign-in, capability-gated invite first access (enabled on r10), server sessions,
+  CSRF/origin checks,
   and protocol gating.
 - Accounts, campaigns, roles, invites, membership, export, archive, and ownership transfer.
 - Local/cloud Character Sheet repository switch, non-destructive claim, clone, move, archive, lease takeover.
@@ -316,8 +320,9 @@ rewritten into a current whole-repository baseline. The latest merged handoffs a
 1. **Host-operations proof — complete:** installation, manual drills, five-minute monitoring, encrypted
    off-machine backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return,
    exact cleanup, and the first genuine scheduled maintenance/backup executions passed by 2026-09-13.
-2. **Physical game day:** execute the [private one-DM/two-player runbook](runbooks/private-game-day.md) with real
-   GitHub OAuth and physical devices, then make an explicit go/no-go decision.
+2. **Physical game day — NO-GO on r10:** the 2026-09-28 rerun found the P1 context divergence and disabled
+   targeting. Remediate the [prioritized backlog](game-day-backlog.md), then rerun the incomplete physical
+   scenarios with actual providers/devices and make a new explicit go/no-go decision.
 
 The [living roadmap](roadmap.md) owns scope, dependencies, and acceptance criteria for these gates and the
 approved V2 program.

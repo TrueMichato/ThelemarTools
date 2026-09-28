@@ -3,11 +3,11 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Coordinated implementation program complete through merged PR #253
-> **Deployment:** Release `hub-staging-2026-09-10-r7` at
-> `77d955c053dcdfe949235620db93f7eba477af34` is live on private Oracle staging; V1-G1 operations and
-> recovery proof passed, while the physical one-DM/two-player game day remains gated
-> **Last verified:** 2026-09-20
+> **Implementation:** R10 identity/onboarding changes merged; gameplay waves A0-A3 and game-day UI fixes
+> remain draft/unmerged
+> **Deployment:** The last facilitator-verified Oracle release is `hub-staging-2026-09-21-r10` at
+> `cc3a7290d12f645907688a9731b5b7ae400e28eb`; the 2026-09-28 physical rerun ended **NO-GO**
+> **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -16,6 +16,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 |---|---|
 | What exists now | [Current system](current-system.md) |
 | What ships next and why | [Living roadmap](roadmap.md) |
+| Prioritized game-day findings and the next delivery/release gates | [Game-day backlog and delivery plan](game-day-backlog.md) |
 | Campaign Overview design and implementation record | [Campaign Overview redesign brief](campaign-overview-redesign-brief.md) |
 | Why it is structured this way | [Architecture](architecture.md) and [ADRs](#architecture-decisions) |
 | What was implemented and why | [Implementation history](implementation-history.md) |
