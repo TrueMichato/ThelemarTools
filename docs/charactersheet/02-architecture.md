@@ -139,6 +139,16 @@ from the campaign bundle cannot widen policy. Context rollback, reconnect refres
 access loss, or explicit local navigation generation-fences pending loads and removes stale content filters and
 reports. Signed-out and `?local=1` repositories retain the pre-Hub behavior.
 
+Local and campaign authority are route-fixed and visibly labelled. Campaign-backed routes use
+`hubCampaign`; explicit local routes use `local=1`. A campaign character entering Local mode carries a
+separate validated `returnHubCampaign`/`returnHubCharacter` pair rather than reusing the local `id`
+parameter. The current repository finishes its normal save/recovery flow before navigation, then the page
+advances its character generation, fences callbacks, and suspends campaign context/realtime. The existing
+pagehide lifecycle preserves those owners for BFCache or disposes them for terminal navigation. A refused
+save/recovery leaves the user in the current authority. Campaign Overview and ordinary campaign-context entry
+emit the same canonical route form, so both resolve the same Hub id/revision while any local copy remains an
+independent document.
+
 ### 1. Initialization Flow
 
 ```

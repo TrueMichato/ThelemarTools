@@ -272,6 +272,28 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 	font-weight: var(--cs-weight-semibold, 600);
 }
 
+.charsheet__campaign-authority {
+	display: inline-flex;
+	align-items: center;
+	min-height: 1.25rem;
+	padding: 0.05rem 0.45rem;
+	border: 1px solid currentcolor;
+	border-radius: var(--cs-radius-full, 9999px);
+	font-size: 0.6875rem;
+	font-weight: var(--cs-weight-semibold, 600);
+	letter-spacing: 0.04em;
+	line-height: 1;
+	text-transform: uppercase;
+}
+
+.charsheet__campaign-authority--local {
+	color: var(--cs-text-secondary, #9fadc0);
+}
+
+.charsheet__campaign-authority--campaign {
+	color: #93c5fd;
+}
+
 .charsheet__campaign-detail {
 	color: var(--cs-text-secondary, #9fadc0);
 	font-size: var(--cs-text-xs, 0.75rem);
@@ -365,6 +387,10 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 
 .charsheet__campaign-feedback--success {
 	color: var(--cs-success-text, #6ee7b7);
+}
+
+.charsheet__campaign-feedback--warning {
+	color: var(--cs-warning-text, #fcd34d);
 }
 
 .charsheet__campaign-policy-warning {

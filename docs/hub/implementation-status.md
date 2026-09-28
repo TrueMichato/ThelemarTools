@@ -70,7 +70,10 @@ invalidations, owner/DM/peer views, sharing controls, and fail-closed privacy co
 V2-T5 whole-site campaign context is implemented: account-bound device selection, lightweight Hub/shared-nav
 switchers, early temporary brew/rules activation, authorized bare Character Sheet and DM Screen defaults,
 explicit local routes, pinned-resource behavior, access-loss concealment, BFCache/reconnect revalidation, and
-server capability `campaign.active_context.v1`. ADR 0015/V2-T6 now consumes its source/edition metadata and
+server capability `campaign.active_context.v1`. Character Sheet routes additionally expose explicit Local or
+Campaign authority, label selector scope, save/fence before cross-authority navigation, retain a validated exact
+campaign-character return route through Local refresh/new-tab entry, and keep deliberate same-id local/campaign
+documents isolated by repository. ADR 0015/V2-T6 now consumes its source/edition metadata and
 teardown generation for content enforcement.
 
 The focused `t2-effects-server-role` prerequisite slice established the ADR 0012 server contract without changing

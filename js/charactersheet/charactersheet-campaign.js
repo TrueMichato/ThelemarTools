@@ -8,6 +8,12 @@ import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from ".
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 import {CharacterSheetState} from "./charactersheet-state.js";
 import {getCampaignSettingsOverlayFromRulesVersion} from "../hub/hub-campaign-rule-evaluator.js";
+import {
+	getCampaignCharacterSheetUrl,
+	getCharacterSheetCampaignReturnTarget,
+	getDetachedCloudCharacterSheetUrl,
+	getLocalCharacterSheetUrl,
+} from "../hub/hub-character-sheet-routes.js";
 
 const _CAMPAIGN_ROLES = new Set(["dm", "co_dm", "player"]);
 const _TERMINAL_CHARACTER_ACCESS_ERROR_CODES = new Set([
@@ -40,11 +46,11 @@ export function getEligibleCharacterCampaigns (campaigns, {excludeCampaignId = n
 }
 
 export function getCampaignCharacterUrl ({campaignId, characterId}) {
-	return `charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+	return getCampaignCharacterSheetUrl({campaignId, characterId});
 }
 
 export function getDetachedCloudCharacterUrl ({characterId}) {
-	return `charactersheet.html?id=${encodeURIComponent(characterId)}&hubCharacter=1`;
+	return getDetachedCloudCharacterSheetUrl({characterId});
 }
 
 export function getCloudCharacterUrl ({campaignId = null, characterId}) {
@@ -165,6 +171,12 @@ export class CharacterSheetCampaign {
 		this._sharing = null;
 		this._isInitialized = false;
 		this._refreshGeneration = 0;
+		this._campaignReturnTarget = getCharacterSheetCampaignReturnTarget({
+			href: globalThis.location?.href || "",
+		});
+		this._campaignReturnCharacter = null;
+		this._campaignReturnCampaign = null;
+		this._campaignReturnStatus = this._campaignReturnTarget ? "pending" : null;
 	}
 
 	async pInit () {
@@ -181,6 +193,9 @@ export class CharacterSheetCampaign {
 		this._currentCharacter = null;
 		this._currentCampaign = null;
 		this._sharing = null;
+		this._campaignReturnCharacter = null;
+		this._campaignReturnCampaign = null;
+		this._campaignReturnStatus = this._campaignReturnTarget ? "pending" : null;
 		this._selectedCampaignId = null;
 		this._movePreview = null;
 		this._feedback = null;
@@ -222,11 +237,33 @@ export class CharacterSheetCampaign {
 				? campaigns.find(campaign => campaign.id === currentCampaignId)
 					|| await this._api.pGetCampaign({campaignId: currentCampaignId})
 				: null;
+			let campaignReturnCharacter = null;
+			let campaignReturnCampaign = null;
+			let campaignReturnStatus = this._campaignReturnTarget ? "unavailable" : null;
+			if (session.signedIn && !this._page._isHubCharacter && this._campaignReturnTarget) {
+				campaignReturnCampaign = campaigns.find(campaign => campaign.id === this._campaignReturnTarget.campaignId) || null;
+				if (campaignReturnCampaign) {
+					try {
+						const candidate = await this._api.pGetCharacter({
+							characterId: this._campaignReturnTarget.characterId,
+						});
+						if (candidate?.campaignId === campaignReturnCampaign.id) {
+							campaignReturnCharacter = candidate;
+							campaignReturnStatus = "ready";
+						}
+					} catch {
+						campaignReturnCampaign = null;
+					}
+				}
+			}
 			if (!isCurrent()) return;
 			this._session = session;
 			this._campaigns = campaigns;
 			this._currentCharacter = currentCharacter;
 			this._currentCampaign = currentCampaign;
+			this._campaignReturnCharacter = campaignReturnCharacter;
+			this._campaignReturnCampaign = campaignReturnCampaign;
+			this._campaignReturnStatus = campaignReturnStatus;
 		} catch (error) {
 			if (!isCurrent()) return;
 			this._session = null;
@@ -263,11 +300,15 @@ export class CharacterSheetCampaign {
 			className: "charsheet__campaign-title",
 			text: this._getTitle({isCloud}),
 		});
+		const authority = createElement("span", {
+			className: `charsheet__campaign-authority charsheet__campaign-authority--${isCloud ? "campaign" : "local"}`,
+			text: isCloud ? "Campaign authority" : "Local authority",
+		});
 		const detail = createElement("span", {
 			className: "charsheet__campaign-detail",
 			text: this._getDetail({isCloud}),
 		});
-		copy.append(title, detail);
+		copy.append(title, authority, detail);
 		status.append(icon, copy);
 
 		const actions = createElement("div", {className: "charsheet__campaign-actions"});
@@ -279,6 +320,13 @@ export class CharacterSheetCampaign {
 				className: `charsheet__campaign-feedback charsheet__campaign-feedback--${this._feedback.type}`,
 				text: this._feedback.text,
 				attrs: {role: this._feedback.type === "error" ? "alert" : "status"},
+			}));
+		}
+		if (this._campaignReturnStatus === "unavailable") {
+			this._root.append(createElement("div", {
+				className: "charsheet__campaign-feedback charsheet__campaign-feedback--warning",
+				text: "The previous campaign character is no longer available here. Open Campaign Hub to choose an authorized character.",
+				attrs: {role: "status"},
 			}));
 		}
 		this._renderContentPolicyWarnings();
@@ -406,6 +454,20 @@ export class CharacterSheetCampaign {
 					attrs: {href: `campaign.html?id=${encodeURIComponent(this._currentCampaign.id)}`},
 				}));
 			}
+			if (this._currentCharacter?.campaignId && this._page._currentCharacterId) {
+				const local = createElement("a", {
+					className: "charsheet__campaign-button",
+					text: "Open Local mode",
+					attrs: {
+						href: getLocalCharacterSheetUrl({
+							returnCampaignId: this._currentCharacter.campaignId,
+							returnCharacterId: this._page._currentCharacterId,
+						}),
+						"data-charsheet-authority-navigation": "true",
+					},
+				});
+				actions.append(local);
+			}
 			if (this._page.isCurrentCharacterReadOnly?.()) {
 				if (!this._currentCampaign) {
 					actions.append(createElement("a", {
@@ -440,8 +502,27 @@ export class CharacterSheetCampaign {
 			return;
 		}
 
-		const toggle = this._getToggleButton("Add to campaign");
-		toggle.disabled = !this._page._currentCharacterId || this._isBusy;
+		if (this._campaignReturnCharacter && this._campaignReturnCampaign) {
+			const isReadOnly = this._session?.account?.id
+				&& this._campaignReturnCharacter.ownerAccountId
+				&& this._session.account.id !== this._campaignReturnCharacter.ownerAccountId;
+			actions.append(createElement("a", {
+				className: "charsheet__campaign-button charsheet__campaign-button--primary",
+				text: isReadOnly ? "Return to read-only campaign character" : "Return to campaign character",
+				attrs: {
+					href: getCampaignCharacterSheetUrl({
+						campaignId: this._campaignReturnCampaign.id,
+						characterId: this._campaignReturnCharacter.id,
+					}),
+					"data-charsheet-authority-navigation": "true",
+				},
+			}));
+		}
+
+		const toggle = this._getToggleButton(
+			this._page._currentCharacterId ? "Add to campaign" : "Campaign characters",
+		);
+		toggle.disabled = this._isBusy;
 		actions.append(toggle);
 	}
 
@@ -477,7 +558,7 @@ export class CharacterSheetCampaign {
 			className: "charsheet__campaign-panel-heading",
 			text: isAttached
 				? "Copy or move this character"
-				: isCloud ? "Add this cloud character" : "Add a cloud copy",
+				: isCloud ? "Add this cloud character" : "Campaign characters and cloud copy",
 		});
 		const explanation = createElement("p", {
 			className: "charsheet__campaign-explanation",
@@ -485,7 +566,9 @@ export class CharacterSheetCampaign {
 				? "A separate character will be created in the destination campaign. This character remains here and the two copies will not share later changes."
 				: isCloud
 					? "The same online character will join the selected campaign. No local or cloud copy will be deleted."
-					: "A separate character will be created for the campaign. Your local original stays on this device and will not be changed or removed.",
+					: this._page._currentCharacterId
+						? "Open the selected campaign's character roster, or create a separate online copy. Your local original stays on this device and will not be changed or removed."
+						: "Open the selected campaign's character roster. Choose or create a local character first if you also want to make a separate cloud copy.",
 		});
 		const field = createElement("label", {className: "charsheet__campaign-field"});
 		field.append(createElement("span", {text: "Destination campaign"}));
@@ -512,20 +595,36 @@ export class CharacterSheetCampaign {
 		});
 		field.append(select);
 
-		const submit = createElement("button", {
+		const openCampaignCharacters = createElement("a", {
 			className: "charsheet__campaign-submit",
-			text: this._isBusy
-				? (isCloud && !isAttached ? "Adding character…" : "Creating copy…")
-				: (isCloud && !isAttached ? "Add character" : "Create cloud copy"),
-			attrs: {type: "button"},
+			text: "Open campaign characters",
+			attrs: {
+				href: select.value ? getCampaignCharacterSheetUrl({campaignId: select.value}) : "hub.html",
+				"data-charsheet-authority-navigation": "true",
+			},
 		});
-		submit.disabled = this._isBusy || !destinations.length;
-		submit.addEventListener("click", () => {
-			if (!isCloud) return this._pCopyLocalCharacter({campaignId: select.value});
-			if (!isAttached) return this._pMoveCloudCharacter({campaignId: select.value, isDetached: true});
-			return this._pCloneCloudCharacter({campaignId: select.value});
+		select.addEventListener("change", () => {
+			openCampaignCharacters.href = select.value
+				? getCampaignCharacterSheetUrl({campaignId: select.value})
+				: "hub.html";
 		});
-		panel.append(heading, explanation, field, submit);
+		panel.append(heading, explanation, field, openCampaignCharacters);
+		if (isCloud || this._page._currentCharacterId) {
+			const submit = createElement("button", {
+				className: "charsheet__campaign-submit",
+				text: this._isBusy
+					? (isCloud && !isAttached ? "Adding character…" : "Creating copy…")
+					: (isCloud && !isAttached ? "Add character" : "Create cloud copy"),
+				attrs: {type: "button"},
+			});
+			submit.disabled = this._isBusy || !destinations.length;
+			submit.addEventListener("click", () => {
+				if (!isCloud) return this._pCopyLocalCharacter({campaignId: select.value});
+				if (!isAttached) return this._pMoveCloudCharacter({campaignId: select.value, isDetached: true});
+				return this._pCloneCloudCharacter({campaignId: select.value});
+			});
+			panel.append(submit);
+		}
 		if (isAttached) this._renderMoveControls({panel, sourceCampaignId, campaignId: select.value});
 		return panel;
 	}

@@ -182,6 +182,20 @@ downloads, OAuth/auth routes, hash-only links, or local-only resource URLs.
 `?local=1` is the explicit local/no-campaign route for Character Sheet and DM Screen. It outranks a stored
 selection and is never decorated with `hubCampaign`.
 
+When a campaign Character Sheet deliberately opens Local mode, the local route may also carry
+`returnHubCampaign` plus `returnHubCharacter`. They are an all-or-nothing UUID pair used only to
+reconstruct an explicit return destination after the local campaign control revalidates the current
+session and canonical character projection. The campaign character id is never copied into the local
+route's `id` parameter. Local and campaign repositories therefore remain distinct even if their stored
+documents deliberately use the same id.
+
+Leaving one Character Sheet authority for another first completes the current repository's ordinary
+save/recovery flow. A refused recovery keeps the user on the current page. A successful transition
+advances the character generation, fences callbacks, and suspends realtime/context before navigation.
+`pagehide.persisted` retains those owners for BFCache; terminal page hide performs detach/disposal.
+A temporary cloud id accepted as a different canonical id rewrites the return descriptor before the
+page leaves.
+
 `navigation.js` remains the navigation owner on ordinary heavy pages. It may decorate campaign-capable links
 from an already-validated effective context, but it must not perform authenticated fetches, activate brew, or
 own campaign lifecycle.

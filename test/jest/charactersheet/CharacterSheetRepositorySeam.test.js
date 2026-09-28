@@ -1,6 +1,10 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
-import {HubCharacterMemoryAuthority, HubCharacterRepository} from "../../../js/hub/hub-character-repository.js";
+import {
+	HubCharacterMemoryAuthority,
+	HubCharacterRepository,
+	LocalCharacterRepository,
+} from "../../../js/hub/hub-character-repository.js";
 import {CHARACTER_ACCESS_MODES} from "../../../js/hub/hub-character-view.js";
 import {CHARACTER_REALTIME_ACCESS_END_CAUSES} from "../../../js/charactersheet/charactersheet-realtime.js";
 
@@ -146,6 +150,172 @@ describe("Character Sheet repository seam", () => {
 
 		expect(repository.pList).toHaveBeenCalledTimes(1);
 		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(characters);
+	});
+
+	it("labels the selector with the authority of the injected repository", () => {
+		const localSelect = makeCharacterSelect([]);
+		const localHost = {
+			_isHubCharacter: false,
+			_currentCharacterId: null,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_selCharacter: localSelect,
+			_characterRepository: {getCharacterAccess: () => CHARACTER_ACCESS_MODES.OWNER},
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+		};
+		CharacterSheetPage.prototype._updateCharacterDropdown.call(localHost, [{id: "local-a", name: "Local A"}]);
+		expect(localSelect.options.find(option => option.disabled)?.textContent).toContain("Local characters");
+
+		const campaignSelect = makeCharacterSelect([]);
+		const campaignHost = {
+			...localHost,
+			_isHubCharacter: true,
+			_selCharacter: campaignSelect,
+		};
+		CharacterSheetPage.prototype._updateCharacterDropdown.call(campaignHost, [{id: "cloud-a", name: "Cloud A"}]);
+		expect(campaignSelect.options.find(option => option.disabled)?.textContent).toContain("Campaign characters");
+	});
+
+	it("keeps a deliberate local/campaign id collision isolated by repository authority", async () => {
+		const characterId = "55555555-5555-4555-8555-555555555555";
+		const campaignId = "33333333-3333-4333-8333-333333333333";
+		const authority = new HubCharacterMemoryAuthority();
+		authority.createCharacter({
+			characterId,
+			ownerId: "owner-1",
+			campaignId,
+			data: {name: "Canonical Campaign Hero", hp: {current: 12}},
+			mutationId: "create-canonical",
+		});
+		const campaignRepository = new HubCharacterRepository({
+			authority,
+			sessionId: "session-1",
+			ownerId: "owner-1",
+			campaignId,
+		});
+		const localStorage = {
+			value: [{id: characterId, name: "Local Collision", hp: {current: 3}}],
+			async pGet () { return structuredClone(this.value); },
+			async pSet (_key, value) { this.value = structuredClone(value); },
+		};
+		const localRepository = new LocalCharacterRepository({storage: localStorage});
+
+		await localRepository.pUpsert({
+			character: {id: characterId, name: "Changed Only Locally", hp: {current: 1}},
+		});
+
+		expect(await localRepository.pGet({characterId})).toEqual(expect.objectContaining({
+			name: "Changed Only Locally",
+			hp: {current: 1},
+		}));
+		expect(await campaignRepository.pGet({characterId})).toEqual(expect.objectContaining({
+			name: "Canonical Campaign Hero",
+			hp: {current: 12},
+		}));
+		expect(authority.getCharacter({characterId})).toEqual(expect.objectContaining({
+			revision: 1,
+			data: expect.objectContaining({
+				name: "Canonical Campaign Hero",
+				hp: {current: 12},
+			}),
+		}));
+	});
+
+	it("saves in the current authority before navigation, adopts a canonical id, and fences late callbacks", async () => {
+		const order = [];
+		const host = {
+			_hubCampaignId: "33333333-3333-4333-8333-333333333333",
+			_currentCharacterId: "55555555-5555-4555-8555-555555555555",
+			_characterLoadGeneration: 7,
+			_isAuthorityNavigationPending: false,
+			_saveCurrentCharacter: jest.fn(async () => {
+				order.push("save");
+				host._currentCharacterId = "66666666-6666-4666-8666-666666666666";
+				return true;
+			}),
+			_closeCharacterScopedTransientUi: jest.fn(() => order.push("close")),
+			_fenceHubGeneration: jest.fn(() => order.push("fence")),
+			_hubRealtime: {suspend: jest.fn(() => order.push("realtime-suspend"))},
+			_hubActiveCampaign: {suspend: jest.fn(() => order.push("context-suspend"))},
+		};
+		const fnNavigate = jest.fn(href => order.push(`navigate:${href}`));
+		const previousGeneration = host._characterLoadGeneration;
+
+		const result = await CharacterSheetPage.prototype._pNavigateCharacterAuthority.call(host, {
+			href: "charactersheet.html?local=1&returnHubCampaign=33333333-3333-4333-8333-333333333333&returnHubCharacter=55555555-5555-4555-8555-555555555555",
+			fnNavigate,
+		});
+
+		expect(result).toBe(true);
+		expect(host._characterLoadGeneration).toBe(previousGeneration + 1);
+		expect(order).toEqual([
+			"save",
+			"close",
+			"fence",
+			"realtime-suspend",
+			"context-suspend",
+			"navigate:charactersheet.html?local=1&returnHubCampaign=33333333-3333-4333-8333-333333333333&returnHubCharacter=66666666-6666-4666-8666-666666666666",
+		]);
+	});
+
+	it("does not leave the current authority when its save/recovery flow refuses navigation", async () => {
+		const host = {
+			_hubCampaignId: "33333333-3333-4333-8333-333333333333",
+			_currentCharacterId: "55555555-5555-4555-8555-555555555555",
+			_characterLoadGeneration: 7,
+			_isAuthorityNavigationPending: false,
+			_saveCurrentCharacter: jest.fn(async () => false),
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_fenceHubGeneration: jest.fn(),
+			_hubRealtime: {suspend: jest.fn()},
+			_hubActiveCampaign: {suspend: jest.fn()},
+		};
+		const fnNavigate = jest.fn();
+
+		const result = await CharacterSheetPage.prototype._pNavigateCharacterAuthority.call(host, {
+			href: "charactersheet.html?local=1",
+			fnNavigate,
+		});
+
+		expect(result).toBe(false);
+		expect(host._characterLoadGeneration).toBe(7);
+		expect(host._fenceHubGeneration).not.toHaveBeenCalled();
+		expect(host._hubRealtime.suspend).not.toHaveBeenCalled();
+		expect(host._hubActiveCampaign.suspend).not.toHaveBeenCalled();
+		expect(fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("waits for a queued authority save before fencing and navigating", async () => {
+		const save = makeDeferred();
+		const host = {
+			_hubCampaignId: "33333333-3333-4333-8333-333333333333",
+			_currentCharacterId: "55555555-5555-4555-8555-555555555555",
+			_characterLoadGeneration: 7,
+			_isAuthorityNavigationPending: false,
+			_saveCurrentCharacter: jest.fn(() => save.promise),
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_fenceHubGeneration: jest.fn(),
+			_hubRealtime: {suspend: jest.fn()},
+			_hubActiveCampaign: {suspend: jest.fn()},
+		};
+		const fnNavigate = jest.fn();
+		const pending = CharacterSheetPage.prototype._pNavigateCharacterAuthority.call(host, {
+			href: "charactersheet.html?local=1&returnHubCampaign=33333333-3333-4333-8333-333333333333&returnHubCharacter=55555555-5555-4555-8555-555555555555",
+			fnNavigate,
+		});
+
+		await Promise.resolve();
+		expect(host._characterLoadGeneration).toBe(7);
+		expect(host._hubRealtime.suspend).not.toHaveBeenCalled();
+		expect(fnNavigate).not.toHaveBeenCalled();
+
+		save.resolve(true);
+		await pending;
+
+		expect(host._characterLoadGeneration).toBe(8);
+		expect(host._fenceHubGeneration).toHaveBeenCalledTimes(1);
+		expect(host._hubRealtime.suspend).toHaveBeenCalledTimes(1);
+		expect(host._hubActiveCampaign.suspend).toHaveBeenCalledTimes(1);
+		expect(fnNavigate).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not claim recovery or clear the retained Hub selector after a fenced roster cancellation", async () => {
