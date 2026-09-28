@@ -195,6 +195,7 @@ export class HubActiveCampaignSwitcher {
 			const link = document.createElement("a");
 			link.className = "hub-context-switcher__open";
 			link.href = explicitLocalUrl;
+			link.dataset.charsheetAuthorityNavigation = "true";
 			link.textContent = "Open local";
 			wrapper.append(link);
 		}
@@ -206,6 +207,7 @@ export class HubActiveCampaignSwitcher {
 				const link = document.createElement("a");
 				link.className = "hub-context-switcher__open";
 				link.href = openUrl;
+				link.dataset.charsheetAuthorityNavigation = "true";
 				link.textContent = selectedValue === _LOCAL_VALUE ? "Go local" : "Open selected";
 				wrapper.append(link);
 			}

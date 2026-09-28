@@ -209,6 +209,197 @@ test.describe("device-scoped active campaign context", () => {
 		}
 	});
 
+	test("keeps campaign and Local authority reversible without cross-writing canonical truth", async ({browser}) => {
+		test.setTimeout(240_000);
+		const context = await browser.newContext(contextOptions);
+		try {
+			const hub = new HubCampaignPage(await context.newPage());
+			await hub.signInSynthetic({providerSubject: "authority-owner", displayName: "Authority Owner", secret: secret!});
+			const campaignId = await hub.createCampaign("Authority Routing E2E");
+			const character = await hub.createCharacter({campaignId, name: "Canonical Route Hero"});
+
+			// Deliberately reuse the canonical Hub id in the local repository. Repository authority,
+			// not id uniqueness, must keep the two documents isolated.
+			const localSeed = new HubCampaignPage(await context.newPage());
+			await localSeed.page.goto("/charactersheet.html?local=1");
+			await localSeed.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await localSeed.page.evaluate(async collision => {
+				await (window as any).StorageUtil.pSet("charsheet-characters", [collision]);
+			}, {
+				id: character.id,
+				name: "Local Collision Hero",
+				abilities: {str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10},
+				classes: [{name: "Fighter", source: "PHB", level: 1}],
+				hp: {current: 3, max: 9, temp: 0},
+				inventory: [],
+			});
+			await localSeed.page.close();
+
+			await hub.gotoCampaign(campaignId);
+			await hub.waitForSelectedCampaign(campaignId);
+
+			// Ordinary site entry and Campaign Overview entry both use the same campaign repository.
+			const ordinary = new HubCampaignPage(await context.newPage());
+			await ordinary.page.goto("/charactersheet.html");
+			await ordinary.page.waitForURL(url => url.searchParams.get("hubCampaign") === campaignId, {timeout: 60_000});
+			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(ordinary.page.locator(`#charsheet-sel-character option[value="${character.id}"]`))
+				.toContainText("Canonical Route Hero");
+			await ordinary.page.locator("#charsheet-sel-character").selectOption(character.id);
+			await expect.poll(
+				() => ordinary.page.evaluate(() => (window as any).charSheet?._currentCharacterId),
+				{timeout: 30_000},
+			).toBe(character.id);
+			const canonicalAfterOrdinary = await hub.getCharacter(character.id);
+			const ordinaryAcceptedRevision = await ordinary.page.evaluate(
+				id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
+				character.id,
+			);
+			expect(ordinaryAcceptedRevision).toBe(canonicalAfterOrdinary.revision);
+
+			const overview = new HubCampaignPage(await context.newPage());
+			await overview.gotoCampaign(campaignId);
+			await overview.page.locator("#campaign-character-list .hub-data-row", {hasText: "Canonical Route Hero"}).click();
+			await overview.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			expect(new URL(overview.page.url()).searchParams.get("id")).toBe(character.id);
+			const overviewAcceptedRevision = await overview.page.evaluate(
+				id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
+				character.id,
+			);
+			const canonicalAfterOverview = await hub.getCharacter(character.id);
+			expect(overviewAcceptedRevision).toBe(canonicalAfterOverview.revision);
+			await expect.poll(
+				() => ordinary.page.evaluate(
+					id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
+					character.id,
+				),
+				{timeout: 30_000},
+			).toBe(canonicalAfterOverview.revision);
+
+			// The explicit authority transition saves the current campaign document, fences its
+			// callbacks, and carries an exact route back without putting the Hub id in local `id`.
+			await ordinary.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
+			await ordinary.page.waitForURL(url =>
+				url.searchParams.get("local") === "1"
+				&& url.searchParams.get("returnHubCampaign") === campaignId
+				&& url.searchParams.get("returnHubCharacter") === character.id,
+			{timeout: 60_000});
+			expect(new URL(ordinary.page.url()).searchParams.get("id")).toBeNull();
+			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
+			const canonicalAtLocalEntry = await hub.getCharacter(character.id);
+			expect(canonicalAtLocalEntry.data.name).toBe("Canonical Route Hero");
+
+			await ordinary.page.locator("#charsheet-sel-character").selectOption(character.id);
+			await expect(ordinary.page.locator("#charsheet-ipt-name")).toHaveValue("Local Collision Hero");
+			await ordinary.page.locator("#charsheet-ipt-name").evaluate((input: HTMLInputElement) => {
+				input.value = "Changed Only In Local Authority";
+				input.dispatchEvent(new Event("change", {bubbles: true}));
+			});
+			await expect.poll(
+				() => ordinary.page.evaluate(async id => {
+					const rows = await (window as any).StorageUtil.pGet("charsheet-characters");
+					return rows.find((row: any) => row.id === id)?.name || null;
+				}, character.id),
+				{timeout: 15_000},
+			).toBe("Changed Only In Local Authority");
+
+			const canonicalAfterLocalWrite = await hub.getCharacter(character.id);
+			expect(canonicalAfterLocalWrite.revision).toBe(canonicalAtLocalEntry.revision);
+			expect(canonicalAfterLocalWrite.data.name).toBe("Canonical Route Hero");
+
+			await ordinary.page.reload();
+			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
+			await expect(ordinary.page.locator("#charsheet-ipt-name")).toHaveValue("Changed Only In Local Authority");
+			const returnLink = ordinary.page.locator("#charsheet-campaign a", {hasText: "Return to campaign character"});
+			await expect(returnLink).toHaveAttribute(
+				"href",
+				`charactersheet.html?id=${character.id}&hubCampaign=${campaignId}`,
+			);
+
+			const localUrl = ordinary.page.url();
+			const reopenedLocal = new HubCampaignPage(await context.newPage());
+			await reopenedLocal.page.goto(localUrl);
+			await reopenedLocal.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(reopenedLocal.page.locator("#charsheet-campaign a", {hasText: "Return to campaign character"}))
+				.toHaveAttribute("href", `charactersheet.html?id=${character.id}&hubCampaign=${campaignId}`);
+			await reopenedLocal.page.close();
+
+			await returnLink.click();
+			await ordinary.page.waitForURL(url =>
+				url.searchParams.get("id") === character.id
+				&& url.searchParams.get("hubCampaign") === campaignId
+				&& !url.searchParams.has("local"),
+			{timeout: 60_000});
+			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Campaign authority");
+			await expect(ordinary.page.locator("#charsheet-ipt-name")).toHaveValue("Canonical Route Hero");
+
+			const canonicalAfterReturn = await hub.getCharacter(character.id);
+			const returnedAcceptedRevision = await ordinary.page.evaluate(
+				id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
+				character.id,
+			);
+			expect(canonicalAfterReturn.revision).toBe(canonicalAfterLocalWrite.revision);
+			expect(returnedAcceptedRevision).toBe(canonicalAfterReturn.revision);
+		} finally {
+			await pCloseContext(context);
+		}
+	});
+
+	test("returns a DM from Local mode to the same read-only campaign projection", async ({browser}) => {
+		test.setTimeout(240_000);
+		const dmContext = await browser.newContext(contextOptions);
+		const playerContext = await browser.newContext(contextOptions);
+		try {
+			const dm = new HubCampaignPage(await dmContext.newPage());
+			await dm.signInSynthetic({providerSubject: "authority-dm", displayName: "Authority DM", secret: secret!});
+			const campaignId = await dm.createCampaign("DM Authority Routing E2E");
+			const invite = await dm.createInviteViaApi(campaignId);
+
+			const player = new HubCampaignPage(await playerContext.newPage());
+			await player.signInSynthetic({providerSubject: "authority-player", displayName: "Authority Player", secret: secret!});
+			await player.redeemInviteTokenViaApi(invite);
+			const character = await player.createCharacter({campaignId, name: "Read-only Route Hero"});
+			const canonicalBefore = await player.getCharacter(character.id);
+
+			await dm.gotoCampaign(campaignId);
+			await dm.page.locator("#campaign-character-list .hub-data-row", {hasText: "Read-only Route Hero"}).click();
+			await dm.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(dm.page.locator("#charsheet-campaign")).toContainText("Read-only DM view");
+			await expect(dm.page.locator("#charsheet-save-indicator")).toHaveAttribute("title", "Read-only DM view");
+
+			await dm.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
+			await dm.page.waitForURL(url =>
+				url.searchParams.get("local") === "1"
+				&& url.searchParams.get("returnHubCampaign") === campaignId
+				&& url.searchParams.get("returnHubCharacter") === character.id,
+			{timeout: 60_000});
+			await dm.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(dm.page.locator("#charsheet-campaign a", {hasText: "Return to read-only campaign character"}))
+				.toBeVisible();
+
+			await dm.page.reload();
+			await dm.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await dm.page.locator("#charsheet-campaign a", {hasText: "Return to read-only campaign character"}).click();
+			await dm.page.waitForURL(url =>
+				url.searchParams.get("id") === character.id
+				&& url.searchParams.get("hubCampaign") === campaignId,
+			{timeout: 60_000});
+			await dm.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(dm.page.locator("#charsheet-campaign")).toContainText("Read-only DM view");
+			await expect(dm.page.locator("#charsheet-save-indicator")).toHaveAttribute("title", "Read-only DM view");
+
+			const canonicalAfter = await player.getCharacter(character.id);
+			expect(canonicalAfter.revision).toBe(canonicalBefore.revision);
+			expect(canonicalAfter.data.name).toBe("Read-only Route Hero");
+		} finally {
+			await pCloseContext(dmContext);
+			await pCloseContext(playerContext);
+		}
+	});
+
 	test("survives a BFCache round trip without losing campaign rules", async ({browser}) => {
 		test.setTimeout(180_000);
 		const context = await browser.newContext(contextOptions);

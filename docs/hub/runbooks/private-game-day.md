@@ -178,11 +178,15 @@ character appears.
 1. DM activates a distinctive campaign rule and one harmless campaign homebrew entry in Campaign A.
 2. Player A confirms both are visible in Campaign A.
 3. Player A opens Campaign B and a `?local=1` Character Sheet.
-4. Switch repeatedly between A, B, and local mode.
+4. From an open Campaign A character, use the visible Local-mode route. Refresh that local route, open it in a
+   new tab, then use the visible return action to reopen the exact Campaign A character.
+5. Switch repeatedly between A, B, and local mode.
 
 **Expected:** Campaign A context applies only in A; Campaign B keeps its own rule/content version; local mode
-uses personal content only; switching or access loss clears the prior temporary overlay before the next one is
-used.
+uses personal content only; the authority label and character selector say whether they are Local or Campaign;
+the exact campaign return survives refresh/new-tab entry; returning restores the same canonical character id and
+revision; local edits never change the campaign character even if a test fixture deliberately reuses its id;
+switching or access loss clears the prior temporary overlay before the next one is used.
 
 ### GD-06 — DM visibility and player privacy
 

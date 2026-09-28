@@ -188,6 +188,13 @@ No reactive system — renders are explicit. Related modules re-render together 
   scope, roster selection, projections, and realtime subscription under one updated load/save fence before the
   repository mutation queue releases canonical events. The identity-only detach preserves canonical repository
   reconciliation coverage while fencing callbacks from the temporary subscription.
+- **Local/Campaign authority navigation**: the route fixes the repository for the page lifetime. Campaign
+  sheets save through the Hub repository before entering `?local=1`, then advance the character generation,
+  close character-scoped UI, detach realtime/projections, and navigate. The local URL carries a separately
+  validated `returnHubCampaign`/`returnHubCharacter` pair, never the campaign id in local `id`; a temporary
+  character canonicalized by that final save rewrites the return pair. Local sheets perform the same save-first
+  fence before returning. A refused save/recovery stays put, and deliberate same-id local/campaign documents
+  remain isolated by repository authority.
 - **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
   canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
   until an authoritative applied event completes repository adoption. The approval response carries that same
