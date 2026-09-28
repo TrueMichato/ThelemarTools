@@ -1,14 +1,19 @@
 # Runbook: Oracle host operations for the Campaign Hub
 
-> **Status:** Release r7 deployed; V1-G1 operations and recovery evidence complete
+> **Status:** Last facilitator-verified deployment r10; V1-G1 operations complete; r11 preflight blocked
 > **Last drilled:** 2026-09-13
+> **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub operator
 
 This procedure adds scheduled maintenance, encrypted backups, off-machine copies, and five-minute health
 checks without stopping or resizing the Oracle instance. The host is now dedicated to the Campaign Hub after
 Foundry was intentionally decommissioned.
 
-The current deployed release is the annotated tag `hub-staging-2026-09-10-r7` (tag object
+The last facilitator-verified deployment was annotated tag `hub-staging-2026-09-21-r10` at
+`cc3a7290d12f645907688a9731b5b7ae400e28eb`. Fresh host-private deployment identity and
+backup/restore/monitor evidence must be rechecked before the next release; the 2026-09-28 prospective
+r11 preflight found a stale off-machine copy and could not authenticate to the host. The r7
+qualification used annotated tag `hub-staging-2026-09-10-r7` (tag object
 `a65fec81eba3cd147fd44b54e617bf83d4a707f8`, commit
 `77d955c053dcdfe949235620db93f7eba477af34`). Manual maintenance and backup runs, five-minute monitoring,
 off-machine backup copying, an isolated authenticated restore, and an exact-r6 application rollback rehearsal
