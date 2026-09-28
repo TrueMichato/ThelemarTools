@@ -2903,6 +2903,35 @@ class CharacterSheetProgression {
 		return issues;
 	}
 
+	static _getPermanentSpellAcquisitionOwners ({decisions, decision}) {
+		const permanentTypes = new Set(["knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"]);
+		const owners = new Map();
+		if (!permanentTypes.has(decision.type) || decision.meta?.legacyCumulative) return owners;
+		const classUid = CharacterSheetProgression.getClassUid(decision.className, decision.classSource);
+		const earlier = decisions
+			.filter(other =>
+				CharacterSheetProgression.getClassUid(other.className, other.classSource) === classUid
+				&& Number(other.classLevel) < Number(decision.classLevel)
+				&& (other.type === decision.type || (decision.type === "knownSpells" && other.type === "spellSwap"))
+				&& !other.meta?.legacyCumulative,
+			)
+			.sort((a, b) => Number(a.classLevel) - Number(b.classLevel));
+		for (const other of earlier) {
+			if (other.type === "spellSwap") {
+				if (other.status !== "resolved") continue;
+				owners.delete(CharacterSheetProgression.getEntityUid(other.selection?.removed));
+				const addedUid = CharacterSheetProgression.getEntityUid(other.selection?.added);
+				if (addedUid && !owners.has(addedUid)) owners.set(addedUid, other);
+				continue;
+			}
+			for (const spell of Array.isArray(other.selection) ? other.selection : []) {
+				const uid = CharacterSheetProgression.getEntityUid(spell);
+				if (uid && !owners.has(uid)) owners.set(uid, other);
+			}
+		}
+		return owners;
+	}
+
 	/**
 	 * Derive every known progression decision opportunity for the supplied
 	 * chronological timeline. Existing selections are matched by semantic key so a
@@ -3872,6 +3901,19 @@ class CharacterSheetProgression {
 			state,
 			storedBasePool: baseStoredPool,
 		});
+
+		for (const decision of decisions) {
+			if (!Array.isArray(decision.selection) || !decision.selection.length || decision.meta?.legacyCumulative) continue;
+			const owners = CharacterSheetProgression._getPermanentSpellAcquisitionOwners({decisions, decision});
+			const conflicting = decision.selection.find(spell => owners.has(CharacterSheetProgression.getEntityUid(spell)));
+			if (!conflicting) continue;
+			const owner = owners.get(CharacterSheetProgression.getEntityUid(conflicting));
+			decision.status = "invalid";
+			decision.meta = {
+				...decision.meta,
+				validationMessage: `${conflicting.name} (${conflicting.source}) is already assigned to ${decision.className} at Level ${owner.characterLevel}. Choose a different spell or repair the earlier level.`,
+			};
+		}
 
 		const artificerPlanDecisions = decisions
 			.filter(decision => [

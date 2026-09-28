@@ -794,6 +794,178 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 		});
 	});
 
+	it("blocks the same exact cantrip acquired at two Bard levels in the manifest and Apply", async () => {
+		const {state, page} = getRecordedBard({level: 4});
+		const first = state.getLevelHistoryEntry(1).choices.cantrips[0];
+		state.getLevelHistoryEntry(4).choices.cantrips = [copy(first)];
+		const original = state.toJson();
+		const respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		const fourth = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 4);
+
+		expect(fourth.selection).toEqual([first]);
+		expect(fourth.status).toBe("invalid");
+		expect(respec._engine.getValidation().errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				decisionId: fourth.id,
+				message: expect.stringContaining("Level 1"),
+			}),
+		]));
+		await expect(respec._engine.apply()).rejects.toThrow(/Resolve .* required Respec item/);
+		expect(state.toJson()).toEqual(original);
+	});
+
+	it("revalidates a newly staged duplicate cantrip and an older repeated known spell", () => {
+		const {state, page} = getRecordedBard({level: 4});
+		const cantrip = state.getLevelHistoryEntry(1).choices.cantrips[0];
+		const known = state.getLevelHistoryEntry(1).choices.knownSpells[0];
+		const respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const fourth = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 4);
+		const original = state.toJson();
+		respec._engine.stageGraphMutation(fourth.id, [cantrip], {
+			apply: ({state: candidate}) => respec._applyManifestSelectionMechanics(fourth, [cantrip], fourth.options, candidate),
+		});
+		expect(respec._engine.getDecision(fourth.id).status).toBe("invalid");
+		expect(respec._engine.getValidation().errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({decisionId: fourth.id, message: expect.stringContaining("Level 1")}),
+		]));
+		expect(state.toJson()).toEqual(original);
+
+		const older = getRecordedBard({level: 4});
+		older.state.getLevelHistoryEntry(2).choices.knownSpells = [copy(known)];
+		const manifest = CharacterSheetProgression.buildManifest({page: older.page, state: older.state});
+		const second = manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 2);
+		expect(second.selection).toEqual([known]);
+		expect(second.status).toBe("invalid");
+		expect(second.meta.validationMessage).toContain("Level 1");
+	});
+
+	it("keeps source-qualified variants, class owners, spell models, and a swapped-out spell distinct", () => {
+		const {state, page, spellData} = getRecordedBard({level: 4});
+		const first = state.getLevelHistoryEntry(1).choices.cantrips[0];
+		const otherSource = {...first, source: "PHB"};
+		state.getLevelHistoryEntry(4).choices.cantrips = [otherSource];
+		const catalog = [...spellData, {
+			...spellData.find(it => it.name === first.name && it.source === first.source),
+			source: "PHB",
+			classes: {fromClassList: [{name: "Bard", source: "PHB"}]},
+		}];
+		page.getSpells = () => copy(catalog);
+		page.getFilteredSpellData = () => copy(catalog);
+		const manifest = CharacterSheetProgression.buildManifest({page, state});
+		const firstDecision = manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 1);
+		const fourth = manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 4);
+		expect(firstDecision.status).toBe("resolved");
+		expect(fourth.status).toBe("resolved");
+		expect(CharacterSheetProgression._getPermanentSpellAcquisitionOwners({
+			decisions: [firstDecision], decision: fourth,
+		}).has("bard cantrip 1|phb")).toBe(false);
+		for (const decision of [
+			{...fourth, classSource: "PHB"},
+			{...fourth, className: "Wizard"},
+			{...fourth, type: "preparedSpells"},
+			{...fourth, meta: {legacyCumulative: true}},
+		]) {
+			expect(CharacterSheetProgression._getPermanentSpellAcquisitionOwners({
+				decisions: [firstDecision], decision,
+			}).size).toBe(0);
+		}
+		const known = manifest.decisions.find(it => it.type === "knownSpells" && it.classLevel === 1);
+		const next = {...known, classLevel: 4, characterLevel: 4};
+		const removed = known.selection[0];
+		const swap = {
+			...known,
+			type: "spellSwap",
+			classLevel: 2,
+			characterLevel: 2,
+			status: "resolved",
+			selection: {removed, added: known.selection[1]},
+		};
+		const uid = CharacterSheetProgression.getEntityUid(removed);
+		expect(CharacterSheetProgression._getPermanentSpellAcquisitionOwners({
+			decisions: [known], decision: next,
+		}).has(uid)).toBe(true);
+		expect(CharacterSheetProgression._getPermanentSpellAcquisitionOwners({
+			decisions: [known, swap], decision: next,
+		}).has(uid)).toBe(false);
+	});
+
+	it("keeps the conflicting selection visible but refuses to stage it in Repair", async () => {
+		const {state, page} = getRecordedBard({level: 4});
+		const first = state.getLevelHistoryEntry(1).choices.cantrips[0];
+		state.getLevelHistoryEntry(4).choices.cantrips = [copy(first)];
+		const respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		respec.render = jest.fn();
+		const fourth = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 4);
+		const modalInner = e_({tag: "div"});
+		const originalPGetShow = CharacterSheetModal.pGetShow;
+		CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
+		try {
+			await respec._showSpellRepairFlow([fourth.id], jest.fn());
+			const row = getDescendants(modalInner).find(it =>
+				it._clazz?.includes("charsheet__respec-option")
+				&& it._children?.[1]?.textContent?.includes(first.name),
+			);
+			const stage = getDescendants(modalInner).find(it => it.textContent === "Stage & Finish");
+			expect(row._children[0].checked).toBe(true);
+			expect(row._children[1].textContent).toContain("Level 1");
+			expect(stage.disabled).toBe(true);
+			stage.click();
+			expect(respec._engine.isDirty).toBe(false);
+		} finally {
+			CharacterSheetModal.pGetShow = originalPGetShow;
+		}
+	});
+
+	it("shows both selected choices as checkboxes until an overfull one-slot repair is reduced", async () => {
+		const {state, page} = getRecordedBard({level: 4});
+		const fourth = state.getLevelHistoryEntry(4);
+		fourth.choices.cantrips.push(copy(state.getLevelHistoryEntry(1).choices.cantrips[0]));
+		const respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const decision = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 4);
+		const modalInner = e_({tag: "div"});
+		const originalPGetShow = CharacterSheetModal.pGetShow;
+		CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
+		try {
+			await respec._showSpellRepairFlow([decision.id], jest.fn());
+			const rows = getDescendants(modalInner).filter(it => it._clazz?.includes("charsheet__respec-option"));
+			const checked = rows.map(row => row._children[0]).filter(input => input.checked);
+			const count = getDescendants(modalInner).find(it => it.textContent.startsWith("2/1 selected"));
+			const stage = getDescendants(modalInner).find(it => it.textContent === "Stage & Finish");
+			expect(decision.status).toBe("invalid");
+			expect(count).toBeDefined();
+			expect(checked).toHaveLength(2);
+			expect(checked.every(input => input.type === "checkbox")).toBe(true);
+			expect(stage.disabled).toBe(true);
+			const list = getDescendants(modalInner).find(it => it._clazz === "charsheet__respec-option-list");
+			const firstBatchSize = list._children.length;
+			const conflicting = rows.find(row => row._children[1].textContent.includes("chosen at Level 1"));
+			conflicting._children[0].checked = false;
+			conflicting._children[0]._handlers.change();
+			const updatedRows = list._children.slice(firstBatchSize)
+				.filter(it => it._clazz?.includes("charsheet__respec-option"));
+			expect(updatedRows.map(row => row._children[0]).filter(input => input.checked)).toHaveLength(1);
+			expect(updatedRows.every(row => row._children[0].type === "radio")).toBe(true);
+			expect(count.textContent).toBe("1/1 selected");
+			expect(stage.disabled).toBe(false);
+			stage.click();
+			expect(respec._engine.getDecision(decision.id)).toMatchObject({
+				status: "resolved",
+				selection: [fourth.choices.cantrips[0]],
+			});
+			expect(respec._engine.state._getProgressionOwnershipEntry("cantrips", fourth.choices.cantrips[1]).sources)
+				.toHaveLength(1);
+		} finally {
+			CharacterSheetModal.pGetShow = originalPGetShow;
+		}
+	});
+
 	it("lets the repair flow replace an illegal historical cantrip instead of silently restaging it", async () => {
 		const legal = BARD_SPELLS.at(-1);
 		const replacement = spell("Bright Note", 0);

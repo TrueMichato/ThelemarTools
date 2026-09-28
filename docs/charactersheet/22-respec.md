@@ -563,11 +563,19 @@ reclassifying those level-owned spells as one final repertoire.
 
 If real level-specific choices are missing, Review groups unresolved spell
 decisions into one repair item. The spell-repair flow prevents assigning the
-same permanent spell to two levels and keeps partially completed work in the
-candidate when the player chooses **Finish later**. A historical spell which is
-no longer legal remains visible and selected until the player removes it; the
-repair cannot finish while such a selection remains, and replacing it preserves
-every still-legal spell in the repertoire. Pre-manifest characters
+same exact `name|source` permanent spell to two levels of the same class and
+acquisition model. The manifest also marks an already-saved collision invalid,
+names the earlier level in Review, and blocks Apply; Repair keeps the conflicting
+selection visible with its owning level but cannot stage it until it is replaced.
+Same-name spells from different books, independent class owners, and genuinely
+swapped-out spells remain distinct. When a one-slot saved decision contains
+multiple selections, Repair displays both as checked boxes rather than hiding
+one behind a radio group; after reducing it to one choice, the editor switches
+back to radios. Partially completed work stays in the candidate when the player
+chooses **Finish later**. A historical spell which is no longer legal remains
+visible and selected until the player removes it; the repair cannot finish
+while such a selection remains, and replacing it preserves every still-legal
+spell in the repertoire. Pre-manifest characters
 which never used class spell tracking retain empty spell rows as deferred; they
 are not forced to invent twenty levels of historical spell picks before
 applying an unrelated change.

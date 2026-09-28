@@ -71,6 +71,14 @@ Specialty identity, prose-backed Arcane Archer/Thaumaturge choices,
 diagnostics. The inline editor avoids stacked nested modals and all candidate
 mechanics remain isolated until Apply.
 
+Permanent spell-acquisition validation compares exact `name|source` within the
+same class/source, spell model, and distinct acquisition levels. Review and
+Repair share the earlier-level ownership check, while `spellSwap` removals
+release a known spell for later reacquisition. Cumulative legacy repertoires,
+other classes, and distinct source editions are not cross-level collisions.
+Overfull one-slot Repair decisions show checked boxes until reduced to one
+selection, then return to radio controls.
+
 Known validation baseline: `npm run test:data` still reports unrelated missing
 links in `data/crafting.json` (TGTT Identify, COMCRAF crafting material
 descriptions, HHHVI materials/diseases, and Arcadia11 ingredients/skill).
