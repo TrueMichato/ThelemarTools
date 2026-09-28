@@ -1299,6 +1299,65 @@ export class CharacterSheetPage {
 		await this.page.locator("#charsheet-respec-draft-status").waitFor({state: "visible", timeout: 5000});
 	}
 
+	async getFreeOriginAbilityEvidence (): Promise<{
+		live: {race: string; background: string; bonuses: Record<string, number>; choices: Record<string, string | number>};
+		draft: {race: string; background: string; bonuses: Record<string, number>; choices: Record<string, string | number>};
+		decisions: Array<{type: string; status: string; selection: unknown; ownerUid: string; semanticKey: string; receiptSourceKey: string | null; effects: Array<{type: string; ability: string; amount: number}>}>;
+		errors: Array<{code: string; message: string}>;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const respec = cs._respec;
+			const snapshot = (state: any) => ({
+				race: `${state.getRace()?.name}|${state.getRace()?.source}`,
+				background: `${state.getBackground()?.name}|${state.getBackground()?.source}`,
+				bonuses: state.toJson().abilityBonuses,
+				choices: state.getBaseBackgroundUserChoices()?.selectedAbilityBonuses || {},
+			});
+			return {
+				live: snapshot(cs._state),
+				draft: snapshot(respec._state),
+				decisions: respec._engine.manifest.base.decisions
+					.filter((decision: any) => decision.meta?.originFreeAbility)
+					.map((decision: any) => ({
+						type: decision.type,
+						status: decision.status,
+						selection: decision.selection,
+						ownerUid: decision.provenance.ownerUid,
+						semanticKey: decision.semanticKey,
+						receiptSourceKey: decision.receipt?.sourceDecisionKey || null,
+						effects: (decision.receipt?.effects || []).filter((effect: any) => effect.type === "abilityBonusDelta"),
+					})),
+				errors: respec._engine.getValidation().errors,
+			};
+		});
+	}
+
+	async openRespecBackgroundEditor (): Promise<void> {
+		await this.page.locator(".charsheet__respec-base-card button[title='Edit background']").click();
+		await expect(this.page.locator(".ve-ui-modal__overlay:visible .charsheet__respec-feat-list")).toBeVisible();
+	}
+
+	async selectRespecBackgroundAndAbilities (name: string, source: string, abilities: [string, string]): Promise<void> {
+		const modal = this.page.locator(".ve-ui-modal__overlay:visible").last();
+		await modal.locator(".charsheet__respec-search-row input").fill(name);
+		const row = modal.locator(".charsheet__respec-feat-item")
+			.filter({has: this.page.locator("strong", {hasText: name})})
+			.filter({hasText: source});
+		await expect(row).toHaveCount(1);
+		await row.click();
+		const choices = modal.locator(".charsheet__respec-choices-panel");
+		for (const select of await choices.locator("select:not([data-asi-idx])").all()) {
+			await select.selectOption({index: 1});
+		}
+		const asi = choices.locator(".charsheet__respec-asi-choices select");
+		await expect(asi).toHaveCount(2);
+		for (let ix = 0; ix < abilities.length; ix++) await asi.nth(ix).selectOption(abilities[ix]);
+		await expect(modal.locator(".charsheet__respec-btn-row button", {hasText: "Change Background"})).toBeEnabled();
+		await modal.locator(".charsheet__respec-btn-row button", {hasText: "Change Background"}).click();
+		await expect(modal).toBeHidden();
+	}
+
 	async getRespecDraftStatus (): Promise<string> {
 		return ((await this.page.locator("#charsheet-respec-draft-status").textContent()) || "").trim();
 	}

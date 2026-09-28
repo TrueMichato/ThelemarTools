@@ -841,7 +841,11 @@ describe("CharacterSheetRespec race/background", () => {
 		test("applies user-chosen weighted ability bonuses from userChoices", () => {
 			const respec = makeRespec({
 				race: {name: "Human", source: "XPHB"},
-				background: {name: "Sage", source: "XPHB"},
+				background: {
+					name: "Sage",
+					source: "XPHB",
+					ability: [{choose: {weighted: {from: ["con", "int", "wis"], weights: [2, 1]}}}],
+				},
 			});
 			const history = {
 				level: 1,

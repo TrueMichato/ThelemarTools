@@ -607,6 +607,8 @@ class CharacterSheetRespecEngine {
 				? value.toLowerCase()
 				: `${String(value?.name || value?.value || value?.choice || "").toLowerCase()}|${String(value?.source || "").toLowerCase()}`;
 			for (const snapshot of descendantSnapshots) {
+				if (reverseParent && decision.meta?.originAbilityDistribution
+					&& snapshot.decision.meta?.originAbilityDistribution) continue;
 				const next = refreshed.decisions?.find(it => it.semanticKey === snapshot.decision.semanticKey);
 				if (!next || snapshot.selection == null) continue;
 				const selected = Array.isArray(snapshot.selection) ? snapshot.selection : [snapshot.selection];
