@@ -646,6 +646,10 @@ inventing spells or reassigning later acquisitions to level 1. Reapplying
 the Spells step removes deselected Builder-owned picks, not later acquisitions
 or independently owned spells; Respec's **Defer** on an already-deferred
 choice leaves its partial selection in place.
+The sheet's Add Spell action persists `addedFromSpellsTab` on live entries
+(including cantrips); this independent provenance survives save/reload and
+does not backfill Builder level-1 choices. Unmarked extra Bard-owned entries
+remain contradictory rather than being guessed to be manual.
 
 Quick Build's known-caster Spells step retains selections by character level,
 then writes each `knownSpells`/`knownCantrips` choice to that level's history

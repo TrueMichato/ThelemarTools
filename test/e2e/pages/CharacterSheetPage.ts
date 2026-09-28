@@ -2124,8 +2124,8 @@ export class CharacterSheetPage {
 			preparedSpells?: Array<{name: string; source: string; level: number}>;
 			builderSpellPicks?: {classUid: string; knownSpells: string[]; cantrips: string[]};
 		};
-		spells: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string; prepared: boolean}>;
-		cantrips: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string}>;
+		spells: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string; prepared: boolean; addedFromSpellsTab?: boolean}>;
+		cantrips: Array<{name: string; source: string; sourceFeature: string; sourceClass: string; sourceClassSource: string; addedFromSpellsTab?: boolean}>;
 	}> {
 		return this.page.evaluate(() => {
 			const state = (globalThis as any).charSheet._state;
@@ -2135,6 +2135,7 @@ export class CharacterSheetPage {
 				sourceFeature: entry.sourceFeature,
 				sourceClass: entry.sourceClass,
 				sourceClassSource: entry.sourceClassSource,
+				addedFromSpellsTab: entry.addedFromSpellsTab,
 			});
 			return {
 				classSource: state.getClasses().find((cls: any) => cls.name === "Bard")?.source,

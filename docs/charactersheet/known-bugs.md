@@ -477,6 +477,10 @@ The follow-up regression guards Builder Spells-step reapplication (removing
 deselected level-1 picks but keeping later-owned spells), rejects orphaned live
 Builder spells as invalid rather than deferred, and makes **Defer** on an
 already-deferred partial choice preserve its selections.
+Sheet Add Spell now persists independent live-spell provenance after a partial
+Builder save, so a later manually added Bard spell does not make that deferred
+level-1 choice invalid or block an unrelated Respec Apply. Unmarked orphaned
+Builder spells still block.
 
 ### CS-BUG-176 — EFA Artificer level-4 ASI was absent — FIXED
 

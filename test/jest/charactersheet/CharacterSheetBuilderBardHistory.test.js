@@ -7,8 +7,9 @@ import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 import "../../../js/charactersheet/charactersheet-builder.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
-const {CharacterSheetBuilder, CharacterSheetClassUtils, CharacterSheetProgression, CharacterSheetRespecEngine, CharacterSheetState} = globalThis;
+const {CharacterSheetBuilder, CharacterSheetClassUtils, CharacterSheetProgression, CharacterSheetRespecEngine, CharacterSheetSpells, CharacterSheetState} = globalThis;
 
 const published = new Map([
 	["PHB", "data/class/class-bard.json", "Bard"],
@@ -77,6 +78,16 @@ function decisions ({state, page, className = "Bard"}) {
 		spells: manifest.decisions.find(decision => decision.className === className && decision.classLevel === 1 && decision.type === "knownSpells"),
 		cantrips: manifest.decisions.find(decision => decision.className === className && decision.classLevel === 1 && decision.type === "cantrips"),
 	};
+}
+
+function addFromSpellsTab (state, added) {
+	const spells = Object.create(CharacterSheetSpells.prototype);
+	spells._state = state;
+	spells._page = {saveCharacter: () => {}};
+	spells._checkSpellLimits = () => ({canAdd: true});
+	spells._renderSpellList = () => {};
+	spells._renderSpellcastingStats = () => {};
+	spells._addSpell(added, {targetClass: state.getClasses()[0]});
 }
 
 describe("CS-BUG-177 (FIXED): Builder level-1 Bard spell ownership", () => {
@@ -151,6 +162,66 @@ describe("CS-BUG-177 (FIXED): Builder level-1 Bard spell ownership", () => {
 			});
 		}
 	}
+
+	for (const source of ["TGTT", "XPHB"]) {
+		test(`${source} sheet Add Spell after partial Builder picks does not backfill level-1 ownership`, () => {
+			const {state, page} = build({
+				source, spells: bardSpells.slice(0, 2), cantrips: bardCantrips.slice(0, 1),
+			});
+			const saved = new CharacterSheetState();
+			saved.setSpellData(page.getSpells());
+			saved.loadFromJson(state.toJson());
+			addFromSpellsTab(saved, bardSpells[2]);
+			const after = decisions({state: saved, page});
+			expect(after.reloaded.getLevelHistoryEntry(1).choices.knownSpells)
+				.toEqual(bardSpells.slice(0, 2).map(({name, source, level}) => ({name, source, level})));
+			expect(after.reloaded.getSpellsKnown().map(it => `${it.name}|${it.source}`))
+				.toEqual(bardSpells.slice(0, 3).map(it => `${it.name}|${it.source}`));
+			expect(after.reloaded.getSpellsKnown()[2]).toMatchObject({
+				sourceFeature: "Spells Known",
+				sourceClass: "Bard",
+				sourceClassSource: source,
+				addedFromSpellsTab: true,
+			});
+			expect(after.reloaded.getSpellsKnown()[0].addedFromSpellsTab).toBeUndefined();
+			expect(after.spells).toMatchObject({status: "deferred", required: false, count: 4});
+			const engine = new CharacterSheetRespecEngine({state: after.reloaded, page});
+			engine.begin();
+			expect(engine.getValidation().errors.filter(it => it.decisionId === after.spells.id)).toEqual([]);
+		});
+	}
+
+	test("sheet Add Spell after empty Builder picks leaves both groups deferred", () => {
+		const {state, page} = build({source: "TGTT", spells: [], cantrips: []});
+		const saved = new CharacterSheetState();
+		saved.setSpellData(page.getSpells());
+		saved.loadFromJson(state.toJson());
+		for (const added of [bardSpells[0], bardCantrips[0]]) addFromSpellsTab(saved, added);
+		const after = decisions({state: saved, page});
+		expect(after.spells).toMatchObject({status: "deferred", required: false, selection: []});
+		expect(after.cantrips).toMatchObject({status: "deferred", required: false, selection: []});
+		expect(after.reloaded.getSpellsKnown()).toHaveLength(1);
+		expect(after.reloaded.getCantripsKnown()).toHaveLength(1);
+		expect(after.reloaded.getSpellsKnown()[0].addedFromSpellsTab).toBe(true);
+		expect(after.reloaded.getCantripsKnown()[0].addedFromSpellsTab).toBe(true);
+	});
+
+	test("an independently added existing Bard spell survives a Builder re-pick without becoming a level-1 acquisition", () => {
+		const {builder, state, page} = build({source: "TGTT", spells: bardSpells.slice(0, 2), cantrips: []});
+		const originalId = state.getSpellsKnown()[0].id;
+		addFromSpellsTab(state, bardSpells[0]);
+		expect(state.getSpellsKnown()).toHaveLength(2);
+		expect(state.getSpellsKnown()[0]).toMatchObject({id: originalId, addedFromSpellsTab: true});
+		builder._selectedKnownSpells = bardSpells.slice(1, 2);
+		builder._currentStep = 6;
+		builder._applyCurrentStep();
+		const after = decisions({state, page});
+		expect(after.reloaded.getLevelHistoryEntry(1).choices.knownSpells)
+			.toEqual([{name: "Dissonant Whispers", source: "XPHB", level: 1}]);
+		expect(after.reloaded.getSpellsKnown().map(it => `${it.name}|${it.source}`))
+			.toEqual(["Cure Wounds|XPHB", "Dissonant Whispers|XPHB"]);
+		expect(after.spells).toMatchObject({status: "deferred", required: false});
+	});
 
 	test("empty Builder history with orphaned Bard-owned spells is invalid, not deferred", () => {
 		const {state, page} = build({source: "TGTT"});

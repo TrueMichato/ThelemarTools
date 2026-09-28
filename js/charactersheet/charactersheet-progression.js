@@ -2706,7 +2706,8 @@ class CharacterSheetProgression {
 			&& spell.sourceClassSource === levelInfo.classSource
 			&& spell.sourceFeature === (isCantrip ? "Cantrips Known" : "Spells Known")
 			&& !selected.has(CharacterSheetProgression.getEntityUid(spell))
-			&& !laterOwned.has(CharacterSheetProgression.getEntityUid(spell)))) return false;
+			&& !laterOwned.has(CharacterSheetProgression.getEntityUid(spell))
+			&& spell.addedFromSpellsTab !== true)) return false;
 		return picks.every((pick, ix) => {
 			const uid = CharacterSheetProgression.getEntityUid(pick);
 			return pick?.name && pick?.source

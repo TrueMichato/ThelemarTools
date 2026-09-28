@@ -9752,7 +9752,7 @@ class CharacterSheetBuilder {
 					&& it.sourceClassSource === knownInfo.classSource
 					&& it.sourceFeature === feature,
 				);
-				if (!spell || spell.grantedByClass || spell.alwaysPrepared || spell.classGrantOwners?.length) continue;
+				if (!spell || spell.grantedByClass || spell.alwaysPrepared || spell.classGrantOwners?.length || spell.addedFromSpellsTab === true) continue;
 				const owner = this._state._getProgressionOwnershipEntry?.(type, spell);
 				if (owner?.preserved || owner?.sources?.some(source => source !== level1Key)) continue;
 				if (owner?.sources?.includes(level1Key)) this._state.releaseProgressionOwnership(type, spell, level1Key);

@@ -5124,6 +5124,7 @@ class CharacterSheetState {
 		if (src.prepared && !target.prepared) target.prepared = true;
 		if (src.isDivineSoulAffinity && !target.isDivineSoulAffinity) target.isDivineSoulAffinity = true;
 		if (src.isSubclassChoiceSpell && !target.isSubclassChoiceSpell) target.isSubclassChoiceSpell = true;
+		if (src.addedFromSpellsTab === true) target.addedFromSpellsTab = true;
 		if (src.inSpellbook && !target.inSpellbook) target.inSpellbook = true;
 		if (!Object.hasOwn(target, "classGrantOriginalMetadata")
 			&& Object.hasOwn(src, "classGrantOriginalMetadata")) {
@@ -24314,6 +24315,7 @@ class CharacterSheetState {
 				sourceClassSource: spell.sourceClassSource || spell.classSource || null,
 				sourceSubclass: spell.sourceSubclass || null,
 				sourceSubclassSource: spell.sourceSubclassSource || spell.subclassSource || null,
+				...(spell.addedFromSpellsTab === true ? {addedFromSpellsTab: true} : {}),
 				subschools: spell.subschools || [],
 				spellcastingAbility: spell.spellcastingAbility || null,
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
@@ -24350,6 +24352,7 @@ class CharacterSheetState {
 				sourceClassSource: spell.sourceClassSource || spell.classSource || null,
 				sourceSubclass: spell.sourceSubclass || null,
 				sourceSubclassSource: spell.sourceSubclassSource || spell.subclassSource || null,
+				...(spell.addedFromSpellsTab === true ? {addedFromSpellsTab: true} : {}),
 				spellcastingAbility: spell.spellcastingAbility || null,
 				subschools: spell.subschools || [],
 				isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,

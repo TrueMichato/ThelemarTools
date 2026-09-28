@@ -522,6 +522,11 @@ use this deferral exception. Reapplying the Builder's Spells step reconciles
 previously selected level-1 Bard spells/cantrips against the new picks while
 preserving recorded later acquisitions and independent owners; orphaned live
 Builder spells cannot make empty history look like an intentional omission.
+Spells added later through the sheet's Add Spell action carry a persisted
+`addedFromSpellsTab` marker on the live spell/cantrip, not in level-1 history.
+Those independent additions do not turn an otherwise valid partial Builder
+choice into an orphan or a level-1 acquisition. Unmarked extra Bard-owned
+spells remain invalid: older saves are not silently reclassified as manual.
 Selecting **Defer** on a choice that is already deferred keeps any valid
 partial picks and does not dirty or block the Respec draft.
 For an XPHB or TGTT Bard from Bard level 10 onward, ordinary Level Up records

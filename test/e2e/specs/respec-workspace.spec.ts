@@ -116,6 +116,71 @@ test.describe("Respec workspace", () => {
 		}
 	}
 
+	for (const source of ["TGTT", "XPHB"] as const) {
+		test(`${source} Bard Add Spell after partial Builder save stays independent of level-1 Respec`, async ({page}) => {
+			test.setTimeout(120_000);
+			await gotoWithThelemar(page);
+			const {charSheet} = await createCharacterViaWizard(page, {
+				...PRESET_BARD,
+				name: `${source} Add Spell Bard`,
+				...(source === "XPHB" ? {race: "Dwarf", raceSource: "PHB'24"} : {}),
+				background: "Soldier",
+				bgSource: source === "XPHB" ? "PHB'24" : "PHB",
+				classSource: source === "XPHB" ? "PHB'24" : source,
+				...(source === "XPHB" ? {prioritySources: ["XPHB"], classInstrumentCount: 3, selectBackgroundAbilityBonuses: true} : {}),
+				startingSpellPicks: {
+					spells: ["Cure Wounds", "Healing Word"].map(name => ({name, source: "XPHB"})),
+					cantrips: [{name: "Vicious Mockery", source: "XPHB"}],
+				},
+			});
+			const levelOne = (await charSheet.getLevelOneBardSpellEvidence()).choices;
+			await charSheet.reloadCharacterSheet();
+			await charSheet.openAddSpellModal();
+			await charSheet.searchAddSpellPicker("Faerie Fire");
+			await charSheet.addMountedSpell("Faerie Fire", "XPHB");
+			await charSheet.closeAddSpellModal();
+			const assertIndependent = async () => {
+				const evidence = await charSheet.getLevelOneBardSpellEvidence();
+				expect(evidence.choices).toMatchObject({
+					knownSpells: levelOne.knownSpells,
+					knownCantrips: levelOne.knownCantrips,
+					builderSpellPicks: levelOne.builderSpellPicks,
+				});
+				expect(evidence.spells).toEqual(expect.arrayContaining([
+					expect.objectContaining({
+						name: "Faerie Fire", source: "XPHB", sourceClass: "Bard",
+						sourceClassSource: source, sourceFeature: "Spells Known", addedFromSpellsTab: true,
+					}),
+				]));
+				expect(evidence.spells.filter(it => it.sourceClass === "Bard" && it.sourceFeature === "Spells Known")).toHaveLength(3);
+			};
+			await assertIndependent();
+			await charSheet.reloadCharacterSheet();
+			await assertIndependent();
+			await charSheet.openRespec();
+			const assertDeferred = async () => {
+				expect(await charSheet.getLevelOneBardRespecDecisions()).toEqual(expect.arrayContaining([
+					expect.objectContaining({
+						type: "knownSpells", status: "deferred", required: false,
+						selection: levelOne.knownSpells, issues: [],
+					}),
+					expect.objectContaining({
+						type: "cantrips", status: "deferred", required: false,
+						selection: levelOne.knownCantrips, issues: [],
+					}),
+				]));
+			};
+			await assertDeferred();
+			await charSheet.stageLevelOneBardSkillSwap();
+			await charSheet.applyRespecDraft();
+			await assertIndependent();
+			await charSheet.reloadCharacterSheet();
+			await assertIndependent();
+			await charSheet.openRespec();
+			await assertDeferred();
+		});
+	}
+
 	test("TGTT Bard revisiting Builder Spells clears deselected live picks before Respec", async ({page}) => {
 		test.setTimeout(120_000);
 		await gotoWithThelemar(page);
