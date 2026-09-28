@@ -50,6 +50,7 @@ import {HubApiClient} from "../hub/hub-api-client.js";
 import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
 import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
+import {normalizeCharacterSheetAuthorityNavigationUrl} from "../hub/hub-character-sheet-routes.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {
 	CHARACTER_REALTIME_ACCESS_END_CAUSES,
@@ -139,6 +140,7 @@ class CharacterSheetPage {
 		this._hubAuthoritativeReconcilePromise = null;
 		this._isHubAuthoritativeReconcileScheduled = false;
 		this._isHubCharacterConflictPromptOpen = false;
+		this._isAuthorityNavigationPending = false;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -3008,6 +3010,20 @@ class CharacterSheetPage {
 			element?.addEventListener(eventName, handler);
 			return element;
 		};
+		document.addEventListener("click", event => {
+			if (
+				event.defaultPrevented
+				|| event.button !== 0
+				|| event.metaKey
+				|| event.ctrlKey
+				|| event.shiftKey
+				|| event.altKey
+			) return;
+			const link = event.target?.closest?.("a[data-charsheet-authority-navigation=\"true\"]");
+			if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
+			event.preventDefault();
+			void this._pNavigateCharacterAuthority({href: link.getAttribute("href") || link.href});
+		});
 
 		// Character selection
 		bind(this._selCharacter, "change", () => this._onCharacterSelect());
@@ -3306,6 +3322,31 @@ class CharacterSheetPage {
 	}
 
 	// #region Character Management
+	async _pNavigateCharacterAuthority ({
+		href,
+		fnNavigate = target => window.location.assign(target),
+	} = {}) {
+		if (!href || this._isAuthorityNavigationPending) return false;
+		this._isAuthorityNavigationPending = true;
+		try {
+			if (this._currentCharacterId && !await this._saveCurrentCharacter()) return false;
+			const target = normalizeCharacterSheetAuthorityNavigationUrl({
+				href,
+				currentCampaignId: this._hubCampaignId,
+				currentCharacterId: this._currentCharacterId,
+			});
+			this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+			this._closeCharacterScopedTransientUi?.();
+			this._fenceHubGeneration?.();
+			this._hubRealtime?.suspend?.();
+			this._hubActiveCampaign?.suspend?.();
+			fnNavigate(target);
+			return true;
+		} finally {
+			this._isAuthorityNavigationPending = false;
+		}
+	}
+
 	async _pLoadCharacters () {
 		let characters = await this._characterRepository.pList();
 		if (!characters) {
@@ -3430,7 +3471,9 @@ class CharacterSheetPage {
 		if (characters.length) {
 			const divider = document.createElement("option");
 			divider.disabled = true;
-			divider.textContent = "────── Saved Characters ──────";
+			divider.textContent = this._isHubCharacter
+				? "────── Campaign characters ──────"
+				: "────── Local characters ──────";
 			this._selCharacter.append(divider);
 		}
 

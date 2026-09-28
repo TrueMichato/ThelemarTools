@@ -80,7 +80,7 @@ The DM Screen bootstrap previously issued **four** requests including **two dupl
 | Host | Explicit / resource URL | No URL + stored selection | No URL + tombstone or signed out | Pinned |
 |---|---|---|---|---|
 | `hub.html` / `campaign.html` | Explicit `?id`, adopted at zero request cost | Revalidated through the selection-only path; cleared if archived or inaccessible | Signed out writes a clear tombstone for the stored record's account | No |
-| Character Sheet | Resource-canonical, else `hubCampaign`; activates rules and brew | A bare URL opens the selected campaign repository; `?local=1` preserves the local repository | Local mode | **Yes**, once opened |
+| Character Sheet | Resource-canonical, else `hubCampaign`; activates rules and brew | A bare URL opens the selected campaign repository; `?local=1` preserves the local repository and may carry a validated return descriptor | Local mode | **Yes**, once opened |
 | DM Screen | Explicit `hubCampaign`; DM/co-DM only | A bare URL opens the selected authorized private workspace; `?local=1` preserves the local Board | Local mode | **Yes**, once opened |
 | Ordinary content/build pages | Explicit `hubCampaign` | Activates temporary campaign brew and context before page data/rendering | Existing local/personal-brew behavior | No |
 
@@ -89,6 +89,19 @@ issues no request, and behaves exactly as before. Its lightweight navigation ada
 for the page lifetime, so storage and BroadcastChannel selections are ignored. A remembered campaign
 can never apply its rules to a local character, and local Board initialisation is never gated behind
 an authenticated fetch.
+
+Character Sheet authority is explicit in both the campaign strip and character selector. The selector
+labels its rows as **Local characters** or **Campaign characters** according to the repository fixed by
+the route. A signed-in local sheet can open a selected campaign roster without copying the current local
+character. A campaign sheet can enter Local mode through:
+
+`?local=1&returnHubCampaign=<campaignId>&returnHubCharacter=<characterId>`
+
+The two return parameters are accepted only as a complete UUID pair and are navigation hints, not
+authorization. The local route never puts the campaign character id in its `id` parameter, so even a
+deliberate local/campaign id collision remains separated by repository authority. The local campaign
+control revalidates the pair through the current session and canonical character projection before
+showing **Return to campaign character** or **Return to read-only campaign character**.
 
 ## Switching, pinning, and teardown
 
@@ -120,6 +133,14 @@ A **switchable** host must pass `pPreflightSwitch` — which stops new mutations
 writes — before any teardown runs; if it cannot guarantee safety the switch stays pending and the
 current campaign stays active. Logout, account mismatch, and authoritative access loss always tear
 down immediately, pinned or not.
+
+Cross-authority Character Sheet navigation has its own final save fence. It completes the current
+repository's ordinary save/recovery flow before navigation, then advances the character-load
+generation, closes character-scoped UI, fences realtime callbacks, and suspends the realtime/context
+owners. The existing `pagehide` owner then preserves them for BFCache or performs terminal
+detach/disposal. If save or recovery refuses, navigation does not occur.
+If a temporary cloud id canonicalizes during that save, the local return descriptor is rewritten to
+the accepted canonical id before navigation.
 
 ### The rules-teardown trap
 
@@ -264,14 +285,11 @@ also covers Play Mode's keyboard, drag, custom-role-button, and body-portaled me
 overflow contains only Export and Print. Server-authored XP changes trigger a fresh scoped `dm_truth` read without
 showing the awarding DM a player-recipient toast.
 
-The remaining long-term cleanup is intentionally phased rather than a broad entry-flow rewrite:
-
-1. **Current:** shared URL precedence and surface-default helper, explicit local mode, authority-preserving
-   Character Sheet repository, and consistent read-only DM affordances.
-2. **Next:** expose a shared launch descriptor (`surface`, campaign id, resource id, authority) so Campaign
-   Overview, global navigation, bookmarks, and future deep links produce one normalized destination.
-3. **Later:** reuse that descriptor for pre-navigation capability summaries and cross-surface breadcrumbs without
-   moving authorization decisions out of the BFF.
+Character Sheet-owned navigation uses one shared route builder for ordinary campaign-context entry, detached
+cloud characters, explicit Local mode, and exact campaign return. The lightweight Campaign Overview preserves
+the same canonical URL form without importing another static module into its signed-out boot graph. This
+normalizes destinations without moving authorization out of the BFF. Future cross-surface breadcrumbs may reuse
+the descriptor, but may not infer authority from the URL.
 
 ## Files
 
@@ -284,6 +302,7 @@ The remaining long-term cleanup is intentionally phased rather than a broad entr
 | `js/hub/hub-active-campaign-switcher.js` | Accessible selector and campaign-aware link decoration |
 | `js/hub/hub-site-context.js` | Early ordinary-page activation and shared-navigation adapter |
 | `js/hub/hub-surface-defaults.js` | Bare Character Sheet/DM Screen default routing |
+| `js/hub/hub-character-sheet-routes.js` | Canonical campaign/local/detached URLs and validated Local return descriptors |
 | `js/hub/hub-capabilities.js` | Active-context protocol capability |
 | `js/hub/hub-campaign-context.js` | Campaign context loader; injected session/context; idempotent `dispose()` |
 
@@ -301,12 +320,13 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 | `HubActiveCampaignCoordinator.test.js` | Precedence, request budgets, abort fencing, invalidation, teardown order, pinning, preflight, BFCache |
 | `HubCampaignContext.test.js` | Zero-request injected activation, idempotent disposal |
 | `HubCampaignNavigation.test.js` | URL decoration, explicit local routes, and surface defaults |
+| `HubCharacterSheetAuthorityRoutes.test.js` | Exact campaign/local round trips, malformed return rejection, canonical-id adoption, and cross-campaign id fencing |
 | `HubContentBootstrap.test.js` / `HubSiteContext.test.js` | Pre-data activation, temporary-only brew, capability failure |
 | `CharacterSheetHubTeardown.test.js` / `CharacterSheetPersistenceBackend.test.js` | Ordered rules cleanup and in-flight character-save conflict fencing |
-| `HubHttpCharacterRepository.test.js` / `CharacterSheetRepositorySeam.test.js` | Canonical-id adoption, explicit create intent, owner/DM authority preservation, and pre-input read-only guards |
+| `HubHttpCharacterRepository.test.js` / `CharacterSheetRepositorySeam.test.js` | Canonical-id adoption, explicit create intent, same-id local/campaign isolation, save-before-navigation, queued-save and late-callback fencing, owner/DM authority preservation, and pre-input read-only guards |
 | `DmScreenCampaignPrivacy.test.js` / `DmScreenWorkspacePersistence.test.js` | Private Board concealment and conflict/panel-hydration fencing |
 | `HubActiveCampaignJourney.test.js` | Real BFF integration: reload, device independence, request counts, logout ordering, pinned convergence |
-| `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher/reselection, native storage/channel, defaults/local routes, pinning, in-flight conflict/access-loss order, BFCache, revoke/archive |
+| `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher/reselection, native storage/channel, ordinary/Campaign Overview canonical-revision parity, reversible Local routes across refresh/new tab, deliberate same-id isolation, DM read-only return, defaults/local routes, pinning, in-flight conflict/access-loss order, BFCache, revoke/archive |
 | `npm run test:hub:mutations` | Kills generation, teardown-order, account-scope, local-fallback, pinned-reselection, Character Sheet save-fence, and DM workspace save-fence mutants |
 
 ## Content-policy consumer

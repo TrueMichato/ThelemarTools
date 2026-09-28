@@ -380,6 +380,13 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - Moved-character browser coverage opens the old campaign URL and proves it canonicalizes before campaign
   context activation. Journey Tracker regressions prove linked campaign participants and their activity/slot
   references remain ephemeral.
+- GD-FIND-014 authority-routing coverage opens the same character from ordinary Character Sheet navigation and
+  Campaign Overview, proves both repository instances accept the same canonical id and revision, then enters
+  explicit Local mode with a deliberately colliding local id. Local writes leave the canonical revision/data
+  unchanged; refresh and a new tab retain an exact validated return link; returning restores the canonical
+  owner document. A parallel DM journey proves the same round trip returns to `dm_readonly` truth and emits no
+  canonical write. Unit seams separately hold queued saves before navigation, reject refused recovery, rewrite a
+  temporary id after canonical adoption, and fence realtime/recovery callbacks before leaving.
 - Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
   from party inventory without reloading. Transfer authority coverage exercises player-to-own/peer/DM-owned and

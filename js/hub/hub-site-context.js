@@ -4,6 +4,11 @@ import {HubActiveCampaignChannel} from "./hub-active-campaign-channel.js";
 import {HubActiveCampaignStore} from "./hub-active-campaign-store.js";
 import {HubActiveCampaignSwitcher, decorateCampaignNavigationLinks} from "./hub-active-campaign-switcher.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "./hub-capabilities.js";
+import {
+	getCampaignCharacterSheetUrl,
+	getCharacterSheetCampaignReturnTarget,
+	getLocalCharacterSheetUrl,
+} from "./hub-character-sheet-routes.js";
 
 function _getPageName (location = globalThis.location) {
 	return location?.pathname?.split("/").pop()?.toLowerCase() || "";
@@ -22,12 +27,48 @@ function _isSurfaceResourcePinned (location) {
 function _getExplicitLocalUrl (location) {
 	const page = _getPageName(location);
 	if (!["charactersheet.html", "dmscreen.html"].includes(page)) return null;
+	if (page === "charactersheet.html") {
+		const params = new URLSearchParams(location?.search || "");
+		const campaignId = params.get("hubCampaign");
+		const characterId = params.get("id");
+		if (campaignId && characterId) {
+			try {
+				return getLocalCharacterSheetUrl({
+					returnCampaignId: campaignId,
+					returnCharacterId: characterId,
+				});
+			} catch {
+				// Fall through to an ordinary explicit local route.
+			}
+		}
+		return getLocalCharacterSheetUrl();
+	}
 	return `${page}?local=1`;
 }
 
 function _getOpenSelectionUrl ({campaignId, location}) {
 	const page = _getPageName(location);
 	if (!["charactersheet.html", "dmscreen.html"].includes(page)) return null;
+	if (page === "charactersheet.html") {
+		const params = new URLSearchParams(location?.search || "");
+		const currentCampaignId = params.get("hubCampaign");
+		const currentCharacterId = params.get("id");
+		const returnTarget = getCharacterSheetCampaignReturnTarget({href: location?.href});
+		if (!campaignId) return _getExplicitLocalUrl(location);
+		if (campaignId === currentCampaignId && currentCharacterId) {
+			return getCampaignCharacterSheetUrl({
+				campaignId,
+				characterId: currentCharacterId,
+			});
+		}
+		if (campaignId === returnTarget?.campaignId) {
+			return getCampaignCharacterSheetUrl({
+				campaignId,
+				characterId: returnTarget.characterId,
+			});
+		}
+		return getCampaignCharacterSheetUrl({campaignId});
+	}
 	return campaignId
 		? `${page}?hubCampaign=${encodeURIComponent(campaignId)}`
 		: `${page}?local=1`;
