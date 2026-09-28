@@ -1266,29 +1266,34 @@ class CharacterSheetProgression {
 		originUid,
 		entityKey,
 		storedBasePool,
+		isFreeOriginAbility = false,
+		state = null,
+		issues = [],
 	}) {
-		if (originType !== "background") return [];
-		const modes = (entity?.ability || [])
-			.map((abilitySet, modeIndex) => {
-				const choose = abilitySet?.choose;
-				if (!choose) return null;
-				const weights = choose.weighted?.weights
+		if (originType !== "background" && !isFreeOriginAbility) return [];
+		const modes = isFreeOriginAbility
+			? [{name: "+2/+1", key: "free-2-1", modeIndex: 0, weights: [2, 1], from: ["str", "dex", "con", "int", "wis", "cha"]}]
+			: (entity?.ability || [])
+				.map((abilitySet, modeIndex) => {
+					const choose = abilitySet?.choose;
+					if (!choose) return null;
+					const weights = choose.weighted?.weights
 					|| (choose.count ? Array(Number(choose.count) || 0).fill(Number(choose.amount) || 1) : []);
-				const from = choose.weighted?.from || choose.from || [];
-				if (!weights.length || !from.length) return null;
-				return {
-					name: weights.map(weight => `+${weight}`).join("/"),
-					key: `mode-${modeIndex}`,
-					modeIndex,
-					weights: CharacterSheetProgression._copy(weights),
-					from: CharacterSheetProgression._copy(from),
-				};
-			})
-			.filter(Boolean);
-		if (modes.length < 2) return [];
+					const from = choose.weighted?.from || choose.from || [];
+					if (!weights.length || !from.length) return null;
+					return {
+						name: weights.map(weight => `+${weight}`).join("/"),
+						key: `mode-${modeIndex}`,
+						modeIndex,
+						weights: CharacterSheetProgression._copy(weights),
+						from: CharacterSheetProgression._copy(from),
+					};
+				})
+				.filter(Boolean);
+		if (!isFreeOriginAbility && modes.length < 2) return [];
 
 		const acquisitionKey = `base:${originType}:${originUid}`;
-		const grantKey = `${originType}.ability.distribution`;
+		const grantKey = isFreeOriginAbility ? "origin.freeAbility" : `${originType}.ability.distribution`;
 		const semanticKey = CharacterSheetProgression.getNestedSemanticKey({
 			parentSemanticKey: entityKey,
 			acquisitionKey,
@@ -1305,7 +1310,7 @@ class CharacterSheetProgression {
 			mode.weights.length === selectedWeights.length
 				&& mode.weights.every((weight, ix) => weight === selectedWeights[ix]),
 		) || null;
-		const selection = stored?.selection ?? persistedMode;
+		const selection = isFreeOriginAbility ? modes[0] : stored?.selection ?? persistedMode;
 		const selectedMode = modes.find(mode =>
 			mode.key === selection?.key
 				|| (
@@ -1320,7 +1325,7 @@ class CharacterSheetProgression {
 			classSource: "",
 			classLevel: 0,
 			type: "nestedConfiguration",
-			label: "Background Ability Distribution",
+			label: isFreeOriginAbility ? "Free Origin Ability Distribution" : "Background Ability Distribution",
 			sourceKey: grantKey,
 			count: 1,
 			options: modes,
@@ -1332,7 +1337,7 @@ class CharacterSheetProgression {
 				type: "nestedConfiguration",
 			}),
 			receipt: stored?.receipt || null,
-			meta: {originAbilityDistribution: true},
+			meta: {originAbilityDistribution: true, ...(isFreeOriginAbility ? {originFreeAbility: true} : {})},
 			scope: "origin",
 			semanticKeyOverride: semanticKey,
 			rootSemanticKey: entityKey,
@@ -1345,7 +1350,7 @@ class CharacterSheetProgression {
 				selectedGrantKey: originUid,
 				grantKind: "configuration",
 				grantKey,
-				sourcePath: `${originType}.ability`,
+				sourcePath: isFreeOriginAbility ? grantKey : `${originType}.ability`,
 				occurrence: 0,
 				pickSlot: 0,
 			},
@@ -1353,7 +1358,60 @@ class CharacterSheetProgression {
 		const decisions = [parent];
 		if (!selectedMode) return decisions;
 
+		const hasRecordedChoices = Object.keys(selectedBonuses).some(key => /^bg_\d+(?:_weight)?$/.test(key));
 		const selectedAbilities = selectedMode.weights.map((weight, ix) => selectedBonuses[`bg_${ix}`] || null);
+		if (isFreeOriginAbility) {
+			const expectedKeys = ["bg_0", "bg_0_weight", "bg_1", "bg_1_weight"];
+			const complete = expectedKeys.every(key => Object.hasOwn(selectedBonuses, key))
+				&& Object.keys(selectedBonuses).length === expectedKeys.length
+				&& persistedMode === selectedMode
+				&& selectedAbilities.every(ability => selectedMode.from.includes(ability))
+				&& new Set(selectedAbilities).size === selectedAbilities.length;
+			const matchingBonuses = complete && selectedAbilities.every((ability, ix) =>
+				(Number(state?.getAbilityBonus?.(ability)) || 0) >= selectedMode.weights[ix],
+			);
+			const storedChildren = selectedMode.weights.map((weight, ix) => {
+				const key = CharacterSheetProgression.getNestedSemanticKey({
+					parentSemanticKey: semanticKey,
+					acquisitionKey,
+					grantKey: `${grantKey}.${selectedMode.key}.ability-${ix}`,
+					occurrence: selectedMode.modeIndex,
+					slot: ix,
+					identityMode: "opportunity",
+				});
+				return storedBasePool.get(key)?.find(decision => decision.selection != null);
+			});
+			const matchingReceipts = storedChildren.every((child, ix) => {
+				if (!child?.receipt) return true;
+				if (child.receipt.sourceDecisionKey !== child.semanticKey) return false;
+				const ownedEffects = (child.receipt.effects || []).filter(effect => effect.type === "abilityBonusDelta");
+				if (!ownedEffects.length) {
+					return (child.receipt.effects || []).every(effect =>
+						effect.type !== "abilityDelta" || (
+							effect.ability === selectedAbilities[ix]
+							&& Number(effect.amount) === selectedMode.weights[ix]
+						));
+				}
+				return ownedEffects.length === 1
+					&& ownedEffects[0].ability === selectedAbilities[ix]
+					&& Number(ownedEffects[0].amount) === selectedMode.weights[ix]
+					&& Number.isFinite(Number(ownedEffects[0].before));
+			});
+			if (!complete || !matchingBonuses || !matchingReceipts) {
+				const canRepair = !hasRecordedChoices
+					&& selectedMode.from.every(ability => (Number(state?.getAbilityBonus?.(ability)) || 0) === 0)
+					&& storedChildren.every(child => !child?.selection && !child?.receipt);
+				issues.push({
+					level: 0,
+					severity: "error",
+					code: "free-origin-ability-evidence",
+					repairable: canRepair,
+					message: canRepair
+						? "Free origin ability choices are incomplete. Select distinct +2/+1 abilities in Change Background before applying Respec."
+						: "Free origin ability history is incomplete or mismatched. Restore the recorded +2/+1 choices and bonuses from a saved backup before editing or applying Respec.",
+				});
+			}
+		}
 		const selectedCounts = selectedAbilities.reduce((counts, ability) => {
 			if (ability) counts.set(ability, (counts.get(ability) || 0) + 1);
 			return counts;
@@ -1369,7 +1427,9 @@ class CharacterSheetProgression {
 				identityMode: "opportunity",
 			});
 			const storedChild = storedBasePool.get(childSemanticKey)?.find(decision => decision.selection != null);
-			const childSelection = storedChild?.selection ?? selectedAbilities[ix];
+			const childSelection = isFreeOriginAbility && hasRecordedChoices
+				? selectedAbilities[ix]
+				: storedChild?.selection ?? selectedAbilities[ix];
 			const isUnique = !childSelection || selectedCounts.get(childSelection) === 1;
 			decisions.push(CharacterSheetProgression._makeDecision({
 				characterLevel: 0,
@@ -1377,7 +1437,7 @@ class CharacterSheetProgression {
 				classSource: "",
 				classLevel: 0,
 				type: "nestedAbility",
-				label: `Background Ability +${amount}`,
+				label: `${isFreeOriginAbility ? "Free Origin" : "Background"} Ability +${amount}`,
 				sourceKey: childGrantKey,
 				slot: ix,
 				count: 1,
@@ -1389,9 +1449,15 @@ class CharacterSheetProgression {
 					options: selectedMode.from,
 					type: "nestedAbility",
 				}),
-				receipt: storedChild?.receipt || null,
+				receipt: isFreeOriginAbility && (
+					childSelection !== storedChild?.selection
+					|| !storedChild?.receipt?.effects?.some(effect => effect.type === "abilityBonusDelta")
+				)
+					? null
+					: storedChild?.receipt || null,
 				meta: {
 					originAbilityDistribution: true,
+					...(isFreeOriginAbility ? {originFreeAbility: true} : {}),
 					originAbilitySelectionKey: `bg_${ix}`,
 					descriptorRules: {
 						amount,
@@ -1413,7 +1479,7 @@ class CharacterSheetProgression {
 					selectedGrantKey: selectedMode.key,
 					grantKind: "ability",
 					grantKey: childGrantKey,
-					sourcePath: `${originType}.ability[${selectedMode.modeIndex}]`,
+					sourcePath: isFreeOriginAbility ? grantKey : `${originType}.ability[${selectedMode.modeIndex}]`,
 					occurrence: selectedMode.modeIndex,
 					pickSlot: ix,
 				},
@@ -1715,6 +1781,26 @@ class CharacterSheetProgression {
 		const characterBase = state?.getCharacterBase?.() || {};
 		addOrigin("race", state?.getRace?.(), characterBase.raceUserChoices, 0);
 		addOrigin("background", state?.getBackground?.(), characterBase.backgroundUserChoices, 1);
+		const race = state?.getRace?.();
+		const background = state?.getBackground?.();
+		if (CharacterSheetClassUtils.hasFreeOriginAbilityPair(race, background)) {
+			const raceUid = CharacterSheetProgression.getEntityUid(race);
+			base.decisions.push(...CharacterSheetProgression._buildOriginAbilityDistribution({
+				originType: "race",
+				entity: race,
+				choices: characterBase.backgroundUserChoices,
+				originUid: raceUid,
+				entityKey: CharacterSheetProgression.getOriginSemanticKey({
+					originType: "race",
+					originUid: raceUid,
+					grantKey: "entity",
+				}),
+				storedBasePool,
+				isFreeOriginAbility: true,
+				state,
+				issues,
+			}));
+		}
 		return base;
 	}
 

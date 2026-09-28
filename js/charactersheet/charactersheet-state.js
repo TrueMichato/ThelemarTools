@@ -12850,9 +12850,13 @@ class CharacterSheetState {
 				const amount = Number(effect.amount) || 0;
 				if (ability && amount) {
 					const before = Number(effect.before);
-					this.setAbilityBonus(ability, Number.isFinite(before)
-						? before
-						: Math.max(0, (Number(this._data.abilityBonuses?.[ability]) || 0) - amount));
+					const current = Number(this._data.abilityBonuses?.[ability]) || 0;
+					if (decision.meta?.originFreeAbility && current < amount) {
+						throw new Error("Free origin ability bonus no longer matches its receipt; restore its saved choices before editing.");
+					}
+					this.setAbilityBonus(ability, decision.meta?.originFreeAbility
+						? current - amount
+						: Number.isFinite(before) ? before : Math.max(0, current - amount));
 				}
 				continue;
 			}

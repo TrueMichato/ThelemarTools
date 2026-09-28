@@ -16,6 +16,13 @@ class CharacterSheetClassUtils {
 		return !!race?.ability?.length;
 	}
 
+	static hasFreeOriginAbilityPair (race, background) {
+		return !!race && !!background
+			&& !this.raceProvidesAbilityBonuses(race)
+			&& !background.ability?.length
+			&& (race.source === "XPHB" || race.edition === "one");
+	}
+
 	/**
 	 * (S2 #15) Canonical name of the single shared resource pool that every Hochling
 	 * "Divine Manifestation" Channel-Divinity option draws on. Kept here so the option

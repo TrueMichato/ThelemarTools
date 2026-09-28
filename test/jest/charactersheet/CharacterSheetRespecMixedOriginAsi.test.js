@@ -543,6 +543,360 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 		expect(loaded.toJson()).toEqual(before);
 	});
 
+	it("owns the saved free +2/+1 as two reversible origin choices through unrelated Apply, reload, and Undo", async () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["str", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		state.setAbilityBonus("wis", 4);
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		const decisions = respec._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility);
+		expect(decisions.map(decision => [decision.type, decision.status, decision.selection])).toEqual([
+			["nestedConfiguration", "resolved", expect.objectContaining({weights: [2, 1]})],
+			["nestedAbility", "resolved", "str"],
+			["nestedAbility", "resolved", "con"],
+		]);
+		expect(decisions.map(decision => decision.provenance.ownerUid)).toEqual(["dwarf|xphb", "dwarf|xphb", "dwarf|xphb"]);
+		expect(decisions.slice(1).map(decision => decision.receipt.effects[0])).toMatchObject([
+			{type: "abilityBonusDelta", ability: "str", amount: 2, before: 0},
+			{type: "abilityBonusDelta", ability: "con", amount: 1, before: 0},
+		]);
+		await respec._engine.stageCandidateMutation(({state: candidate}) => candidate.setName("Unrelated edit"));
+		expect(loaded.toJson()).toEqual(before);
+		await respec._engine.apply();
+		expect(loaded.toJson().abilityBonuses).toMatchObject({str: 2, con: 1, wis: 4});
+		const reopened = openRespec(reload(loaded), page);
+		expect(reopened._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
+			.map(decision => decision.status)).toEqual(["resolved", "resolved", "resolved"]);
+		reopened._engine.cancel();
+		expect(await respec._engine.undo()).toBe(true);
+		expect(withoutRegeneratedModifierIds(loaded.toJson())).toEqual(withoutRegeneratedModifierIds(before));
+	});
+
+	it("adopts a canonical Builder save with recorded free picks but no owned bonus receipts", async () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["dex", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		globalThis.CharacterSheetProgression.syncCanonicalDecisions({page, state});
+		const saved = state.getCharacterBase().decisions.filter(decision => decision.meta?.originFreeAbility);
+		expect(saved).toHaveLength(3);
+		expect(saved.slice(1).every(decision =>
+			!decision.receipt?.effects?.some(effect => effect.type === "abilityBonusDelta"),
+		)).toBe(true);
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		expect(respec._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
+			.slice(1).map(decision => decision.receipt.effects[0]))
+			.toEqual([
+				expect.objectContaining({type: "abilityBonusDelta", ability: "dex", amount: 2, before: 0}),
+				expect.objectContaining({type: "abilityBonusDelta", ability: "con", amount: 1, before: 0}),
+			]);
+		expect(loaded.toJson()).toEqual(before);
+		respec._engine.cancel();
+	});
+
+	it("rejects a stored free-pair receipt with a different origin owner", () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["dex", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		globalThis.CharacterSheetProgression.syncCanonicalDecisions({page, state});
+		state.getCharacterBase().decisions.find(decision =>
+			decision.meta?.originFreeAbility && decision.type === "nestedAbility",
+		).receipt.sourceDecisionKey = "nested:another-origin";
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		expect(respec._engine.getValidation().errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "free-origin-ability-evidence", repairable: false}),
+		]));
+		expect(loaded.toJson()).toEqual(before);
+		respec._engine.cancel();
+	});
+
+	it("edits the free distribution in the same PHB background dialog without losing independent bonuses", async () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["str", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		state.setAbilityBonus("wis", 4);
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		const modalInner = e_({tag: "div"});
+		const originalShow = globalThis.CharacterSheetModal.pGetShow;
+		const language = jest.spyOn(respec, "_renderLanguageChoicePickers").mockReturnValue(null);
+		const tool = jest.spyOn(respec, "_renderToolChoicePickers").mockReturnValue(null);
+		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
+		try {
+			await respec._editBackground(1, respec._state.getLevelHistoryEntry(1), null);
+			findByClass(modalInner, "charsheet__respec-feat-list")._children[0].click();
+			const selects = findAll(modalInner, element => element?._html?.startsWith("<select") && element._handlers.change);
+			expect(selects).toHaveLength(2);
+			["dex", "int"].forEach((ability, ix) => {
+				selects[ix].value = ability;
+				selects[ix]._handlers.change();
+			});
+			await findByClass(modalInner, "charsheet__respec-btn-row")._children[1]._handlers.click();
+			expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 2, int: 1, wis: 4});
+			expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
+				.toMatchObject({bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1});
+			expect(loaded.toJson()).toEqual(before);
+			await respec._engine.apply();
+			const reopened = openRespec(reload(loaded), page);
+			expect(reopened._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
+				.map(decision => decision.selection)).toEqual([
+				expect.objectContaining({weights: [2, 1]}), "dex", "int",
+			]);
+			expect(reopened._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 2, int: 1, wis: 4});
+			reopened._engine.cancel();
+			expect(await respec._engine.undo()).toBe(true);
+			expect(withoutRegeneratedModifierIds(loaded.toJson())).toEqual(withoutRegeneratedModifierIds(before));
+		} finally {
+			globalThis.CharacterSheetModal.pGetShow = originalShow;
+			language.mockRestore();
+			tool.mockRestore();
+			respec._engine.cancel();
+		}
+	});
+
+	it("keeps the exact free grant when switching between no-ASI PHB backgrounds", async () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["str", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		const loaded = reload(state);
+		const respec = openRespec(loaded, page);
+		const before = copy(respec._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility));
+		const next = getBackground("Acolyte", "PHB");
+		const origin = respec._engine.manifest.base.decisions.find(decision => decision.type === "originBackground");
+		await respec._engine.stageGraphMutation(origin.id, {name: next.name, source: next.source}, {
+			apply: ({state: candidate}) => {
+				const old = respec._state;
+				respec._state = candidate;
+				try {
+					respec._applyBackgroundChange(candidate.getLevelHistoryEntry(1), next, {});
+				} finally {
+					respec._state = old;
+				}
+			},
+		});
+		expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
+			.toEqual(state.getBaseBackgroundUserChoices().selectedAbilityBonuses);
+		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 2, con: 1});
+		expect(respec._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
+			.map(decision => [decision.semanticKey, decision.receipt]))
+			.toEqual(before.map(decision => [decision.semanticKey, decision.receipt]));
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		respec._engine.cancel();
+	});
+
+	it("reselects the same PHB background with language/tool changes and a new free pair", async () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["str", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		state.setAbilityBonus("dex", 3);
+		const loaded = reload(state);
+		const respec = openRespec(loaded, page);
+		const modalInner = e_({tag: "div"});
+		const originalShow = globalThis.CharacterSheetModal.pGetShow;
+		const language = jest.spyOn(respec, "_renderLanguageChoicePickers").mockReturnValue({
+			type: "language", isComplete: () => true, getSelections: () => ["Common"],
+		});
+		const tool = jest.spyOn(respec, "_renderToolChoicePickers").mockReturnValue({
+			type: "tool", isComplete: () => true, getSelections: () => ["Bagpipes"],
+		});
+		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
+		try {
+			await respec._editBackground(1, respec._state.getLevelHistoryEntry(1), null);
+			findByClass(modalInner, "charsheet__respec-feat-list")._children[0].click();
+			const selects = findAll(modalInner, element => element?._html?.startsWith("<select") && element._handlers.change);
+			expect(selects).toHaveLength(2);
+			["dex", "int"].forEach((ability, ix) => {
+				selects[ix].value = ability;
+				selects[ix]._handlers.change();
+			});
+			await findByClass(modalInner, "charsheet__respec-btn-row")._children[1]._handlers.click();
+			expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 5, int: 1});
+			expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
+				.toMatchObject({bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1});
+			expect(respec._engine.getValidation().errors).toEqual([]);
+			await respec._engine.apply();
+			expect(reload(loaded).toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 5, int: 1});
+		} finally {
+			globalThis.CharacterSheetModal.pGetShow = originalShow;
+			language.mockRestore();
+			tool.mockRestore();
+			respec._engine.cancel();
+		}
+	});
+
+	it("replaces the free grant with an explicitly picked XPHB background ASI", async () => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["str", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		state.setAbilityBonus("wis", 4);
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		const next = getBackground("Sage", "XPHB");
+		const origin = respec._engine.manifest.base.decisions.find(decision => decision.type === "originBackground");
+		await respec._engine.stageGraphMutation(origin.id, {name: next.name, source: next.source}, {
+			apply: ({state: candidate}) => {
+				const old = respec._state;
+				respec._state = candidate;
+				try {
+					respec._applyBackgroundChange(candidate.getLevelHistoryEntry(1), next, {
+						selectedAbilityBonuses: {bg_0: "int", bg_0_weight: 2, bg_1: "wis", bg_1_weight: 1},
+					});
+				} finally {
+					respec._state = old;
+				}
+			},
+		});
+		expect(respec._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)).toEqual([]);
+		expect(getAbilityDecisions(respec, "background").map(decision => decision.status))
+			.toEqual(["resolved", "resolved", "resolved"]);
+		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, int: 2, wis: 5});
+		expect(loaded.toJson()).toEqual(before);
+		await respec._engine.apply();
+		const reopened = openRespec(reload(loaded), page);
+		expect(getAbilityDecisions(reopened, "background").map(decision => decision.selection)).toEqual([
+			expect.objectContaining({weights: [2, 1]}), "int", "wis",
+		]);
+		expect(reopened._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, int: 2, wis: 5});
+		reopened._engine.cancel();
+		expect(await respec._engine.undo()).toBe(true);
+		expect(withoutRegeneratedModifierIds(loaded.toJson())).toEqual(withoutRegeneratedModifierIds(before));
+	});
+
+	it("offers repair when a free pairing has no recorded or applied choices", async () => {
+		const {state, page} = build({raceName: "Dwarf", raceSource: "XPHB", racePicks: []});
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		expect(getRepairButton(respec._renderBaseCard())).not.toBeNull();
+		expect(respec._engine.getValidation().errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "free-origin-ability-evidence"}),
+		]));
+		expect(await respec._stageSameBackgroundAbilityChoices({
+			selectedAbilityBonuses: {bg_0: "str", bg_0_weight: 2, bg_1: "con", bg_1_weight: 1},
+		})).toBe(true);
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 2, con: 1});
+		respec._engine.cancel();
+		expect(loaded.toJson()).toEqual(before);
+	});
+
+	it("repairs an unassigned free pair through a same-background reselect with other choices", async () => {
+		const {state, page} = build({raceName: "Dwarf", raceSource: "XPHB", racePicks: []});
+		const respec = openRespec(reload(state), page);
+		const origin = respec._engine.manifest.base.decisions.find(decision => decision.type === "originBackground");
+		expect(respec._engine.getValidation().issues).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "free-origin-ability-evidence", repairable: true}),
+		]));
+		const currentBg = respec._state.getBackground();
+		await respec._engine.stageGraphMutation(origin.id, {name: currentBg.name, source: currentBg.source}, {
+			apply: ({state: candidate}) => {
+				const old = respec._state;
+				respec._state = candidate;
+				try {
+					respec._applyBackgroundChange(candidate.getLevelHistoryEntry(1), currentBg, {
+						selectedLanguages: ["Common"],
+						selectedAbilityBonuses: {bg_0: "str", bg_0_weight: 2, bg_1: "con", bg_1_weight: 1},
+					});
+				} finally {
+					respec._state = old;
+				}
+			},
+		});
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 2, con: 1});
+		respec._engine.cancel();
+	});
+
+	it("does not guess a missing free pair from an unrelated aggregate bonus", async () => {
+		const {state, page} = build({raceName: "Dwarf", raceSource: "XPHB", racePicks: []});
+		state.setAbilityBonus("str", 2);
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		expect(respec._engine.getValidation().issues).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "free-origin-ability-evidence", repairable: false}),
+		]));
+		expect(getRepairButton(respec._renderBaseCard())).toBeNull();
+		await expect(respec._stageSameBackgroundAbilityChoices({
+			selectedAbilityBonuses: {bg_0: "str", bg_0_weight: 2, bg_1: "con", bg_1_weight: 1},
+		})).rejects.toThrow(/restore.*saved backup/i);
+		expect(loaded.toJson()).toEqual(before);
+		respec._engine.cancel();
+	});
+
+	it.each([
+		{
+			label: "partial",
+			choices: {bg_0: "str", bg_0_weight: 2},
+			bonuses: {str: 2, con: 1},
+		},
+		{
+			label: "contradictory",
+			choices: {bg_0: "str", bg_0_weight: 2, bg_1: "con", bg_1_weight: 1},
+			bonuses: {str: 2, con: 0},
+		},
+	])("blocks $label saved free ASI evidence with an actionable error rather than guessing bonuses", ({choices, bonuses}) => {
+		const {state, page} = build({
+			raceName: "Dwarf",
+			raceSource: "XPHB",
+			racePicks: [],
+			backgroundPicks: [["str", 2], ["con", 1]],
+			applyAbilities: true,
+		});
+		state.setBaseBackgroundUserChoices({
+			...state.getBaseBackgroundUserChoices(), selectedAbilityBonuses: choices,
+		});
+		for (const [ability, bonus] of Object.entries(bonuses)) state.setAbilityBonus(ability, bonus);
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		expect(respec._engine.getValidation().errors).toEqual(expect.arrayContaining([
+			expect.objectContaining({message: expect.stringMatching(/free.*abilit.*(incomplete|mismatch|repair)/i)}),
+		]));
+		const card = respec._renderBaseCard();
+		expect(getRepairButton(card)).toBeNull();
+		expect(findAll(card, element => element?.textContent?.includes("Restore the recorded +2/+1 choices")))
+			.not.toHaveLength(0);
+		respec._engine.cancel();
+		expect(loaded.toJson()).toEqual(before);
+	});
+
 	it("keeps an explicitly selected Tasha distribution when changing only the background", () => {
 		const {state, page} = build({
 			raceName: "Half-Orc",

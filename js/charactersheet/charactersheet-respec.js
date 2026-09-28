@@ -410,13 +410,22 @@ class CharacterSheetRespec {
 		rows.append(mkRow("🎒", "Background", background?.name || "", background ? () => this._editBackground(1, level1History || {level: 1, choices: {}}, null) : null));
 		const backgroundAbilityDecisions = (this._engine?.manifest?.base?.decisions || []).filter(decision =>
 			decision.meta?.originAbilityDistribution
-				&& decision.provenance?.ownerType === "background",
+				&& (decision.provenance?.ownerType === "background" || decision.meta?.originFreeAbility),
 		);
-		if (background && backgroundAbilityDecisions.some(decision => decision.required && decision.status !== "resolved")) {
+		const isFree = backgroundAbilityDecisions.some(decision => decision.meta?.originFreeAbility);
+		const freeEvidenceIssue = this._engine?.getValidation()?.issues?.find(issue =>
+			issue.code === "free-origin-ability-evidence",
+		);
+		if (background && isFree && freeEvidenceIssue && !freeEvidenceIssue.repairable) {
+			rows.append(e_({tag: "p", clazz: "ve-small text-warning mt-1", txt: freeEvidenceIssue.message}));
+		} else if (background && (backgroundAbilityDecisions.some(decision => decision.required && decision.status !== "resolved")
+			|| (isFree && freeEvidenceIssue))) {
 			const repair = e_({
 				tag: "button",
 				clazz: "ve-btn ve-btn-xs ve-btn-warning mt-1",
-				txt: "Background ability choices are incomplete — complete choices",
+				txt: isFree
+					? "Free origin ability choices are incomplete — choose +2/+1"
+					: "Background ability choices are incomplete — complete choices",
 			});
 			repair.dataset.respecBackgroundAbilityRepair = "true";
 			repair.addEventListener("click", () => this._editBackground(1, level1History || {level: 1, choices: {}}, null));
@@ -2368,7 +2377,7 @@ class CharacterSheetRespec {
 							decision.meta.receiptPreviousAbilityBonus[ability] = before;
 						}
 						this._state.setAbilityBonus(ability, before + amount);
-						if (decision.provenance?.ownerType === "race") {
+						if (decision.provenance?.ownerType === "race" && !decision.meta?.originFreeAbility) {
 							const race = this._state.getRace?.();
 							const choices = MiscUtil.copyFast(this._state.getBaseRaceUserChoices?.() || {});
 							choices.selectedAbilityChoices ||= {};
@@ -2384,7 +2393,7 @@ class CharacterSheetRespec {
 							ownerChoices[`choose_${choiceIndex}_${pickIndex}`] = ability;
 							ownerChoices[`choose_${choiceIndex}_${pickIndex}_amount`] = amount;
 							this._state.setBaseRaceUserChoices(choices);
-						} else if (decision.provenance?.ownerType === "background") {
+						} else if (decision.provenance?.ownerType === "background" || decision.meta?.originFreeAbility) {
 							const choices = MiscUtil.copyFast(this._state.getBaseBackgroundUserChoices?.() || {});
 							const selectionKey = decision.meta?.originAbilitySelectionKey;
 							if (selectionKey) {
@@ -5453,6 +5462,12 @@ class CharacterSheetRespec {
 	}
 
 	async _stageSameBackgroundAbilityChoices (userChoices) {
+		const freeIssue = this._engine?.getValidation()?.issues?.find(issue =>
+			issue.code === "free-origin-ability-evidence",
+		);
+		if (freeIssue && !freeIssue.repairable) {
+			throw new Error(freeIssue.message);
+		}
 		const selectedAbilityBonuses = userChoices?.selectedAbilityBonuses || {};
 		const weights = Object.keys(selectedAbilityBonuses)
 			.filter(key => /^bg_\d+_weight$/.test(key))
@@ -5461,7 +5476,7 @@ class CharacterSheetRespec {
 		const parent = (this._engine?.manifest?.base?.decisions || []).find(decision =>
 			decision.type === "nestedConfiguration"
 				&& decision.meta?.originAbilityDistribution
-				&& decision.provenance?.ownerType === "background",
+				&& (decision.provenance?.ownerType === "background" || decision.meta?.originFreeAbility),
 		);
 		const mode = parent?.options?.find(option =>
 			option.weights?.length === weights.length
@@ -5772,9 +5787,21 @@ class CharacterSheetRespec {
 						if (langPicker) currentPickers.push(langPicker);
 						const toolPicker = this._renderToolChoicePickers(choicesPanel, bg, () => fnUpdateApplyState?.());
 						if (toolPicker) currentPickers.push(toolPicker);
-						const abiPicker = CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())
+						const isFree = CharacterSheetClassUtils.hasFreeOriginAbilityPair(this._state.getRace(), bg);
+						const keepFree = isFree && !isCurrent && CharacterSheetClassUtils.hasFreeOriginAbilityPair(
+							this._state.getRace(), currentBg,
+						);
+						if (keepFree) {
+							choicesPanel.append(e_({
+								outer: "<p class=\"ve-small ve-muted\">Your free +2/+1 origin abilities carry over with this species.</p>",
+							}));
+						}
+						const abilitySource = isFree && !keepFree
+							? {ability: [{choose: {weighted: {from: Parser.ABIL_ABVS, weights: [2, 1]}}}]}
+							: bg;
+						const abiPicker = CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace()) || keepFree
 							? null
-							: this._renderAbilityChoicePickers(choicesPanel, bg, "bg", () => fnUpdateApplyState?.());
+							: this._renderAbilityChoicePickers(choicesPanel, abilitySource, "bg", () => fnUpdateApplyState?.());
 						if (abiPicker) currentPickers.push(abiPicker);
 					}
 					fnUpdateApplyState?.();
@@ -5828,10 +5855,17 @@ class CharacterSheetRespec {
 				else if (p.type === "tool") userChoices.selectedTools = p.getSelections();
 				else if (p.type === "ability") userChoices.selectedAbilityBonuses = p.getSelections();
 			});
+			const freeIssue = this._engine?.getValidation()?.issues?.find(issue =>
+				issue.code === "free-origin-ability-evidence",
+			);
+			if (freeIssue && !freeIssue.repairable) {
+				JqueryUtil.doToast({type: "danger", content: freeIssue.message});
+				return;
+			}
 
 			const originDecision = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originBackground");
 			const isSameBackgroundAbilityOnly = isSameEntity
-				&& currentPickers.length
+				&& currentPickers.some(picker => picker.type === "ability")
 				&& currentPickers.every(picker => picker.type === "ability");
 			const didStageOwnedAbilityChoices = isSameBackgroundAbilityOnly
 				? await this._stageSameBackgroundAbilityChoices(userChoices)
@@ -6074,6 +6108,30 @@ class CharacterSheetRespec {
 		const oldBg = this._state.getBackground();
 		const backgroundSourceId = "base:origin-background";
 		const oldUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history.choices?.backgroundUserChoices || {};
+		const isFreeBefore = CharacterSheetClassUtils.hasFreeOriginAbilityPair(this._state.getRace(), oldBg);
+		const isFreeAfter = CharacterSheetClassUtils.hasFreeOriginAbilityPair(this._state.getRace(), newBg);
+		const keepFree = isFreeBefore && isFreeAfter && !userChoices.selectedAbilityBonuses;
+		if (isFreeBefore) {
+			const issue = this._engine?.getValidation()?.issues?.find(it => it.code === "free-origin-ability-evidence");
+			if (issue && !issue.repairable) throw new Error(issue.message);
+			if (!keepFree && !issue?.repairable) {
+				const children = (this._engine?.manifest?.base?.decisions || [])
+					.filter(decision => decision.meta?.originFreeAbility && decision.type === "nestedAbility");
+				if (children.length !== 2 || children.some(decision =>
+					!decision.receipt?.effects?.some(effect => effect.type === "abilityBonusDelta"),
+				)) throw new Error("Free origin ability receipts are incomplete. Restore the saved +2/+1 choices before changing backgrounds.");
+				for (const child of children) {
+					const effect = child.receipt.effects.find(it => it.type === "abilityBonusDelta");
+					const current = this._state.getAbilityBonus(effect.ability);
+					if (current < effect.amount) {
+						throw new Error("Free origin ability bonuses do not match their recorded choices. Restore the saved character before changing backgrounds.");
+					}
+					this._state.setAbilityBonus(effect.ability, current - effect.amount);
+				}
+				const base = this._state.getCharacterBase();
+				base.decisions = (base.decisions || []).filter(decision => !decision.meta?.originFreeAbility);
+			}
+		}
 
 		// --- CLEAR OLD BACKGROUND GRANTS ---
 
@@ -6083,8 +6141,8 @@ class CharacterSheetRespec {
 			.filter(f => f.featureType === "Background")
 			.forEach(f => this._state.removeFeature(f.id));
 
-		// Clear old background ability bonuses (reset all, will reapply race + new bg)
-		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
+		// The free origin grant has its own receipt; only remove its exact deltas.
+		if (!isFreeBefore) Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
 
 		// Clear old background skills
 		this._clearSkillsFromData(oldBg, backgroundSourceId);
@@ -6130,8 +6188,7 @@ class CharacterSheetRespec {
 			});
 		}
 
-		// Reapply racial ability bonuses (since we reset all to 0)
-		this._reapplyRacialAbilityBonuses(history);
+		if (!isFreeBefore) this._reapplyRacialAbilityBonuses(history);
 
 		// Reapply newly-selected background ability bonuses
 		// For 2024 backgrounds with ability choices, apply fixed bonuses only
@@ -6184,6 +6241,8 @@ class CharacterSheetRespec {
 		}
 		if (userChoices.selectedAbilityBonuses) {
 			storedUserChoices.selectedAbilityBonuses = userChoices.selectedAbilityBonuses;
+		} else if (keepFree) {
+			storedUserChoices.selectedAbilityBonuses = oldUserChoices.selectedAbilityBonuses;
 		}
 
 		// Persist origin choices to the character base node (single source of truth). Fall back to the

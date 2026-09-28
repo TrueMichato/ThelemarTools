@@ -109,9 +109,19 @@ and reverses only their receipt-owned bonus deltas. Legacy saves without
 instead of inferring ownership from aggregate ability bonuses, and the Base
 card links to the existing background editor to complete the missing history.
 An ASI-granting PHB race ignores the XPHB background's weighted picker.
-The separate free ASI that Builder offers an ASI-less XPHB species with a PHB
-background has no background-provided weighted distribution or Respec editor
-yet; existing recorded choices are preserved, not relabeled as PHB grants.
+For an ASI-less XPHB species paired with a background without an ASI, Builder's
+free +2/+1 is a separate, species-keyed origin distribution, **not** an ASI
+granted by that background. Its two weighted children read the exact recorded
+`backgroundUserChoices.selectedAbilityBonuses` picks and own reversible bonus
+receipts. Respec's Change Background editor can reselect the pair on the same
+background; changing to another no-ASI background carries the pair over
+automatically. Changing to an ASI-granting background instead removes only
+the free pair and requires a legal choice from the new background. Other
+ability-score contributors remain untouched by these free-pair changes.
+Canonical Builder saves with complete picks and applied bonuses but no
+bonus-owned receipts acquire them on the isolated Respec draft. Partial or
+contradictory recorded picks/bonuses block Apply with a restore-from-backup
+diagnostic rather than filling in a missing ability from total scores.
 
 Fixed species/background feats are also origin child decisions, even though
 the player does not choose them. Their semantic key is derived from the origin
