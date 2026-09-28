@@ -120,6 +120,13 @@ function findByClass (root, clazz) {
 	return null;
 }
 
+function findAll (root, predicate) {
+	return [
+		...(predicate(root) ? [root] : []),
+		...(root?._children || []).flatMap(child => findAll(child, predicate)),
+	];
+}
+
 const getAbilityDecisions = (respec, ownerType) => respec._engine.manifest.base.decisions
 	.filter(decision => decision.provenance?.ownerType === ownerType
 		&& (decision.provenance?.grantKind === "ability" || decision.meta?.originAbilityDistribution));
@@ -221,6 +228,120 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 		});
 		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, dex: 0, wis: 1, con: 1, cha: 2});
 		respec._engine.cancel();
+	});
+
+	it("keeps partial source-qualified racial picks invalid beside a stale resolved base ledger", async () => {
+		const {state, page} = build();
+		const loaded = reload(state);
+		const initial = openRespec(loaded, page);
+		const resolved = copy(getAbilityDecisions(initial, "race")[0]);
+		initial._engine.cancel();
+		loaded.getCharacterBase().decisions = [resolved];
+		loaded.setBaseRaceUserChoices({
+			...loaded.getBaseRaceUserChoices(),
+			selectedAbilityChoices: {"Half-Elf|PHB": {choose_0_0: "str", choose_0_0_amount: 1}},
+		});
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		expect(getAbilityDecisions(respec, "race")[0]).toMatchObject({
+			selection: ["str"],
+			status: "invalid",
+		});
+		expect(respec._engine.getValidation().errors.length).toBeGreaterThan(0);
+		await respec._engine.stageCandidateMutation(({state: candidate}) => candidate.setName("Unrelated edit"));
+		expect(getAbilityDecisions(respec, "race")[0]).toMatchObject({
+			selection: ["str"],
+			status: "invalid",
+		});
+		expect(respec._engine.getValidation().errors.length).toBeGreaterThan(0);
+		respec._engine.cancel();
+		expect(loaded.toJson()).toEqual(before);
+	});
+
+	it("retains a saved resolved base decision when no choices belong to this race", () => {
+		const {state, page} = build();
+		const loaded = reload(state);
+		const initial = openRespec(loaded, page);
+		const resolved = copy(getAbilityDecisions(initial, "race")[0]);
+		initial._engine.cancel();
+		loaded.getCharacterBase().decisions = [resolved];
+		loaded.setBaseRaceUserChoices({
+			...loaded.getBaseRaceUserChoices(),
+			selectedAbilityChoices: {"Half-Elf|XPHB": {choose_0_0: "wis"}},
+		});
+		const respec = openRespec(loaded, page);
+		expect(getAbilityDecisions(respec, "race")[0]).toMatchObject({
+			selection: ["str", "dex"],
+			status: "resolved",
+		});
+		respec._engine.cancel();
+	});
+
+	it("replaces both racial picks and their receipt through the Half-Elf Change Species dialog", async () => {
+		const {state, page} = build();
+		const loaded = reload(state);
+		const before = loaded.toJson();
+		const respec = openRespec(loaded, page);
+		const modalInner = e_({tag: "div"});
+		const originalShow = globalThis.CharacterSheetModal.pGetShow;
+		const languagePicker = jest.spyOn(respec, "_renderLanguageChoicePickers").mockReturnValue({
+			type: "language",
+			isComplete: () => true,
+			getSelections: () => ({0: ["Elvish"]}),
+		});
+		const skillPicker = jest.spyOn(respec, "_renderSkillChoicePickers").mockReturnValue({
+			type: "skill",
+			isComplete: () => true,
+			getSelections: () => ["Athletics", "Arcana"],
+		});
+		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
+		try {
+			await respec._editRace(1, respec._state.getLevelHistoryEntry(1), null);
+			const list = findByClass(modalInner, "charsheet__respec-feat-list");
+			list._children[0].click();
+			expect(skillPicker).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({name: "Half-Elf", source: "PHB"}), expect.any(Function));
+			const selects = findAll(modalInner, element => element?._html?.startsWith("<select") && element._handlers.change);
+			expect(selects).toHaveLength(2);
+			["wis", "con"].forEach((ability, ix) => {
+				selects[ix].value = ability;
+				selects[ix]._handlers.change();
+			});
+			const changeButton = findByClass(modalInner, "charsheet__respec-btn-row")._children[1];
+			expect(changeButton.disabled).toBe(false);
+			await changeButton._handlers.click();
+			expect(respec._state.getBaseRaceUserChoices().selectedAbilityChoices["Half-Elf|PHB"])
+				.toMatchObject({choose_0_0: "wis", choose_0_1: "con"});
+			expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, dex: 0, wis: 1, con: 1, cha: 2});
+			expect(getAbilityDecisions(respec, "race")[0]).toMatchObject({
+				selection: ["wis", "con"],
+				status: "resolved",
+				receipt: {effects: [
+					expect.objectContaining({type: "abilityBonusDelta", ability: "wis", amount: 1, before: 0}),
+					expect.objectContaining({type: "abilityBonusDelta", ability: "con", amount: 1, before: 0}),
+				]},
+			});
+			expect(respec._engine.getValidation().errors).toEqual([]);
+			expect(loaded.toJson()).toEqual(before);
+			await respec._engine.stageCandidateMutation(({state: candidate}) => candidate.setName("Unrelated edit"));
+			await respec._engine.apply();
+			const persisted = reload(loaded);
+			const reopened = openRespec(persisted, page);
+			expect(getAbilityDecisions(reopened, "race")[0]).toMatchObject({
+				selection: ["wis", "con"],
+				status: "resolved",
+				receipt: {effects: [
+					expect.objectContaining({type: "abilityBonusDelta", ability: "wis", amount: 1, before: 0}),
+					expect.objectContaining({type: "abilityBonusDelta", ability: "con", amount: 1, before: 0}),
+				]},
+			});
+			expect(reopened._engine.getValidation().errors).toEqual([]);
+			reopened._engine.cancel();
+		} finally {
+			globalThis.CharacterSheetModal.pGetShow = originalShow;
+			languagePicker.mockRestore();
+			skillPicker.mockRestore();
+			if (respec._engine.isActive) respec._engine.cancel();
+		}
 	});
 
 	it("stores a newly selected PHB race's two picker choices under its source-qualified owner", async () => {

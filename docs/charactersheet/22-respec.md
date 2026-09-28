@@ -90,10 +90,14 @@ XPHB classes/backgrounds) owns its racial picks, while an ASI-less species
 may receive bonuses from its background. Source-qualified Builder racial
 choices such as `selectedAbilityChoices["Half-Elf|PHB"]` retain *both*
 `choose_0_0` and `choose_0_1`; Respec keeps them as one two-pick origin
-decision with reversible bonus receipts. The Base card shows the fixed and
-chosen racial bonuses. When Tasha's reassignment is explicitly recorded,
-the chosen distribution replaces the race defaults; Respec does not infer
-Tasha choices from total scores on older saves.
+decision with reversible bonus receipts. Present owner-qualified choices,
+including incomplete ones, take precedence over an older saved decision;
+an incomplete pair blocks Apply rather than inheriting a stale second pick.
+Changing species choices through the full picker replaces the prior racial
+selection and receipt instead of restoring the old decision. The Base card
+shows the fixed and chosen racial bonuses. When Tasha's reassignment is
+explicitly recorded, the chosen distribution replaces the race defaults;
+Respec does not infer Tasha choices from total scores on older saves.
 
 When the race does not provide an ASI, background ability alternatives are
 represented as a required distribution parent with weighted ability children.

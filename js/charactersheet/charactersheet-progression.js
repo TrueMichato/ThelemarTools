@@ -1584,10 +1584,16 @@ class CharacterSheetProgression {
 					state,
 					legacyChoices: choices,
 				});
-				const selectedFallback = descriptor.kind === "ability"
+				const hasOwnerQualifiedRaceAbilityChoices = descriptor.kind === "ability"
+					&& originType === "race"
+					&& Object.entries(choices?.selectedAbilityChoices || {})
+						.some(([owner, value]) => CharacterSheetProgression._normalize(owner) === originUid
+							&& value && typeof value === "object");
+				const hasCompleteRaceAbilityChoices = descriptor.kind === "ability"
 					&& originType === "race"
 					&& Array.isArray(selected)
-					&& selected.length === descriptor.count
+					&& selected.length === descriptor.count;
+				const selectedFallback = hasOwnerQualifiedRaceAbilityChoices || hasCompleteRaceAbilityChoices
 					? selected
 					: storedDecision?.selection ?? selected ??
 					choices?.[`selected${descriptor.kind[0].toUpperCase()}${descriptor.kind.slice(1)}s`] ??
