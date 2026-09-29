@@ -1,6 +1,6 @@
 # Campaign Hub staging plan
 
-> **Status:** r10 serving after a verified interrupted-r11 rollback; V1-G1 complete; physical rerun **NO-GO**
+> **Status:** r11b deployed and operationally verified; V1-G1 complete; physical rerun **NO-GO**
 > **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
 
@@ -8,7 +8,9 @@ The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r
 correction release, and physical re-entry gate. Earlier r7 drills below are historical evidence, not a
 claim that r7 is still deployed or that the r10 findings have been resolved. The 2026-09-29 r11
 promotion was interrupted after traffic changed; its compatible application rollback restored exact
-r10 with no schema migration. The new pre-release backup still needs off-machine verification.
+r10 with no schema migration. A new genuine-provenance r11b tag was then promoted and verified, with
+its newest encrypted prerelease backup matched off-machine. Targeting remains disabled and the P1
+physical retest is pending.
 
 ## Objectives
 
@@ -22,8 +24,8 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- The last facilitator-verified deployed release is annotated `hub-staging-2026-09-21-r10` at
-  `cc3a7290d12f645907688a9731b5b7ae400e28eb`, with migrations `0001`-`0009`;
+- The independently verified deployed release is annotated `hub-staging-2026-09-29-r11b` at
+  `a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167`, with migrations `0001`-`0009`;
   Phase 6G is complete. Recheck live identity before the next promotion.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup

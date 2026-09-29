@@ -5,8 +5,9 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 
 > **Implementation:** R10 identity/onboarding and P1 campaign-sheet routing fix merged; gameplay waves
 > A0-A3 and the separate sharing UX PR remain draft/unmerged
-> **Deployment:** The last facilitator-verified Oracle release is `hub-staging-2026-09-21-r10` at
-> `cc3a7290d12f645907688a9731b5b7ae400e28eb`; the 2026-09-28 physical rerun ended **NO-GO**
+> **Deployment:** `hub-staging-2026-09-29-r11b` at
+> `a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167` passed independent Oracle release checks;
+> the 2026-09-28 physical **NO-GO** remains pending retest
 > **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
 

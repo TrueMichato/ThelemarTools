@@ -29,7 +29,7 @@ rather than inferring deployment or enablement from merged code.
 | Status | Milestone | Evidence or remaining decision |
 |---|---|---|
 | **shipped** | Private invite-only Hub implementation through Phase 6F | Server, browser, Character Sheet, DM Screen, lifecycle, migration, operations, CI, and real-stack evidence are summarized in [implementation status](implementation-status.md) |
-| **shipped** | Phase 6G Oracle deployment | The latest facilitator-verified Oracle release is annotated `hub-staging-2026-09-21-r10` at `cc3a7290d12f645907688a9731b5b7ae400e28eb`, with migrations `0001`-`0009`; this is dated game-day evidence, not a fresh host check |
+| **shipped** | Phase 6G Oracle deployment | Annotated `hub-staging-2026-09-29-r11b` at `a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167` passed independent post-release checks with migrations `0001`-`0009`; code deployment is not physical game-day acceptance |
 | **shipped** | V2-T0 release automation and live promotion | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) implemented the release path; the r7 dry-run/promotion, immutable evidence, image preservation, and non-disruptive rollback prerequisites were proven on Oracle |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
 | **shipped** | Coordinated implementation closeout | All 59 planned implementation todos are complete. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241) merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`; [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) integrated source/species/edition content enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`; [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` |
@@ -38,7 +38,7 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | V2-T9 Campaign Overview redesign | The pinned session brief, role-specific continuation action, preserved workbench, responsive/accessibility coverage, and authority hardening are merged in PR #243 |
 | **shipped** | V1 external Oracle host-operations proof | Manual and genuine scheduled maintenance/backup, five-minute external monitoring, off-machine backup, authenticated isolated restore, RPO/RTO, exact-r6 rollback, exact-r7 return, cleanup, and zero-disruption identity checks passed by 2026-09-13 |
 | **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
-| **active** | r10 game-day fix candidates | [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331) (context routing) merged as `df9e0b0a6aba82c19ee4e146209725f6c8ee18e2`, with a BFCache inventory fix in descendant `dd1522955c86a6cbbccf651da5d8e2fcc855f63a`. Neither is deployed or physically retested. [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) (outer sharing disclosure) remains a separate green draft, not required for the P1/targeting retest. |
+| **active** | r10 game-day fix candidates | [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331) (context routing), merged as `df9e0b0a6aba82c19ee4e146209725f6c8ee18e2`, plus BFCache inventory fix `dd1522955c86a6cbbccf651da5d8e2fcc855f63a` are deployed in r11b but **not physically retested**. [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) remains a separate green draft. |
 | **next** | Wave A gameplay delivery | Stacked draft PRs [#285](https://github.com/TrueMichato/ThelemarTools/pull/285)-[#288](https://github.com/TrueMichato/ThelemarTools/pull/288) remain held/unmerged. A4/A5, inventory Wave B, and rules Wave D follow the [delivery plan](game-day-backlog.md). |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
@@ -47,8 +47,8 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
-The last facilitator-verified Oracle identity is annotated release `hub-staging-2026-09-21-r10` at
-`cc3a7290d12f645907688a9731b5b7ae400e28eb`. Draft PRs and later repository changes are not
+The last independently verified Oracle identity is annotated release `hub-staging-2026-09-29-r11b` at
+`a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167`. Draft PRs and later repository changes are not
 target-environment evidence until separately reviewed, merged, tagged, approved, and promoted.
 
 ## V1 launch closeout

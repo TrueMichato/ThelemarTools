@@ -12,21 +12,24 @@ identifiers, provider subjects, tokens, or private evidence into Git.
 
 ## Current boundary
 
-- **Deployed:** `hub-staging-2026-09-21-r10` at
-  `cc3a7290d12f645907688a9731b5b7ae400e28eb`, protocol 5, migrations `0001`-`0009`.
-  This is the last deployment identity verified by the r10 facilitator, not a claim of fresh host health.
+- **Deployed:** genuine-provenance `hub-staging-2026-09-29-r11b`, annotated tag object
+  `a4e5f742eccb3cd007756ce734e1361a4dedd9e8` at
+  `a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167`, protocol 5, migrations `0001`-`0009`.
+  Independent post-release host/public checks passed at 2026-09-29T16:22Z; this is not physical
+  character or targeting acceptance.
 - **Physical result:** final **NO-GO** at 2026-09-28T20:02:31Z. GD-FIND-014 is a confirmed P1
   refresh-persistent local/campaign Character Sheet divergence. GD-FIND-012 records that the
   campaign's player-targeting rollout was disabled. Several scenarios lack participant/device evidence.
-- **P1 remediation merged, not on Oracle:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
+- **P1 remediation deployed, not physically proven:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
   fixes local/campaign route and repository-authority restoration. Its reviewed head
   `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;
   it merged into `multiplayer-hub` as `df9e0b0a6aba82c19ee4e146209725f6c8ee18e2`.
   Exact-merge review found a retained Party Inventory BFCache generation fence; the normal descendant
   `dd1522955c86a6cbbccf651da5d8e2fcc855f63a` restores attachment and refresh after an authorized
   Back navigation, with red-first unit and real-stack regressions.
-  Local same-ID and real-stack tests did not reproduce a canonical Hub overwrite; they cannot establish
-  what happened to the original live character or replace physical verification after deployment.
+  Its r11b release includes the BFCache fix. Local same-ID and real-stack tests did not reproduce a
+  canonical Hub overwrite; they cannot establish what happened to the original live character or
+  replace the pending physical comparison.
 - **Related sharing UX in code, not on Oracle:**
   [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) adds an accessible outer sharing
   disclosure. Its exact head `2048973d37198da04681ec86d5a7fb82af49ca1b` passed all four CI jobs,
@@ -38,16 +41,14 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   [#288](https://github.com/TrueMichato/ThelemarTools/pull/288) (multi-target server, migration 0011)
   remain stacked drafts, unmerged/undeployed with their runtime capability default-off. The existing
   delivery hold has **not** been lifted by this document.
-- **Release safety status:** the first read-only r11 preflight stopped on a stale off-machine backup and
-  unavailable SSH; a fresh retry cleared both. Exact-head CI and the Oracle dry run later passed for
-  `hub-staging-2026-09-29-r11`. During the separately confirmed promotion, the release was interrupted
-  after traffic changed. Its evidence records exit 130 in deploy, **successful compatible application
-  rollback** to exact r10, no schema migration, and verified pre-release backup. Independent read-only
-  checks at 2026-09-29T07:49Z found r10 serving and healthy with no continuing outage. The immutable r11
-  tag has a placeholder tagger identity and will **not** be moved or reused. The newly created encrypted
-  pre-release archive is not yet verified off-machine. A new operator-authored tag, fresh matching
-  off-machine copy, exact-head validation, preflight, dry run, and separate promotion authorization are
-  required before another attempt. Targeting remains disabled.
+- **Release safety status:** the first r11 attempt was interrupted after traffic changed; its evidence
+  records exit 130 in deploy, successful compatible rollback to r10, and no schema migration. Its
+  placeholder-provenance tag remains immutable and unused. The separately approved, genuinely tagged
+  r11b release passed its exact-head CI, dry run, human-confirmed promotion, and independent post-release
+  checks without rollback. DB/BFF/static/edge are healthy, one BFF serves, the ledger is unchanged,
+  outbox/dispatcher are clear, and the deployed static/service-worker hashes match the public assets.
+  The newest verified encrypted prerelease archive matches off-machine by filename, size, and SHA-256.
+  **Targeting enrollment remains disabled, and the physical NO-GO has not been reversed.**
 
 Implemented, merged, tagged, deployed, enabled for a specific campaign, and physically proven are distinct
 states. A green PR is not a new game-day release. The repository's GitHub Issues feature is disabled; use
@@ -64,7 +65,7 @@ finding.
 
 | Priority | Finding | Observation and current disposition | Next acceptance evidence / lane |
 |---|---|---|---|
-| P1 | **GD-FIND-014** | General-site/local and Campaign Hub sheet routes diverged, with no clear return path; refresh did not reconcile them. PR #331 is merged but not deployed or live-proven. Canonical live impact remains unknown. | Read-only owner/DM/local identity and revision comparison; deploy the reviewed route fix; repeat both entry paths, local return, refresh, BFCache, two-device and DM-truth convergence without crossing save authority. **Release re-entry**. |
+| P1 | **GD-FIND-014** | General-site/local and Campaign Hub sheet routes diverged, with no clear return path; refresh did not reconcile them. PR #331 is deployed in r11b but not physically proven. Canonical historical impact remains unknown. | Read-only owner/DM/local identity and revision comparison; repeat both entry paths, local return, refresh, BFCache, two-device and DM-truth convergence without crossing save authority. **Physical re-entry**. |
 | P2 | **GD-FIND-012** | Cure Wounds targeting was absent because the peer source-cost campaign rollout was disabled. This does not prove a missing server template. | Operator-approved exact-campaign enrollment using the checked-in preflight; physical reject/cancel/expiry/accept/self-target checks with no early cost and one accepted cost/effect. **Release re-entry / Wave A**. |
 | P2, reproduce | **GD-FIND-003** | Character-information view opened from Campaign Overview closed after about ten seconds; interaction/timeout conditions were not captured. | Reproduce with pointer and keyboard interaction, distinguish intentional expiry from premature dismissal, keep a readable/focus-safe view, and test the real browser. **Overview UX**. |
 | P2 | **GD-FIND-006** | Inventory **Share** began a second step in a lower sheet panel without moving focus, scrolling, or announcing it; action looked stalled. No asset loss was reported. | Focus/announce the next actionable control; distinguish draft/pending/committed states and prove no duplicate submission. **B0/B2**. |
@@ -77,7 +78,7 @@ finding.
 | Design | **GD-FIND-008** | Participants want fewer routine stash approvals, transparent withdrawals and shared-weight handling. | Decide custody, concurrent debit/approval, carry ownership, activity and notifications before changing inventory authority. **B0/B3 decision; ADR if authority changes**. |
 | Design | **GD-FIND-010** | DM requested direct player-sheet editing/transfers with player notification; current arbitrary edit authority is intentionally limited. | Choose explicit typed, auditable DM operations and recipient notices; do not bypass owner leases or grant arbitrary writes. **Wave A/B authority decision**. |
 | Design | **GD-FIND-011** | A condition installed only as personal/site homebrew was unavailable in campaign authority, as designed. | If desired, design an explicit reviewed publish/select-to-campaign flow; never silently import personal brew. **Content-publication decision**. |
-| Resolved for r10; r11 copy pending | **GD-FIND-001** | Newest encrypted backup was initially absent off-machine and then copied before play. The first r11 preflight found a stale trusted copy; a fresh host/off-machine match passed at 2026-09-29T06:12Z. The attempted r11 release then created a new pre-release archive that has not yet been copied to the trusted machine. | Preserve the r10 and r11 evidence; verify a matching copy of the newest pre-release archive and current restore age before any retry. **Operations**. |
+| Resolved; recheck each release | **GD-FIND-001** | Newest encrypted backup was initially absent off-machine and then copied before play. The interrupted r11 attempt required a second copy; successful r11b created another encrypted prerelease archive. The latest Oracle and trusted-machine copies now match. | Preserve bounded release/backup evidence; recheck newest host/off-machine copy and restore age before each later promotion. **Operations**. |
 
 The 2026-09-13 game-day findings are historical, not silently closed by this list. R10 reproduced earlier
 entry-path finding #3 and rollout finding #18; its P1 is a *separate convergence-class recurrence*
@@ -98,14 +99,13 @@ remain untested or insufficiently evidenced unless the private report explicitly
    Rerun route/convergence and, if included, disclosure/projection-privacy journeys on the *integrated*
    head, plus full Hub, affected Character Sheet, relevant mutation and real-stack gates. The nested
    GD-FIND-005 request remains open either way.
-3. **Release deliberately, not from draft branches.** A live test of those fixes requires a reviewed merged
-   commit reachable from `origin/multiplayer-hub`, an immutable annotated `hub-*` tag, fresh read-only host
-   preflight, separately authorized host dry run, and a human-confirmed
-   `deploy/hub/release.sh` promotion. Recheck migration policy, rollback compatibility, backup/off-machine
-   copy, restore age, roles, current health, and image identity. The r11 attempt rolled the application
-   back after interruption and must not be treated as deployment. Leave its tag immutable and unused;
-   reverify the new pre-release backup off-machine and begin any retry from a new, operator-authored
-   release tag with its own gates. Do not run a release from this backlog or treat merge as deployment.
+3. **Keep release identity separate from game-day acceptance.** The focused P1 correction is now deployed
+   as exact r11b from a reviewed, merged, annotated commit. The initial r11 attempt rolled back and is
+   not a deployment; its tag remains immutable and unused. r11b's final release and off-machine backup
+   evidence passed, but its routing fix still needs physical owner/DM/local checks. Every *future*
+   promotion still requires its own immutable tag, fresh operational preflight, dry run, human-confirmed
+   `deploy/hub/release.sh` invocation, and post-release checks. Do not treat a merge or this document as
+   authorization for another release.
 4. **Enable only the intended targeting slice.** The r10 one-target PHB/XPHB Cure Wounds flow already has a
    separate campaign-ID-gated rollout. Check its current exact release and rules prerequisites; use
    [peer source-cost rollout](runbooks/peer-source-cost-rollout.md) for a separately authorized, exact-campaign

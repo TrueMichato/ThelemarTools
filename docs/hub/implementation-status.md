@@ -5,12 +5,13 @@
 
 ## Status
 
-The last facilitator-verified private invite-only release is `hub-staging-2026-09-21-r10` at
-`cc3a7290d12f645907688a9731b5b7ae400e28eb` on the reused, Hub-only Oracle Always Free ARM
+The last independently verified private invite-only release is `hub-staging-2026-09-29-r11b` at
+`a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
-PostgreSQL, static site, BFF, API, and WebSocket checks passed the r10 game-day preflight. Phase 6G deployment
-and V1-G1 host-operations evidence are complete. The 2026-09-28 physical rerun returned **NO-GO** for a P1
-Character Sheet context divergence and disabled player targeting; see the
+PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11b post-release
+verification. Phase 6G deployment and V1-G1 host-operations evidence are complete. The 2026-09-28 r10
+physical rerun returned **NO-GO** for a P1 Character Sheet context divergence and disabled player targeting;
+r11b fixes the routing code but has not yet been physically retested, and targeting remains disabled. See the
 [prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
@@ -161,9 +162,10 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-09-21-r10` at `cc3a7290d12f645907688a9731b5b7ae400e28eb` was the last verified
-Oracle identity. Deployment, recovery, and genuine daily timer evidence were recorded; the physical r10
-rerun subsequently returned NO-GO. The [backlog](game-day-backlog.md) owns the re-entry work.
+`hub-staging-2026-09-29-r11b` at `a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167` is the last verified
+Oracle identity. Genuine daily timer and recovery evidence remain recorded; the independent r11b
+post-release check passed with a matching encrypted off-machine backup. The physical r10 rerun's NO-GO
+is not overturned by deployment alone. The [backlog](game-day-backlog.md) owns the re-entry work.
 
 ## Implemented
 
