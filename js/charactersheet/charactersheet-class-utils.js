@@ -6660,12 +6660,12 @@ class CharacterSheetClassUtils {
 	 * @returns {{count: number, autoLanguages?: string[]}|null}
 	 */
 	static findLanguageGrantsInFeature (/** @type {*} */ feature) {
-		// Special handling for Thieves' Cant - grants Thieves' Cant + 1 other language
-		// Check name BEFORE entries since features from string refs may lack entries
+		// PHB grants only Cant; the XPHB feature also grants one chosen language.
+		// Check the name before entries since string refs may not carry prose.
 		const nameLower = feature?.name?.toLowerCase() || "";
 		if (/** @type {*} */ nameLower === "thieves' cant" || nameLower === "thieves cant") {
 			return {
-				count: 1,
+				count: feature?.classSource === "XPHB" ? 1 : 0,
 				autoLanguages: ["Thieves' Cant"],
 			};
 		}

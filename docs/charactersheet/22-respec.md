@@ -331,6 +331,29 @@ Progression-controlled proficiencies and spells use
 `state.progressionOwnership`. Each value can have multiple decision sources, and
 unattributed imported/manual values are marked `preserved`.
 
+The ordinary Builder records a level-1 class language selection in
+`choices.languages` with its source feature. An XPHB Rogue's Thieves' Cant
+grants the fixed Cant and one chosen extra language; the PHB Rogue receives
+only the fixed Cant. After save/reload, the XPHB choice resolves to its
+source-qualified class decision and changing it replaces only that choice.
+Revisiting Builder's Class step preserves languages also granted by the race,
+background, or a feat.
+
+Older XPHB Rogue saves can have an extra language in the character's aggregate
+list but no recorded class-language choice. Even a leftover Rogue ownership
+key without its matching history is treated as unresolved. Respec cannot infer
+the missing selection from the aggregate list. Repair identifies the unresolved
+language and blocks staging a second choice until the player either
+**attributes an existing language to Rogue** or **confirms the unresolved
+languages were independently granted** and chooses a new one. If the attributed
+choice also has an independent grant,
+the player can mark that overlap explicitly so changing Rogue's choice later
+keeps the language. Proven race, background, feat, or other progression grants
+remain independent automatically. A character with no existing extra
+language can simply select the missing choice. All attribution and changes
+remain candidate-only until Apply; save/reload, reopening Respec, and Undo
+retain or reverse the ownership together with the language choice.
+
 When an editor changes a choice, it detaches only that decision's source. The
 mechanical value is removed only when no other progression source or preserved
 origin remains. This prevents changing a class skill, tool, language, expertise,

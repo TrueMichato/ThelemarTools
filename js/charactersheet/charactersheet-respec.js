@@ -1766,6 +1766,11 @@ class CharacterSheetRespec {
 		const decision = choice.decision;
 		if (!decision) return;
 		const legalOptions = this._getDecisionOptions(decision);
+		const unresolvedLanguages = globalThis.CharacterSheetProgression.getUnresolvedRogueLanguages({
+			state: this._state,
+			manifest: this._engine?.manifest,
+			decision,
+		});
 		const selected = new Map();
 		const currentValues = Array.isArray(decision.selection)
 			? decision.selection
@@ -1801,6 +1806,46 @@ class CharacterSheetRespec {
 			clazz: "ve-muted",
 			txt: `Choose ${decision.count} option${decision.count === 1 ? "" : "s"}. ${decision.required ? "This decision is required." : "You may leave it deferred."}`,
 		}));
+		let legacyLanguageMode = null;
+		let alsoIndependent = null;
+		if (unresolvedLanguages.length) {
+			const fieldset = e_({tag: "fieldset", clazz: "charsheet__respec-decision-editor mb-2"});
+			fieldset.append(e_({
+				tag: "legend",
+				clazz: "ve-small",
+				txt: "Repair an older Rogue language choice",
+			}));
+			fieldset.append(e_({
+				tag: "p",
+				clazz: "ve-muted ve-small",
+				txt: `This save has no recorded Rogue choice for ${unresolvedLanguages.join(", ")}. Choose one language below, then identify whether it was Rogue's earlier choice or whether all unresolved languages came from elsewhere. Nothing changes on the live character until Apply.`,
+			}));
+			const addMode = (value, label) => {
+				const row = e_({tag: "label", clazz: "charsheet__respec-option"});
+				const input = e_({tag: "input"});
+				input.type = "radio";
+				input.name = `respec-language-owner-${decision.id}`;
+				input.value = value;
+				input.addEventListener("change", () => {
+					legacyLanguageMode = value;
+					alsoIndependent?.element.classList.toggle("ve-hidden", value !== "attribute");
+				});
+				row.append(input, e_({tag: "span", txt: label}));
+				fieldset.append(row);
+			};
+			addMode("attribute", "The language I select below was my Rogue's earlier choice.");
+			addMode("independent", "None of the unresolved languages came from Rogue; keep them and choose a new one.");
+			alsoIndependent = e_({tag: "label", clazz: "charsheet__respec-option ve-hidden"});
+			const overlap = e_({tag: "input"});
+			overlap.type = "checkbox";
+			alsoIndependent.append(overlap, e_({
+				tag: "span",
+				txt: "That Rogue language is also granted independently; keep it if I change this choice later.",
+			}));
+			fieldset.append(alsoIndependent);
+			content.append(fieldset);
+			alsoIndependent = {element: alsoIndependent, input: overlap};
+		}
 		const search = e_({tag: "input", clazz: "ve-form-control mb-2"});
 		search.type = "search";
 		search.placeholder = `Search ${decision.label.toLowerCase()}...`;
@@ -1871,6 +1916,10 @@ class CharacterSheetRespec {
 				JqueryUtil.doToast({type: "warning", content: `Choose exactly ${decision.count} option${decision.count === 1 ? "" : "s"}.`});
 				return;
 			}
+			if (unresolvedLanguages.length && !legacyLanguageMode) {
+				errorMessage.textContent = "Choose how the older, unresolved languages should be treated before staging.";
+				return;
+			}
 			const values = [...selected.values()];
 			const selection = ["scholar", "subclassChoice"].includes(decision.type) && decision.count === 1
 				? values[0]
@@ -1885,6 +1934,12 @@ class CharacterSheetRespec {
 				await this._engine.stageGraphMutation(decision.id, selection, {
 					reverseParent: !setOwnedSpellTypes.has(decision.type),
 					apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, legalOptions, state),
+					...(unresolvedLanguages.length
+						? {legacyLanguageResolution: {
+							mode: legacyLanguageMode,
+							alsoIndependent: alsoIndependent?.input.checked === true,
+						}}
+						: {}),
 				});
 			} catch (error) {
 				errorMessage.textContent = `Could not stage ${decision.label}: ${error.message || String(error)}`;
