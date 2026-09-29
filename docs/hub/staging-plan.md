@@ -1,12 +1,14 @@
 # Campaign Hub staging plan
 
-> **Status:** Last facilitator-verified release r10; V1-G1 complete; r10 physical rerun **NO-GO**
+> **Status:** r10 serving after a verified interrupted-r11 rollback; V1-G1 complete; physical rerun **NO-GO**
 > **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub maintainers
 
 The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r10 findings, focused
 correction release, and physical re-entry gate. Earlier r7 drills below are historical evidence, not a
-claim that r7 is still deployed or that the r10 findings have been resolved.
+claim that r7 is still deployed or that the r10 findings have been resolved. The 2026-09-29 r11
+promotion was interrupted after traffic changed; its compatible application rollback restored exact
+r10 with no schema migration. The new pre-release backup still needs off-machine verification.
 
 ## Objectives
 

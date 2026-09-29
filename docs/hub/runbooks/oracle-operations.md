@@ -1,6 +1,6 @@
 # Runbook: Oracle host operations for the Campaign Hub
 
-> **Status:** Last facilitator-verified deployment r10; V1-G1 operations complete; r11 preflight blocked
+> **Status:** Exact r10 restored after interrupted r11 cutover; V1-G1 operations complete
 > **Last drilled:** 2026-09-13
 > **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub operator
@@ -19,6 +19,13 @@ qualification used annotated tag `hub-staging-2026-09-10-r7` (tag object
 off-machine backup copying, an isolated authenticated restore, and an exact-r6 application rollback rehearsal
 passed on 2026-09-12. The first genuine daily maintenance and backup timer activations passed on 2026-09-13,
 completing V1-G1.
+
+The 2026-09-29 preflight subsequently passed, but an r11 promotion was interrupted after traffic
+changed. The release engine completed compatible application rollback; independent checks confirmed
+exact r10, healthy Hub-only services, no schema migration, and no continuing outage. Keep the failed
+release evidence and existing r11 tag immutable. Before another attempt, copy and verify the newly
+created encrypted pre-release backup off-machine and re-run every release gate with a new tag whose
+operator provenance is genuine.
 
 ## Safety rules
 
