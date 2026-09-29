@@ -637,8 +637,18 @@ UI, PDF/export, and E2E coverage remain later milestones.
 | Features | State | getFeatureCalculations(), resource tracking |
 
 The ordinary Builder's Class step establishes the level-1 history row; its
-Spells step writes the selected source-qualified spell and cantrip choices
-after applying them to live state. For TGTT/XPHB Bard, use the shared
+class-feature language picks are stored in `choices.languages` with the
+granting feature name. XPHB Rogue receives fixed Thieves' Cant and one
+recorded extra language; PHB Rogue receives only fixed Cant. Do not derive
+an older Rogue's missing language owner from the aggregate language list:
+Respec requires explicit attribution of an existing language or confirmation
+that unresolved languages are independent before staging a new choice, even
+if a stale exact Rogue ownership key survives without its choice history.
+`state.hasIndependentLanguageGrant` checks recorded non-class owners when
+reversing a language choice or revisiting Builder's Class step; merely
+`preserved: true` is not proof of an independent legacy Respec grant.
+The Builder's Spells step writes selected source-qualified spell and cantrip
+choices after applying them to live state. For TGTT/XPHB Bard, use the shared
 known-caster model rather than treating `preparedSpellsProgression` as proof
 of daily preparation. Explicitly underfilled starting picks retain their
 Builder provenance so Respec can defer only legal, Bard-owned choices without

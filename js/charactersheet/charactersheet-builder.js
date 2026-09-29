@@ -568,6 +568,14 @@ class CharacterSheetBuilder {
 							.map((/** @type {*} */ choice) => choice.tool || choice)
 							.filter(Boolean);
 					}
+					const languageGrant = this._selectedClassFeatureLanguages?.length
+						? this._getClassFeatureLanguageGrantsAtLevel(this._selectedClass, 1)
+						: null;
+					if (languageGrant?.count) {
+						level1History.choices.languages = this._selectedClassFeatureLanguages
+							.filter(Boolean)
+							.map((/** @type {*} */ language) => ({featureName: languageGrant.featureName, language}));
+					}
 
 					// Record subclass if selected at level 1 (Cleric, Sorcerer, Warlock)
 					if (this._selectedSubclass) {
@@ -2235,6 +2243,11 @@ class CharacterSheetBuilder {
 	_clearClassApplication (snapshot) {
 		if (!snapshot) return;
 
+		const previousClassLanguageOwners = (this._state.getLevelHistoryEntry?.(1)?.decisions || [])
+			.filter((/** @type {*} */ decision) =>
+				decision.type === "languages" && decision.className === snapshot.className && decision.classSource === snapshot.classSource,
+			)
+			.map((/** @type {*} */ decision) => decision.semanticKey);
 		const removedClass = this._state.getClasses?.()
 			.find(cls => cls.name === snapshot.className && cls.source === snapshot.classSource);
 		const subclassSpellOwner = removedClass?.subclass
@@ -2280,7 +2293,12 @@ class CharacterSheetBuilder {
 		(snapshot.toolProficiencies || []).forEach((/** @type {*} */ t) => { if (t) this._state.removeToolProficiency(t); });
 
 		// Remove class feature languages
-		(snapshot.languages || []).forEach((/** @type {*} */ l) => { if (l) this._state.removeLanguage(l); });
+		(snapshot.languages || []).forEach((/** @type {*} */ l) => {
+			if (l && !this._state.hasIndependentLanguageGrant?.(l, {
+				excludeSourceIds: previousClassLanguageOwners,
+				includePreserved: true,
+			})) this._state.removeLanguage(l);
+		});
 
 		// Remove Illrigger Forked Tongue swappable spoken languages (also drops them from
 		// _data.languages). Guarded so fake test states without the API are unaffected.

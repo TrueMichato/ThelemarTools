@@ -12695,6 +12695,22 @@ class CharacterSheetState {
 		return out;
 	}
 
+	hasIndependentLanguageGrant (language, {manifest = null, excludeSourceIds = [], includePreserved = false} = {}) {
+		const key = this._getProgressionOwnershipKey("languages", language);
+		if (!key) return false;
+		const owner = this._getProgressionOwnershipEntry("languages", language);
+		if (owner?.sources?.some(source => !excludeSourceIds.includes(source))) return true;
+		if (includePreserved && owner?.preserved) return true;
+		if (this._getNonProgressionOwnershipKeys(manifest).languages.has(key)) return true;
+		return this.getFeats().some(feat =>
+			[
+				...(feat.appliedEffects?.languagesAdded || []),
+				...(feat.choices?.languages || []),
+				...(feat._featChoices?.languages || []),
+			].some(value => this._getProgressionOwnershipKey("languages", typeof value === "string" ? value : value?.language) === key),
+		);
+	}
+
 	/**
 	 * Drop ownership claims for decisions which no longer exist after a cascade.
 	 * Values owned only by removed decisions are removed from the candidate state;
@@ -12747,6 +12763,28 @@ class CharacterSheetState {
 		if (!sourceId) return;
 		const entry = this._getProgressionOwnershipEntry(type, value, {isCreate: true});
 		if (entry && !entry.sources.includes(sourceId)) entry.sources.push(sourceId);
+	}
+
+	adoptUnattributedProgressionLanguage (language, sourceId, {alsoIndependent = false, manifest} = {}) {
+		if (typeof language !== "string" || !sourceId || !manifest
+			|| !this.getLanguages().some(value => this._getProgressionOwnershipKey("languages", value) === this._getProgressionOwnershipKey("languages", language))) {
+			throw new Error("Cannot attribute a language that is not present in the character's saved languages.");
+		}
+		const entry = this._getProgressionOwnershipEntry("languages", language);
+		if (!entry || entry.sources.some(source => source !== sourceId) || (!entry.preserved && !entry.sources.includes(sourceId))) {
+			throw new Error("That language already has recorded ownership; refresh the Respec draft before repairing it.");
+		}
+		entry.preserved = !!alsoIndependent || this.hasIndependentLanguageGrant(language, {manifest, excludeSourceIds: [sourceId]});
+		this.claimProgressionOwnership("languages", language, sourceId);
+	}
+
+	preserveUnrecordedProgressionLanguage (language, sourceId) {
+		const entry = this._getProgressionOwnershipEntry("languages", language);
+		if (!entry || entry.sources.some(source => source !== sourceId)) {
+			throw new Error("That language has another recorded owner; refresh the Respec draft before repairing it.");
+		}
+		entry.preserved = true;
+		this.releaseProgressionOwnership("languages", language, sourceId);
 	}
 
 	/**

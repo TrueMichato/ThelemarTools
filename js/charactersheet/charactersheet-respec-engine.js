@@ -525,10 +525,25 @@ class CharacterSheetRespecEngine {
 	 * boundary rather than just the ledger boundary: controller callbacks may
 	 * materialise features, resources, or spells before a descriptor is refreshed.
 	 */
-	stageGraphMutation (decisionId, selection, {status = null, apply = null, reverseParent = false} = {}) {
+	stageGraphMutation (decisionId, selection, {status = null, apply = null, reverseParent = false, legacyLanguageResolution = null} = {}) {
 		const decision = this.getDecision(decisionId);
 		if (!decision) throw new Error("That progression decision is no longer available.");
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
+		const unresolvedLanguages = CharacterSheetProgression.getUnresolvedRogueLanguages({
+			state: this._candidateState,
+			manifest: this._manifest,
+			decision,
+		});
+		if (unresolvedLanguages.length) {
+			const selected = Array.isArray(selection) && selection.length === 1 ? selection[0] : null;
+			const keyOf = value => this._candidateState._getProgressionOwnershipKey("languages", value);
+			const selectedWasUnresolved = selected && unresolvedLanguages.some(value => keyOf(value) === keyOf(selected));
+			if (!selected || !["attribute", "independent"].includes(legacyLanguageResolution?.mode)
+				|| (legacyLanguageResolution.mode === "attribute" && !selectedWasUnresolved)
+				|| (legacyLanguageResolution.mode === "independent" && selectedWasUnresolved)) {
+				throw new Error("Confirm whether an existing unresolved language belonged to Rogue before staging this choice.");
+			}
+		}
 		// Already-deferred Builder picks are still owned live choices. Confirming
 		// "Defer" must not reverse their effects or erase that evidence.
 		if (decision.status === "deferred" && !decision.required
@@ -686,6 +701,21 @@ class CharacterSheetRespecEngine {
 			// editors opt out because their callback performs the historical
 			// teardown itself.
 			if (reverseParent) this._reverseDecisionReceipt(stored);
+			if (unresolvedLanguages.length) {
+				const selectedKey = this._candidateState._getProgressionOwnershipKey("languages", selection[0]);
+				for (const language of unresolvedLanguages) {
+					if (legacyLanguageResolution.mode === "independent"
+						|| this._candidateState._getProgressionOwnershipKey("languages", language) !== selectedKey) {
+						this._candidateState.preserveUnrecordedProgressionLanguage(language, decision.semanticKey);
+					}
+				}
+				if (legacyLanguageResolution.mode === "attribute") {
+					this._candidateState.adoptUnattributedProgressionLanguage(selection[0], decision.semanticKey, {
+						alsoIndependent: legacyLanguageResolution.alsoIndependent === true,
+						manifest: this._manifest,
+					});
+				}
+			}
 			const applyResult = typeof apply === "function"
 				? apply({decision, stored, state: this._candidateState})
 				: null;
@@ -740,12 +770,19 @@ class CharacterSheetRespecEngine {
 		for (const decision of this._manifest?.decisions || []) {
 			if (decision.status === "resolved" || (!decision.required && decision.status === "deferred")) continue;
 			if (!decision.required && !["invalid", "ambiguous"].includes(decision.status)) continue;
+			const unattributed = CharacterSheetProgression.getUnresolvedRogueLanguages({
+				state: this._candidateState,
+				manifest: this._manifest,
+				decision,
+			});
 			issues.push({
 				level: decision.characterLevel,
 				severity: "error",
 				code: `decision-${decision.status}`,
 				decisionId: decision.id,
-				message: decision.meta?.validationMessage || `${decision.label} is ${decision.status}.`,
+				message: unattributed.length
+					? `${decision.label} has no recorded choice. ${unattributed.join(", ")} may be the Rogue's old language or independent grants; use Repair to attribute an existing language or confirm they are independent before selecting a new one.`
+					: decision.meta?.validationMessage || `${decision.label} is ${decision.status}.`,
 			});
 		}
 		return {

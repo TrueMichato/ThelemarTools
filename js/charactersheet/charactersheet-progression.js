@@ -2542,6 +2542,26 @@ class CharacterSheetProgression {
 		}
 	}
 
+	static getUnresolvedRogueLanguages ({state, manifest, decision}) {
+		if (decision?.type !== "languages"
+			|| decision.className !== "Rogue"
+			|| decision.classSource !== "XPHB"
+			|| Number(decision.classLevel) !== 1
+			|| decision.sourceKey !== "Thieves' Cant"
+			|| decision.selection != null
+			|| !["missing", "ambiguous"].includes(decision.status)) return [];
+
+		const keyOf = value => state._getProgressionOwnershipKey("languages", value);
+		const fixed = new Set((decision.meta?.autoLanguages || []).map(keyOf));
+		return (state.getLanguages?.() || []).filter(language => {
+			const key = keyOf(language);
+			return key && !fixed.has(key) && !state.hasIndependentLanguageGrant(language, {
+				manifest,
+				excludeSourceIds: [decision.semanticKey],
+			});
+		});
+	}
+
 	static _getLegacyEpicBoonRepair ({improvement, legacyFeat, legacyAsi, state, featPool}) {
 		if (improvement?.kind !== "feat" || legacyFeat?.name || !legacyAsi) return null;
 		if (Object.values(legacyAsi).reduce((total, value) => total + (Number(value) || 0), 0) !== 2) return null;
