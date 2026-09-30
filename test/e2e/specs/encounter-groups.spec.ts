@@ -58,7 +58,7 @@ test("a confirmed shared initiative acts once, survives reload, and restores ori
 	await expect(page.locator("#ew-round-status")).toContainText("Round 2");
 	await expect(page.locator(".ew__statblock [data-field=initiative]").first()).toBeDisabled();
 	await page.locator("#ew-all").click();
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator("#ew-init-roll").click();
 	await expect(page.locator("#ew-result-table tbody tr")).toHaveCount(1);
 	await expect(page.locator(".ew__turn")).toHaveCount(1);

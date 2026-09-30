@@ -53,6 +53,7 @@ test("a rendered ability check and batch initiative share saved check effects wi
 	await expect(page.locator("#ew-status")).toContainText('Applied "Fortune"');
 	await encounter.clickRenderedRoll(0, "abilityCheck");
 	await expect(encounter.rolledEntries.first()).toHaveAttribute("title", /Fortune.*2d20dl1\s*\+\s*4/);
+	await encounter.openInitiative();
 	await page.locator("#ew-init-roll").click();
 	await expect(encounter.rolledEntries.first()).toHaveAttribute("title", /Fortune.*2d20dl1\s*\+\s*4/);
 	await expect(page.locator(".ew__statblock").first()).toContainText("Lair reminder (text only): Bell");

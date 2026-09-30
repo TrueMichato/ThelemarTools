@@ -42,6 +42,7 @@ test("edited grouped monsters keep independent combat state through rolls, turns
 	await page.locator(".ew__statblock [data-field=current]").press("Tab");
 	await expect(page.locator('.ew__roster-row[data-instance-id="one"] .ew__roster-meta')).toContainText("HP 7/7");
 	await expect(page.locator('.ew__roster-row[data-instance-id="two"] .ew__roster-meta')).toContainText("HP 3/7");
+	await encounter.openInitiative();
 	await page.locator("#ew-turn-start").click();
 	await expect(page.locator("#ew-round-status")).toContainText("Round 1");
 	await page.locator("#ew-roster-sort").selectOption("hp");

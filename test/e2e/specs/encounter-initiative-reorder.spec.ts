@@ -10,7 +10,7 @@ test("dragging a turn changes whole-number totals, preserves the active actor, a
 		await page.locator(".ew__statblock [data-field=initiative]").press("Tab");
 		await expect(page.locator("#ew-status")).toContainText(`to ${total}`);
 	}
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator("#ew-turn-start").click();
 	await expect(page.locator("#ew-round-status")).toContainText("Round 1 · Goblin #1");
 	await page.locator('.ew__turn[data-turn-id="creature-2"] .ew__turn-move')
@@ -32,7 +32,7 @@ test("dragging a turn changes whole-number totals, preserves the active actor, a
 	await expect(page.locator("#ew-turn-order .ew__turn").nth(2)).toContainText("18");
 	await expect(page.locator("#ew-round-status")).toContainText("Round 1 · Goblin #1");
 	await expect(page.locator("#ew-move-undo")).toBeDisabled();
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator('.ew__turn[data-turn-id="two"] .ew__turn-edit').click();
 	await page.locator('.ew__turn[data-turn-id="two"] .ew__turn-init').fill("17");
 	await page.locator('.ew__turn[data-turn-id="two"] .ew__turn-init').press("Tab");
@@ -52,7 +52,7 @@ test("touch-sized Move controls place unrolled monsters, list every changed tota
 		await expect(page.locator("#ew-status")).toContainText(`to ${total}`);
 	}
 	await page.setViewportSize({width: 390, height: 844});
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator("#ew-turn-start").click();
 	await page.locator("#ew-unrolled-order .ew__turn-move").click();
 	await expect(page.locator("#ew-move-entry")).toHaveValue("creature-2");
@@ -85,7 +85,7 @@ test("touch-sized Move controls place unrolled monsters, list every changed tota
 test("an unrolled monster can be dragged into an empty turn order", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await expect(page.locator("#ew-turn-order .ew__turn")).toHaveCount(0);
 	await page.locator("#ew-unrolled-order .ew__turn-move").first()
 		.dragTo(page.locator("#ew-turn-order"), {targetPosition: {x: 30, y: 20}});
@@ -117,7 +117,7 @@ test("shared turns move as a single entry and retain individual totals for split
 	await page.locator(".ew__group-init").first().fill("16");
 	await page.getByRole("button", {name: "Share turns"}).click();
 	await page.getByRole("button", {name: /Share turn$/}).click();
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator("#ew-turn-start").click();
 	await page.locator("#ew-position > summary").click();
 	await page.locator("#ew-move-entry").selectOption({index: 0});
@@ -143,7 +143,7 @@ test("shared turns move as a single entry and retain individual totals for split
 test("rolling six initiatives updates every roster row before advancing a turn", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({count: 6});
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator("#ew-all").click();
 	await page.locator("#ew-init-roll").click();
 	await expect(page.locator("#ew-status")).toContainText("6 initiatives saved");
@@ -155,7 +155,7 @@ test("a full 1000-monster encounter can put an unrolled entry in turn order", as
 	test.setTimeout(120_000);
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({count: 1000});
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await page.locator("#ew-position > summary").click();
 	await expect(page.locator("#ew-move-entry option")).toHaveCount(1000);
 	await page.locator("#ew-move-entry").selectOption("creature-999");

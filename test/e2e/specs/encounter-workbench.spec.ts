@@ -11,6 +11,7 @@ test("combat cockpit keeps canonical order, viewed statblock, and bulk targets s
 		await expect(page.locator("#ew-status")).toContainText(`to ${total}`);
 	}
 	await page.setViewportSize({width: 390, height: 844});
+	await encounter.openInitiative();
 	await expect(page.locator("#ew-turn-order .ew__turn")).toHaveCount(3);
 	const moveDown = await page.locator("#ew-turn-order .ew__turn").first().locator(".ew__turn-step").last().boundingBox();
 	expect(moveDown?.width).toBeGreaterThanOrEqual(44);
@@ -23,10 +24,11 @@ test("combat cockpit keeps canonical order, viewed statblock, and bulk targets s
 		page.locator(".ew__rail").boundingBox(),
 		page.locator(".ew__focus").boundingBox(),
 	]);
-	expect(strip && initiative && roster && focus && strip.y < initiative.y && initiative.y < roster.y && roster.y < focus.y).toBe(true);
+	expect(strip && initiative && roster && focus && strip.y < initiative.y && initiative.y < focus.y && focus.y < roster.y).toBe(true);
 
 	await expect(page.locator("#ew-focus-status")).toContainText("Viewing statblock: Goblin #3");
 	await expect(page.locator("#ew-summary")).toContainText("1 of 3 selected as targets: Goblin #1");
+	await encounter.openQuickActions();
 	await page.locator("#ew-select-viewed").click();
 	await expect(page.locator("#ew-summary")).toContainText("Goblin #1, Goblin #3");
 	await page.locator("#ew-turn-start").click();
@@ -99,6 +101,40 @@ test("roster navigation and filters do not change the active turn or selected ta
 	await expect(jumps.last()).toBeFocused();
 });
 
+test("mobile jump and edit controls keep the viewed monster separate from turns and targets", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({count: 6});
+	await page.setViewportSize({width: 390, height: 844});
+	await expect(page.locator("#ew-initiative")).toHaveJSProperty("open", false);
+	await expect(page.locator("#ew-quick")).toHaveJSProperty("open", false);
+	await page.locator(".ew__statblock [data-field=initiative]").fill("20");
+	await page.locator(".ew__statblock [data-field=initiative]").press("Tab");
+	await page.locator("#ew-turn-start").click();
+	await expect(page.locator("#ew-round-status")).toContainText("Goblin #1");
+	await page.locator("#ew-focus-picker").selectOption("creature-5");
+	await expect(page.locator("#ew-focus-status")).toContainText("Goblin #6");
+	await expect(page.locator(".ew__statblock-title")).toHaveText("Goblin #6");
+	await expect(page.locator("#ew-round-status")).toContainText("Goblin #1");
+	await expect(page.locator("#ew-summary")).toContainText("1 of 6 selected as targets: Goblin #1");
+	await page.locator("#ew-focus-edit").click();
+	await expect(page.getByRole("tab", {name: "Templates"})).toBeVisible();
+	await page.getByRole("button", {name: "Done"}).click();
+	await page.locator("#ew-open-quick").click();
+	await expect(page.locator("#ew-quick")).toHaveJSProperty("open", true);
+	await expect(page.locator("#ew-quick > summary")).toBeFocused();
+	await page.locator("#ew-open-initiative").click();
+	await expect(page.locator("#ew-initiative")).toHaveJSProperty("open", true);
+	await expect(page.locator("#ew-initiative > summary")).toBeFocused();
+	await page.locator("#ew-browse-roster").click();
+	await expect(page.locator("#ew-roster-search")).toBeFocused();
+	await page.locator('.ew__roster-row[data-instance-id="two"] .ew__roster-jump').focus();
+	await page.keyboard.press("Enter");
+	await expect(page.locator("#ew-focus-picker")).toHaveValue("two");
+	await expect(page.locator("#ew-focus-status")).toBeFocused();
+	await expect(page.locator("#ew-summary")).toContainText("1 of 6 selected as targets: Goblin #1");
+	await expect(page.locator("#ew-round-status")).toContainText("Goblin #1");
+});
+
 test("a renamed effective monster is visible and sorted by its edited name without changing turn identity", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({renameSecond: "Acolyte"});
@@ -117,7 +153,7 @@ test("a renamed effective monster is visible and sorted by its edited name witho
 	await page.locator("#ew-roster-sort").selectOption("name");
 	await expect(page.locator(".ew__roster-row").first()).toHaveAttribute("data-instance-id", "two");
 	await expect(original.locator(".ew__roster-name")).toHaveText("Goblin #1");
-	await encounter.openActions();
+	await encounter.openInitiative();
 	await expect(page.locator("#ew-turn-order .ew__turn")).toContainText(["Goblin #1", "Goblin #2"]);
 	await page.locator("#ew-roster-search").fill("Acolyte");
 	await expect(page.locator(".ew__roster-row")).toHaveCount(1);
@@ -209,7 +245,7 @@ test("all-cards mode constructs statblocks only when requested, in bounded batch
 	await expect(page.locator(".ew__statblock")).toHaveCount(1);
 });
 
-test("the live turn leads and mobile targets/actions precede the statblock in day and night views", async ({page}) => {
+test("the live turn and focused statblock lead mobile navigation in day and night views", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
 	for (const width of [1280, 390]) {
@@ -228,16 +264,20 @@ test("the live turn leads and mobile targets/actions precede the statblock in da
 				liveTop: document.getElementById("ew-round-status")!.getBoundingClientRect().top,
 				statblockTop: document.querySelector(".ew__statblock")!.getBoundingClientRect().top,
 				rosterTop: document.getElementById("ew-roster")!.getBoundingClientRect().top,
-				quickBottom: document.querySelector(".ew__quick")!.getBoundingClientRect().bottom,
-				orderTop: document.getElementById("ew-turn-order")!.getBoundingClientRect().top,
+				quickTop: document.querySelector(".ew__quick")!.getBoundingClientRect().top,
+				initiativeTop: document.querySelector(".ew__initiative")!.getBoundingClientRect().top,
 				searchBottom: document.getElementById("ew-roster-search")!.getBoundingClientRect().bottom,
 				countTop: document.getElementById("ew-roster-count")!.getBoundingClientRect().top,
 			}));
 			expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.viewport + 2);
 			expect(dimensions.liveTop).toBeLessThan(844);
-			expect(dimensions.orderTop).toBeLessThan(dimensions.rosterTop);
+			expect(dimensions.initiativeTop).toBeLessThan(dimensions.statblockTop);
 			if (width > 800) expect(dimensions.statblockTop).toBeLessThan(844);
-			else expect(dimensions.statblockTop).toBeGreaterThanOrEqual(dimensions.quickBottom);
+			else {
+				expect(dimensions.statblockTop).toBeLessThan(844);
+				expect(dimensions.statblockTop).toBeLessThan(dimensions.rosterTop);
+				expect(dimensions.rosterTop).toBeLessThan(dimensions.quickTop);
+			}
 			expect(dimensions.searchBottom).toBeLessThan(dimensions.countTop);
 			await expect(page.locator("#ew-roster")).toHaveCSS("overflow-y", "visible");
 			if (night) await expect(page.locator("#ew-position > summary")).toHaveCSS("background-color", "rgb(56, 56, 56)");

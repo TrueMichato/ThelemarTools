@@ -17,6 +17,15 @@ const REVIEW_FIELDS = new Set(["ac", "hp", "attacks", "cr", "characterLevel", "e
 
 const copy = value => structuredClone(value);
 const getId = (kind, {name, source}) => `${kind}:${name.toLowerCase()}|${source.toLowerCase()}`;
+const getStableSignature = value => JSON.stringify(value, (_key, part) =>
+	part && typeof part === "object" && !Array.isArray(part)
+		? Object.fromEntries(Object.entries(part).sort(([a], [b]) => a.localeCompare(b)))
+		: part);
+const getSignatureHash = signature => {
+	let hash = 2166136261;
+	for (let i = 0; i < signature.length; i++) hash = Math.imul(hash ^ signature.charCodeAt(i), 16777619);
+	return (hash >>> 0).toString(36);
+};
 const assertIdentity = (entity) => {
 	if (typeof entity?.name !== "string" || !entity.name.trim() || typeof entity?.source !== "string" || !entity.source.trim()) {
 		throw new Error("Creature transformation requires a nonempty name and source.");
@@ -141,8 +150,7 @@ const getRaceRecipe = race => {
  */
 function getCreatureTransformationCandidates ({catalog, races, getVersions}) {
 	if (!Array.isArray(catalog?.creatureTransformation) || !Array.isArray(races)) throw new Error("Transformation catalog and resolved races are required.");
-	const seen = new Set();
-	const result = [];
+	const byId = new Map();
 	const append = candidate => {
 		assertIdentity(candidate.identity);
 		if (
@@ -174,9 +182,12 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions}) {
 			const parent = candidate.optionGroups.find(it => it.id === group.appliesTo.group);
 			if (!parent?.options.some(it => it.id === group.appliesTo.option) || group.required) throw new Error(`Invalid conditional option group in ${candidate.id}/${group.id}.`);
 		}
-		if (seen.has(candidate.id)) throw new Error(`Duplicate creature transformation identity: ${candidate.id}`);
-		seen.add(candidate.id);
-		result.push(candidate);
+		const matches = byId.get(candidate.id) || [];
+		if (matches.length && candidate.kind !== "race") throw new Error(`Duplicate creature transformation identity: ${candidate.id}`);
+		const signature = getStableSignature(candidate);
+		if (matches.some(it => it.signature === signature)) return;
+		matches.push({candidate, signature});
+		byId.set(candidate.id, matches);
 	};
 
 	for (const recipe of catalog.creatureTransformation) {
@@ -202,6 +213,22 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions}) {
 			versionRecipe.id = `${versionRecipe.id}~v:${race.name.toLowerCase()}|${race.source.toLowerCase()}:${ix + 1}`;
 			append(versionRecipe);
 		}
+	}
+	const result = [];
+	for (const [id, matches] of byId) {
+		if (matches.length === 1) {
+			result.push(matches[0].candidate);
+			continue;
+		}
+		matches.sort((a, b) => a.signature.localeCompare(b.signature));
+		const distinctIds = new Set();
+		matches.forEach(({candidate, signature}, index) => {
+			candidate.id = `${id}~d:${getSignatureHash(signature)}`;
+			if (distinctIds.has(candidate.id)) throw new Error(`Cannot distinguish conflicting race definitions: ${id}`);
+			distinctIds.add(candidate.id);
+			candidate.duplicateVariant = `${index + 1} of ${matches.length}`;
+			result.push(candidate);
+		});
 	}
 	return result.sort((a, b) => a.id.localeCompare(b.id));
 }

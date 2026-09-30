@@ -105,14 +105,12 @@
 				<div class="ew__controls ew__turn-controls">
 					<button type="button" class="ve-btn ve-btn-primary" id="ew-turn-start">Start turns</button>
 					<button type="button" class="ve-btn ve-btn-primary" id="ew-turn-next" hidden>Next turn</button>
-					<button type="button" class="ve-btn ve-btn-default" id="ew-turn-reset" hidden>Reset turns</button>
+					<button type="button" class="ve-btn ve-btn-default" id="ew-open-initiative">Order &amp; initiative</button>
 				</div>
 			</section>
-			<section class="ew__initiative" aria-label="Canonical initiative order">
-				<div class="ew__turns-header">
-					<h3>Initiative order</h3>
-					<p>Saved totals · shared turns move together</p>
-				</div>
+			<details class="ew__initiative" id="ew-initiative">
+				<summary id="ew-initiative-summary">Initiative order</summary>
+				<div class="ew__initiative-body">
 				<ol id="ew-turn-order" class="ew__turn-order"></ol>
 				<p id="ew-init-unrolled" class="ew__operation-help"></p>
 				<ul id="ew-unrolled-order" class="ew__unrolled-order" hidden></ul>
@@ -127,6 +125,7 @@
 						</select>
 						<button type="button" class="ve-btn ve-btn-default" id="ew-init-roll">Roll selected initiative</button>
 						<button type="button" class="ve-btn ve-btn-default" id="ew-move-undo" disabled>Undo last move</button>
+						<button type="button" class="ve-btn ve-btn-default" id="ew-turn-reset" hidden>Reset turns</button>
 					</div>
 				</div>
 				<details class="ew__position" id="ew-position">
@@ -143,8 +142,36 @@
 					<summary id="ew-move-report-summary"></summary>
 					<ul id="ew-move-report-list"></ul>
 				</details>
-			</section>
+				</div>
+			</details>
 			<div class="ew__layout">
+				<section class="ew__focus" aria-label="Monster statblocks">
+					<div class="ew__focus-bar">
+						<div class="ew__focus-nav">
+							<strong id="ew-focus-status" role="status" aria-live="polite" tabindex="-1"></strong>
+							<label for="ew-focus-picker">Jump to statblock</label>
+							<select class="ve-form-control" id="ew-focus-picker"></select>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-prev" aria-label="Previous visible monster">Previous</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-next" aria-label="Next visible monster">Next</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-current">View active turn</button>
+						</div>
+						<label for="ew-view-mode">Statblocks
+							<select class="ve-form-control" id="ew-view-mode">
+								<option value="focused">Focused</option>
+								<option value="all">All (load in batches)</option>
+							</select>
+						</label>
+						<p id="ew-summary" class="ew__selection-caption" role="status" aria-live="polite"></p>
+						<div class="ew__focus-actions">
+							<button type="button" class="ve-btn ve-btn-primary" id="ew-focus-edit">Edit viewed statblock</button>
+							<button type="button" class="ve-btn ve-btn-default" id="ew-open-bulk">Edit selected statblocks</button>
+							<button type="button" class="ve-btn ve-btn-default" id="ew-open-quick">Roll, HP &amp; conditions</button>
+							<button type="button" class="ve-btn ve-btn-default" id="ew-browse-roster">Browse roster</button>
+						</div>
+					</div>
+					<div class="ew__statblocks" id="ew-statblocks"></div>
+					<button type="button" class="ve-btn ve-btn-default ew__load-more" id="ew-cards-more" hidden>Load more statblocks</button>
+				</section>
 				<aside class="ew__rail" aria-label="Monster targets">
 					<div class="ew__rail-header">
 						<h3>Roster &amp; targets</h3>
@@ -181,16 +208,15 @@
 						<p class="ew__help">Identical effective statblocks group in this roster; expand for individual HP, conditions and targets. Group selected creatures to keep them together or share a turn. Selection is saved. A group checkbox always selects its full group, including filtered-out members.</p>
 					</details>
 					<div id="ew-roster" class="ew__roster"></div>
-					<section class="ew__quick" aria-label="Actions for selected targets">
-						<h3>Selected target actions</h3>
-						<p id="ew-summary" class="ew__selection-caption" role="status" aria-live="polite"></p>
+					<details class="ew__quick" id="ew-quick">
+						<summary id="ew-quick-summary">Actions for selected targets</summary>
+						<div class="ew__quick-body">
 						<div class="ew__selection-actions">
 							<button type="button" class="ve-btn ve-btn-default" id="ew-select-current">Select active turn</button>
 							<button type="button" class="ve-btn ve-btn-default" id="ew-select-viewed">Select viewed statblock</button>
 						</div>
 						<div class="ew__operation">
 							<h4>Roll for selected</h4>
-							<p id="ew-roll-targets" class="ew__selection-caption"></p>
 							<div class="ew__controls">
 								<label for="ew-roll-type">Roll</label>
 								<select class="ve-form-control" id="ew-roll-type"></select>
@@ -208,7 +234,6 @@
 						</div>
 						<div class="ew__operation">
 							<h4>Selected monsters' HP</h4>
-							<p id="ew-hp-targets" class="ew__selection-caption"></p>
 							<div class="ew__controls">
 								<label for="ew-hp-expression">Damage / heal / set</label>
 								<input class="ve-form-control ew__hp-expression" id="ew-hp-expression" type="text" placeholder="8d6, +12, -30, =15" aria-describedby="ew-hp-hint">
@@ -220,7 +245,6 @@
 						</div>
 						<div class="ew__operation">
 							<h4>Conditions</h4>
-							<p id="ew-condition-targets" class="ew__selection-caption"></p>
 							<div class="ew__controls">
 								<label for="ew-condition">Condition</label>
 								<select class="ve-form-control" id="ew-condition"></select>
@@ -234,27 +258,9 @@
 							<p id="ew-roll-summary" role="status" aria-live="polite"></p>
 							<div id="ew-result-table" class="ew__results-scroll"></div>
 						</section>
-						<button type="button" class="ve-btn ve-btn-default ew__open-bulk" id="ew-open-bulk">Edit selected statblocks</button>
-					</section>
-				</aside>
-				<section class="ew__focus" aria-label="Monster statblocks">
-					<div class="ew__focus-bar">
-						<div class="ew__focus-nav">
-							<strong id="ew-focus-status" role="status" aria-live="polite"></strong>
-							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-prev" aria-label="Previous visible monster">Previous</button>
-							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-next" aria-label="Next visible monster">Next</button>
-							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-focus-current">View active turn</button>
 						</div>
-						<label for="ew-view-mode">Statblocks
-							<select class="ve-form-control" id="ew-view-mode">
-								<option value="focused">Focused</option>
-								<option value="all">All (load in batches)</option>
-							</select>
-						</label>
-					</div>
-					<div class="ew__statblocks" id="ew-statblocks"></div>
-					<button type="button" class="ve-btn ve-btn-default ew__load-more" id="ew-cards-more" hidden>Load more statblocks</button>
-				</section>
+					</details>
+				</aside>
 			</div>
 			<details class="ew__action-drawer" id="ew-actions">
 				<summary>Advanced selected-target actions · statblock edits, notes &amp; effects</summary>

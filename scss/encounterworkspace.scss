@@ -61,18 +61,21 @@
 
 		&__status {
 			margin: 8px 0;
-			padding: 7px 12px;
-			min-height: 38px;
-			border: 1px solid vars.$rgb-border-grey;
-			background: vars.$rgb-bg--alt;
+			padding: 3px 0;
+			min-height: 24px;
 			overflow-wrap: anywhere;
 		}
 
 		&__status--error,
 		&__render-error {
+			padding: 7px 12px;
 			color: vars.$rgb-alert-text-danger;
 			border-color: vars.$rgb-btn-danger-border-red;
 			background: vars.$rgb-bg;
+		}
+
+		&__status--error {
+			border: 1px solid vars.$rgb-btn-danger-border-red;
 		}
 
 		&__handoff {
@@ -232,6 +235,19 @@
 			padding: 10px 12px;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg--alt;
+
+			> summary {
+				padding: 10px 12px;
+				margin: -10px -12px;
+				background: vars.$rgb-bg--alt;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			&[open] > summary {
+				margin-bottom: 10px;
+				border-bottom: 1px solid vars.$rgb-border-grey--muted;
+			}
 		}
 
 		&__initiative-tools {
@@ -720,13 +736,13 @@
 
 		&__layout {
 			display: grid;
-			grid-template-columns: minmax(310px, 360px) minmax(0, 1fr);
+			grid-template-columns: minmax(0, 1fr) minmax(290px, 350px);
 			align-items: start;
 			gap: 18px;
 		}
 
 		&__focus {
-			grid-column: 2;
+			grid-column: 1;
 			grid-row: 1;
 			min-width: 0;
 		}
@@ -752,14 +768,38 @@
 				gap: 6px;
 				margin: 0;
 			}
+
+			> .ew__selection-caption {
+				flex-basis: 100%;
+				margin: 0;
+			}
 		}
 
 		&__focus-nav {
+			flex: 1 1 400px;
+
 			strong {
 				min-width: 0;
 				flex-basis: 100%;
 				overflow-wrap: anywhere;
 			}
+
+			> label {
+				margin: 0;
+			}
+
+			> select {
+				flex: 1 1 180px;
+				min-width: 0;
+				max-width: 420px;
+			}
+		}
+
+		&__focus-actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 7px;
+			width: 100%;
 		}
 
 		&__card {
@@ -794,7 +834,7 @@
 		}
 
 		&__rail {
-			grid-column: 1;
+			grid-column: 2;
 			grid-row: 1;
 			min-width: 0;
 			border: 1px solid vars.$rgb-border-grey;
@@ -802,12 +842,17 @@
 		}
 
 		&__quick {
-			padding: 12px;
 			border-top: 1px solid vars.$rgb-border-grey;
 
-			h3 {
-				margin: 0 0 6px;
-				font-size: 1rem;
+			> summary {
+				padding: 12px;
+				background: vars.$rgb-bg--alt;
+				font-weight: 600;
+				cursor: pointer;
+			}
+
+			&-body {
+				padding: 0 12px 12px;
 			}
 
 			.ew__operation,
@@ -1151,8 +1196,10 @@
 		&__header,
 		&__rail-header,
 		&__initiative,
+		&__initiative > summary,
 		&__empty-start,
 		&__quick,
+		&__quick > summary,
 		&__rail,
 		&__focus-bar,
 		&__card,
@@ -1174,7 +1221,9 @@
 
 		&__rail,
 		&__initiative,
+		&__initiative > summary,
 		&__empty-start,
+		&__quick > summary,
 		&__focus-bar,
 		&__card,
 		&__setup > summary,
@@ -1182,7 +1231,6 @@
 		&__roster-help > summary,
 		&__position > summary,
 		&__move-report > summary,
-		&__status,
 		&__notices,
 		&__operation,
 		&__results,
@@ -1309,12 +1357,12 @@
 
 		.ew__focus {
 			grid-column: 1;
-			grid-row: 2;
+			grid-row: 1;
 		}
 
 		.ew__rail {
 			grid-column: 1;
-			grid-row: 1;
+			grid-row: 2;
 		}
 	}
 
@@ -1425,9 +1473,18 @@
 
 		.ew__move-controls select,
 		.ew__move-controls button,
-		.ew__quick .ew__selection-actions button,
-		.ew__open-bulk {
+		.ew__quick .ew__selection-actions button {
 			width: 100%;
+		}
+
+		.ew__focus-actions {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+
+			button {
+				min-width: 0;
+				width: 100%;
+			}
 		}
 
 		.ew__focus-nav {

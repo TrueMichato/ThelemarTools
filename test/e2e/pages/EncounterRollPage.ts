@@ -71,14 +71,26 @@ export class EncounterRollPage {
 
 	async focus (index: number) {
 		const row = this.page.locator(".ew__roster-row").nth(index);
-		const group = row.locator("xpath=ancestor::section[contains(@class,'ew__roster-group')]");
-		if (await group.locator(".ew__group-members").isHidden()) await group.getByRole("button", {name: /Expand.*group/}).click();
-		await row.getByRole("button", {name: /View statblock/}).click();
+		const id = await row.getAttribute("data-instance-id");
+		if (!id) throw new Error(`Roster monster ${index + 1} has no instance ID.`);
+		await this.page.locator("#ew-focus-picker").selectOption(id);
 	}
 
 	async openActions () {
 		if (!await this.page.locator("#ew-actions").evaluate(element => (element as HTMLDetailsElement).open)) {
 			await this.page.locator("#ew-actions > summary").click();
+		}
+	}
+
+	async openInitiative () {
+		if (!await this.page.locator("#ew-initiative").evaluate(element => (element as HTMLDetailsElement).open)) {
+			await this.page.locator("#ew-open-initiative").click();
+		}
+	}
+
+	async openQuickActions () {
+		if (!await this.page.locator("#ew-quick").evaluate(element => (element as HTMLDetailsElement).open)) {
+			await this.page.locator("#ew-open-quick").click();
 		}
 	}
 
