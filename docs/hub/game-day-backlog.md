@@ -42,8 +42,11 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   combined local run passed 45/47, with an unrelated action-form click timeout and a per-IP
   campaign-creation 429; both failed journeys passed together on a fresh isolated stack. Focused
   transfer and no-edit route journeys pass, as do 59/59 PostgreSQL prerequisites and the Hub
-  suite. The combined follow-up has **not** passed full-suite or exact-head CI, been tagged or
-  deployed, or received physical acceptance. Keep the P1 hard stop until those gates close.
+  suite. Exact source head `6d930fb5ea7cd1aa3eddf084146c8daba9410667` passed all four jobs
+  in CI run `36700531710`, including 47/47 real-stack browser journeys. The local full-suite
+  discrepancy remains recorded rather than silently called green. No new tag, deployment, or
+  physical acceptance exists; the newest Oracle backup also lacks a verified off-machine match.
+  Keep the P1 hard stop until operational and physical gates close.
 - **P1 remediation deployed, not physically proven:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
   fixes local/campaign route and repository-authority restoration. Its reviewed head
   `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;
