@@ -183,6 +183,19 @@ describe("resolved creature transformation preview and replay", () => {
 		expect(() => preview(monster, [], {...resolved, eligibility: [{minInt: 13}], prerequisites: []})).toThrow(/eligib/i);
 	});
 
+	it("requires every base and selected-option eligibility clause on preview and saved replay", () => {
+		const monster = getCreature();
+		const resolved = getRecipe("Restricted Form", [{type: "minimumAbility", ability: "wis", value: 13}], {
+			eligibility: [{types: ["dragon"]}, {minInt: 13}, {dmApproval: true}],
+		});
+		expect(() => preview(monster, [], resolved, {dmApproved: true})).toThrow(/eligib/i);
+		expect(() => preview({...monster, int: 13}, [], resolved)).toThrow(/eligib/i);
+		const eligible = {...monster, int: 13};
+		const operation = commit(eligible, [], preview(eligible, [], resolved, {dmApproved: true}));
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: eligible, operations: JSON.parse(JSON.stringify([operation]))}).wis).toBe(13);
+		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [operation]})).toThrow(/eligib/i);
+	});
+
 	it("tracks conflicting named-entry removals and retains harmless no-op writes within a recipe", () => {
 		const monster = getCreature();
 		const firstRecipe = getRecipe("Added", [
@@ -264,7 +277,7 @@ describe("resolved creature transformation preview and replay", () => {
 		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [operation]})).toThrow(/plain|json|undefined/i);
 	});
 
-	it("allows only explicitly optional entry replacements, while damage replacement still requires one named match", () => {
+	it("skips missing optional named entries and damage replacements, but rejects ambiguous matches", () => {
 		const monster = getCreature();
 		delete monster.bonus;
 		monster.action.push({name: "No Text"});
@@ -277,10 +290,17 @@ describe("resolved creature transformation preview and replay", () => {
 		const skipWithoutText = getRecipe("Skip", [{type: "replaceDamageType", section: "action", match: {name: "No Text", source: "$chassis"}, from: ["fire"], to: "cold", onMissing: "skip"}]);
 		const skipped = commit(monster, [], preview(monster, [], skipWithoutText));
 		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([skipped]))})).toEqual(monster);
+		const noBite = {...monster, action: monster.action.filter(it => it.name !== "Bite")};
+		const optionalMissingBite = getRecipe("Missing Bite", [{type: "replaceDamageType", section: "action", match: {role: "bite", source: "$chassis"}, from: ["fire"], to: "cold", onMissing: "skip"}]);
+		const missingBitePreview = preview(noBite, [], optionalMissingBite);
+		expect(missingBitePreview.proposed).toEqual(noBite);
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: noBite, operations: [commit(noBite, [], missingBitePreview)]})).toEqual(noBite);
+		expect(() => preview(noBite, [], {...optionalMissingBite, changes: [{...optionalMissingBite.changes[0], onMissing: "error"}]})).toThrow(/matched 0 entries/i);
 		expect(() => preview(monster, [], {...optional, changes: [{...optional.changes[0], onMissing: "error"}]})).toThrow(/matched 0 entries/i);
-		expect(() => preview(monster, [], {...optional, changes: [{...optional.changes[1], match: {name: "None", source: "$chassis"}}]})).toThrow(/matched 0 entries/i);
+		expect(preview(monster, [], {...optional, changes: [{...optional.changes[1], match: {name: "None", source: "$chassis"}}]}).proposed).toEqual(monster);
 		const duplicate = {...monster, action: [...monster.action, structuredClone(monster.action[0])]};
 		expect(() => preview(duplicate, [], optional)).toThrow(/matched 2 entries/i);
+		expect(() => preview(duplicate, [], optionalMissingBite)).toThrow(/matched 2 entries/i);
 	});
 
 	it("does not normalize numeric speed on a no-op and rejects nonintegral or overflowing ability scores", () => {
@@ -289,6 +309,11 @@ describe("resolved creature transformation preview and replay", () => {
 		expect(noOp.proposed.speed).toBe(30);
 		expect(noOp.diff.fields).toEqual([]);
 		expect(preview(monster, [], getRecipe("Faster", [{type: "grantSpeed", mode: "walk", feet: 40}])).proposed.speed).toBe(40);
+		const zero = getRecipe("Still Water", [{type: "grantSpeed", mode: "swim", feet: 0}]);
+		const zeroPreview = preview(monster, [], zero);
+		expect(zeroPreview.proposed.speed).toEqual({walk: 30, swim: 0});
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [commit(monster, [], zeroPreview)]}).speed).toEqual({walk: 30, swim: 0});
+		expect(preview({...monster, speed: {walk: 30, swim: 20}}, [], zero).proposed.speed).toEqual({walk: 30, swim: 20});
 		expect(() => preview(monster, [], getRecipe("Fraction", [{type: "setAbility", ability: "str", value: 18.5}]))).toThrow(/safe integer/i);
 		expect(() => preview(monster, [], getRecipe("Overflow", [{type: "adjustAbility", ability: "str", amount: Number.MAX_SAFE_INTEGER, floor: 1}]))).toThrow(/invalid str score/i);
 	});

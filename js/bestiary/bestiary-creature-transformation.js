@@ -183,7 +183,7 @@ function _validateChange (change) {
 		case "grantSpeed":
 			_expectKeys(change, ["type", "mode", "feet"], change.type);
 			if (!_SPEED_MODES.has(change.mode)) _fail(`Unsupported speed mode "${change.mode}".`);
-			_expectInteger(change.feet, "Speed", {min: 1});
+			_expectInteger(change.feet, "Speed");
 			break;
 		case "grantConditionalDefense":
 			_expectKeys(change, ["type", "kind", "value", "when"], change.type);
@@ -296,7 +296,7 @@ function _checkEligibility ({creature, resolved, acknowledgedPrerequisites, dmAp
 		&& (rule.maxInt == null || (Number.isFinite(creature.int) && creature.int <= rule.maxInt))
 		&& (!rule.requiresTrait || (creature.trait || []).some(it => it.name?.toLowerCase() === rule.requiresTrait.toLowerCase()))
 		&& (!rule.dmApproval || dmApproved);
-	if (resolved.eligibility.length && !resolved.eligibility.some(eligible)) _fail("Creature does not satisfy transformation eligibility (or required DM approval).", "CREATURE_TRANSFORMATION_INELIGIBLE");
+	if (!resolved.eligibility.every(eligible)) _fail("Creature does not satisfy transformation eligibility (or required DM approval).", "CREATURE_TRANSFORMATION_INELIGIBLE");
 }
 
 function _getEntrySource (entry, chassis) {
@@ -434,7 +434,9 @@ function _applyChange (creature, change, chassis) {
 				after = entry;
 				break;
 			}
-			const index = _getEntryIndex(out, section, change.match, chassis, {allowMissing: change.type === "replaceEntry" && change.onMissing === "skip"});
+			const index = _getEntryIndex(out, section, change.match, chassis, {
+				allowMissing: ["replaceEntry", "replaceDamageType"].includes(change.type) && change.onMissing === "skip",
+			});
 			if (index === -1) return {out, write: null};
 			before = out[section][index];
 			path = _getEntryKey(section, before, chassis);
