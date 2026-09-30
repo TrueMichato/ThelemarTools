@@ -1,0 +1,141 @@
+@use "../vars/vars";
+@use "../vars/vars-night";
+
+@layer vetools {
+	.ew {
+		&__resources {
+			padding: 10px 12px 14px;
+			border-bottom: 1px solid vars.$rgb-border-grey--muted;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__resource-title {
+			margin: 0 0 10px;
+			font-size: 1rem;
+			font-weight: 700;
+		}
+
+		&__resource-fields {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 12px 18px;
+			min-width: 0;
+			margin: 0;
+			padding: 0;
+			border: 0;
+		}
+
+		&__resource-group {
+			min-width: 0;
+
+			h5 {
+				margin: 0 0 5px;
+				font-size: 1rem;
+			}
+		}
+
+		&__resource-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto auto;
+			align-items: center;
+			gap: 4px 8px;
+			padding: 5px 0;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__resource-name {
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+
+		&__resource-count {
+			white-space: nowrap;
+			font-weight: 600;
+		}
+
+		&__resource-actions {
+			display: flex;
+			gap: 4px;
+		}
+
+		&__resource-button {
+			min-width: 44px;
+			min-height: 44px;
+			padding: 5px 10px;
+		}
+
+		&__resource-edit {
+			grid-column: 1 / -1;
+			min-width: 0;
+
+			summary {
+				display: inline-flex;
+				align-items: center;
+				min-height: 44px;
+				padding: 5px 8px;
+				cursor: pointer;
+			}
+		}
+
+		&__resource-form {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: end;
+			gap: 8px;
+			padding: 6px 0 10px;
+		}
+
+		&__resource-field {
+			display: grid;
+			flex: 1 1 105px;
+			gap: 4px;
+			min-width: 0;
+			font-weight: 600;
+
+			input,
+			select {
+				min-width: 0;
+				min-height: 44px;
+				width: 100%;
+				font-size: max(16px, 1rem);
+			}
+		}
+
+		&__resource-empty {
+			margin: 4px 0;
+		}
+
+		&__resource-concentration {
+			.ew__resource-field {
+				flex-basis: 170px;
+			}
+		}
+	}
+
+	.ve-night-mode .ew {
+		&__resources {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+		}
+
+		&__resource-row {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+	}
+
+	@media (width <= 900px) {
+		.ew__resource-fields {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+
+	@media (width <= 480px) {
+		.ew__resource-row {
+			grid-template-columns: minmax(0, 1fr) auto;
+
+			.ew__resource-actions {
+				grid-column: 1 / -1;
+			}
+		}
+	}
+}

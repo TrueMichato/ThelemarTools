@@ -112,3 +112,13 @@ export function validateEncounterResources (resources) {
 		ids.add(recharge.id);
 	}
 }
+
+export function getEncounterResourceSummary (resources) {
+	const entries = [
+		...(resources.concentration.active ? [`Concentrating${resources.concentration.label ? `: ${resources.concentration.label}` : ""}`] : []),
+		...Object.entries(resources.spellSlots).map(([level, slots]) => `L${level} slots ${slots.current}/${slots.max}`),
+		...resources.abilities.map(ability => `${ability.name} ${ability.current}/${ability.max}`),
+		...resources.recharges.map(recharge => `${recharge.name}: ${recharge.ready ? "ready" : "spent"}`),
+	];
+	return [...entries.slice(0, 3), ...(entries.length > 3 ? [`+${entries.length - 3} more`] : [])].join(" · ");
+}

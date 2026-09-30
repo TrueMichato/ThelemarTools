@@ -1,7 +1,7 @@
 import {jest} from "@jest/globals";
 import {BestiaryQuickActionsOperations} from "../../js/bestiary/bestiary-quick-actions-engine.js";
 import {EncounterWorkspaceState, EncounterWorkspaceStore} from "../../js/encounterworkspace/encounterworkspace-state.js";
-import {getEncounterResourceDefaults} from "../../js/encounterworkspace/encounterworkspace-resources.js";
+import {getEncounterResourceDefaults, getEncounterResourceSummary} from "../../js/encounterworkspace/encounterworkspace-resources.js";
 
 const monster = {
 	name: "Arcane Dragon",
@@ -49,6 +49,7 @@ describe("Encounter Workspace combat resources", () => {
 		]);
 		expect(resources.recharges).toEqual([{id: "auto:recharge:action:0", name: "Breath", min: 5, ready: true}]);
 		expect(resources.concentration).toEqual({active: false, label: ""});
+		expect(getEncounterResourceSummary(resources)).toBe("L1 slots 4/4 · L3 slots 2/2 · Legendary Resistance (3/Day, or 4/Day in Lair) 3/3 · +3 more");
 		expect(getEncounterResourceDefaults({
 			...monster,
 			legendaryActions: 4,
@@ -167,6 +168,18 @@ describe("Encounter Workspace combat resources", () => {
 		const {store} = getStore();
 		await store.pSave(edited);
 		expect((await store.pLoad()).instances[0].resources).toEqual(edited.instances[0].resources);
+	});
+
+	it("does not automatically refill or spend resources when turns or initiative change", async () => {
+		const state = await create();
+		const spent = EncounterWorkspaceState.withAbilityUse(state, {id: "dragon-1", abilityId: "auto:ability:trait:0", change: -1});
+		const slots = EncounterWorkspaceState.withSpellSlots(spent, {id: "dragon-1", level: 1, current: 2, max: 4});
+		let next = EncounterWorkspaceState.withInitiativeResults(slots, [{id: "dragon-1", total: 15}, {id: "dragon-2", total: 10}]);
+		next = EncounterWorkspaceState.withTurn(next, "start");
+		next = EncounterWorkspaceState.withTurn(next, "next");
+		next = EncounterWorkspaceState.withTurn(next, "next");
+		next = EncounterWorkspaceState.withTurn(next, "reset");
+		expect(next.instances.map(it => it.resources)).toEqual(slots.instances.map(it => it.resources));
 	});
 
 	it("does not publish resources when persistence fails", async () => {
