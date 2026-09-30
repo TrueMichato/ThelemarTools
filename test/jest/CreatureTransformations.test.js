@@ -185,7 +185,42 @@ describe("source-qualified candidate and resolution API", () => {
 			dataUtil: {...dataUtil, race: {...dataUtil.race, loadPrerelease: async () => null}},
 		})).rejects.toThrow("prerelease race source is malformed");
 		expect(() => getCreatureTransformationCandidates({catalog, races: [{name: "A", source: "UA", _versions: [{}]}]})).toThrow("versions cannot be resolved");
-		expect(() => getCreatureTransformationCandidates({catalog, races: [{name: "A", source: "X"}, {name: "a", source: "x"}], getVersions: () => []})).toThrow("Duplicate");
+		expect(() => getCreatureTransformationCandidates({
+			catalog: {creatureTransformation: [catalog.creatureTransformation[0], catalog.creatureTransformation[0]]},
+			races: [],
+		})).toThrow("Duplicate");
+	});
+
+	it("keeps all templates available when two loaded race sources repeat Gnoll", async () => {
+		const gnoll = {name: "Gnoll", source: "FoEQuickstone", page: 23, resist: ["fire"], entries: ["Gnoll traits"]};
+		const repeated = await pLoadCreatureTransformationCandidates({
+			dataUtil: {
+				...dataUtil,
+				race: {
+					...dataUtil.race,
+					loadPrerelease: async () => ({race: [gnoll]}),
+					loadBrew: async () => ({race: [structuredClone(gnoll)]}),
+				},
+			},
+		});
+		expect(repeated.filter(it => it.id === "race:gnoll|foequickstone")).toHaveLength(1);
+		expect(repeated.find(it => it.id === "catalog:skeleton|dmg")).toBeDefined();
+	});
+
+	it("shows distinct same-UID race definitions as explicit, stable choices", () => {
+		const gnoll = {name: "Gnoll", source: "FoEQuickstone", page: 23, resist: ["fire"]};
+		const choices = getCreatureTransformationCandidates({
+			catalog,
+			races: [gnoll, {...gnoll, resist: ["cold"]}, {...gnoll}],
+			getVersions: () => [],
+		}).filter(it => it.id.startsWith("race:gnoll|foequickstone"));
+		expect(choices).toHaveLength(2);
+		expect(new Set(choices.map(it => it.id)).size).toBe(2);
+		expect(choices.every(it => it.duplicateVariant)).toBe(true);
+		expect(choices.map(it => resolveCreatureTransformation({candidates: choices, id: it.id}).changes))
+			.toEqual(expect.arrayContaining([[{op: "setType", value: "humanoid"}, {op: "grantResistance", value: "fire"}], [{op: "setType", value: "humanoid"}, {op: "grantResistance", value: "cold"}]]));
+		const reversed = getCreatureTransformationCandidates({catalog, races: [{...gnoll, resist: ["cold"]}, gnoll], getVersions: () => []});
+		expect(reversed.filter(it => it.id.startsWith("race:gnoll|foequickstone")).map(it => it.id)).toEqual(choices.map(it => it.id));
 	});
 
 	it("resolves real site subraces and parameterized 2024 versions with the existing race utilities", () => {

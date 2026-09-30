@@ -164,7 +164,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		const term = search.value.trim().toLowerCase();
 		picker.replaceChildren(new Option("Choose a source-qualified recipe…", ""));
 		candidates.filter(it => `${it.identity.name} ${it.identity.source} ${it.kind}`.toLowerCase().includes(term))
-			.forEach(it => picker.add(new Option(`${it.identity.name} (${it.identity.source}) · ${it.kind === "race" ? "Species" : "Template"}`, it.id)));
+			.forEach(it => picker.add(new Option(`${it.identity.name} (${it.identity.source}) · ${it.kind === "race" ? "Species" : "Template"}${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}${it.provenance.page ? ` (p. ${it.provenance.page})` : ""}` : ""}`, it.id)));
 		picker.value = [...picker.options].some(it => it.value === previous) ? previous : "";
 	};
 	const renderCandidate = () => {
@@ -175,6 +175,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		if (!candidate) return;
 		const provenance = candidate.provenance;
 		paragraph(details, `Source: ${candidate.identity.name} (${candidate.identity.source}) · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
+		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
 		const eligibility = element("div", {className: "bqa__transformation-eligibility"});
 		details.append(eligibility);
 		const renderEligibility = () => {

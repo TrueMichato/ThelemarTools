@@ -75,9 +75,11 @@ export class EncounterWorkspacePage {
 		this._eleSummary = document.getElementById("ew-summary");
 		this._eleInitTargets = document.getElementById("ew-init-targets");
 		this._eleAdvancedTargets = document.getElementById("ew-advanced-targets");
-		this._eleRollTargets = document.getElementById("ew-roll-targets");
-		this._eleHpTargets = document.getElementById("ew-hp-targets");
-		this._eleConditionTargets = document.getElementById("ew-condition-targets");
+		this._eleInitiative = document.getElementById("ew-initiative");
+		this._eleInitiativeSummary = document.getElementById("ew-initiative-summary");
+		this._btnOpenInitiative = document.getElementById("ew-open-initiative");
+		this._eleQuick = document.getElementById("ew-quick");
+		this._eleQuickSummary = document.getElementById("ew-quick-summary");
 		this._eleNextStatus = document.getElementById("ew-next-status");
 		this._eleEmptyStart = document.getElementById("ew-empty-start");
 		this._eleIntro = document.getElementById("ew-intro");
@@ -95,6 +97,9 @@ export class EncounterWorkspacePage {
 		this._btnSelectCurrent = document.getElementById("ew-select-current");
 		this._btnSelectViewed = document.getElementById("ew-select-viewed");
 		this._btnOpenBulk = document.getElementById("ew-open-bulk");
+		this._btnOpenQuick = document.getElementById("ew-open-quick");
+		this._btnBrowseRoster = document.getElementById("ew-browse-roster");
+		this._btnFocusEdit = document.getElementById("ew-focus-edit");
 		this._eleActions = document.getElementById("ew-actions");
 		this._btnGroupSelected = document.getElementById("ew-group-selected");
 		this._selRollType = document.getElementById("ew-roll-type");
@@ -165,6 +170,7 @@ export class EncounterWorkspacePage {
 		this._selRosterFilter = document.getElementById("ew-roster-filter");
 		this._eleRosterCount = document.getElementById("ew-roster-count");
 		this._eleFocusStatus = document.getElementById("ew-focus-status");
+		this._selFocusPicker = document.getElementById("ew-focus-picker");
 		this._btnFocusPrev = document.getElementById("ew-focus-prev");
 		this._btnFocusNext = document.getElementById("ew-focus-next");
 		this._btnFocusCurrent = document.getElementById("ew-focus-current");
@@ -189,6 +195,18 @@ export class EncounterWorkspacePage {
 			this._pAddTargets(group?.memberIds || [activeId]);
 		});
 		this._btnSelectViewed.addEventListener("click", () => this._pAddTargets([this._focusedInstanceId]));
+		this._btnOpenInitiative.addEventListener("click", () => {
+			this._eleInitiative.open = true;
+			this._eleInitiativeSummary.focus({preventScroll: true});
+			this._eleInitiative.scrollIntoView({block: "start"});
+		});
+		this._btnFocusEdit.addEventListener("click", () => this._pOpenStatblockEditor(this._focusedInstanceId));
+		this._btnOpenQuick.addEventListener("click", () => {
+			this._eleQuick.open = true;
+			this._eleQuickSummary.focus({preventScroll: true});
+			this._eleQuick.scrollIntoView({block: "start"});
+		});
+		this._btnBrowseRoster.addEventListener("click", () => this._inpRosterSearch.focus());
 		this._btnOpenBulk.addEventListener("click", () => {
 			this._eleActions.open = true;
 			const bulk = this._eleActions.querySelector(".ew__bulk-edit");
@@ -256,6 +274,7 @@ export class EncounterWorkspacePage {
 		this._btnFocusPrev.addEventListener("click", () => this._stepFocus(-1));
 		this._btnFocusNext.addEventListener("click", () => this._stepFocus(1));
 		this._btnFocusCurrent.addEventListener("click", () => this._focusCurrentTurn({moveFocus: true}));
+		this._selFocusPicker.addEventListener("change", () => this._setFocus(this._selFocusPicker.value));
 		this._selViewMode.addEventListener("change", () => {
 			this._viewMode = this._selViewMode.value;
 			this._shownCards = STATBLOCK_BATCH_SIZE;
@@ -327,6 +346,11 @@ export class EncounterWorkspacePage {
 		this._btnSelectCurrent.disabled = isBusy || !this._state.turn?.activeId;
 		this._btnSelectViewed.disabled = isBusy || !this._focusedInstanceId;
 		this._btnOpenBulk.disabled = isBusy || !this._state.instances.length;
+		this._btnOpenInitiative.disabled = isBusy || !this._state.instances.length;
+		this._btnOpenQuick.disabled = isBusy || !this._state.instances.length;
+		this._btnBrowseRoster.disabled = isBusy || !this._state.instances.length;
+		this._btnFocusEdit.disabled = isBusy || !this._focusedInstanceId;
+		this._selFocusPicker.disabled = isBusy || !this._state.instances.length;
 		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
 		this._groupChecks.forEach(check => check.disabled = isBusy);
@@ -378,6 +402,7 @@ export class EncounterWorkspacePage {
 		this._btnTurnReset.hidden = !isStarted;
 		this._btnSelectCurrent.disabled = this._isBusy || !isStarted;
 		this._btnSelectViewed.disabled = this._isBusy || !this._focusedInstanceId;
+		this._btnFocusEdit.disabled = this._isBusy || !this._focusedInstanceId;
 		this._selMoveEntry.disabled = this._selMoveBefore.disabled = this._btnMoveApply.disabled = this._isBusy || !this._state.instances.length;
 		this._btnMoveUndo.disabled = this._isBusy || !this._initiativeUndo;
 		this._eleTurnOrder.querySelectorAll(".ew__turn-move, .ew__turn-edit, .ew__turn-init, .ew__turn-step").forEach(control => {
@@ -1575,7 +1600,7 @@ export class EncounterWorkspacePage {
 		if (!this._selViewMode) return;
 		this._viewMode = this._selViewMode.value = "focused";
 		this._renderStatblocks();
-		if (moveFocus) this._eleStatblocks.querySelector(".ew__statblock-title")?.focus();
+		if (moveFocus) this._eleFocusStatus.focus();
 	}
 
 	_setFocus (id, {moveFocus = false} = {}) {
@@ -1583,7 +1608,7 @@ export class EncounterWorkspacePage {
 		this._focusedInstanceId = id;
 		this._viewMode = this._selViewMode.value = "focused";
 		this._renderStatblocks();
-		if (moveFocus) this._eleStatblocks.querySelector(".ew__statblock-title")?.focus();
+		if (moveFocus) this._eleFocusStatus.focus();
 	}
 
 	_stepFocus (delta) {
@@ -1618,6 +1643,9 @@ export class EncounterWorkspacePage {
 			filter: this._selRosterFilter.value,
 		});
 		this._visibleIds = view.visibleIds;
+		this._selFocusPicker.replaceChildren(...this._state.instances.map(instance =>
+			new Option(view.displayLabels.get(instance.id), instance.id)));
+		if (this._focusedInstanceId) this._selFocusPicker.value = this._focusedInstanceId;
 		this._eleRosterCount.textContent = `${view.visibleIds.length} of ${this._state.instances.length} shown`;
 		if (!view.visibleIds.length) {
 			const empty = document.createElement("p");
@@ -1931,6 +1959,7 @@ export class EncounterWorkspacePage {
 		this._eleFocusStatus.textContent = label
 			? `Viewing statblock: ${label}${index < 0 ? " · outside roster filter" : ` · ${index + 1} of ${this._visibleIds.length} shown`}`
 			: "No statblock viewed";
+		if (label) this._selFocusPicker.value = this._focusedInstanceId;
 		this._btnFocusPrev.disabled = this._isBusy || !this._visibleIds.length || index === 0;
 		this._btnFocusNext.disabled = this._isBusy || !this._visibleIds.length || index === this._visibleIds.length - 1;
 		this._btnFocusCurrent.disabled = this._isBusy || !this._state.turn.activeId;
@@ -2143,6 +2172,7 @@ export class EncounterWorkspacePage {
 		this._eleTurnOrder.replaceChildren(...items);
 		const unrolled = entries.map(({entry}) => entry).filter(it => it.initiative == null);
 		const unrolledCount = unrolled.reduce((count, it) => count + (it.memberIds?.length || 1), 0);
+		this._eleInitiativeSummary.textContent = `Initiative order · ${order.length} in order${unrolledCount ? ` · ${unrolledCount} unrolled` : ""}`;
 		this._eleInitUnrolled.textContent = unrolled.length
 			? `${unrolledCount} unrolled ${unrolledCount === 1 ? "monster" : "monsters"} (not in turn order). Drag a Move button to a turn, or choose a position above.`
 			: order.length ? "All monsters have initiative." : "Enter or roll initiative to create a turn order.";
@@ -2327,11 +2357,9 @@ export class EncounterWorkspacePage {
 		const names = selected.size ? this._getTargetNames(this._state.selectedIds) : "No targets selected";
 		const outside = this._state.selectedIds.filter(id => !this._visibleIds.includes(id)).length;
 		this._eleSummary.textContent = `${selected.size} of ${this._state.instances.length} selected as targets: ${names}${outside ? ` · ${outside} outside roster filter` : ""}`;
+		this._eleQuickSummary.textContent = `Roll, HP & conditions · ${selected.size} ${selected.size === 1 ? "target" : "targets"}`;
 		this._eleInitTargets.textContent = `Initiative targets: ${names}`;
 		this._eleAdvancedTargets.textContent = `Bulk edit targets: ${names}`;
-		this._eleRollTargets.textContent = `Roll targets: ${names}`;
-		this._eleHpTargets.textContent = `HP targets: ${names}`;
-		this._eleConditionTargets.textContent = `Condition targets: ${names}`;
 		this._checks.forEach((check, id) => check.checked = selected.has(id));
 		this._groupChecks.forEach(({check, memberIds, selection}) => {
 			const count = memberIds.filter(id => selected.has(id)).length;

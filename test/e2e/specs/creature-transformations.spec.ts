@@ -80,6 +80,36 @@ test("Bestiary transformation catalog failures stay visible and do not show a lo
 	await expect(transformations.root.getByRole("status")).toBeEmpty();
 });
 
+test("repeated homebrew race IDs cannot block templates or hide different definitions", async ({page}) => {
+	await page.goto("/bestiary.html#goblin_mm");
+	await page.evaluate(() => {
+		const raceUtil = (globalThis as typeof globalThis & {DataUtil: {race: {loadBrew: (...args: unknown[]) => Promise<{race?: object[]}>}}}).DataUtil.race;
+		const loadBrew = raceUtil.loadBrew.bind(raceUtil);
+		raceUtil.loadBrew = async (...args) => {
+			const loaded = await loadBrew(...args);
+			const gnoll = {name: "Gnoll", source: "FoEQuickstone", page: 23, resist: ["fire"]};
+			return {...loaded, race: [...(loaded.race || []), gnoll, {...gnoll}, {...gnoll, resist: ["cold"]}]};
+		};
+	});
+	await page.locator(".bqa__btn-open:visible").first().click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	const transformations = new CreatureTransformationPage(page);
+	await expect(transformations.root.getByRole("alert")).toBeEmpty();
+	const picker = transformations.root.getByRole("combobox", {name: "Creature transformation"});
+	await expect(picker.locator("option", {hasText: "Gnoll (FoEQuickstone)"})).toHaveCount(2);
+	const variant = await picker.locator("option", {hasText: "Gnoll (FoEQuickstone)"}).first().getAttribute("value");
+	expect(variant).toMatch(/^race:gnoll\|foequickstone~d:/);
+	await transformations.choose(variant!);
+	await expect(transformations.root).toContainText("multiple different race definitions share this name and source");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await expect(transformations.root.locator(".bqa__transformation-target")).toContainText("Goblin");
+	await transformations.choose("catalog:skeleton|dmg");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await expect(transformations.root.locator(".bqa__transformation-target")).toContainText("Undead");
+});
+
 test("Encounter bulk transformation names a capped target and saves only the other eligible monster", async ({page}) => {
 	test.setTimeout(120_000);
 	const encounter = new EncounterRollPage(page);
