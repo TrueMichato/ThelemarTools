@@ -235,6 +235,71 @@ body.bqa__modal-active .ve-hwin {
 		.bqa__field {
 			flex: 1 1 180px;
 		}
+
+		.bqa__field-label {
+			font-size: 12px;
+		}
+	}
+
+	.bqa__transformation-category {
+		display: flex;
+		flex: 1 0 100%;
+		flex-wrap: wrap;
+		gap: 6px;
+		min-width: 0;
+		margin: 0;
+		padding: 0;
+		border: 0;
+
+		legend {
+			margin-bottom: 4px;
+			padding: 0;
+			color: vars.$rgb-font;
+			font-size: 12px;
+			font-weight: 700;
+		}
+	}
+
+	.bqa__transformation-category-btn {
+		min-height: 36px;
+		padding: 6px 12px;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 6px;
+		background: vars.$rgb-bg;
+		color: vars.$rgb-font;
+		font-weight: 700;
+
+		&:hover {
+			background: vars.$rgb-bg--alt;
+		}
+
+		&[aria-pressed="true"] {
+			border-color: vars.$rgb-name-red;
+			background: vars.$rgb-name-red;
+			color: #fff;
+		}
+
+		&:focus-visible {
+			outline: 2px solid vars.$rgb-link-blue;
+			outline-offset: 2px;
+		}
+	}
+
+	.bqa__transformation-count,
+	.bqa__transformation-empty {
+		flex: 1 0 100%;
+		margin: 0;
+		color: vars.$rgb-font--muted;
+		font-size: 12px;
+	}
+
+	.bqa__transformation-empty {
+		padding: 10px 12px;
+		border: 1px dashed vars.$rgb-border-grey;
+
+		&[hidden] {
+			display: none;
+		}
 	}
 
 	.bqa__transformation-options {
@@ -831,8 +896,38 @@ body.bqa__modal-active .ve-hwin {
 
 		.bqa__transformation-group,
 		.bqa__transformation-target,
-		.bqa__transformation-statblock {
+		.bqa__transformation-statblock,
+		.bqa__transformation-category-btn,
+		.bqa__transformation-empty {
 			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		.bqa__transformation-category-btn {
+			background: vars-night.$rgb-bg--night;
+			color: vars-night.$rgb-font--night;
+
+			&:hover {
+				background: vars-night.$rgb-bg--alt-night;
+			}
+
+			&[aria-pressed="true"] {
+				border-color: vars-night.$rgb-name-red--night;
+				background: vars-night.$rgb-name-red--night;
+				color: vars-night.$rgb-bg--night;
+			}
+
+			&:focus-visible {
+				outline-color: vars-night.$rgb-link-blue--night;
+			}
+		}
+
+		.bqa__transformation-category legend {
+			color: vars-night.$rgb-font--night;
+		}
+
+		.bqa__transformation-count,
+		.bqa__transformation-empty {
+			color: vars-night.$rgb-font--night;
 		}
 
 		.bqa__transformation-statblock summary {
@@ -892,6 +987,11 @@ body.bqa__modal-active .ve-hwin {
 		.bqa__transformation input[type="search"],
 		.bqa__transformation-check,
 		.bqa__transformation-statblock summary {
+			min-height: 44px;
+		}
+
+		.bqa__transformation-category-btn {
+			flex: 1 1 auto;
 			min-height: 44px;
 		}
 
