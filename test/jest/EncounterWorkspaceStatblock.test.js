@@ -344,6 +344,8 @@ describe("Encounter Workspace instance statblock edits", () => {
 			const page = Object.create(EncounterWorkspacePage.prototype);
 			page._state = await makeState();
 			page._selBulkType = {value: "area"};
+			page._btnBulkPreview = {hidden: false};
+			page._eleBulkTransformation = {hidden: true, replaceChildren: jest.fn()};
 			page._selBulkChoice = {
 				options: [],
 				value: "",

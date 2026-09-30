@@ -1,14 +1,17 @@
 import {
 	EncounterWorkspaceState,
 	EncounterWorkspaceStore,
+	MAX_ENCOUNTER_STATBLOCK_OPERATIONS,
 	getEncounterCompatibleGroups,
 	getEncounterEffectiveMonster,
 	getEncounterInitiativeTotal,
 	getEncounterSharedGroup,
 	getEncounterViewGroups,
+	validateEncounterStatblockOperations,
 } from "./encounterworkspace/encounterworkspace-state.js";
 import {EncounterWorkspacePostSaveError, EncounterWorkspaceQuickActionsAdapter} from "./encounterworkspace/encounterworkspace-quick-actions.js";
 import {BestiaryQuickActionsUi} from "./bestiary/bestiary-quick-actions-ui.js";
+import {pRenderCreatureTransformationEditor} from "./bestiary/bestiary-transformation-editor.js";
 import {BestiaryQuickActionsOperations} from "./bestiary/bestiary-quick-actions-engine.js";
 import {BestiaryQuickActionsStructuredEditor} from "./bestiary/bestiary-quick-actions-structured.js";
 import {
@@ -126,6 +129,7 @@ export class EncounterWorkspacePage {
 		this._inpBulkDescription = document.getElementById("ew-bulk-description");
 		this._inpBulkCost = document.getElementById("ew-bulk-cost");
 		this._btnBulkPreview = document.getElementById("ew-bulk-preview");
+		this._eleBulkTransformation = document.getElementById("ew-bulk-transformation");
 		this._btnHandoffQueue = document.getElementById("ew-handoff-queue");
 		this._btnHandoffClear = document.getElementById("ew-handoff-clear");
 		this._eleHandoffPending = document.getElementById("ew-handoff-pending");
@@ -872,6 +876,7 @@ export class EncounterWorkspacePage {
 	async _pRenderBulkChoices () {
 		const type = this._selBulkType.value;
 		const isLegendary = type === "legendary";
+		const isTransformation = type === "transformation";
 		const hasChoices = type === "lair" || type === "area";
 		const previousChoice = this._bulkChoiceType === type ? this._selBulkChoice.value : "";
 		this._bulkChoiceType = type;
@@ -880,8 +885,48 @@ export class EncounterWorkspacePage {
 			document.getElementById(`ew-bulk-${id}`).hidden = !isLegendary;
 			document.getElementById(`ew-bulk-${id}-label`).hidden = !isLegendary;
 		}
+		this._btnBulkPreview.hidden = isTransformation;
+		this._eleBulkTransformation.hidden = !isTransformation;
 		this._selBulkChoice.hidden = document.getElementById("ew-bulk-choice-label").hidden = !hasChoices;
 		this._selBulkChoice.replaceChildren();
+		if (isTransformation) {
+			await pRenderCreatureTransformationEditor({
+				mount: this._eleBulkTransformation,
+				isCurrent: () => request === this._bulkChoiceRequest && this._selBulkType.value === "transformation",
+				isBulk: true,
+				getTargets: () => {
+					const labels = getEncounterInstanceLabels(this._state.instances);
+					return this._state.instances.filter(it => this._state.selectedIds.includes(it.id)).map(it => ({
+						id: it.id,
+						label: labels.get(it.id),
+						baseCreature: it.monster,
+						operations: it.statblockOperations,
+					}));
+				},
+				getStamp: () => JSON.stringify(this._state),
+				validateOperation: ({target, operation}) => {
+					if (target.operations.length >= MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
+						throw new Error(`This monster has reached the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);
+					}
+					let id = "preview-transformation";
+					while (target.operations.some(it => it.id === id)) id += "-next";
+					validateEncounterStatblockOperations(target.baseCreature, [...target.operations, {...operation, id}]);
+				},
+				getConsequences: changes => EncounterWorkspaceState.withStatblockChanges(this._state, changes.map((change, index) => ({
+					...change,
+					addOperations: change.addOperations.map((operation, ix) => ({...operation, id: `preview-${index}-${ix}`})),
+				}))),
+				pApply: async changes => {
+					const result = EncounterWorkspaceState.withStatblockChanges(this._state, changes.map(change => ({
+						...change,
+						addOperations: change.addOperations.map(operation => ({...operation, id: CryptUtil.uid()})),
+					})));
+					await this._pCommitStatblockEdit(result);
+				},
+			});
+			return;
+		}
+		this._eleBulkTransformation.replaceChildren();
 		if (!hasChoices) return;
 		this._selBulkChoice.add(new Option("Loading available rules...", ""));
 		try {
