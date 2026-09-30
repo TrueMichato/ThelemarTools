@@ -251,8 +251,22 @@
 					<div class="ew__turns-header">
 						<h3>Turn order</h3>
 					</div>
+					<div class="ew__move-controls">
+						<label for="ew-move-entry">Move monster or shared turn</label>
+						<select class="ve-form-control" id="ew-move-entry"></select>
+						<label for="ew-move-before">Place before</label>
+						<select class="ve-form-control" id="ew-move-before"></select>
+						<button type="button" class="ve-btn ve-btn-default" id="ew-move-apply">Move turn</button>
+						<button type="button" class="ve-btn ve-btn-default" id="ew-move-undo" disabled>Undo last move</button>
+					</div>
+					<p class="ew__operation-help">Use the Move buttons to drag a turn onto another turn, or click one and choose a position here. Initiative totals change to match the new order; neighboring totals change only when needed. Undo lasts until another initiative, group or turn edit, or a reload.</p>
+					<details id="ew-move-report" class="ew__move-report" hidden>
+						<summary id="ew-move-report-summary"></summary>
+						<ul id="ew-move-report-list"></ul>
+					</details>
 					<ol id="ew-turn-order" class="ew__turn-order"></ol>
 					<p id="ew-init-unrolled" class="ew__operation-help"></p>
+					<ul id="ew-unrolled-order" class="ew__unrolled-order" hidden></ul>
 				</section>
 				<section class="ew__results" id="ew-results" aria-label="Roll results" hidden>
 					<h3>Roll results</h3>

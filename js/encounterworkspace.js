@@ -56,6 +56,8 @@ export class EncounterWorkspacePage {
 		this._vitalContainers = new Map();
 		this._rosterMeta = new Map();
 		this._hpUndo = [];
+		this._initiativeUndo = null;
+		this._dragTurnId = null;
 		this._focusedInstanceId = null;
 		this._viewMode = "focused";
 		this._visibleIds = [];
@@ -131,6 +133,14 @@ export class EncounterWorkspacePage {
 		this._eleRoundStatus = document.getElementById("ew-round-status");
 		this._eleTurnOrder = document.getElementById("ew-turn-order");
 		this._eleInitUnrolled = document.getElementById("ew-init-unrolled");
+		this._eleUnrolledOrder = document.getElementById("ew-unrolled-order");
+		this._selMoveEntry = document.getElementById("ew-move-entry");
+		this._selMoveBefore = document.getElementById("ew-move-before");
+		this._btnMoveApply = document.getElementById("ew-move-apply");
+		this._btnMoveUndo = document.getElementById("ew-move-undo");
+		this._eleMoveReport = document.getElementById("ew-move-report");
+		this._eleMoveReportSummary = document.getElementById("ew-move-report-summary");
+		this._eleMoveReportList = document.getElementById("ew-move-report-list");
 		this._eleActiveVitals = document.getElementById("ew-active-vitals");
 		this._eleSetup = document.getElementById("ew-setup");
 		this._inpRosterSearch = document.getElementById("ew-roster-search");
@@ -173,6 +183,36 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.addEventListener("click", () => this._pUpdateTurn("start"));
 		this._btnTurnNext.addEventListener("click", () => this._pUpdateTurn("next"));
 		this._btnTurnReset.addEventListener("click", () => this._pUpdateTurn("reset"));
+		this._btnMoveApply.addEventListener("click", () => this._pMoveInitiative({
+			id: this._selMoveEntry.value, beforeId: this._selMoveBefore.value || null,
+		}));
+		this._btnMoveUndo.addEventListener("click", () => this._pUndoInitiativeMove());
+		this._eleTurnOrder.addEventListener("dragover", event => {
+			if (!this._dragTurnId || this._isBusy) return;
+			event.preventDefault();
+			event.dataTransfer.dropEffect = "move";
+			const item = event.target.closest(".ew__turn");
+			this._eleTurnOrder.querySelectorAll(".ew__turn--drop-before, .ew__turn--drop-after")
+				.forEach(it => it.classList.remove("ew__turn--drop-before", "ew__turn--drop-after"));
+			if (item) {
+				item.classList.add(event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2
+					? "ew__turn--drop-before" : "ew__turn--drop-after");
+			}
+		});
+		this._eleTurnOrder.addEventListener("drop", event => {
+			if (!this._dragTurnId || this._isBusy) return;
+			event.preventDefault();
+			const item = event.target.closest(".ew__turn");
+			const beforeId = item
+				? event.clientY < item.getBoundingClientRect().top + item.offsetHeight / 2
+					? item.dataset.turnId : item.nextElementSibling?.dataset.turnId ?? null
+				: null;
+			const id = this._dragTurnId;
+			this._dragTurnId = null;
+			this._eleTurnOrder.querySelectorAll(".ew__turn--drop-before, .ew__turn--drop-after")
+				.forEach(it => it.classList.remove("ew__turn--drop-before", "ew__turn--drop-after"));
+			this._pMoveInitiative({id, beforeId});
+		});
 		this._inpRosterSearch.addEventListener("input", () => this._renderRosterView());
 		this._selRosterSort.addEventListener("change", () => this._renderRosterView());
 		this._selRosterFilter.addEventListener("change", () => this._renderRosterView());
@@ -293,6 +333,10 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.disabled = this._isBusy || isStarted || !hasInitiative;
 		this._btnTurnNext.disabled = this._isBusy || !isStarted;
 		this._btnTurnReset.disabled = this._isBusy || !isStarted;
+		this._selMoveEntry.disabled = this._selMoveBefore.disabled = this._btnMoveApply.disabled = this._isBusy || !this._state.instances.length;
+		this._btnMoveUndo.disabled = this._isBusy || !this._initiativeUndo;
+		this._eleTurnOrder.querySelectorAll(".ew__turn-move, .ew__turn-edit, .ew__turn-init").forEach(control => control.disabled = this._isBusy);
+		this._eleUnrolledOrder.querySelectorAll(".ew__turn-move").forEach(button => button.disabled = this._isBusy);
 		this._btnHandoffQueue.disabled = this._isBusy || this._handoffReadError || !hasTargets || !this._state.sourceList;
 		this._btnHandoffClear.disabled = this._isBusy || !(this._pendingHandoff || this._corruptHandoffToken);
 		this._btnHandoffClear.textContent = this._corruptHandoffToken ? "Clear damaged queue" : "Clear queued snapshot";
@@ -442,6 +486,7 @@ export class EncounterWorkspacePage {
 			}
 			this._state = next;
 			this._hpUndo = [];
+			this._clearInitiativeMove();
 			this._collapsedGroups.clear();
 			this._focusedInstanceId = null;
 			this._viewMode = "focused";
@@ -516,6 +561,7 @@ export class EncounterWorkspacePage {
 			this._state = await this._store.pSave(next);
 			if (previousTurn.activeId !== next.turn.activeId) this._focusActiveTurn();
 			isSaved = true;
+			this._clearInitiativeMove();
 			this._render();
 			const turnNotice = previousTurn.activeId !== next.turn.activeId
 				? ` Active turn ${next.turn.round ? `moved to ${this._getTurnName(next.turn.activeId)}` : "was reset because no former member has initiative"}.`
@@ -582,6 +628,7 @@ export class EncounterWorkspacePage {
 			this._state = await this._store.pSave(next);
 			if (previousTurn.activeId !== next.turn.activeId) this._focusActiveTurn();
 			isSaved = true;
+			this._clearInitiativeMove();
 			this._render();
 			this._setStatus(`Shared turn enabled at initiative ${total} for ${members.length} monsters.${previousTurn.activeId !== next.turn.activeId ? " The active member is now represented by the group's single turn." : ""} Original totals are preserved.`);
 		} catch (e) {
@@ -781,6 +828,7 @@ export class EncounterWorkspacePage {
 			this._state = await this._store.pSave(state);
 			isSaved = true;
 			if (resetHpIds.length) this._hpUndo = this._hpUndo.filter(snapshots => !snapshots.some(it => resetHpIds.includes(it.id)));
+			if (splitIds.length) this._clearInitiativeMove();
 			this._render();
 			this._clearRollResults();
 			const names = this._getTargetNames(changedIds);
@@ -1180,6 +1228,7 @@ export class EncounterWorkspacePage {
 			const total = !trimmed ? null : /^[+-]?\d+$/.test(trimmed) ? Number(trimmed) : NaN;
 			const next = EncounterWorkspaceState.withInitiative(this._state, {id, total});
 			this._state = await this._store.pSave(next);
+			this._clearInitiativeMove();
 			const group = getEncounterSharedGroup(this._state, id);
 			this._renderVitals(group?.memberIds || [id]);
 			this._refreshGroupInitiativeInputs();
@@ -1191,11 +1240,24 @@ export class EncounterWorkspacePage {
 			const group = getEncounterSharedGroup(this._state, id);
 			const input = group && this._groupInitiativeInputs?.get(group.id);
 			if (input) input.value = group.initiative ?? "";
+			const turnInput = [...(this._eleTurnOrder?.querySelectorAll(".ew__turn-init") || [])].find(it => it.dataset.turnId === id);
+			if (turnInput) {
+				turnInput.value = String(group?.initiative ?? this._state.instances.find(it => it.id === id)?.initiative ?? "");
+				turnInput.hidden = true;
+				turnInput.parentElement.querySelector("strong").hidden = false;
+			}
 			this._renderVitals(group?.memberIds || [id]);
 			this._setError(`Initiative was not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);
 			this._restoreVitalFocus(focused, id, "initiative");
+			if (focused?.classList?.contains("ew__turn-init")) {
+				const edit = [...this._eleTurnOrder.querySelectorAll(".ew__turn-edit")]
+					.find(it => it.dataset.turnId === id);
+				const unrolled = [...this._eleUnrolledOrder.querySelectorAll(".ew__turn")]
+					.find(it => it.dataset.turnId === id)?.querySelector(".ew__turn-move");
+				(edit || unrolled)?.focus({preventScroll: true});
+			}
 		}
 	}
 
@@ -1213,6 +1275,7 @@ export class EncounterWorkspacePage {
 			if (results.length) {
 				const next = EncounterWorkspaceState.withInitiativeResults(this._state, results.map(({id, total}) => ({id, total})));
 				this._state = await this._store.pSave(next);
+				this._clearInitiativeMove();
 				this._renderVitals(results.flatMap(it => getEncounterSharedGroup(this._state, it.id)?.memberIds || [it.id]));
 				this._refreshGroupInitiativeInputs();
 				this._renderTurnOrder();
@@ -1236,11 +1299,102 @@ export class EncounterWorkspacePage {
 		try {
 			const next = EncounterWorkspaceState.withTurn(this._state, action);
 			this._state = await this._store.pSave(next);
+			this._clearInitiativeMove();
 			this._renderTurnOrder();
 			if (action !== "reset") this._focusCurrentTurn();
 			this._setStatus(action === "reset" ? "Turns reset; initiative totals are unchanged." : `Round ${next.turn.round}: ${this._getTurnName(next.turn.activeId)} is active.`);
 		} catch (e) {
 			this._setError(`Turns were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	_clearInitiativeMove () {
+		this._initiativeUndo = null;
+		if (!this._eleMoveReport) return;
+		this._eleMoveReport.hidden = true;
+		this._eleMoveReportList.replaceChildren();
+	}
+
+	_getInitiativeEntryLabels (entries) {
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		const byId = new Map(this._state.instances.map(it => [it.id, it]));
+		entries.forEach(({entry}) => {
+			if (!entry.memberIds) return;
+			const first = getEncounterEffectiveMonster(byId.get(entry.memberIds[0]));
+			labels.set(entry.id, `${first._displayName || first.name} ×${entry.memberIds.length} (shared turn)`);
+		});
+		return labels;
+	}
+
+	_renderInitiativeMoveReport (changes) {
+		const labels = this._getInitiativeEntryLabels(EncounterWorkspaceState.getInitiativeEntries(this._state));
+		const items = changes.map(({id, before, after}) => {
+			const item = document.createElement("li");
+			item.textContent = `${labels.get(id)}: ${before == null ? "unrolled" : before} → ${after == null ? "unrolled" : after}`;
+			return item;
+		});
+		this._eleMoveReportSummary.textContent = `Initiative changes · ${changes.length} ${changes.length === 1 ? "turn entry" : "turn entries"}`;
+		this._eleMoveReportList.replaceChildren(...items);
+		this._eleMoveReport.hidden = false;
+		this._eleMoveReport.open = true;
+	}
+
+	async _pMoveInitiative ({id, beforeId}) {
+		if (this._isBusy) return;
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const {state, changes, undo} = EncounterWorkspaceState.withInitiativeReorder(this._state, {id, beforeId});
+			if (!changes.length) return this._setStatus("This turn entry is already in that position; no initiatives changed.");
+			this._state = await this._store.pSave(state);
+			isSaved = true;
+			this._initiativeUndo = undo;
+			const members = changes.flatMap(it => getEncounterSharedGroup(this._state, it.id)?.memberIds || [it.id]);
+			this._renderVitals(members);
+			this._refreshGroupInitiativeInputs();
+			this._renderTurnOrder();
+			this._refreshRosterFor("initiative");
+			this._clearRollResults();
+			this._renderInitiativeMoveReport(changes);
+			const labels = this._getInitiativeEntryLabels(EncounterWorkspaceState.getInitiativeEntries(this._state));
+			this._setStatus(`Moved ${labels.get(id)}. ${changes.length} initiative ${changes.length === 1 ? "total" : "totals"} changed; every old and new total is listed below. Undo is available until the next initiative, group or turn edit.`);
+		} catch (e) {
+			this._setError(isSaved
+				? `Initiative move was saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload to see the new order.`
+				: `Initiative move was not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	async _pUndoInitiativeMove () {
+		if (this._isBusy || !this._initiativeUndo) return;
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const undo = this._initiativeUndo;
+			let next;
+			try {
+				next = EncounterWorkspaceState.withInitiativeReorderUndo(this._state, undo);
+			} catch (e) {
+				this._clearInitiativeMove();
+				throw e;
+			}
+			this._state = await this._store.pSave(next);
+			isSaved = true;
+			this._clearInitiativeMove();
+			this._renderVitals(undo.changes.flatMap(it => getEncounterSharedGroup(this._state, it.id)?.memberIds || [it.id]));
+			this._refreshGroupInitiativeInputs();
+			this._renderTurnOrder();
+			this._refreshRosterFor("initiative");
+			this._renderInitiativeMoveReport(undo.changes.map(({id, before, after}) => ({id, before: after, after: before})));
+			this._setStatus(`Undid the initiative move for ${undo.changes.length} ${undo.changes.length === 1 ? "turn entry" : "turn entries"}. Restored totals are listed below.`);
+		} catch (e) {
+			this._setError(isSaved
+				? `Initiative undo was saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload to see the restored order.`
+				: `Initiative undo was not saved: ${this._getErrorMessage(e)}. ${this._initiativeUndo ? "The working encounter is unchanged." : "The move can no longer be undone safely."}`);
 		} finally {
 			this._setBusy(false);
 		}
@@ -1723,6 +1877,7 @@ export class EncounterWorkspacePage {
 			if (!selected.has(instance.id)) return;
 			const container = this._vitalContainers.get(instance.id);
 			this._renderCardSummary(instance, labels.get(instance.id));
+			this._renderRosterMeta(instance);
 			if (!container) return;
 			const shared = getEncounterSharedGroup(this._state, instance.id);
 			const fields = [
@@ -1762,20 +1917,46 @@ export class EncounterWorkspacePage {
 				return field;
 			});
 			container.replaceChildren(...controls);
-			this._renderRosterMeta(instance);
 			this._renderCardSummary(instance, labels.get(instance.id));
 		});
 		this._renderActiveVitals();
 	}
 
 	_renderTurnOrder () {
+		const entries = EncounterWorkspaceState.getInitiativeEntries(this._state);
 		const order = EncounterWorkspaceState.getInitiativeOrder(this._state);
-		const labels = getEncounterInstanceLabels(this._state.instances);
+		const labels = this._getInitiativeEntryLabels(entries);
 		const {round, activeId} = this._state.turn;
 		this._eleRoundStatus.textContent = round ? `Round ${round} · ${this._getTurnName(activeId)}'s turn` : "Not started";
+		const createMoveButton = (entry) => {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "ve-btn ve-btn-default ve-btn-xs ew__turn-move";
+			button.textContent = "Move";
+			button.draggable = true;
+			button.disabled = this._isBusy;
+			button.title = "Drag onto a turn to place before or after it, or click to choose a position.";
+			button.setAttribute("aria-label", `Move ${labels.get(entry.id)}: drag or choose a position`);
+			button.addEventListener("click", () => {
+				this._selMoveEntry.value = entry.id;
+				this._selMoveBefore.focus();
+			});
+			button.addEventListener("dragstart", event => {
+				this._dragTurnId = entry.id;
+				event.dataTransfer.effectAllowed = "move";
+				event.dataTransfer.setData("text/plain", entry.id);
+			});
+			button.addEventListener("dragend", () => {
+				this._dragTurnId = null;
+				this._eleTurnOrder.querySelectorAll(".ew__turn--drop-before, .ew__turn--drop-after")
+					.forEach(it => it.classList.remove("ew__turn--drop-before", "ew__turn--drop-after"));
+			});
+			return button;
+		};
 		const items = order.map((instance, index) => {
 			const item = document.createElement("li");
 			item.className = "ew__turn";
+			item.dataset.turnId = instance.id;
 			if (instance.id === activeId) {
 				item.classList.add("ew__turn--active");
 				item.setAttribute("aria-current", "step");
@@ -1785,17 +1966,76 @@ export class EncounterWorkspacePage {
 			rank.textContent = `${index + 1}.`;
 			const name = document.createElement("span");
 			name.className = "ew__turn-name";
-			name.textContent = instance.memberIds ? this._getTurnName(instance.id) : labels.get(instance.id);
+			name.textContent = labels.get(instance.id);
 			const total = document.createElement("strong");
 			total.textContent = String(instance.initiative);
-			item.append(rank, name, total);
+			const input = document.createElement("input");
+			input.type = "number";
+			input.step = "1";
+			input.value = String(instance.initiative);
+			input.className = "ve-form-control ew__turn-init";
+			input.dataset.turnId = instance.id;
+			input.setAttribute("aria-label", `Initiative total for ${labels.get(instance.id)}`);
+			input.hidden = true;
+			input.addEventListener("change", () => this._pSetInitiative({id: instance.id, raw: input.value}));
+			input.addEventListener("keydown", event => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					input.blur();
+				} else if (event.key === "Escape") {
+					input.value = String(instance.initiative);
+					input.hidden = true;
+					total.hidden = false;
+					edit.focus();
+				}
+			});
+			input.addEventListener("blur", () => {
+				if (this._isBusy || !input.isConnected) return;
+				input.value = String(instance.initiative);
+				input.hidden = true;
+				total.hidden = false;
+			});
+			const edit = document.createElement("button");
+			edit.type = "button";
+			edit.className = "ve-btn ve-btn-default ve-btn-xs ew__turn-edit";
+			edit.dataset.turnId = instance.id;
+			edit.textContent = "Edit";
+			edit.disabled = this._isBusy;
+			edit.setAttribute("aria-label", `Edit initiative total for ${labels.get(instance.id)}`);
+			edit.addEventListener("click", () => {
+				total.hidden = true;
+				input.hidden = false;
+				input.focus();
+				input.select();
+			});
+			item.append(rank, name, total, input, edit, createMoveButton(instance));
 			return item;
 		});
 		this._eleTurnOrder.replaceChildren(...items);
-		const unrolled = this._state.instances.filter(it => getEncounterInitiativeTotal(this._state, it) == null);
+		const unrolled = entries.map(({entry}) => entry).filter(it => it.initiative == null);
+		const unrolledCount = unrolled.reduce((count, it) => count + (it.memberIds?.length || 1), 0);
 		this._eleInitUnrolled.textContent = unrolled.length
-			? `${unrolled.length} unrolled (not in turn order): ${this._getTargetNames(unrolled.map(it => it.id))}.`
+			? `${unrolledCount} unrolled ${unrolledCount === 1 ? "monster" : "monsters"} (not in turn order). Drag a Move button to a turn, or choose a position above.`
 			: order.length ? "All monsters have initiative." : "Enter or roll initiative to create a turn order.";
+		this._eleUnrolledOrder.replaceChildren(...unrolled.map(entry => {
+			const item = document.createElement("li");
+			item.className = "ew__turn ew__turn--unrolled";
+			item.dataset.turnId = entry.id;
+			const name = document.createElement("span");
+			name.className = "ew__turn-name";
+			name.textContent = labels.get(entry.id);
+			item.append(name, createMoveButton(entry));
+			return item;
+		}));
+		this._eleUnrolledOrder.hidden = !unrolled.length;
+		const selectedId = this._selMoveEntry.value;
+		const beforeId = this._selMoveBefore.value;
+		this._selMoveEntry.replaceChildren(...entries.map(({entry}) =>
+			new Option(`${labels.get(entry.id)} · ${entry.initiative ?? "unrolled"}`, entry.id)));
+		if (entries.some(({entry}) => entry.id === selectedId)) this._selMoveEntry.value = selectedId;
+		this._selMoveBefore.replaceChildren(new Option("End of order", ""),
+			...order.map(entry => new Option(labels.get(entry.id), entry.id)));
+		if (order.some(entry => entry.id === beforeId)) this._selMoveBefore.value = beforeId;
 		this._updateControls();
 		this._renderActiveVitals();
 		this._updateFocusStatus();
