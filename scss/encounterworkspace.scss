@@ -10,6 +10,11 @@
 		padding-bottom: 32px;
 		color: vars.$rgb-font;
 
+		:is(button, select, input, textarea, summary):focus-visible {
+			outline: 2px solid vars.$rgb-active-blue;
+			outline-offset: 2px;
+		}
+
 		&__header,
 		&__source,
 		&__rail-header {
@@ -21,6 +26,7 @@
 		}
 
 		&__header {
+			align-items: end;
 			padding-bottom: 10px;
 			border-bottom: 1px solid vars.$rgb-border-grey;
 
@@ -34,6 +40,18 @@
 			}
 		}
 
+		&__empty-start {
+			padding: 16px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__empty-start[hidden],
+		&__setup[hidden],
+		&__header p[hidden] {
+			display: none;
+		}
+
 		&__actions,
 		&__selection-actions {
 			display: flex;
@@ -44,8 +62,10 @@
 		&__status {
 			margin: 8px 0;
 			padding: 7px 12px;
+			min-height: 38px;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg--alt;
+			overflow-wrap: anywhere;
 		}
 
 		&__status--error,
@@ -133,14 +153,15 @@
 
 		&__operations {
 			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
+			grid-template-columns: minmax(0, 1fr);
 			gap: 14px;
 			margin-top: 12px;
 		}
 
 		&__setup,
 		&__action-drawer,
-		&__roster-help {
+		&__roster-help,
+		&__position {
 			min-width: 0;
 
 			> summary {
@@ -158,11 +179,7 @@
 		}
 
 		&__setup {
-			margin-bottom: 10px;
-
-			> .ew__actions {
-				padding: 10px 0;
-			}
+			margin-top: 18px;
 		}
 
 		&__action-drawer {
@@ -176,7 +193,7 @@
 			gap: 8px 18px;
 			min-width: 0;
 			padding: 9px 12px;
-			margin-bottom: 14px;
+			margin-bottom: 10px;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg;
 
@@ -195,8 +212,49 @@
 			}
 
 			p {
-				margin: 3px 0 0;
+				margin: 2px 0 0;
 				overflow-wrap: anywhere;
+			}
+		}
+
+		&__turn-controls .ve-btn-primary {
+			min-height: 44px;
+			padding-inline: 20px;
+		}
+
+		&__turn-controls [hidden] {
+			display: none;
+		}
+
+		&__initiative {
+			min-width: 0;
+			margin-bottom: 14px;
+			padding: 10px 12px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&__initiative-tools {
+			margin-top: 9px;
+			padding-top: 9px;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__selection-caption {
+			margin: 0 0 8px;
+			overflow-wrap: anywhere;
+			font-weight: 600;
+		}
+
+		&__position {
+			margin-top: 10px;
+
+			> summary {
+				display: list-item;
+			}
+
+			.ew__move-controls {
+				margin-top: 8px;
 			}
 		}
 
@@ -348,17 +406,22 @@
 
 			p {
 				margin: 0;
-				font-weight: 600;
+				font-size: 1rem;
+			}
+
+			h3 {
+				margin: 0;
+				font-size: 1rem;
 			}
 		}
 
 		&__turn-order {
 			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+			grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
 			gap: 8px;
 			margin: 12px 0 0;
 			padding: 0;
-			list-style-position: inside;
+			list-style: none;
 
 			&:empty {
 				min-height: 48px;
@@ -397,8 +460,6 @@
 			}
 
 			ul {
-				max-height: 15rem;
-				overflow-y: auto;
 				margin: 8px 0 0;
 				padding-left: 22px;
 			}
@@ -406,7 +467,7 @@
 
 		&__unrolled-order {
 			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+			grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
 			gap: 8px;
 			margin: 8px 0 0;
 			padding: 0;
@@ -419,18 +480,22 @@
 		}
 
 		&__turn {
-			display: flex;
-			flex-wrap: wrap;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) repeat(4, auto);
 			align-items: center;
-			justify-content: space-between;
-			gap: 8px;
-			padding: 7px 9px;
+			gap: 4px;
+			min-width: 0;
+			padding: 5px 7px;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg;
 
 			&--active {
 				border-color: vars.$rgb-active-blue;
 				outline: 1px solid vars.$rgb-active-blue;
+			}
+
+			&--next:not(.ew__turn--active) {
+				border-color: vars.$rgb-active-blue;
 			}
 
 			&--drop-before {
@@ -447,7 +512,28 @@
 			}
 
 			.ew__turn-name {
-				flex: 1;
+				grid-column: 2 / 4;
+				grid-row: 1;
+				font-weight: 600;
+			}
+
+			.ew__turn-rank {
+				grid-column: 1;
+				grid-row: 1;
+			}
+
+			.ew__turn-state {
+				grid-column: 1 / 3;
+				grid-row: 2;
+				font-size: 1rem;
+				font-weight: 600;
+			}
+
+			> strong,
+			.ew__turn-init {
+				grid-column: 4 / 7;
+				grid-row: 1;
+				justify-self: end;
 			}
 
 			strong {
@@ -455,9 +541,14 @@
 			}
 
 			.ew__turn-init {
-				width: 7ch;
-				min-width: 65px;
+				width: 6ch;
+				min-width: 60px;
 				font-variant-numeric: tabular-nums;
+			}
+
+			.ew__turn-edit {
+				grid-column: 3;
+				grid-row: 2;
 			}
 
 			.ew__turn-init[hidden],
@@ -466,11 +557,34 @@
 			}
 
 			.ew__turn-move {
+				grid-column: 4;
+				grid-row: 2;
 				cursor: grab;
 
 				&:active {
 					cursor: grabbing;
 				}
+			}
+
+			.ew__turn-step {
+				grid-row: 2;
+				min-width: 34px;
+
+				&:nth-last-child(2) {
+					grid-column: 5;
+				}
+
+				&:last-child {
+					grid-column: 6;
+				}
+			}
+
+			&--unrolled .ew__turn-name {
+				grid-column: 1 / 4;
+			}
+
+			&--unrolled .ew__turn-move {
+				grid-row: 1;
 			}
 		}
 
@@ -578,8 +692,7 @@
 		}
 
 		&__results-scroll {
-			max-height: 300px;
-			overflow: auto;
+			overflow-x: auto;
 		}
 
 		&__results-table {
@@ -607,7 +720,7 @@
 
 		&__layout {
 			display: grid;
-			grid-template-columns: minmax(235px, 300px) minmax(0, 1fr);
+			grid-template-columns: minmax(310px, 360px) minmax(0, 1fr);
 			align-items: start;
 			gap: 18px;
 		}
@@ -644,6 +757,7 @@
 		&__focus-nav {
 			strong {
 				min-width: 0;
+				flex-basis: 100%;
 				overflow-wrap: anywhere;
 			}
 		}
@@ -685,6 +799,35 @@
 			min-width: 0;
 			border: 1px solid vars.$rgb-border-grey;
 			background: vars.$rgb-bg--alt;
+		}
+
+		&__quick {
+			padding: 12px;
+			border-top: 1px solid vars.$rgb-border-grey;
+
+			h3 {
+				margin: 0 0 6px;
+				font-size: 1rem;
+			}
+
+			.ew__operation,
+			.ew__results {
+				margin-top: 12px;
+				padding: 12px 0 0;
+				border: 0;
+				border-top: 1px solid vars.$rgb-border-grey--muted;
+				background: transparent;
+
+				h4 {
+					margin: 0 0 8px;
+					font-size: 1rem;
+					font-weight: 600;
+				}
+			}
+
+			.ew__open-bulk {
+				margin-top: 12px;
+			}
 		}
 
 		&__rail-header {
@@ -733,8 +876,7 @@
 		}
 
 		&__roster {
-			max-height: 65vh;
-			overflow-y: auto;
+			min-width: 0;
 		}
 
 		&__roster-group {
@@ -753,6 +895,25 @@
 		&__group-title {
 			min-width: 0;
 			overflow-wrap: anywhere;
+		}
+
+		&__group-select {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 44px;
+			height: 44px;
+			margin: 0;
+			cursor: pointer;
+		}
+
+		&__group-selection {
+			grid-column: 2 / -1;
+			font-size: 1rem;
+		}
+
+		&__group-header > .ew__group-action {
+			grid-column: 1;
 		}
 
 		&__group-controls {
@@ -836,6 +997,16 @@
 			font-size: 1rem;
 		}
 
+		&__roster-state {
+			grid-column: 1 / -1;
+			font-size: 1rem;
+			font-weight: 600;
+
+			&:empty {
+				display: none;
+			}
+		}
+
 		&__statblocks {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr);
@@ -871,6 +1042,7 @@
 			background: vars.$rgb-bg--alt;
 			font-size: 1rem;
 			font-weight: 600;
+			overflow-wrap: anywhere;
 
 			&:focus {
 				outline: 2px solid vars.$rgb-active-blue;
@@ -972,14 +1144,23 @@
 	.ve-night-mode .ew {
 		color: vars-night.$rgb-font--night;
 
+		:is(button, select, input, textarea, summary):focus-visible {
+			outline-color: vars-night.$rgb-link-blue--night;
+		}
+
 		&__header,
 		&__rail-header,
+		&__initiative,
+		&__empty-start,
+		&__quick,
 		&__rail,
 		&__focus-bar,
 		&__card,
 		&__setup > summary,
 		&__action-drawer > summary,
 		&__roster-help > summary,
+		&__position > summary,
+		&__move-report > summary,
 		&__notices,
 		&__operation,
 		&__results,
@@ -992,11 +1173,15 @@
 		}
 
 		&__rail,
+		&__initiative,
+		&__empty-start,
 		&__focus-bar,
 		&__card,
 		&__setup > summary,
 		&__action-drawer > summary,
 		&__roster-help > summary,
+		&__position > summary,
+		&__move-report > summary,
 		&__status,
 		&__notices,
 		&__operation,
@@ -1070,6 +1255,15 @@
 				border-color: vars-night.$rgb-link-blue--night;
 				outline-color: vars-night.$rgb-link-blue--night;
 			}
+
+			&--next:not(.ew__turn--active) {
+				border-color: vars-night.$rgb-link-blue--night;
+			}
+		}
+
+		&__quick,
+		&__initiative-tools {
+			border-color: vars-night.$rgb-border-grey--night;
 		}
 
 		&__help,
@@ -1115,16 +1309,12 @@
 
 		.ew__focus {
 			grid-column: 1;
-			grid-row: 1;
+			grid-row: 2;
 		}
 
 		.ew__rail {
 			grid-column: 1;
-			grid-row: 2;
-		}
-
-		.ew__roster {
-			max-height: 225px;
+			grid-row: 1;
 		}
 	}
 
@@ -1137,10 +1327,6 @@
 				width: 100%;
 				min-height: 44px;
 			}
-		}
-
-		.ew__results-scroll {
-			max-height: 360px;
 		}
 
 		.ew__results-table {
@@ -1191,6 +1377,59 @@
 	}
 
 	@media (width <= 480px) {
+		.ew {
+			width: calc(100% - 20px);
+
+			button,
+			select,
+			input:not([type="checkbox"]),
+			summary {
+				min-width: 44px;
+				min-height: 44px;
+			}
+
+			input,
+			select,
+			textarea {
+				font-size: max(16px, 1rem);
+			}
+
+			label:has(> input[type="checkbox"]) {
+				min-height: 44px;
+			}
+
+			input[type="checkbox"] {
+				width: 20px;
+				height: 20px;
+			}
+		}
+
+		.ew__header > button,
+		.ew__turn-controls,
+		.ew__turn-controls button {
+			width: 100%;
+		}
+
+		.ew__turn-order,
+		.ew__unrolled-order {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.ew__turn {
+			.ew__turn-edit,
+			.ew__turn-move,
+			.ew__turn-step {
+				min-width: 44px;
+			}
+		}
+
+		.ew__move-controls select,
+		.ew__move-controls button,
+		.ew__quick .ew__selection-actions button,
+		.ew__open-bulk {
+			width: 100%;
+		}
+
 		.ew__focus-nav {
 			width: 100%;
 		}

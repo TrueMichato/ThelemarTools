@@ -73,6 +73,14 @@ export class EncounterWorkspacePage {
 		this._eleStatus = document.getElementById("ew-status");
 		this._eleName = document.getElementById("ew-name");
 		this._eleSummary = document.getElementById("ew-summary");
+		this._eleInitTargets = document.getElementById("ew-init-targets");
+		this._eleAdvancedTargets = document.getElementById("ew-advanced-targets");
+		this._eleRollTargets = document.getElementById("ew-roll-targets");
+		this._eleHpTargets = document.getElementById("ew-hp-targets");
+		this._eleConditionTargets = document.getElementById("ew-condition-targets");
+		this._eleNextStatus = document.getElementById("ew-next-status");
+		this._eleEmptyStart = document.getElementById("ew-empty-start");
+		this._eleIntro = document.getElementById("ew-intro");
 		this._eleNotices = document.getElementById("ew-notices");
 		this._eleRoster = document.getElementById("ew-roster");
 		this._eleStatblocks = document.getElementById("ew-statblocks");
@@ -84,6 +92,10 @@ export class EncounterWorkspacePage {
 		this._btnChoose = document.getElementById("ew-choose");
 		this._btnSelectAll = document.getElementById("ew-all");
 		this._btnSelectNone = document.getElementById("ew-none");
+		this._btnSelectCurrent = document.getElementById("ew-select-current");
+		this._btnSelectViewed = document.getElementById("ew-select-viewed");
+		this._btnOpenBulk = document.getElementById("ew-open-bulk");
+		this._eleActions = document.getElementById("ew-actions");
 		this._btnGroupSelected = document.getElementById("ew-group-selected");
 		this._selRollType = document.getElementById("ew-roll-type");
 		this._selRollKey = document.getElementById("ew-roll-key");
@@ -147,6 +159,7 @@ export class EncounterWorkspacePage {
 		this._eleMoveReportList = document.getElementById("ew-move-report-list");
 		this._eleActiveVitals = document.getElementById("ew-active-vitals");
 		this._eleSetup = document.getElementById("ew-setup");
+		this._elePosition = document.getElementById("ew-position");
 		this._inpRosterSearch = document.getElementById("ew-roster-search");
 		this._selRosterSort = document.getElementById("ew-roster-sort");
 		this._selRosterFilter = document.getElementById("ew-roster-filter");
@@ -159,10 +172,30 @@ export class EncounterWorkspacePage {
 		this._btnCardsMore = document.getElementById("ew-cards-more");
 	}
 
+	_pAddTargets (ids) {
+		const available = new Set(this._state.instances.map(it => it.id));
+		const next = [...new Set([...this._state.selectedIds, ...ids.filter(id => available.has(id))])];
+		if (next.length === this._state.selectedIds.length) return this._setStatus("Those monsters are already selected as targets.");
+		this._pSetTargets(next);
+	}
+
 	async pInit () {
 		this._btnChoose.addEventListener("click", () => this._pChoose());
 		this._btnSelectAll.addEventListener("click", () => this._pSetTargets(this._state.instances.map(it => it.id)));
 		this._btnSelectNone.addEventListener("click", () => this._pSetTargets([]));
+		this._btnSelectCurrent.addEventListener("click", () => {
+			const activeId = this._state.turn.activeId;
+			const group = this._state.groups.find(it => it.id === activeId);
+			this._pAddTargets(group?.memberIds || [activeId]);
+		});
+		this._btnSelectViewed.addEventListener("click", () => this._pAddTargets([this._focusedInstanceId]));
+		this._btnOpenBulk.addEventListener("click", () => {
+			this._eleActions.open = true;
+			const bulk = this._eleActions.querySelector(".ew__bulk-edit");
+			bulk.open = true;
+			bulk.querySelector("summary").focus({preventScroll: true});
+			bulk.scrollIntoView({block: "start"});
+		});
 		this._btnGroupSelected.addEventListener("click", () => this._pCreateGroup());
 		this._selRollType.addEventListener("change", () => this._renderRollKeys());
 		this._selRollKey.addEventListener("change", () => this._clearRollResults());
@@ -291,6 +324,9 @@ export class EncounterWorkspacePage {
 		this._btnChoose.disabled = isBusy || !this._isCatalogReady;
 		this._btnSelectAll.disabled = isBusy || !this._state.instances.length;
 		this._btnSelectNone.disabled = isBusy || !this._state.instances.length;
+		this._btnSelectCurrent.disabled = isBusy || !this._state.turn?.activeId;
+		this._btnSelectViewed.disabled = isBusy || !this._focusedInstanceId;
+		this._btnOpenBulk.disabled = isBusy || !this._state.instances.length;
 		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
 		this._groupChecks.forEach(check => check.disabled = isBusy);
@@ -307,10 +343,10 @@ export class EncounterWorkspacePage {
 	_updateControls () {
 		const count = this._state.selectedIds.length;
 		const hasTargets = !!count;
-		this._eleRollHint.textContent = `${count} ${count === 1 ? "monster" : "monsters"} will roll. Results also appear in the dice roller.`;
+		this._eleRollHint.textContent = hasTargets ? "Results also appear in the dice roller." : "No targets selected. Select a monster in the roster to roll.";
 		this._selRollType.disabled = this._selRollKey.disabled = this._selRollMode.disabled = this._isBusy || !this._state.instances.length;
 		this._btnRoll.disabled = this._isBusy || !hasTargets;
-		this._selCondition.disabled = this._isBusy || !hasTargets || !this._selCondition.options.length;
+		this._selCondition.disabled = this._isBusy || !this._selCondition.options.length;
 		const condition = this._selCondition.value;
 		this._btnConditionAdd.disabled = this._isBusy || !hasTargets || !this._referenceData.conditions.some(it => it.name === condition);
 		this._btnConditionRemove.disabled = this._isBusy || !hasTargets || !this._state.instances.some(it =>
@@ -320,33 +356,40 @@ export class EncounterWorkspacePage {
 			this._selPreset, this._inpPresetSearch, this._inpModName, this._checkModCheck, this._checkModSkill,
 			this._checkModSave, this._checkModInitiative, this._checkModAttack,
 			this._selModMode, this._inpModBonus,
-		].forEach(field => field.disabled = this._isBusy || !hasTargets);
+		].forEach(field => field.disabled = this._isBusy || !this._state.instances.length);
 		this._btnNoteAdd.disabled = this._btnModAdd.disabled = this._isBusy || !hasTargets;
 		this._btnPresetAdd.disabled = this._isBusy || !hasTargets || !this._selPreset.value;
 		this._selNoteRemove.disabled = this._isBusy || !hasTargets || this._selNoteRemove.options.length <= 1;
 		this._btnNoteRemove.disabled = this._selNoteRemove.disabled || !this._selNoteRemove.value;
 		this._selModRemove.disabled = this._isBusy || !hasTargets || this._selModRemove.options.length <= 1;
 		this._btnModRemove.disabled = this._selModRemove.disabled || !this._selModRemove.value;
-		this._inpHpExpression.disabled = this._checkHpHalf.disabled = this._isBusy || !hasTargets;
+		this._inpHpExpression.disabled = this._checkHpHalf.disabled = this._isBusy || !this._state.instances.length;
 		this._btnHpApply.disabled = this._isBusy || !hasTargets;
 		this._btnHpUndo.disabled = this._isBusy || !this._hpUndo.length;
-		this._selInitMode.disabled = this._isBusy || !hasTargets;
+		this._selInitMode.disabled = this._isBusy || !this._state.instances.length;
 		this._btnInitRoll.disabled = this._isBusy || !hasTargets;
 		const isStarted = !!this._state.turn?.round;
 		const hasInitiative = EncounterWorkspaceState.getInitiativeOrder(this._state).length;
 		this._btnTurnStart.disabled = this._isBusy || isStarted || !hasInitiative;
 		this._btnTurnNext.disabled = this._isBusy || !isStarted;
 		this._btnTurnReset.disabled = this._isBusy || !isStarted;
+		this._btnTurnStart.hidden = isStarted;
+		this._btnTurnNext.hidden = !isStarted;
+		this._btnTurnReset.hidden = !isStarted;
+		this._btnSelectCurrent.disabled = this._isBusy || !isStarted;
+		this._btnSelectViewed.disabled = this._isBusy || !this._focusedInstanceId;
 		this._selMoveEntry.disabled = this._selMoveBefore.disabled = this._btnMoveApply.disabled = this._isBusy || !this._state.instances.length;
 		this._btnMoveUndo.disabled = this._isBusy || !this._initiativeUndo;
-		this._eleTurnOrder.querySelectorAll(".ew__turn-move, .ew__turn-edit, .ew__turn-init").forEach(control => control.disabled = this._isBusy);
+		this._eleTurnOrder.querySelectorAll(".ew__turn-move, .ew__turn-edit, .ew__turn-init, .ew__turn-step").forEach(control => {
+			control.disabled = this._isBusy || control.dataset.edge === "true";
+		});
 		this._eleUnrolledOrder.querySelectorAll(".ew__turn-move").forEach(button => button.disabled = this._isBusy);
 		this._btnHandoffQueue.disabled = this._isBusy || this._handoffReadError || !hasTargets || !this._state.sourceList;
 		this._btnHandoffClear.disabled = this._isBusy || !(this._pendingHandoff || this._corruptHandoffToken);
 		this._btnHandoffClear.textContent = this._corruptHandoffToken ? "Clear damaged queue" : "Clear queued snapshot";
-		this._selBulkType.disabled = this._isBusy || !hasTargets;
-		this._selBulkChoice.disabled = this._isBusy || !hasTargets;
-		[this._inpBulkName, this._inpBulkDescription, this._inpBulkCost].forEach(input => input.disabled = this._isBusy || !hasTargets);
+		this._selBulkType.disabled = this._isBusy || !this._state.instances.length;
+		this._selBulkChoice.disabled = this._isBusy || !this._state.instances.length;
+		[this._inpBulkName, this._inpBulkDescription, this._inpBulkCost].forEach(input => input.disabled = this._isBusy || !this._state.instances.length);
 		this._btnBulkPreview.disabled = this._isBusy || !hasTargets;
 		this._tiles.forEach(tile => {
 			const button = tile.querySelector(".ew__statblock-edit");
@@ -1472,8 +1515,14 @@ export class EncounterWorkspacePage {
 
 		const {sourceList, instances, omissions} = this._state;
 		this._eleWorkspace.hidden = !sourceList;
+		this._btnChoose.textContent = sourceList ? "Change saved list" : "Choose saved list";
+		this._btnChoose.classList[sourceList ? "remove" : "add"]("ve-btn-primary");
+		this._btnChoose.classList[sourceList ? "add" : "remove"]("ve-btn-default");
+		this._eleEmptyStart.hidden = !!sourceList;
+		this._eleIntro.hidden = !!sourceList;
+		this._eleSetup.hidden = !sourceList;
 		if (this._setupSource !== sourceList?.saveId) {
-			this._eleSetup.open = !sourceList;
+			this._eleSetup.open = false;
 			this._setupSource = sourceList?.saveId;
 		}
 		if (!sourceList) return;
@@ -1600,12 +1649,17 @@ export class EncounterWorkspacePage {
 				const select = document.createElement("input");
 				select.type = "checkbox";
 				select.setAttribute("aria-label", `Select all ${group.memberIds.length} ${labels.get(group.memberIds[0])} group members`);
+				const selectionLabel = document.createElement("label");
+				selectionLabel.className = "ew__group-select";
+				selectionLabel.append(select);
 				select.addEventListener("change", () => {
 					const selected = new Set(this._state.selectedIds);
 					group.memberIds.forEach(id => select.checked ? selected.add(id) : selected.delete(id));
 					this._pSetTargets([...selected]);
 				});
-				this._groupChecks.set(group.id, {check: select, memberIds: group.memberIds});
+				const selection = document.createElement("span");
+				selection.className = "ew__group-selection";
+				this._groupChecks.set(group.id, {check: select, memberIds: group.memberIds, selection});
 				const toggle = this._getGroupButton({
 					text: "",
 					label: `${members.hidden ? "Expand" : "Collapse"} ${labels.get(group.memberIds[0])} group`,
@@ -1673,7 +1727,7 @@ export class EncounterWorkspacePage {
 						text: "Disband", onClick: () => this._pChangeGroup({action: "disband", groupId: group.id}),
 					}));
 				}
-				header.append(select, title, toggle, controls);
+				header.append(selectionLabel, title, selection, toggle, controls);
 				container.append(header);
 			}
 			group.visibleMembers.forEach(instance => {
@@ -1703,7 +1757,9 @@ export class EncounterWorkspacePage {
 				jump.addEventListener("click", () => this._setFocus(instance.id, {moveFocus: true}));
 				const meta = document.createElement("span");
 				meta.className = "ew__roster-meta";
-				row.append(label, jump, meta);
+				const states = document.createElement("span");
+				states.className = "ew__roster-state";
+				row.append(label, jump, states, meta);
 				this._checks.set(instance.id, check);
 				this._rosterMeta.set(instance.id, meta);
 				if (isGrouped) {
@@ -1873,8 +1929,8 @@ export class EncounterWorkspacePage {
 		const activeGroup = this._state.groups.find(it => it.id === this._state.turn.activeId);
 		const activeMembers = new Set(activeGroup?.memberIds || [this._state.turn.activeId]);
 		this._eleFocusStatus.textContent = label
-			? `${label}${index < 0 ? " · outside roster filter" : ` · ${index + 1} of ${this._visibleIds.length} shown`}`
-			: "No creature focused";
+			? `Viewing statblock: ${label}${index < 0 ? " · outside roster filter" : ` · ${index + 1} of ${this._visibleIds.length} shown`}`
+			: "No statblock viewed";
 		this._btnFocusPrev.disabled = this._isBusy || !this._visibleIds.length || index === 0;
 		this._btnFocusNext.disabled = this._isBusy || !this._visibleIds.length || index === this._visibleIds.length - 1;
 		this._btnFocusCurrent.disabled = this._isBusy || !this._state.turn.activeId;
@@ -1885,6 +1941,10 @@ export class EncounterWorkspacePage {
 			if (isFocused) jump.setAttribute("aria-current", "true");
 			else jump.removeAttribute("aria-current");
 			row.classList.toggle("ew__roster-row--active", activeMembers.has(row.dataset.instanceId));
+			row.querySelector(".ew__roster-state").textContent = [
+				activeMembers.has(row.dataset.instanceId) && this._state.turn.round ? "Active turn" : "",
+				isFocused ? "Viewing statblock" : "",
+			].filter(Boolean).join(" · ");
 		});
 		this._tiles.forEach((tile, id) => tile.classList.toggle("ew__statblock--active", activeMembers.has(id)));
 	}
@@ -1973,17 +2033,23 @@ export class EncounterWorkspacePage {
 		const labels = this._getInitiativeEntryLabels(entries);
 		const {round, activeId} = this._state.turn;
 		this._eleRoundStatus.textContent = round ? `Round ${round} · ${this._getTurnName(activeId)}'s turn` : "Not started";
+		const activeIndex = order.findIndex(it => it.id === activeId);
+		const next = order[round ? (activeIndex + 1) % order.length : 0];
+		this._eleNextStatus.textContent = next
+			? `Next: ${labels.get(next.id)}${round && activeIndex === order.length - 1 ? ` · round ${round + 1}` : ""}`
+			: "Next: enter or roll initiative to start turns.";
 		const createMoveButton = (entry) => {
 			const button = document.createElement("button");
 			button.type = "button";
 			button.className = "ve-btn ve-btn-default ve-btn-xs ew__turn-move";
-			button.textContent = "Move";
+			button.textContent = "⋮⋮ Move";
 			button.draggable = true;
 			button.disabled = this._isBusy;
 			button.title = "Drag onto a turn to place before or after it, or click to choose a position.";
 			button.setAttribute("aria-label", `Move ${labels.get(entry.id)}: drag or choose a position`);
 			button.addEventListener("click", () => {
 				this._selMoveEntry.value = entry.id;
+				this._elePosition.open = true;
 				this._selMoveBefore.focus();
 			});
 			button.addEventListener("dragstart", event => {
@@ -2006,6 +2072,7 @@ export class EncounterWorkspacePage {
 				item.classList.add("ew__turn--active");
 				item.setAttribute("aria-current", "step");
 			}
+			if (round && order[(activeIndex + 1) % order.length]?.id === instance.id && order.length > 1) item.classList.add("ew__turn--next");
 			const rank = document.createElement("span");
 			rank.className = "ew__turn-rank";
 			rank.textContent = `${index + 1}.`;
@@ -2053,7 +2120,24 @@ export class EncounterWorkspacePage {
 				input.focus();
 				input.select();
 			});
-			item.append(rank, name, total, input, edit, createMoveButton(instance));
+			const state = document.createElement("span");
+			state.className = "ew__turn-state";
+			state.textContent = instance.id === activeId ? "Active turn" : item.classList.contains("ew__turn--next") ? "Next" : "";
+			const step = (direction) => {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "ve-btn ve-btn-default ve-btn-xs ew__turn-step";
+				button.textContent = direction === -1 ? "↑" : "↓";
+				button.dataset.edge = String(direction === -1 ? index === 0 : index === order.length - 1);
+				button.disabled = this._isBusy || button.dataset.edge === "true";
+				button.setAttribute("aria-label", `Move ${labels.get(instance.id)} ${direction === -1 ? "up" : "down"} in initiative order`);
+				button.addEventListener("click", () => this._pMoveInitiative({
+					id: instance.id,
+					beforeId: direction === -1 ? order[index - 1].id : order[index + 2]?.id ?? null,
+				}));
+				return button;
+			};
+			item.append(rank, name, state, total, input, edit, createMoveButton(instance), step(-1), step(1));
 			return item;
 		});
 		this._eleTurnOrder.replaceChildren(...items);
@@ -2081,6 +2165,14 @@ export class EncounterWorkspacePage {
 		this._selMoveBefore.replaceChildren(new Option("End of order", ""),
 			...order.map(entry => new Option(labels.get(entry.id), entry.id)));
 		if (order.some(entry => entry.id === beforeId)) this._selMoveBefore.value = beforeId;
+		this._btnMoveUndo.textContent = this._initiativeUndo
+			? `Undo move · restore ${this._initiativeUndo.changes.length <= 2
+				? this._initiativeUndo.changes.map(({id, before}) => `${labels.get(id)} to ${before ?? "unrolled"}`).join(", ")
+				: `${this._initiativeUndo.changes.length} totals (see changes below)`}`
+			: "Undo last move";
+		this._btnMoveUndo.setAttribute("aria-label", this._initiativeUndo
+			? `Undo move; restore ${this._initiativeUndo.changes.slice(0, 5).map(({id, before}) => `${labels.get(id)} to ${before ?? "unrolled"}`).join(", ")}${this._initiativeUndo.changes.length > 5 ? ` and ${this._initiativeUndo.changes.length - 5} more totals` : ""}`
+			: "Undo last move");
 		this._updateControls();
 		this._renderActiveVitals();
 		this._updateFocusStatus();
@@ -2232,13 +2324,21 @@ export class EncounterWorkspacePage {
 
 	_updateTargets () {
 		const selected = new Set(this._state.selectedIds);
-		this._eleSummary.textContent = `${selected.size} of ${this._state.instances.length} selected as targets`;
+		const names = selected.size ? this._getTargetNames(this._state.selectedIds) : "No targets selected";
+		const outside = this._state.selectedIds.filter(id => !this._visibleIds.includes(id)).length;
+		this._eleSummary.textContent = `${selected.size} of ${this._state.instances.length} selected as targets: ${names}${outside ? ` · ${outside} outside roster filter` : ""}`;
+		this._eleInitTargets.textContent = `Initiative targets: ${names}`;
+		this._eleAdvancedTargets.textContent = `Bulk edit targets: ${names}`;
+		this._eleRollTargets.textContent = `Roll targets: ${names}`;
+		this._eleHpTargets.textContent = `HP targets: ${names}`;
+		this._eleConditionTargets.textContent = `Condition targets: ${names}`;
 		this._checks.forEach((check, id) => check.checked = selected.has(id));
-		this._groupChecks.forEach(({check, memberIds}) => {
+		this._groupChecks.forEach(({check, memberIds, selection}) => {
 			const count = memberIds.filter(id => selected.has(id)).length;
 			check.checked = count === memberIds.length;
 			check.indeterminate = count > 0 && count < memberIds.length;
 			check.setAttribute("aria-checked", check.indeterminate ? "mixed" : String(check.checked));
+			selection.textContent = `${count} of ${memberIds.length} selected`;
 		});
 		this._tiles.forEach((tile, id) => tile.classList.toggle("ew__statblock--selected", selected.has(id)));
 		this._renderEffectPickers();

@@ -119,6 +119,7 @@ test("shared turns move as a single entry and retain individual totals for split
 	await page.getByRole("button", {name: /Share turn$/}).click();
 	await encounter.openActions();
 	await page.locator("#ew-turn-start").click();
+	await page.locator("#ew-position > summary").click();
 	await page.locator("#ew-move-entry").selectOption({index: 0});
 	await expect(page.locator("#ew-move-entry option:checked")).toContainText("shared turn");
 	await page.locator("#ew-move-before").selectOption("");
@@ -155,6 +156,7 @@ test("a full 1000-monster encounter can put an unrolled entry in turn order", as
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({count: 1000});
 	await encounter.openActions();
+	await page.locator("#ew-position > summary").click();
 	await expect(page.locator("#ew-move-entry option")).toHaveCount(1000);
 	await page.locator("#ew-move-entry").selectOption("creature-999");
 	const moveStartedAt = Date.now();
