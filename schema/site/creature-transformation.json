@@ -1,0 +1,152 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "creature-transformation.json",
+	"title": "Creature transformations",
+	"description": "App-owned, non-executable recipes for transforming a selected monster or NPC. An operation changes only its named field; all other chassis fields are retained.",
+	"type": "object",
+	"properties": {
+		"creatureTransformation": {
+			"type": "array",
+			"items": {"$ref": "#/$defs/transformation"}
+		}
+	},
+	"required": ["creatureTransformation"],
+	"additionalProperties": false,
+	"$defs": {
+		"identity": {
+			"type": "object",
+			"properties": {
+				"name": {"type": "string", "minLength": 1},
+				"source": {"type": "string", "minLength": 1}
+			},
+			"required": ["name", "source"],
+			"additionalProperties": false
+		},
+		"provenance": {
+			"type": "object",
+			"properties": {
+				"edition": {"enum": ["classic", "one", "unverified"]},
+				"page": {"type": "integer", "minimum": 1},
+				"evidence": {"enum": ["published", "published-example", "user-screenshot"]}
+			},
+			"required": ["edition", "evidence"],
+			"allOf": [
+				{"if": {"properties": {"evidence": {"enum": ["published", "published-example"]}}}, "then": {"required": ["page"], "properties": {"edition": {"enum": ["classic", "one"]}}}},
+				{"if": {"properties": {"evidence": {"const": "user-screenshot"}}}, "then": {"properties": {"edition": {"const": "unverified"}}, "not": {"required": ["page"]}}}
+			],
+			"additionalProperties": false
+		},
+		"size": {"enum": ["T", "S", "M", "L", "H", "G"]},
+		"creatureType": {"enum": ["aberration", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend", "giant", "humanoid", "monstrosity", "ooze", "plant", "undead"]},
+		"damage": {"enum": ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]},
+		"condition": {"enum": ["blinded", "charmed", "deafened", "exhaustion", "frightened", "grappled", "incapacitated", "invisible", "paralyzed", "petrified", "poisoned", "prone", "restrained", "stunned", "unconscious"]},
+		"eligibility": {
+			"type": "object",
+			"properties": {
+				"types": {"type": "array", "items": {"$ref": "#/$defs/creatureType"}, "minItems": 1, "uniqueItems": true},
+				"sizes": {"type": "array", "items": {"$ref": "#/$defs/size"}, "minItems": 1, "uniqueItems": true},
+				"minCr": {"type": "number", "minimum": 0},
+				"maxCr": {"type": "number", "minimum": 0},
+				"minInt": {"type": "integer", "minimum": 1, "maximum": 30},
+				"maxInt": {"type": "integer", "minimum": 1, "maximum": 30},
+				"requiresTrait": {"type": "string", "minLength": 1},
+				"dmApproval": {"type": "boolean"}
+			},
+			"additionalProperties": false
+		},
+		"review": {
+			"type": "object",
+			"properties": {
+				"field": {"enum": ["ac", "hp", "attacks", "cr", "characterLevel", "eligibility", "abilities", "traits", "spellcasting", "other"]},
+				"reason": {"type": "string", "minLength": 1}
+			},
+			"required": ["field", "reason"],
+			"additionalProperties": false
+		},
+		"entry": {
+			"type": "object",
+			"properties": {
+				"name": {"type": "string", "minLength": 1},
+				"source": {"type": "string", "minLength": 1},
+				"entries": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}
+			},
+			"required": ["name", "source", "entries"],
+			"additionalProperties": false
+		},
+		"entryMatch": {
+			"oneOf": [
+				{"type": "object", "properties": {"name": {"type": "string", "minLength": 1}, "source": {"type": "string", "minLength": 1}}, "required": ["name", "source"], "additionalProperties": false},
+				{"type": "object", "properties": {"role": {"enum": ["breathWeapon", "bite", "healingTouch", "angelicWeapons"]}, "source": {"type": "string", "minLength": 1}}, "required": ["role", "source"], "additionalProperties": false}
+			]
+		},
+		"entrySection": {"enum": ["trait", "action", "bonus", "reaction", "legendary"]},
+		"change": {
+			"oneOf": [
+				{"type": "object", "properties": {"op": {"const": "setType"}, "value": {"$ref": "#/$defs/creatureType"}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"enum": ["setAbility", "minimumAbility", "maximumAbility"]}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "value": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["op", "ability", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "adjustAbility"}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "amount": {"type": "integer", "minimum": -30, "maximum": 30}, "floor": {"const": 1}}, "required": ["op", "ability", "amount", "floor"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "scaleAbility"}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "factor": {"const": 0.5}, "round": {"const": "down"}, "floor": {"const": 1}}, "required": ["op", "ability", "factor", "round", "floor"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"enum": ["grantResistance", "grantImmunity", "grantVulnerability"]}, "value": {"$ref": "#/$defs/damage"}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantConditionImmunity"}, "value": {"$ref": "#/$defs/condition"}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantSense"}, "sense": {"enum": ["darkvision", "blindsight", "tremorsense", "truesight"]}, "range": {"type": "integer", "minimum": 1}}, "required": ["op", "sense", "range"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantSpeed"}, "mode": {"enum": ["walk", "fly", "swim", "climb", "burrow"]}, "feet": {"type": "integer", "minimum": 0}}, "required": ["op", "mode", "feet"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantLanguage"}, "value": {"type": "string", "minLength": 1}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantConditionalDefense"}, "kind": {"enum": ["resistance", "immunity"]}, "value": {"$ref": "#/$defs/damage"}, "when": {"enum": ["nonmagical", "nonmagicalUnsilvered", "dimLightOrDarkness"]}}, "required": ["op", "kind", "value", "when"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "addEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "entry": {"$ref": "#/$defs/entry"}}, "required": ["op", "section", "entry"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "removeEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "match": {"$ref": "#/$defs/entryMatch"}}, "required": ["op", "section", "match"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "replaceEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "match": {"$ref": "#/$defs/entryMatch"}, "entry": {"$ref": "#/$defs/entry"}, "onMissing": {"enum": ["error", "skip"]}}, "required": ["op", "section", "match", "entry", "onMissing"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "replaceDamageType"}, "section": {"$ref": "#/$defs/entrySection"}, "match": {"$ref": "#/$defs/entryMatch"}, "from": {"type": "array", "items": {"$ref": "#/$defs/damage"}, "minItems": 1, "uniqueItems": true}, "to": {"$ref": "#/$defs/damage"}, "onMissing": {"enum": ["error", "skip"]}}, "required": ["op", "section", "match", "from", "to", "onMissing"], "additionalProperties": false}
+			]
+		},
+		"option": {
+			"type": "object",
+			"properties": {
+				"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+				"name": {"type": "string", "minLength": 1},
+				"eligibility": {"$ref": "#/$defs/eligibility"},
+				"changes": {"type": "array", "items": {"$ref": "#/$defs/change"}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}},
+				"templateReference": {"$ref": "#/$defs/identity"}
+			},
+			"required": ["id", "name", "changes", "manualReview"],
+			"additionalProperties": false
+		},
+		"optionGroup": {
+			"type": "object",
+			"properties": {
+				"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+				"name": {"type": "string", "minLength": 1},
+				"selection": {"enum": ["one", "any"]},
+				"required": {"type": "boolean"},
+				"appliesTo": {
+					"type": "object",
+					"properties": {
+						"group": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+						"option": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
+					},
+					"required": ["group", "option"],
+					"additionalProperties": false
+				},
+				"options": {"type": "array", "items": {"$ref": "#/$defs/option"}, "minItems": 1}
+			},
+			"required": ["id", "name", "selection", "required", "options"],
+			"additionalProperties": false
+		},
+		"transformation": {
+			"type": "object",
+			"properties": {
+				"name": {"type": "string", "minLength": 1},
+				"source": {"type": "string", "minLength": 1},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"$ref": "#/$defs/eligibility"},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+				"changes": {"type": "array", "items": {"$ref": "#/$defs/change"}},
+				"optionGroups": {"type": "array", "items": {"$ref": "#/$defs/optionGroup"}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}},
+				"templateReference": {"$ref": "#/$defs/identity"}
+			},
+			"required": ["name", "source", "provenance", "eligibility", "prerequisites", "changes", "optionGroups", "manualReview"],
+			"additionalProperties": false
+		}
+	}
+}

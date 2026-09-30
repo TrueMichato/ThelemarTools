@@ -1,0 +1,476 @@
+{
+	"creatureTransformation": [
+		{
+			"name": "Half-Dragon",
+			"source": "MM",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 180},
+			"eligibility": {"types": ["beast", "humanoid", "giant", "monstrosity"]},
+			"prerequisites": ["Choose a dragon ancestry and compare the creature's size and CR with the source's breath-weapon table."],
+			"changes": [
+				{"op": "grantSense", "sense": "blindsight", "range": 10},
+				{"op": "grantSense", "sense": "darkvision", "range": 60},
+				{"op": "grantLanguage", "value": "Draconic"}
+			],
+			"optionGroups": [
+				{
+					"id": "ancestry",
+					"name": "Dragon ancestry",
+					"selection": "one",
+					"required": true,
+					"options": [
+						{"id": "black", "name": "Black", "changes": [{"op": "grantResistance", "value": "acid"}], "manualReview": []},
+						{"id": "blue", "name": "Blue", "changes": [{"op": "grantResistance", "value": "lightning"}], "manualReview": []},
+						{"id": "brass", "name": "Brass", "changes": [{"op": "grantResistance", "value": "fire"}], "manualReview": []},
+						{"id": "bronze", "name": "Bronze", "changes": [{"op": "grantResistance", "value": "lightning"}], "manualReview": []},
+						{"id": "copper", "name": "Copper", "changes": [{"op": "grantResistance", "value": "acid"}], "manualReview": []},
+						{"id": "gold", "name": "Gold", "changes": [{"op": "grantResistance", "value": "fire"}], "manualReview": []},
+						{"id": "green", "name": "Green", "changes": [{"op": "grantResistance", "value": "poison"}], "manualReview": []},
+						{"id": "red", "name": "Red", "changes": [{"op": "grantResistance", "value": "fire"}], "manualReview": []},
+						{"id": "silver", "name": "Silver", "changes": [{"op": "grantResistance", "value": "cold"}], "manualReview": []},
+						{"id": "white", "name": "White", "changes": [{"op": "grantResistance", "value": "cold"}], "manualReview": []}
+					]
+				},
+				{
+					"id": "size",
+					"name": "Breath size",
+					"selection": "one",
+					"required": true,
+					"options": [
+						{"id": "large-or-smaller", "name": "Large or smaller", "eligibility": {"sizes": ["T", "S", "M", "L"]}, "changes": [], "manualReview": [{"field": "attacks", "reason": "Choose the ancestry's wyrmling breath; below CR 2, recalculate CR."}]},
+						{"id": "huge", "name": "Huge", "eligibility": {"sizes": ["H"]}, "changes": [], "manualReview": [{"field": "attacks", "reason": "Choose the ancestry's young-dragon breath; below CR 7, recalculate CR."}]},
+						{"id": "gargantuan", "name": "Gargantuan", "eligibility": {"sizes": ["G"]}, "changes": [], "manualReview": [{"field": "attacks", "reason": "Choose the ancestry's adult-dragon breath; below CR 8, recalculate CR."}]}
+					]
+				}
+			],
+			"manualReview": [{"field": "attacks", "reason": "Breath area, damage, DC, and recharge depend on both chosen ancestry and size; no static template is applied."}]
+		},
+		{
+			"name": "Shadow Dragon",
+			"source": "MM",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 84},
+			"eligibility": {"types": ["dragon"]},
+			"prerequisites": ["Confirm a true dragon exposed to the Shadowfell; a dracolich is ineligible."],
+			"changes": [
+				{"op": "grantResistance", "value": "necrotic"},
+				{"op": "replaceDamageType", "section": "action", "match": {"role": "breathWeapon", "source": "$chassis"}, "from": ["acid", "cold", "fire", "lightning", "poison"], "to": "necrotic", "onMissing": "error"},
+				{"op": "replaceDamageType", "section": "action", "match": {"role": "bite", "source": "$chassis"}, "from": ["acid", "cold", "fire", "lightning", "poison"], "to": "necrotic", "onMissing": "skip"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "acid", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "cold", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "fire", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "lightning", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "necrotic", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "piercing", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "poison", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "slashing", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "thunder", "when": "dimLightOrDarkness"},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Living Shadow", "source": "MM", "entries": ["In dim light or darkness, the dragon resists damage except force, psychic, or radiant damage."]}},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Shadow Stealth", "source": "MM", "entries": ["In dim light or darkness, the dragon can Hide as a bonus action."]}},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Sunlight Sensitivity", "source": "MM", "entries": ["In sunlight, the dragon has disadvantage on attacks and sight-based Perception checks."]}}
+			],
+			"optionGroups": [],
+			"manualReview": [
+				{"field": "traits", "reason": "Resolve Stealth expertise and the light-dependent shadow traits."},
+				{"field": "attacks", "reason": "Replace the original breath with its shadow form and determine bite, lair, and legendary changes."}
+			]
+		},
+		{
+			"name": "Dracolich",
+			"source": "MM",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 83},
+			"eligibility": {"types": ["dragon"]},
+			"prerequisites": ["Confirm the dragon's age and the circumstances of its transformation with the DM."],
+			"changes": [
+				{"op": "setType", "value": "undead"},
+				{"op": "grantResistance", "value": "necrotic"},
+				{"op": "grantImmunity", "value": "poison"},
+				{"op": "grantConditionImmunity", "value": "charmed"},
+				{"op": "grantConditionImmunity", "value": "frightened"},
+				{"op": "grantConditionImmunity", "value": "paralyzed"},
+				{"op": "grantConditionImmunity", "value": "poisoned"},
+				{"op": "grantConditionImmunity", "value": "exhaustion"}
+			],
+			"optionGroups": [],
+			"manualReview": [{"field": "traits", "reason": "Resolve magic resistance, lost traits, and dracolich-specific features; the existing static copy template is not an application engine."}],
+			"templateReference": {"name": "Dracolich", "source": "MM"}
+		},
+		{
+			"name": "Spore Servant",
+			"source": "MM",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 230},
+			"eligibility": {"sizes": ["T", "S", "M", "L"], "types": ["aberration", "beast", "celestial", "dragon", "fey", "fiend", "giant", "humanoid", "monstrosity"]},
+			"prerequisites": ["Confirm the remains were once flesh and blood and animated by a myconid sovereign."],
+			"changes": [
+				{"op": "setType", "value": "plant"},
+				{"op": "setAbility", "ability": "int", "value": 2},
+				{"op": "setAbility", "ability": "wis", "value": 6},
+				{"op": "setAbility", "ability": "cha", "value": 1},
+				{"op": "grantSense", "sense": "blindsight", "range": 30},
+				{"op": "grantConditionImmunity", "value": "blinded"},
+				{"op": "grantConditionImmunity", "value": "charmed"},
+				{"op": "grantConditionImmunity", "value": "frightened"},
+				{"op": "grantConditionImmunity", "value": "paralyzed"},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Limited Blindsight", "source": "MM", "entries": ["The servant perceives creatures within 30 feet by blindsight and cannot see farther away."]}}
+			],
+			"optionGroups": [],
+			"manualReview": [
+				{"field": "traits", "reason": "Remove old traits, skills, saves, languages, tags, and special senses; blindsight has a beyond-range limitation."},
+				{"field": "attacks", "reason": "Retain only permitted melee actions; assess an unarmed strike if none remain."},
+				{"field": "other", "reason": "Reduce each movement speed by 10 feet, minimum 5, without replacing the chassis' movement types."}
+			]
+		},
+		{
+			"name": "Vampire",
+			"source": "MM",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 297},
+			"eligibility": {"types": ["humanoid"], "dmApproval": true},
+			"prerequisites": ["Agree with the DM whether the subject becomes a vampire or a vampire spawn."],
+			"changes": [
+				{"op": "setType", "value": "undead"},
+				{"op": "grantResistance", "value": "necrotic"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "nonmagical"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "piercing", "when": "nonmagical"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "slashing", "when": "nonmagical"}
+			],
+			"optionGroups": [
+				{"id": "outcome", "name": "Vampiric outcome", "selection": "one", "required": true, "options": [
+					{"id": "vampire", "name": "Vampire", "changes": [{"op": "grantSense", "sense": "darkvision", "range": 120}], "manualReview": [{"field": "traits", "reason": "Resolve vampire regeneration, shapechanging, weaknesses, and legendary features."}]},
+					{"id": "spawn", "name": "Vampire spawn", "changes": [{"op": "grantSense", "sense": "darkvision", "range": 60}], "manualReview": [{"field": "traits", "reason": "Resolve spawn-specific regeneration, weaknesses, and dependence on its creator."}]}
+				]}
+			],
+			"manualReview": [{"field": "attacks", "reason": "Resolve bite, charm, grapples, and form-dependent actions for the chosen outcome."}]
+		},
+		{
+			"name": "Lycanthropy",
+			"source": "MM",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 207},
+			"eligibility": {"types": ["humanoid"]},
+			"prerequisites": ["Confirm the curse, saving throw, and whether the subject accepts or resists it."],
+			"changes": [
+				{"op": "grantConditionalDefense", "kind": "immunity", "value": "bludgeoning", "when": "nonmagicalUnsilvered"},
+				{"op": "grantConditionalDefense", "kind": "immunity", "value": "piercing", "when": "nonmagicalUnsilvered"},
+				{"op": "grantConditionalDefense", "kind": "immunity", "value": "slashing", "when": "nonmagicalUnsilvered"}
+			],
+			"optionGroups": [
+				{"id": "form", "name": "Lycanthrope", "selection": "one", "required": true, "options": [
+					{"id": "werebear", "name": "Werebear", "changes": [{"op": "minimumAbility", "ability": "str", "value": 19}], "manualReview": [{"field": "ac", "reason": "Add natural armor only in bear or hybrid form."}]},
+					{"id": "wereboar", "name": "Wereboar", "changes": [{"op": "minimumAbility", "ability": "str", "value": 17}], "manualReview": [{"field": "ac", "reason": "Add natural armor only in boar or hybrid form."}]},
+					{"id": "wererat", "name": "Wererat", "changes": [{"op": "minimumAbility", "ability": "dex", "value": 15}], "manualReview": []},
+					{"id": "weretiger", "name": "Weretiger", "changes": [{"op": "minimumAbility", "ability": "str", "value": 17}], "manualReview": []},
+					{"id": "werewolf", "name": "Werewolf", "changes": [{"op": "minimumAbility", "ability": "str", "value": 15}], "manualReview": [{"field": "ac", "reason": "Add natural armor only in wolf or hybrid form."}]}
+				]}
+			],
+			"manualReview": [
+				{"field": "traits", "reason": "Resolve silver-sensitive immunity, curse, and traits of the chosen form; ordinary immunity would be incorrect."},
+				{"field": "attacks", "reason": "Resolve natural attacks, form-specific movement and speech, and weapon limitations."},
+				{"field": "eligibility", "reason": "The source's ability guidance addresses player characters; adjudicate its use on NPCs."}
+			]
+		},
+		{
+			"name": "Skeleton",
+			"source": "DMG",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 282},
+			"eligibility": {"dmApproval": true},
+			"prerequisites": ["Confirm the body has a skeleton appropriate for reanimation."],
+			"changes": [
+				{"op": "setType", "value": "undead"},
+				{"op": "adjustAbility", "ability": "dex", "amount": 2, "floor": 1},
+				{"op": "adjustAbility", "ability": "int", "amount": -4, "floor": 1},
+				{"op": "adjustAbility", "ability": "cha", "amount": -4, "floor": 1},
+				{"op": "grantSense", "sense": "darkvision", "range": 60},
+				{"op": "grantImmunity", "value": "poison"},
+				{"op": "grantVulnerability", "value": "bludgeoning"},
+				{"op": "grantConditionImmunity", "value": "exhaustion"},
+				{"op": "grantConditionImmunity", "value": "poisoned"}
+			],
+			"optionGroups": [],
+			"manualReview": [{"field": "traits", "reason": "Determine retained abilities, languages, and reanimation-specific changes for this chassis."}],
+			"templateReference": {"name": "Skeleton", "source": "DMG"}
+		},
+		{
+			"name": "Zombie",
+			"source": "DMG",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 282},
+			"eligibility": {"dmApproval": true},
+			"prerequisites": ["Confirm a corpse that can be animated as a zombie."],
+			"changes": [
+				{"op": "setType", "value": "undead"},
+				{"op": "adjustAbility", "ability": "str", "amount": 1, "floor": 1},
+				{"op": "adjustAbility", "ability": "con", "amount": 2, "floor": 1},
+				{"op": "adjustAbility", "ability": "int", "amount": -6, "floor": 1},
+				{"op": "adjustAbility", "ability": "wis", "amount": -4, "floor": 1},
+				{"op": "adjustAbility", "ability": "cha", "amount": -4, "floor": 1},
+				{"op": "grantSense", "sense": "darkvision", "range": 60},
+				{"op": "grantImmunity", "value": "poison"},
+				{"op": "grantConditionImmunity", "value": "poisoned"}
+			],
+			"optionGroups": [],
+			"manualReview": [
+				{"field": "abilities", "reason": "Apply the DMG racial adjustments to this corpse's own scores, not the MM zombie's fixed scores."},
+				{"field": "traits", "reason": "Resolve Undead Fortitude and lost capabilities for the reanimated creature."}
+			]
+		},
+		{
+			"name": "Wereshark",
+			"source": "Arcadia27",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 13},
+			"eligibility": {"types": ["humanoid"]},
+			"prerequisites": ["Resolve the wereshark curse and choose the humanoid, hybrid, or hunter-shark form."],
+			"changes": [
+				{"op": "minimumAbility", "ability": "str", "value": 16},
+				{"op": "grantSense", "sense": "blindsight", "range": 60},
+				{"op": "grantConditionalDefense", "kind": "immunity", "value": "bludgeoning", "when": "nonmagicalUnsilvered"},
+				{"op": "grantConditionalDefense", "kind": "immunity", "value": "piercing", "when": "nonmagicalUnsilvered"},
+				{"op": "grantConditionalDefense", "kind": "immunity", "value": "slashing", "when": "nonmagicalUnsilvered"},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Change Shape", "source": "Arcadia27", "entries": ["As a bonus action, the wereshark takes humanoid, hybrid, or Large hunter-shark form. Its gear stays the same, and it reverts on death. The DM resolves each form's movement."]}},
+				{"op": "addEntry", "section": "action", "entry": {"name": "Bite (Wereshark)", "source": "Arcadia27", "entries": ["A bite can curse a Humanoid with wereshark lycanthropy on a failed Constitution save; the save DC is 8 plus proficiency bonus plus Constitution modifier. The DM sets the bite's attack and damage."]}}
+			],
+			"optionGroups": [],
+			"manualReview": [
+				{"field": "traits", "reason": "Resolve Blood Frenzy and the full effects of Change Shape for the chosen form."},
+				{"field": "ac", "reason": "Add one point of natural armor in hybrid or shark form, not humanoid form."},
+				{"field": "attacks", "reason": "Adapt the form-specific bite and its lycanthropy save from the original template."},
+				{"field": "other", "reason": "Reconcile changed size, swimming speed, and equipment; do not copy ungranted monster-only features."}
+			]
+		},
+		{
+			"name": "Skeletal Wyrmling",
+			"source": "Ar8",
+			"provenance": {"edition": "classic", "evidence": "published", "page": 20},
+			"eligibility": {"types": ["dragon"]},
+			"prerequisites": ["Confirm animate dead, three wyrmling bones, and blood from the dragon whose wyrmling stat block is used."],
+			"changes": [
+				{"op": "setType", "value": "undead"},
+				{"op": "adjustAbility", "ability": "dex", "amount": -2, "floor": 1},
+				{"op": "adjustAbility", "ability": "int", "amount": -2, "floor": 1},
+				{"op": "adjustAbility", "ability": "cha", "amount": -2, "floor": 1},
+				{"op": "adjustAbility", "ability": "wis", "amount": -1, "floor": 1},
+				{"op": "adjustAbility", "ability": "con", "amount": 2, "floor": 1},
+				{"op": "grantImmunity", "value": "poison"},
+				{"op": "grantConditionImmunity", "value": "poisoned"},
+				{"op": "removeEntry", "section": "action", "match": {"role": "breathWeapon", "source": "$chassis"}}
+			],
+			"optionGroups": [],
+			"manualReview": [
+				{"field": "eligibility", "reason": "Only a wyrmling chassis from the blood donor qualifies, not every dragon."},
+				{"field": "hp", "reason": "Add one hit point for each Hit Die to account for the changed Constitution."},
+				{"field": "attacks", "reason": "Remove the breath weapon; do not silently keep it from the original chassis."},
+				{"field": "traits", "reason": "Understands its prior languages but cannot speak."}
+			]
+		},
+		{
+			"name": "Shadow Dragon",
+			"source": "BEG",
+			"provenance": {"edition": "classic", "evidence": "published-example", "page": 25},
+			"eligibility": {"types": ["dragon"]},
+			"prerequisites": ["Use the Shadow Dragon Template embedded in the page-25 adult black shadow dragon example, not the example's CR or alignment."],
+			"changes": [
+				{"op": "grantResistance", "value": "necrotic"},
+				{"op": "replaceDamageType", "section": "action", "match": {"role": "breathWeapon", "source": "$chassis"}, "from": ["acid", "cold", "fire", "lightning", "poison"], "to": "necrotic", "onMissing": "error"},
+				{"op": "replaceDamageType", "section": "action", "match": {"role": "bite", "source": "$chassis"}, "from": ["acid", "cold", "fire", "lightning", "poison"], "to": "necrotic", "onMissing": "skip"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "acid", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "cold", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "fire", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "lightning", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "necrotic", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "piercing", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "poison", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "slashing", "when": "dimLightOrDarkness"},
+				{"op": "grantConditionalDefense", "kind": "resistance", "value": "thunder", "when": "dimLightOrDarkness"},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Living Shadow", "source": "BEG", "entries": ["In dim light or darkness, the dragon resists damage except force, psychic, or radiant damage."]}},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Shadow Stealth", "source": "BEG", "entries": ["In dim light or darkness, the dragon can Hide as a bonus action."]}},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Sunlight Sensitivity", "source": "BEG", "entries": ["In sunlight, the dragon has disadvantage on attacks and sight-based Perception checks."]}}
+			],
+			"optionGroups": [],
+			"manualReview": [
+				{"field": "eligibility", "reason": "Requires a true dragon associated with the Shadowfell; dracoliches are excluded."},
+				{"field": "traits", "reason": "Resolve doubled Stealth proficiency, conditional shadow resistance and hiding, and sunlight sensitivity."},
+				{"field": "attacks", "reason": "Convert elemental bite and breath effects to necrotic; adjudicate a shadow created by lethal breath damage."}
+			]
+		},
+		{
+			"name": "Fey Beast",
+			"source": "SCRE",
+			"provenance": {"edition": "unverified", "evidence": "user-screenshot"},
+			"eligibility": {"types": ["beast"]},
+			"prerequisites": ["Select traits and actions with the DM; the screenshot suggests a count tied to CR, minimum one."],
+			"changes": [
+				{"op": "setType", "value": "fey"},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Sylvan Understanding", "source": "SCRE", "entries": ["If its Intelligence is at least 3, this creature understands Sylvan but does not gain the ability to speak it."]}}
+			],
+			"optionGroups": [
+				{"id": "features", "name": "Fey traits and actions", "selection": "any", "required": false, "options": [
+					{"id": "barkskin", "name": "Barkskin", "changes": [], "manualReview": [{"field": "ac", "reason": "Set natural AC to 16 if the chosen feature applies."}]},
+					{"id": "fey-touched", "name": "Fey-Touched", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Fey-Touched", "source": "SCRE", "entries": ["The creature has advantage on saving throws against effects that charm or frighten it."]}}], "manualReview": []},
+					{"id": "entangle", "name": "Entangle", "changes": [], "manualReview": [{"field": "spellcasting", "reason": "Resolve the once-daily Wisdom spell without spoken or material components."}]},
+					{"id": "spike-growth", "name": "Spike Growth", "changes": [], "manualReview": [{"field": "spellcasting", "reason": "Resolve the once-daily Wisdom spell without spoken or material components."}]},
+					{"id": "natural-camouflage", "name": "Natural Camouflage", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Natural Camouflage", "source": "SCRE", "entries": ["The creature has advantage on Stealth checks in forest or grassland terrain."]}}], "manualReview": []},
+					{"id": "plant-stride", "name": "Plant Stride", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve movement through plants, including magical manipulation of them."}]},
+					{"id": "rooted", "name": "Rooted", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Rooted", "source": "SCRE", "entries": ["The creature has advantage on checks and saves against forced movement or being knocked prone."]}}], "manualReview": []},
+					{"id": "tree-stride", "name": "Tree Stride", "changes": [], "manualReview": [{"field": "other", "reason": "Resolve movement between nearby living trees and its movement cost."}]},
+					{"id": "nature-sense", "name": "Nature Sense", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve the nearest chosen kind of beast or plant within five miles."}]},
+					{"id": "teleport", "name": "Teleport", "changes": [], "manualReview": [{"field": "attacks", "reason": "Add a recharge 4-6, 30-foot teleport and its attack timing."}]}
+				]}
+			],
+			"manualReview": [
+				{"field": "eligibility", "reason": "Page, edition, and screenshot attribution are not independently verified."},
+				{"field": "traits", "reason": "Reconcile any pre-existing ability to speak Sylvan."}
+			]
+		},
+		{
+			"name": "Fallen Angel",
+			"source": "SCRE",
+			"provenance": {"edition": "unverified", "evidence": "user-screenshot"},
+			"eligibility": {"types": ["celestial"]},
+			"prerequisites": ["Confirm this is an angel and agree on its fall with the DM."],
+			"changes": [
+				{"op": "grantResistance", "value": "necrotic"},
+				{"op": "replaceEntry", "section": "action", "match": {"role": "healingTouch", "source": "$chassis"}, "onMissing": "skip", "entry": {"name": "Corrupting Touch", "source": "SCRE", "entries": ["A creature touched by the angel must save against its spell DC or be charmed and follow its commands for up to one hour. Uses match the replaced Healing Touch."]}}
+			],
+			"optionGroups": [
+				{"id": "allegiance", "name": "Fallen form", "selection": "one", "required": true, "options": [
+					{"id": "fallen", "name": "Fallen Angel", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve lawful evil alignment, reduced flight, new skills, changed weapon damage and lost spells."}, {"field": "attacks", "reason": "Set Corrupting Touch's save and the existing Healing Touch use count if present."}]},
+					{"id": "devilsworn", "name": "Devilsworn Angel", "changes": [
+						{"op": "setType", "value": "fiend"},
+						{"op": "grantResistance", "value": "cold"},
+						{"op": "grantResistance", "value": "fire"},
+						{"op": "grantImmunity", "value": "poison"}
+					], "manualReview": [
+						{"field": "traits", "reason": "Mark the devil subtype; reconcile silver-bypassed defenses and Devil's Sight."},
+						{"field": "attacks", "reason": "Change the angelic weapon's bonus damage to fire."},
+						{"field": "other", "reason": "Replace truesight with darkvision of equal range, if present."}
+					]}
+				]}
+			],
+			"manualReview": [{"field": "eligibility", "reason": "Screenshot page and edition are unverified; do not infer rules from the Fallen Planetar example."}]
+		},
+		{
+			"name": "Undead",
+			"source": "SCRE",
+			"provenance": {"edition": "unverified", "evidence": "user-screenshot"},
+			"eligibility": {"dmApproval": true},
+			"prerequisites": ["Choose one undead category; additional features from the optional groups need DM approval and should fit the original CR."],
+			"changes": [
+				{"op": "setType", "value": "undead"},
+				{"op": "grantResistance", "value": "necrotic"},
+				{"op": "grantImmunity", "value": "poison"},
+				{"op": "grantConditionImmunity", "value": "poisoned"},
+				{"op": "grantConditionImmunity", "value": "exhaustion"},
+				{"op": "grantSense", "sense": "darkvision", "range": 60},
+				{"op": "addEntry", "section": "trait", "entry": {"name": "Undead Nature", "source": "SCRE", "entries": ["This creature needs no air, food, water, or sleep."]}}
+			],
+			"optionGroups": [
+				{
+					"id": "category",
+					"name": "Undead category",
+					"selection": "one",
+					"required": true,
+					"options": [
+						{"id": "ghostly", "name": "Ghostly", "changes": [
+							{"op": "grantResistance", "value": "acid"},
+							{"op": "grantResistance", "value": "cold"},
+							{"op": "grantResistance", "value": "fire"},
+							{"op": "grantResistance", "value": "lightning"},
+							{"op": "grantResistance", "value": "thunder"},
+							{"op": "scaleAbility", "ability": "str", "factor": 0.5, "round": "down", "floor": 1},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "nonmagical"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "piercing", "when": "nonmagical"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "slashing", "when": "nonmagical"},
+							{"op": "grantConditionImmunity", "value": "charmed"},
+							{"op": "grantConditionImmunity", "value": "frightened"},
+							{"op": "grantConditionImmunity", "value": "grappled"},
+							{"op": "grantConditionImmunity", "value": "paralyzed"},
+							{"op": "grantConditionImmunity", "value": "petrified"},
+							{"op": "grantConditionImmunity", "value": "prone"},
+							{"op": "grantConditionImmunity", "value": "restrained"}
+						], "manualReview": [
+							{"field": "other", "reason": "Replace movement with flight and hover; do not retain incompatible ground movement."},
+							{"field": "abilities", "reason": "Determine whether Dexterity or Charisma substitutes on attacks."},
+							{"field": "traits", "reason": "Resolve movement through objects, including force damage when ending within one."}
+						]},
+						{"id": "skeletal", "name": "Skeletal", "changes": [
+							{"op": "maximumAbility", "ability": "int", "value": 6},
+							{"op": "scaleAbility", "ability": "wis", "factor": 0.5, "round": "down", "floor": 1},
+							{"op": "scaleAbility", "ability": "cha", "factor": 0.5, "round": "down", "floor": 1},
+							{"op": "grantVulnerability", "value": "bludgeoning"}
+						], "manualReview": []},
+						{"id": "vampiric", "name": "Vampiric", "changes": [
+							{"op": "grantSense", "sense": "darkvision", "range": 120},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "nonmagical"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "piercing", "when": "nonmagical"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "slashing", "when": "nonmagical"},
+							{"op": "addEntry", "section": "trait", "entry": {"name": "Spider Climb", "source": "SCRE", "entries": ["The creature climbs difficult surfaces, including ceilings, without needing an ability check."]}}
+						], "manualReview": [
+							{"field": "attacks", "reason": "Resolve once-per-turn draining damage, maximum-HP reduction, and healing."},
+							{"field": "traits", "reason": "Resolve conditional 10-HP regeneration and the applicable vampiric weaknesses."}
+						]},
+						{"id": "zombie", "name": "Zombie", "changes": [
+							{"op": "maximumAbility", "ability": "int", "value": 3},
+							{"op": "scaleAbility", "ability": "wis", "factor": 0.5, "round": "down", "floor": 1},
+							{"op": "scaleAbility", "ability": "cha", "factor": 0.5, "round": "down", "floor": 1}
+						], "manualReview": [
+							{"field": "other", "reason": "Reduce all speeds by 10 feet but not below 5."},
+							{"field": "traits", "reason": "Add Undead Fortitude, with DC based on damage and exceptions for radiant damage and critical hits."}
+						]},
+						{"id": "ghoulish", "name": "Ghoulish", "changes": [{"op": "grantConditionImmunity", "value": "charmed"}], "manualReview": [{"field": "attacks", "reason": "Resolve once-per-turn paralysis from ghoulish strikes against eligible targets."}]},
+						{"id": "mummified", "name": "Mummified", "changes": [
+							{"op": "scaleAbility", "ability": "int", "factor": 0.5, "round": "down", "floor": 1},
+							{"op": "grantVulnerability", "value": "fire"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "nonmagical"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "piercing", "when": "nonmagical"},
+							{"op": "grantConditionalDefense", "kind": "resistance", "value": "slashing", "when": "nonmagical"},
+							{"op": "grantConditionImmunity", "value": "charmed"},
+							{"op": "grantConditionImmunity", "value": "frightened"},
+							{"op": "grantConditionImmunity", "value": "paralyzed"}
+						], "manualReview": [
+							{"field": "other", "reason": "Halve all speeds, minimum 20 feet."},
+							{"field": "attacks", "reason": "Resolve rotting-strike necrosis and the CR-dependent mummy-rot curse."}
+						]}
+					]
+				},
+				{"id": "ghostly-strikes", "name": "Ghostly strike variant", "selection": "one", "required": false, "appliesTo": {"group": "category", "option": "ghostly"}, "options": [
+					{"id": "spectral-strikes", "name": "Spectral Strikes", "changes": [], "manualReview": [{"field": "attacks", "reason": "Resolve the force-damage replacement on the original strikes."}]},
+					{"id": "withering-strikes", "name": "Withering Strikes", "changes": [], "manualReview": [{"field": "attacks", "reason": "Resolve the necrotic-damage replacement on the original strikes."}]}
+				]},
+				{"id": "ghostly-features", "name": "Ghostly actions", "selection": "any", "required": false, "appliesTo": {"group": "category", "option": "ghostly"}, "options": [
+					{"id": "etherealness", "name": "Etherealness", "eligibility": {"requiresTrait": "Ethereal Sight"}, "changes": [], "manualReview": [{"field": "traits", "reason": "Check Ethereal Sight and resolve an action to change planes."}]}
+				]},
+				{"id": "vampiric-weaknesses", "name": "Vampiric weaknesses", "selection": "any", "required": false, "appliesTo": {"group": "category", "option": "vampiric"}, "options": [
+					{"id": "forbiddance", "name": "Forbiddance", "eligibility": {"minInt": 6}, "changes": [], "manualReview": [{"field": "traits", "reason": "Apply the invitation restriction only if Intelligence is at least 6."}]},
+					{"id": "running-water", "name": "Running Water", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve damage from ending a turn in running water."}]},
+					{"id": "stake-to-heart", "name": "Stake to the Heart", "changes": [], "manualReview": [{"field": "traits", "reason": "Apply paralysis from a heart stake only while resting and incapacitated."}]},
+					{"id": "sunlight", "name": "Sunlight", "changes": [], "manualReview": [{"field": "traits", "reason": "Apply damage and the attack and sight-check penalties in direct sunlight."}]}
+				]},
+				{"id": "ghoulish-features", "name": "Ghoulish traits", "selection": "any", "required": false, "appliesTo": {"group": "category", "option": "ghoulish"}, "options": [
+					{"id": "ghoulish-strikes", "name": "Ghoulish Strikes", "changes": [], "manualReview": [{"field": "attacks", "reason": "Apply repeated Constitution saves against paralysis, except to elves and undead."}]},
+					{"id": "stench", "name": "Stench", "eligibility": {"minCr": 2}, "changes": [], "manualReview": [{"field": "traits", "reason": "At CR 2 or higher, resolve nearby poisoning and the successful target's temporary immunity."}]}
+				]},
+				{"id": "mummified-features", "name": "Mummified strikes", "selection": "any", "required": false, "appliesTo": {"group": "category", "option": "mummified"}, "options": [
+					{"id": "rotting-strikes", "name": "Rotting Strikes", "changes": [], "manualReview": [{"field": "attacks", "reason": "Resolve the CR 5 damage increase, healing prevention, shrinking HP maximum, and curse removal."}]}
+				]},
+				{"id": "miscellaneous", "name": "Additional undead features", "selection": "any", "required": false, "options": [
+					{"id": "deathly-aura", "name": "Deathly Aura", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve aura range and damage with the DM."}]},
+					{"id": "detect-life", "name": "Detect Life", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve detection range and creature exclusions."}]},
+					{"id": "ethereal-sight", "name": "Ethereal Sight", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve vision into the Ethereal Plane."}]},
+					{"id": "headless", "name": "Headless", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve survival and senses without a head."}]},
+					{"id": "bestow-curse", "name": "Bestow Curse", "changes": [], "manualReview": [{"field": "spellcasting", "reason": "Resolve once-daily casting and the appropriate save DC."}]},
+					{"id": "chill-touch", "name": "Chill Touch", "changes": [], "manualReview": [{"field": "spellcasting", "reason": "Resolve at-will casting and its level-dependent damage."}]},
+					{"id": "magic-resistance", "name": "Magic Resistance", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Magic Resistance", "source": "SCRE", "entries": ["The creature has advantage on saving throws against spells and magical effects."]}}], "manualReview": []},
+					{"id": "necrotic-absorption", "name": "Necrotic Absorption", "changes": [], "manualReview": [{"field": "traits", "reason": "Resolve healing from necrotic damage rather than treating it as immunity."}]},
+					{"id": "overwhelming-necrosis", "name": "Overwhelming Necrosis", "changes": [], "manualReview": [{"field": "attacks", "reason": "Resolve additional necrotic damage on eligible strikes."}]},
+					{"id": "shadow-stealth", "name": "Shadow Stealth", "eligibility": {"requiresTrait": "Sunlight Sensitivity"}, "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Shadow Stealth", "source": "SCRE", "entries": ["The creature can Hide as a bonus action while in dim light or darkness."]}}], "manualReview": [{"field": "eligibility", "reason": "Requires Sunlight Sensitivity; confirm it is present or also selected."}]},
+					{"id": "sunlight-sensitivity", "name": "Sunlight Sensitivity", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Sunlight Sensitivity", "source": "SCRE", "entries": ["In direct sunlight, the creature has disadvantage on attack rolls and sight-based Perception checks."]}}], "manualReview": []},
+					{"id": "touch-of-death", "name": "Touch of Death", "changes": [], "manualReview": [{"field": "attacks", "reason": "Resolve the once-daily touch attack and damage."}]},
+					{"id": "turn-immunity", "name": "Turn Immunity", "eligibility": {"minCr": 5}, "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Turn Immunity", "source": "SCRE", "entries": ["The creature cannot be turned by effects that turn undead."]}}], "manualReview": []},
+					{"id": "turn-resistance", "name": "Turn Resistance", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Turn Resistance", "source": "SCRE", "entries": ["The creature has advantage on saving throws against effects that turn undead."]}}], "manualReview": []},
+					{"id": "dreadful-glare", "name": "Dreadful Glare", "changes": [], "manualReview": [{"field": "attacks", "reason": "Resolve fear, paralysis on a severely failed save, and Multiattack integration."}]}
+				]}
+			],
+			"manualReview": [
+				{"field": "eligibility", "reason": "Screenshot page, edition, and source attribution are unverified; confirm any CR-based option limits."},
+				{"field": "traits", "reason": "Determine alignment and other category-appropriate traits with the DM; the worked tyrannosaurus and hydra are examples, not defaults."}
+			]
+		}
+	]
+}
