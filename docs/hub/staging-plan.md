@@ -9,8 +9,8 @@ correction release, and physical re-entry gate. Earlier r7 drills below are hist
 claim that r7 is still deployed or that the r10 findings have been resolved. The 2026-09-29 r11
 promotion was interrupted after traffic changed; its compatible application rollback restored exact
 r10 with no schema migration. A new genuine-provenance r11b tag was then promoted and verified, with
-its newest encrypted prerelease backup matched off-machine. Targeting remains disabled and the P1
-physical retest is pending.
+its newest encrypted prerelease backup matched off-machine. Targeting remains disabled; the P1
+physical retest failed when Local return advanced the same canonical character's revision without an edit.
 
 ## Objectives
 

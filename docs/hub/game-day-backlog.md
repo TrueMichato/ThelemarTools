@@ -20,6 +20,13 @@ identifiers, provider subjects, tokens, or private evidence into Git.
 - **Physical result:** final **NO-GO** at 2026-09-28T20:02:31Z. GD-FIND-014 is a confirmed P1
   refresh-persistent local/campaign Character Sheet divergence. GD-FIND-012 records that the
   campaign's player-targeting rollout was disabled. Several scenarios lack participant/device evidence.
+- **R11b physical retest:** browser service worker matched r11b; initial owner and DM campaign views agreed
+  on the same character ID and revision, and the Local copy was clearly separate. Campaign -> Local ->
+  **Return to campaign character** reached the same canonical ID but advanced its revision with no user edit.
+  Owner/DM visible fields still agreed after return; no data loss was observed. This is a new **P1
+  read-only route-write/convergence stop**, not evidence that the original data was overwritten.
+  BFCache/new-tab/two-device and targeting retests were stopped pending command/audit correlation and a
+  stable-revision fix.
 - **P1 remediation deployed, not physically proven:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
   fixes local/campaign route and repository-authority restoration. Its reviewed head
   `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;
@@ -65,7 +72,7 @@ finding.
 
 | Priority | Finding | Observation and current disposition | Next acceptance evidence / lane |
 |---|---|---|---|
-| P1 | **GD-FIND-014** | General-site/local and Campaign Hub sheet routes diverged, with no clear return path; refresh did not reconcile them. PR #331 is deployed in r11b but not physically proven. Canonical historical impact remains unknown. | Read-only owner/DM/local identity and revision comparison; repeat both entry paths, local return, refresh, BFCache, two-device and DM-truth convergence without crossing save authority. **Physical re-entry**. |
+| P1 | **GD-FIND-014** | The original general-site/local and Campaign Hub routes diverged. PR #331 is deployed in r11b, but its physical return check advanced the same canonical character's revision with no edit. Initial and final owner/DM visible fields agreed, so data loss is not established; historical impact remains unknown. | Correlate the read-only route's command/audit/event and identify the write source. Prove stable canonical revision with no edit across both entry paths, Local return, refresh, BFCache and two devices before another physical run. **Physical re-entry remains blocked**. |
 | P2 | **GD-FIND-012** | Cure Wounds targeting was absent because the peer source-cost campaign rollout was disabled. This does not prove a missing server template. | Operator-approved exact-campaign enrollment using the checked-in preflight; physical reject/cancel/expiry/accept/self-target checks with no early cost and one accepted cost/effect. **Release re-entry / Wave A**. |
 | P2, reproduce | **GD-FIND-003** | Character-information view opened from Campaign Overview closed after about ten seconds; interaction/timeout conditions were not captured. | Reproduce with pointer and keyboard interaction, distinguish intentional expiry from premature dismissal, keep a readable/focus-safe view, and test the real browser. **Overview UX**. |
 | P2 | **GD-FIND-006** | Inventory **Share** began a second step in a lower sheet panel without moving focus, scrolling, or announcing it; action looked stalled. No asset loss was reported. | Focus/announce the next actionable control; distinguish draft/pending/committed states and prove no duplicate submission. **B0/B2**. |

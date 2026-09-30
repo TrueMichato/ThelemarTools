@@ -11,7 +11,8 @@ instance. Foundry was intentionally decommissioned and is not a release prerequi
 PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11b post-release
 verification. Phase 6G deployment and V1-G1 host-operations evidence are complete. The 2026-09-28 r10
 physical rerun returned **NO-GO** for a P1 Character Sheet context divergence and disabled player targeting;
-r11b fixes the routing code but has not yet been physically retested, and targeting remains disabled. See the
+r11b fixes the routing code, but the physical return check advanced the same canonical character's
+revision without an edit; targeting remains disabled. The private-launch verdict is still NO-GO. See the
 [prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
