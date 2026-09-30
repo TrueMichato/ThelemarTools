@@ -1,4 +1,4 @@
-import {MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
+import {MAX_ENCOUNTER_RESOURCE_COUNT, getEncounterResourceSummary} from "./encounterworkspace-resources.js";
 
 const create = (tag, className, text) => {
 	const element = document.createElement(tag);
@@ -83,11 +83,17 @@ function getCounterRow ({name, current, max, resourceKey, onSpend, onRestore, ed
 
 export function getEncounterResourcePanel ({instance, label, onAction}) {
 	const {resources} = instance;
-	const section = create("section", "ew__resources");
+	const section = create("details", "ew__resources");
 	section.setAttribute("aria-label", `Combat resources for ${label}`);
-	const title = create("h4", "ew__resource-title", "Combat resources");
-	title.tabIndex = -1;
-	section.append(title);
+	const overview = create("summary", "ew__resource-overview");
+	overview.dataset.resourceControl = "resources:toggle";
+	const title = create("h4", "ew__resource-title");
+	title.append(
+		create("span", "ew__resource-label", "Combat resources"),
+		create("span", "ew__resource-summary", getEncounterResourceSummary(resources) || "No limited uses tracked"),
+	);
+	overview.append(title);
+	section.append(overview);
 	const fieldset = create("fieldset", "ew__resource-fields");
 	fieldset.append(create("legend", "ve-hidden", `Combat resources for ${label}`));
 

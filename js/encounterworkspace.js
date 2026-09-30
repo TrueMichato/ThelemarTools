@@ -1366,7 +1366,7 @@ export class EncounterWorkspacePage {
 				const currentPanel = this._resourceContainers.get(id);
 				const control = [...(currentPanel?.querySelectorAll("[data-resource-control]") || [])]
 					.find(it => it.dataset.resourceControl === focused);
-				(control && !control.disabled ? control : currentPanel?.querySelector(".ew__resource-title"))?.focus({preventScroll: true});
+				(control && !control.disabled ? control : currentPanel?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
 			}
 		}
 	}
@@ -1376,12 +1376,14 @@ export class EncounterWorkspacePage {
 		if (!previous) return;
 		const open = new Set([...previous.querySelectorAll("details[data-resource-key]")]
 			.filter(details => details.open).map(details => details.dataset.resourceKey));
+		const wasOpen = previous.open;
 		const instance = this._state.instances.find(it => it.id === id);
 		const label = getEncounterInstanceLabels(this._state.instances).get(id);
 		const panel = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(id, action)});
 		panel.querySelectorAll("details[data-resource-key]").forEach(details => {
 			details.open = open.has(details.dataset.resourceKey);
 		});
+		panel.open = wasOpen;
 		previous.replaceWith(panel);
 		this._resourceContainers.set(id, panel);
 	}

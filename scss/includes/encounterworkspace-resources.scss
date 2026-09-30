@@ -4,15 +4,55 @@
 @layer vetools {
 	.ew {
 		&__resources {
-			padding: 10px 12px 14px;
 			border-bottom: 1px solid vars.$rgb-border-grey--muted;
 			background: vars.$rgb-bg--alt;
 		}
 
+		&__resource-overview {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			min-height: 44px;
+			padding: 8px 12px;
+			cursor: pointer;
+
+			&::before {
+				content: "+";
+				flex: 0 0 18px;
+				text-align: center;
+				font-weight: 700;
+			}
+
+			&::-webkit-details-marker {
+				display: none;
+			}
+		}
+
+		&__resources[open] > .ew__resource-overview::before {
+			content: "-";
+		}
+
 		&__resource-title {
-			margin: 0 0 10px;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			min-width: 0;
+			margin: 0;
 			font-size: 1rem;
 			font-weight: 700;
+		}
+
+		&__resource-label {
+			white-space: nowrap;
+		}
+
+		&__resource-summary {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			font-weight: 400;
+			font-variant-numeric: tabular-nums;
 		}
 
 		&__resource-fields {
@@ -21,7 +61,7 @@
 			gap: 12px 18px;
 			min-width: 0;
 			margin: 0;
-			padding: 0;
+			padding: 10px 12px 14px;
 			border: 0;
 		}
 
@@ -51,6 +91,7 @@
 		&__resource-count {
 			white-space: nowrap;
 			font-weight: 600;
+			font-variant-numeric: tabular-nums;
 		}
 
 		&__resource-actions {

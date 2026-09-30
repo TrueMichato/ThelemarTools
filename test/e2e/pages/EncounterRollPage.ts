@@ -27,7 +27,7 @@ const monster = {
 export class EncounterRollPage {
 	constructor (readonly page: Page) {}
 
-	async seed ({count = 2, renameSecond, renameIndices = [], capFirstHistory = false}: {count?: number, renameSecond?: string, renameIndices?: number[], capFirstHistory?: boolean} = {}) {
+	async seed ({count = 2, renameSecond, renameIndices = [], capFirstHistory = false, monsterOverride = {}}: {count?: number, renameSecond?: string, renameIndices?: number[], capFirstHistory?: boolean, monsterOverride?: Record<string, unknown>} = {}) {
 		await this.page.goto("/encounterworkspace.html");
 		await this.page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 		const effect = {id: "custom-attack", name: "Rally", scopes: ["attack"], mode: "advantage", bonus: 3};
@@ -37,7 +37,7 @@ export class EncounterRollPage {
 			instances: Array.from({length: count}, (_, index) => ({
 				id: index === 0 ? "one" : index === 1 ? "two" : `creature-${index}`,
 				hash: "goblin_mm",
-				monster,
+				monster: {...monster, ...monsterOverride},
 				conditions: [],
 				areaNotes: [{id: "note", kind: "lair", name: "Bell", description: "Reminder only"}],
 				modifiers: index === 0 ? [effect] : [],
