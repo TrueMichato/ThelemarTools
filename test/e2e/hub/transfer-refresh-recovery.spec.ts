@@ -47,6 +47,7 @@ test("a fenced transfer balance retry remains recoverable until replacement refr
 			name: "Guide",
 			inventory: [{id: "rations", item: RATIONS, quantity: 5}],
 		});
+		const originalGuidePolicy = await dm.hub.getProjectionPolicy(dmCharacter.id);
 
 		await player.hub.expectTransferRefreshRecoveryAcrossAuthorizationFence({
 			campaignId,
@@ -72,6 +73,46 @@ test("a fenced transfer balance retry remains recoverable until replacement refr
 				await expect(partyRefresh).toHaveText("Refreshing authorized party details...");
 			},
 		});
+
+		await player.hub.gotoCampaign(campaignId);
+		await player.hub.openCampaignWorkbench();
+		await player.page.locator("#campaign-transfer-source").selectOption({label: "Rowan"});
+		await player.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
+		const rations = player.page.locator("#campaign-transfer-entry option", {hasText: "Rations"}).first();
+		await player.page.locator("#campaign-transfer-entry").selectOption(await rations.getAttribute("value") || "");
+		await player.page.locator("#campaign-transfer-quantity").fill("1");
+		let signalPost = () => {};
+		const postStarted = new Promise<void>(resolve => signalPost = resolve);
+		let releasePost = () => {};
+		const postGate = new Promise<void>(resolve => releasePost = resolve);
+		await player.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
+			if (route.request().method() === "POST") {
+				signalPost();
+				await postGate;
+			}
+			await route.continue();
+		});
+		await player.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await postStarted;
+		const guidePolicy = await dm.hub.getProjectionPolicy(dmCharacter.id);
+		await dm.hub.setProjectionPolicy({
+			characterId: dmCharacter.id,
+			expectedProjectionRevision: guidePolicy.projectionRevision,
+			policy: originalGuidePolicy.policy,
+		});
+		await expect(player.page.locator("#campaign-transfer-form button[type='submit']")).toHaveText("Retry transfer");
+		await expect(player.page.locator("#campaign-transfer-form-status")).toContainText("transfer outcome is not yet confirmed");
+		const firstResponse = player.page.waitForResponse(response =>
+			response.request().method() === "POST"
+			&& new URL(response.url()).pathname === `/api/campaigns/${campaignId}/transfers`,
+		);
+		releasePost();
+		expect((await firstResponse).status()).toBe(201);
+		await expect(player.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+		await player.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await expect(player.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+		await dm.hub.gotoCampaign(campaignId);
+		await expect(dm.page.locator("#campaign-pending-transfers .hub-data-row").filter({hasText: "Party inventory"})).toHaveCount(1);
 	} finally {
 		await Promise.all([
 			pCloseContext(playerContext),

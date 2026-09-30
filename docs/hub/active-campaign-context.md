@@ -226,10 +226,14 @@ peers excluded by both policies do not receive it.
 While a replacement projection is loading, Campaign Overview fences the complete refresh generation: deferred
 action/transfer inbox responses cannot repopulate concealed names, and mutation controls remain disabled until the
 sequence-current snapshot and its dependent inbox reads are accepted. Transfer drafts are preserved across that
-concealment only when their source, destination, and item remain authorized; a committed transfer whose refresh
-fails is represented by a generic recovery row without retaining character names. Session expiry keeps Sign out as
-the sole enabled campaign-content control while every mutation control stays disabled, including after an
-in-flight request settles.
+concealment only when their source, destination, and item remain authorized. An input event overlapping
+concealment updates the captured draft so a late refresh cannot replace the user's latest currency entry with
+its earlier value; invalid source or destination selections still clear the draft amounts. A committed transfer
+whose refresh fails is represented by a generic recovery row without retaining character names. Session expiry
+keeps Sign out as the sole enabled campaign-content control while every mutation control stays disabled,
+including after an in-flight request settles.
+If a projection refresh completes while a transfer proposal is still in flight, its retry control explains
+that confirmation is pending rather than leaving a blank status or claiming another transfer can be sent.
 
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local

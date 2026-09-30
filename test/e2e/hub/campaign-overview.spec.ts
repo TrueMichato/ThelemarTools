@@ -1230,6 +1230,19 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 		});
 		let isRefreshGateEnabled = false;
 		let transferRefreshCount = 0;
+		let signalCurrencyRefresh = () => {};
+		const currencyRefreshStarted = new Promise<void>(resolve => signalCurrencyRefresh = resolve);
+		let releaseCurrencyRefresh = () => {};
+		const currencyRefreshGate = new Promise<void>(resolve => releaseCurrencyRefresh = resolve);
+		let isCurrencyGateEnabled = false;
+		await dm.page.route(`**/api/campaigns/${campaignId}/party-inventory`, async route => {
+			if (route.request().method() === "GET" && isCurrencyGateEnabled) {
+				isCurrencyGateEnabled = false;
+				signalCurrencyRefresh();
+				await currencyRefreshGate;
+			}
+			await route.continue();
+		});
 		await dm.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
 			if (route.request().method() !== "GET") {
 				await route.continue();
@@ -1256,12 +1269,24 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 			},
 		};
 		isRefreshGateEnabled = true;
+		isCurrencyGateEnabled = true;
 		const firstUpdate = await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: policy.projectionRevision,
 			policy: changedPolicy,
 		});
+		await currencyRefreshStarted;
+		await expect.poll(() => dm.page.locator("#campaign-transfer-form").evaluate(form =>
+			!!(form as HTMLFormElement & {_hubProjectionTransferDraft?: object})._hubProjectionTransferDraft,
+		)).toBe(true);
+		// The in-flight input event can arrive after concealment captures the older draft.
+		await dm.page.locator("#campaign-transfer-sp").evaluate(input => {
+			(input as HTMLInputElement).value = "2";
+			input.dispatchEvent(new Event("input", {bubbles: true}));
+		});
+		releaseCurrencyRefresh();
 		await firstRefreshStarted;
+		await expect(dm.page.locator("#campaign-transfer-sp")).toHaveValue("2");
 		await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: firstUpdate.projectionRevision,
@@ -1274,8 +1299,9 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 			source: (document.getElementById("campaign-transfer-source") as HTMLSelectElement).value,
 			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
 			gp: (document.getElementById("campaign-transfer-gp") as HTMLInputElement).value,
+			sp: (document.getElementById("campaign-transfer-sp") as HTMLInputElement).value,
 			hasDraft: !!(document.getElementById("campaign-transfer-form") as any)._hubProjectionTransferDraft,
-		}))).toEqual({...selections, gp: "7", hasDraft: false});
+		}))).toEqual({...selections, gp: "7", sp: "2", hasDraft: false});
 		await expect(dm.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
 	} finally {
 		await Promise.all([pCloseContext(dmContext), pCloseContext(ownerContext)]);

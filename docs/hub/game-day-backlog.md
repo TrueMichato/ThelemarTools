@@ -1,7 +1,7 @@
 # Campaign Hub game-day backlog and delivery plan
 
 > **Status:** Prioritized follow-up; private-pilot expansion is **NO-GO**
-> **Last reviewed:** 2026-09-29
+> **Last reviewed:** 2026-09-30
 > **Owner:** Campaign Hub maintainers
 
 This is the sanitized repository tracking record for the 2026-09-28 r10 physical game day and its
@@ -32,10 +32,18 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   Second Wind pool was re-minting a generic `resources[]` row, while source-managed modifier IDs also
   drifted on load. The source fix prevents the duplicate and reuses exactly matching derived IDs;
   focused PostgreSQL/browser testing now proves the no-edit route sends zero PATCHes and leaves the
-  canonical revision unchanged. Full local Hub/Character Sheet suites passed; a separate full-stack
-  auth/reauthentication UI journey failed while 46 other browser journeys passed, then passed alone
-  on a fresh stack. Do not call the *full* local real-stack run green or promote this candidate until
-  exact-head CI and physical retest close the remaining gates.
+  canonical revision unchanged. The initial source candidate at `86547a9f` passed local Hub and
+  Character Sheet suites, but exact-head CI's full-stack transfer journey failed: a projection
+  refresh replaced an in-flight 2 SP form entry with its earlier zero draft. A red-first overlap
+  regression now protects the input event and the existing stale-generation test in one campaign.
+  The first CI attempt also exposed an empty status beside an enabled Retry transfer button; a
+  separate red-first response/authorization-fence journey now requires pending guidance and safe
+  same-command replay. The currency-only follow-up passed 47/47 browser journeys; the latest
+  combined local run passed 45/47, with an unrelated action-form click timeout and a per-IP
+  campaign-creation 429; both failed journeys passed together on a fresh isolated stack. Focused
+  transfer and no-edit route journeys pass, as do 59/59 PostgreSQL prerequisites and the Hub
+  suite. The combined follow-up has **not** passed full-suite or exact-head CI, been tagged or
+  deployed, or received physical acceptance. Keep the P1 hard stop until those gates close.
 - **P1 remediation deployed, not physically proven:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
   fixes local/campaign route and repository-authority restoration. Its reviewed head
   `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;

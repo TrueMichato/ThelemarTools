@@ -1354,6 +1354,25 @@ function captureCampaignTransferDraft () {
 	form._hubProjectionTransferDraft = getCampaignTransferDraft();
 }
 
+function updateCapturedCampaignTransferDraft ({form, control}) {
+	const draft = form?._hubProjectionTransferDraft;
+	if (!draft) return;
+	const currencyType = CURRENCY_TYPES.find(type => control.id === `campaign-transfer-${type}`);
+	if (currencyType) {
+		draft.currency[currencyType] = control.value;
+		return;
+	}
+	if (control.id === "campaign-transfer-source") {
+		draft.source = control.value;
+		draft.item = document.getElementById("campaign-transfer-entry")?.value || "";
+		draft.quantity = document.getElementById("campaign-transfer-quantity")?.value || "";
+	} else if (control.id === "campaign-transfer-target") draft.target = control.value;
+	else if (control.id === "campaign-transfer-entry") {
+		draft.item = control.value;
+		draft.quantity = document.getElementById("campaign-transfer-quantity")?.value || "";
+	} else if (control.id === "campaign-transfer-quantity") draft.quantity = control.value;
+}
+
 function renderAccountDeletionPending (deletion) {
 	setHidden(document.getElementById("hub-account-active"), true);
 	setHidden(document.getElementById("hub-account-deletion-pending"), false);
@@ -3699,6 +3718,13 @@ async function pInitCampaignForms ({
 				}
 				delete form?._hubProjectionTransferDraft;
 				applyTransferRefreshRecoverySuccess({form});
+				const status = document.getElementById("campaign-transfer-form-status");
+				if (!status?.textContent || status.textContent === "Latest balances loaded. You can send another transfer.") {
+					setFormStatus({
+						formId: "campaign-transfer-form",
+						message: "The transfer outcome is not yet confirmed. Retry to reconcile the same transfer.",
+					});
+				}
 				return true;
 			}
 			setTransferProposalControls({form, isLocked: false});
@@ -3745,6 +3771,13 @@ async function pInitCampaignForms ({
 	fillCharacterSelect(document.getElementById("campaign-xp-target"), characters);
 	document.getElementById("campaign-transfer-source")?.addEventListener("change", () => syncTransferItemPicker({characters, partyInventory}));
 	document.getElementById("campaign-transfer-entry")?.addEventListener("change", syncTransferQuantity);
+	const transferForm = document.getElementById("campaign-transfer-form");
+	for (const eventType of ["input", "change"]) {
+		transferForm?.addEventListener(eventType, event => updateCapturedCampaignTransferDraft({
+			form: transferForm,
+			control: event.target,
+		}));
+	}
 	setFormAvailability({
 		formId: "campaign-action-form",
 		isAvailable: !!document.getElementById("campaign-action-target")?.options.length,
