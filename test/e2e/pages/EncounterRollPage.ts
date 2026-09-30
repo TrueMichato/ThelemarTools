@@ -27,12 +27,12 @@ const monster = {
 export class EncounterRollPage {
 	constructor (readonly page: Page) {}
 
-	async seed ({count = 2, renameSecond, capFirstHistory = false}: {count?: number, renameSecond?: string, capFirstHistory?: boolean} = {}) {
+	async seed ({count = 2, renameSecond, renameIndices = [], capFirstHistory = false}: {count?: number, renameSecond?: string, renameIndices?: number[], capFirstHistory?: boolean} = {}) {
 		await this.page.goto("/encounterworkspace.html");
 		await this.page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 		const effect = {id: "custom-attack", name: "Rally", scopes: ["attack"], mode: "advantage", bonus: 3};
 		const state = {
-			version: renameSecond || capFirstHistory ? 6 : 4,
+			version: renameSecond || renameIndices.length || capFirstHistory ? 6 : 4,
 			sourceList: {name: "Goblin Patrol", saveId: "test-list"},
 			instances: Array.from({length: count}, (_, index) => ({
 				id: index === 0 ? "one" : index === 1 ? "two" : `creature-${index}`,
@@ -47,8 +47,8 @@ export class EncounterRollPage {
 						type: "patch",
 						data: {patch: {set: {dex: 14}}},
 					}))
-					: renameSecond && index === 1
-						? [{id: "rename-two", type: "patch", data: {patch: {set: {name: renameSecond}}}}]
+					: (renameSecond && index === 1) || renameIndices.includes(index)
+						? [{id: `rename-${index}`, type: "patch", data: {patch: {set: {name: renameIndices.includes(index) ? "Hobgoblin" : renameSecond}}}}]
 						: [],
 				hp: {current: 7, max: 7, temp: 0},
 				initiative: null,
@@ -90,6 +90,9 @@ export class EncounterRollPage {
 
 	async openQuickActions () {
 		if (!await this.page.locator("#ew-quick").evaluate(element => (element as HTMLDetailsElement).open)) {
+			if (!await this.page.locator("#ew-focus-more").evaluate(element => (element as HTMLDetailsElement).open)) {
+				await this.page.locator("#ew-focus-more > summary").click();
+			}
 			await this.page.locator("#ew-open-quick").click();
 		}
 	}

@@ -119,6 +119,7 @@ test("mobile jump and edit controls keep the viewed monster separate from turns 
 	await page.locator("#ew-focus-edit").click();
 	await expect(page.getByRole("tab", {name: "Templates"})).toBeVisible();
 	await page.getByRole("button", {name: "Done"}).click();
+	await page.locator("#ew-focus-more > summary").click();
 	await page.locator("#ew-open-quick").click();
 	await expect(page.locator("#ew-quick")).toHaveJSProperty("open", true);
 	await expect(page.locator("#ew-quick > summary")).toBeFocused();

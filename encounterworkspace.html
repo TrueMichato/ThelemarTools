@@ -163,12 +163,66 @@
 						</label>
 						<p id="ew-summary" class="ew__selection-caption" role="status" aria-live="polite"></p>
 						<div class="ew__focus-actions">
+							<button type="button" class="ve-btn ve-btn-default" id="ew-fast-damage" aria-label="Damage selected targets">Damage</button>
+							<button type="button" class="ve-btn ve-btn-default" id="ew-fast-save" aria-label="Roll selected saving throws">Saves</button>
+							<button type="button" class="ve-btn ve-btn-default" id="ew-fast-move" aria-label="Move viewed monster or shared turn">Move turn</button>
 							<button type="button" class="ve-btn ve-btn-primary" id="ew-focus-edit">Edit viewed statblock</button>
-							<button type="button" class="ve-btn ve-btn-default" id="ew-open-bulk">Edit selected statblocks</button>
-							<button type="button" class="ve-btn ve-btn-default" id="ew-open-quick">Roll, HP &amp; conditions</button>
-							<button type="button" class="ve-btn ve-btn-default" id="ew-browse-roster">Browse roster</button>
+							<details class="ew__focus-more" id="ew-focus-more">
+								<summary aria-label="More cockpit tools">More</summary>
+								<div class="ew__focus-more-actions">
+									<button type="button" class="ve-btn ve-btn-default" id="ew-open-bulk">Edit selected statblocks</button>
+									<button type="button" class="ve-btn ve-btn-default" id="ew-open-quick">Target &amp; condition tools</button>
+									<button type="button" class="ve-btn ve-btn-default" id="ew-browse-roster">Browse roster</button>
+								</div>
+							</details>
 						</div>
 					</div>
+					<section class="ew__fast" id="ew-fast" aria-label="Damage and roll selected targets" hidden>
+						<div class="ew__fast-heading">
+							<strong>Damage &amp; rolls · selected targets only</strong>
+							<button type="button" class="ve-btn ve-btn-default" id="ew-fast-close">Close quick actions</button>
+						</div>
+						<div class="ew__fast-body">
+							<p class="ew__selection-caption" id="ew-fast-targets"></p>
+							<details class="ew__target-list" id="ew-target-list">
+								<summary>Show every selected target</summary>
+								<p id="ew-target-names"></p>
+							</details>
+							<div class="ew__operation">
+								<h4>Selected monsters' HP</h4>
+								<div class="ew__controls">
+									<label for="ew-hp-expression">Damage / heal / set</label>
+									<input class="ve-form-control ew__hp-expression" id="ew-hp-expression" type="text" placeholder="8d6, +12, -30, =15" aria-describedby="ew-hp-hint">
+									<label class="ew__inline-check"><input id="ew-hp-half" type="checkbox"> Half damage</label>
+									<button type="button" class="ve-btn ve-btn-default" id="ew-hp-apply">Apply HP to selected</button>
+									<button type="button" class="ve-btn ve-btn-default" id="ew-hp-undo">Undo HP</button>
+								</div>
+								<p class="ew__operation-help" id="ew-hp-hint">Bare numbers damage; + heals, - damages, = sets. Dice roll once for the batch. Unset HP targets are skipped.</p>
+							</div>
+							<div class="ew__operation">
+								<h4>Roll for selected</h4>
+								<div class="ew__controls">
+									<label for="ew-roll-type">Roll</label>
+									<select class="ve-form-control" id="ew-roll-type"></select>
+									<label for="ew-roll-key">Using</label>
+									<select class="ve-form-control" id="ew-roll-key"></select>
+									<label for="ew-roll-mode">Mode</label>
+									<select class="ve-form-control" id="ew-roll-mode">
+										<option value="normal">Normal</option>
+										<option value="advantage">Advantage</option>
+										<option value="disadvantage">Disadvantage</option>
+									</select>
+									<button type="button" class="ve-btn ve-btn-default" id="ew-roll">Roll selected</button>
+								</div>
+								<p class="ew__operation-help" id="ew-roll-hint"></p>
+							</div>
+							<section class="ew__results" id="ew-results" aria-label="Roll results" hidden>
+								<h4>Roll results</h4>
+								<p id="ew-roll-summary" role="status" aria-live="polite"></p>
+								<div id="ew-result-table" class="ew__results-scroll"></div>
+							</section>
+						</div>
+					</section>
 					<div class="ew__statblocks" id="ew-statblocks"></div>
 					<button type="button" class="ve-btn ve-btn-default ew__load-more" id="ew-cards-more" hidden>Load more statblocks</button>
 				</section>
@@ -205,43 +259,15 @@
 						<p id="ew-roster-count" role="status" aria-live="polite"></p>
 					</div>
 					<details class="ew__roster-help"><summary>Grouping and targets</summary>
-						<p class="ew__help">Identical effective statblocks group in this roster; expand for individual HP, conditions and targets. Group selected creatures to keep them together or share a turn. Selection is saved. A group checkbox always selects its full group, including filtered-out members.</p>
+						<p class="ew__help">Identical effective statblocks group in this roster; expand to pick named members. Select shown / Clear shown affect only members matching the roster filter. A group checkbox targets every member, including filtered-out ones. Viewing a statblock or advancing turns never changes targets.</p>
 					</details>
 					<div id="ew-roster" class="ew__roster"></div>
 					<details class="ew__quick" id="ew-quick">
-						<summary id="ew-quick-summary">Actions for selected targets</summary>
+						<summary id="ew-quick-summary">Target &amp; condition tools</summary>
 						<div class="ew__quick-body">
 						<div class="ew__selection-actions">
 							<button type="button" class="ve-btn ve-btn-default" id="ew-select-current">Select active turn</button>
 							<button type="button" class="ve-btn ve-btn-default" id="ew-select-viewed">Select viewed statblock</button>
-						</div>
-						<div class="ew__operation">
-							<h4>Roll for selected</h4>
-							<div class="ew__controls">
-								<label for="ew-roll-type">Roll</label>
-								<select class="ve-form-control" id="ew-roll-type"></select>
-								<label for="ew-roll-key">Using</label>
-								<select class="ve-form-control" id="ew-roll-key"></select>
-								<label for="ew-roll-mode">Mode</label>
-								<select class="ve-form-control" id="ew-roll-mode">
-									<option value="normal">Normal</option>
-									<option value="advantage">Advantage</option>
-									<option value="disadvantage">Disadvantage</option>
-								</select>
-								<button type="button" class="ve-btn ve-btn-default" id="ew-roll">Roll selected</button>
-							</div>
-							<p class="ew__operation-help" id="ew-roll-hint"></p>
-						</div>
-						<div class="ew__operation">
-							<h4>Selected monsters' HP</h4>
-							<div class="ew__controls">
-								<label for="ew-hp-expression">Damage / heal / set</label>
-								<input class="ve-form-control ew__hp-expression" id="ew-hp-expression" type="text" placeholder="8d6, +12, -30, =15" aria-describedby="ew-hp-hint">
-								<label class="ew__inline-check"><input id="ew-hp-half" type="checkbox"> Half damage</label>
-								<button type="button" class="ve-btn ve-btn-default" id="ew-hp-apply">Apply HP</button>
-								<button type="button" class="ve-btn ve-btn-default" id="ew-hp-undo">Undo HP</button>
-							</div>
-							<p class="ew__operation-help" id="ew-hp-hint">Bare numbers damage; + heals, - damages, = sets. Dice roll once for the batch. Unset HP targets are skipped.</p>
 						</div>
 						<div class="ew__operation">
 							<h4>Conditions</h4>
@@ -253,11 +279,6 @@
 							</div>
 							<p class="ew__operation-help">Conditions are saved per monster; remove a chip from a single monster below.</p>
 						</div>
-						<section class="ew__results" id="ew-results" aria-label="Roll results" hidden>
-							<h4>Roll results</h4>
-							<p id="ew-roll-summary" role="status" aria-live="polite"></p>
-							<div id="ew-result-table" class="ew__results-scroll"></div>
-						</section>
 						</div>
 					</details>
 				</aside>
