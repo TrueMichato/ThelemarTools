@@ -8,10 +8,11 @@ import {
 	validateEncounterAreaNote,
 	validateEncounterModifier,
 } from "./encounterworkspace-effects.js";
+import {getEncounterResourceDefaults, validateEncounterResources} from "./encounterworkspace-resources.js";
 
 const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
-const VERSION = 6;
+const VERSION = 7;
 const MAX_INSTANCES = 1000;
 export const MAX_ENCOUNTER_STATBLOCK_OPERATIONS = 100;
 const MAX_OPERATION_SIZE = 200_000;
@@ -155,7 +156,7 @@ export class EncounterWorkspaceState {
 	}
 
 	static validate (raw) {
-		if (!raw || ![1, 2, 3, 4, 5, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
+		if (!raw || ![1, 2, 3, 4, 5, 6, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
 		if (
 			(raw.sourceList !== null && (typeof raw.sourceList?.name !== "string" || typeof raw.sourceList?.saveId !== "string"))
 			|| !Array.isArray(raw.instances)
@@ -197,6 +198,7 @@ export class EncounterWorkspaceState {
 				}
 			}
 			if (raw.version >= 5) validateEncounterStatblockOperations(instance.monster, instance.statblockOperations);
+			if (raw.version >= 7) validateEncounterResources(instance.resources);
 			ids.add(instance.id);
 		}
 		if (
@@ -271,6 +273,7 @@ export class EncounterWorkspaceState {
 				instance.initiative = null;
 			}
 			if (raw.version < 5) instance.statblockOperations = [];
+			if (raw.version < 7) instance.resources = getEncounterResourceDefaults(getEncounterEffectiveMonster(instance));
 			freezeSnapshot(instance.monster);
 		});
 		return state;
@@ -322,6 +325,7 @@ export class EncounterWorkspaceState {
 					statblockOperations: [],
 					hp: getHpDefaults(resolved.entity),
 					initiative: null,
+					resources: getEncounterResourceDefaults(resolved.entity),
 				});
 				state.selectedIds.push(id);
 			}
@@ -597,6 +601,79 @@ export class EncounterWorkspaceState {
 		});
 	}
 
+	static withSpellSlots (state, {id, level, current, max}) {
+		if (!Number.isInteger(level) || level < 1 || level > 9) throw new Error("Choose a spell level from 1 to 9.");
+		return this._withResources(state, id, resources => ({
+			...resources,
+			spellSlots: {...resources.spellSlots, [level]: {current, max}},
+		}));
+	}
+
+	static withoutSpellSlots (state, {id, level}) {
+		if (!Number.isInteger(level) || level < 1 || level > 9) throw new Error("Choose a spell level from 1 to 9.");
+		return this._withResources(state, id, resources => {
+			if (!Object.hasOwn(resources.spellSlots, level)) throw new Error("This spell level is not tracked.");
+			const spellSlots = {...resources.spellSlots};
+			delete spellSlots[level];
+			return {...resources, spellSlots};
+		});
+	}
+
+	static withAbility (state, {id, ability}) {
+		return this._withResources(state, id, resources => {
+			const existing = resources.abilities.findIndex(it => it.id === ability?.id);
+			if (existing < 0 && resources.recharges.some(it => it.id === ability?.id)) throw new Error("This resource ID is already in use.");
+			const abilities = [...resources.abilities];
+			if (existing < 0) abilities.push(ability);
+			else abilities[existing] = ability;
+			return {...resources, abilities};
+		});
+	}
+
+	static withoutAbility (state, {id, abilityId}) {
+		return this._withResources(state, id, resources => {
+			if (!resources.abilities.some(it => it.id === abilityId)) throw new Error("This ability is not tracked.");
+			return {...resources, abilities: resources.abilities.filter(it => it.id !== abilityId)};
+		});
+	}
+
+	static withAbilityUse (state, {id, abilityId, change}) {
+		if (change !== -1 && change !== 1) throw new Error("Spend or restore one use at a time.");
+		return this._withResources(state, id, resources => {
+			const ability = resources.abilities.find(it => it.id === abilityId);
+			if (!ability) throw new Error("This ability is not tracked.");
+			const current = ability.current + change;
+			if (current < 0 || current > ability.max) throw new Error("This ability has no uses to spend or restore.");
+			return {...resources, abilities: resources.abilities.map(it => it.id === abilityId ? {...it, current} : it)};
+		});
+	}
+
+	static withRechargeReady (state, {id, rechargeId, ready}) {
+		if (typeof ready !== "boolean") throw new Error("Choose whether the recharge ability is ready.");
+		return this._withResources(state, id, resources => {
+			if (!resources.recharges.some(it => it.id === rechargeId)) throw new Error("This recharge ability is not tracked.");
+			return {...resources, recharges: resources.recharges.map(it => it.id === rechargeId ? {...it, ready} : it)};
+		});
+	}
+
+	static withConcentration (state, {id, active, label = ""}) {
+		if (typeof active !== "boolean" || typeof label !== "string" || label.length > 120
+				|| (!active && label)) throw new Error("Choose a valid concentration state and optional effect label.");
+		return this._withResources(state, id, resources => ({
+			...resources,
+			concentration: {active, label},
+		}));
+	}
+
+	static _withResources (state, id, update) {
+		if (!state.instances.some(it => it.id === id)) throw new Error("This encounter monster no longer exists.");
+		return this.validate({
+			...state,
+			instances: state.instances.map(instance => instance.id === id
+				? {...instance, resources: update(instance.resources)}
+				: instance),
+		});
+	}
 	static withHpOperation (state, {operation, targetIds = state.selectedIds}) {
 		const {eligibleIds, skippedIds: missingIds} = getEncounterEffectTargets(state, {targetIds});
 		if (!["delta", "set"].includes(operation?.mode) || !Number.isSafeInteger(operation.value)) {

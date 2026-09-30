@@ -12,6 +12,7 @@ import {ENCOUNTER_ROLL_PRESETS, getEncounterModifierForPreset} from "../../js/en
 import {getNpcTrackerConditionPickerModel} from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerConditionRollMeta} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
 import {EncounterWorkspaceState} from "../../js/encounterworkspace/encounterworkspace-state.js";
+import {getEncounterResourceDefaults} from "../../js/encounterworkspace/encounterworkspace-resources.js";
 
 const monster = {
 	name: "Goblin",
@@ -233,7 +234,12 @@ describe("Encounter Workspace rolls", () => {
 			const initial = {
 				...EncounterWorkspaceState.getEmpty(),
 				instances: state.instances.map(it => ({
-					...it, hash: "goblin_mm", areaNotes: [], statblockOperations: [], hp: {current: 7, max: 7, temp: 0},
+					...it,
+					hash: "goblin_mm",
+					areaNotes: [],
+					statblockOperations: [],
+					hp: {current: 7, max: 7, temp: 0},
+					resources: getEncounterResourceDefaults(it.monster),
 				})),
 				selectedIds: state.selectedIds,
 			};
