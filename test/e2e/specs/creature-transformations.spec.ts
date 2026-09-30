@@ -1,0 +1,81 @@
+import {expect, test} from "@playwright/test";
+import {CreatureTransformationPage} from "../pages/CreatureTransformationPage";
+import {EncounterRollPage} from "../pages/EncounterRollPage";
+
+test("Bestiary Quick Actions previews and stacks two source-qualified templates with explicit conflict winners", async ({page}) => {
+	test.setTimeout(120_000);
+	await page.goto("/bestiary.html#goblin_mm");
+	await page.locator(".bqa__btn-open:visible").first().click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	await page.getByRole("tab", {name: "Templates"}).press("ArrowRight");
+	await expect(page.getByRole("tab", {name: "Area Traits"})).toHaveAttribute("aria-selected", "true");
+	await page.getByRole("tab", {name: "Area Traits"}).press("ArrowLeft");
+	const transformations = new CreatureTransformationPage(page);
+	await transformations.choose("catalog:skeleton|dmg");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await expect(transformations.root.locator(".bqa__transformation-target")).toContainText("vulnerable");
+	await expect(transformations.root.locator(".bqa__transformation-review")).toContainText("Recheck hit points");
+	await transformations.apply();
+	await expect(page.locator(".bqa__changes")).toContainText("Transformation: Skeleton");
+
+	await transformations.choose("catalog:zombie|dmg");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await expect(transformations.root).toContainText("Choose an existing or incoming winner");
+	await transformations.pickIncomingWinners();
+	await transformations.apply();
+	await expect(page.locator(".bqa__changes")).toContainText("Transformation: Zombie");
+	await expect(page.locator(".bqa__changes .bqa__row-title")).toHaveCount(2);
+	await page.setViewportSize({width: 390, height: 844});
+	await expect(page.locator(".bqa__changes")).toBeVisible();
+	const tabHeight = await page.getByRole("tab", {name: "Templates"}).evaluate(node => node.getBoundingClientRect().height);
+	expect(tabHeight).toBeGreaterThanOrEqual(44);
+});
+
+test("Encounter individual templates and bulk selection preview name exact skips and survive reload", async ({page}) => {
+	test.setTimeout(120_000);
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed();
+	await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	const transformations = new CreatureTransformationPage(page);
+	await transformations.choose("catalog:skeleton|dmg");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await transformations.apply();
+	await page.getByRole("button", {name: "Done"}).click();
+	await expect(page.locator(".ew__statblock")).toContainText("Undead");
+	await page.reload();
+	await expect(page.locator(".ew__statblock")).toContainText("Undead");
+	await encounter.openActions();
+	await page.locator("#ew-all").click();
+	await page.locator(".ew__bulk-edit > summary").click();
+	await page.locator("#ew-bulk-type").selectOption("transformation");
+	await transformations.choose("catalog:lycanthropy|mm");
+	await transformations.chooseOption("Lycanthrope", "werebear");
+	await expect(transformations.root).toContainText("Lycanthrope · Werebear:");
+	await transformations.acknowledge();
+	await transformations.root.getByRole("button", {name: "Preview selected monsters"}).click();
+	await expect(transformations.root.locator(".bqa__transformation-target")).toHaveCount(1);
+	await expect(transformations.root).toContainText("Goblin #1: Creature does not satisfy transformation eligibility");
+	await expect(transformations.root).toContainText("Goblin #2");
+	await transformations.apply({bulk: true, count: 1});
+	await page.reload();
+	await page.getByRole("button", {name: "Next visible monster"}).click();
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText("19");
+	await page.getByRole("button", {name: "Previous visible monster"}).click();
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText("Undead");
+});
+
+test("Bestiary transformation catalog failures stay visible and do not show a loaded picker", async ({page}) => {
+	await page.route("**/data/creature-transformations.json", route => route.abort("failed"));
+	await page.goto("/bestiary.html#goblin_mm");
+	await page.locator(".bqa__btn-open:visible").first().click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	const transformations = new CreatureTransformationPage(page);
+	await expect(transformations.root.getByRole("alert")).toContainText("Could not load creature transformations");
+	await expect(transformations.root.getByRole("button", {name: "Retry catalog load"})).toBeVisible();
+	await expect(transformations.root.getByRole("combobox", {name: "Creature transformation"})).toHaveCount(0);
+	await expect(transformations.root.getByRole("status")).toBeEmpty();
+});
