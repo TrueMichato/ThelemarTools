@@ -27,11 +27,13 @@ The schema at `schema/site/creature-transformation.json` is strict, with no arbi
 | `grantLanguage {value}` | Add a fixed spoken language; understanding without speech requires manual review. |
 | `addEntry {section,entry}` | Add an original, short, source-qualified statblock entry. |
 | `removeEntry/replaceEntry {section,match,...}` | Match exactly one named entry plus source, or exactly one well-defined role plus source; zero or multiple matches **fail**. `replaceEntry.onMissing:"skip"` is only for explicitly optional source abilities. |
-| `replaceDamageType {section,match,from,to,onMissing}` | Match exactly one action then replace only the enumerated elemental damage types, retaining its dice, DC, and other text. `onMissing:"skip"` applies to absent optional elemental damage, not an ambiguous or missing action. |
+| `replaceDamageType {section,match,from,to,onMissing}` | Match exactly one action then replace only the listed damage types, retaining its dice, DC, and other text. `onMissing:"skip"` applies to absent optional damage, not an ambiguous or missing action. |
 
 Entry sections are `trait`, `action`, `bonus`, `reaction`, and `legendary`. Match source `$chassis` resolves to the chosen creature's own source; other sources are explicit. The later engine must make this identity check fail closed. `entry.source` records provenance; if target statblock entry schemas do not allow it directly, retain provenance outside the rendered entry rather than silently discarding it. No step modifies unrelated AC, HP, attacks, CR, or character-level state. All five are explicitly returned for DM review, as are template-specific unresolved abilities. `manualReview` is a blocking to-do list for a DM, not a simulated automation.
 
 For example, `resolveCreatureTransformation({candidates, id: "catalog:half-dragon|mm", selections: {ancestry: ["red"], size: ["huge"]}})` returns resistance to fire and checked source guidance for the Huge breath. It does **not** fabricate a new breath attack, assume the source's optional CR floor is a mandatory prerequisite, or change the NPC's current HP.
+
+The MM Shadow Dragon breath step covers every supported damage type, including gem-dragon breath damage; its bite step remains limited to the five listed types. Lethal Shadow Breath's Humanoid-to-shadow consequence requires DM review rather than spawning a creature automatically. Resolved DMG Skeleton race candidates grant bludgeoning vulnerability; choice-shaped or nonstandard race vulnerabilities require DM review. Fey Beast requires at least one feature pick, and still permits multiple picks. The screenshot recipe's page and edition remain unverified.
 
 ## Validation and provenance
 

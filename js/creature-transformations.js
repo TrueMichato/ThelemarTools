@@ -84,9 +84,14 @@ const getRaceRecipe = race => {
 	const changes = [];
 	const manualReview = copy(REVIEW_CHASSIS);
 	const addDamage = (key, op) => {
-		for (const value of race[key] || []) {
+		if (race[key] == null) return;
+		if (!Array.isArray(race[key])) {
+			manualReview.push({field: "traits", reason: `Resolve this species' ${key} choice or nonstandard damage type.`});
+			return;
+		}
+		for (const value of race[key]) {
 			if (typeof value === "string" && DAMAGE_TYPES.has(value)) changes.push({op, value});
-			else manualReview.push({field: "traits", reason: `Resolve the ${key} choice or nonstandard resistance for this species.`});
+			else manualReview.push({field: "traits", reason: `Resolve this species' ${key} choice or nonstandard damage type.`});
 		}
 	};
 	const addConditions = () => {
@@ -101,6 +106,7 @@ const getRaceRecipe = race => {
 	else if (!race.creatureTypes) changes.push({op: "setType", value: "humanoid"});
 	addDamage("resist", "grantResistance");
 	addDamage("immune", "grantImmunity");
+	addDamage("vulnerable", "grantVulnerability");
 	addConditions();
 	if (Number.isInteger(race.darkvision) && race.darkvision > 0) changes.push({op: "grantSense", sense: "darkvision", range: race.darkvision});
 	if (typeof race.speed === "number" && Number.isInteger(race.speed) && race.speed >= 0) changes.push({op: "grantSpeed", mode: "walk", feet: race.speed});

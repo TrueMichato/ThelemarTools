@@ -52,7 +52,7 @@
 			"prerequisites": ["Confirm a true dragon exposed to the Shadowfell; a dracolich is ineligible."],
 			"changes": [
 				{"op": "grantResistance", "value": "necrotic"},
-				{"op": "replaceDamageType", "section": "action", "match": {"role": "breathWeapon", "source": "$chassis"}, "from": ["acid", "cold", "fire", "lightning", "poison"], "to": "necrotic", "onMissing": "error"},
+				{"op": "replaceDamageType", "section": "action", "match": {"role": "breathWeapon", "source": "$chassis"}, "from": ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"], "to": "necrotic", "onMissing": "error"},
 				{"op": "replaceDamageType", "section": "action", "match": {"role": "bite", "source": "$chassis"}, "from": ["acid", "cold", "fire", "lightning", "poison"], "to": "necrotic", "onMissing": "skip"},
 				{"op": "grantConditionalDefense", "kind": "resistance", "value": "acid", "when": "dimLightOrDarkness"},
 				{"op": "grantConditionalDefense", "kind": "resistance", "value": "bludgeoning", "when": "dimLightOrDarkness"},
@@ -71,7 +71,8 @@
 			"optionGroups": [],
 			"manualReview": [
 				{"field": "traits", "reason": "Resolve Stealth expertise and the light-dependent shadow traits."},
-				{"field": "attacks", "reason": "Replace the original breath with its shadow form and determine bite, lair, and legendary changes."}
+				{"field": "attacks", "reason": "Replace the original breath with its shadow form and determine bite, lair, and legendary changes."},
+				{"field": "attacks", "reason": "If Shadow Breath reduces a Humanoid to 0 hit points, adjudicate its death and the resulting shadow; these steps do not create a creature."}
 			]
 		},
 		{
@@ -300,7 +301,7 @@
 				{"op": "addEntry", "section": "trait", "entry": {"name": "Sylvan Understanding", "source": "SCRE", "entries": ["If its Intelligence is at least 3, this creature understands Sylvan but does not gain the ability to speak it."]}}
 			],
 			"optionGroups": [
-				{"id": "features", "name": "Fey traits and actions", "selection": "any", "required": false, "options": [
+				{"id": "features", "name": "Fey traits and actions", "selection": "any", "required": true, "options": [
 					{"id": "barkskin", "name": "Barkskin", "changes": [], "manualReview": [{"field": "ac", "reason": "Set natural AC to 16 if the chosen feature applies."}]},
 					{"id": "fey-touched", "name": "Fey-Touched", "changes": [{"op": "addEntry", "section": "trait", "entry": {"name": "Fey-Touched", "source": "SCRE", "entries": ["The creature has advantage on saving throws against effects that charm or frighten it."]}}], "manualReview": []},
 					{"id": "entangle", "name": "Entangle", "changes": [], "manualReview": [{"field": "spellcasting", "reason": "Resolve the once-daily Wisdom spell without spoken or material components."}]},

@@ -118,6 +118,28 @@ describe("app-owned creature transformation schema and source corpus", () => {
 		}
 		expect(byId("Fallen Angel", "SCRE").changes).toContainEqual(expect.objectContaining({op: "replaceEntry", match: {role: "healingTouch", source: "$chassis"}, onMissing: "skip"}));
 	});
+
+	it("replaces every supported breath damage type on MM Shadow Dragons, without widening their bite rule", () => {
+		const steps = byId("Shadow Dragon", "MM").changes.filter(it => it.op === "replaceDamageType");
+		expect(steps.find(it => it.match.role === "breathWeapon")).toEqual({
+			op: "replaceDamageType",
+			section: "action",
+			match: {role: "breathWeapon", source: "$chassis"},
+			from: ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"],
+			to: "necrotic",
+			onMissing: "error",
+		});
+		expect(steps.find(it => it.match.role === "bite").from).toEqual(["acid", "cold", "fire", "lightning", "poison"]);
+	});
+
+	it("flags the MM Shadow Breath's lethal Humanoid-to-shadow consequence for DM review", () => {
+		const candidates = getCreatureTransformationCandidates({catalog, races: [], getVersions: () => []});
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:shadow dragon|mm"});
+		expect(resolved.manualReview).toContainEqual({
+			field: "attacks",
+			reason: expect.stringMatching(/\bhumanoid\b.*\bshadow\b/i),
+		});
+	});
 });
 
 describe("source-qualified candidate and resolution API", () => {
@@ -191,6 +213,39 @@ describe("source-qualified candidate and resolution API", () => {
 			getVersions: race => DataUtil.generic.getVersions(race, {isExternalApplicationIdentityOnly: false}),
 		});
 		expect(withBrew.find(it => it.id === "race:elf (moon)|hbr").baseIdentity).toEqual({name: "Elf", source: "PHB"});
+	});
+
+	it("replays the DMG Skeleton's vulnerability and escalates unsupported race vulnerability choices", () => {
+		const raw = JSON.parse(fs.readFileSync("data/races.json", "utf8"));
+		const skeleton = raw.race.find(it => it.name === "Skeleton" && it.source === "DMG");
+		expect(skeleton.vulnerable).toEqual(["bludgeoning"]);
+		const candidates = getCreatureTransformationCandidates({
+			catalog,
+			races: [
+				skeleton,
+				{...skeleton, name: "Choice Skeleton", vulnerable: ["bludgeoning", {choose: {from: ["fire", "cold"]}}]},
+				{...skeleton, name: "Complex Skeleton", vulnerable: {choose: {from: ["fire", "cold"]}}},
+			],
+			getVersions: () => [],
+		});
+		const resolved = resolveCreatureTransformation({candidates, id: "race:skeleton|dmg"});
+		expect(resolved.changes).toContainEqual({op: "grantVulnerability", value: "bludgeoning"});
+		const choice = resolveCreatureTransformation({candidates, id: "race:choice skeleton|dmg"});
+		expect(choice.changes).toContainEqual({op: "grantVulnerability", value: "bludgeoning"});
+		expect(choice.manualReview).toContainEqual({field: "traits", reason: expect.stringContaining("vulnerable")});
+		const complex = resolveCreatureTransformation({candidates, id: "race:complex skeleton|dmg"});
+		expect(complex.changes).not.toContainEqual(expect.objectContaining({op: "grantVulnerability"}));
+		expect(complex.manualReview).toContainEqual({field: "traits", reason: expect.stringContaining("vulnerable")});
+	});
+
+	it("requires at least one Fey Beast feature without limiting additional picks", () => {
+		const candidates = getCreatureTransformationCandidates({catalog, races: [], getVersions: () => []});
+		const id = "catalog:fey beast|scre";
+		expect(() => resolveCreatureTransformation({candidates, id})).toThrow("Invalid selection");
+		expect(() => resolveCreatureTransformation({candidates, id, selections: {features: []}})).toThrow("Invalid selection");
+		const resolved = resolveCreatureTransformation({candidates, id, selections: {features: ["fey-touched", "rooted"]}});
+		expect(resolved.selectedOptions.features).toEqual(["fey-touched", "rooted"]);
+		expect(resolved.changes).toContainEqual(expect.objectContaining({op: "addEntry", entry: expect.objectContaining({name: "Fey-Touched"})}));
 	});
 
 	it("requires selections, rejects unknown and inappropriate choices, and returns immutable, scoped steps", () => {
