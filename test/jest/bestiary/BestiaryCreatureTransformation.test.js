@@ -223,15 +223,60 @@ describe("resolved creature transformation preview and replay", () => {
 		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [first, second, third]}).str).toBe(22);
 	});
 
+	it("evaluates each stacked recipe against the current type rather than the original chassis", () => {
+		const monster = getCreature();
+		const dracolich = getRecipe("Dracolich", [{type: "setType", value: "undead"}]);
+		const shadow = getRecipe("Shadow Dragon", [{type: "grantResistance", value: "necrotic"}]);
+		const transformed = commit(monster, [], preview(monster, [], dracolich));
+		expect(() => preview(monster, [transformed], shadow)).toThrow(/eligibility/i);
+
+		const shadowFirst = commit(monster, [], preview(monster, [], shadow));
+		const dracolichSecond = commit(monster, [shadowFirst], preview(monster, [shadowFirst], dracolich));
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([shadowFirst, dracolichSecond]))}).type).toBe("undead");
+		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [dracolichSecond, shadowFirst]})).toThrow(/eligibility/i);
+		expect(monster.type).toBe("dragon");
+	});
+
+	it("permits a later humanoid-only recipe after transformation and rejects replay without its prerequisite step", () => {
+		const monster = getCreature();
+		const humanoid = commit(monster, [], preview(monster, [], getRecipe("Humanoid Form", [{type: "setType", value: "humanoid"}])));
+		const humanoidOnly = getRecipe("Humanoid-only", [{type: "minimumAbility", ability: "dex", value: 14}], {eligibility: [{types: ["humanoid"]}]});
+		expect(() => preview(monster, [], humanoidOnly)).toThrow(/eligibility/i);
+		const second = commit(monster, [humanoid], preview(monster, [humanoid], humanoidOnly));
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([humanoid, second]))})).toMatchObject({type: "humanoid", dex: 14});
+		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [second]})).toThrow(/eligibility/i);
+	});
+
+	it("rejects undefined recipe/operation data instead of producing a receipt that fails after JSON save", () => {
+		const monster = getCreature();
+		const invalid = getRecipe("Invalid", [{type: "setAbility", ability: "dex", value: 12}], {
+			provenance: {edition: "classic", evidence: undefined},
+		});
+		expect(() => preview(monster, [], invalid)).toThrow(/plain|json|undefined/i);
+		const nonJson = getRecipe("Non-JSON", [{type: "setAbility", ability: "dex", value: 12}]);
+		nonJson.provenance[Symbol("hidden")] = "not persisted";
+		expect(() => preview(monster, [], nonJson)).toThrow(/JSON cannot contain symbol/i);
+		const valid = getRecipe("Valid", [{type: "setAbility", ability: "dex", value: 12}]);
+		const operation = commit(monster, [], preview(monster, [], valid));
+		const saved = JSON.parse(JSON.stringify(operation));
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [saved]}).dex).toBe(12);
+		operation.data.resolved.provenance.evidence = undefined;
+		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [operation]})).toThrow(/plain|json|undefined/i);
+	});
+
 	it("allows only explicitly optional entry replacements, while damage replacement still requires one named match", () => {
 		const monster = getCreature();
 		delete monster.bonus;
+		monster.action.push({name: "No Text"});
 		const optional = getRecipe("Optional", [
 			{type: "replaceEntry", section: "action", match: {name: "Healing Touch", source: "$chassis"}, entry: {name: "Healing Touch", source: "TST", entries: ["Replaced."]}, onMissing: "skip"},
 			{type: "replaceDamageType", section: "action", match: {role: "bite", source: "$chassis"}, from: ["fire"], to: "cold", onMissing: "skip"},
 		]);
 		expect(preview(monster, [], optional).proposed).toEqual(monster);
 		expect(preview(monster, [], {...optional, changes: [{...optional.changes[0], section: "bonus"}]}).proposed).not.toHaveProperty("bonus");
+		const skipWithoutText = getRecipe("Skip", [{type: "replaceDamageType", section: "action", match: {name: "No Text", source: "$chassis"}, from: ["fire"], to: "cold", onMissing: "skip"}]);
+		const skipped = commit(monster, [], preview(monster, [], skipWithoutText));
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([skipped]))})).toEqual(monster);
 		expect(() => preview(monster, [], {...optional, changes: [{...optional.changes[0], onMissing: "error"}]})).toThrow(/matched 0 entries/i);
 		expect(() => preview(monster, [], {...optional, changes: [{...optional.changes[1], match: {name: "None", source: "$chassis"}}]})).toThrow(/matched 0 entries/i);
 		const duplicate = {...monster, action: [...monster.action, structuredClone(monster.action[0])]};

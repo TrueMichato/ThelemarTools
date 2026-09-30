@@ -35,8 +35,12 @@ function _isObject (value) {
 	return prototype === null || Object.getPrototypeOf(prototype) === null;
 }
 
-function _assertJson (value, seen = new WeakSet()) {
-	if (value == null || typeof value === "string" || typeof value === "boolean") return;
+function _assertJson (value, seen = new WeakSet(), {allowUndefined = false, strict = true} = {}) {
+	if (value === undefined) {
+		if (allowUndefined) return;
+		_fail("Undefined is not valid transformation JSON.");
+	}
+	if (value === null || typeof value === "string" || typeof value === "boolean") return;
 	if (typeof value === "number" && Number.isFinite(value)) return;
 	if (typeof value !== "object" || (!Array.isArray(value) && !_isObject(value)) || seen.has(value)) _fail("Transformation data must be finite, plain, acyclic JSON.");
 	seen.add(value);
@@ -46,9 +50,13 @@ function _assertJson (value, seen = new WeakSet()) {
 			if (!Object.hasOwn(value, i)) _fail("Sparse transformation arrays are not supported.");
 		}
 	}
-	for (const key of Object.keys(value)) {
+	const keys = strict ? Reflect.ownKeys(value).filter(key => !(Array.isArray(value) && key === "length")) : Object.keys(value);
+	for (const key of keys) {
+		if (strict && (typeof key !== "string" || (Array.isArray(value) && !/^(0|[1-9]\d*)$/.test(key)))) _fail("Transformation JSON cannot contain symbol or non-index array properties.");
 		if (_UNSAFE_KEYS.has(key)) _fail(`Unsafe transformation property "${key}".`);
-		_assertJson(value[key], seen);
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (strict && (!descriptor.enumerable || !Object.hasOwn(descriptor, "value"))) _fail("Transformation JSON cannot contain hidden or accessor properties.");
+		_assertJson(value[key], seen, {allowUndefined, strict});
 	}
 	seen.delete(value);
 }
@@ -271,22 +279,22 @@ function _getCr (creature) {
 	return /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : null;
 }
 
-function _checkEligibility ({original, resolved, acknowledgedPrerequisites, dmApproved}) {
+function _checkEligibility ({creature, resolved, acknowledgedPrerequisites, dmApproved}) {
 	_expectArray(acknowledgedPrerequisites, "Acknowledged prerequisites");
 	if (acknowledgedPrerequisites.some(it => !resolved.prerequisites.includes(it)) || resolved.prerequisites.some(it => !acknowledgedPrerequisites.includes(it))) {
 		_fail("All narrative prerequisites must be explicitly acknowledged.", "CREATURE_TRANSFORMATION_PREREQUISITE");
 	}
 	if (typeof dmApproved !== "boolean") _fail("DM approval must be explicitly true or false.");
-	const type = typeof original.type === "string" ? original.type : original.type?.type;
-	const cr = _getCr(original);
+	const type = typeof creature.type === "string" ? creature.type : creature.type?.type;
+	const cr = _getCr(creature);
 	const eligible = rule =>
 		(!rule.types || rule.types.some(it => it.toLowerCase() === `${type || ""}`.toLowerCase()))
-		&& (!rule.sizes || rule.sizes.some(it => (original.size || []).includes(it)))
+		&& (!rule.sizes || rule.sizes.some(it => (creature.size || []).includes(it)))
 		&& (rule.minCr == null || (cr != null && cr >= rule.minCr))
 		&& (rule.maxCr == null || (cr != null && cr <= rule.maxCr))
-		&& (rule.minInt == null || (Number.isFinite(original.int) && original.int >= rule.minInt))
-		&& (rule.maxInt == null || (Number.isFinite(original.int) && original.int <= rule.maxInt))
-		&& (!rule.requiresTrait || (original.trait || []).some(it => it.name?.toLowerCase() === rule.requiresTrait.toLowerCase()))
+		&& (rule.minInt == null || (Number.isFinite(creature.int) && creature.int >= rule.minInt))
+		&& (rule.maxInt == null || (Number.isFinite(creature.int) && creature.int <= rule.maxInt))
+		&& (!rule.requiresTrait || (creature.trait || []).some(it => it.name?.toLowerCase() === rule.requiresTrait.toLowerCase()))
 		&& (!rule.dmApproval || dmApproved);
 	if (resolved.eligibility.length && !resolved.eligibility.some(eligible)) _fail("Creature does not satisfy transformation eligibility (or required DM approval).", "CREATURE_TRANSFORMATION_INELIGIBLE");
 }
@@ -438,8 +446,9 @@ function _applyChange (creature, change, chassis) {
 				out[section][index] = after;
 			} else {
 				const count = {value: 0};
-				after = {...before, entries: _replaceDamageText(before.entries, change.from, change.to, count)};
+				const entries = _replaceDamageText(before.entries, change.from, change.to, count);
 				if (!count.value && change.onMissing === "error") _fail(`No listed damage type found in "${before.name}".`, "CREATURE_TRANSFORMATION_DAMAGE_MISSING");
+				after = count.value ? {...before, entries} : before;
 				out[section][index] = after;
 			}
 			break;
@@ -474,12 +483,12 @@ export class BestiaryCreatureTransformation {
 
 	static preview ({original, current, resolved, priorWrites = [], acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, historyFingerprint = ""}) {
 		_validateRecipe(resolved);
-		_assertJson(original);
-		_assertJson(current);
-		_assertJson(priorWrites);
+		_assertJson(original, new WeakSet(), {strict: false});
+		_assertJson(current, new WeakSet(), {strict: false});
+		_assertJson(priorWrites, new WeakSet(), {allowUndefined: true, strict: false});
 		_assertJson(conflictDecisions);
 		const sourceUid = _getUid(original);
-		_checkEligibility({original, resolved, acknowledgedPrerequisites, dmApproved});
+		_checkEligibility({creature: current, resolved, acknowledgedPrerequisites, dmApproved});
 		if (!_isObject(conflictDecisions)) _fail("Conflict decisions must be keyed by field path.");
 		let candidate = _copy(current);
 		const candidateWrites = new Map();
