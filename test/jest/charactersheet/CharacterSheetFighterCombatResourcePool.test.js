@@ -53,6 +53,35 @@ describe("Fighter combat-resource pool (synthetic)", () => {
 	// #9 Second Wind
 	// -------------------------------------------------------------------------
 	describe("Second Wind", () => {
+		it("never remints a generic resource beside its synthetic pool on scale or reload", () => {
+			makeFighter(5);
+			expect(state.getResources().some(resource => resource.name === "Second Wind")).toBe(false);
+			const max = state.getSecondWindUsesMax();
+			state.setSecondWindUsesRemaining(max - 1);
+			state.ensureFighterFeatureUses();
+			expect(state.getSecondWindUsesRemaining()).toBe(max - 1);
+			expect(state.getResources().some(resource => resource.name === "Second Wind")).toBe(false);
+			state.addResource({name: "Second Wind", max: 1, current: 1, recharge: "short"});
+			expect(state.getResources().some(resource => resource.name === "Second Wind")).toBe(true);
+			state.ensureFighterFeatureUses();
+			expect(state.getResources().some(resource => resource.name === "Second Wind")).toBe(false);
+			const reloaded = new CharacterSheetState();
+			reloaded.loadFromJson(state.toJson());
+			reloaded.ensureFighterFeatureUses();
+			expect(reloaded.getResources().some(resource => resource.name === "Second Wind")).toBe(false);
+			expect(reloaded.getSyntheticCombatResources().some(resource => resource.kind === "secondWind")).toBe(true);
+		});
+
+		it("keeps Action Surge's mirrored resource while omitting Second Wind's duplicate", () => {
+			makeFighter(5);
+			state.addFeature({name: "Action Surge", source: "XPHB", className: "Fighter", level: 2, description: "<p>Action Surge.</p>"});
+			state.ensureFighterFeatureUses();
+			const resource = state.getResources().find(it => it.name === "Action Surge");
+			expect(resource).toBeDefined();
+			expect(resource.max).toBeGreaterThan(0);
+			expect(state.getResources().some(it => it.name === "Second Wind")).toBe(false);
+		});
+
 		it("appears in the synthetic pool with canonical max/remaining", () => {
 			makeFighter(5);
 			const res = find("secondWind");

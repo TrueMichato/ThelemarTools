@@ -251,6 +251,18 @@ test.describe("device-scoped active campaign context", () => {
 				() => ordinary.page.evaluate(() => (window as any).charSheet?._currentCharacterId),
 				{timeout: 30_000},
 			).toBe(character.id);
+			await expect.poll(async () => {
+				const state = await ordinary.page.evaluate(id => {
+					const sheet = (window as any).charSheet;
+					return {
+						revision: sheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
+						pending: sheet?._characterRepository?.hasPendingWrites?.() ?? true,
+						loading: sheet?._campaign?._isLoading ?? true,
+					};
+				}, character.id);
+				const latest = await hub.getCharacter(character.id);
+				return state.revision != null && state.revision === latest.revision && !state.pending && !state.loading;
+			}, {timeout: 30_000}).toBe(true);
 			const canonicalAfterOrdinary = await hub.getCharacter(character.id);
 			const ordinaryAcceptedRevision = await ordinary.page.evaluate(
 				id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
@@ -276,13 +288,22 @@ test.describe("device-scoped active campaign context", () => {
 				),
 				{timeout: 30_000},
 			).toBe(canonicalAfterOverview.revision);
-
 			// The explicit authority transition saves the current campaign document, fences its
 			// callbacks, and carries an exact route back without putting the Hub id in local `id`.
 			const bfcacheToken = await ordinary.page.evaluate(() => {
 				(window as any).__authorityBfcacheToken = crypto.randomUUID();
 				return (window as any).__authorityBfcacheToken;
 			});
+			const routePatchPaths: string[] = [];
+			const onRouteRequest = request => {
+				if (
+					request.method() !== "PATCH"
+					|| new URL(request.url()).pathname !== `/api/characters/${character.id}`
+				) return;
+				const body = request.postDataJSON();
+				routePatchPaths.push(...(body.patches || []).map((patch: {path: string}) => patch.path.split("/")[1]));
+			};
+			ordinary.page.on("request", onRouteRequest);
 			await ordinary.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
 			await ordinary.page.waitForURL(url =>
 				url.searchParams.get("local") === "1"
@@ -318,6 +339,11 @@ test.describe("device-scoped active campaign context", () => {
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
 			const canonicalAtLocalEntry = await hub.getCharacter(character.id);
 			expect(canonicalAtLocalEntry.data.name).toBe("Canonical Route Hero");
+			ordinary.page.off("request", onRouteRequest);
+			expect({revision: canonicalAtLocalEntry.revision, routePatchPaths}).toEqual({
+				revision: canonicalAfterOverview.revision,
+				routePatchPaths: [],
+			});
 
 			await ordinary.page.locator("#charsheet-sel-character").selectOption(character.id);
 			await expect(ordinary.page.locator("#charsheet-ipt-name")).toHaveValue("Local Collision Hero");
@@ -371,6 +397,7 @@ test.describe("device-scoped active campaign context", () => {
 				character.id,
 			);
 			expect(canonicalAfterReturn.revision).toBe(canonicalAfterLocalWrite.revision);
+			expect(canonicalAfterReturn.revision).toBe(canonicalAfterOverview.revision);
 			expect(returnedAcceptedRevision).toBe(canonicalAfterReturn.revision);
 		} finally {
 			await pCloseContext(context);

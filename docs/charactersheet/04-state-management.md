@@ -591,6 +591,12 @@ getFeatureCalculations() {
 }
 ```
 
+Second Wind's `feature.uses` backs the synthetic combat-resource pool; it must not also create a
+generic `resources[]` row. `ensureFighterFeatureUses()` scales the feature uses and clears a stale
+duplicate row, while Action Surge still retains its ordinary mirrored resource. On load, a
+source-managed named modifier rebuilt with identical effects reuses its persisted ID, so a
+read-only sheet rehydration does not turn new random IDs into a canonical character patch.
+
 ### 2014 vs 2024 Rules
 
 The method handles differences between PHB (2014) and XPHB (2024):

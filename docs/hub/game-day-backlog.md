@@ -27,6 +27,15 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   read-only route-write/convergence stop**, not evidence that the original data was overwritten.
   BFCache/new-tab/two-device and targeting retests were stopped pending command/audit correlation and a
   stable-revision fix.
+- **Revised source candidate, not deployed:** read-only audit confirmed one ordinary character PATCH at
+  the route transition (revision 22 -> 23). Synthetic red-first tests found that Fighter's synthetic
+  Second Wind pool was re-minting a generic `resources[]` row, while source-managed modifier IDs also
+  drifted on load. The source fix prevents the duplicate and reuses exactly matching derived IDs;
+  focused PostgreSQL/browser testing now proves the no-edit route sends zero PATCHes and leaves the
+  canonical revision unchanged. Full local Hub/Character Sheet suites passed; a separate full-stack
+  auth/reauthentication UI journey failed while 46 other browser journeys passed, then passed alone
+  on a fresh stack. Do not call the *full* local real-stack run green or promote this candidate until
+  exact-head CI and physical retest close the remaining gates.
 - **P1 remediation deployed, not physically proven:** [PR #331](https://github.com/TrueMichato/ThelemarTools/pull/331)
   fixes local/campaign route and repository-authority restoration. Its reviewed head
   `7f6c5d37dd7e7bee47b6ca39040eaf607f484179` passed all four CI jobs, including real-stack E2E;

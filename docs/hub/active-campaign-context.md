@@ -139,6 +139,8 @@ repository's ordinary save/recovery flow before navigation, then advances the ch
 generation, closes character-scoped UI, fences realtime callbacks, and suspends the realtime/context
 owners. The existing `pagehide` owner then preserves them for BFCache or performs terminal
 detach/disposal. If save or recovery refuses, navigation does not occur.
+An unchanged campaign sheet must not emit an ordinary character PATCH or advance the canonical
+revision merely because feature effects and synthetic resources were re-derived during load.
 If a temporary cloud id canonicalizes during that save, the local return descriptor is rewritten to
 the accepted canonical id before navigation.
 After BFCache restores the campaign sheet, context revalidation precedes realtime resume. A retained

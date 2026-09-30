@@ -5514,6 +5514,9 @@ class CharacterSheetState {
 			...this._getDefaultState(),
 			...MiscUtil.copyFast(data),
 		};
+		const storedNamedModifiers = Array.isArray(this._data.namedModifiers)
+			? this._data.namedModifiers.map(modifier => MiscUtil.copyFast(modifier))
+			: [];
 		if (campaignSettingsOverlay) this.setCampaignSettingsOverlay(campaignSettingsOverlay);
 		this._migrateInventoryItemMetadata();
 
@@ -5949,6 +5952,39 @@ class CharacterSheetState {
 		// `_calculateMaxHp()` (classes, level history, custom modifiers, active states,
 		// equipment) has already been restored and migrated.
 		this._migrateHpMax();
+		this._reuseDerivedNamedModifierIds(storedNamedModifiers);
+	}
+
+	_reuseDerivedNamedModifierIds (storedModifiers) {
+		if (!storedModifiers.length || !Array.isArray(this._data.namedModifiers)) return;
+		// Re-derived effects keep their persisted identity only when every effect field still agrees.
+		const normalize = value => {
+			if (Array.isArray(value)) return value.map(normalize);
+			if (value && typeof value === "object") {
+				return Object.fromEntries(Object.keys(value).sort().map(key => [key, normalize(value[key])]));
+			}
+			return value;
+		};
+		const signature = modifier => {
+			const {id: _id, ...fields} = modifier;
+			return JSON.stringify(normalize(fields));
+		};
+		const previousIds = new Map();
+		for (const modifier of storedModifiers) {
+			if (!modifier?.sourceType || typeof modifier.id !== "string") continue;
+			const key = signature(modifier);
+			if (!previousIds.has(key)) previousIds.set(key, []);
+			previousIds.get(key).push(modifier.id);
+		}
+		const usedIds = new Set(this._data.namedModifiers.map(modifier => modifier.id));
+		for (const modifier of this._data.namedModifiers) {
+			if (!modifier?.sourceType) continue;
+			const oldId = previousIds.get(signature(modifier))?.shift();
+			if (!oldId || oldId === modifier.id || usedIds.has(oldId)) continue;
+			usedIds.delete(modifier.id);
+			modifier.id = oldId;
+			usedIds.add(oldId);
+		}
 	}
 
 	/**
@@ -49177,7 +49213,20 @@ class CharacterSheetState {
 			feature.uses.current = wasFull ? desiredMax : Math.min(feature.uses.current ?? 0, desiredMax);
 		}
 
-		// Sync the mirrored resource that addFeature creates (Combat Resources pips read it).
+		const syntheticName = CharacterSheetState.canonicalSyntheticTrackedResourceName(featureName);
+		if (syntheticName) {
+			const hasStaleResource = this._data.resources.some(r =>
+				CharacterSheetState.canonicalSyntheticTrackedResourceName(r.name) === syntheticName,
+			);
+			if (hasStaleResource) {
+				this._data.resources = this._data.resources.filter(r =>
+					CharacterSheetState.canonicalSyntheticTrackedResourceName(r.name) !== syntheticName,
+				);
+			}
+			return;
+		}
+
+		// Other Fighter features may still use a mirrored resource.
 		const resource = this._data.resources.find(r => r.featureId === feature.id)
 			|| this._data.resources.find(r => r.name === feature.name);
 		if (resource) {
