@@ -5,6 +5,7 @@ const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_INELIGIBLE",
 	"CREATURE_TRANSFORMATION_ENTRY_MATCH",
 	"CREATURE_TRANSFORMATION_DAMAGE_MISSING",
+	"CREATURE_TRANSFORMATION_TOO_LARGE",
 ]);
 
 function getEligibilityDetail (creature, rules, dmApproved) {
@@ -26,7 +27,7 @@ function getEligibilityDetail (creature, rules, dmApproved) {
 	return reasons.join("; ");
 }
 
-export function previewCreatureTransformationTargets ({targets, resolved, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}}) {
+export function previewCreatureTransformationTargets ({targets, resolved, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, validateOperation = null}) {
 	if (!Array.isArray(targets) || !targets.length || new Set(targets.map(it => it.id)).size !== targets.length) {
 		throw new Error("Choose at least one distinct monster to transform.");
 	}
@@ -35,14 +36,31 @@ export function previewCreatureTransformationTargets ({targets, resolved, acknow
 	const skipped = [];
 	for (const target of targets) {
 		try {
-			const preview = BestiaryQuickActionsUtil.previewCreatureTransformation({
+			const options = {
 				baseCreature: target.baseCreature,
 				operations: target.operations,
 				resolved: recipe,
 				acknowledgedPrerequisites,
 				dmApproved,
 				conflictDecisions: conflictDecisions[target.id] || {},
-			});
+			};
+			const preview = BestiaryQuickActionsUtil.previewCreatureTransformation(options);
+			if (validateOperation) {
+				// Temporary winners validate storage limits only; unresolved choices remain for the DM.
+				const preflightDecisions = Object.fromEntries(preview.conflicts.map(({path}) => [path, conflictDecisions[target.id]?.[path] || "incoming"]));
+				const preflight = preview.canApply ? preview : BestiaryQuickActionsUtil.previewCreatureTransformation({...options, conflictDecisions: preflightDecisions});
+				const operation = BestiaryQuickActionsUtil.createCreatureTransformationOperation({
+					baseCreature: target.baseCreature,
+					operations: target.operations,
+					preview: preflight,
+					conflictDecisions: preflightDecisions,
+				});
+				try { validateOperation({target, operation}); } catch (e) {
+					if (!(e instanceof Error)) throw e;
+					skipped.push({id: target.id, label: target.label, reason: e.message});
+					continue;
+				}
+			}
 			previews.push({id: target.id, label: target.label, preview});
 		} catch (e) {
 			if (!SKIPPABLE_CODES.has(e.code)) throw e;

@@ -13,7 +13,7 @@ const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
 const VERSION = 6;
 const MAX_INSTANCES = 1000;
-const MAX_STATBLOCK_OPERATIONS = 100;
+export const MAX_ENCOUNTER_STATBLOCK_OPERATIONS = 100;
 const MAX_OPERATION_SIZE = 200_000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -46,8 +46,8 @@ function validateHp (hp) {
 
 const isRecord = value => value && typeof value === "object" && !Array.isArray(value);
 
-function validateStatblockOperations (monster, operations) {
-	if (!Array.isArray(operations) || operations.length > MAX_STATBLOCK_OPERATIONS) {
+export function validateEncounterStatblockOperations (monster, operations) {
+	if (!Array.isArray(operations) || operations.length > MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
 		throw new Error("The saved encounter contains an invalid statblock history. It has not been changed.");
 	}
 	const ids = new Set();
@@ -196,7 +196,7 @@ export class EncounterWorkspaceState {
 					throw new Error("The saved encounter contains invalid initiative. It has not been changed.");
 				}
 			}
-			if (raw.version >= 5) validateStatblockOperations(instance.monster, instance.statblockOperations);
+			if (raw.version >= 5) validateEncounterStatblockOperations(instance.monster, instance.statblockOperations);
 			ids.add(instance.id);
 		}
 		if (
@@ -434,7 +434,7 @@ export class EncounterWorkspaceState {
 			}
 			const operations = [...prior.filter(it => !removed.has(it.id)), ...change.addOperations];
 			if (JSON.stringify(operations) === JSON.stringify(prior)) return instance;
-			validateStatblockOperations(instance.monster, operations);
+			validateEncounterStatblockOperations(instance.monster, operations);
 			const after = BestiaryQuickActionsEngine.applyOperations({monster: instance.monster, operations});
 			const hpChanged = !Object.is(before.hp?.average, after.hp?.average);
 			changedIds.push(instance.id);
@@ -503,7 +503,7 @@ export class EncounterWorkspaceState {
 				? instance.statblockOperations.filter(it => it.type === "setLegendaryGroup").map(it => it.id)
 				: [];
 			try {
-				validateStatblockOperations(instance.monster, [
+				validateEncounterStatblockOperations(instance.monster, [
 					...instance.statblockOperations.filter(it => !removeIds.includes(it.id)),
 					operation,
 				]);

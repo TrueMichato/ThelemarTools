@@ -1,11 +1,13 @@
 import {
 	EncounterWorkspaceState,
 	EncounterWorkspaceStore,
+	MAX_ENCOUNTER_STATBLOCK_OPERATIONS,
 	getEncounterCompatibleGroups,
 	getEncounterEffectiveMonster,
 	getEncounterInitiativeTotal,
 	getEncounterSharedGroup,
 	getEncounterViewGroups,
+	validateEncounterStatblockOperations,
 } from "./encounterworkspace/encounterworkspace-state.js";
 import {EncounterWorkspacePostSaveError, EncounterWorkspaceQuickActionsAdapter} from "./encounterworkspace/encounterworkspace-quick-actions.js";
 import {BestiaryQuickActionsUi} from "./bestiary/bestiary-quick-actions-ui.js";
@@ -902,6 +904,14 @@ export class EncounterWorkspacePage {
 					}));
 				},
 				getStamp: () => JSON.stringify(this._state),
+				validateOperation: ({target, operation}) => {
+					if (target.operations.length >= MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
+						throw new Error(`This monster has reached the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);
+					}
+					let id = "preview-transformation";
+					while (target.operations.some(it => it.id === id)) id += "-next";
+					validateEncounterStatblockOperations(target.baseCreature, [...target.operations, {...operation, id}]);
+				},
 				getConsequences: changes => EncounterWorkspaceState.withStatblockChanges(this._state, changes.map((change, index) => ({
 					...change,
 					addOperations: change.addOperations.map((operation, ix) => ({...operation, id: `preview-${index}-${ix}`})),

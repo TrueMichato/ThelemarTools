@@ -4,7 +4,7 @@ import {getCreatureTransformationCandidates, resolveCreatureTransformation} from
 import {normalizeCreatureTransformation} from "../../../js/bestiary/bestiary-transformation-catalog-adapter.js";
 import {createCreatureTransformationChanges, previewCreatureTransformationTargets} from "../../../js/bestiary/bestiary-transformation-workflow.js";
 import {BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
-import {EncounterWorkspaceState, getEncounterEffectiveMonster} from "../../../js/encounterworkspace/encounterworkspace-state.js";
+import {EncounterWorkspaceState, MAX_ENCOUNTER_STATBLOCK_OPERATIONS, getEncounterEffectiveMonster, validateEncounterStatblockOperations} from "../../../js/encounterworkspace/encounterworkspace-state.js";
 import {getEncounterHandoffSnapshot} from "../../../js/encounterworkspace/encounterworkspace-handoff.js";
 
 const catalog = JSON.parse(fs.readFileSync(new URL("../../../data/creature-transformations.json", import.meta.url), "utf8"));
@@ -178,6 +178,54 @@ describe("stacked and bulk encounter transformations", () => {
 		expect(result.changedIds).toEqual(["one", "two"]);
 		expect(result.state.instances.map(it => getEncounterEffectiveMonster(it).int)).toEqual([1, 4]);
 		expect(result.state.instances[0].monster.int).toBe(10);
+	});
+
+	it("skips a capped target before bulk apply and persists the other eligible transformation in one save", async () => {
+		const initial = makeState();
+		const fullHistory = Array.from({length: 100}, (_, ix) => ({
+			id: `prior-${ix}`,
+			type: "patch",
+			data: {patch: {set: {dex: 14}}},
+		}));
+		const state = EncounterWorkspaceState.validate({
+			...initial,
+			instances: initial.instances.map((instance, ix) => ({
+				...instance,
+				statblockOperations: ix ? [] : fullHistory,
+			})),
+		});
+		const targets = state.instances.map(instance => target(instance.id, instance.monster, instance.statblockOperations));
+		const skeleton = resolve("catalog:skeleton|dmg");
+		const prior = ready(targets, skeleton);
+		expect(prior.previews).toHaveLength(2);
+		expect(() => EncounterWorkspaceState.withStatblockChanges(state, changes(prior))).toThrow(/invalid statblock history/i);
+		const batch = ready(targets, skeleton, {
+			validateOperation: ({target: item, operation}) => {
+				if (item.operations.length >= MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
+					throw new Error(`This monster has reached the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);
+				}
+				validateEncounterStatblockOperations(item.baseCreature, [...item.operations, {...operation, id: "preview-next"}]);
+			},
+		});
+		expect(batch.skipped).toEqual([{id: "one", label: "Goblin one", reason: expect.stringMatching(/100-operation statblock history limit/i)}]);
+		expect(batch.previews.map(it => it.id)).toEqual(["two"]);
+		const result = EncounterWorkspaceState.withStatblockChanges(state, changes(batch));
+		expect(result.changedIds).toEqual(["two"]);
+		expect(result.state.instances[0].statblockOperations).toHaveLength(100);
+		expect(result.state.instances.map(it => getEncounterEffectiveMonster(it).type)).toEqual(["humanoid", "undead"]);
+		const {EncounterWorkspaceStore} = await import("../../../js/encounterworkspace/encounterworkspace-state.js");
+		const save = jest.fn(async () => {});
+		await new EncounterWorkspaceStore({storage: {pSetForPage: save}}).pSave(result.state);
+		expect(save).toHaveBeenCalledTimes(1);
+		expect(state.instances[1].statblockOperations).toHaveLength(0);
+	});
+
+	it("names an oversized transformation as a skip before it can be saved", () => {
+		const recipe = resolve("catalog:skeleton|dmg");
+		const oversized = {...recipe, manualReview: [{field: "other", reason: "x".repeat(90_000)}]};
+		const batch = ready([target("one")], oversized, {validateOperation: () => {}});
+		expect(batch.previews).toHaveLength(0);
+		expect(batch.skipped).toEqual([{id: "one", label: "Goblin one", reason: expect.stringMatching(/operation size budget/i)}]);
 	});
 
 	it("skips only ineligible targets, fences selection and history, and commits one effective operation per eligible instance", () => {

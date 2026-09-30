@@ -96,7 +96,7 @@ function renderPreviewTarget (parent, {id, label, preview}, decisions, onDecisio
 	parent.append(section);
 }
 
-export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true}) {
+export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true}) {
 	const container = element("section", {className: "bqa__transformation"});
 	mount.replaceChildren(container);
 	paragraph(container, "Combine source-qualified recipes on the current statblock. Only the changes listed in the mechanical diff are applied; source text and manual-review items are not automatically converted.");
@@ -122,7 +122,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		status.textContent = "";
 		showError(`Could not load creature transformations: ${e.message}`);
 		container.append(button("Retry catalog load", () => pRenderCreatureTransformationEditor({
-			mount, getTargets, getStamp, getConsequences, pApply, isBulk, pLoadCandidates, isCurrent,
+			mount, getTargets, getStamp, getConsequences, validateOperation, pApply, isBulk, pLoadCandidates, isCurrent,
 		})));
 		return;
 	}
@@ -310,6 +310,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 						acknowledgedPrerequisites: resolved.prerequisites,
 						dmApproved: approvalInput.checked,
 						conflictDecisions: decisions,
+						validateOperation,
 					});
 					renderBatch();
 					result.querySelectorAll("select[data-conflict-id]").forEach(select => {
@@ -347,7 +348,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 			const targets = getTargets();
 			stamp = getStamp();
 			batch = previewCreatureTransformationTargets({
-				targets, resolved, acknowledgedPrerequisites: resolved.prerequisites, dmApproved: approvalInput.checked,
+				targets, resolved, acknowledgedPrerequisites: resolved.prerequisites, dmApproved: approvalInput.checked, validateOperation,
 			});
 			renderBatch();
 			if (!batch.previews.length) showError("No eligible monster can use this recipe; review the exact skips below.");

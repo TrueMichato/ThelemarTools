@@ -79,3 +79,27 @@ test("Bestiary transformation catalog failures stay visible and do not show a lo
 	await expect(transformations.root.getByRole("combobox", {name: "Creature transformation"})).toHaveCount(0);
 	await expect(transformations.root.getByRole("status")).toBeEmpty();
 });
+
+test("Encounter bulk transformation names a capped target and saves only the other eligible monster", async ({page}) => {
+	test.setTimeout(120_000);
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({capFirstHistory: true});
+	await encounter.openActions();
+	await page.locator("#ew-all").click();
+	await page.locator(".ew__bulk-edit > summary").click();
+	await page.locator("#ew-bulk-type").selectOption("transformation");
+	const transformations = new CreatureTransformationPage(page);
+	await transformations.choose("catalog:skeleton|dmg");
+	await transformations.acknowledge();
+	await transformations.root.getByRole("button", {name: "Preview selected monsters"}).click();
+	await expect(transformations.root.locator(".bqa__transformation-summary")).toContainText("1 eligible · 1 skipped");
+	await expect(transformations.root).toContainText("Goblin #1: This monster has reached the 100-operation statblock history limit");
+	await expect(transformations.root.locator(".bqa__transformation-target")).toHaveCount(1);
+	await expect(transformations.root.locator(".bqa__transformation-target")).toContainText("Goblin #2");
+	await transformations.apply({bulk: true, count: 1});
+	await page.reload();
+	await expect(page.getByRole("button", {name: "Edit statblock for Goblin #1"})).toContainText("(100)");
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText("Humanoid");
+	await page.getByRole("button", {name: "Next visible monster"}).click();
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText("Undead");
+});
