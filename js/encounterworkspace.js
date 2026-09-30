@@ -1505,6 +1505,9 @@ export class EncounterWorkspacePage {
 
 		const {sourceList, instances, omissions} = this._state;
 		this._eleWorkspace.hidden = !sourceList;
+		this._btnChoose.textContent = sourceList ? "Change saved list" : "Choose saved list";
+		this._btnChoose.classList[sourceList ? "remove" : "add"]("ve-btn-primary");
+		this._btnChoose.classList[sourceList ? "add" : "remove"]("ve-btn-default");
 		this._eleEmptyStart.hidden = !!sourceList;
 		this._eleIntro.hidden = !!sourceList;
 		this._eleSetup.hidden = !sourceList;
