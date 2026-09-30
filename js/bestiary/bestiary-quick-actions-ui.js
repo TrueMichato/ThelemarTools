@@ -1,6 +1,7 @@
 import {SourceUiUtil} from "../utils-ui/utils-ui-sourcebuilder.js";
 import {BESTIARY_QUICK_ACTIONS_REGISTRY} from "./bestiary-quick-actions-engine.js";
 import {BestiaryQuickActionsStructuredEditor} from "./bestiary-quick-actions-structured.js";
+import {pRenderCreatureTransformationEditor} from "./bestiary-transformation-editor.js";
 
 const _PROPS_ENTRY = ["trait", "action", "bonus", "reaction", "legendary", "mythic", "spellcasting"];
 const _PROPS_ABILITY = ["str", "dex", "con", "int", "wis", "cha"];
@@ -233,6 +234,9 @@ export class BestiaryQuickActionsUi {
 
 	static async pOpen ({monster, registry = this._registry, pFnOnSave = null} = {}) {
 		if (!monster) throw new Error("A creature is required to open Bestiary Quick Actions.");
+		// Bestiary filter items are UI metadata, not part of the editable statblock.
+		monster = {...monster};
+		delete monster._fSources;
 
 		let unsubscribe = null;
 		const onClose = () => {
@@ -272,22 +276,33 @@ export class BestiaryQuickActionsUi {
 
 		const sections = [
 			{id: "minion", label: "Minion", icon: "glyphicon-user"},
+			{id: "transformation", label: "Templates", icon: "glyphicon-refresh"},
 			{id: "area", label: "Area Traits", icon: "glyphicon-tree-conifer"},
 			{id: "lair", label: "Lair Actions", icon: "glyphicon-home"},
 			{id: "item", label: "Magic Item", icon: "glyphicon-certificate"},
 			{id: "edit", label: "Quick Edit", icon: "glyphicon-edit"},
 		];
 		let activeSection = "minion";
+		let renderRequest = 0;
+		const panelId = `bqa-panel-${_getOperationId()}`;
+		content.id = panelId;
+		content.setAttribute("role", "tabpanel");
 
 		const navButtons = new Map();
 		const pRenderActive = async () => {
-			navButtons.forEach((btn, id) => btn.setAttribute("aria-selected", id === activeSection ? "true" : "false"));
+			const request = ++renderRequest;
+			navButtons.forEach((btn, id) => {
+				btn.setAttribute("aria-selected", id === activeSection ? "true" : "false");
+				btn.tabIndex = id === activeSection ? 0 : -1;
+			});
+			content.setAttribute("aria-labelledby", navButtons.get(activeSection)?.id);
 			title.textContent = sections.find(it => it.id === activeSection)?.label || "Quick Actions";
 			content.replaceChildren(_getElement("div", {clazz: "ve-flex-vh-center ve-h-100", text: "Loading…"}));
 
 			try {
 				switch (activeSection) {
 					case "minion": return this._pRenderMinion({content, monster, registry});
+					case "transformation": return this._pRenderTransformation({content, monster, registry, isCurrent: () => request === renderRequest});
 					case "area": return this._pRenderAreaTraits({content, monster, registry});
 					case "lair": return this._pRenderLairActions({content, monster, registry});
 					case "item": return this._pRenderMagicItem({content, monster, registry});
@@ -295,6 +310,7 @@ export class BestiaryQuickActionsUi {
 					default: throw new Error(`Unknown Bestiary Quick Actions section "${activeSection}".`);
 				}
 			} catch (e) {
+				if (request !== renderRequest) return;
 				content.replaceChildren(this._getErrorState({
 					message: e.message || "This quick action could not be loaded.",
 					onRetry: () => pRenderActive(),
@@ -312,11 +328,25 @@ export class BestiaryQuickActionsUi {
 					"aria-selected": section.id === activeSection ? "true" : "false",
 				},
 			});
+			btn.id = `${panelId}-${section.id}`;
+			btn.setAttribute("aria-controls", panelId);
+			btn.tabIndex = section.id === activeSection ? 0 : -1;
 			const icon = _getElement("span", {clazz: `glyphicon ${section.icon}`, attrs: {"aria-hidden": "true"}});
 			btn.append(icon, document.createTextNode(section.label));
 			btn.addEventListener("click", () => {
 				activeSection = section.id;
 				pRenderActive().then(null);
+			});
+			btn.addEventListener("keydown", event => {
+				const offset = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1
+					: ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
+				if (!offset && !["Home", "End"].includes(event.key)) return;
+				event.preventDefault();
+				const index = sections.findIndex(it => it.id === section.id);
+				const next = event.key === "Home" ? 0 : event.key === "End" ? sections.length - 1
+					: (index + offset + sections.length) % sections.length;
+				navButtons.get(sections[next].id).click();
+				navButtons.get(sections[next].id).focus();
 			});
 			navButtons.set(section.id, btn);
 			nav.append(btn);
@@ -420,6 +450,7 @@ export class BestiaryQuickActionsUi {
 	static _getOperationLabel (operation) {
 		switch (operation.type) {
 			case "minion": return "Minion conversion";
+			case "applyCreatureTransformation": return `Transformation: ${operation.data?.resolved?.identity?.name || "Recipe"}`;
 			case "applyAreaTrait": return `Area trait: ${operation.data?.trait?.name || "Trait"}`;
 			case "addEntry": return `Added ${operation.prop || "entry"}`;
 			case "setLegendaryGroup": return "Lair actions";
@@ -430,6 +461,7 @@ export class BestiaryQuickActionsUi {
 	}
 
 	static _getOperationMeta (operation, {isPersistent = false} = {}) {
+		if (operation.type === "applyCreatureTransformation") return `${operation.data?.resolved?.identity?.source || "Unknown source"} · ${operation.data?.resolved?.manualReview?.length || 0} manual-review items`;
 		if (operation.sourceName) return operation.sourceName;
 		if (operation.data?.item?.name) return operation.data.item.name;
 		if (operation.data?.area) return operation.data.area;
@@ -452,6 +484,29 @@ export class BestiaryQuickActionsUi {
 		wrp.append(_getElement("p", {text: message}));
 		if (onRetry) wrp.append(_getButton({text: "Try Again", onClick: onRetry}));
 		return wrp;
+	}
+
+	static async _pRenderTransformation ({content, monster, registry, isCurrent}) {
+		await pRenderCreatureTransformationEditor({
+			mount: content,
+			isCurrent,
+			getTargets: () => [{
+				id: "current",
+				label: monster._displayName || monster.name,
+				baseCreature: monster,
+				operations: registry.getOperations({monster}),
+			}],
+			getStamp: () => JSON.stringify(registry.getOverride({monster})),
+			pApply: async changes => {
+				const result = await registry.applyChanges({
+					monster,
+					addOperations: changes[0].addOperations,
+					removeIds: [],
+				});
+				if (!result) throw new Error("The statblock edit was not applied.");
+				JqueryUtil.doToast({type: "success", content: "Transformation applied. Manual-review items still need DM adjudication."});
+			},
+		});
 	}
 
 	static _getHoverLabel ({name, entries, title = null}) {

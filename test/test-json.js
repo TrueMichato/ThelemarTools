@@ -12,6 +12,10 @@ import {
 	COMBAT_METHOD_DATA_PATH,
 	getCombatMethodCorpusErrors,
 } from "./util-combatmethods-schema.js";
+import {
+	DATA_PATH as CREATURE_TRANSFORMATION_DATA_PATH,
+	getCreatureTransformationCorpusErrors,
+} from "./util-creature-transformation-schema.js";
 
 const LOG_TAG = "JSON";
 const _IS_FAIL_SLOW = !!process.env.FAIL_SLOW;
@@ -122,6 +126,12 @@ async function main () {
 		console.error(`Combat method schema test failed (${errorsCombatMethods.length} failure${errorsCombatMethods.length === 1 ? "" : "s"}).`);
 		return false;
 	}
+	const errorsCreatureTransformations = getCreatureTransformationCorpusErrors();
+	if (errorsCreatureTransformations.length) {
+		errorsCreatureTransformations.forEach(error => Um.error(LOG_TAG, error));
+		console.error(`Creature transformation schema test failed (${errorsCreatureTransformations.length} failure${errorsCreatureTransformations.length === 1 ? "" : "s"}).`);
+		return false;
+	}
 
 	const jsonTester = new JsonTester({
 		tagLog: LOG_TAG,
@@ -133,6 +143,7 @@ async function main () {
 		.filter(filePath => {
 			if (filePath.includes("data/generated")) return _GENERATED_ALLOWLIST.has(filePath.split("/").at(-1));
 			if (filePath.replace(/\\/g, "/").endsWith(COMBAT_METHOD_DATA_PATH)) return false;
+			if (filePath.replace(/\\/g, "/").endsWith(CREATURE_TRANSFORMATION_DATA_PATH)) return false;
 			for (const {suffix, schemaId, reason} of _SCHEMA_UNAVAILABLE) {
 				if (filePath.endsWith(suffix) && !_hasSchemaOnDisk(schemaId)) {
 					Um.warn(LOG_TAG, `Skipping "${filePath}" — ${reason}. Add a local schema or install upstream schema "${schemaId}" to enable validation.`);

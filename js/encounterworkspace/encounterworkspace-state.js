@@ -13,7 +13,7 @@ const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
 const VERSION = 6;
 const MAX_INSTANCES = 1000;
-const MAX_STATBLOCK_OPERATIONS = 100;
+export const MAX_ENCOUNTER_STATBLOCK_OPERATIONS = 100;
 const MAX_OPERATION_SIZE = 200_000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -46,8 +46,8 @@ function validateHp (hp) {
 
 const isRecord = value => value && typeof value === "object" && !Array.isArray(value);
 
-function validateStatblockOperations (monster, operations) {
-	if (!Array.isArray(operations) || operations.length > MAX_STATBLOCK_OPERATIONS) {
+export function validateEncounterStatblockOperations (monster, operations) {
+	if (!Array.isArray(operations) || operations.length > MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
 		throw new Error("The saved encounter contains an invalid statblock history. It has not been changed.");
 	}
 	const ids = new Set();
@@ -196,7 +196,7 @@ export class EncounterWorkspaceState {
 					throw new Error("The saved encounter contains invalid initiative. It has not been changed.");
 				}
 			}
-			if (raw.version >= 5) validateStatblockOperations(instance.monster, instance.statblockOperations);
+			if (raw.version >= 5) validateEncounterStatblockOperations(instance.monster, instance.statblockOperations);
 			ids.add(instance.id);
 		}
 		if (
@@ -434,7 +434,7 @@ export class EncounterWorkspaceState {
 			}
 			const operations = [...prior.filter(it => !removed.has(it.id)), ...change.addOperations];
 			if (JSON.stringify(operations) === JSON.stringify(prior)) return instance;
-			validateStatblockOperations(instance.monster, operations);
+			validateEncounterStatblockOperations(instance.monster, operations);
 			const after = BestiaryQuickActionsEngine.applyOperations({monster: instance.monster, operations});
 			const hpChanged = !Object.is(before.hp?.average, after.hp?.average);
 			changedIds.push(instance.id);
@@ -503,7 +503,7 @@ export class EncounterWorkspaceState {
 				? instance.statblockOperations.filter(it => it.type === "setLegendaryGroup").map(it => it.id)
 				: [];
 			try {
-				validateStatblockOperations(instance.monster, [
+				validateEncounterStatblockOperations(instance.monster, [
 					...instance.statblockOperations.filter(it => !removeIds.includes(it.id)),
 					operation,
 				]);
@@ -641,18 +641,94 @@ export class EncounterWorkspaceState {
 	}
 
 	static getInitiativeOrder (state) {
+		return this.getInitiativeEntries(state)
+			.filter(({entry}) => entry.initiative != null)
+			.sort((a, b) => b.entry.initiative - a.entry.initiative || a.order - b.order)
+			.map(({entry}) => entry);
+	}
+
+	static getInitiativeEntries (state) {
+		if (!state.instances.length) return [];
+		const sharedByMember = new Map(state.groups
+			.filter(group => group.sharedTurn)
+			.flatMap(group => group.memberIds.map(id => [id, group])));
 		const seen = new Set();
 		return state.instances.flatMap((instance, order) => {
-			const group = getEncounterSharedGroup(state, instance.id);
+			const group = sharedByMember.get(instance.id);
 			if (group) {
-				if (seen.has(group.id) || group.initiative == null) return [];
+				if (seen.has(group.id)) return [];
 				seen.add(group.id);
 				return [{entry: {id: group.id, initiative: group.initiative, memberIds: group.memberIds}, order}];
 			}
-			return instance.initiative == null ? [] : [{entry: instance, order}];
-		})
-			.sort((a, b) => b.entry.initiative - a.entry.initiative || a.order - b.order)
-			.map(({entry}) => entry);
+			return [{entry: instance, order}];
+		});
+	}
+
+	static withInitiativeReorder (state, {id, beforeId = null}) {
+		const entries = this.getInitiativeEntries(state);
+		const source = entries.find(it => it.entry.id === id)?.entry;
+		const order = this.getInitiativeOrder(state);
+		if (!source) throw new Error("Choose a monster or shared turn to move.");
+		if (beforeId !== null && !order.some(it => it.id === beforeId)) {
+			throw new Error("The destination is no longer in turn order.");
+		}
+		const remaining = order.filter(it => it.id !== id);
+		const position = beforeId === id ? order.findIndex(it => it.id === id)
+			: beforeId === null ? remaining.length : remaining.findIndex(it => it.id === beforeId);
+		if (source.initiative != null && position === order.findIndex(it => it.id === id)) {
+			return {state, changes: [], undo: null};
+		}
+		const left = remaining[position - 1];
+		const right = remaining[position];
+		const candidate = direction => {
+			let total = direction === "left"
+				? right ? right.initiative + 1 : left ? Math.max(Number.MIN_SAFE_INTEGER, left.initiative - 1) : 0
+				: left ? left.initiative - 1 : right ? Math.min(Number.MAX_SAFE_INTEGER, right.initiative + 1) : 0;
+			if (!Number.isSafeInteger(total)) return null;
+			const totals = new Map([[id, total]]);
+			for (let ix = position + (direction === "left" ? -1 : 0);
+				ix >= 0 && ix < remaining.length;
+				ix += direction === "left" ? -1 : 1) {
+				const entry = remaining[ix];
+				if (direction === "left" ? entry.initiative > total : entry.initiative < total) break;
+				total += direction === "left" ? 1 : -1;
+				if (!Number.isSafeInteger(total)) return null;
+				totals.set(entry.id, total);
+			}
+			return totals;
+		};
+		const choices = [candidate("left"), candidate("right")].filter(Boolean);
+		if (!choices.length) throw new Error("There are no safe whole-number initiative totals for this position.");
+		choices.sort((a, b) => {
+			if (a.size !== b.size) return a.size - b.size;
+			if (source.initiative == null) return 0;
+			return Math.abs(a.get(id) - source.initiative) - Math.abs(b.get(id) - source.initiative);
+		});
+		const totals = choices[0];
+		const current = new Map(entries.map(({entry}) => [entry.id, entry.initiative]));
+		const changes = [...totals].filter(([entryId, after]) => current.get(entryId) !== after)
+			.map(([entryId, after]) => ({id: entryId, before: current.get(entryId), after}));
+		const next = this.withInitiativeResults(state, changes.map(({id: entryId, after}) => ({id: entryId, total: after})));
+		return {
+			state: next,
+			changes,
+			undo: {changes, after: this.getInitiativeUndoGuard(next)},
+		};
+	}
+
+	static getInitiativeUndoGuard (state) {
+		return {
+			turn: {...state.turn},
+			groups: state.groups.map(({id, memberIds, sharedTurn, initiative}) => ({id, memberIds: [...memberIds], sharedTurn, initiative})),
+			instances: state.instances.map(({id, initiative}) => [id, initiative]),
+		};
+	}
+
+	static withInitiativeReorderUndo (state, undo) {
+		if (!undo?.changes?.length || JSON.stringify(this.getInitiativeUndoGuard(state)) !== JSON.stringify(undo.after)) {
+			throw new Error("Initiative, groups or turns changed since the move; it cannot be undone safely.");
+		}
+		return this.withInitiativeResults(state, undo.changes.map(({id, before}) => ({id, total: before})));
 	}
 
 	static withInitiative (state, {id, total}) {

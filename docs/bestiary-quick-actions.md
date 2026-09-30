@@ -9,10 +9,19 @@ Open the pencil button beside a creature's name to:
 - convert the current statblock to or from a Flee, Mortals! Minion;
 - add loaded Flee, Mortals! area traits individually or by environment;
 - preview and attach lair actions from a loaded legendary group;
-- apply a magic item's structured bonuses and editable Trait, Action, Bonus Action, or Reaction entries; or
-- edit core combat fields and statblock entry sections.
+- apply a magic item's structured bonuses and editable Trait, Action, Bonus Action, or Reaction entries;
+- edit core combat fields and statblock entry sections; or
+- stack source-qualified creature templates or playable species, with an explicit before/after statblock preview.
 
-The workspace lists each operation separately. Removing an operation rebuilds the creature from its source data and replays the remaining operations in order.
+The workspace lists each operation separately. Removing an operation rebuilds the creature from its source data and replays the remaining operations in order. Bestiary-only filter metadata is excluded from the editable statblock copy; the source entry and its filters remain untouched.
+
+## Creature transformations
+
+Open **Templates**, filter by name or source, and choose a catalog template or a site, prerelease, or installed-homebrew species. Versioned species have distinct IDs, so selecting one does not silently use its base species. Choose all required options, acknowledge narrative prerequisites, and explicitly approve DM-gated candidates. The editor lists provenance, base and selected-option eligibility, and manual-review items; the latter remain **DM tasks**, not automatically applied mechanics.
+
+**Preview transformation** shows the current and proposed rendered statblocks plus a field/entry diff. Stacking recipes is supported; every overlapping change from an earlier recipe must have an explicit **keep existing** or **use incoming** decision before the Apply button is available. Confirm that the remaining manual-review tasks will be adjudicated separately. A recipe can contain only review tasks; a zero-diff preview does not claim its prose was mechanically applied. The source statblock stays untouched. Bestiary changes remain local overrides until you choose **Save to Homebrew**.
+
+Loading a candidate list fails visibly if catalog, site races, prerelease, or homebrew cannot load. A stale history or changed candidate is rejected instead of applying an outdated preview.
 
 Area traits use an explicit Flee, Mortals! mechanics catalog. Representable effects such as defenses, condition immunities, speeds, senses, size and Hit Dice changes, granted bonus actions, and melee damage riders update the statblock; prose-only effects remain rendered rules. Choice-bearing traits request all required options before a single or environment-wide add.
 
@@ -50,5 +59,8 @@ On the Bestiary page, a saved creature is inserted into the current list immedia
 ## Implementation
 
 - `js/bestiary/bestiary-quick-actions-engine.js` owns immutable operation replay and the in-memory registry.
+- `js/bestiary/bestiary-creature-transformation.js` provides the pure, loader-free resolved-recipe preview/replay core. `bestiary-transformation-catalog-adapter.js` validates and translates the catalog's `op` changes to replay's `type` changes; never pass catalog steps directly to replay. `bestiary-transformation-workflow.js` previews individual targets and fences their history, and `bestiary-transformation-editor.js` renders the shared Bestiary/Encounter controls.
+- The operation stores the resolved changes, selected options, provenance, prerequisite acknowledgements, conflict decisions, and manual-review items as plain data. Replay requires no catalog lookup; unsupported edits, ambiguous named entries, changed conflicts, and oversized payloads fail explicitly. Removing or reordering operations rebuilds from the immutable source and may require re-preview if a saved conflict decision no longer fits.
+- Every base and selected-option eligibility clause must match the **current effective creature before each transformation**, not the original source chassis. Zero-foot speed grants are valid (they do not lower an existing speed), and optional damage replacements skip a missing named entry rather than rejecting an otherwise valid recipe. Resolved recipes and saved operation payloads must be JSON data; undefined properties are rejected rather than silently disappearing when history is serialized.
 - `js/bestiary/bestiary-quick-actions-ui.js` owns the shared modal workflow.
 - `scss/includes/bestiary-quick-actions.scss` contains shared Bestiary and DM Screen styles.

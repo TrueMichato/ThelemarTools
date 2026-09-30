@@ -1,3 +1,5 @@
+import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation.js";
+
 /**
  * @typedef {{type: "base"} | {type: "cr" | "summonSpellLevel" | "summonClassLevel", value: string | number}} BestiaryQuickActionsScaleContext
  * @typedef {{set?: Record<string, *>, remove?: string[]}} BestiaryQuickActionsPatch
@@ -11,6 +13,7 @@ const _OPERATION_TYPES = Object.freeze({
 	REMOVE_ENTRY: "removeEntry",
 	SET_LEGENDARY_GROUP: "setLegendaryGroup",
 	APPLY_ITEM: "applyItem",
+	APPLY_CREATURE_TRANSFORMATION: "applyCreatureTransformation",
 	PATCH: "patch",
 });
 
@@ -91,7 +94,10 @@ function _clone (value, seen = new WeakMap()) {
 		? []
 		: {};
 	seen.set(value, out);
-	Reflect.ownKeys(value).forEach(key => out[key] = _clone(value[key], seen));
+	Reflect.ownKeys(value).forEach(key => {
+		if (key === "__proto__") Object.defineProperty(out, key, {value: _clone(value[key], seen), enumerable: true, configurable: true, writable: true});
+		else out[key] = _clone(value[key], seen);
+	});
 	return out;
 }
 
@@ -498,7 +504,7 @@ function _validateEntrySection (section) {
 	if (!_ENTRY_SECTIONS.has(section)) throw new BestiaryQuickActionsValidationError(`Unsupported statblock entry section "${section}".`);
 }
 
-function _applyOperation (creature, operation) {
+function _applyOperation (creature, operation, {baseCreature = null, priorWrites = [], operationId = null} = {}) {
 	switch (operation.type) {
 		case _OPERATION_TYPES.MINION: return BestiaryQuickActionsMinion.convert(creature);
 		case _OPERATION_TYPES.APPLY_AREA_TRAIT: {
@@ -564,6 +570,17 @@ function _applyOperation (creature, operation) {
 		case _OPERATION_TYPES.PATCH:
 			_applyPatch(creature, operation.data?.patch ?? operation.patch);
 			return creature;
+		case _OPERATION_TYPES.APPLY_CREATURE_TRANSFORMATION: {
+			const result = BestiaryCreatureTransformation.replay({
+				creature,
+				baseCreature,
+				operation,
+				priorWrites,
+				operationId,
+			});
+			priorWrites.push(...result.writes);
+			return result.creature;
+		}
 		default: throw new BestiaryQuickActionsValidationError(`Unknown Bestiary Quick Actions operation type "${operation.type}".`);
 	}
 }
@@ -626,6 +643,10 @@ export class BestiaryQuickActionsOperations {
 
 	static patch (patch) {
 		return {type: _OPERATION_TYPES.PATCH, data: {patch: _clone(patch)}};
+	}
+
+	static applyCreatureTransformation (options) {
+		return BestiaryQuickActionsUtil.createCreatureTransformationOperation(options);
 	}
 }
 
@@ -698,13 +719,58 @@ export class BestiaryQuickActionsUtil {
 			: `${uid}::${normalizedScale.type}=${encodeURIComponent(`${normalizedScale.value}`.trim().toLowerCase())}`;
 	}
 
-	static applyOperations ({baseCreature, operations = []}) {
+	static _getReplayState ({baseCreature, operations = []}) {
 		if (baseCreature == null || typeof baseCreature !== "object") throw new BestiaryQuickActionsValidationError("A base creature is required.");
-		let out = operations.reduce((creature, operation) => _applyOperation(creature, _clone(operation)), _clone(baseCreature));
+		const priorWrites = [];
+		const creature = operations.reduce((current, operation, index) => _applyOperation(current, _clone(operation), {
+			baseCreature,
+			priorWrites,
+			operationId: operation.id || `${operation.data?.resolved?.id || "operation"}@${index}`,
+		}), _clone(baseCreature));
+		return {creature, priorWrites};
+	}
+
+	static applyOperations ({baseCreature, operations = []}) {
+		let {creature: out} = this._getReplayState({baseCreature, operations});
 		const proficiencyBonus = _getProficiencyBonus(out);
 		_applyDeferredEffects(out, proficiencyBonus);
 		out = _resolveMarkedProficiencyTemplates(out, proficiencyBonus);
 		return out;
+	}
+
+	static previewCreatureTransformation ({baseCreature, operations = [], resolved, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}}) {
+		const {creature, priorWrites} = this._getReplayState({baseCreature, operations});
+		const preview = BestiaryCreatureTransformation.preview({
+			original: baseCreature,
+			current: creature,
+			resolved,
+			priorWrites,
+			acknowledgedPrerequisites,
+			dmApproved,
+			conflictDecisions,
+			historyFingerprint: JSON.stringify(operations),
+		});
+		const finalize = value => {
+			const out = _clone(value);
+			const proficiencyBonus = _getProficiencyBonus(out);
+			_applyDeferredEffects(out, proficiencyBonus);
+			return _resolveMarkedProficiencyTemplates(out, proficiencyBonus);
+		};
+		const current = finalize(preview.current);
+		const proposed = finalize(preview.proposed);
+		return {...preview, current, proposed, diff: BestiaryCreatureTransformation.getDiff(current, proposed)};
+	}
+
+	static createCreatureTransformationOperation ({baseCreature, operations = [], preview, conflictDecisions = {}, acknowledgedPrerequisites = preview?.acknowledgedPrerequisites, dmApproved = preview?.dmApproved}) {
+		const currentPreview = this.previewCreatureTransformation({
+			baseCreature,
+			operations,
+			resolved: preview?.resolved,
+			acknowledgedPrerequisites,
+			dmApproved,
+			conflictDecisions,
+		});
+		return BestiaryCreatureTransformation.createOperation({preview, currentPreview, conflictDecisions});
 	}
 }
 
@@ -738,6 +804,14 @@ export class BestiaryQuickActionsEngine {
 
 	static validateMinion (monster) {
 		return BestiaryQuickActionsMinion.validate(monster);
+	}
+
+	static previewCreatureTransformation ({monster, ...options}) {
+		return BestiaryQuickActionsUtil.previewCreatureTransformation({baseCreature: monster, ...options});
+	}
+
+	static createCreatureTransformationOperation ({monster, ...options}) {
+		return BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: monster, ...options});
 	}
 }
 

@@ -1,0 +1,40 @@
+# Creature transformation foundation
+
+This catalog is **app-owned data**, not the 5etools-utils `monsterTemplate` format. A monster template in `data/bestiary/template.json` participates in `_copy._templates` when an existing stat block is loaded; it does not apply a recipe to an arbitrary selected NPC. `templateReference` is a checked source pointer only. Never pass it to `_copy`, and do not change either upstream schema or the existing template file to add new transformations.
+
+## Preview contract
+
+`js/creature-transformations.js` exports:
+
+- `pLoadCreatureTransformationCandidates({dataUtil?})`: loads the validated-on-build catalog and site, installed prerelease, and installed homebrew races from `DataUtil.race`. The normal race loader merges site and externally adopted subraces with `Renderer.race.mergeSubraces`; inline `_versions` expand with `DataUtil.generic.getVersions`. A failed load rejects; it never returns a partial success-shaped list.
+- `getCreatureTransformationCandidates({catalog, races, getVersions})`: pure construction from already-resolved races. IDs are case-normalized `catalog:name|source` or `race:name|source`. Versions use the extra `~v:baseName|baseSource:1-based-index` discriminator, including when a version has exactly the base race's name. Distinct sources (such as `Shadow Dragon|MM` and `Shadow Dragon|BEG`) remain distinct candidates. Duplicate IDs fail.
+- `resolveCreatureTransformation({candidates, id, selections = {}})`: returns a **new**, non-executable `{id, kind, identity, provenance, eligibility, prerequisites, selectedOptions, changes, manualReview}`. `selections` is a map of option-group ID to an array of option IDs. Required, single-choice, unknown, duplicate, and `appliesTo`-gated selections are checked. `eligibility` is an **array of conjunctive constraints**: the base recipe plus each chosen option's constraint. It is not silently enforced without a selected creature.
+
+`identity` always has `{name, source}`. A source must be installed or otherwise resolvable by the eventual browser for linked entities; no bare display-name fallback is permitted. The `provenance` of published recipes has edition and a verified page. For `BEG`, `published-example` page 25 belongs to the enclosing Adult Black Shadow Dragon **example**, not a page printed on the embedded template. The screenshots supplied for `SCRE` have no verified page or edition; `SCRE` is a provisional, user-attributed Spectre Creations source key pending verification. The screenshot markings do not independently establish that publisher. Never present an invented page as fact.
+
+### Typed steps
+
+The schema at `schema/site/creature-transformation.json` is strict, with no arbitrary path, JavaScript, regex, or `_copy._mod` execution. A later engine must first check all eligibility and prerequisites against the chosen monster and adjudicate `manualReview`. The permitted `changes` are:
+
+| Step | Bounded meaning |
+| --- | --- |
+| `setType {value}` | Replace only the creature's type; review tags separately. |
+| `setAbility/minimumAbility/maximumAbility {ability,value}` | Exact score, lower bound, or upper bound; preserve other abilities. |
+| `adjustAbility {ability,amount,floor:1}` / `scaleAbility {ability,factor:0.5,round:"down",floor:1}` | Apply a fixed delta or halve a score with a minimum of 1. Recheck dependent calculations. |
+| `grantResistance/grantImmunity/grantVulnerability/grantConditionImmunity {value}` | Add the fixed, unconditional typed value without replacing existing defenses. |
+| `grantConditionalDefense {kind,value,when}` | Add one resistance or immunity only under `nonmagical`, `nonmagicalUnsilvered`, or `dimLightOrDarkness`; never promote it to unconditional defense. |
+| `grantSense {sense,range}` / `grantSpeed {mode,feet}` | Retain the better existing numeric sense or movement mode, respectively; do not replace unrelated modes. Conditional ranges and lost modes require manual review. |
+| `grantLanguage {value}` | Add a fixed spoken language; understanding without speech requires manual review. |
+| `addEntry {section,entry}` | Add an original, short, source-qualified statblock entry. |
+| `removeEntry/replaceEntry {section,match,...}` | Match exactly one named entry plus source, or exactly one well-defined role plus source; zero or multiple matches **fail**. `replaceEntry.onMissing:"skip"` is only for explicitly optional source abilities. |
+| `replaceDamageType {section,match,from,to,onMissing}` | Match exactly one action then replace only the listed damage types, retaining its dice, DC, and other text. `onMissing:"skip"` applies to absent optional damage, not an ambiguous or missing action. |
+
+Entry sections are `trait`, `action`, `bonus`, `reaction`, and `legendary`. Match source `$chassis` resolves to the chosen creature's own source; other sources are explicit. The later engine must make this identity check fail closed. `entry.source` records provenance; if target statblock entry schemas do not allow it directly, retain provenance outside the rendered entry rather than silently discarding it. No step modifies unrelated AC, HP, attacks, CR, or character-level state. All five are explicitly returned for DM review, as are template-specific unresolved abilities. `manualReview` is a blocking to-do list for a DM, not a simulated automation.
+
+For example, `resolveCreatureTransformation({candidates, id: "catalog:half-dragon|mm", selections: {ancestry: ["red"], size: ["huge"]}})` returns resistance to fire and checked source guidance for the Huge breath. It does **not** fabricate a new breath attack, assume the source's optional CR floor is a mandatory prerequisite, or change the NPC's current HP.
+
+The MM Shadow Dragon breath step covers every supported damage type, including gem-dragon breath damage; its bite step remains limited to the five listed types. Lethal Shadow Breath's Humanoid-to-shadow consequence requires DM review rather than spawning a creature automatically. Resolved DMG Skeleton race candidates grant bludgeoning vulnerability; choice-shaped or nonstandard race vulnerabilities require DM review. Fey Beast requires at least one feature pick, and still permits multiple picks. The screenshot recipe's page and edition remain unverified.
+
+## Validation and provenance
+
+`test/util-creature-transformation-schema.js` validates the entire catalog against the app schema and checks identity/option integrity. The standard `npm run test:json` invokes this first, then excludes only the already-validated catalog from the 5etools-utils filename-matched validator. `test/jest/CreatureTransformations.test.js` locks required family and screenshot option names, source distinctions, static-template reference checks, candidate loading, selection resolution, and unavailable-source errors. When adding a recipe, update its completeness expectations and provide a page or explicitly unverified provenance; never copy artwork or source prose. The source rule references are MM pp. 83–85, 180, 207, 230, 297; DMG p. 282; [Arcadia 27 p. 13 (`Arcadia27`)](https://raw.githubusercontent.com/TheGiddyLimit/homebrew/2773a23f112085f1dff1fd801e23fe7aab0cb4e1/book/MCDM%20Productions%3B%20Arcadia%20Issue%2027.json); [Arcadia 8 p. 20 (`Ar8`)](https://raw.githubusercontent.com/TheGiddyLimit/homebrew/2773a23f112085f1dff1fd801e23fe7aab0cb4e1/book/MCDM%20Productions%3B%20Arcadia%20Issue%208.json); and the [BEG embedded example p. 25 (`BEG`)](https://raw.githubusercontent.com/TheGiddyLimit/homebrew/2773a23f112085f1dff1fd801e23fe7aab0cb4e1/collection/badooga%3B%20Badooga's%20Exploration%20Guidelines.json). Screenshot options were transcribed from the six read-only images supplied for this task, in brief original paraphrase only.
