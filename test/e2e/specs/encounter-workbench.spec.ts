@@ -12,6 +12,9 @@ test("combat cockpit keeps canonical order, viewed statblock, and bulk targets s
 	}
 	await page.setViewportSize({width: 390, height: 844});
 	await expect(page.locator("#ew-turn-order .ew__turn")).toHaveCount(3);
+	const moveDown = await page.locator("#ew-turn-order .ew__turn").first().locator(".ew__turn-step").last().boundingBox();
+	expect(moveDown?.width).toBeGreaterThanOrEqual(44);
+	expect(moveDown?.height).toBeGreaterThanOrEqual(44);
 	await expect(page.locator("#ew-actions")).toHaveJSProperty("open", false);
 	await expect(page.locator("#ew-roster")).toHaveCSS("overflow-y", "visible");
 	const [strip, initiative, roster, focus] = await Promise.all([
@@ -45,12 +48,17 @@ test("combat cockpit keeps canonical order, viewed statblock, and bulk targets s
 	await expect(page.locator("#ew-summary")).toContainText("Goblin #2 · 1 outside roster filter");
 	await page.locator("#ew-roster-search").fill("");
 
-	await page.locator(".ew__turn--active .ew__turn-step").first().click();
+	await page.locator(".ew__turn--active .ew__turn-step").first().focus();
+	await page.keyboard.press("Enter");
 	await expect(page.locator("#ew-turn-order .ew__turn").first()).toContainText("Goblin #2");
 	await expect(page.locator("#ew-move-undo")).toHaveAttribute("aria-label", /restore Goblin #2 to 12/);
 	await page.locator("#ew-move-undo").click();
 	await expect(page.locator("#ew-turn-order .ew__turn").nth(1)).toContainText("Goblin #2");
 	await expect(page.locator("#ew-round-status")).toContainText("Round 1 · Goblin #2");
+	await page.locator("#ew-open-bulk").click();
+	await expect(page.locator("#ew-actions")).toHaveJSProperty("open", true);
+	await expect(page.locator("#ew-actions .ew__bulk-edit")).toHaveJSProperty("open", true);
+	await expect(page.locator("#ew-actions .ew__bulk-edit > summary")).toBeFocused();
 });
 
 test("roster navigation and filters do not change the active turn or selected targets", async ({page}) => {

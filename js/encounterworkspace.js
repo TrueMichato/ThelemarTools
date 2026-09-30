@@ -94,6 +94,8 @@ export class EncounterWorkspacePage {
 		this._btnSelectNone = document.getElementById("ew-none");
 		this._btnSelectCurrent = document.getElementById("ew-select-current");
 		this._btnSelectViewed = document.getElementById("ew-select-viewed");
+		this._btnOpenBulk = document.getElementById("ew-open-bulk");
+		this._eleActions = document.getElementById("ew-actions");
 		this._btnGroupSelected = document.getElementById("ew-group-selected");
 		this._selRollType = document.getElementById("ew-roll-type");
 		this._selRollKey = document.getElementById("ew-roll-key");
@@ -187,6 +189,13 @@ export class EncounterWorkspacePage {
 			this._pAddTargets(group?.memberIds || [activeId]);
 		});
 		this._btnSelectViewed.addEventListener("click", () => this._pAddTargets([this._focusedInstanceId]));
+		this._btnOpenBulk.addEventListener("click", () => {
+			this._eleActions.open = true;
+			const bulk = this._eleActions.querySelector(".ew__bulk-edit");
+			bulk.open = true;
+			bulk.querySelector("summary").focus({preventScroll: true});
+			bulk.scrollIntoView({block: "start"});
+		});
 		this._btnGroupSelected.addEventListener("click", () => this._pCreateGroup());
 		this._selRollType.addEventListener("change", () => this._renderRollKeys());
 		this._selRollKey.addEventListener("change", () => this._clearRollResults());
@@ -317,6 +326,7 @@ export class EncounterWorkspacePage {
 		this._btnSelectNone.disabled = isBusy || !this._state.instances.length;
 		this._btnSelectCurrent.disabled = isBusy || !this._state.turn?.activeId;
 		this._btnSelectViewed.disabled = isBusy || !this._focusedInstanceId;
+		this._btnOpenBulk.disabled = isBusy || !this._state.instances.length;
 		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
 		this._groupChecks.forEach(check => check.disabled = isBusy);

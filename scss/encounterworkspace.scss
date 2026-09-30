@@ -824,6 +824,10 @@
 					font-weight: 600;
 				}
 			}
+
+			.ew__open-bulk {
+				margin-top: 12px;
+			}
 		}
 
 		&__rail-header {
@@ -1416,7 +1420,8 @@
 
 		.ew__move-controls select,
 		.ew__move-controls button,
-		.ew__quick .ew__selection-actions button {
+		.ew__quick .ew__selection-actions button,
+		.ew__open-bulk {
 			width: 100%;
 		}
 
