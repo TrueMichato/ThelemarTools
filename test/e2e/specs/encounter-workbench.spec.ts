@@ -207,10 +207,10 @@ test("all-cards mode constructs statblocks only when requested, in bounded batch
 	await expect(page.locator(".ew__statblock-edit")).toHaveCount(1);
 	await encounter.clickRenderedRoll(0, "hit");
 	await expect(page.locator("#ew-status")).toContainText("Rally +3");
-	await page.locator(".ew__card-details").nth(1).locator("summary").click();
+	await page.locator(".ew__card-details").nth(1).locator(":scope > summary").click();
 	await expect(page.locator(".ew__statblock")).toHaveCount(2);
 	await expect(page.locator(".ew__statblock").last().locator("[data-field=current]")).toHaveValue("7");
-	await page.locator(".ew__card-details").first().locator("summary").click();
+	await page.locator(".ew__card-details").first().locator(":scope > summary").click();
 	await expect(page.locator(".ew__statblock")).toHaveCount(1);
 	await page.locator("#ew-cards-more").click();
 	await expect(page.locator(".ew__card")).toHaveCount(24);

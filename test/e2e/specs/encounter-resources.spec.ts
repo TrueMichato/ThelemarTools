@@ -53,6 +53,58 @@ test("resources and concentration belong to each monster and survive reload with
 	await expect(first.getByRole("button", {name: /start concentration/})).toHaveAttribute("aria-pressed", "false");
 });
 
+test("failed resource saves leave the last good state and unsaved form values available for retry", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed();
+	const panel = page.locator('.ew__statblock[data-instance-id="one"] .ew__resources');
+	const addSlots = panel.locator('details[data-resource-key="slots:add"]');
+	await addSlots.locator("summary").click();
+	await addSlots.getByRole("button", {name: "Add level"}).click();
+	await expect(panel.getByLabel("Level 1 spell slot: 1 of 1 remaining")).toBeVisible();
+
+	const edit = panel.locator('details[data-resource-key="slots:1"]');
+	await edit.locator("summary").click();
+	await edit.getByLabel("Remaining").fill("2");
+	await edit.getByLabel("Maximum").fill("4");
+	await page.evaluate(() => {
+		const globals = globalThis as typeof globalThis & {
+			StorageUtil: {pSetForPage: (...args: unknown[]) => Promise<void>},
+			restoreEncounterSave?: () => void,
+		};
+		const original = globals.StorageUtil.pSetForPage;
+		globals.StorageUtil.pSetForPage = async () => { throw new Error("Storage full"); };
+		globals.restoreEncounterSave = () => { globals.StorageUtil.pSetForPage = original; };
+	});
+	await edit.getByRole("button", {name: "Save"}).click();
+	await expect(page.locator("#ew-status[role=alert]")).toContainText("Storage full");
+	await expect(edit.getByLabel("Remaining")).toHaveValue("2");
+	await expect(panel.getByLabel("Level 1 spell slot: 1 of 1 remaining")).toBeVisible();
+	await page.evaluate(() => {
+		const globals = globalThis as typeof globalThis & {restoreEncounterSave?: () => void};
+		globals.restoreEncounterSave?.();
+	});
+	await edit.getByRole("button", {name: "Save"}).click();
+	await expect(panel.getByLabel("Level 1 spell slot: 2 of 4 remaining")).toBeVisible();
+	await expect(edit.getByRole("button", {name: "Save"})).toBeFocused();
+	await expect(page.locator('.ew__roster-row[data-instance-id="one"]')).toContainText("L1 slots 2/4");
+	await edit.getByRole("button", {name: "Stop tracking Level 1 spell slot"}).click();
+	await expect(panel).not.toContainText("Level 1 spell slot");
+	await expect(panel.locator(".ew__resource-title")).toBeFocused();
+
+	const addAbility = panel.locator('details[data-resource-key="ability:add"]');
+	await addAbility.locator("summary").click();
+	await addAbility.getByLabel("Ability name").fill("Shield charm");
+	await addAbility.getByRole("button", {name: "Add ability"}).click();
+	const abilityEdit = panel.locator("details[data-resource-key^='ability:']").filter({has: page.locator("summary", {hasText: "Edit Shield charm"})});
+	await abilityEdit.locator("summary").click();
+	await abilityEdit.getByLabel("Ability name").fill("Shield amulet");
+	await abilityEdit.getByLabel("Maximum").fill("3");
+	await abilityEdit.getByRole("button", {name: "Save"}).click();
+	await expect(panel.getByLabel("Shield amulet: 1 of 3 remaining")).toBeVisible();
+	await panel.getByRole("button", {name: "Stop tracking Shield amulet"}).click();
+	await expect(panel).not.toContainText("Shield amulet");
+});
+
 test("focused resources stay readable and usable in mobile day and night views", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({count: 20});

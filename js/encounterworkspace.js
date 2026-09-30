@@ -33,6 +33,8 @@ import {
 } from "./encounterworkspace/encounterworkspace-effects.js";
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
 import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-view.js";
+import {getEncounterResourceSummary} from "./encounterworkspace/encounterworkspace-resources.js";
+import {getEncounterResourcePanel} from "./encounterworkspace/encounterworkspace-resource-view.js";
 
 const STATBLOCK_BATCH_SIZE = 12;
 
@@ -57,6 +59,7 @@ export class EncounterWorkspacePage {
 		this._conditionContainers = new Map();
 		this._effectContainers = new Map();
 		this._vitalContainers = new Map();
+		this._resourceContainers = new Map();
 		this._rosterMeta = new Map();
 		this._hpUndo = [];
 		this._initiativeUndo = null;
@@ -399,6 +402,9 @@ export class EncounterWorkspacePage {
 		this._effectContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
 		this._vitalContainers.forEach(container => container.querySelectorAll("input").forEach(input => {
 			input.disabled = isBusy || (input.dataset.field === "initiative" && !!getEncounterSharedGroup(this._state, input.dataset.instanceId));
+		}));
+		this._resourceContainers.forEach(container => container.querySelectorAll("button, input, select").forEach(control => {
+			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
 		}));
 		this._updateControls();
 		this._updateFocusStatus();
@@ -1323,6 +1329,63 @@ export class EncounterWorkspacePage {
 		}
 	}
 
+	async _pUpdateResource (id, action) {
+		if (this._isBusy) return;
+		const panel = this._resourceContainers.get(id);
+		const focused = panel?.contains(document.activeElement) ? document.activeElement.dataset.resourceControl : null;
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const args = {...action, id};
+			let next;
+			switch (action.kind) {
+				case "slots": next = EncounterWorkspaceState.withSpellSlots(this._state, args); break;
+				case "removeSlots": next = EncounterWorkspaceState.withoutSpellSlots(this._state, args); break;
+				case "ability": next = EncounterWorkspaceState.withAbility(this._state, args); break;
+				case "removeAbility": next = EncounterWorkspaceState.withoutAbility(this._state, args); break;
+				case "abilityUse": next = EncounterWorkspaceState.withAbilityUse(this._state, args); break;
+				case "recharge": next = EncounterWorkspaceState.withRechargeReady(this._state, args); break;
+				case "concentration": next = EncounterWorkspaceState.withConcentration(this._state, args); break;
+				default: throw new Error("Unknown combat resource action.");
+			}
+			this._state = await this._store.pSave(next);
+			isSaved = true;
+			this._renderResourcePanel(id);
+			const instance = this._state.instances.find(it => it.id === id);
+			this._renderRosterMeta(instance);
+			this._renderCardSummary(instance, getEncounterInstanceLabels(this._state.instances).get(id));
+			this._renderActiveVitals();
+			this._setStatus(`Saved combat resources for ${getEncounterInstanceLabels(this._state.instances).get(id)}.`);
+		} catch (e) {
+			this._setError(isSaved
+				? `Combat resources were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload to see the changes.`
+				: `Combat resources were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+			if (focused) {
+				const currentPanel = this._resourceContainers.get(id);
+				const control = [...(currentPanel?.querySelectorAll("[data-resource-control]") || [])]
+					.find(it => it.dataset.resourceControl === focused);
+				(control && !control.disabled ? control : currentPanel?.querySelector(".ew__resource-title"))?.focus({preventScroll: true});
+			}
+		}
+	}
+
+	_renderResourcePanel (id) {
+		const previous = this._resourceContainers.get(id);
+		if (!previous) return;
+		const open = new Set([...previous.querySelectorAll("details[data-resource-key]")]
+			.filter(details => details.open).map(details => details.dataset.resourceKey));
+		const instance = this._state.instances.find(it => it.id === id);
+		const label = getEncounterInstanceLabels(this._state.instances).get(id);
+		const panel = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(id, action)});
+		panel.querySelectorAll("details[data-resource-key]").forEach(details => {
+			details.open = open.has(details.dataset.resourceKey);
+		});
+		previous.replaceWith(panel);
+		this._resourceContainers.set(id, panel);
+	}
+
 	async _pApplyHp () {
 		if (this._isBusy) return;
 		const targets = this._state.instances.filter(it => this._state.selectedIds.includes(it.id));
@@ -1878,6 +1941,7 @@ export class EncounterWorkspacePage {
 		this._conditionContainers.clear();
 		this._effectContainers.clear();
 		this._vitalContainers.clear();
+		this._resourceContainers.clear();
 		this._cardSummaries.clear();
 		this._eleStatblocks.replaceChildren();
 		const byId = new Map(this._state.instances.map(it => [it.id, it]));
@@ -1924,6 +1988,7 @@ export class EncounterWorkspacePage {
 						this._conditionContainers.delete(id);
 						this._effectContainers.delete(id);
 						this._vitalContainers.delete(id);
+						this._resourceContainers.delete(id);
 						this._expandedCards.delete(id);
 					}
 				});
@@ -1952,7 +2017,10 @@ export class EncounterWorkspacePage {
 
 	_renderCardSummary (instance, label) {
 		const summary = this._cardSummaries.get(instance.id);
-		if (summary) summary.textContent = `${label} · HP ${instance.hp.current ?? "unset"}/${instance.hp.max ?? "unset"} · ${instance.conditions.length ? instance.conditions.join(", ") : "No conditions"}`;
+		if (summary) {
+			const resources = getEncounterResourceSummary(instance.resources);
+			summary.textContent = `${label} · HP ${instance.hp.current ?? "unset"}/${instance.hp.max ?? "unset"} · ${instance.conditions.length ? instance.conditions.join(", ") : "No conditions"}${resources ? ` · ${resources}` : ""}`;
+		}
 	}
 
 	_createStatblock (instance, label) {
@@ -1986,18 +2054,20 @@ export class EncounterWorkspacePage {
 		vitals.className = "ew__vitals";
 		vitals.setAttribute("aria-label", `HP and initiative for ${label}`);
 		this._vitalContainers.set(instance.id, vitals);
+		const resources = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(instance.id, action)});
+		this._resourceContainers.set(instance.id, resources);
 		const table = document.createElement("table");
 		table.className = "ve-w-100 ve-stats";
 		const body = document.createElement("tbody");
 		try {
 			body.innerHTML = Renderer.monster.getCompactRenderedString(MiscUtil.copyFast(effective), {isShowScalers: false});
 			table.append(body);
-			tile.append(heading, vitals, conditions, effects, table);
+			tile.append(heading, vitals, resources, conditions, effects, table);
 		} catch (e) {
 			const failure = document.createElement("p");
 			failure.className = "ew__render-error";
 			failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-			tile.append(heading, vitals, conditions, effects, failure);
+			tile.append(heading, vitals, resources, conditions, effects, failure);
 		}
 		this._tiles.set(instance.id, tile);
 		return tile;
@@ -2040,7 +2110,10 @@ export class EncounterWorkspacePage {
 		const labels = getEncounterInstanceLabels(this._state.instances);
 		this._eleActiveVitals.textContent = members.length
 			? [
-				...members.slice(0, 3).map(it => `${labels.get(it.id)}: HP ${it.hp.current ?? "unset"}/${it.hp.max ?? "unset"}${it.hp.temp ? ` +${it.hp.temp} temp` : ""} · ${it.conditions.length ? it.conditions.join(", ") : "No conditions"}`),
+				...members.slice(0, 3).map(it => {
+					const resources = getEncounterResourceSummary(it.resources);
+					return `${labels.get(it.id)}: HP ${it.hp.current ?? "unset"}/${it.hp.max ?? "unset"}${it.hp.temp ? ` +${it.hp.temp} temp` : ""} · ${it.conditions.length ? it.conditions.join(", ") : "No conditions"}${resources ? ` · ${resources}` : ""}`;
+				}),
 				...(members.length > 3 ? [`${members.length - 3} more group members in the roster`] : []),
 			].join(" · ")
 			: "Start turns to follow the active monster.";
@@ -2324,9 +2397,10 @@ export class EncounterWorkspacePage {
 			`${getEncounterEffectiveMonster(instance).source} · CR ${getEncounterEffectiveMonster(instance).cr?.cr || getEncounterEffectiveMonster(instance).cr || "—"}`,
 			`HP ${instance.hp.current == null ? "unset" : instance.hp.current}/${instance.hp.max == null ? "unset" : instance.hp.max}${instance.hp.temp ? ` +${instance.hp.temp} temp` : ""}`,
 			`Init ${getEncounterInitiativeTotal(this._state, instance) == null ? "unrolled" : getEncounterInitiativeTotal(this._state, instance)}${getEncounterSharedGroup(this._state, instance.id) ? " shared" : ""}`,
+			getEncounterResourceSummary(instance.resources),
 			...activeConditions,
 			...effectNames,
-		].join(" · ");
+		].filter(Boolean).join(" · ");
 	}
 
 	_renderEffects () {
