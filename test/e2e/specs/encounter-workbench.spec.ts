@@ -215,7 +215,10 @@ test("the live turn leads and mobile targets/actions precede the statblock in da
 	for (const width of [1280, 390]) {
 		await page.setViewportSize({width, height: 844});
 		for (const night of [false, true]) {
-			await page.locator("body").evaluate((body, enabled) => body.classList.toggle("ve-night-mode", enabled), night);
+			await page.locator("html").evaluate((html, enabled) => {
+				html.classList.toggle("ve-night-mode", enabled);
+				html.classList.toggle("ve-night-mode--standard", enabled);
+			}, night);
 			await expect(page.locator("#ew-turn-start")).toBeVisible();
 			await expect(page.locator("#ew-focus-next")).toBeVisible();
 			await expect(page.locator(".ew__statblock")).toBeVisible();
@@ -237,6 +240,14 @@ test("the live turn leads and mobile targets/actions precede the statblock in da
 			else expect(dimensions.statblockTop).toBeGreaterThanOrEqual(dimensions.quickBottom);
 			expect(dimensions.searchBottom).toBeLessThan(dimensions.countTop);
 			await expect(page.locator("#ew-roster")).toHaveCSS("overflow-y", "visible");
+			if (night) await expect(page.locator("#ew-position > summary")).toHaveCSS("background-color", "rgb(56, 56, 56)");
+			if (width <= 480) {
+				const smallControls = await page.locator(".ew button, .ew select, .ew input:not([type=checkbox]), .ew summary")
+					.evaluateAll(elements => elements.filter(element => element.getClientRects().length && getComputedStyle(element).visibility === "visible")
+						.filter(element => element.getBoundingClientRect().width < 44 || element.getBoundingClientRect().height < 44)
+						.map(element => element.getAttribute("aria-label") || element.id || element.textContent?.trim().slice(0, 40)));
+				expect(smallControls).toEqual([]);
+			}
 		}
 	}
 });

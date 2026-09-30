@@ -1159,6 +1159,8 @@
 		&__setup > summary,
 		&__action-drawer > summary,
 		&__roster-help > summary,
+		&__position > summary,
+		&__move-report > summary,
 		&__notices,
 		&__operation,
 		&__results,
@@ -1178,6 +1180,8 @@
 		&__setup > summary,
 		&__action-drawer > summary,
 		&__roster-help > summary,
+		&__position > summary,
+		&__move-report > summary,
 		&__status,
 		&__notices,
 		&__operation,
@@ -1380,6 +1384,7 @@
 			select,
 			input:not([type="checkbox"]),
 			summary {
+				min-width: 44px;
 				min-height: 44px;
 			}
 
