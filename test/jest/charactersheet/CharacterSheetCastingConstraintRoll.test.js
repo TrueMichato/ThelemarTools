@@ -148,7 +148,7 @@ describe("TGTT casting constraints — committed casts only", () => {
 	});
 
 	it("one check covers multiple verbal and somatic constraints, without double charging", async () => {
-		const {state, spells, spellId} = makeHarness({dice: [14, 19]});
+		const {state, page, spells, spellId} = makeHarness({dice: [14]});
 		state.addCondition({name: "Frightened", source: "TGTT"});
 		state.addCondition({name: "Choked", source: "TGTT"});
 		state.addCondition({name: "Grappled", source: "TGTT"});
@@ -156,7 +156,12 @@ describe("TGTT casting constraints — committed casts only", () => {
 
 		await spells._castSpell(spellId, {withMetamagic: false});
 
-		expect(state.rollD20).toHaveBeenCalledTimes(2);
+		expect(state.rollD20).toHaveBeenCalledTimes(1);
+		expect(page.pAnimateD20).toHaveBeenCalledTimes(1);
+		expect(page.pAnimateD20).toHaveBeenCalledWith(expect.objectContaining({roll: 14, mode: "normal"}));
+		expect(page._rollHistory.addRoll).toHaveBeenCalledWith(expect.objectContaining({
+			resultNote: expect.stringMatching(/Frightened \(verbal\); Choked \(verbal\); Grappled \(somatic\): Success — cast proceeds\./),
+		}));
 		expect(state.getSpellSlotsCurrent(1)).toBe(before - 1);
 		expect(spells._showCastResult).toHaveBeenCalledTimes(1);
 		expect(toast).toHaveBeenCalledWith(expect.objectContaining({

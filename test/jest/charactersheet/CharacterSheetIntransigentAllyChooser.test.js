@@ -19,6 +19,7 @@
  */
 import "./setup.js";
 import {jest} from "@jest/globals";
+import {installFeatureDisclosureDom} from "./fixtures/feature-disclosure-dom.js";
 
 // CharacterSheetFeatures' constructor wires a global click listener.
 if (typeof globalThis.document === "undefined") {
@@ -27,7 +28,11 @@ if (typeof globalThis.document === "undefined") {
 
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
-import "../../../js/charactersheet/charactersheet-features.js";
+
+// Features captures e_ during import; install the local disclosure adapter first.
+const restoreFeatureDom = installFeatureDisclosureDom();
+await import("../../../js/charactersheet/charactersheet-features.js");
+restoreFeatureDom();
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetFeatures = globalThis.CharacterSheetFeatures;
@@ -105,6 +110,8 @@ describe("#11 Intransigent ally-chooser control", () => {
 		expect(attrOf(html, "charsheet__intransigent-ally-count", "value")).toBe("2");
 		// Surfaces the aura's 10-ft / conscious gating from the calc.
 		expect(html).toContain("within 10 ft");
+		expect(html).toContain("aria-controls=\"charsheet-feature-body-intransigent-1\"");
+		expect(html).toContain("id=\"charsheet-feature-body-intransigent-1\"");
 	});
 
 	test("the seeded value follows the API (a different stored count renders a different value)", () => {
