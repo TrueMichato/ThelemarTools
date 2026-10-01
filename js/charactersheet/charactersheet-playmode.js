@@ -2106,7 +2106,8 @@ export class CharacterSheetPlayMode {
 			&& i.equipped
 			&& (this._state.isItemAttackAvailable?.(i) ?? true));
 		equippedWeapons.forEach(weapon => {
-			if (attacks.find(a => a.name === weapon.name)) return;
+			if (attacks.find(a => a.sourceItem?.id === weapon.id
+				|| (!weapon._summonedSpell && a.name === weapon.name))) return;
 			const autoAttack = this._state.buildAutoAttackFromWeapon?.(weapon);
 			if (autoAttack) attacks.push(autoAttack);
 		});
@@ -2147,9 +2148,38 @@ export class CharacterSheetPlayMode {
 			});
 		}
 
+		const spellToResummon = this._state.getSummonedSpellWeaponToResummon?.();
+		if (spellToResummon) {
+			const resummon = this._ce("button", "pm-attack__spell-btn", card);
+			resummon.textContent = `Re-summon ${spellToResummon.name} (Bonus Action)`;
+			resummon.addEventListener("click", e => {
+				e.stopPropagation();
+				const result = this._state.resummonSpellWeapon(spellToResummon);
+				if (!result.ok) {
+					JqueryUtil.doToast({type: "warning", content: `Could not re-summon ${spellToResummon.name}: ${result.code}.`});
+					return;
+				}
+				this._page._combat?.renderAttacks?.();
+				this._page._inventory?.render?.();
+				this._renderActionsHub();
+				this._page.saveCharacter?.();
+			});
+		}
+
 		const customAttackIds = new Set(this._state.getAttacks().map(a => a.id));
 
 		attacks.forEach(attack => {
+			const summonedBenefits = this._state.getSummonedSpellWeaponAttackBenefits?.(attack);
+			const combat = this._page._combat;
+			const rollAttack = (e, opts = {}) => {
+				if (summonedBenefits) {
+					if (!combat) {
+						JqueryUtil.doToast({type: "warning", content: "Combat rolls are unavailable for this summoned weapon."});
+						return;
+					}
+					void combat.rollSummonedSpellWeaponAttack(attack, e, opts);
+				} else this._page._rollAttack(attack, e);
+			};
 			const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
 			const abilityResolution = attackBreakdown?.abilityResolution
 				|| this._state.getWeaponAbilityResolution?.(attack)
@@ -2167,7 +2197,7 @@ export class CharacterSheetPlayMode {
 			const critRange = this._state.getCriticalRange?.({attack}) || 20;
 			const chainedDamage = this._state.getChainedFuryDamageExplanation?.(attack.sourceItem?.id, {attack});
 
-			const row = this._ce("div", `pm-attack${chainedDamage?.text ? " pm-attack--with-provenance" : ""}`, card);
+			const row = this._ce("div", `pm-attack${summonedBenefits ? " pm-attack--summoned" : ""}${chainedDamage?.text ? " pm-attack--with-provenance" : ""}`, card);
 
 			const icon = this._ce("span", "pm-attack__icon", row);
 			icon.textContent = attack.isMelee ? "weapon-melee" : "weapon-ranged";
@@ -2262,17 +2292,39 @@ export class CharacterSheetPlayMode {
 				});
 			});
 
+			if (summonedBenefits?.targetLightAdvantage && combat) {
+				const controls = this._ce("span", "pm-attack__spell-controls", row);
+				const dim = this._ce("button", "pm-attack__spell-btn", controls);
+				const updateDim = () => {
+					const active = !!combat._summonedWeaponDimTargets?.has(attack.sourceItem.id);
+					dim.textContent = `Dim target: ${active ? "ON" : "OFF"}`;
+					dim.setAttribute("aria-pressed", String(active));
+				};
+				updateDim();
+				dim.addEventListener("click", e => {
+					e.stopPropagation();
+					if (combat.toggleSummonedWeaponDimTarget(attack)) updateDim();
+				});
+				const throwButton = this._ce("button", "pm-attack__spell-btn", controls);
+				throwButton.textContent = "Throw (20/60)";
+				throwButton.addEventListener("click", e => {
+					e.stopPropagation();
+					void combat.rollSummonedSpellWeaponAttack(attack, e, {thrown: true});
+				});
+			}
+
 			row.addEventListener("click", (e) => {
-				this._page._rollAttack(attack, e);
+				rollAttack(e);
 				this._logActivity(attack.isMelee ? "weapon-melee" : "weapon-ranged", `Attacked with ${attack.name}`);
 			});
 			row.setAttribute("role", "button");
 			row.setAttribute("tabindex", "0");
 			row.setAttribute("aria-label", `Roll attack: ${attack.name}, ${this._fmtMod(totalBonus)} to hit, ${dmgStr} damage`);
 			row.addEventListener("keydown", (e) => {
+				if (e.target !== row) return;
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault();
-					this._page._rollAttack(attack, e);
+					rollAttack(e);
 					this._logActivity(attack.isMelee ? "weapon-melee" : "weapon-ranged", `Attacked with ${attack.name}`);
 				}
 			});
@@ -2285,7 +2337,7 @@ export class CharacterSheetPlayMode {
 				this._showContextMenu(e, [
 					{label: attack.name, icon: attack.isMelee ? "weapon-melee" : "weapon-ranged", disabled: true},
 					{separator: true},
-					{label: "Roll Attack", icon: "dice", onClick: () => { this._page._rollAttack(attack, e); this._logActivity(attack.isMelee ? "weapon-melee" : "weapon-ranged", `Attacked with ${attack.name}`); }},
+					{label: "Roll Attack", icon: "dice", onClick: () => { rollAttack(e); this._logActivity(attack.isMelee ? "weapon-melee" : "weapon-ranged", `Attacked with ${attack.name}`); }},
 					{label: "Add Note", icon: "edit", onClick: () => this._showEntityNoteModal("attack", attack.id || attack.name, attack.name, () => this._renderAttacks())},
 					{label: atkIsFav ? "Remove Favorite" : "Add Favorite", icon: "inspiration", onClick: () => this._toggleFavorite({id: `attack:${attack.id || attack.name}`, type: "attack", name: attack.name, icon: attack.isMelee ? "weapon-melee" : "weapon-ranged", detail: this._fmtMod(totalBonus), ref: attack})},
 					...(isCustomAtk ? [
@@ -2296,6 +2348,19 @@ export class CharacterSheetPlayMode {
 				]);
 			});
 		});
+
+		const pendingThrow = this._page._combat?.getPendingSummonedWeaponThrow?.();
+		if (pendingThrow) {
+			const row = this._ce("div", "pm-attack", card);
+			const label = this._ce("span", "pm-attack__name", row);
+			label.textContent = `${pendingThrow.attack.name} (thrown; resolve damage)`;
+			const damage = this._ce("button", "pm-card__action-btn", row);
+			damage.textContent = "Roll Damage";
+			damage.addEventListener("click", e => {
+				e.stopPropagation();
+				void this._page._combat._rollDamage(pendingThrow.attackId).then(() => this._renderActionsHub());
+			});
+		}
 	}
 
 	_renderSpellsQuick () {

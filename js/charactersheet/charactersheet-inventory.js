@@ -5498,6 +5498,10 @@ class CharacterSheetInventory {
 		}
 
 		const newEquipped = !item.equipped;
+		if (newEquipped && item._summonedSpell?.status === "released") {
+			JqueryUtil.doToast({type: "warning", content: `${item.name} was released and cannot be picked back up. Re-summon it from Attacks after it dissipates at the end of the turn.`});
+			return;
+		}
 
 		// If equipping armor, unequip other armor
 		if (newEquipped && item.armor) {

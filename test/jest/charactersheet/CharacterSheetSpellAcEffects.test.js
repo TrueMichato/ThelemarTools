@@ -316,10 +316,11 @@ describe("Spell AC Effects", () => {
 			expect(entry.selfEffects.some(e => e.type === "disadvantage" && e.target === "attacksAgainst")).toBe(true);
 		});
 
-		test("Shadow Blade should have extra psychic damage", () => {
+		test("Shadow Blade defines a summoned sword, not universal extra damage", () => {
 			const entry = CharacterSheetState.getSpellFromRegistry("Shadow Blade");
 			expect(entry).toBeDefined();
-			expect(entry.selfEffects.some(e => e.type === "extraDamage" && e.damageType === "psychic")).toBe(true);
+			expect(entry.summonedWeapon).toMatchObject({source: "XGE", damageType: "psychic", damageBySlot: {2: "2d8", 7: "5d8"}});
+			expect(entry.selfEffects?.some(e => e.type === "extraDamage")).not.toBe(true);
 		});
 
 		test("Spirit Guardians should have a note effect", () => {

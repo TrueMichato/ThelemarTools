@@ -2659,6 +2659,7 @@ class CharacterSheetSpells {
 			damageEvidence: pendingSpellCast.damageEvidence,
 			cast: pendingSpellCast.cast,
 		});
+		if (receipt) this._materializeSummonedSpellWeapon(pendingSpellCast.spellData, pendingSpellCast.cast.slotLevel);
 		await this._pApplyCommittedEfaArcaneFirearmDamage({
 			receipt,
 			spell: pendingSpellCast.spell,
@@ -2705,6 +2706,16 @@ class CharacterSheetSpells {
 			breakdown: `${applied.baseTotal} spell damage + 1d8 (${applied.firearmRoll}) from Arcane Firearm|EFA through ${focusName}`,
 		});
 		return applied;
+	}
+
+	_materializeSummonedSpellWeapon (spellData, slotLevel) {
+		if (!CharacterSheetState.getSummonedSpellWeaponDefinition(spellData)) return;
+		const summoned = this._state.summonSpellWeapon(spellData, slotLevel);
+		if (!summoned.ok) throw new Error(`Could not summon ${spellData.name}: ${summoned.code}`);
+		this._page._combat?.renderAttacks?.();
+		this._page._inventory?.render?.();
+		this._page._renderActiveStates?.();
+		this._page._playMode?._renderActionsHub?.();
 	}
 
 	async pCastFeatureSpellGrant (grantId) {
@@ -2793,6 +2804,7 @@ class CharacterSheetSpells {
 			});
 			this._updateConcentrationUI();
 		}
+		this._materializeSummonedSpellWeapon(spellData, grant.spell.castLevel);
 		if (!waivesMaterial) await this._pConsumeMaterialComponent({spell, spellData});
 		this._state.consumeStatesEndingOnSpellCast?.();
 		const triggeredFeatures = this._state.applyCommittedSpellCastTriggers?.(spell) || [];
@@ -3266,6 +3278,11 @@ class CharacterSheetSpells {
 				...(selectedSlot.isWizardCapstone ? {freeCastSource: selectedSlot.capstoneType === "mastery" ? "Spell Mastery" : "Signature Spells"} : {}),
 			},
 		});
+		if (CharacterSheetState.getSummonedSpellWeaponDefinition(spellData)
+			&& castMeta.variantComponent?.effects?.some(effect => effect.type === "removeConcentration")) {
+			JqueryUtil.doToast({type: "warning", content: `${spell.name} needs concentration to sustain its summoned weapon. Choose a different component to cast it.`});
+			return;
+		}
 		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
 		if (focusSelection.cancelled) return;
 		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
@@ -3498,6 +3515,7 @@ class CharacterSheetSpells {
 			this._state.setConcentration?.({name: spell.name, level: selectedSlot.level, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 			this._updateConcentrationUI();
 		}
+		this._materializeSummonedSpellWeapon(spellData, selectedSlot.level);
 
 		// Cast is committed (not cancelled / refunded) — consume any gold-cost material component.
 		await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
@@ -3709,6 +3727,12 @@ class CharacterSheetSpells {
 		this._page._combat?.renderCombatEffects?.();
 		// Update overview active states
 		this._page._renderActiveStates?.();
+		if (this._page._combat?._cachedAttacks?.some(attack =>
+			attack.sourceItem?._summonedSpell && !this._state.isSummonedSpellWeaponAttack(attack))) {
+			this._page._combat.renderAttacks();
+			this._page._inventory?.render?.();
+			this._page._playMode?._renderActionsHub?.();
+		}
 	}
 
 	/**
@@ -7414,6 +7438,10 @@ class CharacterSheetSpells {
 		castingStats = null,
 		effectOwner = null,
 	} = {}) {
+		// A conjured weapon is created only after the cast commits and concentration
+		// replaces the previous spell. The raw damage dice belong to its item, not
+		// to an immediately rolled spell effect or a universal active-state rider.
+		if (effects.summonedWeapon) return [];
 		const appliedEffects = [];
 		const castingAbility = castingStats?.ability
 			|| this._state.getSpellcastingAbilityForSpell?.(spell)

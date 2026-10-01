@@ -6677,6 +6677,7 @@ class CharacterSheetState {
 		this.reconcileEfaReplicateMagicItems({reason: "load"});
 		this.reconcileEfaArtificerTinker({reason: "load"});
 		this._normalizeGeneratedFeatureItemLifecycleState();
+		this.reconcileSummonedSpellWeapons();
 		this.reconcileGeneratedFeatureItemDeathTransition({reason: "load"});
 		this.reconcileEfaSpellStoringItem({reason: "load"});
 		this._ensureFeatRegistryResources();
@@ -46248,8 +46249,10 @@ class CharacterSheetState {
 	setItemEquipped (itemId, equipped) {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
+			if (equipped && item.item?._summonedSpell && item.item._summonedSpell.status !== "held") return;
 			const wasActive = this._isItemProficienciesActive(item);
 			item.equipped = equipped;
+			if (!equipped && item.item?._summonedSpell?.status === "held") item.item._summonedSpell.status = "released";
 			if (!equipped) this._deactivateItemSpeedPowers(item);
 			const isActive = this._isItemProficienciesActive(item);
 			// Apply or remove proficiencies + item effects if activation state changed
@@ -46288,6 +46291,7 @@ class CharacterSheetState {
 	equip (itemId) {
 		const invItem = this._findInventoryRow(itemId);
 		if (invItem) {
+			if (invItem.item?._summonedSpell && invItem.item._summonedSpell.status !== "held") return false;
 			invItem.equipped = true;
 
 			// Apply item effects now that it is equipped (if attunement gate also satisfied)
@@ -46311,6 +46315,7 @@ class CharacterSheetState {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.equipped = false;
+			if (item.item?._summonedSpell?.status === "held") item.item._summonedSpell.status = "released";
 			this._deactivateItemSpeedPowers(item);
 			if (
 				item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
@@ -79726,6 +79731,12 @@ class CharacterSheetState {
 		}
 
 		if (state.isSpellEffect && this.getConcentrations().some(c => c.name === state.name || c.spellName === state.name)) {
+			const summonedConcentration = this.getConcentrations().find(c =>
+				c.summonedWeapon
+				&& c.spellName === state.name
+				&& c.summonedWeapon.castId === state.metadata?.summonedSpellCastId,
+			);
+			if (summonedConcentration) this._removeSummonedSpellWeapon(summonedConcentration);
 			this._dropConcentrationsWhere(c => c.name === state.name || c.spellName === state.name);
 			this.dismissConcentrationCompanions();
 			if (!this.getConcentrationCount()) {
@@ -83589,6 +83600,7 @@ class CharacterSheetState {
 
 	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
 		const receiptBoundary = this.advanceTurnReceiptBoundary();
+		this._dissipateReleasedSpellWeapons();
 		this._expireTargetEffectsAtOwnerTurnStart({
 			combatRound: round,
 			turnId: receiptBoundary.turnId,
@@ -84578,6 +84590,7 @@ class CharacterSheetState {
 	 */
 	_teardownConcentration (concentration) {
 		if (!concentration) return;
+		this._removeSummonedSpellWeapon(concentration);
 		const concSpellName = concentration.spellName;
 		const concCustomAbilityId = concentration.customAbilityId;
 		const effectOwnerId = concentration.effectOwnerId || null;
@@ -96958,6 +96971,210 @@ class CharacterSheetState {
 
 	// #region Spell Effects
 
+	static getSummonedSpellWeaponDefinition (spell) {
+		const entry = CharacterSheetState.getSpellFromRegistry(spell?.name);
+		return entry?.summonedWeapon?.source === spell?.source ? entry.summonedWeapon : null;
+	}
+
+	_getSummonedSpellWeaponConcentration (spell) {
+		const spellUid = `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
+		return this.getConcentrations().find(c =>
+			c.kind === "spell"
+			&& `${String(c.spellName || "").toLowerCase()}|${String(c.spellSource || "").toLowerCase()}` === spellUid,
+		) || null;
+	}
+
+	_addSummonedSpellWeaponItem (spell, definition, concentration) {
+		const {itemId, castId, slotLevel, spellUid} = concentration.summonedWeapon;
+		const damageLevel = Math.max(...Object.keys(definition.damageBySlot)
+			.map(Number).filter(level => level <= slotLevel));
+		this.addItem({
+			id: itemId,
+			name: spell.name,
+			source: spell.source,
+			type: definition.type,
+			weapon: true,
+			weaponCategory: definition.weaponCategory,
+			property: [...definition.property],
+			range: definition.range,
+			dmg1: definition.damageBySlot[damageLevel],
+			dmgType: definition.damageType,
+			countsAsMagical: true,
+			_isCustom: true,
+			_summonedSpell: {spellUid, castId, status: "held"},
+		}, 1, true);
+		return this._findInventoryRow(itemId) != null;
+	}
+
+	/**
+	 * Materialize a spell's weapon as a normal equipped inventory row. The
+	 * concentration entry owns its identity even when the sword has dissipated.
+	 */
+	summonSpellWeapon (spell, slotLevel) {
+		const definition = CharacterSheetState.getSummonedSpellWeaponDefinition(spell);
+		const concentration = this._getSummonedSpellWeaponConcentration(spell);
+		if (!definition || !concentration || !Number.isSafeInteger(slotLevel) || slotLevel < spell.level
+			|| concentration.spellLevel !== slotLevel || concentration.summonedWeapon) {
+			return {ok: false, code: "summoned-weapon-unavailable"};
+		}
+		const spellUid = `${spell.name}|${spell.source}`.toLowerCase();
+		const itemId = CryptUtil.uid();
+		concentration.summonedWeapon = {spellUid, castId: CryptUtil.uid(), itemId, slotLevel};
+		try {
+			if (!this._addSummonedSpellWeaponItem(spell, definition, concentration)) {
+				throw new Error(`Could not add summoned weapon for ${spellUid}`);
+			}
+			this._grantSummonedSpellWeaponProficiency(concentration);
+			this.activateState("custom", {
+				name: spell.name,
+				sourceFeatureId: `spell:${spellUid}:${concentration.summonedWeapon.castId}`,
+				isSpellEffect: true,
+				concentration: true,
+				duration: {amount: 1, unit: "minute"},
+				customEffects: [],
+				metadata: {summonedSpellCastId: concentration.summonedWeapon.castId, spellUid},
+				description: `${spell.name}: summon a ${definition.damageBySlot[slotLevel] || this.getItemRaw(itemId)?.dmg1} ${definition.damageType} sword`,
+			});
+		} catch (error) {
+			this._removeSummonedSpellWeapon(concentration);
+			delete concentration.summonedWeapon;
+			throw error;
+		}
+		return {ok: true, code: "summoned-weapon-created", itemId};
+	}
+
+	_grantSummonedSpellWeaponProficiency (concentration) {
+		const record = concentration.summonedWeapon;
+		const name = concentration.spellName;
+		const key = name.toLowerCase();
+		if (this._data.weaponProficiencies.some(prof => prof.toLowerCase() === key)
+			&& !this._data.grantedProficiencies?.weapons?.[key]?.length) {
+			this._trackGrantedProficiency("weapons", key, "base");
+		}
+		this.addWeaponProficiency(name);
+		this._trackGrantedProficiency("weapons", key, `spell:${record.castId}`);
+		record.proficiencyGranted = true;
+	}
+
+	_removeSummonedSpellWeapon (concentration) {
+		const record = concentration?.summonedWeapon;
+		if (!record) return;
+		const row = this._findInventoryRow(record.itemId);
+		if (row?.item?._summonedSpell?.castId === record.castId
+			&& row.item._summonedSpell.spellUid === record.spellUid) this.removeItem(record.itemId);
+		if (record.proficiencyGranted && this._untrackGrantedProficiency("weapons", concentration.spellName.toLowerCase(), `spell:${record.castId}`)) {
+			this.removeWeaponProficiency(concentration.spellName);
+		}
+		record.proficiencyGranted = false;
+	}
+
+	_dissipateReleasedSpellWeapons () {
+		for (const row of [...this._data.inventory]) {
+			if (row.item?._summonedSpell?.status === "released") this.removeItem(row.id);
+		}
+	}
+
+	/** Called on a committed throw; the attack's damage remains rollable this turn. */
+	releaseSummonedSpellWeapon (itemId) {
+		const row = this._findInventoryRow(itemId);
+		if (!row?.item?._summonedSpell || !this.isSummonedSpellWeaponAttack({sourceItem: this.getItemRaw(itemId)})) return false;
+		this.setItemEquipped(itemId, false);
+		return true;
+	}
+
+	isSummonedSpellWeaponAttack (attack) {
+		const item = attack?.sourceItem;
+		const record = item?._summonedSpell;
+		if (!record || record.status !== "held" || !item.equipped) return false;
+		const row = this._findInventoryRow(item.id);
+		if (!row?.equipped || row.item?._summonedSpell?.castId !== record.castId
+			|| row.item._summonedSpell.status !== "held") return false;
+		const concentration = this._getSummonedSpellWeaponConcentration(row.item);
+		return concentration?.summonedWeapon?.itemId === row.id
+			&& concentration.summonedWeapon.castId === record.castId
+			&& concentration.summonedWeapon.spellUid === record.spellUid;
+	}
+
+	getSummonedSpellWeaponAttackBenefits (attack) {
+		if (!this.isSummonedSpellWeaponAttack(attack)) return null;
+		const definition = CharacterSheetState.getSummonedSpellWeaponDefinition(attack.sourceItem);
+		return definition ? {targetLightAdvantage: !!definition.targetLightAdvantage} : null;
+	}
+
+	getSummonedSpellWeaponToResummon () {
+		const concentration = this.getConcentrations().find(c => c.summonedWeapon
+			&& !this._findInventoryRow(c.summonedWeapon.itemId));
+		if (!concentration) return null;
+		const spell = {name: concentration.spellName, source: concentration.spellSource};
+		return CharacterSheetState.getSummonedSpellWeaponDefinition(spell) ? spell : null;
+	}
+
+	resummonSpellWeapon (spell) {
+		const definition = CharacterSheetState.getSummonedSpellWeaponDefinition(spell);
+		const concentration = this._getSummonedSpellWeaponConcentration(spell);
+		const record = concentration?.summonedWeapon;
+		if (!definition || !record || this._findInventoryRow(record.itemId)) {
+			return {ok: false, code: "summoned-weapon-unavailable"};
+		}
+		const payment = this.commitActionEconomy("bonus", {trackOnlyInCombat: true});
+		if (!payment.ok) return {ok: false, code: payment.reason};
+		try {
+			if (!this._addSummonedSpellWeaponItem(spell, definition, concentration)) {
+				throw new Error(`Could not re-summon ${record.spellUid}`);
+			}
+		} catch (error) {
+			if (this._findInventoryRow(record.itemId)) this.removeItem(record.itemId);
+			this.rollbackActionEconomy(payment);
+			throw error;
+		}
+		return {ok: true, code: "summoned-weapon-returned", itemId: record.itemId};
+	}
+
+	/** Discard orphaned swords and upgrade pre-weapon saves without reactivating old damage buffs. */
+	reconcileSummonedSpellWeapons () {
+		const spell = {name: "Shadow Blade", source: "XGE", level: 2};
+		const concentration = this._getSummonedSpellWeaponConcentration(spell);
+		const state = this._data.activeStates.find(it =>
+			it.isSpellEffect && it.name === spell.name && it.active
+			&& (it.metadata?.spellUid === "shadow blade|xge"
+				|| (!it.metadata?.spellUid && (it.customEffects || []).some(effect =>
+					effect.type === "extraDamage" && effect.dice === "2d8" && effect.damageType === "psychic"))),
+		);
+		if (state) {
+			state.customEffects = (state.customEffects || []).filter(effect =>
+				!(effect.type === "extraDamage" && effect.dice === "2d8" && effect.damageType === "psychic"),
+			);
+		}
+		if (concentration && !concentration.summonedWeapon && state) {
+			const definition = CharacterSheetState.getSummonedSpellWeaponDefinition(spell);
+			const slotLevel = Math.max(spell.level, Number(concentration.spellLevel) || spell.level);
+			concentration.summonedWeapon = {
+				spellUid: `${spell.name}|${spell.source}`.toLowerCase(),
+				castId: CryptUtil.uid(),
+				itemId: CryptUtil.uid(),
+				slotLevel,
+			};
+			state.metadata = {
+				...(state.metadata || {}),
+				spellUid: concentration.summonedWeapon.spellUid,
+				summonedSpellCastId: concentration.summonedWeapon.castId,
+			};
+			if (!this._addSummonedSpellWeaponItem(spell, definition, concentration)) {
+				throw new Error("Could not restore the active Shadow Blade on load");
+			}
+		}
+		if (concentration?.summonedWeapon) this._grantSummonedSpellWeaponProficiency(concentration);
+		for (const row of [...this._data.inventory]) {
+			const record = row.item?._summonedSpell;
+			if (!record) continue;
+			const [name, source] = record.spellUid?.split("|") || [];
+			const owner = this._getSummonedSpellWeaponConcentration({name, source})?.summonedWeapon;
+			if (!owner || owner.itemId !== row.id || owner.castId !== record.castId
+				|| owner.spellUid !== record.spellUid) this.removeItem(row.id);
+		}
+		if (state && !concentration) this.removeActiveState(state.id);
+	}
+
 	/**
 	 * Known spell effect registry — provides reliable effect data for common spells
 	 * where text parsing may be unreliable. Keyed by lowercase spell name.
@@ -97190,8 +97407,16 @@ class CharacterSheetState {
 		},
 		"shadow blade": {
 			concentration: true,
-			selfEffects: [{type: "extraDamage", dice: "2d8", damageType: "psychic"}],
-			upcastScaling: {3: {dice: "3d8"}, 5: {dice: "4d8"}, 7: {dice: "5d8"}},
+			summonedWeapon: {
+				source: "XGE",
+				type: "M",
+				weaponCategory: "simple",
+				property: ["F", "L", "T"],
+				range: "20/60 ft.",
+				damageType: "psychic",
+				damageBySlot: {2: "2d8", 3: "3d8", 5: "4d8", 7: "5d8"},
+				targetLightAdvantage: true,
+			},
 			duration: {amount: 1, unit: "minute"},
 		},
 		"spirit guardians": {
@@ -97524,11 +97749,12 @@ class CharacterSheetState {
 
 		// Enrich with spell-buff registry data (known reliable effects for common spells)
 		const registryEntry = CharacterSheetState.getSpellFromRegistry(spell.name);
-		if (registryEntry) {
+		if (registryEntry && (!registryEntry.summonedWeapon || registryEntry.summonedWeapon.source === spell.source)) {
 			effects.registryMatch = true;
 			if (registryEntry.selfEffects) {
 				effects.registryEffects = registryEntry.selfEffects;
 			}
+			if (registryEntry.summonedWeapon) effects.summonedWeapon = registryEntry.summonedWeapon;
 			if (registryEntry.upcastPerLevel) {
 				effects.upcastPerLevel = registryEntry.upcastPerLevel;
 			}
