@@ -71,5 +71,13 @@ describe("creature transformation option and group rules hover", () => {
 		const entries = getCreatureTransformationOptionHoverEntries({candidate, group, option, sourceLabel});
 		expect(entries.find(it => it.name === "Automatic mechanical effects").entries)
 			.toContain("fly speed equal to effective walking speed only while not wearing medium or heavy armor");
+		const climb = getCreatureTransformationOptionHoverEntries({
+			candidate,
+			group,
+			option: {...option, changes: [{op: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"}]},
+			sourceLabel,
+		});
+		expect(climb.find(it => it.name === "Automatic mechanical effects").entries)
+			.toContain("climb speed equal to effective walking speed");
 	});
 });
