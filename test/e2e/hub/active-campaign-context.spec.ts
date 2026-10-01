@@ -342,6 +342,7 @@ test.describe("device-scoped active campaign context", () => {
 				return (window as any).__authorityBfcacheToken;
 			});
 			const routePatchPaths: string[] = [];
+			let routePatchCount = 0;
 			let routeLeaseCount = 0;
 			const onRouteRequest = request => {
 				if (
@@ -355,6 +356,7 @@ test.describe("device-scoped active campaign context", () => {
 					request.method() !== "PATCH"
 					|| new URL(request.url()).pathname !== `/api/characters/${character.id}`
 				) return;
+				routePatchCount++;
 				const body = request.postDataJSON();
 				routePatchPaths.push(...(body.patches || []).map((patch: {path: string}) => patch.path.split("/")[1]));
 			};
@@ -369,6 +371,7 @@ test.describe("device-scoped active campaign context", () => {
 			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
 			expect(routePatchPaths).toEqual([]);
+			expect(routePatchCount).toBe(0);
 			expect(routeLeaseCount).toBe(0);
 			expect((await hub.getCharacter(character.id)).revision).toBe(canonicalAfterOverview.revision);
 
@@ -402,6 +405,7 @@ test.describe("device-scoped active campaign context", () => {
 				revision: canonicalAfterOverview.revision,
 				routePatchPaths: [],
 			});
+			expect(routePatchCount).toBe(0);
 			expect(routeLeaseCount).toBe(0);
 
 			await ordinary.page.locator("#charsheet-sel-character").selectOption(character.id);
