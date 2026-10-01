@@ -12,6 +12,7 @@ import {getEncounterResourceDefaults, validateEncounterResources} from "./encoun
 import {getEncounterDamageForMonster} from "./encounterworkspace-damage.js";
 
 const STORAGE_KEY = "encounterWorkspaceState";
+const SETTINGS_KEY = "encounterWorkspaceSettings";
 const PAGE = "encounterworkspace.html";
 const VERSION = 7;
 const MAX_INSTANCES = 1000;
@@ -932,5 +933,25 @@ export class EncounterWorkspaceStore {
 				: "The current Bestiary encounter has no usable creatures. Add creatures there and try again");
 		}
 		return this.pSave(next);
+	}
+}
+
+export class EncounterWorkspaceSettingsStore {
+	constructor ({storage = StorageUtil} = {}) { this._storage = storage; }
+
+	async pLoad () {
+		const saved = await this._storage.pGetForPage(SETTINGS_KEY, {page: PAGE});
+		if (saved == null) return {autoRollRecharge: false};
+		if (!isRecord(saved) || typeof saved.autoRollRecharge !== "boolean") {
+			throw new Error("The saved encounter settings are invalid. They have not been changed.");
+		}
+		return {autoRollRecharge: saved.autoRollRecharge};
+	}
+
+	async pSave ({autoRollRecharge}) {
+		if (typeof autoRollRecharge !== "boolean") throw new Error("Choose whether to roll recharge abilities automatically.");
+		const settings = {autoRollRecharge};
+		await this._storage.pSetForPage(SETTINGS_KEY, settings, {page: PAGE});
+		return settings;
 	}
 }

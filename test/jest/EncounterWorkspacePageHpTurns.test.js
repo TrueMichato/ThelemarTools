@@ -11,11 +11,11 @@ globalThis.window = {addEventListener: jest.fn()};
 const {EncounterWorkspacePage} = await import("../../js/encounterworkspace.js");
 globalThis.window = priorWindow;
 
-const createPage = async ({isMissingHp = false} = {}) => {
+const createPage = async ({isMissingHp = false, monsterOverride = {}} = {}) => {
 	let nextId = 0;
 	const state = await EncounterWorkspaceState.pFromSavedList({
 		exportedSublist: {name: "Ambush", items: [{h: "goblin_mm", c: 2}]},
-		pResolveItem: async () => ({entity: {name: "Goblin", source: "MM", dex: 14, hp: isMissingHp ? {} : {average: 7}}}),
+		pResolveItem: async () => ({entity: {name: "Goblin", source: "MM", dex: 14, hp: isMissingHp ? {} : {average: 7}, ...monsterOverride}}),
 		fnUid: () => `goblin-${++nextId}`,
 	});
 	const storage = {
@@ -36,6 +36,12 @@ const createPage = async ({isMissingHp = false} = {}) => {
 	page._clearDamageFeedback = jest.fn();
 	page._renderVitals = jest.fn();
 	page._renderTurnOrder = jest.fn();
+	page._renderResourcePanel = jest.fn();
+	page._renderRosterMeta = jest.fn();
+	page._renderCardSummary = jest.fn();
+	page._renderActiveVitals = jest.fn();
+	page._focusCurrentTurn = jest.fn();
+	page._settings = {autoRollRecharge: false};
 	page._renderRollResults = jest.fn();
 	page._clearRollResults = jest.fn();
 	page._restoreVitalFocus = jest.fn();
@@ -43,6 +49,148 @@ const createPage = async ({isMissingHp = false} = {}) => {
 };
 
 describe("Encounter Workspace HP/turn controls", () => {
+	const withSpentRecharge = state => EncounterWorkspaceState.withRechargeReady(state, {
+		id: "goblin-1", rechargeId: "auto:recharge:action:0", ready: false,
+	});
+
+	it("prompts only after a saved turn change; Skip, reset, failed saves and no spent abilities never roll", async () => {
+		const {page, storage} = await createPage({monsterOverride: {action: [{name: "Breath {@recharge 5}", entries: ["Damage."]}]}});
+		page._state = EncounterWorkspaceState.withInitiativeResults(withSpentRecharge(page._state), [
+			{id: "goblin-1", total: 15}, {id: "goblin-2", total: 10},
+		]);
+		const prompt = jest.spyOn(InputUiUtil, "pGetUserBoolean").mockResolvedValue(false);
+		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(6);
+		try {
+			storage.pSetForPage.mockRejectedValueOnce(new Error("Storage full"));
+			await page._pUpdateTurn("start");
+			expect(prompt).not.toHaveBeenCalled();
+			expect(roll).not.toHaveBeenCalled();
+			await page._pUpdateTurn("start");
+			expect(prompt).toHaveBeenCalledTimes(1);
+			expect(roll).not.toHaveBeenCalled();
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
+			await page._pUpdateTurn("next");
+			expect(prompt).toHaveBeenCalledTimes(1);
+			await page._pUpdateTurn("reset");
+			expect(prompt).toHaveBeenCalledTimes(1);
+		} finally {
+			prompt.mockRestore();
+			roll.mockRestore();
+		}
+	});
+
+	it("rolls each shared-turn member separately, saves successes before announcing ready, and keeps failures spent", async () => {
+		const {page, storage} = await createPage({monsterOverride: {
+			action: [
+				{name: "Breath {@recharge 5}", entries: ["Damage."]},
+				{name: "Shout {@recharge 6}", entries: ["Damage."]},
+			],
+		}});
+		page._state = EncounterWorkspaceState.withGroup({state: page._state, memberIds: ["goblin-1", "goblin-2"], id: "group"});
+		page._state = EncounterWorkspaceState.withSharedTurn(page._state, {groupId: "group", isShared: true, total: 15});
+		for (const id of ["goblin-1", "goblin-2"]) {
+			for (const rechargeId of ["auto:recharge:action:0", "auto:recharge:action:1"]) {
+				page._state = EncounterWorkspaceState.withRechargeReady(page._state, {id, rechargeId, ready: false});
+			}
+		}
+		page._settings.autoRollRecharge = true;
+		const prompt = jest.spyOn(InputUiUtil, "pGetUserBoolean");
+		const roll = jest.spyOn(Renderer.dice, "pRoll2")
+			.mockResolvedValueOnce(5).mockResolvedValueOnce(5)
+			.mockResolvedValueOnce(null).mockResolvedValueOnce("6");
+		page._setStatus.mockImplementation(text => {
+			if (text.includes("ready")) expect(storage.pSetForPage).toHaveBeenCalledTimes(2);
+		});
+		try {
+			await page._pUpdateTurn("start");
+			expect(roll).toHaveBeenCalledTimes(4);
+			expect(roll).toHaveBeenNthCalledWith(1, "1d6", expect.objectContaining({label: "Breath recharge (5–6)"}), {isResultUsed: false});
+			expect(prompt).not.toHaveBeenCalled();
+			expect(storage.pSetForPage).toHaveBeenCalledTimes(2);
+			expect(page._state.instances.map(it => it.resources.recharges.map(recharge => recharge.ready))).toEqual([
+				[true, false], [false, false],
+			]);
+			expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("5 ≥ 5; ready"));
+			expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("5 < 6; still spent"));
+			expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("no valid roll; still spent"));
+		} finally {
+			roll.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
+	it("does not announce or publish a successful recharge when its storage write fails", async () => {
+		const {page, storage} = await createPage({monsterOverride: {action: [{name: "Breath {@recharge 5}", entries: ["Damage."]}]}});
+		page._state = EncounterWorkspaceState.withInitiativeResults(withSpentRecharge(page._state), [{id: "goblin-1", total: 15}]);
+		page._settings.autoRollRecharge = true;
+		storage.pSetForPage.mockImplementationOnce(async () => {}).mockRejectedValueOnce(new Error("Storage full"));
+		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(6);
+		try {
+			await page._pUpdateTurn("start");
+			expect(page._state.turn).toEqual({round: 1, activeId: "goblin-1"});
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
+			expect(page._setError).toHaveBeenCalledWith(expect.stringContaining("The turn was saved, but recharge was not completed: Storage full"));
+			expect(page._setStatus.mock.calls.some(([message]) => message.includes("; ready"))).toBe(false);
+		} finally {
+			roll.mockRestore();
+		}
+	});
+
+	it("checks spent abilities again on the next round of a one-entry initiative", async () => {
+		const {page, storage} = await createPage({monsterOverride: {action: [{name: "Breath {@recharge 5}", entries: ["Damage."]}]}});
+		page._state = EncounterWorkspaceState.withInitiativeResults(withSpentRecharge(page._state), [{id: "goblin-1", total: 15}]);
+		page._settings.autoRollRecharge = true;
+		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValueOnce(1).mockResolvedValueOnce(6);
+		try {
+			await page._pUpdateTurn("start");
+			expect(page._state.turn).toEqual({round: 1, activeId: "goblin-1"});
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
+			await page._pUpdateTurn("next");
+			expect(page._state.turn).toEqual({round: 2, activeId: "goblin-1"});
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(true);
+			expect(roll).toHaveBeenCalledTimes(2);
+			expect(storage.pSetForPage).toHaveBeenCalledTimes(3);
+		} finally {
+			roll.mockRestore();
+		}
+	});
+
+	it("keeps resource edits blocked while a recharge die is pending", async () => {
+		const {page, storage} = await createPage({monsterOverride: {action: [{name: "Breath {@recharge 5}", entries: ["Damage."]}]}});
+		page._state = EncounterWorkspaceState.withInitiativeResults(withSpentRecharge(page._state), [{id: "goblin-1", total: 15}]);
+		page._settings.autoRollRecharge = true;
+		let finishRoll;
+		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockImplementation(() => new Promise(resolve => { finishRoll = resolve; }));
+		try {
+			const transition = page._pUpdateTurn("start");
+			for (let attempt = 0; attempt < 10; attempt++) {
+				if (finishRoll) break;
+				await Promise.resolve();
+			}
+			expect(finishRoll).toEqual(expect.any(Function));
+			expect(page._isBusy).toBe(true);
+			await page._pUpdateResource("goblin-1", {kind: "recharge", rechargeId: "auto:recharge:action:0", ready: true});
+			expect(storage.pSetForPage).toHaveBeenCalledTimes(1);
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
+			finishRoll(6);
+			await transition;
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(true);
+			expect(storage.pSetForPage).toHaveBeenCalledTimes(2);
+		} finally {
+			if (finishRoll) finishRoll(null);
+			roll.mockRestore();
+		}
+	});
+
+	it("reverts a failed automatic-roll setting write without changing the active choice", async () => {
+		const {page} = await createPage();
+		page._checkAutoRecharge = {checked: true};
+		page._settingsStore = {pSave: jest.fn(async () => { throw new Error("Storage full"); })};
+		await page._pSetAutoRollRecharge();
+		expect(page._settings.autoRollRecharge).toBe(false);
+		expect(page._checkAutoRecharge.checked).toBe(false);
+		expect(page._setError).toHaveBeenCalledWith(expect.stringContaining("Recharge settings were not saved: Storage full"));
+	});
 	it("evaluates HP dice only once for the selected batch, persists one state, and undoes only committed changes", async () => {
 		const {page, storage} = await createPage();
 		const tree = jest.spyOn(Renderer.dice.lang, "getTree3");

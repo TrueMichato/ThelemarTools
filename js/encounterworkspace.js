@@ -1,5 +1,6 @@
 import {
 	EncounterWorkspaceState,
+	EncounterWorkspaceSettingsStore,
 	EncounterWorkspaceStore,
 	MAX_ENCOUNTER_STATBLOCK_OPERATIONS,
 	getEncounterCompatibleGroups,
@@ -51,8 +52,10 @@ import {
 const STATBLOCK_BATCH_SIZE = 12;
 
 export class EncounterWorkspacePage {
-	constructor ({store = new EncounterWorkspaceStore(), handoffStore = new EncounterWorkspaceHandoffStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
+	constructor ({store = new EncounterWorkspaceStore(), settingsStore = new EncounterWorkspaceSettingsStore(), handoffStore = new EncounterWorkspaceHandoffStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
 		this._store = store;
+		this._settingsStore = settingsStore;
+		this._settings = {autoRollRecharge: false};
 		this._handoffStore = handoffStore;
 		this._pendingHandoff = null;
 		this._handoffReadError = false;
@@ -184,6 +187,7 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart = document.getElementById("ew-turn-start");
 		this._btnTurnNext = document.getElementById("ew-turn-next");
 		this._btnTurnReset = document.getElementById("ew-turn-reset");
+		this._checkAutoRecharge = document.getElementById("ew-auto-recharge");
 		this._selBulkType = document.getElementById("ew-bulk-type");
 		this._selBulkChoice = document.getElementById("ew-bulk-choice");
 		this._inpBulkName = document.getElementById("ew-bulk-name");
@@ -243,6 +247,7 @@ export class EncounterWorkspacePage {
 	}
 
 	async pInit () {
+		this._checkAutoRecharge.addEventListener("change", () => this._pSetAutoRollRecharge());
 		this._btnChoose.addEventListener("click", () => this._pChoose());
 		this._btnSelectAll.addEventListener("click", () => this._pSetTargets(this._state.instances.map(it => it.id)));
 		this._btnSelectNone.addEventListener("click", () => this._pSetTargets([]));
@@ -396,6 +401,13 @@ export class EncounterWorkspacePage {
 		this._btnHandoffClear.addEventListener("click", () => this._pClearHandoff());
 		window.addEventListener("focus", () => this._pRefreshHandoff());
 
+		let settingsError = null;
+		try {
+			this._settings = await this._settingsStore.pLoad();
+			this._checkAutoRecharge.checked = this._settings.autoRollRecharge;
+		} catch (e) {
+			settingsError = e;
+		}
 		let catalogError = null;
 		try {
 			await Promise.all([PrereleaseUtil.pInit(), BrewUtil2.pInit()]);
@@ -427,6 +439,7 @@ export class EncounterWorkspacePage {
 		}
 		if (catalogError) this._setError(`Bestiary sources could not be initialized: ${this._getErrorMessage(catalogError)}. ${this._hasUnreadableSave ? "The saved encounter also could not be opened." : "The saved encounter is still available."} Importing another list is disabled until the page can load those sources.`);
 		else if (referenceError) this._setError(`Condition and skill reference data could not be loaded: ${this._getErrorMessage(referenceError)}. Standard conditions and skills remain available. You can still choose a saved Bestiary list.${this._hasUnreadableSave ? " The saved encounter also could not be opened; choose a saved list to replace it." : ""}`);
+		if (settingsError) this._setError(`${this._eleStatus.textContent} Recharge settings could not be loaded: ${this._getErrorMessage(settingsError)}. Confirm before each spent recharge roll; the saved setting has not been changed.`);
 		await this._pRefreshHandoff();
 		await this._pOpenBestiaryHandoff();
 	}
@@ -509,6 +522,7 @@ export class EncounterWorkspacePage {
 		this._btnTurnStart.disabled = this._isBusy || isStarted || !hasInitiative;
 		this._btnTurnNext.disabled = this._isBusy || !isStarted;
 		this._btnTurnReset.disabled = this._isBusy || !isStarted;
+		this._checkAutoRecharge.disabled = this._isBusy;
 		this._btnTurnStart.hidden = isStarted;
 		this._btnTurnNext.hidden = !isStarted;
 		this._btnTurnReset.hidden = !isStarted;
@@ -1473,7 +1487,11 @@ export class EncounterWorkspacePage {
 				const currentTile = this._tiles.get(id);
 				const control = [...(currentTile?.querySelectorAll("[data-resource-control]") || [])]
 					.find(it => it.dataset.resourceControl === focused);
-				(control && !control.disabled ? control : currentTile?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
+				const opposite = focused.endsWith(":spend") ? focused.replace(/:spend$/, ":restore")
+					: focused.endsWith(":restore") ? focused.replace(/:restore$/, ":spend") : null;
+				const alternative = opposite && [...(currentTile?.querySelectorAll("[data-resource-control]") || [])]
+					.find(it => it.dataset.resourceControl === opposite && !it.disabled);
+				(control && !control.disabled ? control : alternative || currentTile?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
 			}
 		}
 	}
@@ -1767,18 +1785,101 @@ export class EncounterWorkspacePage {
 	async _pUpdateTurn (action) {
 		if (this._isBusy) return;
 		this._setBusy(true);
+		let isTurnSaved = false;
 		try {
 			const next = EncounterWorkspaceState.withTurn(this._state, action);
 			this._state = await this._store.pSave(next);
+			isTurnSaved = true;
 			this._clearInitiativeMove();
 			this._renderTurnOrder();
 			if (action !== "reset") this._focusCurrentTurn();
 			this._setStatus(action === "reset" ? "Turns reset; initiative totals are unchanged." : `Round ${next.turn.round}: ${this._getTurnName(next.turn.activeId)} is active.`);
+			if (action !== "reset") await this._pRollTurnRecharges(this._state);
 		} catch (e) {
-			this._setError(`Turns were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			if (e.isRechargeSaved) this._setError(e.message);
+			else if (isTurnSaved) this._setError(`The turn was saved, but recharge was not completed: ${this._getErrorMessage(e)}. Check the recharge controls before continuing.`);
+			else this._setError(`Turns were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
 			this._setBusy(false);
 		}
+	}
+
+	async _pSetAutoRollRecharge () {
+		if (this._isBusy) return;
+		const isEnabled = this._checkAutoRecharge.checked;
+		this._setBusy(true);
+		try {
+			this._settings = await this._settingsStore.pSave({autoRollRecharge: isEnabled});
+			this._setStatus(isEnabled ? "Automatic recharge rolls enabled for future turns and encounters." : "Automatic recharge rolls disabled; choose Roll or Skip each turn.");
+		} catch (e) {
+			this._checkAutoRecharge.checked = this._settings.autoRollRecharge;
+			this._setError(`Recharge settings were not saved: ${this._getErrorMessage(e)}. The prior choice remains active.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	async _pRollTurnRecharges (savedTurn) {
+		const memberIds = savedTurn.groups.find(it => it.sharedTurn && it.id === savedTurn.turn.activeId)?.memberIds || [savedTurn.turn.activeId];
+		const labels = getEncounterInstanceLabels(savedTurn.instances);
+		const spent = memberIds.flatMap(id => {
+			const instance = savedTurn.instances.find(it => it.id === id);
+			return instance?.resources?.recharges.filter(it => !it.ready).map(recharge => ({id, recharge})) || [];
+		});
+		if (!spent.length) return;
+		if (!this._settings?.autoRollRecharge) {
+			const shouldRoll = await InputUiUtil.pGetUserBoolean({
+				title: "Roll spent recharge abilities?",
+				htmlDescription: `<p>${spent.length} spent ${spent.length === 1 ? "ability" : "abilities"} for the active turn. Roll 1d6 separately for each; a result at or above its listed threshold restores it.</p>`,
+				textYes: "Roll",
+				textNo: "Skip",
+			});
+			if (!shouldRoll) return this._setStatus("Recharge rolls skipped; spent abilities remain spent.");
+		}
+		const outcomes = [];
+		let next = savedTurn;
+		for (const {id, recharge} of spent) {
+			if (this._state !== savedTurn) throw new Error("The encounter changed while rolling; no recharge results were saved");
+			let result;
+			try {
+				result = await Renderer.dice.pRoll2("1d6", {
+					isUser: false,
+					name: labels.get(id),
+					label: `${recharge.name} recharge (${recharge.min}–6)`,
+				}, {isResultUsed: false});
+			} catch (e) {
+				outcomes.push(`${labels.get(id)} ${recharge.name}: roll failed (${this._getErrorMessage(e)})`);
+				continue;
+			}
+			if (typeof result !== "number" || !Number.isInteger(result) || result < 1 || result > 6) {
+				outcomes.push(`${labels.get(id)} ${recharge.name}: no valid roll; still spent`);
+				continue;
+			}
+			if (result < recharge.min) {
+				outcomes.push(`${labels.get(id)} ${recharge.name}: ${result} < ${recharge.min}; still spent`);
+				continue;
+			}
+			next = EncounterWorkspaceState.withRechargeReady(next, {id, rechargeId: recharge.id, ready: true});
+			outcomes.push(`${labels.get(id)} ${recharge.name}: ${result} ≥ ${recharge.min}; ready`);
+		}
+		if (this._state !== savedTurn) throw new Error("The encounter changed while rolling; no recharge results were saved");
+		if (next !== savedTurn) {
+			this._state = await this._store.pSave(next);
+			try {
+				for (const id of new Set(spent.map(it => it.id))) {
+					this._renderResourcePanel(id);
+					const instance = this._state.instances.find(it => it.id === id);
+					this._renderRosterMeta(instance);
+					this._renderCardSummary(instance, labels.get(id));
+				}
+				this._renderActiveVitals();
+			} catch (e) {
+				const error = new Error(`Recharge results were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload the workspace before making another change.`);
+				error.isRechargeSaved = true;
+				throw error;
+			}
+		}
+		this._setStatus(`Round ${savedTurn.turn.round} recharge: ${outcomes.join("; ")}.`);
 	}
 
 	_clearInitiativeMove () {
@@ -2285,6 +2386,8 @@ export class EncounterWorkspacePage {
 		const tile = document.createElement("article");
 		tile.className = "ew__statblock";
 		tile.dataset.instanceId = instance.id;
+		const type = typeof effective.type === "string" ? effective.type : effective.type?.type;
+		tile.dataset.resourceType = typeof type === "string" ? type.toLowerCase() : "";
 		const title = document.createElement("h3");
 		title.className = "ew__statblock-title";
 		title.textContent = label;

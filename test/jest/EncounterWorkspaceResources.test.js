@@ -3,7 +3,7 @@ import "../../js/parser.js";
 import "../../js/utils.js";
 import "../../js/render.js";
 import {BestiaryQuickActionsOperations} from "../../js/bestiary/bestiary-quick-actions-engine.js";
-import {EncounterWorkspaceState, EncounterWorkspaceStore} from "../../js/encounterworkspace/encounterworkspace-state.js";
+import {EncounterWorkspaceSettingsStore, EncounterWorkspaceState, EncounterWorkspaceStore} from "../../js/encounterworkspace/encounterworkspace-state.js";
 import {getEncounterResourceDefaults, getEncounterResourceSummary} from "../../js/encounterworkspace/encounterworkspace-resources.js";
 import {getEncounterInlineResourceEntry} from "../../js/encounterworkspace/encounterworkspace-resource-view.js";
 
@@ -43,6 +43,21 @@ const getStore = () => {
 };
 
 describe("Encounter Workspace combat resources", () => {
+	it("stores the recharge preference independently of encounter state and rejects malformed settings", async () => {
+		const {storage} = getStore();
+		const settings = new EncounterWorkspaceSettingsStore({storage});
+		expect(await settings.pLoad()).toEqual({autoRollRecharge: false});
+		expect(await settings.pSave({autoRollRecharge: true})).toEqual({autoRollRecharge: true});
+		expect(storage.pSetForPage).toHaveBeenCalledWith("encounterWorkspaceSettings", {autoRollRecharge: true}, {page: "encounterworkspace.html"});
+		expect(await settings.pLoad()).toEqual({autoRollRecharge: true});
+		storage.pGetForPage.mockResolvedValueOnce({autoRollRecharge: "true"});
+		await expect(settings.pLoad()).rejects.toThrow(/settings are invalid/);
+		await expect(settings.pSave({autoRollRecharge: "yes"})).rejects.toThrow(/Choose whether/);
+		storage.pSetForPage.mockRejectedValueOnce(new Error("Storage full"));
+		await expect(settings.pSave({autoRollRecharge: false})).rejects.toThrow("Storage full");
+		expect(await settings.pLoad()).toEqual({autoRollRecharge: true});
+	});
+
 	it("binds indexed defaults only to uniquely identified effective entries, never duplicate names or manual rows", () => {
 		const effective = {
 			trait: [
