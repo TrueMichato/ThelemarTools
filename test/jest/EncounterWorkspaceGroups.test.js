@@ -184,7 +184,7 @@ describe("Encounter Workspace identical effective statblocks and shared turns", 
 			if (version < 2) raw.instances.forEach(it => delete it.conditions);
 			storage.pGetForPage.mockResolvedValueOnce(raw);
 			const loaded = await store.pLoad();
-			expect(loaded).toMatchObject({version: 6, groups: [], ungroupedIds: [], selectedIds: state.selectedIds});
+			expect(loaded).toMatchObject({version: 7, groups: [], ungroupedIds: [], selectedIds: state.selectedIds});
 			expect(loaded.instances.map(it => it.monster)).toEqual(state.instances.map(it => it.monster));
 		}
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe("Encounter Workspace identical effective statblocks and shared turns", 
 		delete legacy.ungroupedIds;
 		const storage = {pGetForPage: jest.fn(async () => legacy), pSetForPage: jest.fn()};
 		const loaded = await new EncounterWorkspaceStore({storage}).pLoad();
-		expect(loaded.version).toBe(6);
+		expect(loaded.version).toBe(7);
 		expect(loaded.instances[0].statblockOperations).toEqual(state.instances[0].statblockOperations);
 		expect(loaded.instances[0].modifiers).toEqual(state.instances[0].modifiers);
 		expect(loaded.instances[1].areaNotes).toEqual(state.instances[1].areaNotes);

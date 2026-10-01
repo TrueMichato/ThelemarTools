@@ -6,7 +6,93 @@ export class CreatureTransformationPage {
 	get root () { return this.page.locator(".bqa__transformation:visible"); }
 
 	async choose (id: string) {
+		await this.chooseCategory(id.startsWith("race:") ? "Species" : "Templates");
 		await this.root.getByRole("combobox", {name: "Creature transformation"}).selectOption(id);
+	}
+
+	async chooseCategory (category: "Species" | "Templates") {
+		await this.categoryButton(category).click();
+	}
+
+	async selectSource (source: string) {
+		await this.root.getByRole("combobox", {name: "Source book"}).selectOption(source);
+	}
+
+	async search (term: string) {
+		await this.root.getByRole("searchbox", {name: "Find a template or species"}).fill(term);
+	}
+
+	async installHomebrew (brew: object) {
+		await this.page.route("**/__transformation-test-brew.json", route => route.fulfill({
+			contentType: "application/json",
+			body: JSON.stringify(brew),
+		}));
+		await this.page.evaluate(async () => {
+			const {BrewUtil2} = globalThis as typeof globalThis & {BrewUtil2: {pAddBrewFromUrl: (url: string) => Promise<unknown>}};
+			await BrewUtil2.pAddBrewFromUrl("/__transformation-test-brew.json");
+		});
+	}
+
+	async useNightMode () {
+		await this.page.evaluate(() => {
+			document.documentElement.classList.add("ve-night-mode", "ve-night-mode--standard");
+		});
+	}
+
+	async injectRepeatedRaceDefinitions () {
+		await this.page.evaluate(() => {
+			const raceUtil = (globalThis as typeof globalThis & {DataUtil: {race: {loadBrew: (...args: unknown[]) => Promise<{race?: object[]}>}}}).DataUtil.race;
+			const loadBrew = raceUtil.loadBrew.bind(raceUtil);
+			raceUtil.loadBrew = async (...args) => {
+				const loaded = await loadBrew(...args);
+				const gnoll = {name: "Gnoll", source: "FoEQuickstone", page: 23, resist: ["fire"]};
+				return {...loaded, race: [...(loaded.race || []), gnoll, {...gnoll}, {...gnoll, resist: ["cold"]}]};
+			};
+		});
+	}
+
+	async pauseCatalogReload () {
+		await this.page.evaluate(() => {
+			const raceUtil = (globalThis as typeof globalThis & {DataUtil: {race: {loadBrew: (...args: unknown[]) => Promise<unknown>}}}).DataUtil.race;
+			const loadBrew = raceUtil.loadBrew.bind(raceUtil);
+			let release: () => void = () => {};
+			const gate = new Promise<void>(resolve => { release = resolve; });
+			raceUtil.loadBrew = async (...args) => {
+				await gate;
+				return loadBrew(...args);
+			};
+			(globalThis as typeof globalThis & {releaseTransformationCatalogReload?: () => void}).releaseTransformationCatalogReload = () => {
+				raceUtil.loadBrew = loadBrew;
+				release();
+			};
+		});
+	}
+
+	async resumeCatalogReload () {
+		await this.page.evaluate(() => {
+			const globals = globalThis as typeof globalThis & {releaseTransformationCatalogReload?: () => void};
+			globals.releaseTransformationCatalogReload?.();
+			delete globals.releaseTransformationCatalogReload;
+		});
+	}
+
+	categoryButton (category: "Species" | "Templates") {
+		return this.root.getByRole("group", {name: "Browse recipes"}).getByRole("button", {name: new RegExp(`^${category} \\(`)});
+	}
+
+	async categoryColors (category: "Species" | "Templates") {
+		return this.categoryButton(category).evaluate(node => {
+			const style = getComputedStyle(node);
+			return {background: style.backgroundColor, foreground: style.color};
+		});
+	}
+
+	async expectReadableDiscoveryLabels () {
+		for (const selector of [
+			".bqa__transformation-category legend",
+			".bqa__transformation-input .bqa__field-label",
+			".bqa__transformation-count",
+		]) await expect(this.root.locator(selector).first()).toHaveCSS("font-size", "12px");
 	}
 
 	async chooseOption (group: string, value: string) {

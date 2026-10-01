@@ -129,18 +129,42 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	if (!isCurrent()) return;
 	status.textContent = "";
 	const {resolveCreatureTransformation} = await import("../creature-transformations.js");
+	const sourceNames = new Map(candidates.map(({identity: {source}}) => [source, Parser.sourceJsonToFull(source)]));
+	const sourceLabel = source => {
+		const full = sourceNames.get(source);
+		const abv = Parser.sourceJsonToAbv(source);
+		return full.toLowerCase() === source.toLowerCase()
+			? source
+			: `${full} (${abv}${abv.toLowerCase() === source.toLowerCase() ? "" : ` · ${source}`})`;
+	};
+	const category = element("fieldset", {className: "bqa__transformation-category"});
+	category.append(element("legend", {text: "Browse recipes"}));
+	const categoryButtons = new Map([
+		["catalog", button("", () => setCategory("catalog"), "bqa__transformation-category-btn")],
+		["race", button("", () => setCategory("race"), "bqa__transformation-category-btn")],
+	]);
+	categoryButtons.forEach(node => category.append(node));
+	const source = element("select", {className: "ve-form-control"});
+	const sourceField = element("label", {className: "bqa__field"});
+	sourceField.append(element("span", {className: "bqa__field-label", text: "Source book"}), source);
 	const picker = element("select", {className: "ve-form-control"});
 	picker.setAttribute("aria-label", "Creature transformation");
 	const search = element("input", {className: "ve-form-control"});
 	search.type = "search";
-	search.placeholder = "Filter by name or source";
+	search.placeholder = "Name, book, or source code";
 	const searchLabel = element("label", {className: "bqa__field"});
 	searchLabel.append(element("span", {className: "bqa__field-label", text: "Find a template or species"}), search);
 	const pickerLabel = element("label", {className: "bqa__field"});
 	pickerLabel.append(element("span", {className: "bqa__field-label", text: "Creature transformation"}), picker);
-	input.append(searchLabel, pickerLabel);
+	const count = element("p", {className: "bqa__transformation-count"});
+	count.setAttribute("role", "status");
+	count.setAttribute("aria-live", "polite");
+	const empty = element("p", {className: "bqa__transformation-empty"});
+	input.append(category, sourceField, searchLabel, pickerLabel, count, empty);
 	const previewButton = button(isBulk ? "Preview selected monsters" : "Preview transformation", () => doPreview(), "ve-btn ve-btn-primary ve-btn-sm");
 	input.append(previewButton);
+	let activeCategory = "catalog";
+	let visibleIds = new Set();
 	let selections = {};
 	let acknowledgementInputs = [];
 	let approvalInput = null;
@@ -155,26 +179,64 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const clearPreview = () => {
 		batch = null;
 		stamp = null;
+		resolved = null;
 		result.replaceChildren();
 		status.textContent = "";
 		showError("");
 	};
+	const refreshSources = () => {
+		const previous = source.value;
+		const available = candidates.filter(it => it.kind === activeCategory);
+		const counts = new Map();
+		available.forEach(it => counts.set(it.identity.source, (counts.get(it.identity.source) || 0) + 1));
+		source.replaceChildren(new Option(`All sources (${available.length})`, ""));
+		[...counts].sort(([a], [b]) => sourceLabel(a).localeCompare(sourceLabel(b))).forEach(([code, total]) =>
+			source.add(new Option(`${sourceLabel(code)} · ${total}`, code)));
+		source.value = counts.has(previous) ? previous : "";
+		categoryButtons.forEach((node, kind) => {
+			node.textContent = `${kind === "catalog" ? "Templates" : "Species"} (${candidates.filter(it => it.kind === kind).length})`;
+			node.setAttribute("aria-pressed", String(activeCategory === kind));
+		});
+	};
 	const refreshOptions = () => {
 		const previous = picker.value;
 		const term = search.value.trim().toLowerCase();
+		const inCategory = candidates.filter(it => it.kind === activeCategory);
+		const matching = inCategory.filter(it =>
+			(!source.value || it.identity.source === source.value)
+			&& `${it.identity.name} ${it.identity.source} ${sourceNames.get(it.identity.source)} ${Parser.sourceJsonToAbv(it.identity.source)}`.toLowerCase().includes(term));
+		visibleIds = new Set(matching.map(it => it.id));
 		picker.replaceChildren(new Option("Choose a source-qualified recipe…", ""));
-		candidates.filter(it => `${it.identity.name} ${it.identity.source} ${it.kind}`.toLowerCase().includes(term))
-			.forEach(it => picker.add(new Option(`${it.identity.name} (${it.identity.source}) · ${it.kind === "race" ? "Species" : "Template"}${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}${it.provenance.page ? ` (p. ${it.provenance.page})` : ""}` : ""}`, it.id)));
-		picker.value = [...picker.options].some(it => it.value === previous) ? previous : "";
+		matching.forEach(it => picker.add(new Option(`${it.identity.name} (${it.identity.source})${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}${it.provenance.page ? ` (p. ${it.provenance.page})` : ""}` : ""}`, it.id)));
+		picker.value = visibleIds.has(previous) ? previous : "";
+		count.textContent = `Showing ${matching.length} of ${inCategory.length} ${activeCategory === "catalog" ? "templates" : "species"}.`;
+		empty.textContent = matching.length ? "" : "No recipes match these filters. Try another source or clear the search.";
+		empty.hidden = !!matching.length;
+		previewButton.disabled = !picker.value;
+	};
+	const onFilterChange = () => {
+		clearPreview();
+		refreshOptions();
+		if (candidate?.id !== picker.value) renderCandidate();
+	};
+	const setCategory = kind => {
+		if (activeCategory === kind) return;
+		activeCategory = kind;
+		refreshSources();
+		onFilterChange();
 	};
 	const renderCandidate = () => {
 		clearPreview();
-		candidate = candidates.find(it => it.id === picker.value) || null;
+		candidate = visibleIds.has(picker.value) ? candidates.find(it => it.id === picker.value) : null;
 		selections = {};
+		acknowledgementInputs = [];
+		approvalInput = null;
+		reviewInput = null;
 		details.replaceChildren();
+		previewButton.disabled = !candidate;
 		if (!candidate) return;
 		const provenance = candidate.provenance;
-		paragraph(details, `Source: ${candidate.identity.name} (${candidate.identity.source}) · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
+		paragraph(details, `Source: ${candidate.identity.name} · ${sourceLabel(candidate.identity.source)} · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
 		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
 		const eligibility = element("div", {className: "bqa__transformation-eligibility"});
 		details.append(eligibility);
@@ -282,11 +344,10 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		review.replaceChildren();
 		list(review, items.map(it => `${it.field}: ${it.reason}`));
 	};
-	search.addEventListener("input", () => {
-		refreshOptions();
-		renderCandidate();
-	});
+	search.addEventListener("input", onFilterChange);
+	source.addEventListener("change", onFilterChange);
 	picker.addEventListener("change", renderCandidate);
+	refreshSources();
 	refreshOptions();
 
 	const renderBatch = () => {
@@ -341,7 +402,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const doPreview = () => {
 		clearPreview();
 		try {
-			if (!candidate) throw new Error("Choose a source-qualified recipe.");
+			if (!candidate || picker.value !== candidate.id || !visibleIds.has(candidate.id)) throw new Error("Choose a visible source-qualified recipe.");
 			if (acknowledgementInputs.some(it => !it.control.checked)) throw new Error("Acknowledge every narrative prerequisite before previewing.");
 			resolved = resolveCreatureTransformation({candidates, id: candidate.id, selections});
 			if (resolved.eligibility.some(it => it.dmApproval) && !approvalInput.checked) throw new Error("Confirm DM approval before previewing this recipe.");
@@ -358,19 +419,22 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const doApply = async () => {
 		if (isSaving || !batch) return;
 		isSaving = true;
+		const selectedCandidate = candidate;
+		const selectedBatch = batch;
 		try {
 			if (!reviewInput?.checked) throw new Error("Confirm that the manual-review items still need DM adjudication.");
 			const currentCandidates = await load();
 			if (!isCurrent()) throw new Error("The editor changed while the catalog was loading. Preview again.");
-			const currentCandidate = currentCandidates.find(it => it.id === candidate.id);
-			if (JSON.stringify(currentCandidate) !== JSON.stringify(candidate)) throw new Error("The transformation catalog changed. Preview again.");
-			const currentResolved = resolveCreatureTransformation({candidates: currentCandidates, id: candidate.id, selections});
+			if (batch !== selectedBatch || candidate !== selectedCandidate || picker.value !== selectedCandidate.id || !visibleIds.has(selectedCandidate.id)) throw new Error("The filters or selection changed. Preview again.");
+			const currentCandidate = currentCandidates.find(it => it.id === selectedCandidate.id);
+			if (JSON.stringify(currentCandidate) !== JSON.stringify(selectedCandidate)) throw new Error("The transformation catalog changed. Preview again.");
+			const currentResolved = resolveCreatureTransformation({candidates: currentCandidates, id: selectedCandidate.id, selections});
 			if (JSON.stringify(currentResolved) !== JSON.stringify(resolved) || getStamp() !== stamp) throw new Error("The selection, encounter, or catalog changed. Preview again.");
 			const changes = createCreatureTransformationChanges({batch, targets: getTargets(), conflictDecisions: decisions});
 			if (!changes.length) throw new Error("No eligible monster remains to transform.");
 			await pApply(changes);
 			clearPreview();
-			status.textContent = `Applied ${candidate.identity.name} to ${changes.length} ${changes.length === 1 ? "monster" : "monsters"}. Manual-review items still need DM adjudication.`;
+			status.textContent = `Applied ${selectedCandidate.identity.name} to ${changes.length} ${changes.length === 1 ? "monster" : "monsters"}. Manual-review items still need DM adjudication.`;
 		} catch (e) {
 			if (e.isEncounterStatblockSaved) {
 				clearPreview();

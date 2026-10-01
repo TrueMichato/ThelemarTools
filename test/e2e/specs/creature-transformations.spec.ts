@@ -82,19 +82,16 @@ test("Bestiary transformation catalog failures stay visible and do not show a lo
 
 test("repeated homebrew race IDs cannot block templates or hide different definitions", async ({page}) => {
 	await page.goto("/bestiary.html#goblin_mm");
-	await page.evaluate(() => {
-		const raceUtil = (globalThis as typeof globalThis & {DataUtil: {race: {loadBrew: (...args: unknown[]) => Promise<{race?: object[]}>}}}).DataUtil.race;
-		const loadBrew = raceUtil.loadBrew.bind(raceUtil);
-		raceUtil.loadBrew = async (...args) => {
-			const loaded = await loadBrew(...args);
-			const gnoll = {name: "Gnoll", source: "FoEQuickstone", page: 23, resist: ["fire"]};
-			return {...loaded, race: [...(loaded.race || []), gnoll, {...gnoll}, {...gnoll, resist: ["cold"]}]};
-		};
-	});
+	const transformations = new CreatureTransformationPage(page);
+	await transformations.injectRepeatedRaceDefinitions();
 	await page.locator(".bqa__btn-open:visible").first().click();
 	await page.getByRole("tab", {name: "Templates"}).click();
-	const transformations = new CreatureTransformationPage(page);
 	await expect(transformations.root.getByRole("alert")).toBeEmpty();
+	await transformations.chooseCategory("Species");
+	await transformations.selectSource("FoEQuickstone");
+	await transformations.search("gnoll");
+	await expect(transformations.root.locator(".bqa__transformation-count")).toHaveText(/Showing 2 of \d+ species/);
+	await expect(transformations.root.getByRole("combobox", {name: "Source book"}).locator('option[value="FoEQuickstone"]')).toContainText("FoEQuickstone");
 	const picker = transformations.root.getByRole("combobox", {name: "Creature transformation"});
 	await expect(picker.locator("option", {hasText: "Gnoll (FoEQuickstone)"})).toHaveCount(2);
 	const variant = await picker.locator("option", {hasText: "Gnoll (FoEQuickstone)"}).first().getAttribute("value");
@@ -104,6 +101,140 @@ test("repeated homebrew race IDs cannot block templates or hide different defini
 	await transformations.acknowledge();
 	await transformations.preview();
 	await expect(transformations.root.locator(".bqa__transformation-target")).toContainText("Goblin");
+	await transformations.chooseCategory("Templates");
+	await expect(transformations.root.locator(".bqa__transformation-target")).toHaveCount(0);
+	await expect(transformations.root.locator(".bqa__transformation-apply")).toHaveCount(0);
+	await transformations.search("");
+	await transformations.choose("catalog:skeleton|dmg");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await expect(transformations.root.locator(".bqa__transformation-target")).toContainText("Undead");
+});
+
+test("Bestiary source browsing preserves visible choices but invalidates filtered previews", async ({page}) => {
+	await page.goto("/bestiary.html#goblin_mm");
+	await page.locator(".bqa__btn-open:visible").first().click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	const transformations = new CreatureTransformationPage(page);
+	const root = transformations.root;
+	await expect(transformations.categoryButton("Templates")).toHaveAttribute("aria-pressed", "true");
+	await expect(root.getByRole("combobox", {name: "Source book"}).locator('option[value="MM"]')).toContainText(/Monster Manual \(2014\) \(MM'14 · MM\)/);
+	await transformations.search("monster manual");
+	await expect(root.getByRole("combobox", {name: "Creature transformation"}).locator('option[value="catalog:shadow dragon|mm"]')).toHaveCount(1);
+	await expect(root.getByRole("combobox", {name: "Creature transformation"}).locator('option[value="catalog:shadow dragon|beg"]')).toHaveCount(0);
+	await transformations.search("shadow dragon");
+	await transformations.selectSource("BEG");
+	await expect(root.getByRole("combobox", {name: "Creature transformation"}).locator('option[value="catalog:shadow dragon|beg"]')).toHaveCount(1);
+	await transformations.choose("catalog:shadow dragon|beg");
+	await expect(root).toContainText("Source: Shadow Dragon · BEG · 2014 edition · p. 25.");
+	await transformations.selectSource("MM");
+	await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("");
+	await expect(root.getByRole("button", {name: "Preview transformation"})).toBeDisabled();
+	await transformations.search("");
+	await transformations.choose("catalog:half-dragon|mm");
+	await transformations.chooseOption("Dragon ancestry", "red");
+	await transformations.chooseOption("Breath size", "large-or-smaller");
+	await transformations.acknowledge();
+	await transformations.preview();
+	await transformations.search("half-dragon");
+	await expect(root.locator(".bqa__transformation-target")).toHaveCount(0);
+	await expect(root.getByRole("combobox", {name: "Dragon ancestry"})).toHaveValue("red");
+	await expect(root.getByRole("combobox", {name: "Breath size"})).toHaveValue("large-or-smaller");
+	await transformations.preview();
+	await transformations.pauseCatalogReload();
+	await transformations.acknowledgeReview();
+	await root.getByRole("button", {name: "Apply transformation"}).click();
+	await transformations.search("no matching recipe");
+	await transformations.resumeCatalogReload();
+	await expect(root.getByRole("alert")).toContainText("The filters or selection changed");
+	await expect(page.locator(".bqa__changes")).not.toContainText("Transformation: Half-Dragon");
+	await expect(root.locator(".bqa__transformation-count")).toHaveText(/Showing 0 of \d+ templates/);
+	await expect(root.locator(".bqa__transformation-empty")).toContainText("No recipes match");
+	await expect(root.locator(".bqa__transformation-apply")).toHaveCount(0);
+	await expect(root.getByRole("button", {name: "Preview transformation"})).toBeDisabled();
+	await transformations.search("");
+	await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("");
+	await expect(root.getByRole("combobox", {name: "Dragon ancestry"})).toHaveCount(0);
+});
+
+const installedBrew = {
+	_meta: {sources: [{json: "E2EVillage", abbreviation: "VB", full: "Village Bestiary", authors: ["E2E"]}]},
+	race: [{name: "Lantern Kin", source: "E2EVillage", page: 7, resist: ["fire"]}],
+};
+
+for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
+	test(`${surface} discovers installed homebrew by book name, abbreviation, and code on mobile`, async ({page}) => {
+		test.setTimeout(120_000);
+		const transformations = new CreatureTransformationPage(page);
+		if (surface === "Bestiary") await page.goto("/bestiary.html#goblin_mm");
+		else {
+			const encounter = new EncounterRollPage(page);
+			await encounter.seed();
+		}
+		await transformations.installHomebrew(installedBrew);
+		await page.setViewportSize({width: 390, height: 844});
+		if (surface === "Bestiary") await page.locator(".bqa__btn-open:visible").first().click();
+		else await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+		await page.getByRole("tab", {name: "Templates"}).click();
+		const root = transformations.root;
+		await transformations.expectReadableDiscoveryLabels();
+		const species = transformations.categoryButton("Species");
+		await species.focus();
+		await page.keyboard.press("Enter");
+		await expect(species).toHaveAttribute("aria-pressed", "true");
+		await expect(root.getByRole("combobox", {name: "Source book"}).locator('option[value="E2EVillage"]')).toContainText("Village Bestiary (VB · E2EVillage)");
+		await transformations.selectSource("E2EVillage");
+		for (const query of ["Village Bestiary", "VB", "E2EVillage"]) {
+			await transformations.search(query);
+			await expect(root.locator(".bqa__transformation-count")).toHaveText(/Showing 1 of \d+ species/);
+			await expect(root.getByRole("combobox", {name: "Creature transformation"}).locator('option[value="race:lantern kin|e2evillage"]')).toHaveCount(1);
+		}
+		await transformations.choose("race:lantern kin|e2evillage");
+		await expect(root).toContainText("Source: Lantern Kin · Village Bestiary (VB · E2EVillage) · Edition unverified · p. 7");
+		await transformations.acknowledge();
+		await transformations.preview();
+		await expect(root.locator(".bqa__transformation-target")).toHaveCount(1);
+		const dayColors = await transformations.categoryColors("Species");
+		await transformations.useNightMode();
+		await expect(root.locator(".bqa__transformation-target")).toBeVisible();
+		for (const button of [transformations.categoryButton("Templates"), species]) {
+			const bounds = await button.boundingBox();
+			expect(bounds?.height).toBeGreaterThanOrEqual(44);
+		}
+		const nightColors = await transformations.categoryColors("Species");
+		expect(nightColors.background).not.toBe(dayColors.background);
+		expect(nightColors.foreground).not.toBe(dayColors.foreground);
+		await transformations.expectReadableDiscoveryLabels();
+		await transformations.categoryButton("Templates").focus();
+		await page.keyboard.press("Space");
+		await expect(root.locator(".bqa__transformation-apply")).toHaveCount(0);
+		await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("");
+	});
+}
+
+test("Encounter Workspace keeps duplicate species variants separate and cannot apply one after switching filters", async ({page}) => {
+	test.setTimeout(120_000);
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed();
+	const transformations = new CreatureTransformationPage(page);
+	await transformations.injectRepeatedRaceDefinitions();
+	await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	await transformations.chooseCategory("Species");
+	await transformations.selectSource("FoEQuickstone");
+	const picker = transformations.root.getByRole("combobox", {name: "Creature transformation"});
+	await expect(picker.locator("option", {hasText: "Gnoll (FoEQuickstone)"})).toHaveCount(2);
+	const ids = await picker.locator("option", {hasText: "Gnoll (FoEQuickstone)"}).evaluateAll(options => options.map(it => (it as HTMLOptionElement).value));
+	expect(new Set(ids).size).toBe(2);
+	await transformations.choose(ids[1]);
+	await transformations.acknowledge();
+	await transformations.preview();
+	await transformations.selectSource("");
+	await expect(picker).toHaveValue(ids[1]);
+	await expect(transformations.root.locator(".bqa__transformation-target")).toHaveCount(0);
+	await transformations.chooseCategory("Templates");
+	await expect(picker).toHaveValue("");
+	await expect(transformations.root.locator(".bqa__transformation-apply")).toHaveCount(0);
 	await transformations.choose("catalog:skeleton|dmg");
 	await transformations.acknowledge();
 	await transformations.preview();

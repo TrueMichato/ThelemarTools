@@ -33,6 +33,8 @@ import {
 } from "./encounterworkspace/encounterworkspace-effects.js";
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
 import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-view.js";
+import {getEncounterResourceSummary} from "./encounterworkspace/encounterworkspace-resources.js";
+import {getEncounterResourcePanel} from "./encounterworkspace/encounterworkspace-resource-view.js";
 
 const STATBLOCK_BATCH_SIZE = 12;
 
@@ -57,6 +59,7 @@ export class EncounterWorkspacePage {
 		this._conditionContainers = new Map();
 		this._effectContainers = new Map();
 		this._vitalContainers = new Map();
+		this._resourceContainers = new Map();
 		this._rosterMeta = new Map();
 		this._hpUndo = [];
 		this._initiativeUndo = null;
@@ -80,6 +83,14 @@ export class EncounterWorkspacePage {
 		this._btnOpenInitiative = document.getElementById("ew-open-initiative");
 		this._eleQuick = document.getElementById("ew-quick");
 		this._eleQuickSummary = document.getElementById("ew-quick-summary");
+		this._eleFast = document.getElementById("ew-fast");
+		this._eleFastTargets = document.getElementById("ew-fast-targets");
+		this._eleTargetList = document.getElementById("ew-target-list");
+		this._eleTargetNames = document.getElementById("ew-target-names");
+		this._btnFastDamage = document.getElementById("ew-fast-damage");
+		this._btnFastSave = document.getElementById("ew-fast-save");
+		this._btnFastMove = document.getElementById("ew-fast-move");
+		this._btnFastClose = document.getElementById("ew-fast-close");
 		this._eleNextStatus = document.getElementById("ew-next-status");
 		this._eleEmptyStart = document.getElementById("ew-empty-start");
 		this._eleIntro = document.getElementById("ew-intro");
@@ -185,6 +196,19 @@ export class EncounterWorkspacePage {
 		this._pSetTargets(next);
 	}
 
+	_pSetGroupTargets (ids, isSelected) {
+		const selected = new Set(this._state.selectedIds);
+		ids.forEach(id => isSelected ? selected.add(id) : selected.delete(id));
+		return this._pSetTargets([...selected]);
+	}
+
+	_showFastActions (field, trigger) {
+		this._eleFast.hidden = false;
+		this._fastTrigger = trigger;
+		field.focus({preventScroll: true});
+		this._eleFast.scrollIntoView({block: "nearest"});
+	}
+
 	async pInit () {
 		this._btnChoose.addEventListener("click", () => this._pChoose());
 		this._btnSelectAll.addEventListener("click", () => this._pSetTargets(this._state.instances.map(it => it.id)));
@@ -195,6 +219,24 @@ export class EncounterWorkspacePage {
 			this._pAddTargets(group?.memberIds || [activeId]);
 		});
 		this._btnSelectViewed.addEventListener("click", () => this._pAddTargets([this._focusedInstanceId]));
+		this._btnFastDamage.addEventListener("click", () => this._showFastActions(this._inpHpExpression, this._btnFastDamage));
+		this._btnFastSave.addEventListener("click", () => {
+			this._selRollType.value = "save";
+			this._renderRollKeys();
+			this._showFastActions(this._selRollKey, this._btnFastSave);
+		});
+		this._btnFastMove.addEventListener("click", () => {
+			this._eleInitiative.open = true;
+			this._elePosition.open = true;
+			this._selMoveEntry.value = getEncounterSharedGroup(this._state, this._focusedInstanceId)?.id || this._focusedInstanceId;
+			this._selMoveEntry.focus({preventScroll: true});
+			this._elePosition.scrollIntoView({block: "nearest"});
+		});
+		this._btnFastClose.addEventListener("click", () => {
+			this._eleFast.hidden = true;
+			this._fastTrigger?.focus({preventScroll: true});
+		});
+		this._eleTargetList.addEventListener("toggle", () => this._renderTargetList());
 		this._btnOpenInitiative.addEventListener("click", () => {
 			this._eleInitiative.open = true;
 			this._eleInitiativeSummary.focus({preventScroll: true});
@@ -349,16 +391,20 @@ export class EncounterWorkspacePage {
 		this._btnOpenInitiative.disabled = isBusy || !this._state.instances.length;
 		this._btnOpenQuick.disabled = isBusy || !this._state.instances.length;
 		this._btnBrowseRoster.disabled = isBusy || !this._state.instances.length;
+		this._btnFastDamage.disabled = this._btnFastSave.disabled = this._btnFastMove.disabled = isBusy || !this._state.instances.length;
 		this._btnFocusEdit.disabled = isBusy || !this._focusedInstanceId;
 		this._selFocusPicker.disabled = isBusy || !this._state.instances.length;
 		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
-		this._groupChecks.forEach(check => check.disabled = isBusy);
+		this._groupChecks.forEach(({check}) => check.disabled = isBusy);
 		this._eleRoster.querySelectorAll(".ew__group-action, .ew__group-init").forEach(control => control.disabled = isBusy);
 		this._conditionContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
 		this._effectContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
 		this._vitalContainers.forEach(container => container.querySelectorAll("input").forEach(input => {
 			input.disabled = isBusy || (input.dataset.field === "initiative" && !!getEncounterSharedGroup(this._state, input.dataset.instanceId));
+		}));
+		this._resourceContainers.forEach(container => container.querySelectorAll("button, input, select").forEach(control => {
+			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
 		}));
 		this._updateControls();
 		this._updateFocusStatus();
@@ -1283,6 +1329,65 @@ export class EncounterWorkspacePage {
 		}
 	}
 
+	async _pUpdateResource (id, action) {
+		if (this._isBusy) return;
+		const panel = this._resourceContainers.get(id);
+		const focused = panel?.contains(document.activeElement) ? document.activeElement.dataset.resourceControl : null;
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const args = {...action, id};
+			let next;
+			switch (action.kind) {
+				case "slots": next = EncounterWorkspaceState.withSpellSlots(this._state, args); break;
+				case "removeSlots": next = EncounterWorkspaceState.withoutSpellSlots(this._state, args); break;
+				case "ability": next = EncounterWorkspaceState.withAbility(this._state, args); break;
+				case "removeAbility": next = EncounterWorkspaceState.withoutAbility(this._state, args); break;
+				case "abilityUse": next = EncounterWorkspaceState.withAbilityUse(this._state, args); break;
+				case "recharge": next = EncounterWorkspaceState.withRechargeReady(this._state, args); break;
+				case "concentration": next = EncounterWorkspaceState.withConcentration(this._state, args); break;
+				default: throw new Error("Unknown combat resource action.");
+			}
+			this._state = await this._store.pSave(next);
+			isSaved = true;
+			this._renderResourcePanel(id);
+			const instance = this._state.instances.find(it => it.id === id);
+			this._renderRosterMeta(instance);
+			this._renderCardSummary(instance, getEncounterInstanceLabels(this._state.instances).get(id));
+			this._renderActiveVitals();
+			this._setStatus(`Saved combat resources for ${getEncounterInstanceLabels(this._state.instances).get(id)}.`);
+		} catch (e) {
+			this._setError(isSaved
+				? `Combat resources were saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload to see the changes.`
+				: `Combat resources were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+			if (focused) {
+				const currentPanel = this._resourceContainers.get(id);
+				const control = [...(currentPanel?.querySelectorAll("[data-resource-control]") || [])]
+					.find(it => it.dataset.resourceControl === focused);
+				(control && !control.disabled ? control : currentPanel?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
+			}
+		}
+	}
+
+	_renderResourcePanel (id) {
+		const previous = this._resourceContainers.get(id);
+		if (!previous) return;
+		const open = new Set([...previous.querySelectorAll("details[data-resource-key]")]
+			.filter(details => details.open).map(details => details.dataset.resourceKey));
+		const wasOpen = previous.open;
+		const instance = this._state.instances.find(it => it.id === id);
+		const label = getEncounterInstanceLabels(this._state.instances).get(id);
+		const panel = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(id, action)});
+		panel.querySelectorAll("details[data-resource-key]").forEach(details => {
+			details.open = open.has(details.dataset.resourceKey);
+		});
+		panel.open = wasOpen;
+		previous.replaceWith(panel);
+		this._resourceContainers.set(id, panel);
+	}
+
 	async _pApplyHp () {
 		if (this._isBusy) return;
 		const targets = this._state.instances.filter(it => this._state.selectedIds.includes(it.id));
@@ -1395,6 +1500,7 @@ export class EncounterWorkspacePage {
 				this._refreshRosterFor("initiative");
 			}
 			this._renderRollResults({results, failures, failureLabel: "Initiative (Dexterity check)"});
+			if (this._eleFast) this._eleFast.hidden = false;
 			const outcome = `${results.length} initiatives saved, ${failures.length} failed.`;
 			if (failures.length) this._setError(`${outcome} See the results; cancelled or invalid rolls have not replaced existing totals.`);
 			else this._setStatus(`${outcome} Each genuine roll is in the dice roller.`);
@@ -1643,6 +1749,7 @@ export class EncounterWorkspacePage {
 			filter: this._selRosterFilter.value,
 		});
 		this._visibleIds = view.visibleIds;
+		this._displayLabels = view.displayLabels;
 		this._selFocusPicker.replaceChildren(...this._state.instances.map(instance =>
 			new Option(view.displayLabels.get(instance.id), instance.id)));
 		if (this._focusedInstanceId) this._selFocusPicker.value = this._focusedInstanceId;
@@ -1676,18 +1783,16 @@ export class EncounterWorkspacePage {
 				header.className = "ew__group-header";
 				const select = document.createElement("input");
 				select.type = "checkbox";
-				select.setAttribute("aria-label", `Select all ${group.memberIds.length} ${labels.get(group.memberIds[0])} group members`);
+				const first = getEncounterEffectiveMonster(group.members[0]);
+				const groupName = first._displayName || first.name;
+				select.setAttribute("aria-label", `Target entire ${groupName} group: ${group.memberIds.length} total, ${group.visibleMembers.length} shown, including members hidden by filters`);
 				const selectionLabel = document.createElement("label");
 				selectionLabel.className = "ew__group-select";
 				selectionLabel.append(select);
-				select.addEventListener("change", () => {
-					const selected = new Set(this._state.selectedIds);
-					group.memberIds.forEach(id => select.checked ? selected.add(id) : selected.delete(id));
-					this._pSetTargets([...selected]);
-				});
+				select.addEventListener("change", () => this._pSetGroupTargets(group.memberIds, select.checked));
 				const selection = document.createElement("span");
 				selection.className = "ew__group-selection";
-				this._groupChecks.set(group.id, {check: select, memberIds: group.memberIds, selection});
+				this._groupChecks.set(group.id, {check: select, memberIds: group.memberIds, visibleIds: group.visibleMembers.map(it => it.id), selection});
 				const toggle = this._getGroupButton({
 					text: "",
 					label: `${members.hidden ? "Expand" : "Collapse"} ${labels.get(group.memberIds[0])} group`,
@@ -1705,8 +1810,21 @@ export class EncounterWorkspacePage {
 				toggle.setAttribute("aria-controls", members.id);
 				const title = document.createElement("strong");
 				title.className = "ew__group-title";
-				const first = getEncounterEffectiveMonster(group.members[0]);
 				title.textContent = `${first._displayName || first.name} ×${group.memberIds.length} · ${first.source} · CR ${first.cr?.cr || first.cr || "—"}${group.visibleMembers.length < group.memberIds.length ? ` · ${group.visibleMembers.length} shown` : ""}`;
+				const shownActions = document.createElement("div");
+				shownActions.className = "ew__group-targets";
+				shownActions.append(
+					this._getGroupButton({
+						text: `Select shown (${group.visibleMembers.length})`,
+						label: `Select ${group.visibleMembers.length} shown ${groupName} group members only`,
+						onClick: () => this._pSetGroupTargets(group.visibleMembers.map(it => it.id), true),
+					}),
+					this._getGroupButton({
+						text: `Clear shown (${group.visibleMembers.length})`,
+						label: `Clear ${group.visibleMembers.length} shown ${groupName} group members only`,
+						onClick: () => this._pSetGroupTargets(group.visibleMembers.map(it => it.id), false),
+					}),
+				);
 				const controls = document.createElement("div");
 				controls.className = "ew__group-controls";
 				const view = this._getGroupButton({
@@ -1755,7 +1873,7 @@ export class EncounterWorkspacePage {
 						text: "Disband", onClick: () => this._pChangeGroup({action: "disband", groupId: group.id}),
 					}));
 				}
-				header.append(selectionLabel, title, selection, toggle, controls);
+				header.append(selectionLabel, title, selection, toggle, shownActions, controls);
 				container.append(header);
 			}
 			group.visibleMembers.forEach(instance => {
@@ -1825,6 +1943,7 @@ export class EncounterWorkspacePage {
 		this._conditionContainers.clear();
 		this._effectContainers.clear();
 		this._vitalContainers.clear();
+		this._resourceContainers.clear();
 		this._cardSummaries.clear();
 		this._eleStatblocks.replaceChildren();
 		const byId = new Map(this._state.instances.map(it => [it.id, it]));
@@ -1871,6 +1990,7 @@ export class EncounterWorkspacePage {
 						this._conditionContainers.delete(id);
 						this._effectContainers.delete(id);
 						this._vitalContainers.delete(id);
+						this._resourceContainers.delete(id);
 						this._expandedCards.delete(id);
 					}
 				});
@@ -1899,7 +2019,10 @@ export class EncounterWorkspacePage {
 
 	_renderCardSummary (instance, label) {
 		const summary = this._cardSummaries.get(instance.id);
-		if (summary) summary.textContent = `${label} · HP ${instance.hp.current ?? "unset"}/${instance.hp.max ?? "unset"} · ${instance.conditions.length ? instance.conditions.join(", ") : "No conditions"}`;
+		if (summary) {
+			const resources = getEncounterResourceSummary(instance.resources);
+			summary.textContent = `${label} · HP ${instance.hp.current ?? "unset"}/${instance.hp.max ?? "unset"} · ${instance.conditions.length ? instance.conditions.join(", ") : "No conditions"}${resources ? ` · ${resources}` : ""}`;
+		}
 	}
 
 	_createStatblock (instance, label) {
@@ -1933,18 +2056,20 @@ export class EncounterWorkspacePage {
 		vitals.className = "ew__vitals";
 		vitals.setAttribute("aria-label", `HP and initiative for ${label}`);
 		this._vitalContainers.set(instance.id, vitals);
+		const resources = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(instance.id, action)});
+		this._resourceContainers.set(instance.id, resources);
 		const table = document.createElement("table");
 		table.className = "ve-w-100 ve-stats";
 		const body = document.createElement("tbody");
 		try {
 			body.innerHTML = Renderer.monster.getCompactRenderedString(MiscUtil.copyFast(effective), {isShowScalers: false});
 			table.append(body);
-			tile.append(heading, vitals, conditions, effects, table);
+			tile.append(heading, vitals, resources, conditions, effects, table);
 		} catch (e) {
 			const failure = document.createElement("p");
 			failure.className = "ew__render-error";
 			failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-			tile.append(heading, vitals, conditions, effects, failure);
+			tile.append(heading, vitals, resources, conditions, effects, failure);
 		}
 		this._tiles.set(instance.id, tile);
 		return tile;
@@ -1987,7 +2112,10 @@ export class EncounterWorkspacePage {
 		const labels = getEncounterInstanceLabels(this._state.instances);
 		this._eleActiveVitals.textContent = members.length
 			? [
-				...members.slice(0, 3).map(it => `${labels.get(it.id)}: HP ${it.hp.current ?? "unset"}/${it.hp.max ?? "unset"}${it.hp.temp ? ` +${it.hp.temp} temp` : ""} · ${it.conditions.length ? it.conditions.join(", ") : "No conditions"}`),
+				...members.slice(0, 3).map(it => {
+					const resources = getEncounterResourceSummary(it.resources);
+					return `${labels.get(it.id)}: HP ${it.hp.current ?? "unset"}/${it.hp.max ?? "unset"}${it.hp.temp ? ` +${it.hp.temp} temp` : ""} · ${it.conditions.length ? it.conditions.join(", ") : "No conditions"}${resources ? ` · ${resources}` : ""}`;
+				}),
 				...(members.length > 3 ? [`${members.length - 3} more group members in the roster`] : []),
 			].join(" · ")
 			: "Start turns to follow the active monster.";
@@ -2271,9 +2399,10 @@ export class EncounterWorkspacePage {
 			`${getEncounterEffectiveMonster(instance).source} · CR ${getEncounterEffectiveMonster(instance).cr?.cr || getEncounterEffectiveMonster(instance).cr || "—"}`,
 			`HP ${instance.hp.current == null ? "unset" : instance.hp.current}/${instance.hp.max == null ? "unset" : instance.hp.max}${instance.hp.temp ? ` +${instance.hp.temp} temp` : ""}`,
 			`Init ${getEncounterInitiativeTotal(this._state, instance) == null ? "unrolled" : getEncounterInitiativeTotal(this._state, instance)}${getEncounterSharedGroup(this._state, instance.id) ? " shared" : ""}`,
+			getEncounterResourceSummary(instance.resources),
 			...activeConditions,
 			...effectNames,
-		].join(" · ");
+		].filter(Boolean).join(" · ");
 	}
 
 	_renderEffects () {
@@ -2355,21 +2484,34 @@ export class EncounterWorkspacePage {
 	_updateTargets () {
 		const selected = new Set(this._state.selectedIds);
 		const names = selected.size ? this._getTargetNames(this._state.selectedIds) : "No targets selected";
+		const preview = this._state.selectedIds.slice(0, 2).map(id =>
+			this._displayLabels?.get(id) || getEncounterInstanceLabels(this._state.instances).get(id)).join(", ");
+		const extra = selected.size > 2 ? `, and ${selected.size - 2} more` : "";
 		const outside = this._state.selectedIds.filter(id => !this._visibleIds.includes(id)).length;
-		this._eleSummary.textContent = `${selected.size} of ${this._state.instances.length} selected as targets: ${names}${outside ? ` · ${outside} outside roster filter` : ""}`;
-		this._eleQuickSummary.textContent = `Roll, HP & conditions · ${selected.size} ${selected.size === 1 ? "target" : "targets"}`;
+		const caption = `${selected.size} of ${this._state.instances.length} selected as targets: ${preview || "No targets selected"}${extra}${outside ? ` · ${outside} outside roster filter` : ""}`;
+		this._eleSummary.textContent = caption;
+		this._eleFastTargets.textContent = caption;
+		this._eleTargetList.hidden = selected.size <= 2;
+		this._renderTargetList();
+		this._eleQuickSummary.textContent = `Target & condition tools · ${selected.size} ${selected.size === 1 ? "target" : "targets"}`;
 		this._eleInitTargets.textContent = `Initiative targets: ${names}`;
 		this._eleAdvancedTargets.textContent = `Bulk edit targets: ${names}`;
 		this._checks.forEach((check, id) => check.checked = selected.has(id));
-		this._groupChecks.forEach(({check, memberIds, selection}) => {
+		this._groupChecks.forEach(({check, memberIds, visibleIds, selection}) => {
 			const count = memberIds.filter(id => selected.has(id)).length;
 			check.checked = count === memberIds.length;
 			check.indeterminate = count > 0 && count < memberIds.length;
 			check.setAttribute("aria-checked", check.indeterminate ? "mixed" : String(check.checked));
-			selection.textContent = `${count} of ${memberIds.length} selected`;
+			selection.textContent = `Entire group: ${count} of ${memberIds.length} targeted · ${visibleIds.length} shown`;
 		});
 		this._tiles.forEach((tile, id) => tile.classList.toggle("ew__statblock--selected", selected.has(id)));
 		this._renderEffectPickers();
+	}
+
+	_renderTargetList () {
+		if (!this._eleTargetList.open) return;
+		const labels = this._displayLabels || getEncounterInstanceLabels(this._state.instances);
+		this._eleTargetNames.textContent = this._state.selectedIds.map(id => labels.get(id)).join(", ");
 	}
 }
 

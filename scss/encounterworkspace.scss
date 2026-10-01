@@ -1,6 +1,7 @@
 @use "vars/vars";
 @use "vars/vars-night";
 @use "includes/bestiary-quick-actions";
+@use "includes/encounterworkspace-resources";
 
 @layer vetools {
 	.ew {
@@ -800,6 +801,97 @@
 			flex-wrap: wrap;
 			gap: 7px;
 			width: 100%;
+
+			> button,
+			> details > summary {
+				min-height: 44px;
+			}
+		}
+
+		&__focus-more {
+			> summary {
+				display: flex;
+				align-items: center;
+				padding: 7px 12px;
+				border: 1px solid vars.$rgb-border-grey;
+				background: vars.$rgb-bg;
+				font-weight: 600;
+				cursor: pointer;
+			}
+		}
+
+		&__focus-more-actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 7px;
+			margin-top: 7px;
+
+			button {
+				min-height: 44px;
+			}
+		}
+
+		&__fast {
+			margin-bottom: 10px;
+			padding: 10px 12px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			&[hidden] {
+				display: none;
+			}
+		}
+
+		&__fast-heading {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: space-between;
+			gap: 7px;
+
+			strong {
+				font-size: 1rem;
+			}
+		}
+
+		&__fast-body {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 10px;
+			margin-top: 10px;
+
+			> .ew__selection-caption,
+			> .ew__target-list,
+			> .ew__results {
+				grid-column: 1 / -1;
+				margin: 0;
+			}
+
+			> .ew__target-list[hidden] {
+				display: none;
+			}
+
+			> .ew__target-list > summary {
+				display: inline-flex;
+				align-items: center;
+				min-height: 44px;
+				cursor: pointer;
+			}
+
+			> .ew__target-list > p {
+				margin: 0 0 6px;
+				overflow-wrap: anywhere;
+			}
+
+			> .ew__operation h4,
+			> .ew__results h4 {
+				margin: 0 0 9px;
+				font-size: 1rem;
+			}
+
+			> .ew__results[hidden] {
+				display: none;
+			}
 		}
 
 		&__card {
@@ -957,6 +1049,17 @@
 			font-size: 1rem;
 		}
 
+		&__group-targets {
+			display: flex;
+			grid-column: 2 / -1;
+			flex-wrap: wrap;
+			gap: 6px;
+
+			button {
+				min-height: 44px;
+			}
+		}
+
 		&__group-header > .ew__group-action {
 			grid-column: 1;
 		}
@@ -1027,6 +1130,7 @@
 			align-items: center;
 			gap: 10px;
 			min-width: 0;
+			min-height: 44px;
 			cursor: pointer;
 		}
 
@@ -1202,6 +1306,8 @@
 		&__quick > summary,
 		&__rail,
 		&__focus-bar,
+		&__focus-more > summary,
+		&__fast,
 		&__card,
 		&__setup > summary,
 		&__action-drawer > summary,
@@ -1225,6 +1331,7 @@
 		&__empty-start,
 		&__quick > summary,
 		&__focus-bar,
+		&__fast,
 		&__card,
 		&__setup > summary,
 		&__action-drawer > summary,
@@ -1244,6 +1351,7 @@
 
 		&__statblock,
 		&__live,
+		&__focus-more > summary,
 		&__roster-row:hover,
 		&__roster-row:focus-within {
 			background: vars-night.$rgb-bg--night;
@@ -1347,7 +1455,8 @@
 
 	@media (width <= 800px) {
 		.ew__operations,
-		.ew__effect-tools-grid {
+		.ew__effect-tools-grid,
+		.ew__fast-body {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
@@ -1479,11 +1588,29 @@
 
 		.ew__focus-actions {
 			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
+			grid-template-columns: repeat(3, minmax(0, 1fr));
 
 			button {
 				min-width: 0;
 				width: 100%;
+			}
+
+			#ew-focus-edit {
+				grid-column: 1 / 3;
+			}
+
+			.ew__focus-more {
+				grid-column: 3;
+				min-width: 0;
+
+				> summary {
+					justify-content: center;
+					text-align: center;
+				}
+
+				&[open] {
+					grid-column: 1 / -1;
+				}
 			}
 		}
 
