@@ -44,6 +44,7 @@ import {ENCOUNTER_DAMAGE_TYPES} from "./encounterworkspace/encounterworkspace-da
 import {BESTIARY_ENCOUNTER_HANDOFF_PARAM, takeBestiaryEncounterHandoff} from "./encounterworkspace/encounterworkspace-bestiary-handoff.js";
 import {
 	getEncounterCrEstimate,
+	getEncounterCrInferences,
 	getEncounterCrReview,
 	getEncounterMonsterXp,
 	getEncounterXpSummary,
@@ -96,6 +97,7 @@ export class EncounterWorkspacePage {
 		this._eleCrBaseline = document.getElementById("ew-cr-baseline");
 		this._eleCrChanges = document.getElementById("ew-cr-changes");
 		this._eleCrNotes = document.getElementById("ew-cr-notes");
+		this._eleCrInference = document.getElementById("ew-cr-inference");
 		this._formCr = document.getElementById("ew-cr-form");
 		this._inpCrHp = document.getElementById("ew-cr-hp");
 		this._inpCrAc = document.getElementById("ew-cr-ac");
@@ -287,12 +289,12 @@ export class EncounterWorkspacePage {
 		});
 		this._formCr.addEventListener("input", () => {
 			this._crRequestId = (this._crRequestId || 0) + 1;
-			this._setCrResult("");
+			this._setCrResult("Assumptions changed. Choose Estimate 2014 CR to recalculate.");
 		});
 		this._selCrAttackType.addEventListener("change", () => {
 			this._crRequestId = (this._crRequestId || 0) + 1;
 			this._inpCrAttack.min = this._selCrAttackType.value === "save" ? "0" : "-10";
-			this._setCrResult("");
+			this._setCrResult("Assumptions changed. Choose Estimate 2014 CR to recalculate.");
 		});
 		this._btnOpenQuick.addEventListener("click", () => {
 			this._eleQuick.open = true;
@@ -2462,6 +2464,7 @@ export class EncounterWorkspacePage {
 		this._eleCrAssessment.hidden = !instance;
 		if (!instance) {
 			this._crAssessmentKey = null;
+			this._crRequestId = (this._crRequestId || 0) + 1;
 			return;
 		}
 		const key = JSON.stringify([this._state.sourceList, instance.id, instance.monster, instance.statblockOperations, instance.areaNotes]);
@@ -2469,19 +2472,26 @@ export class EncounterWorkspacePage {
 		this._crAssessmentKey = key;
 		this._crRequestId = (this._crRequestId || 0) + 1;
 		const review = getEncounterCrReview(instance);
+		const inference = getEncounterCrInferences(instance);
 		this._eleCrBaseline.textContent = `Original → effective: CR ${review.baselineCr} → ${review.effectiveCr}; HP ${review.baselineHp} → ${review.effectiveHp}; AC ${review.baselineAc} → ${review.effectiveAc}.`;
 		this._eleCrChanges.textContent = `${review.operationCount} saved statblock ${review.operationCount === 1 ? "edit" : "edits"}; changed fields: ${review.changeDetails.join(", ") || "none"}. ${review.changes.length ? "Review the updated abilities and damage above." : ""}`;
 		this._eleCrNotes.textContent = `${review.areaNotes.length ? `Text-only reminders (not mechanics): ${review.areaNotes.join("; ")}. ` : ""}${review.manualReview.length ? `Transformation manual review required: ${review.manualReview.join("; ")}.` : ""}`;
 		this._eleCrNotes.hidden = !review.areaNotes.length && !review.manualReview.length;
+		this._eleCrInference.textContent = `Inferred: ${inference.evidence.join("; ") || "none"}. ${inference.missing.length ? `DM input needed: ${inference.missing.join(", ")}. ` : ""}${inference.exclusions.length ? `Not counted: ${inference.exclusions.join("; ")}. ` : ""}Edit any assumption below to account for excluded mechanics.`;
 		this._formCr.reset();
-		this._inpCrHp.value = review.suggestedHp ?? "";
-		this._inpCrAc.value = review.suggestedAc ?? "";
-		this._inpCrAttack.min = "-10";
-		this._setCrResult("");
+		this._inpCrHp.value = inference.values.hp ?? "";
+		this._inpCrAc.value = inference.values.ac ?? "";
+		this._inpCrDamage.value = inference.values.damageOverThreeRounds ?? "";
+		this._selCrAttackType.value = inference.values.attackType;
+		this._inpCrAttack.min = inference.values.attackType === "save" ? "0" : "-10";
+		this._inpCrAttack.value = inference.values.attackValue ?? "";
+		if (inference.missing.length) {
+			this._setCrResult(`Automatic 2014 estimate unavailable: enter ${inference.missing.join(", ")} to calculate.`);
+		} else this._pEstimateCr({isAutomatic: true, exclusions: inference.exclusions});
 	}
 
-	async _pEstimateCr () {
-		if (this._isBusy || !this._focusedInstanceId) return;
+	async _pEstimateCr ({isAutomatic = false, exclusions = []} = {}) {
+		if ((!isAutomatic && this._isBusy) || !this._focusedInstanceId) return;
 		const key = this._crAssessmentKey;
 		const requestId = this._crRequestId = (this._crRequestId || 0) + 1;
 		const read = input => input.value.trim() === "" ? NaN : Number(input.value);
@@ -2499,7 +2509,7 @@ export class EncounterWorkspacePage {
 			const estimate = getEncounterCrEstimate(assumptions, data.cr);
 			this._crTable = data;
 			const effectiveCr = getEncounterCrReview(this._state.instances.find(it => it.id === this._focusedInstanceId)).effectiveCr;
-			this._setCrResult(`2014 table estimate: CR ${estimate.cr} (defensive ${estimate.defensiveCr}, offensive ${estimate.offensiveCr}; ${estimate.dpr} average damage/round). Saved CR ${effectiveCr} and award XP are unchanged. Use Edit viewed statblock to adopt a rating.`);
+			this._setCrResult(`${isAutomatic ? exclusions.length ? "Automatic partial baseline — " : "Automatic " : "DM-adjusted "}2014 table estimate: CR ${estimate.cr} (defensive ${estimate.defensiveCr}, offensive ${estimate.offensiveCr}; ${estimate.dpr} average damage/round).${isAutomatic && exclusions.length ? " Excluded mechanics above require DM review; this is not a complete rating." : ""} Saved CR ${effectiveCr} and award XP are unchanged. Use Edit viewed statblock to adopt a rating.`);
 		} catch (e) {
 			if (key === this._crAssessmentKey && requestId === this._crRequestId) {
 				this._setCrResult(`Could not estimate CR: ${this._getErrorMessage(e)}`, {isError: true});

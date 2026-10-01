@@ -7,6 +7,7 @@ import {BestiaryQuickActionsOperations} from "../../js/bestiary/bestiary-quick-a
 import {EncounterWorkspaceState, EncounterWorkspaceStore, getEncounterEffectiveMonster} from "../../js/encounterworkspace/encounterworkspace-state.js";
 import {
 	getEncounterCrEstimate,
+	getEncounterCrInferences,
 	getEncounterCrReview,
 	getEncounterMonsterXp,
 	getEncounterXpSummary,
@@ -32,7 +33,7 @@ const makeState = async () => {
 };
 
 const patch = (state, id, set) => EncounterWorkspaceState.withStatblockChanges(state, [{
-	id, removeIds: [], addOperations: [{id: `patch-${id}`, ...BestiaryQuickActionsOperations.patch({set})}],
+	id, removeIds: [], addOperations: [{id: `patch-${id}-${state.instances.find(it => it.id === id).statblockOperations.length}`, ...BestiaryQuickActionsOperations.patch({set})}],
 }]).state;
 
 describe("Encounter Workspace award XP", () => {
@@ -74,6 +75,90 @@ describe("Encounter Workspace award XP", () => {
 });
 
 describe("Encounter Workspace guided 2014 CR assessment", () => {
+	it("derives all four inputs from edited repeatable attacks, not saved CR or award XP", async () => {
+		const state = await makeState();
+		const attack = {name: "Blade", entries: ["{@atk mw} {@hit +4} to hit, one target. {@h}5 ({@damage 1d6+2}) slashing damage."]};
+		const base = patch(state, "goblin-1", {action: [attack]});
+		const original = getEncounterCrInferences(base.instances[0]);
+		expect(original.values).toEqual({hp: 7, ac: 15, damageOverThreeRounds: 15, attackType: "attack", attackValue: 4});
+		expect(original.missing).toEqual([]);
+		const edited = patch(base, "goblin-1", {
+			"hp.average": 71,
+			ac: [{ac: 13}],
+			action: [{name: "Blade", entries: ["{@atk mw} {@hit +6} to hit, one target. {@h}5 ({@damage 2d8+3}) slashing damage."]}],
+		});
+		const inferred = getEncounterCrInferences(edited.instances[0]);
+		expect(inferred.values).toEqual({hp: 71, ac: 13, damageOverThreeRounds: 36, attackType: "attack", attackValue: 6});
+		expect(inferred.evidence).toEqual(expect.arrayContaining([expect.stringContaining("3-round damage 36")]));
+		expect(getEncounterCrEstimate(inferred.values, rows).cr).not.toBe(getEncounterCrEstimate(original.values, rows).cr);
+		expect(getEncounterCrReview(edited.instances[0]).effectiveCr).toBe("1/4");
+		expect(getEncounterXpSummary(edited.instances)).toEqual({totalXp: 150n, ratedCount: 3, unknownCount: 0});
+	});
+
+	it("sums named mixed multiattacks and notes excluded conditional, recharge, legendary, and area mechanics", async () => {
+		const state = await makeState();
+		const edited = patch(state, "goblin-1", {
+			action: [
+				{name: "Multiattack", entries: ["The goblin makes three attacks: two with its claws and one with its bite."]},
+				{name: "Claw", entries: ["{@atk mw} {@hit +5} to hit. {@h}7 ({@damage 2d4+2}) slashing damage."]},
+				{name: "Bite", entries: ["{@atk mw} {@hit +5} to hit. {@h}10 ({@damage 2d6+3}) piercing damage."]},
+				{name: "Blast {@recharge 5}", entries: ["{@atk rs} {@hit +7} to hit. {@h}{@damage 10d6} fire damage."]},
+			],
+			trait: [{name: "Dive Attack", entries: ["If diving, the claw deals an extra {@damage 3d6} damage."]}],
+			legendary: [{name: "Wing Attack", entries: ["The goblin deals {@damage 4d6} damage."]}],
+			areaTags: ["C"],
+		});
+		const inference = getEncounterCrInferences(edited.instances[0]);
+		expect(inference.values).toEqual({hp: 7, ac: 15, damageOverThreeRounds: 72, attackType: "attack", attackValue: 5});
+		expect(inference.exclusions.join(" ")).toMatch(/recharge/);
+		expect(inference.exclusions.join(" ")).toMatch(/legendary/);
+		expect(inference.exclusions.join(" ")).toMatch(/Traits/);
+		expect(inference.evidence.join(" ")).not.toMatch(/Blast|Dive Attack|Wing Attack/);
+	});
+
+	it("infers a single-target save DC but leaves ambiguous, conditional and missing inputs to the DM", async () => {
+		const state = await makeState();
+		const single = patch(state, "goblin-1", {action: [{
+			name: "Mind Lance", entries: ["One creature must make a {@dc 16} Wisdom saving throw, taking 12 ({@damage 3d6+2}) psychic damage on a failed save."],
+		}]});
+		expect(getEncounterCrInferences(single.instances[0]).values).toEqual({
+			hp: 7, ac: 15, damageOverThreeRounds: 36, attackType: "save", attackValue: 16,
+		});
+		const unknown = patch(state, "goblin-1", {
+			hp: {special: "varies"},
+			ac: [{ac: 13}, {ac: 17, condition: "with shield"}],
+			action: [
+				{name: "Multiattack", entries: ["The goblin makes two attacks, choosing weapons each time."]},
+				{name: "Burst", entries: ["Each creature in a 30-foot cone makes a {@dc 15} Dexterity saving throw, taking {@damage 6d6} fire damage on a failed save."]},
+			],
+		});
+		const inferred = getEncounterCrInferences(unknown.instances[0]);
+		expect(inferred.values).toEqual({hp: null, ac: null, damageOverThreeRounds: null, attackType: "attack", attackValue: null});
+		expect(inferred.missing).toEqual(["effective HP", "unconditional AC", "three-round damage", "attack bonus or save DC"]);
+		expect(inferred.exclusions).toContain("Multiattack sequence needs DM choice");
+	});
+
+	it("counts unconditional dice and flat damage together; rejects ungrounded recharge or alternate multiattacks", async () => {
+		const state = await makeState();
+		const combined = patch(state, "goblin-1", {action: [{
+			name: "Blade", entries: ["{@atk mw} {@hit +4} to hit. {@h}3 ({@damage 1d6+2}) slashing damage plus 4 poison damage."],
+		}]});
+		expect(getEncounterCrInferences(combined.instances[0]).values.damageOverThreeRounds).toBe(27);
+		const recharge = patch(state, "goblin-1", {action: [{
+			name: "Blade {@recharge 5}", entries: ["{@atk mw} {@hit +4} to hit. {@h}{@damage 4d6} fire damage."],
+		}]});
+		expect(getEncounterCrInferences(recharge.instances[0]).missing).toEqual(["three-round damage", "attack bonus or save DC"]);
+		const alternative = patch(state, "goblin-1", {action: [
+			{name: "Multiattack", entries: ["The goblin makes two attacks with its blade, or uses a spell instead."]},
+			{name: "Blade", entries: ["{@atk mw} {@hit +4} to hit. {@h}{@damage 1d6+2} slashing damage."]},
+		]});
+		expect(getEncounterCrInferences(alternative.instances[0]).values.damageOverThreeRounds).toBeNull();
+		const conditional = patch(state, "goblin-1", {action: [{
+			name: "Bite", entries: ["{@atk mw} {@hit +4} to hit. {@h}5 piercing damage plus 10 poison damage if the target fails a save."],
+		}]});
+		expect(getEncounterCrInferences(conditional.instances[0]).missing).toContain("three-round damage");
+	});
+
 	it("compares original and effective mechanics, separates text notes, and exposes transformation review", async () => {
 		const state = await makeState();
 		const edited = patch(state, "goblin-1", {
