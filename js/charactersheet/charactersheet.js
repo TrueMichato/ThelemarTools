@@ -6517,6 +6517,14 @@ class CharacterSheetPage {
 		container.innerHTML = "";
 
 		const pools = this._state.getHitDice().filter(hd => (hd.max || 0) > 0);
+		const useButton = document.getElementById("charsheet-btn-use-hitdie");
+		if (useButton) {
+			const spendable = pools.filter(hd => hd.current > 0);
+			useButton.disabled = !spendable.length;
+			useButton.title = spendable.length > 1
+				? "Choose a Hit Die to spend and heal (Shift: max healing)"
+				: "Spend an available Hit Die to heal (Shift: max healing)";
+		}
 		if (!pools.length) {
 			container.append(e_({tag: "div", clazz: "charsheet__hitdice-empty ve-muted", txt: "—"}));
 			return;
@@ -6622,8 +6630,12 @@ class CharacterSheetPage {
 			return armorTokenLabels[token] || raw;
 		};
 		const armor = profs.armor.map(armorLabel).join(", ");
-		const weapons = profs.weapons.map(w => typeof w === "string" ? w : w.full).join(", ");
-		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full).join(", ");
+		const weaponTokenLabels = {simple: "Simple Weapons", martial: "Martial Weapons"};
+		const weapons = profs.weapons.map(w => {
+			const raw = typeof w === "string" ? w : w.full || w.name;
+			return weaponTokenLabels[this._state._normalizeWeaponProfToken(raw)] || raw;
+		}).join(", ");
+		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full || t.name).join(", ");
 
 		(/** @type {*} */ (document.getElementById("charsheet-prof-armor"))).innerHTML = `${Renderer.get().render(armor)}` || "—";
 		(/** @type {*} */ (document.getElementById("charsheet-prof-weapons"))).innerHTML = `${Renderer.get().render(weapons)}` || "—";
@@ -16179,9 +16191,31 @@ class CharacterSheetPage {
 	}
 
 	async _onUseHitDie (evt = null) {
-		const dieType = this._state.getLargestSpendableHitDieType();
-		if (!dieType) {
+		const pools = this._state.getHitDice().filter(hd => hd.current > 0 && hd.max > 0);
+		if (!pools.length) {
 			JqueryUtil.doToast({type: "warning", content: "No hit dice remaining!"});
+			return;
+		}
+
+		let dieType = pools[0].type;
+		if (pools.length > 1) {
+			const choices = pools.map(hd => `${hd.className} ${hd.type} (${hd.current} remaining)`);
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Choose a Hit Die to Spend",
+				values: choices,
+				isResolveItem: true,
+			});
+			if (selected == null) return;
+			const index = choices.indexOf(selected);
+			if (index < 0) {
+				JqueryUtil.doToast({type: "danger", content: "The selected Hit Die is not available. Please try again."});
+				return;
+			}
+			dieType = pools[index].type;
+		}
+
+		if (this._state.getHitDiceByType()[dieType]?.current <= 0) {
+			JqueryUtil.doToast({type: "warning", content: `No ${dieType} Hit Dice remaining. Please choose again.`});
 			return;
 		}
 
@@ -16192,10 +16226,12 @@ class CharacterSheetPage {
 		const roll = evt?.shiftKey ? dieSize : RollerUtil.randomise(dieSize);
 		const healing = Math.max(1, roll + conMod);
 
-		// Decrement WITHOUT healing (adjustHitDieCurrent never heals), then apply
-		// the rolled healing exactly once — avoids the previous double-heal where
-		// useHitDie() healed again on top of the manual setCurrentHp.
-		this._state.adjustHitDieCurrent(dieType, -1);
+		if (!this._state.adjustHitDieCurrent(dieType, -1)) {
+			JqueryUtil.doToast({type: "warning", content: `No ${dieType} Hit Dice remaining. Please choose again.`});
+			return;
+		}
+
+		// adjustHitDieCurrent never heals; apply the selected die's rolled healing once.
 		const currentHp = this._state.getCurrentHp();
 		const maxHp = this._state.getMaxHp();
 		this._state.setCurrentHp(Math.min(currentHp + healing, maxHp));

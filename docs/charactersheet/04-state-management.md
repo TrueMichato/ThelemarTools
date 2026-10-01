@@ -199,10 +199,10 @@ hp: {
     temp: 0,                   // Temporary HP
     maxModifier: 0,            // Bonus/penalty to max (e.g., from exhaustion)
 },
-hitDice: [
-    {class: "Fighter", die: 10, max: 5, current: 3},
-    {class: "Rogue", die: 8, max: 3, current: 3},
-],
+hitDice: {
+    d10: {max: 5, current: 3},
+    d8: {max: 3, current: 3},
+},
 deathSaves: {
     successes: 0,
     failures: 0,
@@ -222,17 +222,10 @@ skillProficiencies: ["athletics", "intimidation", "perception", "stealth"],
 skillExpertise: ["stealth"],
 
 // Tools
-toolProficiencies: [
-    {name: "Thieves' Tools", source: "Rogue"},
-    {name: "Gaming Set (Dice)", source: "Background"},
-],
+toolProficiencies: ["Thieves' Tools", "Gaming Set (Dice)"],
 
 // Languages
-languageProficiencies: [
-    {name: "Common", source: "Race"},
-    {name: "Dwarvish", source: "Race"},
-    {name: "Thieves' Cant", source: "Rogue"},
-],
+languages: ["Common", "Dwarvish", "Thieves' Cant"],
 
 // Weapons (strings or patterns)
 weaponProficiencies: ["simple", "martial"],
@@ -240,6 +233,26 @@ weaponProficiencies: ["simple", "martial"],
 // Armor
 armorProficiencies: ["light", "medium", "heavy", "shields"],
 ```
+
+Hit Dice are stored by die type, not by class. Overview's **Use Hit Die**
+spends the only available pool directly or, for different die types, asks which
+class/die pool to use. Canceling does nothing; a selected pool is checked again
+before spending. Shift-click rolls that die's maximum face. The die is spent
+once and rolled healing is applied once, capped at maximum HP. Short Rest
+retains its own per-pool choices.
+
+Armor categories (`light`/`Light Armor`, `shield`/`Shields`) and weapon
+categories (`simple`/`Simple weapons`, `martial`/`Martial weapons`) are compared
+by canonical meaning when added, including multiclass grants. Named
+proficiencies (such as Longsword versus Shortsword), different tools, and
+distinct languages/dialects remain separate. `getProficiencies()` returns a
+de-duplicated **display copy**, including for older saves with duplicate raw
+entries; it does not rewrite the saved arrays or the grant/ownership ledgers.
+The Overview displays category-friendly labels, and its tool-check candidates
+still use the unique tool entries. Multiclass receipts can record attempted
+grants that were already owned by the first class, so reversing those receipts
+must preserve that first-class grant; promoting a new first class re-applies
+still-active class-feature grants afterward.
 
 The XPHB level-3 Barbarian feature **Primal Knowledge** (also used by the
 TGTT Barbarian) queues one skill proficiency from the owning class's

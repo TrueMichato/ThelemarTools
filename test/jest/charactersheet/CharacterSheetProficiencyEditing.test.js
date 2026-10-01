@@ -157,9 +157,8 @@ describe("Proficiency Editing — polluted-save dedupe removal (B6)", () => {
 	it("removeArmorProficiencyVariants clears every normalized variant and re-applies the penalty", () => {
 		const state = buildWizard();
 		state.setArmor({name: "Studded Leather", ac: 12, type: "light"});
-		// Simulate a polluted save (both canonical + friendly-label duplicate).
-		state.addArmorProficiency("light");
-		state.addArmorProficiency("Light armor");
+		// The public add path now prevents duplicates; load a legacy polluted save.
+		state.loadFromJson({...state.toJson(), armorProficiencies: ["light", "Light armor"]});
 		expect(state.isWearingNonProficientArmor()).toBe(false);
 
 		// The editor removes EVERY stored variant that normalizes to the token in one call.
