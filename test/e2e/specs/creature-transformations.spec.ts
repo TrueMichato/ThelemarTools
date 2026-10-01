@@ -138,8 +138,8 @@ test("Bestiary source browsing preserves visible choices but invalidates filtere
 	await transformations.preview();
 	await transformations.search("half-dragon");
 	await expect(root.locator(".bqa__transformation-target")).toHaveCount(0);
-	await expect(root.getByRole("combobox", {name: "Dragon ancestry"})).toHaveValue("red");
-	await expect(root.getByRole("combobox", {name: "Breath size"})).toHaveValue("large-or-smaller");
+	await expect(transformations.optionControl("Dragon ancestry", "red")).toBeChecked();
+	await expect(transformations.optionControl("Breath size", "large-or-smaller")).toBeChecked();
 	await transformations.preview();
 	await transformations.pauseCatalogReload();
 	await transformations.acknowledgeReview();
@@ -154,7 +154,7 @@ test("Bestiary source browsing preserves visible choices but invalidates filtere
 	await expect(root.getByRole("button", {name: "Preview transformation"})).toBeDisabled();
 	await transformations.search("");
 	await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("");
-	await expect(root.getByRole("combobox", {name: "Dragon ancestry"})).toHaveCount(0);
+	await expect(transformations.optionControl("Dragon ancestry", "red")).toHaveCount(0);
 });
 
 const installedBrew = {
@@ -182,7 +182,11 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		await expect(skeleton.locator(".bqa__transformation-choice-detail")).toBeHidden();
 		await skeleton.hover();
 		await expect(skeleton.locator(".bqa__transformation-choice-detail")).toContainText("DM approval required");
+		await expect(root.locator(".bqa__transformation-recipe-info")).toContainText("Confirm the body has a skeleton appropriate for reanimation");
+		await expect(root.locator(".bqa__transformation-recipe-info")).toContainText(/Dungeon Master.s Guide/);
+		await expect(root.locator(".bqa__transformation-recipe-info")).toBeInViewport();
 		for (const contrast of await transformations.templateContrast("catalog:skeleton|dmg")) expect(contrast).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-recipe-info h5", ".bqa__transformation-recipe-info")).toBeGreaterThanOrEqual(4.5);
 		await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("");
 		await expect(root.getByRole("button", {name: "Preview transformation"})).toBeDisabled();
 		await expect(root.locator(".bqa__transformation-target")).toHaveCount(0);
@@ -191,16 +195,27 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		await page.keyboard.press("Shift+Tab");
 		await expect(shadowMM.locator(".bqa__transformation-choice-detail")).toBeVisible();
 		await expect(shadowMM.locator(".bqa__transformation-choice-detail")).toContainText("Type: dragon");
+		await expect(root.locator(".bqa__transformation-recipe-info")).toContainText("Shadow Dragon (MM)");
+		await expect(root.locator(".bqa__transformation-recipe-info")).toContainText("Confirm a true dragon exposed to the Shadowfell");
 		await expect(shadowMM).toHaveCSS("outline-style", "solid");
 		await skeleton.click();
 		await expect(skeleton).toHaveAttribute("aria-pressed", "true");
 		await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("catalog:skeleton|dmg");
 		await expect(root.locator(".bqa__transformation-selected h5")).toHaveText("Skeleton");
 		await expect(root.locator(".bqa__transformation-selected h5")).toHaveCSS("font-size", "16px");
-		await expect(root.locator(".bqa__transformation-selected h5")).toHaveCSS("color", await skeleton.locator(".bqa__transformation-choice-name").evaluate(node => getComputedStyle(node).color));
+		expect(await transformations.textContrast(".bqa__transformation-selected h5", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		await expect(root.locator(".bqa__transformation-recipe-info")).toContainText("Skeleton (DMG)");
+		await root.getByRole("button", {name: "Preview transformation"}).click();
+		await expect(root.getByRole("alert")).toContainText("Acknowledge every narrative prerequisite");
+		const confirmation = root.getByRole("group", {name: "Confirm before preview"});
+		await confirmation.getByRole("checkbox").first().check();
+		await root.getByRole("button", {name: "Preview transformation"}).click();
+		await expect(root.getByRole("alert")).toContainText("Confirm DM approval");
 		await transformations.acknowledge();
 		await transformations.preview();
 		await shadowBEG.hover();
+		await expect(root.locator(".bqa__transformation-recipe-info")).toContainText("Shadow Dragon (BEG)");
+		await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("catalog:skeleton|dmg");
 		await expect(root.locator(".bqa__transformation-target")).toHaveCount(1);
 		await shadowBEG.click();
 		await expect(shadowBEG).toHaveAttribute("aria-pressed", "true");
@@ -218,15 +233,90 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		await transformations.expectLongTemplateTitleFits("catalog:skeletal wyrmling|ar8");
 		await expect(root.locator(".bqa__transformation-choices")).toBeVisible();
 		await transformations.useNightMode();
+		await skeleton.click();
 		const nightTitle = await skeleton.locator(".bqa__transformation-choice-name").evaluate(node => getComputedStyle(node).color);
-		const selectedTitle = await root.locator(".bqa__transformation-selected h5").count();
-		expect(selectedTitle).toBe(0);
 		expect(nightTitle).not.toBe("rgb(0, 0, 0)");
 		for (const contrast of await transformations.templateContrast("catalog:skeleton|dmg")) expect(contrast).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-selected h5", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-recipe-info h5", ".bqa__transformation-recipe-info")).toBeGreaterThanOrEqual(4.5);
 		await skeleton.focus();
 		await page.keyboard.press("Tab");
 		await page.keyboard.press("Shift+Tab");
 		await expect(skeleton.locator(".bqa__transformation-choice-detail")).toBeVisible();
+	});
+
+	test(`${surface} option details work on hover, keyboard, and touch-sized selection before preview`, async ({page}) => {
+		test.setTimeout(120_000);
+		const transformations = new CreatureTransformationPage(page);
+		if (surface === "Bestiary") await page.goto("/bestiary.html#goblin_mm");
+		else await new EncounterRollPage(page).seed();
+		if (surface === "Bestiary") await page.locator(".bqa__btn-open:visible").first().click();
+		else await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+		await page.getByRole("tab", {name: "Templates"}).click();
+		const root = transformations.root;
+		await transformations.choose("catalog:half-dragon|mm");
+		const red = transformations.optionControl("Dragon ancestry", "red");
+		const redRow = red.locator("..");
+		await expect(red).toHaveAttribute("aria-describedby", /bqa-transformation-detail-/);
+		await expect(redRow.locator(".bqa__transformation-option-detail")).toBeHidden();
+		await redRow.hover();
+		await expect(redRow.locator(".bqa__transformation-option-detail")).toContainText("Half-Dragon (MM) · Dragon ancestry · Red");
+		await expect(redRow.locator(".bqa__transformation-option-detail")).toContainText("Resistance to fire");
+		await expect(red).not.toBeChecked();
+		await red.focus();
+		await expect(redRow.locator(".bqa__transformation-option-detail")).toBeVisible();
+		await expect(redRow).toHaveCSS("outline-style", "solid");
+		await page.keyboard.press("Space");
+		await expect(red).toBeChecked();
+		await expect(redRow.locator(".bqa__transformation-option-detail")).toBeVisible();
+		await transformations.acknowledge();
+		await root.getByRole("button", {name: "Preview transformation"}).click();
+		await expect(root.getByRole("alert")).toContainText("Breath size");
+		await expect(root.locator(".bqa__transformation-target")).toHaveCount(0);
+		const huge = transformations.optionControl("Breath size", "huge");
+		await huge.locator("..").hover();
+		await expect(huge.locator("..").locator(".bqa__transformation-option-detail")).toContainText("Size: Huge");
+		await expect(huge.locator("..").locator(".bqa__transformation-option-detail")).toContainText("young-dragon breath");
+		await page.setViewportSize({width: 390, height: 844});
+		await transformations.chooseOption("Breath size", "large-or-smaller");
+		await root.getByRole("searchbox", {name: "Find a template or species"}).focus();
+		await expect(transformations.optionControl("Breath size", "large-or-smaller").locator("..").locator(".bqa__transformation-option-detail")).toBeVisible();
+		const detail = transformations.optionControl("Breath size", "large-or-smaller").locator("..").locator(".bqa__transformation-option-detail");
+		await expect(detail).toContainText("wyrmling breath");
+		expect(await transformations.textContrast(".bqa__transformation-selected h5", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-group legend", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-option:has(input[value='large-or-smaller']) .bqa__transformation-option-name", ".bqa__transformation-option:has(input[value='large-or-smaller'])")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-option:has(input[value='large-or-smaller']) .bqa__transformation-option-detail", ".bqa__transformation-option:has(input[value='large-or-smaller'])")).toBeGreaterThanOrEqual(4.5);
+		await transformations.preview();
+		await expect(root.locator(".bqa__transformation-target")).toContainText("Goblin");
+		await transformations.chooseOption("Dragon ancestry", "blue");
+		await expect(root.locator(".bqa__transformation-target")).toHaveCount(0);
+		await transformations.useNightMode();
+		const blue = transformations.optionControl("Dragon ancestry", "blue");
+		await expect(blue).toBeChecked();
+		await expect(red).not.toBeChecked();
+		expect(await transformations.textContrast(".bqa__transformation-selected h5", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-group legend", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-option:has(input[value='blue']) .bqa__transformation-option-name", ".bqa__transformation-option:has(input[value='blue'])")).toBeGreaterThanOrEqual(4.5);
+		expect(await transformations.textContrast(".bqa__transformation-option:has(input[value='blue']) .bqa__transformation-option-detail", ".bqa__transformation-option:has(input[value='blue'])")).toBeGreaterThanOrEqual(4.5);
+		await transformations.choose("catalog:undead|scre");
+		const withering = root.locator('.bqa__transformation-option input[value="withering-strikes"]');
+		await expect(withering).toBeDisabled();
+		await transformations.chooseOption("Undead category", "ghostly");
+		await expect(transformations.optionControl("Ghostly strike variant", "")).toBeChecked();
+		await transformations.chooseOption("Ghostly strike variant", "withering-strikes");
+		await expect(withering).toBeChecked();
+		const etherealness = transformations.optionControl("Ghostly actions", "etherealness");
+		await etherealness.locator("..").hover();
+		await expect(etherealness.locator("..").locator(".bqa__transformation-option-detail")).toContainText("Requires trait: Ethereal Sight");
+		await expect(etherealness).not.toBeChecked();
+		await transformations.chooseOption("Additional undead features", "magic-resistance");
+		await expect(root.locator(".bqa__transformation-review")).toContainText("Recheck hit points");
+		await transformations.chooseOption("Undead category", "skeletal");
+		await expect(withering).toBeDisabled();
+		await transformations.chooseOption("Undead category", "ghostly");
+		await expect(transformations.optionControl("Ghostly strike variant", "")).toBeChecked();
+		await expect(withering).not.toBeChecked();
 	});
 
 	test(`${surface} discovers installed homebrew by book name, abbreviation, and code on mobile`, async ({page}) => {
@@ -277,6 +367,31 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		await expect(root.getByRole("combobox", {name: "Creature transformation"})).toHaveValue("");
 	});
 }
+
+test.describe("touch template explanations", () => {
+	test.use({hasTouch: true, viewport: {width: 390, height: 844}});
+	for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
+		test(`${surface} keeps selected recipe and option information readable after tapping`, async ({page}) => {
+			test.setTimeout(120_000);
+			const transformations = new CreatureTransformationPage(page);
+			if (surface === "Bestiary") await page.goto("/bestiary.html#goblin_mm");
+			else await new EncounterRollPage(page).seed();
+			if (surface === "Bestiary") await page.locator(".bqa__btn-open:visible").first().tap();
+			else await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).tap();
+			await page.getByRole("tab", {name: "Templates"}).tap();
+			await transformations.templateChoice("catalog:half-dragon|mm").tap();
+			const root = transformations.root;
+			await expect(root.locator(".bqa__transformation-recipe-info")).toContainText("Required choices: Dragon ancestry, Breath size");
+			await transformations.optionControl("Dragon ancestry", "red").tap();
+			await transformations.optionControl("Breath size", "large-or-smaller").tap();
+			await root.getByRole("searchbox", {name: "Find a template or species"}).focus();
+			await expect(transformations.optionControl("Dragon ancestry", "red")).toBeChecked();
+			await expect(transformations.optionControl("Dragon ancestry", "red").locator("..").locator(".bqa__transformation-option-detail")).toContainText("Resistance to fire");
+			await expect(transformations.optionControl("Breath size", "large-or-smaller").locator("..").locator(".bqa__transformation-option-detail")).toContainText("Size: Tiny or Small or Medium or Large");
+			expect(await transformations.textContrast(".bqa__transformation-selected h5", ".bqa__workspace")).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
 
 test("Encounter Workspace keeps duplicate species variants separate and cannot apply one after switching filters", async ({page}) => {
 	test.setTimeout(120_000);
