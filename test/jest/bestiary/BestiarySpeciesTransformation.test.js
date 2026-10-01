@@ -78,6 +78,35 @@ describe("species mechanics on a retained encounter chassis", () => {
 		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([walkOperation, save(recipe, monster, [walkOperation])]))}).speed).toEqual(draft.proposed.speed);
 	});
 
+	it("grants real Dhampir Spider Climb without inferring its optional Ancestral Legacy speeds or level-3 ceiling movement", () => {
+		const dhampir = raw.race.find(it => it.name === "Dhampir" && it.source === "VRGR");
+		const candidates = candidatesFor([dhampir]);
+		const candidate = candidates.find(it => it.id === "race:dhampir|vrgr");
+		const size = candidate.optionGroups.find(it => it.id === "size");
+		const recipe = resolve(candidates, candidate.id, {size: [size.options.find(it => it.name === "S").id]});
+		expect(recipe.changes).toContainEqual({type: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"});
+		expect(recipe.changes).not.toContainEqual(expect.objectContaining({type: "grantRelativeSpeed", mode: "fly"}));
+		expect(recipe.changes).not.toContainEqual(expect.objectContaining({type: "grantRelativeSpeed", mode: "swim"}));
+		expect(recipe.manualReview).toContainEqual(expect.objectContaining({field: "traits", reason: expect.stringMatching(/Ancestral Legacy/)}));
+		const base = {...monster, speed: {walk: 45}};
+		const draft = preview(recipe, base);
+		expect(draft.proposed.speed).toEqual({walk: 45, climb: 45});
+		expect(draft.proposed.trait.find(it => it.name === "Spider Climb")?.entries[0]).toMatch(/at 3rd level/);
+		const operation = save(recipe, base);
+		const reloaded = BestiaryQuickActionsUtil.applyOperations({baseCreature: base, operations: JSON.parse(JSON.stringify([operation]))});
+		expect(reloaded.speed).toEqual(draft.proposed.speed);
+		expect(Parser.getSpeedString(reloaded, {styleHint: "classic"})).toMatch(/climb 45 ft/i);
+		const restricted = {
+			...dhampir,
+			name: "Restricted Dhampir",
+			entries: dhampir.entries.map(entry => entry.name === "Ancestral Legacy"
+				? {...entry, entries: [...entry.entries, "You cannot use your climbing speed while wearing medium armor."]} : entry),
+		};
+		const unsafe = candidatesFor([restricted])[0];
+		expect(unsafe.changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "climb"}));
+		expect(unsafe.manualReview).toContainEqual(expect.objectContaining({field: "traits", reason: expect.stringMatching(/climb speed/)}));
+	});
+
 	it("accepts a single unconditional top-level trait but refuses a movement-only no-op", () => {
 		const textOnly = {name: "Cliff Kin", source: "HBR", speed: 30, entries: [{type: "entries", name: "Climbing", entries: ["You have a climbing speed equal to your walking speed."]}]};
 		const climber = resolve(candidatesFor([textOnly]), "race:cliff kin|hbr");

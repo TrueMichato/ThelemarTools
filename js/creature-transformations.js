@@ -20,7 +20,17 @@ const RELATIVE_SPEED_MENTIONS = {
 	climb: /\b(?:climb|climbing|climber)\b/i,
 	burrow: /\b(?:burrow|burrowing)\b/i,
 };
-const RELATIVE_SPEED_TRAIT = /^(?:Because of your wings, |Thanks to your wings, |Your walking speed is \d+ feet, and )?you have a (flying|swimming|climbing|burrowing) speed equal to your walking speed\.(?: (You can't use this flying speed if you're wearing medium or heavy armor\.))?$/i;
+const RELATIVE_SPEED_TRAIT = /^(?:Because of your wings, |Thanks to your wings, |Your walking speed is \d+ feet, and )?you have a (flying|swimming|climbing|burrowing) speed equal to your walking speed\.(?: (You can't use this flying speed if you're wearing medium or heavy armor\.)| In addition, at 3rd level, you can move up, down, and across vertical surfaces and upside down along ceilings, while leaving your hands free\.)?$/i;
+const ANCESTRAL_LEGACY_RETENTION = [
+	"If you replace a race with this lineage, you can keep the following elements of that race: any skill proficiencies you gained from it and any climbing, flying, or swimming speed you gained from it.",
+	"If you don't keep any of those elements or you choose this lineage at character creation, you gain proficiency in two skills of your choice.",
+];
+const isAncestralLegacyRetention = (race, entry) => Boolean(race.lineage)
+	&& entry?.type === "entries"
+	&& entry.name === "Ancestral Legacy"
+	&& Array.isArray(entry.entries)
+	&& entry.entries.length === ANCESTRAL_LEGACY_RETENTION.length
+	&& entry.entries.every((text, ix) => text === ANCESTRAL_LEGACY_RETENTION[ix]);
 const SIZES = new Set(["T", "S", "M", "L", "H", "G"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const ENTRY_SECTIONS = new Set(["trait", "action", "bonus", "reaction", "legendary"]);
@@ -197,7 +207,7 @@ const getSpellBlock = (block, source, ability) => {
 
 const getRelativeSpeed = (race, mode) => {
 	const entries = Array.isArray(race.entries) ? race.entries : [];
-	const relevant = entries.filter(entry => RELATIVE_SPEED_MENTIONS[mode].test(JSON.stringify(entry)));
+	const relevant = entries.filter(entry => RELATIVE_SPEED_MENTIONS[mode].test(JSON.stringify(entry)) && !isAncestralLegacyRetention(race, entry));
 	if (!relevant.length) return race.speed?.[mode] === true ? {op: "grantRelativeSpeed", mode, relativeTo: "walk"} : null;
 	if (relevant.length !== 1 || !Array.isArray(relevant[0]?.entries) || relevant[0].entries.length !== 1 || typeof relevant[0].entries[0] !== "string") return null;
 	const match = RELATIVE_SPEED_TRAIT.exec(relevant[0].entries[0]);
@@ -380,6 +390,9 @@ const getRaceRecipe = race => {
 	if (race.feats?.length) review("traits", "Review species-granted feats with the DM; they were not automated.");
 	if (race.creatureTypeTags?.length) review("traits", "Review species creature-type tags with the DM; only the primary type was changed.");
 	if (race.lineage) review("eligibility", "Review lineage selection with the DM; it was not inferred from this species.");
+	if (race.entries?.some(entry => isAncestralLegacyRetention(race, entry))) {
+		review("traits", "Resolve any movement retained from Ancestral Legacy with the DM; no legacy speed was granted.");
+	}
 	if (!changes.length && !optionGroups.length) review("other", "No safe executable species change is available for this entry.");
 	return {
 		kind: "race",
