@@ -98,6 +98,7 @@ describe("Encounter Workspace HP/turn controls", () => {
 		const roll = jest.spyOn(Renderer.dice, "pRoll2")
 			.mockResolvedValueOnce(5).mockResolvedValueOnce(5)
 			.mockResolvedValueOnce(null).mockResolvedValueOnce("6");
+		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 		page._setStatus.mockImplementation(text => {
 			if (text.includes("ready")) expect(storage.pSetForPage).toHaveBeenCalledTimes(2);
 		});
@@ -113,9 +114,53 @@ describe("Encounter Workspace HP/turn controls", () => {
 			expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("5 ≥ 5; ready"));
 			expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("5 < 6; still spent"));
 			expect(page._setStatus).toHaveBeenCalledWith(expect.stringContaining("no valid roll; still spent"));
+			expect(toast).toHaveBeenCalledTimes(1);
+			expect(toast).toHaveBeenCalledWith({type: "success", content: expect.stringContaining("Goblin #1 Breath")});
+			expect(toast.mock.calls[0][0].content).not.toMatch(/Shout|Goblin #2/);
 		} finally {
 			roll.mockRestore();
 			prompt.mockRestore();
+			toast.mockRestore();
+		}
+	});
+
+	it("shows a success toast only after the ready state has been persisted", async () => {
+		const {page, storage} = await createPage({monsterOverride: {action: [{name: "Breath {@recharge 5}", entries: ["Damage."]}]}});
+		page._state = EncounterWorkspaceState.withInitiativeResults(withSpentRecharge(page._state), [{id: "goblin-1", total: 15}]);
+		page._settings.autoRollRecharge = true;
+		let finishSave;
+		let isReadySaved = false;
+		storage.pSetForPage.mockImplementation(async (key, state) => {
+			if (!state.instances[0].resources.recharges[0].ready) return;
+			await new Promise(resolve => { finishSave = resolve; });
+			isReadySaved = true;
+		});
+		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(6);
+		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {
+			expect(isReadySaved).toBe(true);
+			expect(storage.pSetForPage.mock.lastCall[1].instances[0].resources.recharges[0].ready).toBe(true);
+		});
+		try {
+			const transition = page._pUpdateTurn("start");
+			for (let attempt = 0; attempt < 20; attempt++) {
+				if (finishSave) break;
+				await Promise.resolve();
+			}
+			expect(finishSave).toEqual(expect.any(Function));
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
+			expect(toast).not.toHaveBeenCalled();
+			finishSave();
+			await transition;
+			expect(toast).toHaveBeenCalledTimes(1);
+			expect(toast).toHaveBeenCalledWith({
+				type: "success",
+				content: expect.stringMatching(/Recharged:.*Breath/),
+			});
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(true);
+		} finally {
+			finishSave?.();
+			roll.mockRestore();
+			toast.mockRestore();
 		}
 	});
 
@@ -125,14 +170,41 @@ describe("Encounter Workspace HP/turn controls", () => {
 		page._settings.autoRollRecharge = true;
 		storage.pSetForPage.mockImplementationOnce(async () => {}).mockRejectedValueOnce(new Error("Storage full"));
 		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(6);
+		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 		try {
 			await page._pUpdateTurn("start");
 			expect(page._state.turn).toEqual({round: 1, activeId: "goblin-1"});
 			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
 			expect(page._setError).toHaveBeenCalledWith(expect.stringContaining("The turn was saved, but recharge was not completed: Storage full"));
 			expect(page._setStatus.mock.calls.some(([message]) => message.includes("; ready"))).toBe(false);
+			expect(toast).not.toHaveBeenCalled();
 		} finally {
 			roll.mockRestore();
+			toast.mockRestore();
+		}
+	});
+
+	it.each([
+		{reason: "Skip", shouldRoll: false, result: 6},
+		{reason: "a missed threshold", shouldRoll: true, result: 4},
+		{reason: "a cancelled roll", shouldRoll: true, result: null},
+		{reason: "an invalid roll", shouldRoll: true, result: "6"},
+	])("does not show a success toast after $reason", async ({shouldRoll, result}) => {
+		const {page, storage} = await createPage({monsterOverride: {action: [{name: "Breath {@recharge 5}", entries: ["Damage."]}]}});
+		page._state = EncounterWorkspaceState.withInitiativeResults(withSpentRecharge(page._state), [{id: "goblin-1", total: 15}]);
+		const prompt = jest.spyOn(InputUiUtil, "pGetUserBoolean").mockResolvedValue(shouldRoll);
+		const roll = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(result);
+		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
+		try {
+			await page._pUpdateTurn("start");
+			expect(page._state.instances[0].resources.recharges[0].ready).toBe(false);
+			expect(storage.pSetForPage).toHaveBeenCalledTimes(1);
+			expect(roll).toHaveBeenCalledTimes(Number(shouldRoll));
+			expect(toast).not.toHaveBeenCalled();
+		} finally {
+			prompt.mockRestore();
+			roll.mockRestore();
+			toast.mockRestore();
 		}
 	});
 

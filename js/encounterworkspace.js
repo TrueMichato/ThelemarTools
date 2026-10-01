@@ -1837,6 +1837,7 @@ export class EncounterWorkspacePage {
 			if (!shouldRoll) return this._setStatus("Recharge rolls skipped; spent abilities remain spent.");
 		}
 		const outcomes = [];
+		const recharged = [];
 		let next = savedTurn;
 		for (const {id, recharge} of spent) {
 			if (this._state !== savedTurn) throw new Error("The encounter changed while rolling; no recharge results were saved");
@@ -1861,6 +1862,7 @@ export class EncounterWorkspacePage {
 			}
 			next = EncounterWorkspaceState.withRechargeReady(next, {id, rechargeId: recharge.id, ready: true});
 			outcomes.push(`${labels.get(id)} ${recharge.name}: ${result} ≥ ${recharge.min}; ready`);
+			recharged.push(`${labels.get(id)} ${recharge.name}`);
 		}
 		if (this._state !== savedTurn) throw new Error("The encounter changed while rolling; no recharge results were saved");
 		if (next !== savedTurn) {
@@ -1880,6 +1882,7 @@ export class EncounterWorkspacePage {
 			}
 		}
 		this._setStatus(`Round ${savedTurn.turn.round} recharge: ${outcomes.join("; ")}.`);
+		if (recharged.length) JqueryUtil.doToast({type: "success", content: `Recharged: ${recharged.join(", ")}.`});
 	}
 
 	_clearInitiativeMove () {

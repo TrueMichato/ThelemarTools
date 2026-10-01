@@ -573,6 +573,32 @@ test("recharge prompts only after saved turns, and the automatic setting survive
 	await expect(page.locator("#ew-auto-recharge")).toBeChecked();
 });
 
+test("successful recharge popup appears only after the Ready state is saved", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({count: 1});
+	const rechargeId = "auto:recharge:action:0";
+	const recharge = encounter.inlineResource("one", `recharge:${rechargeId}`);
+	await recharge.click();
+	await encounter.statblock("one").locator("[data-field=initiative]").fill("18");
+	await encounter.statblock("one").locator("[data-field=initiative]").press("Tab");
+	await encounter.deferRechargeSaveWithRoll(6);
+	await page.locator("#ew-turn-start").click();
+	await page.getByRole("button", {name: /Roll$/}).click();
+	await encounter.waitForRechargeSave();
+	await expect(recharge).toHaveAttribute("aria-pressed", "false");
+	await expect(page.locator(".toast--type-success")).toHaveCount(0);
+	expect(await encounter.getSavedRechargeReady("one", rechargeId)).toBe(false);
+	await encounter.releaseRechargeSave();
+	await expect(recharge).toHaveAttribute("aria-pressed", "true");
+	await expect(page.locator("#ew-status")).toContainText("6 ≥ 5; ready");
+	await expect(page.locator(".toast--type-success")).toContainText(/Recharged:.*Goblin.*Blade/);
+	expect(await encounter.getSavedRechargeReady("one", rechargeId)).toBe(true);
+	await page.reload();
+	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
+	await expect(recharge).toHaveAttribute("aria-pressed", "true");
+	await expect(page.locator(".toast--type-success")).toHaveCount(0);
+});
+
 test("resource accents and spent symbols remain distinct on desktop and mobile in both themes", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({monsterOverride: {

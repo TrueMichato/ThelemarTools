@@ -123,6 +123,54 @@ export class EncounterRollPage {
 		return this.statblock(instanceId).locator(`[data-inline-resource="${key}"]`);
 	}
 
+	async deferRechargeSaveWithRoll (result: number) {
+		await this.page.evaluate(roll => {
+			const globals = globalThis as typeof globalThis & {
+				Renderer: {dice: {pRoll2: () => Promise<number>}},
+				StorageUtil: {
+					pSetForPage: (key: string, state: {instances: {resources?: {recharges: {ready: boolean}[]}}[]}, options: {page: string}) => Promise<void>,
+				},
+				isRechargeSavePending?: boolean,
+				releaseRechargeSave?: () => void,
+			};
+			const originalSave = globals.StorageUtil.pSetForPage.bind(globals.StorageUtil);
+			globals.Renderer.dice.pRoll2 = async () => roll;
+			globals.StorageUtil.pSetForPage = async (key, state, options) => {
+				if (key === "encounterWorkspaceState" && state.instances.some(it => it.resources?.recharges.some(recharge => recharge.ready))) {
+					globals.isRechargeSavePending = true;
+					await new Promise<void>(resolve => { globals.releaseRechargeSave = resolve; });
+				}
+				return originalSave(key, state, options);
+			};
+		}, result);
+	}
+
+	async waitForRechargeSave () {
+		await this.page.waitForFunction(() => (globalThis as typeof globalThis & {isRechargeSavePending?: boolean}).isRechargeSavePending === true);
+	}
+
+	async releaseRechargeSave () {
+		await this.page.evaluate(() => {
+			const globals = globalThis as typeof globalThis & {releaseRechargeSave?: () => void};
+			if (!globals.releaseRechargeSave) throw new Error("No pending recharge save to release.");
+			globals.releaseRechargeSave();
+		});
+	}
+
+	async getSavedRechargeReady (instanceId: string, rechargeId: string): Promise<boolean | undefined> {
+		return this.page.evaluate(async ({id, rechargeId}) => {
+			const globals = globalThis as typeof globalThis & {
+				StorageUtil: {
+					pGetForPage: (key: string, options: {page: string}) => Promise<{
+						instances: {id: string, resources?: {recharges: {id: string, ready: boolean}[]}}[],
+					}>,
+				},
+			};
+			const state = await globals.StorageUtil.pGetForPage("encounterWorkspaceState", {page: "encounterworkspace.html"});
+			return state.instances.find(it => it.id === id)?.resources?.recharges.find(it => it.id === rechargeId)?.ready;
+		}, {id: instanceId, rechargeId});
+	}
+
 	resourceManager (instanceId: string) {
 		return this.resourcePanel(instanceId).locator(":scope > .ew__resource-manager");
 	}
