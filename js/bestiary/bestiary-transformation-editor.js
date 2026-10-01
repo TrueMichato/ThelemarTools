@@ -57,6 +57,9 @@ function describeChange (step) {
 		case "grantConditionImmunity": return `Immunity to ${step.value}`;
 		case "grantSense": return `${step.sense} ${step.range} ft.`;
 		case "grantSpeed": return `${step.mode} speed ${step.feet} ft.`;
+		case "grantRelativeSpeed":
+			if (step.relativeTo !== "walk" || (step.condition && step.condition !== "noMediumOrHeavyArmor")) throw new Error("Unsupported relative speed description.");
+			return `${step.mode} speed equal to effective walking speed${step.condition ? " only while not wearing medium or heavy armor" : ""}`;
 		case "grantLanguage": return `Speak ${step.value}`;
 		case "grantSpell": {
 			const [name, source] = step.spell.split("|");
@@ -219,17 +222,27 @@ export function formatCreatureTransformationDeltaField ({path, before, after}) {
 	const isAbility = abilities.includes(path);
 	const isSpeed = path === "speed" || path.startsWith("speed.");
 	const label = isAbility ? Parser.attAbvToFull(path)
-		: path.startsWith("speed.") ? `${path.slice("speed.".length).replace(/^\w/, char => char.toUpperCase())} speed`
-			: DELTA_FIELD_NAMES[path] || `Other field (${path})`;
+		: path.startsWith("speed.alternate.") ? `${path.slice("speed.alternate.".length).replace(/^\w/, char => char.toUpperCase())} speed (alternate)`
+			: path.startsWith("speed.") ? `${path.slice("speed.".length).replace(/^\w/, char => char.toUpperCase())} speed`
+				: DELTA_FIELD_NAMES[path] || `Other field (${path})`;
+	const formatSpeed = value => {
+		if (typeof value === "number") return `${value} ft.`;
+		if (Array.isArray(value)) return value.map(formatSpeed).join(", ") || "none";
+		if (value && typeof value === "object") {
+			if (Number.isSafeInteger(value.number) && typeof value.condition === "string" && Object.keys(value).length === 2) {
+				return `${value.number} ft. ${value.condition}`;
+			}
+			if (!Object.hasOwn(value, "number")) {
+				return Object.entries(value).map(([mode, speed]) => `${mode} ${formatSpeed(speed)}`).join(", ") || "none";
+			}
+		}
+		return JSON.stringify(value);
+	};
 	const format = value => {
 		if (value == null) return "none";
 		if (path === "size" && Array.isArray(value)) return value.map(it => Parser.sizeAbvToFull(it)).join(", ") || "none";
 		if (path === "type" && (typeof value === "string" || typeof value?.type === "string")) return Parser.monTypeToFullObj(value).asText;
-		if (isSpeed && typeof value === "number") return `${value} ft.`;
-		if (path === "speed" && value && typeof value === "object" && !Array.isArray(value)
-			&& Object.values(value).every(it => typeof it === "number")) {
-			return Object.entries(value).map(([mode, feet]) => `${mode} ${feet} ft.`).join(", ") || "none";
-		}
+		if (isSpeed) return formatSpeed(value);
 		if (["resist", "immune", "vulnerable", "conditionImmune", "senses", "languages"].includes(path) && Array.isArray(value)) {
 			return value.map(it => {
 				if (typeof it === "string") return it;

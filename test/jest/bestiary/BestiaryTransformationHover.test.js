@@ -52,4 +52,24 @@ describe("creature transformation option and group rules hover", () => {
 		expect(aura.find(it => it.name?.startsWith("DM review")).entries)
 			.toContain("traits: Resolve aura range and damage with the DM.");
 	});
+
+	it("describes published walking-relative movement without turning armor-restricted flight unconditional", () => {
+		const candidate = {
+			...undead,
+			identity: {name: "Fairy", source: "MPMM"},
+			changes: [],
+			eligibility: {},
+			provenance: {edition: "classic", page: 11},
+		};
+		const group = {name: "Species movement", options: [], selection: "one", required: true};
+		const option = {
+			name: "Flight",
+			eligibility: {},
+			changes: [{op: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"}],
+			manualReview: [],
+		};
+		const entries = getCreatureTransformationOptionHoverEntries({candidate, group, option, sourceLabel});
+		expect(entries.find(it => it.name === "Automatic mechanical effects").entries)
+			.toContain("fly speed equal to effective walking speed only while not wearing medium or heavy armor");
+	});
 });

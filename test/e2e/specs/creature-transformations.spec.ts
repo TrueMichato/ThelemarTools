@@ -123,6 +123,10 @@ test("Fairy flight previews as armor-restricted movement and survives encounter 
 	await editor.choose("race:fairy|mpmm");
 	await editor.chooseOption("Species spell grant and ability", "choice-1");
 	await editor.expectLivePreview();
+	await editor.selectedRecipeInfo().click();
+	await expect(editor.nativeHover).toContainText("fly speed equal to effective walking speed only while not wearing medium or heavy armor");
+	await editor.dismissNativeHover();
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Fly speed: none → 30 ft. while not wearing medium or heavy armor");
 	await expect(editor.beforeStatblock).not.toContainText(/fly 30 ft/i);
 	await expect(editor.afterStatblock).toContainText(/fly 30 ft\. while not wearing medium or heavy armor/i);
 	expect(await editor.savedEncounter()).toEqual(before);
