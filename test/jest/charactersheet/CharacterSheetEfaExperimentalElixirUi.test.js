@@ -1,6 +1,7 @@
 import {jest} from "@jest/globals";
 
 import "./setup.js";
+import {installFeatureDisclosureDom} from "./fixtures/feature-disclosure-dom.js";
 
 if (!String.prototype.escapeQuotes) {
 	String.prototype.escapeQuotes = function () {
@@ -29,9 +30,13 @@ import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-efa-experimental-elixir-ui.js";
-import "../../../js/charactersheet/charactersheet-features.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
 import "../../../js/charactersheet/charactersheet-rest.js";
+
+// Features captures e_ during import; only its disclosure descendants need a DOM adapter.
+const restoreFeatureDom = installFeatureDisclosureDom();
+await import("../../../js/charactersheet/charactersheet-features.js");
+restoreFeatureDom();
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetModal = globalThis.CharacterSheetModal;
@@ -152,6 +157,12 @@ describe("EFA Experimental Elixir feature status", () => {
 		expect(html).toContain("Supplies ready");
 		expect(html).toContain("Create with Spell Slot");
 		expect(html).not.toContain("efa-elixir-create-reason");
+	});
+
+	test("links the feature disclosure toggle to its rendered body", () => {
+		const html = makeFeatures(makeState())._renderFeature(EXACT_FEATURE).outerHTML;
+		expect(html).toContain("class=\"charsheet__feature-body\" style=\"display: none;\" id=\"charsheet-feature-body-efa-experimental-elixir\"");
+		expect(html).toMatch(/class="charsheet__feature-toggle[^"]*" aria-expanded="false" aria-controls="charsheet-feature-body-efa-experimental-elixir" aria-label="Toggle details for Experimental Elixir"/);
 	});
 
 	test("explains missing focus, slot, and spent Magic action instead of silently disabling", () => {
