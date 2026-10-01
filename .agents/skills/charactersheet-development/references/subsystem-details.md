@@ -4581,6 +4581,11 @@ cannot leave a stale receipt. Save/load normalization preserves a valid receipt 
 
 ### Short Rest
 - **Hit Dice**: d{classHitDie} + CON mod per die spent; minimum 1 HP healed
+- **Overview Use Hit Die**: Different spendable die types prompt for the class/type
+  before spending; cancel leaves HP and pools untouched. The selected pool is
+  rechecked after the choice; Shift-click uses that die's maximum face. Overview
+  adjusts the chosen pool and applies healing exactly once, while Short Rest
+  retains its own independent per-pool roll/confirm flow.
 - **Arcane Recovery** (Wizard): Select slot levels to recover, capped by LEVEL SUM (not count). "Max 5 levels" means any combo summing ≤5. No 6th+ slots.
 - **Natural Recovery** (Land Druid): Same mechanic as Arcane Recovery
 - **Sorcerous Restoration** (Sorcerer 20): Auto-applies via `state.applySorcerousRestoration()`, not manual

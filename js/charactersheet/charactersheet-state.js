@@ -15918,9 +15918,8 @@ class CharacterSheetState {
 
 	/**
 	 * Returns the die type (e.g. "d10") of the largest-faced pool that still has
-	 * dice available to spend, or null if none remain. Used by the single
-	 * Overview "Use Hit Die" button to pick a sensible die for multiclass
-	 * characters (Short Rest offers full per-type control).
+	 * dice available to spend, or null if none remain. Retained for callers
+	 * seeking a default; Overview and Short Rest offer explicit per-type choice.
 	 * @returns {string|null}
 	 */
 	getLargestSpendableHitDieType () {

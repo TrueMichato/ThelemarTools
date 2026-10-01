@@ -199,10 +199,10 @@ hp: {
     temp: 0,                   // Temporary HP
     maxModifier: 0,            // Bonus/penalty to max (e.g., from exhaustion)
 },
-hitDice: [
-    {class: "Fighter", die: 10, max: 5, current: 3},
-    {class: "Rogue", die: 8, max: 3, current: 3},
-],
+hitDice: {
+    d10: {max: 5, current: 3},
+    d8: {max: 3, current: 3},
+},
 deathSaves: {
     successes: 0,
     failures: 0,
@@ -233,6 +233,13 @@ weaponProficiencies: ["simple", "martial"],
 // Armor
 armorProficiencies: ["light", "medium", "heavy", "shields"],
 ```
+
+Hit Dice are stored by die type, not by class. Overview's **Use Hit Die**
+spends the only available pool directly or, for different die types, asks which
+class/die pool to use. Canceling does nothing; a selected pool is checked again
+before spending. Shift-click rolls that die's maximum face. The die is spent
+once and rolled healing is applied once, capped at maximum HP. Short Rest
+retains its own per-pool choices.
 
 Armor categories (`light`/`Light Armor`, `shield`/`Shields`) and weapon
 categories (`simple`/`Simple weapons`, `martial`/`Martial weapons`) are compared
