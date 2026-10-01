@@ -3,21 +3,57 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 63 — Multiclass, spells, tool checks, progression, and TGTT copy
-
-- **S1 (bugs 1–2) — Multiclass proficiencies and Hit Dice:** Proficiencies sometimes display twice after multiclassing. The Overview Hit Die action chooses the largest die, so a Ranger/Druid cannot spend a Druid die while Ranger dice remain. Own proficiency aggregation/display and the Overview Hit Die picker, including its pool rendering; preserve Short Rest's independent per-die choice. Coordinate the resulting tool-proficiency shape with S3.
-- **S2 (bug 3) — Shadow Blade:** Casting the XGE spell must create a usable weapon with its authored damage, properties, proficiency, range, dim-light advantage, scaling, and lifecycle; its damage must not become a universal buff to other attacks. Own Shadow Blade casting, generated-weapon identity, combat projection, and spell cleanup, without changing unrelated attack rules.
-- **S3 (bug 4) — Tool-roll skill choice:** Roll Tool Check should offer any skill, while only a proficient paired skill grants the applicable advantage. Own tool-check setup/roll and linked-check behavior; verify the candidate list and enabled state against S1's deduplicated proficiency output.
-- **S4 (bugs 5–6) — Monk improvements and repeatable ASI feat:** TGTT Monk ASI/Feat opportunities are missing from Level Up and Quick Build; the XPHB Ability Score Improvement feat is marked repeatable in source data but cannot be selected repeatedly. Own shared improvement/feat eligibility and its affected flows, including regression coverage for progression-history replay and Respec; preserve class/source specificity.
-- **S5 (bugs 7–8) — TGTT text and duration:** Rewrite Unhindered Flurry's broken sentence to state its intended no-Focus-Point rule clearly, and encode Andrui's Baneful Backfire's duration as lasting until triggered using the established spell-duration form. Own only these two homebrew entries and focused data tests; do not change the TGTT Monk class-feature reference list owned by S4.
-
-The orchestrator alone updates this file. Each session supplies causal Jest coverage and a shared-surface report; integration checks cross-session behavior and runs the full repository gate before moving `character-sheet-wip`. The existing item-editor follow-up remains open.
-
 ### Round 62 — Item editor follow-up (plan only)
 
 - **Custom/Modify Item editor (bug 7):** The item-editor session completed a phased plan based on the previously approved shared-editor design and the DMG/XDMG Boots findings. Create/Modify/catalog-clone implementation is still pending; no editor code was changed in this round.
 
 ## Closed Bugs
+
+### Round 63 — Multiclass, spells, tool checks, progression, and TGTT copy
+
+**Integration.** Five isolated fix branches and a test-fixture repair branch were
+merged `--no-ff`. Cross-branch checks covered the multiclass proficiency/tool
+boundary and the Monk improvement/feat ownership paths. An integration-only
+tooltip correction makes the initial Overview copy agree with the new Hit Die
+choice. The unchanged baseline's three failing Jest suites (18 tests) were
+repaired in test fixtures/assertions without production changes. Final ESLint,
+configured Stylelint, and JSON validation passed; the memory-bounded full Jest
+run passed **752 suites / 19,438 tests** (2 suites / 208 tests skipped). The
+unrelated Round 62 item-editor follow-up remains open.
+
+- **Multiclass proficiencies (bug 1):** Equivalent armor/weapon labels could be
+  granted or rendered twice, and legacy saves already contained duplicate
+  entries. Semantic comparisons now prevent duplicate grants, while a read-only
+  projection displays unique proficiencies without rewriting saved arrays or
+  losing distinct named tools.
+- **Ranger/Druid Hit Dice (bug 2):** Overview spent the largest available die
+  automatically. It now lets the player choose an available die type, safely
+  cancels or rejects a stale choice, and retains Shift-click maximum healing;
+  Short Rest's separate die choice is unchanged.
+- **Shadow Blade (bug 3):** The spell's damage had been registered as an
+  all-attacks buff instead of a weapon. Casting now summons a source-scoped
+  weapon with the spell's damage, upcasting, properties, range, and dim-light
+  advantage, with concentration and throw/drop cleanup.
+- **Tool-roll skill choice (bug 4):** The picker had hidden untrained skills.
+  It now offers all relevant skills, keeps suggested skills first, and derives
+  one proficiency bonus from the stronger live tool/skill training. The
+  2024 paired-check advantage still requires both proficiencies; saved checks
+  update with later training changes.
+- **Monk improvements (bug 5):** TGTT Monk's improvement references point to
+  XPHB Monk features, which the source filter had rejected. Verified
+  same-class, same-level references now resolve for Level Up, Quick Build,
+  progression, and Respec without relaxing unrelated feature identities.
+- **Repeatable 2024 ASI (bug 6):** Duplicate-name feat rejection and
+  first-match ownership discarded later picks. Each repeated ASI now has its
+  own decision, ID, choice, and effect receipt across leveling, replay, reload,
+  and Respec; the Features picker also permits repeatable feats. The existing
+  picker still only offers +2 to one ability, not the data's +1/+1 alternative.
+- **Unhindered Flurry (bug 7):** Its wording now states that the level-8
+  ability costs no Focus Points, and its XPHB Flurry of Blows reference uses the
+  correct level-2 feature UID.
+- **Andrui's Baneful Backfire (bug 8):** Its duration uses the established
+  spell representation rendered as **Until triggered**, without adding an
+  unspoken expiry or repeat-trigger rule.
 
 ### Round 62 — Character Sheet regressions and Marathoner
 
