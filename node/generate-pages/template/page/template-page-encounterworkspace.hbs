@@ -28,6 +28,7 @@
 				<div>
 					<h2 id="ew-name"></h2>
 					<p>Working copy · saved Bestiary list unchanged</p>
+					<p class="ew__xp-total" id="ew-xp-total" role="status" aria-live="polite"></p>
 				</div>
 			</header>
 			<div class="ew__notices" id="ew-notices" aria-label="Entries not loaded" hidden></div>
@@ -188,6 +189,38 @@
 					</section>
 					<div class="ew__statblocks" id="ew-statblocks"></div>
 					<button type="button" class="ve-btn ve-btn-default ew__load-more" id="ew-cards-more" hidden>Load more statblocks</button>
+					<details class="ew__cr-assessment" id="ew-cr-assessment">
+						<summary>Assess viewed creature's CR · 2014 advisory</summary>
+						<div class="ew__cr-body">
+							<p id="ew-cr-baseline"></p>
+							<p id="ew-cr-changes"></p>
+							<p id="ew-cr-notes"></p>
+							<p class="ew__operation-help">Adjust HP/AC for defenses and traits. Enter expected damage across three rounds, including reactions, auras, legendary/lair actions at their likely frequency. Text-only notes add nothing unless you include an effect. Resolve transformation manual-review items first. This is a 2014 DMG estimate, not a 2024 rating.</p>
+							<form class="ew__cr-form" id="ew-cr-form" novalidate>
+								<label for="ew-cr-hp">Effective HP for CR
+									<input class="ve-form-control" id="ew-cr-hp" type="number" min="1" max="850" step="1" required>
+								</label>
+								<label for="ew-cr-ac">Effective AC for CR
+									<input class="ve-form-control" id="ew-cr-ac" type="number" min="0" max="40" step="1" required>
+								</label>
+								<label for="ew-cr-damage">Total expected damage over 3 rounds
+									<input class="ve-form-control" id="ew-cr-damage" type="number" min="0" max="960" step="1" required>
+								</label>
+								<label for="ew-cr-attack-type">Main attack measure
+									<select class="ve-form-control" id="ew-cr-attack-type">
+										<option value="attack">Attack bonus</option>
+										<option value="save">Save DC</option>
+									</select>
+								</label>
+								<label for="ew-cr-attack">Attack bonus or save DC
+									<input class="ve-form-control" id="ew-cr-attack" type="number" min="-10" max="40" step="1" required>
+								</label>
+								<button type="submit" class="ve-btn ve-btn-primary">Estimate 2014 CR</button>
+							</form>
+							<p class="ew__cr-result" id="ew-cr-result" role="status" aria-live="polite"></p>
+							<p class="ew__operation-help">An estimate never changes the creature's saved CR, award XP, or adjusted encounter difficulty. To adopt it, choose <strong>Edit viewed statblock</strong> and explicitly edit CR (and any custom XP override) there.</p>
+						</div>
+					</details>
 				</section>
 				<aside class="ew__rail" aria-label="Monster targets">
 					<div class="ew__rail-header">

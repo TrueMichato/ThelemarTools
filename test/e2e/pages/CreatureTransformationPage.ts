@@ -9,6 +9,30 @@ export class CreatureTransformationPage {
 		return this.root.locator(`.bqa__transformation-choice[data-recipe-id="${id}"]`);
 	}
 
+	optionControl (group: string, value: string) {
+		return this.root.getByRole("group", {name: new RegExp(`^${group}(?: \\(required\\))?$`)})
+			.locator(`.bqa__transformation-option input[value="${value}"]`);
+	}
+
+	async textContrast (foregroundSelector: string, backgroundSelector: string) {
+		return this.root.locator(foregroundSelector).first().evaluate((node, selector) => {
+			const foreground = getComputedStyle(node).color;
+			const surface = node.closest(selector);
+			if (!surface) throw new Error(`No background surface for ${selector}`);
+			const background = getComputedStyle(surface).backgroundColor;
+			const luminance = (color: string) => {
+				const channels = color.match(/\d+/g)!.slice(0, 3).map(value => {
+					const channel = Number(value) / 255;
+					return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+				});
+				return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+			};
+			const a = luminance(foreground);
+			const b = luminance(background);
+			return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+		}, backgroundSelector);
+	}
+
 	async templateContrast (id: string) {
 		return this.templateChoice(id).evaluate(node => {
 			const background = getComputedStyle(node).backgroundColor;
@@ -129,7 +153,7 @@ export class CreatureTransformationPage {
 	}
 
 	async chooseOption (group: string, value: string) {
-		await this.root.getByRole("combobox", {name: group}).selectOption(value);
+		await this.optionControl(group, value).check();
 	}
 
 	async acknowledge () {

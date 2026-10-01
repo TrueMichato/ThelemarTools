@@ -127,13 +127,94 @@
 		&__source {
 			padding: 4px 0 8px;
 
+			> div {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto;
+				gap: 2px 12px;
+				width: 100%;
+			}
+
 			h2 {
-				margin: 0 0 4px;
+				grid-column: 1;
+				margin: 0;
 				font-size: 1.5rem;
+				overflow-wrap: anywhere;
 			}
 
 			p {
+				grid-column: 1 / -1;
 				margin: 0;
+			}
+
+			.ew__xp-total {
+				grid-column: 2;
+				grid-row: 1;
+				align-self: center;
+				text-align: right;
+				overflow-wrap: anywhere;
+				font-weight: 600;
+			}
+		}
+
+		&__cr-assessment {
+			margin-top: 14px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			&[hidden] {
+				display: none;
+			}
+
+			> summary {
+				padding: 10px 12px;
+				font-weight: 600;
+				cursor: pointer;
+			}
+		}
+
+		&__cr-body {
+			padding: 0 14px 14px;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+
+			> p {
+				max-width: 75ch;
+				margin: 10px 0;
+				overflow-wrap: anywhere;
+			}
+		}
+
+		&__cr-form {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+			gap: 10px;
+			margin-top: 14px;
+
+			label {
+				display: grid;
+				align-content: end;
+				gap: 5px;
+				margin: 0;
+				font-weight: 600;
+			}
+
+			input,
+			select,
+			button {
+				width: 100%;
+				min-height: 44px;
+				font-size: max(16px, 1rem);
+			}
+
+			button {
+				align-self: end;
+			}
+		}
+
+		&__cr-result {
+			font-weight: 600;
+
+			&--error {
+				color: vars.$rgb-alert-text-danger;
 			}
 		}
 
@@ -353,6 +434,7 @@
 
 		&__statblock-heading {
 			display: flex;
+			flex-wrap: wrap;
 			align-items: center;
 			justify-content: space-between;
 			gap: 8px;
@@ -365,6 +447,10 @@
 				border: 0;
 				background: none;
 			}
+		}
+
+		&__statblock-xp {
+			font-weight: 600;
 		}
 
 		&__operation,
@@ -1529,6 +1615,16 @@
 		&__statblock-heading {
 			border-color: vars-night.$rgb-border-grey--night;
 			background: vars-night.$rgb-bg--alt-night;
+		}
+
+		&__cr-assessment,
+		&__cr-body {
+			border-color: vars-night.$rgb-border-grey--night;
+			background: vars-night.$rgb-bg--alt-night;
+		}
+
+		&__cr-result--error {
+			color: #ffa5a5;
 		}
 	}
 

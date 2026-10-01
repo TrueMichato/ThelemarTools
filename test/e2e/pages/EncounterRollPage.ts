@@ -115,17 +115,25 @@ export class EncounterRollPage {
 		return this.page.locator(`.ew__statblock[data-instance-id="${instanceId}"] .ew__resources`);
 	}
 
+	statblock (instanceId: string) {
+		return this.page.locator(`.ew__statblock[data-instance-id="${instanceId}"]`);
+	}
+
+	inlineResource (instanceId: string, key: string) {
+		return this.statblock(instanceId).locator(`[data-inline-resource="${key}"]`);
+	}
+
 	resourceManager (instanceId: string) {
 		return this.resourcePanel(instanceId).locator(":scope > .ew__resource-manager");
 	}
 
-	async addSavedStatblockPatch (instanceIndex: number, id: string, set: Record<string, number>, migrateFromV4 = false) {
+	async addSavedStatblockPatch (instanceIndex: number, id: string, set: Record<string, number | string>, migrateFromV4 = false) {
 		await this.page.evaluate(async ({instanceIndex, id, set, migrateFromV4}) => {
 			const globals = globalThis as typeof globalThis & {
 				StorageUtil: {
 					pGetForPage: (key: string, options: {page: string}) => Promise<{
 						version: number,
-						instances: {statblockOperations: {id: string, type: string, data: {patch: {set: Record<string, number>}}}[]}[],
+						instances: {statblockOperations: {id: string, type: string, data: {patch: {set: Record<string, number | string>}}}[]}[],
 					}>,
 					pSetForPage: (key: string, value: unknown, options: {page: string}) => Promise<void>,
 				},

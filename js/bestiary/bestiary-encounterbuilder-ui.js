@@ -1,5 +1,6 @@
 import {EncounterBuilderUi} from "../encounterbuilder/encounterbuilder-ui.js";
 import {EncounterBuilderHelpers} from "../utils-list-bestiary.js";
+import {BESTIARY_ENCOUNTER_HANDOFF_PARAM, stageBestiaryEncounterHandoff} from "../encounterworkspace/encounterworkspace-bestiary-handoff.js";
 
 export class EncounterBuilderUiBestiary extends EncounterBuilderUi {
 	static _HASH_KEY = "encounterbuilder";
@@ -24,8 +25,25 @@ export class EncounterBuilderUiBestiary extends EncounterBuilderUi {
 		document.getElementById("wrp-pagecontent").classList.add("best-ecgen__hidden");
 
 		veEs(`#btn-encounterbuild`).vee.onn("click", () => Hist.setSubhash(this.constructor._HASH_KEY, true));
+		document.querySelectorAll(".bestiary__encounter-workspace-link").forEach(link => link.addEventListener("click", evt => {
+			if (!this.isActive()) return;
+			evt.preventDefault();
+			this._pOpenEncounterWorkspace(link).catch(e => JqueryUtil.doToast({
+				content: `Could not open the current encounter: ${e.message} Your Bestiary encounter is unchanged.`,
+				type: "danger",
+			}));
+		}));
 
 		this._dispSummary = veEs(`#totalcr`);
+	}
+
+	async _pOpenEncounterWorkspace (link) {
+		const exportedSublist = await this._sublistManager.pGetExportableSublist({isMemoryOnly: true});
+		const destination = new URL(link.href);
+		if (destination.origin !== window.location.origin) throw new Error("Encounter Workspace must be on the same site.");
+		const token = stageBestiaryEncounterHandoff({exportedSublist});
+		destination.searchParams.set(BESTIARY_ENCOUNTER_HANDOFF_PARAM, token);
+		window.location.assign(destination.href);
 	}
 
 	/* -------------------------------------------- */

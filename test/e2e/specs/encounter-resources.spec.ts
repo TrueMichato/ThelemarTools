@@ -5,16 +5,22 @@ test("resources and concentration belong to each monster and survive reload with
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed();
 	const first = encounter.resourcePanel("one");
+	const block = encounter.statblock("one");
 	const manager = encounter.resourceManager("one");
 	await expect(manager).toHaveJSProperty("open", false);
 	await expect(first).toBeVisible();
-	await expect(first.getByText("Blade (recharge 5–6)")).toBeVisible();
-	await expect(first.getByRole("button", {name: "Blade: mark spent"})).toBeVisible();
+	const recharge = encounter.inlineResource("one", "recharge:auto:recharge:action:0");
+	await expect(recharge).toHaveAttribute("aria-pressed", "true");
+	await expect(recharge).toHaveAttribute("aria-label", "Blade: mark spent");
+	await expect(first).not.toContainText("Blade");
 	await expect(manager.locator(".ew__resource-fields")).toBeHidden();
 	await encounter.clickRenderedRoll(0, "recharge");
-	await expect(first.getByRole("button", {name: "Blade: mark spent"})).toBeVisible();
-	await first.getByRole("button", {name: "Blade: mark spent"}).click();
-	await expect(first.getByRole("button", {name: "Blade: mark ready"})).toBeFocused();
+	await expect(recharge).toHaveAttribute("aria-pressed", "true");
+	const rollsBefore = await encounter.rolledEntries.count();
+	await recharge.click();
+	await expect(encounter.rolledEntries).toHaveCount(rollsBefore);
+	await expect(recharge).toHaveAttribute("aria-label", "Blade: mark ready");
+	await expect(recharge).toBeFocused();
 	await expect(manager).toHaveJSProperty("open", false);
 
 	await manager.locator(":scope > summary").click();
@@ -44,12 +50,12 @@ test("resources and concentration belong to each monster and survive reload with
 	await abilityPip.click();
 	await expect(abilityPip).toBeFocused();
 	await expect(first.getByLabel("Shield charm: 1 of 3 remaining")).toBeVisible();
-	await first.getByRole("button", {name: /start concentration/}).click();
-	await expect(first.getByRole("button", {name: /end concentration/})).toBeFocused();
+	await block.getByRole("button", {name: /start concentration/}).click();
+	await expect(block.getByRole("button", {name: /end concentration/})).toBeFocused();
 	await manager.getByLabel("Spell or effect (optional)").fill("Haste");
 	await manager.getByRole("button", {name: "Save label"}).click();
 	await manager.locator(":scope > summary").click();
-	await expect(first.getByText("Concentrating: Haste")).toBeVisible();
+	await expect(block.getByRole("button", {name: /end concentration/})).toContainText("Concentrating: Haste");
 	await page.locator(".ew__statblock [data-field=initiative]").fill("17");
 	await page.locator(".ew__statblock [data-field=initiative]").press("Tab");
 	await page.locator("#ew-turn-start").click();
@@ -60,23 +66,23 @@ test("resources and concentration belong to each monster and survive reload with
 	const second = encounter.resourcePanel("two");
 	await expect(second).not.toContainText("Shield charm");
 	await expect(second).not.toContainText("Haste");
-	await expect(second.getByRole("button", {name: "Blade: mark spent"})).toBeVisible();
+	await expect(encounter.inlineResource("two", "recharge:auto:recharge:action:0")).toHaveAttribute("aria-label", "Blade: mark spent");
 	await page.reload();
 	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 	await encounter.focus(0);
-	await expect(first.getByText("Concentrating: Haste")).toBeVisible();
+	await expect(block.getByRole("button", {name: /end concentration/})).toContainText("Concentrating: Haste");
 	await expect(first.getByLabel("Level 1: 1 of 3 remaining")).toBeVisible();
 	await expect(first.getByLabel("Shield charm: 1 of 3 remaining")).toBeVisible();
-	await expect(first.getByRole("button", {name: "Blade: mark ready"})).toBeVisible();
-	await expect(first.getByRole("button", {name: /end concentration/})).toHaveAttribute("aria-pressed", "true");
+	await expect(recharge).toHaveAttribute("aria-label", "Blade: mark ready");
+	await expect(block.getByRole("button", {name: /end concentration/})).toHaveAttribute("aria-pressed", "true");
 	await manager.locator(":scope > summary").click();
 	await expect(manager.getByLabel("Spell or effect (optional)")).toHaveValue("Haste");
 	await expect(page.locator('.ew__roster-row[data-instance-id="one"]')).toContainText("Concentrating");
 	await abilityPip.click();
 	await expect(abilityPip).toBeFocused();
 	await expect(first.getByLabel("Shield charm: 2 of 3 remaining")).toBeVisible();
-	await first.getByRole("button", {name: /end concentration/}).click();
-	await expect(first.getByRole("button", {name: /start concentration/})).toHaveAttribute("aria-pressed", "false");
+	await block.getByRole("button", {name: /end concentration/}).click();
+	await expect(block.getByRole("button", {name: /start concentration/})).toHaveAttribute("aria-pressed", "false");
 	await expect(manager).toHaveJSProperty("open", true);
 });
 
@@ -207,24 +213,239 @@ test("inline controls follow explicit transformed defaults without reinitializin
 	await page.reload();
 	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 	const panel = encounter.resourcePanel("one");
-	await expect(panel.getByLabel("Level 1: 2 of 2 remaining")).toBeVisible();
-	await expect(panel.getByLabel("Level 3: 2 of 2 remaining")).toBeVisible();
-	await expect(panel.getByLabel("Ward (2/Day): 2 of 2 remaining")).toBeVisible();
+	const firstSlot = encounter.inlineResource("one", "slots:1");
+	const thirdSlot = encounter.inlineResource("one", "slots:3");
+	const ward = encounter.inlineResource("one", "ability:auto:ability:trait:0");
+	await expect(firstSlot).toHaveAttribute("aria-label", "Level 1: 2 of 2 remaining");
+	await expect(thirdSlot).toHaveAttribute("aria-label", "Level 3: 2 of 2 remaining");
+	await expect(ward).toHaveAttribute("aria-label", "Ward (2/Day): 2 of 2 remaining");
 	await expect(panel.getByLabel("Legendary Actions: 3 of 3 remaining")).toBeVisible();
-	await expect(panel.getByRole("heading", {name: "Traits"})).toBeVisible();
 	await expect(panel.getByRole("heading", {name: "Legendary actions"})).toBeVisible();
-	await expect(panel.locator(".ew__resource-row")).toHaveCount(5);
-	await panel.getByRole("button", {name: /Level 1, use 2 of 2: available; spend one/}).click();
-	await panel.getByRole("button", {name: /Ward \(2\/Day\), use 2 of 2: available; spend one/}).click();
-	await expect(panel.getByLabel("Level 1: 1 of 2 remaining")).toBeVisible();
+	await expect(panel.locator(".ew__resource-row")).toHaveCount(1);
+	await firstSlot.getByRole("button", {name: /Level 1, use 2 of 2: available; spend one/}).click();
+	await ward.getByRole("button", {name: /Ward \(2\/Day\), use 2 of 2: available; spend one/}).click();
+	await expect(firstSlot).toHaveAttribute("aria-label", "Level 1: 1 of 2 remaining");
 	await encounter.addSavedStatblockPatch(0, "transform-actions", {legendaryActions: 5});
 	await page.reload();
 	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
-	await expect(panel.getByLabel("Level 1: 1 of 2 remaining")).toBeVisible();
-	await expect(panel.getByLabel("Ward (2/Day): 1 of 2 remaining")).toBeVisible();
+	await expect(firstSlot).toHaveAttribute("aria-label", "Level 1: 1 of 2 remaining");
+	await expect(ward).toHaveAttribute("aria-label", "Ward (2/Day): 1 of 2 remaining");
 	await expect(panel.getByLabel("Legendary Actions: 3 of 3 remaining")).toBeVisible();
 	await encounter.focus(1);
-	await expect(encounter.resourcePanel("two").getByLabel("Level 1: 4 of 4 remaining")).toBeVisible();
+	await expect(encounter.inlineResource("two", "slots:1")).toHaveAttribute("aria-label", "Level 1: 4 of 4 remaining");
+});
+
+test("inline pips share their rendered heading line, stay outside dice links, and remain touch-sized in both themes", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({
+		monsterOverride: {
+			spellcasting: [{name: "Spellcasting", spells: {"1": {slots: 2, spells: ["{@spell shield}"]}}}],
+			trait: [{name: "Ward (2/Day)", entries: ["Ward an ally."]}],
+			bonus: [{name: "Quick Ward (2/Day)", entries: ["Ward an ally."]}],
+			action: [{name: "Pulse {@recharge 5}", entries: ["{@damage 1d6} damage."]}],
+			legendary: [{name: "Surge (2/Day)", entries: ["Move 10 feet."]}],
+			legendaryActions: 2,
+		},
+	});
+	for (const width of [1200, 390]) {
+		await page.setViewportSize({width, height: 900});
+		for (const night of [false, true]) {
+			await page.locator("html").evaluate((html, enabled) => {
+				html.classList.toggle("ve-night-mode", enabled);
+				html.classList.toggle("ve-night-mode--standard", enabled);
+			}, night);
+			for (const key of [
+				"slots:1", "ability:auto:ability:trait:0", "ability:auto:ability:bonus:0",
+				"ability:auto:ability:legendary:0", "ability:auto:legendary-actions",
+			]) {
+				const metrics = await encounter.inlineResource("one", key).evaluate(element => {
+					const target = element.querySelector("button") || element;
+					const heading = element.closest(".ve-rd__h, .ve-rd__p-list-item, .ve-rd__li-spell > p, .ve-stats__sect-header-inner");
+					const text = heading?.querySelector(".entry-title-inner, .ve-rd__list-item-name")
+						|| heading?.firstChild;
+					if (!heading || !text) return null;
+					const range = document.createRange();
+					range.selectNodeContents(text);
+					const label = range.getClientRects()[0];
+					const button = target.getBoundingClientRect();
+					return {
+						horizontal: button.left >= label.right - 2,
+						centerOffset: Math.abs((button.top + button.bottom) / 2 - (label.top + label.bottom) / 2),
+						targetWidth: button.width,
+						targetHeight: button.height,
+						insideDiceLink: !!target.closest("[data-packed-dice], a"),
+					};
+				});
+				expect(metrics, `${key} at ${width}px, ${night ? "night" : "day"}`).not.toBeNull();
+				expect(metrics!.horizontal).toBe(true);
+				expect(metrics!.centerOffset).toBeLessThanOrEqual(12);
+				expect(metrics!.targetWidth).toBeGreaterThanOrEqual(44);
+				expect(metrics!.targetHeight).toBeGreaterThanOrEqual(44);
+				expect(metrics!.insideDiceLink).toBe(false);
+			}
+			const recharge = encounter.inlineResource("one", "recharge:auto:recharge:action:0");
+			await expect(recharge).toBeVisible();
+			const rolls = await encounter.rolledEntries.count();
+			await recharge.hover();
+			await expect(page.locator(".hwin")).toHaveCount(0);
+			await recharge.click();
+			await expect(encounter.rolledEntries).toHaveCount(rolls);
+			await expect(recharge).toBeFocused();
+		}
+	}
+});
+
+test("duplicate and stale entry identities fall back to management, not a same-named statblock heading", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({
+		monsterOverride: {
+			trait: [
+				{name: "Echo (2/Day)", entries: ["First echo."]},
+				{name: "Echo (2/Day)", entries: ["Second echo."]},
+			],
+			bonus: [{name: "Echo (2/Day)", entries: ["Different bonus action."]}],
+			action: [{name: "Blade", entries: ["Recharge {@recharge 5}."]}],
+		},
+	});
+	const panel = encounter.resourcePanel("one");
+	const manager = encounter.resourceManager("one");
+	await expect(encounter.inlineResource("one", "ability:auto:ability:trait:0")).toHaveCount(0);
+	await expect(encounter.inlineResource("one", "ability:auto:ability:trait:1")).toHaveCount(0);
+	await expect(encounter.inlineResource("one", "ability:auto:ability:bonus:0")).toHaveCount(1);
+	await expect(panel.locator(".ew__resource-row")).toHaveCount(2);
+	await manager.locator(":scope > summary").click();
+	const add = manager.locator('details[data-resource-key="ability:add"]');
+	await add.locator("summary").click();
+	await add.getByLabel("Ability name").fill("Echo (2/Day)");
+	await add.getByRole("button", {name: "Add ability"}).click();
+	await expect(panel.locator(".ew__resource-row")).toHaveCount(3);
+	await panel.getByRole("button", {name: /Echo \(2\/Day\), use 1 of 1:/}).click();
+	await expect(panel.getByLabel("Echo (2/Day): 0 of 1 remaining")).toBeVisible();
+	await encounter.addSavedStatblockPatch(0, "rename-one", {"bonus.0.name": "Other Ward (2/Day)"});
+	await page.reload();
+	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
+	await expect(encounter.inlineResource("one", "ability:auto:ability:bonus:0")).toHaveCount(0);
+	await expect(encounter.resourcePanel("one").locator(".ew__resource-row")).toHaveCount(4);
+	await expect(encounter.inlineResource("one", "recharge:auto:recharge:action:0")).toHaveCount(1);
+	await encounter.focus(1);
+	await expect(encounter.inlineResource("two", "ability:auto:ability:bonus:0")).toHaveCount(1);
+});
+
+test("large explicit pools use bounded inline controls and do not publish failed saves", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({monsterOverride: {
+		trait: [{name: "Storm (20/Day)", entries: ["Call the storm."]}],
+		bonus: [{name: "Surge (8/Day)", entries: ["Surge forward."]}],
+	}});
+	const pool = encounter.inlineResource("one", "ability:auto:ability:trait:0");
+	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 20 of 20 remaining");
+	await expect(pool.locator(".ew__inline-resource-pip")).toHaveCount(0);
+	const surge = encounter.inlineResource("one", "ability:auto:ability:bonus:0");
+	await expect(surge.locator(".ew__inline-resource-pip")).toHaveCount(0);
+	await expect(surge.getByRole("button", {name: "Spend one Surge (8/Day) use"})).toBeVisible();
+	const spend = pool.getByRole("button", {name: "Spend one Storm (20/Day) use"});
+	await expect(pool.getByRole("button", {name: "Restore one Storm (20/Day) use"})).toBeDisabled();
+	await page.evaluate(() => {
+		const globals = globalThis as typeof globalThis & {
+			StorageUtil: {pSetForPage: (...args: unknown[]) => Promise<void>},
+			restoreEncounterSave?: () => void,
+		};
+		const original = globals.StorageUtil.pSetForPage;
+		globals.StorageUtil.pSetForPage = async () => { throw new Error("Storage full"); };
+		globals.restoreEncounterSave = () => { globals.StorageUtil.pSetForPage = original; };
+	});
+	await spend.click();
+	await expect(page.locator("#ew-status[role=alert]")).toContainText("Storage full");
+	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 20 of 20 remaining");
+	await page.evaluate(() => {
+		const globals = globalThis as typeof globalThis & {restoreEncounterSave?: () => void};
+		globals.restoreEncounterSave?.();
+	});
+	await spend.click();
+	await expect(spend).toBeFocused();
+	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 19 of 20 remaining");
+	await page.reload();
+	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
+	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 19 of 20 remaining");
+});
+
+test("pending resource saves disable only resource controls and restore their intended state on success and failure", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({monsterOverride: {
+		trait: [{name: "Ward (2/Day)", entries: ["Ward an ally."]}],
+		bonus: [{name: "Surge (8/Day)", entries: ["Surge forward."]}],
+		spellcasting: [{name: "Spellcasting", spells: {"1": {slots: 2, spells: ["{@spell shield}"]}}}],
+	}});
+	const ward = encounter.inlineResource("one", "ability:auto:ability:trait:0");
+	const slot = encounter.inlineResource("one", "slots:1");
+	const surge = encounter.inlineResource("one", "ability:auto:ability:bonus:0");
+	const recharge = encounter.inlineResource("one", "recharge:auto:recharge:action:0");
+	const concentration = encounter.statblock("one").getByRole("button", {name: /start concentration/});
+	const restoreSurge = surge.getByRole("button", {name: "Restore one Surge (8/Day) use"});
+	await expect(restoreSurge).toBeDisabled();
+	await page.evaluate(() => {
+		const globals = globalThis as typeof globalThis & {
+			StorageUtil: {pSetForPage: (...args: unknown[]) => Promise<void>},
+			releaseEncounterSave?: (fail?: boolean) => void,
+		};
+		const original = globals.StorageUtil.pSetForPage;
+		globals.StorageUtil.pSetForPage = (...args) => new Promise<void>((resolve, reject) => {
+			globals.releaseEncounterSave = (fail = false) => {
+				if (fail) reject(new Error("Storage full"));
+				else original.apply(globals.StorageUtil, args).then(resolve, reject);
+			};
+		});
+	});
+	await ward.getByRole("button", {name: /Ward \(2\/Day\), use 2 of 2:/}).click();
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "true");
+	await expect(ward.locator("button").first()).toBeDisabled();
+	await expect(ward.locator("button").last()).toBeDisabled();
+	await expect(slot.locator("button").first()).toBeDisabled();
+	await expect(slot.locator("button").last()).toBeDisabled();
+	await expect(surge.locator("button").first()).toBeDisabled();
+	await expect(surge.locator("button").last()).toBeDisabled();
+	await expect(recharge).toBeDisabled();
+	await expect(concentration).toBeDisabled();
+	await expect(encounter.statblock("one").locator("[data-packed-dice]").first()).toBeEnabled();
+	await page.evaluate(() => (globalThis as typeof globalThis & {releaseEncounterSave: () => void}).releaseEncounterSave());
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+	await expect(page.locator("#ew-status")).toContainText("Saved combat resources");
+	await expect(ward).toHaveAttribute("aria-label", "Ward (2/Day): 1 of 2 remaining");
+	await expect(ward.locator("button").first()).toBeEnabled();
+	await expect(ward.locator("button").last()).toBeEnabled();
+	await expect(slot.locator("button").first()).toBeEnabled();
+	await expect(slot.locator("button").last()).toBeEnabled();
+	await expect(surge.getByRole("button", {name: "Spend one Surge (8/Day) use"})).toBeEnabled();
+	await expect(restoreSurge).toBeDisabled();
+	await expect(recharge).toBeEnabled();
+	await expect(concentration).toBeEnabled();
+
+	await concentration.click();
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "true");
+	await expect(concentration).toBeDisabled();
+	await expect(restoreSurge).toBeDisabled();
+	await page.evaluate(() => (globalThis as typeof globalThis & {releaseEncounterSave: (fail: boolean) => void}).releaseEncounterSave(true));
+	await expect(page.locator("#ew-status[role=alert]")).toContainText("Storage full");
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+	await expect(concentration).toBeEnabled();
+	await expect(concentration).toHaveAttribute("aria-pressed", "false");
+	await expect(restoreSurge).toBeDisabled();
+	await expect(recharge).toBeEnabled();
+});
+
+test("a thousand collapsed cards do not render inline resources until opened", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({count: 1000, monsterOverride: {trait: [{name: "Ward (2/Day)", entries: ["Ward an ally."]}]}});
+	await page.locator("#ew-view-mode").selectOption("all");
+	await expect(page.locator(".ew__card-details")).toHaveCount(12);
+	await expect(page.locator("#ew-cards-more")).toContainText("12 of 1000");
+	await expect(page.locator(".ew__inline-resource")).toHaveCount(1);
+	await page.locator(".ew__card-details").nth(1).locator(":scope > summary").click();
+	await expect(page.locator(".ew__inline-resource")).toHaveCount(2);
+	await page.locator(".ew__card-details").nth(1).locator(":scope > summary").click();
+	await expect(page.locator(".ew__inline-resource")).toHaveCount(1);
+	await page.locator(".ew__card-details").first().locator(":scope > summary").click();
+	await expect(page.locator(".ew__inline-resource")).toHaveCount(0);
 });
 
 test("focused resources stay readable and usable in mobile day and night views", async ({page}) => {
@@ -249,6 +470,7 @@ test("focused resources stay readable and usable in mobile day and night views",
 			html.classList.toggle("ve-night-mode--standard", enabled);
 		}, night);
 		const panel = encounter.resourcePanel("one");
+		const block = encounter.statblock("one");
 		const manager = encounter.resourceManager("one");
 		await expect(panel).toHaveCount(1);
 		await expect(panel).toBeVisible();
@@ -258,14 +480,17 @@ test("focused resources stay readable and usable in mobile day and night views",
 			managerHeight: document.querySelector(".ew__resource-manager")!.getBoundingClientRect().height,
 			statblockTop: document.querySelector(".ew__statblock")!.getBoundingClientRect().top,
 			headingTop: document.querySelector(".ew__statblock-heading")!.getBoundingClientRect().top,
+			panelTop: document.querySelector(".ew__resources")!.getBoundingClientRect().top,
+			tableBottom: document.querySelector(".ew__statblock .ve-stats")!.getBoundingClientRect().bottom,
 		}));
 		expect(closed.managerHeight).toBeLessThanOrEqual(70);
 		expect(closed.statblockTop).toBeLessThan(844);
 		expect(closed.headingTop).toBeLessThan(844);
-		await expect(panel.getByRole("heading", {name: "Combat resources"})).toBeVisible();
-		await expect(panel.getByRole("button", {name: /start concentration/})).toBeVisible();
-		await expect(panel.getByRole("button", {name: "Ward 1 (2/Day), use 1 of 2: available; spend one"})).toBeVisible();
-		await expect(panel.locator(".ew__resource-more")).toHaveCount(1);
+		expect(closed.panelTop).toBeGreaterThanOrEqual(closed.tableBottom);
+		await expect(block.getByRole("button", {name: /start concentration/})).toBeVisible();
+		await expect(encounter.inlineResource("one", "ability:auto:ability:trait:0")
+			.getByRole("button", {name: "Ward 1 (2/Day), use 1 of 2: available; spend one"})).toBeVisible();
+		await expect(panel.locator(".ew__resource-more")).toHaveCount(0);
 		await manager.locator(":scope > summary").click();
 		const metrics = await panel.evaluate(element => ({
 			scrollWidth: document.documentElement.scrollWidth,
@@ -275,17 +500,15 @@ test("focused resources stay readable and usable in mobile day and night views",
 		}));
 		expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.viewportWidth + 2);
 		expect(metrics.controls.every(it => it.width >= 44 && it.height >= 44)).toBe(true);
-		await panel.getByRole("button", {name: "Blade: mark spent"}).click();
+		await encounter.inlineResource("one", "recharge:auto:recharge:action:0").click();
 		await expect(manager).toHaveJSProperty("open", true);
-		await expect(panel.getByRole("button", {name: "Blade: mark ready"})).toBeVisible();
-		await panel.getByRole("button", {name: "Blade: mark ready"}).click();
-		await expect(panel.getByRole("button", {name: "Blade: mark spent"})).toBeVisible();
-		const more = panel.locator(".ew__resource-more");
-		await more.locator(":scope > summary").click();
-		const wardPip = panel.getByRole("button", {name: /Ward 16 \(2\/Day\), use 2 of 2:/});
+		await expect(encounter.inlineResource("one", "recharge:auto:recharge:action:0")).toHaveAttribute("aria-label", "Blade: mark ready");
+		await encounter.inlineResource("one", "recharge:auto:recharge:action:0").click();
+		await expect(encounter.inlineResource("one", "recharge:auto:recharge:action:0")).toHaveAttribute("aria-label", "Blade: mark spent");
+		const wardPip = encounter.inlineResource("one", "ability:auto:ability:trait:15")
+			.getByRole("button", {name: /Ward 16 \(2\/Day\), use 2 of 2:/});
 		await wardPip.click();
-		await expect(more).toHaveJSProperty("open", true);
 		await expect(wardPip).toBeFocused();
-		await more.locator(":scope > summary").click();
+		await expect(manager).toHaveJSProperty("open", true);
 	}
 });

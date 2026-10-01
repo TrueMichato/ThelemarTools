@@ -1,5 +1,7 @@
 import {createCreatureTransformationChanges, previewCreatureTransformationTargets} from "./bestiary-transformation-workflow.js";
 
+let nextOptionGroupId = 0;
+
 function element (tag, {className, text} = {}) {
 	const node = document.createElement(tag);
 	if (className) node.className = className;
@@ -30,7 +32,7 @@ function list (parent, items) {
 function describeEligibility (rule) {
 	const parts = [];
 	if (rule.types) parts.push(`Type: ${rule.types.join(" or ")}`);
-	if (rule.sizes) parts.push(`Size: ${rule.sizes.join(" or ")}`);
+	if (rule.sizes) parts.push(`Size: ${rule.sizes.map(it => Parser.sizeAbvToFull(it)).join(" or ")}`);
 	if (rule.minCr != null) parts.push(`CR at least ${rule.minCr}`);
 	if (rule.maxCr != null) parts.push(`CR at most ${rule.maxCr}`);
 	if (rule.minInt != null) parts.push(`Intelligence at least ${rule.minInt}`);
@@ -38,6 +40,43 @@ function describeEligibility (rule) {
 	if (rule.requiresTrait) parts.push(`Requires trait: ${rule.requiresTrait}`);
 	if (rule.dmApproval) parts.push("DM approval required");
 	return parts.join("; ") || "No mechanical restriction";
+}
+
+function describeChange (step) {
+	switch (step.op) {
+		case "setType": return `Set type to ${step.value}`;
+		case "setAbility": return `Set ${Parser.attAbvToFull(step.ability)} to ${step.value}`;
+		case "minimumAbility": return `${Parser.attAbvToFull(step.ability)} at least ${step.value}`;
+		case "maximumAbility": return `${Parser.attAbvToFull(step.ability)} at most ${step.value}`;
+		case "adjustAbility": return `Adjust ${Parser.attAbvToFull(step.ability)} by ${step.amount}`;
+		case "scaleAbility": return `Halve ${Parser.attAbvToFull(step.ability)}, rounding down (minimum 1)`;
+		case "grantResistance": return `Resistance to ${step.value}`;
+		case "grantImmunity": return `Immunity to ${step.value}`;
+		case "grantVulnerability": return `Vulnerability to ${step.value}`;
+		case "grantConditionImmunity": return `Immunity to ${step.value}`;
+		case "grantSense": return `${step.sense} ${step.range} ft.`;
+		case "grantSpeed": return `${step.mode} speed ${step.feet} ft.`;
+		case "grantLanguage": return `Speak ${step.value}`;
+		case "grantConditionalDefense": return `${step.kind} to ${step.value} (${{
+			nonmagical: "nonmagical damage",
+			nonmagicalUnsilvered: "nonmagical, unsilvered damage",
+			dimLightOrDarkness: "in dim light or darkness",
+		}[step.when]})`;
+		case "addEntry": return `Add ${step.section} ${step.entry.name} (${step.entry.source}): ${step.entry.entries.join(" ")}`;
+		case "removeEntry": return `Remove ${step.section} ${step.match.name || step.match.role} (${step.match.source})`;
+		case "replaceEntry": return `Replace ${step.section} ${step.match.name || step.match.role} with ${step.entry.name} (${step.entry.source})`;
+		case "replaceDamageType": return `Change ${step.section} ${step.match.name || step.match.role} damage to ${step.to}`;
+		default: throw new Error(`Unknown transformation change: ${step.op}`);
+	}
+}
+
+function describeOption (option, candidate, group) {
+	return [
+		`${candidate.identity.name} (${candidate.identity.source}) · ${group.name} · ${option.name}.`,
+		`Eligibility: ${describeEligibility(option.eligibility || {})}.`,
+		option.changes.length ? `Mechanical changes: ${option.changes.map(describeChange).join("; ")}.` : "No automatic mechanical change.",
+		option.manualReview.length ? `DM review: ${option.manualReview.map(it => it.reason).join(" ")}` : "No additional DM review for this choice.",
+	].join(" ");
 }
 
 function renderStatblock (parent, creature, heading) {
@@ -163,7 +202,9 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const choices = element("div", {className: "bqa__transformation-choices"});
 	choices.setAttribute("role", "group");
 	choices.setAttribute("aria-label", "Available templates");
-	input.append(category, sourceField, searchLabel, count, empty, choices, pickerLabel);
+	const recipeInfo = element("section", {className: "bqa__transformation-recipe-info"});
+	recipeInfo.setAttribute("aria-label", "Recipe details");
+	input.append(category, sourceField, searchLabel, count, empty, choices, recipeInfo, pickerLabel);
 	const previewButton = button(isBulk ? "Preview selected monsters" : "Preview transformation", () => doPreview(), "ve-btn ve-btn-primary ve-btn-sm");
 	input.append(previewButton);
 	let activeCategory = "catalog";
@@ -179,6 +220,19 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	let decisions = {};
 	let isSaving = false;
 
+	const showRecipeInfo = it => {
+		recipeInfo.replaceChildren();
+		recipeInfo.hidden = activeCategory !== "catalog" || !it;
+		if (recipeInfo.hidden) return;
+		const {edition, page} = it.provenance;
+		const heading = `${it.identity.name} (${it.identity.source})${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}` : ""}`;
+		recipeInfo.append(element("h5", {text: heading}));
+		paragraph(recipeInfo, `${sourceLabel(it.identity.source)} · ${edition === "unverified" ? "Edition unverified" : edition === "one" ? "2024 edition" : "2014 edition"} · ${page == null ? "Page unverified" : `p. ${page}`}.`);
+		paragraph(recipeInfo, `Eligibility: ${describeEligibility(it.eligibility)}.`);
+		const required = it.optionGroups.filter(group => group.required);
+		if (required.length) paragraph(recipeInfo, `Required choices: ${required.map(group => group.name).join(", ")}.`);
+		if (it.prerequisites.length) list(recipeInfo, it.prerequisites.map(text => `Before preview: ${text}`));
+	};
 	const clearPreview = () => {
 		batch = null;
 		stamp = null;
@@ -230,7 +284,11 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 					renderCandidate();
 				}, "bqa__transformation-choice");
 				choice.dataset.recipeId = it.id;
-				choice.setAttribute("aria-label", `${title}, ${sourceLabel(it.identity.source)}, ${edition}, ${page}. ${info}`);
+				choice.setAttribute("aria-label", `${title}, ${sourceLabel(it.identity.source)}, ${edition}, ${page}. ${info} ${it.prerequisites.join(" ")}`);
+				choice.addEventListener("pointerenter", () => showRecipeInfo(it));
+				choice.addEventListener("pointerleave", () => showRecipeInfo(document.activeElement === choice ? it : candidate));
+				choice.addEventListener("focus", () => showRecipeInfo(it));
+				choice.addEventListener("blur", () => showRecipeInfo(candidate));
 				choice.append(
 					element("span", {className: "bqa__transformation-choice-name", text: title}),
 					element("span", {className: "bqa__transformation-choice-meta", text: `${it.identity.source} · ${page}`}),
@@ -244,6 +302,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		empty.textContent = matching.length ? "" : "No recipes match these filters. Try another source or clear the search.";
 		empty.hidden = !!matching.length;
 		previewButton.disabled = !picker.value;
+		showRecipeInfo(visibleIds.has(candidate?.id) ? candidate : null);
 	};
 	const onFilterChange = () => {
 		clearPreview();
@@ -266,6 +325,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		details.replaceChildren();
 		previewButton.disabled = !candidate;
 		syncChoices();
+		showRecipeInfo(candidate);
 		if (!candidate) {
 			paragraph(details, activeCategory === "catalog"
 				? "Select a template to review its prerequisites and preview the mechanical changes."
@@ -295,25 +355,34 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 			const fieldset = element("fieldset", {className: "bqa__transformation-group"});
 			fieldset.append(element("legend", {text: `${group.name}${group.required ? " (required)" : ""}`}));
 			const controls = [];
-			if (group.selection === "one") {
-				const control = element("select", {className: "ve-form-control"});
-				control.setAttribute("aria-label", group.name);
-				control.add(new Option(group.required ? "Choose an option…" : "None", ""));
-				group.options.forEach(option => control.add(new Option(option.name, option.id)));
-				control.addEventListener("change", () => updateSelection(group, control.value ? [control.value] : []));
-				fieldset.append(control);
+			const groupName = `bqa-transformation-group-${++nextOptionGroupId}`;
+			const addOption = (option, {isNone = false} = {}) => {
+				const label = element("label", {className: "bqa__transformation-check bqa__transformation-option"});
+				const control = element("input");
+				control.type = group.selection === "one" ? "radio" : "checkbox";
+				if (control.type === "radio") control.name = groupName;
+				control.value = option?.id || "";
+				if (isNone) control.checked = true;
+				const detail = element("span", {
+					className: "bqa__transformation-option-detail",
+					text: isNone
+						? `No ${group.name.toLowerCase()} selected for ${candidate.identity.name} (${candidate.identity.source}).`
+						: describeOption(option, candidate, group),
+				});
+				detail.id = `bqa-transformation-detail-${++nextOptionGroupId}`;
+				control.setAttribute("aria-describedby", detail.id);
+				control.addEventListener("change", () => updateSelection(group, control.type === "radio"
+					? (control.value ? [control.value] : [])
+					: controls.filter(it => it.checked).map(it => it.value)));
 				controls.push(control);
+				label.append(control, element("span", {className: "bqa__transformation-option-name", text: isNone ? "None" : option.name}), detail);
+				fieldset.append(label);
+			};
+			if (group.selection === "one") {
+				if (!group.required) addOption(null, {isNone: true});
+				group.options.forEach(option => addOption(option));
 			} else {
-				for (const option of group.options) {
-					const label = element("label", {className: "bqa__transformation-check"});
-					const control = element("input");
-					control.type = "checkbox";
-					control.addEventListener("change", () => updateSelection(group, controls.filter(it => it.checked).map(it => it.value)));
-					control.value = option.id;
-					controls.push(control);
-					label.append(control, document.createTextNode(` ${option.name}`));
-					fieldset.append(label);
-				}
+				group.options.forEach(option => addOption(option));
 			}
 			options.append(fieldset);
 			groupControls.set(group.id, {group, fieldset, controls});
@@ -326,8 +395,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				if (!active) {
 					delete selections[group.id];
 					controls.forEach(control => {
-						if (control.type === "checkbox") control.checked = false;
-						else control.value = "";
+						control.checked = control.type === "radio" && !group.required && !control.value;
 					});
 				}
 			}
@@ -445,6 +513,9 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		try {
 			if (!candidate || picker.value !== candidate.id || !visibleIds.has(candidate.id)) throw new Error("Choose a visible source-qualified recipe.");
 			if (acknowledgementInputs.some(it => !it.control.checked)) throw new Error("Acknowledge every narrative prerequisite before previewing.");
+			const missing = candidate.optionGroups.find(group =>
+				group.required && (!group.appliesTo || selections[group.appliesTo.group]?.includes(group.appliesTo.option)) && !selections[group.id]?.length);
+			if (missing) throw new Error(`Choose ${missing.name} before previewing.`);
 			resolved = resolveCreatureTransformation({candidates, id: candidate.id, selections});
 			if (resolved.eligibility.some(it => it.dmApproval) && !approvalInput.checked) throw new Error("Confirm DM approval before previewing this recipe.");
 			decisions = {};

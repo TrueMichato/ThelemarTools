@@ -34,8 +34,19 @@ import {
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
 import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-view.js";
 import {getEncounterResourceSummary} from "./encounterworkspace/encounterworkspace-resources.js";
-import {getEncounterResourcePanel} from "./encounterworkspace/encounterworkspace-resource-view.js";
+import {
+	getEncounterConcentrationButton,
+	getEncounterResourcePanel,
+	renderEncounterInlineResources,
+} from "./encounterworkspace/encounterworkspace-resource-view.js";
 import {ENCOUNTER_DAMAGE_TYPES} from "./encounterworkspace/encounterworkspace-damage.js";
+import {BESTIARY_ENCOUNTER_HANDOFF_PARAM, takeBestiaryEncounterHandoff} from "./encounterworkspace/encounterworkspace-bestiary-handoff.js";
+import {
+	getEncounterCrEstimate,
+	getEncounterCrReview,
+	getEncounterMonsterXp,
+	getEncounterXpSummary,
+} from "./encounterworkspace/encounterworkspace-assessment.js";
 
 const STATBLOCK_BATCH_SIZE = 12;
 
@@ -77,6 +88,18 @@ export class EncounterWorkspacePage {
 		this._eleMain = document.getElementById("encounter-workspace");
 		this._eleStatus = document.getElementById("ew-status");
 		this._eleName = document.getElementById("ew-name");
+		this._eleXpTotal = document.getElementById("ew-xp-total");
+		this._eleCrAssessment = document.getElementById("ew-cr-assessment");
+		this._eleCrBaseline = document.getElementById("ew-cr-baseline");
+		this._eleCrChanges = document.getElementById("ew-cr-changes");
+		this._eleCrNotes = document.getElementById("ew-cr-notes");
+		this._formCr = document.getElementById("ew-cr-form");
+		this._inpCrHp = document.getElementById("ew-cr-hp");
+		this._inpCrAc = document.getElementById("ew-cr-ac");
+		this._inpCrDamage = document.getElementById("ew-cr-damage");
+		this._selCrAttackType = document.getElementById("ew-cr-attack-type");
+		this._inpCrAttack = document.getElementById("ew-cr-attack");
+		this._eleCrResult = document.getElementById("ew-cr-result");
 		this._eleSummary = document.getElementById("ew-summary");
 		this._eleInitTargets = document.getElementById("ew-init-targets");
 		this._eleAdvancedTargets = document.getElementById("ew-advanced-targets");
@@ -253,6 +276,19 @@ export class EncounterWorkspacePage {
 			this._eleInitiative.scrollIntoView({block: "start"});
 		});
 		this._btnFocusEdit.addEventListener("click", () => this._pOpenStatblockEditor(this._focusedInstanceId));
+		this._formCr.addEventListener("submit", event => {
+			event.preventDefault();
+			this._pEstimateCr();
+		});
+		this._formCr.addEventListener("input", () => {
+			this._crRequestId = (this._crRequestId || 0) + 1;
+			this._setCrResult("");
+		});
+		this._selCrAttackType.addEventListener("change", () => {
+			this._crRequestId = (this._crRequestId || 0) + 1;
+			this._inpCrAttack.min = this._selCrAttackType.value === "save" ? "0" : "-10";
+			this._setCrResult("");
+		});
 		this._btnOpenQuick.addEventListener("click", () => {
 			this._eleQuick.open = true;
 			this._eleQuickSummary.focus({preventScroll: true});
@@ -392,6 +428,7 @@ export class EncounterWorkspacePage {
 		if (catalogError) this._setError(`Bestiary sources could not be initialized: ${this._getErrorMessage(catalogError)}. ${this._hasUnreadableSave ? "The saved encounter also could not be opened." : "The saved encounter is still available."} Importing another list is disabled until the page can load those sources.`);
 		else if (referenceError) this._setError(`Condition and skill reference data could not be loaded: ${this._getErrorMessage(referenceError)}. Standard conditions and skills remain available. You can still choose a saved Bestiary list.${this._hasUnreadableSave ? " The saved encounter also could not be opened; choose a saved list to replace it." : ""}`);
 		await this._pRefreshHandoff();
+		await this._pOpenBestiaryHandoff();
 	}
 
 	_getErrorMessage (error) { return String(error?.message || error).replace(/[.!?]+$/, ""); }
@@ -410,6 +447,7 @@ export class EncounterWorkspacePage {
 		this._btnBrowseRoster.disabled = isBusy || !this._state.instances.length;
 		this._btnFastDamage.disabled = this._btnFastSave.disabled = this._btnFastMove.disabled = isBusy || !this._state.instances.length;
 		this._btnFocusEdit.disabled = isBusy || !this._focusedInstanceId;
+		this._formCr.querySelectorAll("input, select, button").forEach(control => control.disabled = isBusy || !this._focusedInstanceId);
 		this._selFocusPicker.disabled = isBusy || !this._state.instances.length;
 		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
@@ -423,9 +461,16 @@ export class EncounterWorkspacePage {
 		this._resourceContainers.forEach(container => container.querySelectorAll("button, input, select").forEach(control => {
 			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
 		}));
+		this._tiles.forEach(tile => this._setTileResourcesBusy(tile, isBusy));
 		this._eleDamageDecisions.querySelectorAll("select").forEach(control => { control.disabled = isBusy; });
 		this._updateControls();
 		this._updateFocusStatus();
+	}
+
+	_setTileResourcesBusy (tile, isBusy) {
+		tile.querySelectorAll(".ew__concentration, .ew__inline-resource-button").forEach(control => {
+			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
+		});
 	}
 
 	_updateControls () {
@@ -586,6 +631,58 @@ export class EncounterWorkspacePage {
 		this._eleStatus.textContent = text;
 	}
 
+	async _pOpenBestiaryHandoff () {
+		if (!window.location?.href) return;
+		const url = new URL(window.location.href);
+		if (!url.searchParams.has(BESTIARY_ENCOUNTER_HANDOFF_PARAM)) return;
+		const token = url.searchParams.get(BESTIARY_ENCOUNTER_HANDOFF_PARAM);
+		url.searchParams.delete(BESTIARY_ENCOUNTER_HANDOFF_PARAM);
+		window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const exportedSublist = takeBestiaryEncounterHandoff({token});
+			if (!this._isCatalogReady) throw new Error("Bestiary sources are not available");
+			if (this._hasUnreadableSave && !await this._pConfirmReplace({isFromBestiary: true})) {
+				return this._setStatus("The unreadable encounter was kept. Return to Bestiary to send it again.");
+			}
+			const next = await this._store.pReplace({
+				currentState: this._state,
+				exportedSublist,
+				isRequireAllItems: true,
+				pConfirm: () => this._pConfirmReplace({isFromBestiary: true}),
+			});
+			if (next === this._state) return this._setStatus("The working encounter was kept. Return to Bestiary to send it again.");
+			isSaved = true;
+			this._setLoadedEncounter(next, {isFromBestiary: true});
+		} catch (e) {
+			this._setError(isSaved
+				? `The Bestiary encounter was saved, but could not be displayed: ${this._getErrorMessage(e)}. Reload the workspace; do not send it again.`
+				: `Could not open the current Bestiary encounter: ${this._getErrorMessage(e)}. The working encounter is unchanged. Return to Bestiary and click Encounter Workspace again, or choose a saved list here.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	_setLoadedEncounter (next, {isFromBestiary = false} = {}) {
+		this._state = next;
+		this._hpUndo = [];
+		this._clearDamageFeedback();
+		this._clearInitiativeMove();
+		this._collapsedGroups.clear();
+		this._focusedInstanceId = null;
+		this._viewMode = "focused";
+		this._selViewMode.value = "focused";
+		this._shownCards = STATBLOCK_BATCH_SIZE;
+		this._expandedCards.clear();
+		this._hasUnreadableSave = false;
+		this._render();
+		const loaded = next.instances.length
+			? `Loaded ${next.instances.length} independent ${next.instances.length === 1 ? "monster" : "monsters"}`
+			: "Loaded an empty working encounter";
+		this._setStatus(`${loaded} from "${next.sourceList.name}"${isFromBestiary ? " in Bestiary" : ""}.${next.omissions.length ? ` ${next.omissions.length} ${next.omissions.length === 1 ? "entry was" : "entries were"} omitted; see details below.` : ""}`);
+	}
+
 	async _pChoose () {
 		if (this._isBusy) return;
 		this._setBusy(true);
@@ -623,22 +720,7 @@ export class EncounterWorkspacePage {
 				this._setStatus("The working encounter was not replaced.");
 				return;
 			}
-			this._state = next;
-			this._hpUndo = [];
-			this._clearDamageFeedback();
-			this._clearInitiativeMove();
-			this._collapsedGroups.clear();
-			this._focusedInstanceId = null;
-			this._viewMode = "focused";
-			this._selViewMode.value = "focused";
-			this._shownCards = STATBLOCK_BATCH_SIZE;
-			this._expandedCards.clear();
-			this._hasUnreadableSave = false;
-			this._render();
-			const loaded = next.instances.length
-				? `Loaded ${next.instances.length} independent ${next.instances.length === 1 ? "monster" : "monsters"}`
-				: "Loaded an empty working encounter";
-			this._setStatus(`${loaded} from "${next.sourceList.name}".${next.omissions.length ? ` ${next.omissions.length} ${next.omissions.length === 1 ? "entry was" : "entries were"} omitted; see details below.` : ""}`);
+			this._setLoadedEncounter(next);
 		} catch (e) {
 			this._setError(`The saved list could not be loaded: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
@@ -646,10 +728,10 @@ export class EncounterWorkspacePage {
 		}
 	}
 
-	_pConfirmReplace () {
+	_pConfirmReplace ({isFromBestiary = false} = {}) {
 		return InputUiUtil.pGetUserBoolean({
 			title: "Replace Working Encounter",
-			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, statblock edits, conditions, notes, roll effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
+			htmlDescription: `Replace the current working encounter with a copy of ${isFromBestiary ? "the current Bestiary encounter" : "this saved Bestiary list"}? Its roster, targets, statblock edits, conditions, notes, roll effects, HP, initiative, and turns will be lost. ${isFromBestiary ? "The Bestiary encounter and its saved list" : "The saved Bestiary list"} will not change.`,
 			textYes: "Replace Encounter",
 			textNo: "Keep Current",
 		});
@@ -837,6 +919,7 @@ export class EncounterWorkspacePage {
 			if (changedIds.length) {
 				this._state = await this._store.pSave(state);
 				this._renderEffects();
+				this._renderCrAssessment();
 				if (isAdd) {
 					this._inpNoteName.value = "";
 					this._inpNoteDescription.value = "";
@@ -1355,8 +1438,8 @@ export class EncounterWorkspacePage {
 
 	async _pUpdateResource (id, action) {
 		if (this._isBusy) return;
-		const panel = this._resourceContainers.get(id);
-		const focused = panel?.contains(document.activeElement) ? document.activeElement.dataset.resourceControl : null;
+		const tile = this._tiles.get(id);
+		const focused = tile?.contains(document.activeElement) ? document.activeElement.dataset.resourceControl : null;
 		this._setBusy(true);
 		let isSaved = false;
 		try {
@@ -1387,10 +1470,10 @@ export class EncounterWorkspacePage {
 		} finally {
 			this._setBusy(false);
 			if (focused) {
-				const currentPanel = this._resourceContainers.get(id);
-				const control = [...(currentPanel?.querySelectorAll("[data-resource-control]") || [])]
+				const currentTile = this._tiles.get(id);
+				const control = [...(currentTile?.querySelectorAll("[data-resource-control]") || [])]
 					.find(it => it.dataset.resourceControl === focused);
-				(control && !control.disabled ? control : currentPanel?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
+				(control && !control.disabled ? control : currentTile?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
 			}
 		}
 	}
@@ -1398,12 +1481,20 @@ export class EncounterWorkspacePage {
 	_renderResourcePanel (id) {
 		const previous = this._resourceContainers.get(id);
 		if (!previous) return;
+		const tile = this._tiles.get(id);
 		const open = new Set([...previous.querySelectorAll("details[data-resource-key]")]
 			.filter(details => details.open).map(details => details.dataset.resourceKey));
 		const wasOpen = previous.querySelector(".ew__resource-manager").open;
 		const instance = this._state.instances.find(it => it.id === id);
 		const label = getEncounterInstanceLabels(this._state.instances).get(id);
-		const panel = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(id, action)});
+		const onAction = action => this._pUpdateResource(id, action);
+		const button = getEncounterConcentrationButton({instance, label, onAction});
+		tile.querySelector(".ew__concentration").replaceWith(button);
+		const table = tile.querySelector("table.ve-stats");
+		const matched = table
+			? renderEncounterInlineResources({instance, effective: getEncounterEffectiveMonster(instance), table, onAction})
+			: new Set();
+		const panel = getEncounterResourcePanel({instance, label, onAction, matched});
 		panel.querySelectorAll("details[data-resource-key]").forEach(details => {
 			details.open = open.has(details.dataset.resourceKey);
 		});
@@ -1827,6 +1918,7 @@ export class EncounterWorkspacePage {
 		this._renderPresetSearch();
 
 		this._eleName.textContent = sourceList.name;
+		this._renderXpTotal();
 		if (!instances.length) {
 			const empty = document.createElement("p");
 			empty.className = "ew__empty";
@@ -2173,6 +2265,7 @@ export class EncounterWorkspacePage {
 		this._renderEffects();
 		this._updateTargets();
 		this._updateFocusStatus();
+		this._renderCrAssessment();
 		if (hadFocus) {
 			(this._btnCardsMore.hidden ? this._eleStatblocks.lastElementChild?.querySelector("summary") : this._btnCardsMore)?.focus({preventScroll: true});
 		}
@@ -2188,6 +2281,7 @@ export class EncounterWorkspacePage {
 
 	_createStatblock (instance, label) {
 		const effective = getEncounterEffectiveMonster(instance);
+		const xp = getEncounterMonsterXp(effective);
 		const tile = document.createElement("article");
 		tile.className = "ew__statblock";
 		tile.dataset.instanceId = instance.id;
@@ -2204,7 +2298,11 @@ export class EncounterWorkspacePage {
 		edit.setAttribute("aria-label", `Edit statblock for ${label}`);
 		edit.disabled = this._isBusy;
 		edit.addEventListener("click", () => this._pOpenStatblockEditor(instance.id));
-		heading.append(title, edit);
+		const onResourceAction = action => this._pUpdateResource(instance.id, action);
+		const xpLabel = document.createElement("span");
+		xpLabel.className = "ew__statblock-xp";
+		xpLabel.textContent = `Award XP ${xp == null ? "unknown" : xp.toLocaleString("en-US")}${effective.cr && typeof effective.cr === "object" && Object.hasOwn(effective.cr, "xp") ? " · custom" : ""}`;
+		heading.append(title, xpLabel, getEncounterConcentrationButton({instance, label, onAction: onResourceAction}), edit);
 		const conditions = document.createElement("div");
 		conditions.className = "ew__conditions";
 		conditions.setAttribute("aria-label", `Conditions for ${label}`);
@@ -2217,23 +2315,90 @@ export class EncounterWorkspacePage {
 		vitals.className = "ew__vitals";
 		vitals.setAttribute("aria-label", `HP and initiative for ${label}`);
 		this._vitalContainers.set(instance.id, vitals);
-		const resources = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(instance.id, action)});
-		this._resourceContainers.set(instance.id, resources);
 		const table = document.createElement("table");
 		table.className = "ve-w-100 ve-stats";
 		const body = document.createElement("tbody");
+		let matched = new Set();
 		try {
 			body.innerHTML = Renderer.monster.getCompactRenderedString(MiscUtil.copyFast(effective), {isShowScalers: false});
 			table.append(body);
-			tile.append(heading, vitals, resources, conditions, effects, table);
+			matched = renderEncounterInlineResources({instance, effective, table, onAction: onResourceAction});
+			tile.append(heading, vitals, conditions, effects, table);
 		} catch (e) {
 			const failure = document.createElement("p");
 			failure.className = "ew__render-error";
 			failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-			tile.append(heading, vitals, resources, conditions, effects, failure);
+			tile.append(heading, vitals, conditions, effects, failure);
 		}
+		const resources = getEncounterResourcePanel({instance, label, onAction: onResourceAction, matched});
+		this._resourceContainers.set(instance.id, resources);
+		tile.append(resources);
 		this._tiles.set(instance.id, tile);
+		if (this._isBusy) this._setTileResourcesBusy(tile, true);
 		return tile;
+	}
+
+	_renderXpTotal () {
+		const {totalXp, ratedCount, unknownCount} = getEncounterXpSummary(this._state.instances);
+		this._eleXpTotal.textContent = !this._state.instances.length
+			? "Award XP: —"
+			: `Award XP: ${ratedCount ? totalXp.toLocaleString("en-US") : "unknown"}${unknownCount && ratedCount ? " known" : ""} · ${ratedCount}/${this._state.instances.length} rated`;
+		this._eleXpTotal.title = "Raw award XP from effective statblocks, not adjusted encounter difficulty. Unrated creatures are excluded, not counted as zero.";
+	}
+
+	_setCrResult (text, {isError = false} = {}) {
+		this._eleCrResult.textContent = text;
+		this._eleCrResult.classList.toggle("ew__cr-result--error", isError);
+	}
+
+	_renderCrAssessment () {
+		const instance = this._state.instances.find(it => it.id === this._focusedInstanceId);
+		this._eleCrAssessment.hidden = !instance;
+		if (!instance) {
+			this._crAssessmentKey = null;
+			return;
+		}
+		const key = JSON.stringify([this._state.sourceList, instance.id, instance.monster, instance.statblockOperations, instance.areaNotes]);
+		if (key === this._crAssessmentKey) return;
+		this._crAssessmentKey = key;
+		this._crRequestId = (this._crRequestId || 0) + 1;
+		const review = getEncounterCrReview(instance);
+		this._eleCrBaseline.textContent = `Original → effective: CR ${review.baselineCr} → ${review.effectiveCr}; HP ${review.baselineHp} → ${review.effectiveHp}; AC ${review.baselineAc} → ${review.effectiveAc}.`;
+		this._eleCrChanges.textContent = `${review.operationCount} saved statblock ${review.operationCount === 1 ? "edit" : "edits"}; changed fields: ${review.changeDetails.join(", ") || "none"}. ${review.changes.length ? "Review the updated abilities and damage above." : ""}`;
+		this._eleCrNotes.textContent = `${review.areaNotes.length ? `Text-only reminders (not mechanics): ${review.areaNotes.join("; ")}. ` : ""}${review.manualReview.length ? `Transformation manual review required: ${review.manualReview.join("; ")}.` : ""}`;
+		this._eleCrNotes.hidden = !review.areaNotes.length && !review.manualReview.length;
+		this._formCr.reset();
+		this._inpCrHp.value = review.suggestedHp ?? "";
+		this._inpCrAc.value = review.suggestedAc ?? "";
+		this._inpCrAttack.min = "-10";
+		this._setCrResult("");
+	}
+
+	async _pEstimateCr () {
+		if (this._isBusy || !this._focusedInstanceId) return;
+		const key = this._crAssessmentKey;
+		const requestId = this._crRequestId = (this._crRequestId || 0) + 1;
+		const read = input => input.value.trim() === "" ? NaN : Number(input.value);
+		const assumptions = {
+			hp: read(this._inpCrHp),
+			ac: read(this._inpCrAc),
+			damageOverThreeRounds: read(this._inpCrDamage),
+			attackValue: read(this._inpCrAttack),
+			attackType: this._selCrAttackType.value,
+		};
+		try {
+			this._setCrResult("Loading 2014 CR table...");
+			const data = this._crTable || await DataUtil.loadJSON("data/msbcr.json");
+			if (key !== this._crAssessmentKey || requestId !== this._crRequestId) return;
+			const estimate = getEncounterCrEstimate(assumptions, data.cr);
+			this._crTable = data;
+			const effectiveCr = getEncounterCrReview(this._state.instances.find(it => it.id === this._focusedInstanceId)).effectiveCr;
+			this._setCrResult(`2014 table estimate: CR ${estimate.cr} (defensive ${estimate.defensiveCr}, offensive ${estimate.offensiveCr}; ${estimate.dpr} average damage/round). Saved CR ${effectiveCr} and award XP are unchanged. Use Edit viewed statblock to adopt a rating.`);
+		} catch (e) {
+			if (key === this._crAssessmentKey && requestId === this._crRequestId) {
+				this._setCrResult(`Could not estimate CR: ${this._getErrorMessage(e)}`, {isError: true});
+			}
+		}
 	}
 
 	_updateFocusStatus () {

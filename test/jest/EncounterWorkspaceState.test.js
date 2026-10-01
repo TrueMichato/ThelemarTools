@@ -423,6 +423,32 @@ describe("Encounter Workspace working copy", () => {
 		expect(replaced.instances).toEqual([]);
 	});
 
+	it("never publishes a partial or empty Bestiary handoff over an existing workspace", async () => {
+		const storage = getStorage();
+		const store = new EncounterWorkspaceStore({storage});
+		const current = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "goblin_mm", c: 1}]),
+			pResolveItem: async () => ({entity: getMonster()}),
+			fnUid: getUid(),
+		});
+		await expect(store.pReplace({
+			currentState: current,
+			exportedSublist: {name: "Current Bestiary Encounter", items: [{h: "goblin_mm"}, {h: "missing_brew"}]},
+			pResolveItem: async item => item.h === "goblin_mm" ? {entity: getMonster()} : null,
+			pConfirm: async () => true,
+			fnUid: getUid(),
+			isRequireAllItems: true,
+		})).rejects.toThrow(/missing_brew/);
+		await expect(store.pReplace({
+			currentState: current,
+			exportedSublist: {name: "Current Bestiary Encounter", items: []},
+			pConfirm: async () => true,
+			isRequireAllItems: true,
+		})).rejects.toThrow(/no usable creatures/);
+		expect(storage.pSetForPage).not.toHaveBeenCalled();
+		expect(current.instances).toHaveLength(1);
+	});
+
 	it("does not accept invalid or unsupported persisted data, or silently erase it", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});

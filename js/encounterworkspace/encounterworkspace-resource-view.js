@@ -1,6 +1,7 @@
-import {MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
+import {getEncounterResourceDefaults, MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
 
 const MAX_VISIBLE_PIPS = 12;
+const MAX_INLINE_PIPS = 5;
 const MAX_INLINE_RESOURCES = 3;
 const RESOURCE_SECTIONS = [
 	["trait", "Traits"],
@@ -12,6 +13,14 @@ const RESOURCE_SECTIONS = [
 	["equipment", "Equipment"],
 	["other", "Other abilities"],
 ];
+const STATBLOCK_SECTIONS = {
+	trait: "Traits",
+	action: "Actions",
+	bonus: "Bonus Actions",
+	reaction: "Reactions",
+	legendary: "Legendary Actions",
+	mythic: "Mythic Actions",
+};
 
 const create = (tag, className, text) => {
 	const element = document.createElement(tag);
@@ -112,29 +121,182 @@ function getPipRow ({name, current, max, resourceKey, onChange}) {
 	return row;
 }
 
-export function getEncounterResourcePanel ({instance, label, onAction}) {
+function getInlineButton (text, label, onClick, controlKey, disabled = false) {
+	const button = getButton(text, label, onClick, disabled, controlKey);
+	button.className = "ew__inline-resource-button";
+	button.addEventListener("click", event => event.stopPropagation());
+	button.addEventListener("mousedown", event => event.stopPropagation());
+	return button;
+}
+
+function getInlineUses ({name, current, max, resourceKey, onChange}) {
+	const group = create("span", "ew__inline-resource");
+	group.dataset.inlineResource = resourceKey;
+	group.setAttribute("role", "group");
+	group.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
+	if (max <= MAX_INLINE_PIPS) {
+		for (let index = 0; index < max; index++) {
+			const available = index < current;
+			const pip = getInlineButton("",
+				`${name}, use ${index + 1} of ${max}: ${available ? "available; spend one" : "spent; restore one"}`,
+				() => onChange(available ? -1 : 1), `${resourceKey}:pip:${index}`);
+			pip.classList.add("ew__inline-resource-pip");
+			pip.classList.toggle("ew__inline-resource-pip--available", available);
+			group.append(pip);
+		}
+	} else {
+		group.append(
+			create("span", "ew__inline-resource-count", `${current}/${max}`),
+			getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`, !current),
+			getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`, current >= max),
+		);
+	}
+	return group;
+}
+
+function getSectionContent (table, section) {
+	const headers = [...table.querySelectorAll("h3.ve-stats__sect-header-inner")]
+		.filter(header => header.firstChild?.textContent?.trim() === STATBLOCK_SECTIONS[section]);
+	if (!headers.length && section === "trait") {
+		const divider = table.querySelector(".mon__body-cols-wrap .ve-tbl-border");
+		return divider?.closest("tr")?.nextElementSibling?.querySelector("td") || null;
+	}
+	if (headers.length !== 1) return null;
+	return headers[0].closest("tr")?.nextElementSibling?.querySelector("td") || null;
+}
+
+function getEntryHeadings (content) {
+	const headings = new Map();
+	if (!content) return headings;
+	const wrappers = [
+		...content.querySelectorAll(":scope > [data-roll-name-ancestor]"),
+		...content.querySelectorAll(":scope > ul > li > p[data-roll-name-ancestor]"),
+	];
+	for (const wrapper of wrappers) {
+		const name = wrapper.dataset.rollNameAncestor;
+		headings.set(name, headings.has(name) ? null : wrapper.querySelector(".ve-rd__h, .ve-rd__list-item-name"));
+	}
+	return headings;
+}
+
+export function getEncounterInlineResourceEntry ({effective, resource}) {
+	const match = resource.id.match(/^auto:(ability|recharge):(trait|action|bonus|reaction|legendary|mythic):(\d+)$/);
+	if (!match) return null;
+	const [, type, section, rawIndex] = match;
+	const entries = effective[section];
+	if (!Array.isArray(entries)) return null;
+	const entry = entries[Number(rawIndex)];
+	if (!entry?.name) return null;
+	const expectedName = type === "recharge"
+		? entry.name.replace(/\s*\{@recharge(?:\s+[2-6])?\s*}/gi, "").trim() || "Recharge ability"
+		: entry.name;
+	if (resource.name !== expectedName) return null;
+	if (type === "recharge" && !getEncounterResourceDefaults({[section]: [entry]}).recharges.length) return null;
+	if (entries.filter(it => Renderer.stripTags(it?.name || "") === Renderer.stripTags(entry.name)).length !== 1) return null;
+	return {type, section, name: entry.name};
+}
+
+export function renderEncounterInlineResources ({instance, effective, table, onAction}) {
+	table.querySelectorAll("[data-inline-resource]").forEach(control => control.remove());
+	const matched = new Set();
+	const resources = instance.resources;
+	const headings = new Map();
+	for (const resource of [...resources.abilities, ...resources.recharges]) {
+		if (resource.id === "auto:legendary-actions") {
+			const header = [...table.querySelectorAll("h3.ve-stats__sect-header-inner")]
+				.filter(it => it.firstChild?.textContent?.trim() === "Legendary Actions");
+			if (header.length !== 1 || !getEncounterResourceDefaults(effective).abilities
+				.some(it => it.id === "auto:legendary-actions")) continue;
+			const key = `ability:${resource.id}`;
+			header[0].append(getInlineUses({
+				...resource,
+				resourceKey: key,
+				onChange: change => onAction({kind: "abilityUse", abilityId: resource.id, change}),
+			}));
+			matched.add(key);
+			continue;
+		}
+		const entry = getEncounterInlineResourceEntry({effective, resource});
+		if (!entry) continue;
+		const {type, section, name} = entry;
+		if (!headings.has(section)) headings.set(section, getEntryHeadings(getSectionContent(table, section)));
+		const heading = headings.get(section).get(Renderer.stripTags(name));
+		if (!heading) continue;
+		const key = `${type === "ability" ? "ability" : "recharge"}:${resource.id}`;
+		if (type === "ability") {
+			heading.append(getInlineUses({
+				...resource,
+				resourceKey: key,
+				onChange: change => onAction({kind: "abilityUse", abilityId: resource.id, change}),
+			}));
+		} else {
+			const button = getInlineButton(resource.ready ? "Ready" : "Spent",
+				`${resource.name}: mark ${resource.ready ? "spent" : "ready"}`,
+				() => onAction({kind: "recharge", rechargeId: resource.id, ready: !resource.ready}),
+				`${key}:toggle`);
+			button.classList.add("ew__inline-recharge");
+			button.classList.toggle("ew__inline-recharge--ready", resource.ready);
+			button.dataset.inlineResource = key;
+			button.setAttribute("aria-pressed", String(resource.ready));
+			heading.append(button);
+		}
+		matched.add(key);
+	}
+
+	for (const [rawLevel, {current, max}] of Object.entries(resources.spellSlots)) {
+		const level = Number(rawLevel);
+		const casters = (effective.spellcasting || []).filter(it => Number.isSafeInteger(it.spells?.[rawLevel]?.slots)
+			&& it.spells[rawLevel].slots > 0 && !it.hidden?.includes("spells"));
+		if (casters.length !== 1) continue;
+		const section = casters[0].displayAs || "trait";
+		const content = getSectionContent(table, section);
+		if (!content) continue;
+		const expected = Renderer.stripTags(casters[0].name);
+		const ordinal = Parser.spLevelToFull(level);
+		const lines = [...content.querySelectorAll(".ve-rd__li-spell > p")]
+			.filter(line => line.closest("[data-roll-name-ancestor]")?.dataset.rollNameAncestor === expected
+				&& line.firstChild?.nodeType === Node.TEXT_NODE
+				&& line.firstChild.textContent.startsWith(`${ordinal} level `)
+				&& /^.*\(\d+ slots?\):\s*$/.test(line.firstChild.textContent));
+		if (lines.length !== 1) continue;
+		const key = `slots:${level}`;
+		lines[0].insertBefore(getInlineUses({
+			name: `Level ${level}`,
+			current,
+			max,
+			resourceKey: key,
+			onChange: change => onAction({kind: "slots", level, current: current + change, max}),
+		}), lines[0].firstChild.nextSibling);
+		matched.add(key);
+	}
+	return matched;
+}
+
+export function getEncounterConcentrationButton ({instance, label, onAction}) {
+	const {concentration} = instance.resources;
+	const button = getButton(
+		concentration.active ? `Concentrating${concentration.label ? `: ${concentration.label}` : ""}` : "Start concentration",
+		`${label}: ${concentration.active ? "end" : "start"} concentration${concentration.label ? ` on ${concentration.label}` : ""}`,
+		() => onAction({kind: "concentration", active: !concentration.active, label: ""}), false, "concentration:toggle",
+	);
+	button.classList.add("ew__concentration");
+	button.classList.toggle("ew__concentration--active", concentration.active);
+	button.setAttribute("aria-pressed", String(concentration.active));
+	return button;
+}
+
+export function getEncounterResourcePanel ({instance, label, onAction, matched = new Set()}) {
 	const {resources} = instance;
 	const section = create("section", "ew__resources");
 	section.setAttribute("aria-label", `Combat resources for ${label}`);
-	const header = create("div", "ew__resource-header");
-	header.append(create("h4", "ew__resource-title", "Combat resources"));
-	const concentration = getButton(
-		resources.concentration.active ? `Concentrating${resources.concentration.label ? `: ${resources.concentration.label}` : ""}` : "Start concentration",
-		`${label}: ${resources.concentration.active ? "end" : "start"} concentration${resources.concentration.label ? ` on ${resources.concentration.label}` : ""}`,
-		() => onAction({kind: "concentration", active: !resources.concentration.active, label: ""}), false, "concentration:toggle",
-	);
-	concentration.classList.add("ew__concentration");
-	concentration.classList.toggle("ew__concentration--active", resources.concentration.active);
-	concentration.setAttribute("aria-pressed", String(resources.concentration.active));
-	header.append(concentration);
-	section.append(header);
 
 	const tracker = create("div", "ew__resource-tracker");
 	const slotEntries = Object.entries(resources.spellSlots).sort(([a], [b]) => Number(a) - Number(b));
-	if (slotEntries.length) {
+	const unmatchedSlots = slotEntries.filter(([level]) => !matched.has(`slots:${level}`));
+	if (unmatchedSlots.length) {
 		const slots = create("div", "ew__resource-group");
 		slots.append(create("h5", null, "Spell slots"));
-		for (const [rawLevel, {current, max}] of slotEntries) {
+		for (const [rawLevel, {current, max}] of unmatchedSlots) {
 			const level = Number(rawLevel);
 			slots.append(getPipRow({
 				name: `Level ${level}`,
@@ -148,6 +310,7 @@ export function getEncounterResourcePanel ({instance, label, onAction}) {
 	}
 	const grouped = new Map();
 	for (const resource of [...resources.abilities, ...resources.recharges]) {
+		if (matched.has(`${Object.hasOwn(resource, "ready") ? "recharge" : "ability"}:${resource.id}`)) continue;
 		const key = getResourceSection(resource);
 		if (!grouped.has(key)) grouped.set(key, []);
 		grouped.get(key).push(resource);
@@ -185,8 +348,7 @@ export function getEncounterResourcePanel ({instance, label, onAction}) {
 		if (more) group.append(more);
 		tracker.append(group);
 	}
-	if (!tracker.children.length) tracker.append(create("p", "ew__resource-empty", "No counted uses yet. Add a spell level or ability below."));
-	section.append(tracker);
+	if (tracker.children.length) section.append(tracker);
 
 	const manager = create("details", "ew__resource-manager");
 	const overview = create("summary", "ew__resource-overview", "Manage counts and names");

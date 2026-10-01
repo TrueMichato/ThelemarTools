@@ -338,12 +338,12 @@ body.bqa__modal-active .ve-hwin {
 
 		&[aria-pressed="true"] {
 			border-color: vars.$rgb-name-red;
-			background: vars.$rgb-bg--alt;
+			background: vars.$rgb-bg-orange;
 		}
 
 		&:focus-visible {
 			outline: 2px solid vars.$rgb-link-blue;
-			outline-offset: -3px;
+			outline-offset: 2px;
 		}
 
 		&:hover,
@@ -373,6 +373,34 @@ body.bqa__modal-active .ve-hwin {
 		margin-top: 4px;
 	}
 
+	.bqa__transformation-recipe-info {
+		flex: 1 0 100%;
+		min-width: 0;
+		padding: 8px 10px;
+		border: 1px solid vars.$rgb-border-grey;
+		background: vars.$rgb-bg--alt;
+		color: vars.$rgb-font;
+		overflow-wrap: anywhere;
+
+		&[hidden] {
+			display: none;
+		}
+
+		h5 {
+			margin: 0 0 4px;
+			color: vars.$rgb-font;
+			font-size: 16px;
+		}
+
+		p {
+			margin: 4px 0;
+		}
+
+		ul {
+			margin: 4px 0 0;
+		}
+	}
+
 	.bqa__transformation-selected {
 		margin: 16px 0 12px;
 		padding-bottom: 8px;
@@ -380,7 +408,7 @@ body.bqa__modal-active .ve-hwin {
 
 		h5 {
 			margin: 0 0 3px;
-			color: color.adjust(vars.$rgb-link-blue, $lightness: -7%);
+			color: vars.$rgb-font;
 			font-size: 16px;
 			overflow-wrap: anywhere;
 		}
@@ -410,6 +438,7 @@ body.bqa__modal-active .ve-hwin {
 	.bqa__transformation-group {
 		legend {
 			padding: 0 5px;
+			color: vars.$rgb-font;
 			font-weight: 700;
 		}
 
@@ -422,6 +451,59 @@ body.bqa__modal-active .ve-hwin {
 		display: block;
 		margin: 6px 0;
 		cursor: pointer;
+	}
+
+	.bqa__transformation-option {
+		padding: 6px 8px;
+		border: 1px solid vars.$rgb-border-grey;
+		border-radius: 6px;
+		overflow-wrap: anywhere;
+
+		&:hover,
+		&:focus-within {
+			border-color: vars.$rgb-link-blue;
+			background: vars.$rgb-bg--alt;
+		}
+
+		&:has(input:checked) {
+			border-color: vars.$rgb-name-red;
+			background: vars.$rgb-bg-orange;
+		}
+
+		&:focus-within {
+			outline: 2px solid vars.$rgb-link-blue;
+			outline-offset: 2px;
+		}
+
+		input {
+			margin-right: 6px;
+			accent-color: vars.$rgb-name-red;
+		}
+
+		&:hover,
+		&:focus-within,
+		&:has(input:checked) {
+			.bqa__transformation-option-detail {
+				display: block;
+			}
+		}
+	}
+
+	.bqa__transformation-option-name {
+		color: vars.$rgb-font;
+		font-weight: 600;
+	}
+
+	.bqa__transformation-option-detail {
+		display: none;
+		margin: 4px 0 0 22px;
+		color: vars.$rgb-font;
+		font-size: 1rem;
+		line-height: 1.4;
+	}
+
+	.bqa__transformation button:disabled {
+		cursor: not-allowed;
 	}
 
 	.bqa__transformation-error {
@@ -999,7 +1081,9 @@ body.bqa__modal-active .ve-hwin {
 		.bqa__transformation-statblock,
 		.bqa__transformation-category-btn,
 		.bqa__transformation-empty,
-		.bqa__transformation-choice {
+		.bqa__transformation-choice,
+		.bqa__transformation-recipe-info,
+		.bqa__transformation-option {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
@@ -1052,14 +1136,44 @@ body.bqa__modal-active .ve-hwin {
 		}
 
 		.bqa__transformation-choice-name,
-		.bqa__transformation-selected h5 {
+		.bqa__transformation-recipe-info h5 {
 			color: vars-night.$rgb-link-blue--night;
 		}
 
 		.bqa__transformation-choice-meta,
 		.bqa__transformation-choice-detail,
-		.bqa__transformation-selected p {
+		.bqa__transformation-selected p,
+		.bqa__transformation-selected h5,
+		.bqa__transformation-group legend,
+		.bqa__transformation-option-name,
+		.bqa__transformation-option-detail {
 			color: vars-night.$rgb-font--night;
+		}
+
+		.bqa__transformation-recipe-info {
+			background: vars-night.$rgb-bg--alt-night;
+			color: vars-night.$rgb-font--night;
+		}
+
+		.bqa__transformation-option {
+			&:hover,
+			&:focus-within {
+				border-color: vars-night.$rgb-link-blue--night;
+				background: vars-night.$rgb-bg--alt-night;
+			}
+
+			&:has(input:checked) {
+				border-color: vars-night.$rgb-name-red--night;
+				background: vars-night.$rgb-bg--alt-night;
+			}
+
+			&:focus-within {
+				outline-color: vars-night.$rgb-link-blue--night;
+			}
+
+			input {
+				accent-color: vars-night.$rgb-link-blue--night;
+			}
 		}
 
 		.bqa__transformation-selected {
