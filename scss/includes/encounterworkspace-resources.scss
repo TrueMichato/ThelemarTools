@@ -38,8 +38,7 @@
 		&__inline-resource {
 			display: inline-flex;
 			align-items: center;
-			flex-wrap: wrap;
-			gap: 2px;
+			gap: 0;
 			vertical-align: middle;
 			margin-left: 4px;
 			font-style: normal;
@@ -100,7 +99,7 @@
 		}
 
 		&__inline-resource-count {
-			margin-right: 2px;
+			padding: 0 4px;
 			font-size: 1rem;
 			font-weight: 600;
 		}
@@ -211,16 +210,60 @@
 
 		&__resource-actions {
 			display: flex;
-			flex-wrap: wrap;
 			align-items: center;
-			gap: 4px;
+			gap: 0;
 			grid-column: 1 / -1;
+
+			.ew__resource-count {
+				padding: 0 4px;
+			}
 		}
 
 		&__resource-button {
 			min-width: 44px;
 			min-height: 44px;
 			padding: 5px 10px;
+		}
+
+		&__resource-step {
+			position: relative;
+			flex: 0 0 44px;
+			width: 44px;
+			height: 44px;
+			padding: 0;
+			border: 0;
+			border-radius: 6px;
+			background: transparent;
+			color: inherit;
+			font-size: 0.75rem;
+			font-weight: 700;
+			line-height: 1;
+
+			&::before {
+				position: absolute;
+				inset: 9px;
+				border: 1px solid currentcolor;
+				border-radius: 6px;
+				content: "";
+			}
+
+			&:hover:not(:disabled) {
+				background: transparent;
+
+				&::before {
+					background: color-mix(in srgb, currentcolor 12%, transparent);
+				}
+			}
+
+			&:focus-visible {
+				outline: 2px solid var(--ew-resource-accent, #{vars.$rgb-active-blue});
+				outline-offset: -2px;
+			}
+
+			&:disabled {
+				opacity: 0.45;
+				cursor: not-allowed;
+			}
 		}
 
 		&__resource-edit {
@@ -327,6 +370,10 @@
 		&__concentration--active {
 			border-color: vars-night.$rgb-link-blue--night;
 			color: vars-night.$rgb-link-blue--night;
+		}
+
+		&__resource-step:focus-visible {
+			outline-color: var(--ew-resource-accent, #{vars-night.$rgb-link-blue--night});
 		}
 	}
 

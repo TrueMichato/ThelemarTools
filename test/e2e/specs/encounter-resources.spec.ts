@@ -153,6 +153,11 @@ test("resource pips do not publish a failed save, and large pools use bounded co
 	await addSlots.getByRole("button", {name: "Add level"}).click();
 	await expect(panel.getByLabel("Level 1: 9999 of 9999 remaining")).toBeVisible();
 	await expect(panel.locator(".ew__resource-pip")).toHaveCount(0);
+	const slotActions = panel.getByLabel("Level 1: 9999 of 9999 remaining");
+	await expect.poll(() => slotActions.evaluate(element => [...element.children].map(it => it instanceof HTMLButtonElement
+		? it.dataset.resourceControl?.split(":").at(-1) : it.className)))
+		.toEqual(["spend", "ew__resource-count", "restore"]);
+	await expect(slotActions.getByRole("button", {name: "Restore one Level 1 use"})).toBeDisabled();
 	const spend = panel.getByRole("button", {name: "Spend one Level 1 use"});
 	await expect(spend).toBeVisible();
 	const addAbility = manager.locator('details[data-resource-key="ability:add"]');
@@ -189,8 +194,10 @@ test("resource pips do not publish a failed save, and large pools use bounded co
 	await spend.click();
 	await expect(panel.getByLabel("Level 1: 9998 of 9999 remaining")).toBeVisible();
 	await expect(spend).toBeFocused();
+	await expect(panel.getByLabel("Level 1: 9998 of 9999 remaining").locator(".ew__resource-count")).toHaveText("9998/9999");
 	await panel.getByRole("button", {name: "Restore one Level 1 use"}).click();
 	await expect(panel.getByLabel("Level 1: 9999 of 9999 remaining")).toBeVisible();
+	await expect(slotActions.getByRole("button", {name: "Restore one Level 1 use"})).toBeDisabled();
 });
 
 test("inline controls follow explicit transformed defaults without reinitializing spent uses", async ({page}) => {
@@ -268,11 +275,20 @@ test("compact indicators wrap at headings, with separate accessible touch target
 					range.selectNodeContents(text);
 					const label = range.getClientRects()[0];
 					const button = target.getBoundingClientRect();
+					const restore = element.querySelectorAll("button")[1].getBoundingClientRect();
+					const indicators = element.querySelector(".ew__inline-resource-pips")!.getBoundingClientRect();
+					const face = getComputedStyle(target, "::before");
 					return {
 						horizontal: button.left >= label.right - 2,
 						centerOffset: Math.abs((button.top + button.bottom) / 2 - (label.top + label.bottom) / 2),
 						targetWidth: button.width,
 						targetHeight: button.height,
+						faceWidth: parseFloat(face.width),
+						faceHeight: parseFloat(face.height),
+						controlOrder: [...element.children].map(it => it instanceof HTMLButtonElement
+							? it.dataset.resourceControl?.split(":").at(-1) : it.className),
+						flanksPips: button.right <= indicators.left + 1 && restore.left >= indicators.right - 1,
+						buttonsAligned: Math.abs(button.top - restore.top) < 1,
 						insideDiceLink: !!target.closest("[data-packed-dice], a"),
 						pipSizes: [...element.querySelectorAll(".ew__inline-resource-pip")].map(it => it.getBoundingClientRect().width),
 						spend: !!element.querySelector('button[aria-label^="Spend one"]'),
@@ -284,6 +300,10 @@ test("compact indicators wrap at headings, with separate accessible touch target
 				expect(metrics!.centerOffset).toBeLessThanOrEqual(12);
 				expect(metrics!.targetWidth).toBeGreaterThanOrEqual(44);
 				expect(metrics!.targetHeight).toBeGreaterThanOrEqual(44);
+				expect(metrics!.faceWidth).toBeLessThanOrEqual(28);
+				expect(metrics!.faceHeight).toBeLessThanOrEqual(28);
+				expect(metrics!.controlOrder).toEqual(["spend", "ew__inline-resource-pips", "restore"]);
+				expect(metrics!.flanksPips && metrics!.buttonsAligned).toBe(true);
 				expect(metrics!.insideDiceLink).toBe(false);
 				expect(metrics!.pipSizes.length).toBeGreaterThan(0);
 				expect(metrics!.pipSizes.every(size => size <= 10)).toBe(true);
@@ -351,6 +371,9 @@ test("large explicit pools use bounded inline controls and do not publish failed
 	const pool = encounter.inlineResource("one", "ability:auto:ability:trait:0");
 	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 20 of 20 remaining");
 	await expect(pool.locator(".ew__inline-resource-pip")).toHaveCount(0);
+	await expect.poll(() => pool.evaluate(element => [...element.children].map(it => it instanceof HTMLButtonElement
+		? it.dataset.resourceControl?.split(":").at(-1) : it.className)))
+		.toEqual(["spend", "ew__inline-resource-count", "restore"]);
 	const surge = encounter.inlineResource("one", "ability:auto:ability:bonus:0");
 	await expect(surge.locator(".ew__inline-resource-pip")).toHaveCount(8);
 	await expect(surge.getByRole("button", {name: "Spend one Surge (8/Day) use"})).toBeVisible();
@@ -378,6 +401,88 @@ test("large explicit pools use bounded inline controls and do not publish failed
 	await page.reload();
 	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 19 of 20 remaining");
+});
+
+test.describe("touch resource controls", () => {
+	test.use({hasTouch: true});
+
+	test("compact controls keep keyboard, touch and saved boundary counts at 320px", async ({page}) => {
+		await page.setViewportSize({width: 320, height: 740});
+		const encounter = new EncounterRollPage(page);
+		await encounter.seed({monsterOverride: {
+			trait: [{name: "Ward (12/Day)", entries: ["Ward an ally."]}],
+			bonus: [{name: "Storm (13/Day)", entries: ["Call a storm."]}],
+		}});
+		const ward = encounter.inlineResource("one", "ability:auto:ability:trait:0");
+		const storm = encounter.inlineResource("one", "ability:auto:ability:bonus:0");
+		const spendWard = ward.getByRole("button", {name: "Spend one Ward (12/Day) use"});
+		const restoreWard = ward.getByRole("button", {name: "Restore one Ward (12/Day) use"});
+		await expect(restoreWard).toBeDisabled();
+		await spendWard.focus();
+		await spendWard.press("Enter");
+		await expect(spendWard).toBeFocused();
+		expect(await spendWard.evaluate(element => {
+			const style = getComputedStyle(element);
+			return {kind: style.outlineStyle, width: parseFloat(style.outlineWidth)};
+		})).toEqual({kind: "solid", width: 2});
+		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 11 of 12 remaining");
+		await restoreWard.press("Space");
+		await expect(restoreWard).toBeDisabled();
+		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 12 of 12 remaining");
+		const spendStorm = storm.getByRole("button", {name: "Spend one Storm (13/Day) use"});
+		await spendStorm.tap();
+		await expect(storm).toHaveAttribute("aria-label", "Storm (13/Day): 12 of 13 remaining");
+		await expect(storm.locator(".ew__inline-resource-count")).toHaveText("12/13");
+		const manager = encounter.resourceManager("one");
+		await manager.locator(":scope > summary").click();
+		const editWard = manager.locator('details[data-resource-key="ability:auto:ability:trait:0"]');
+		await editWard.locator("summary").click();
+		await editWard.getByLabel("Remaining").fill("0");
+		await editWard.getByRole("button", {name: "Save"}).click();
+		await expect(spendWard).toBeDisabled();
+		expect(await spendWard.evaluate(element => getComputedStyle(element).opacity)).toBe("0.45");
+		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 0 of 12 remaining");
+		await restoreWard.tap();
+		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 1 of 12 remaining");
+		const add = manager.locator('details[data-resource-key="ability:add"]');
+		await add.locator("summary").click();
+		await add.getByLabel("Ability name").fill("Crystal charm");
+		await add.getByLabel("Remaining").fill("3");
+		await add.getByLabel("Maximum").fill("3");
+		await add.getByRole("button", {name: "Add ability"}).click();
+		const row = encounter.resourcePanel("one").locator(".ew__resource-row").filter({hasText: "Crystal charm"});
+		const actions = row.locator(".ew__resource-actions");
+		await expect.poll(() => actions.evaluate(element => [...element.children].map(it => it instanceof HTMLButtonElement
+			? it.dataset.resourceControl?.split(":").at(-1) : it.className)))
+			.toEqual(["spend", "ew__resource-pips", "restore"]);
+		await expect(actions.getByRole("button", {name: "Restore one Crystal charm use"})).toBeDisabled();
+		const metrics = await actions.evaluate(element => {
+			const [spend, pips, restore] = [...element.children];
+			const hit = spend.getBoundingClientRect();
+			const face = getComputedStyle(spend, "::before");
+			return {
+				hitWidth: hit.width,
+				hitHeight: hit.height,
+				faceWidth: parseFloat(face.width),
+				flanks: hit.right <= pips.getBoundingClientRect().left + 1
+					&& restore.getBoundingClientRect().left >= pips.getBoundingClientRect().right - 1,
+				scrollWidth: document.documentElement.scrollWidth,
+				viewportWidth: document.documentElement.clientWidth,
+			};
+		});
+		expect(metrics.hitWidth).toBeGreaterThanOrEqual(44);
+		expect(metrics.hitHeight).toBeGreaterThanOrEqual(44);
+		expect(metrics.faceWidth).toBeLessThanOrEqual(28);
+		expect(metrics.flanks).toBe(true);
+		expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.viewportWidth + 2);
+		await actions.getByRole("button", {name: "Spend one Crystal charm use"}).tap();
+		await expect(row.locator(".ew__resource-count")).toHaveText("2/3");
+		await page.reload();
+		await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
+		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 1 of 12 remaining");
+		await expect(storm).toHaveAttribute("aria-label", "Storm (13/Day): 12 of 13 remaining");
+		await expect(row.locator(".ew__resource-count")).toHaveText("2/3");
+	});
 });
 
 test("pending resource saves disable only resource controls and restore their intended state on success and failure", async ({page}) => {
@@ -616,12 +721,15 @@ test("resource accents and spent symbols remain distinct on desktop and mobile i
 				const available = getComputedStyle(pips[0]);
 				const spent = getComputedStyle(pips.at(-1)!);
 				const rows = new Set(pips.map(it => it.getBoundingClientRect().top));
+				const [spend, indicators, restore] = [...element.children];
 				return {
 					accent: getComputedStyle(element.closest(".ew__statblock")!).getPropertyValue("--ew-resource-accent").trim(),
 					pipWidth: pips[0].getBoundingClientRect().width,
 					availableFill: available.backgroundColor,
 					spentSlash: spent.backgroundImage,
 					rows: rows.size,
+					flanksAllRows: spend.getBoundingClientRect().right <= indicators.getBoundingClientRect().left + 1
+						&& restore.getBoundingClientRect().left >= indicators.getBoundingClientRect().right - 1,
 					scrollWidth: document.documentElement.scrollWidth,
 					viewportWidth: document.documentElement.clientWidth,
 				};
@@ -631,6 +739,7 @@ test("resource accents and spent symbols remain distinct on desktop and mobile i
 			expect(metrics.availableFill).not.toBe("rgba(0, 0, 0, 0)");
 			expect(metrics.spentSlash).toContain("linear-gradient");
 			expect(metrics.rows).toBeGreaterThan(1);
+			expect(metrics.flanksAllRows).toBe(true);
 			expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.viewportWidth + 2);
 		}
 	}

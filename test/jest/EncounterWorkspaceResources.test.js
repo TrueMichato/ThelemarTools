@@ -143,6 +143,28 @@ describe("Encounter Workspace combat resources", () => {
 		expect(state.instances[0].resources.spellSlots["3"]).toBeUndefined();
 	});
 
+	it("keeps zero and full use boundaries exact across saved spell slots and abilities", async () => {
+		const original = await create();
+		const abilityId = "auto:ability:action:1";
+		let state = EncounterWorkspaceState.withAbilityUse(original, {id: "dragon-1", abilityId, change: -1});
+		state = EncounterWorkspaceState.withAbilityUse(state, {id: "dragon-1", abilityId, change: -1});
+		state = EncounterWorkspaceState.withSpellSlots(state, {id: "dragon-1", level: 1, current: 0, max: 4});
+		expect(state.instances[0].resources.abilities.find(it => it.id === abilityId).current).toBe(0);
+		expect(state.instances[0].resources.spellSlots["1"]).toEqual({current: 0, max: 4});
+		expect(() => EncounterWorkspaceState.withAbilityUse(state, {id: "dragon-1", abilityId, change: -1})).toThrow(/no uses/);
+		expect(() => EncounterWorkspaceState.withSpellSlots(state, {id: "dragon-1", level: 1, current: -1, max: 4})).toThrow();
+		const {store} = getStore();
+		await store.pSave(state);
+		const loaded = await store.pLoad();
+		expect(loaded.instances[0].resources).toEqual(state.instances[0].resources);
+		expect(loaded.instances[1].resources).toEqual(original.instances[1].resources);
+		state = EncounterWorkspaceState.withAbilityUse(loaded, {id: "dragon-1", abilityId, change: 1});
+		state = EncounterWorkspaceState.withSpellSlots(state, {id: "dragon-1", level: 1, current: 4, max: 4});
+		expect(state.instances[0].resources.abilities.find(it => it.id === abilityId).current).toBe(1);
+		expect(state.instances[0].resources.spellSlots["1"]).toEqual({current: 4, max: 4});
+		expect(() => EncounterWorkspaceState.withSpellSlots(state, {id: "dragon-1", level: 1, current: 5, max: 4})).toThrow();
+	});
+
 	it("migrates versions 1 through 6 in memory from effective statblocks, with no writes", async () => {
 		const state = await create();
 		const {store, storage} = getStore();
