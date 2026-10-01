@@ -41,6 +41,12 @@ import {
 } from "./encounterworkspace/encounterworkspace-resource-view.js";
 import {ENCOUNTER_DAMAGE_TYPES} from "./encounterworkspace/encounterworkspace-damage.js";
 import {BESTIARY_ENCOUNTER_HANDOFF_PARAM, takeBestiaryEncounterHandoff} from "./encounterworkspace/encounterworkspace-bestiary-handoff.js";
+import {
+	getEncounterCrEstimate,
+	getEncounterCrReview,
+	getEncounterMonsterXp,
+	getEncounterXpSummary,
+} from "./encounterworkspace/encounterworkspace-assessment.js";
 
 const STATBLOCK_BATCH_SIZE = 12;
 
@@ -82,6 +88,18 @@ export class EncounterWorkspacePage {
 		this._eleMain = document.getElementById("encounter-workspace");
 		this._eleStatus = document.getElementById("ew-status");
 		this._eleName = document.getElementById("ew-name");
+		this._eleXpTotal = document.getElementById("ew-xp-total");
+		this._eleCrAssessment = document.getElementById("ew-cr-assessment");
+		this._eleCrBaseline = document.getElementById("ew-cr-baseline");
+		this._eleCrChanges = document.getElementById("ew-cr-changes");
+		this._eleCrNotes = document.getElementById("ew-cr-notes");
+		this._formCr = document.getElementById("ew-cr-form");
+		this._inpCrHp = document.getElementById("ew-cr-hp");
+		this._inpCrAc = document.getElementById("ew-cr-ac");
+		this._inpCrDamage = document.getElementById("ew-cr-damage");
+		this._selCrAttackType = document.getElementById("ew-cr-attack-type");
+		this._inpCrAttack = document.getElementById("ew-cr-attack");
+		this._eleCrResult = document.getElementById("ew-cr-result");
 		this._eleSummary = document.getElementById("ew-summary");
 		this._eleInitTargets = document.getElementById("ew-init-targets");
 		this._eleAdvancedTargets = document.getElementById("ew-advanced-targets");
@@ -258,6 +276,19 @@ export class EncounterWorkspacePage {
 			this._eleInitiative.scrollIntoView({block: "start"});
 		});
 		this._btnFocusEdit.addEventListener("click", () => this._pOpenStatblockEditor(this._focusedInstanceId));
+		this._formCr.addEventListener("submit", event => {
+			event.preventDefault();
+			this._pEstimateCr();
+		});
+		this._formCr.addEventListener("input", () => {
+			this._crRequestId = (this._crRequestId || 0) + 1;
+			this._setCrResult("");
+		});
+		this._selCrAttackType.addEventListener("change", () => {
+			this._crRequestId = (this._crRequestId || 0) + 1;
+			this._inpCrAttack.min = this._selCrAttackType.value === "save" ? "0" : "-10";
+			this._setCrResult("");
+		});
 		this._btnOpenQuick.addEventListener("click", () => {
 			this._eleQuick.open = true;
 			this._eleQuickSummary.focus({preventScroll: true});
@@ -416,6 +447,7 @@ export class EncounterWorkspacePage {
 		this._btnBrowseRoster.disabled = isBusy || !this._state.instances.length;
 		this._btnFastDamage.disabled = this._btnFastSave.disabled = this._btnFastMove.disabled = isBusy || !this._state.instances.length;
 		this._btnFocusEdit.disabled = isBusy || !this._focusedInstanceId;
+		this._formCr.querySelectorAll("input, select, button").forEach(control => control.disabled = isBusy || !this._focusedInstanceId);
 		this._selFocusPicker.disabled = isBusy || !this._state.instances.length;
 		this._btnGroupSelected.disabled = isBusy || this._state.selectedIds.length < 2;
 		this._checks.forEach(check => check.disabled = isBusy);
@@ -887,6 +919,7 @@ export class EncounterWorkspacePage {
 			if (changedIds.length) {
 				this._state = await this._store.pSave(state);
 				this._renderEffects();
+				this._renderCrAssessment();
 				if (isAdd) {
 					this._inpNoteName.value = "";
 					this._inpNoteDescription.value = "";
@@ -1885,6 +1918,7 @@ export class EncounterWorkspacePage {
 		this._renderPresetSearch();
 
 		this._eleName.textContent = sourceList.name;
+		this._renderXpTotal();
 		if (!instances.length) {
 			const empty = document.createElement("p");
 			empty.className = "ew__empty";
@@ -2231,6 +2265,7 @@ export class EncounterWorkspacePage {
 		this._renderEffects();
 		this._updateTargets();
 		this._updateFocusStatus();
+		this._renderCrAssessment();
 		if (hadFocus) {
 			(this._btnCardsMore.hidden ? this._eleStatblocks.lastElementChild?.querySelector("summary") : this._btnCardsMore)?.focus({preventScroll: true});
 		}
@@ -2246,6 +2281,7 @@ export class EncounterWorkspacePage {
 
 	_createStatblock (instance, label) {
 		const effective = getEncounterEffectiveMonster(instance);
+		const xp = getEncounterMonsterXp(effective);
 		const tile = document.createElement("article");
 		tile.className = "ew__statblock";
 		tile.dataset.instanceId = instance.id;
@@ -2263,7 +2299,10 @@ export class EncounterWorkspacePage {
 		edit.disabled = this._isBusy;
 		edit.addEventListener("click", () => this._pOpenStatblockEditor(instance.id));
 		const onResourceAction = action => this._pUpdateResource(instance.id, action);
-		heading.append(title, getEncounterConcentrationButton({instance, label, onAction: onResourceAction}), edit);
+		const xpLabel = document.createElement("span");
+		xpLabel.className = "ew__statblock-xp";
+		xpLabel.textContent = `Award XP ${xp == null ? "unknown" : xp.toLocaleString("en-US")}${effective.cr && typeof effective.cr === "object" && Object.hasOwn(effective.cr, "xp") ? " · custom" : ""}`;
+		heading.append(title, xpLabel, getEncounterConcentrationButton({instance, label, onAction: onResourceAction}), edit);
 		const conditions = document.createElement("div");
 		conditions.className = "ew__conditions";
 		conditions.setAttribute("aria-label", `Conditions for ${label}`);
@@ -2297,6 +2336,69 @@ export class EncounterWorkspacePage {
 		this._tiles.set(instance.id, tile);
 		if (this._isBusy) this._setTileResourcesBusy(tile, true);
 		return tile;
+	}
+
+	_renderXpTotal () {
+		const {totalXp, ratedCount, unknownCount} = getEncounterXpSummary(this._state.instances);
+		this._eleXpTotal.textContent = !this._state.instances.length
+			? "Award XP: —"
+			: `Award XP: ${ratedCount ? totalXp.toLocaleString("en-US") : "unknown"}${unknownCount && ratedCount ? " known" : ""} · ${ratedCount}/${this._state.instances.length} rated`;
+		this._eleXpTotal.title = "Raw award XP from effective statblocks, not adjusted encounter difficulty. Unrated creatures are excluded, not counted as zero.";
+	}
+
+	_setCrResult (text, {isError = false} = {}) {
+		this._eleCrResult.textContent = text;
+		this._eleCrResult.classList.toggle("ew__cr-result--error", isError);
+	}
+
+	_renderCrAssessment () {
+		const instance = this._state.instances.find(it => it.id === this._focusedInstanceId);
+		this._eleCrAssessment.hidden = !instance;
+		if (!instance) {
+			this._crAssessmentKey = null;
+			return;
+		}
+		const key = JSON.stringify([this._state.sourceList, instance.id, instance.monster, instance.statblockOperations, instance.areaNotes]);
+		if (key === this._crAssessmentKey) return;
+		this._crAssessmentKey = key;
+		this._crRequestId = (this._crRequestId || 0) + 1;
+		const review = getEncounterCrReview(instance);
+		this._eleCrBaseline.textContent = `Original → effective: CR ${review.baselineCr} → ${review.effectiveCr}; HP ${review.baselineHp} → ${review.effectiveHp}; AC ${review.baselineAc} → ${review.effectiveAc}.`;
+		this._eleCrChanges.textContent = `${review.operationCount} saved statblock ${review.operationCount === 1 ? "edit" : "edits"}; changed fields: ${review.changeDetails.join(", ") || "none"}. ${review.changes.length ? "Review the updated abilities and damage above." : ""}`;
+		this._eleCrNotes.textContent = `${review.areaNotes.length ? `Text-only reminders (not mechanics): ${review.areaNotes.join("; ")}. ` : ""}${review.manualReview.length ? `Transformation manual review required: ${review.manualReview.join("; ")}.` : ""}`;
+		this._eleCrNotes.hidden = !review.areaNotes.length && !review.manualReview.length;
+		this._formCr.reset();
+		this._inpCrHp.value = review.suggestedHp ?? "";
+		this._inpCrAc.value = review.suggestedAc ?? "";
+		this._inpCrAttack.min = "-10";
+		this._setCrResult("");
+	}
+
+	async _pEstimateCr () {
+		if (this._isBusy || !this._focusedInstanceId) return;
+		const key = this._crAssessmentKey;
+		const requestId = this._crRequestId = (this._crRequestId || 0) + 1;
+		const read = input => input.value.trim() === "" ? NaN : Number(input.value);
+		const assumptions = {
+			hp: read(this._inpCrHp),
+			ac: read(this._inpCrAc),
+			damageOverThreeRounds: read(this._inpCrDamage),
+			attackValue: read(this._inpCrAttack),
+			attackType: this._selCrAttackType.value,
+		};
+		try {
+			this._setCrResult("Loading 2014 CR table...");
+			const data = this._crTable || await DataUtil.loadJSON("data/msbcr.json");
+			if (key !== this._crAssessmentKey || requestId !== this._crRequestId) return;
+			const estimate = getEncounterCrEstimate(assumptions, data.cr);
+			this._crTable = data;
+			const effectiveCr = getEncounterCrReview(this._state.instances.find(it => it.id === this._focusedInstanceId)).effectiveCr;
+			this._setCrResult(`2014 table estimate: CR ${estimate.cr} (defensive ${estimate.defensiveCr}, offensive ${estimate.offensiveCr}; ${estimate.dpr} average damage/round). Saved CR ${effectiveCr} and award XP are unchanged. Use Edit viewed statblock to adopt a rating.`);
+		} catch (e) {
+			if (key === this._crAssessmentKey && requestId === this._crRequestId) {
+				this._setCrResult(`Could not estimate CR: ${this._getErrorMessage(e)}`, {isError: true});
+			}
+		}
 	}
 
 	_updateFocusStatus () {
