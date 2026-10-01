@@ -369,6 +369,70 @@ test("large explicit pools use bounded inline controls and do not publish failed
 	await expect(pool).toHaveAttribute("aria-label", "Storm (20/Day): 19 of 20 remaining");
 });
 
+test("pending resource saves disable only resource controls and restore their intended state on success and failure", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({monsterOverride: {
+		trait: [{name: "Ward (2/Day)", entries: ["Ward an ally."]}],
+		bonus: [{name: "Surge (8/Day)", entries: ["Surge forward."]}],
+		spellcasting: [{name: "Spellcasting", spells: {"1": {slots: 2, spells: ["{@spell shield}"]}}}],
+	}});
+	const ward = encounter.inlineResource("one", "ability:auto:ability:trait:0");
+	const slot = encounter.inlineResource("one", "slots:1");
+	const surge = encounter.inlineResource("one", "ability:auto:ability:bonus:0");
+	const recharge = encounter.inlineResource("one", "recharge:auto:recharge:action:0");
+	const concentration = encounter.statblock("one").getByRole("button", {name: /start concentration/});
+	const restoreSurge = surge.getByRole("button", {name: "Restore one Surge (8/Day) use"});
+	await expect(restoreSurge).toBeDisabled();
+	await page.evaluate(() => {
+		const globals = globalThis as typeof globalThis & {
+			StorageUtil: {pSetForPage: (...args: unknown[]) => Promise<void>},
+			releaseEncounterSave?: (fail?: boolean) => void,
+		};
+		const original = globals.StorageUtil.pSetForPage;
+		globals.StorageUtil.pSetForPage = (...args) => new Promise<void>((resolve, reject) => {
+			globals.releaseEncounterSave = (fail = false) => {
+				if (fail) reject(new Error("Storage full"));
+				else original.apply(globals.StorageUtil, args).then(resolve, reject);
+			};
+		});
+	});
+	await ward.getByRole("button", {name: /Ward \(2\/Day\), use 2 of 2:/}).click();
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "true");
+	await expect(ward.locator("button").first()).toBeDisabled();
+	await expect(ward.locator("button").last()).toBeDisabled();
+	await expect(slot.locator("button").first()).toBeDisabled();
+	await expect(slot.locator("button").last()).toBeDisabled();
+	await expect(surge.locator("button").first()).toBeDisabled();
+	await expect(surge.locator("button").last()).toBeDisabled();
+	await expect(recharge).toBeDisabled();
+	await expect(concentration).toBeDisabled();
+	await expect(encounter.statblock("one").locator("[data-packed-dice]").first()).toBeEnabled();
+	await page.evaluate(() => (globalThis as typeof globalThis & {releaseEncounterSave: () => void}).releaseEncounterSave());
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+	await expect(page.locator("#ew-status")).toContainText("Saved combat resources");
+	await expect(ward).toHaveAttribute("aria-label", "Ward (2/Day): 1 of 2 remaining");
+	await expect(ward.locator("button").first()).toBeEnabled();
+	await expect(ward.locator("button").last()).toBeEnabled();
+	await expect(slot.locator("button").first()).toBeEnabled();
+	await expect(slot.locator("button").last()).toBeEnabled();
+	await expect(surge.getByRole("button", {name: "Spend one Surge (8/Day) use"})).toBeEnabled();
+	await expect(restoreSurge).toBeDisabled();
+	await expect(recharge).toBeEnabled();
+	await expect(concentration).toBeEnabled();
+
+	await concentration.click();
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "true");
+	await expect(concentration).toBeDisabled();
+	await expect(restoreSurge).toBeDisabled();
+	await page.evaluate(() => (globalThis as typeof globalThis & {releaseEncounterSave: (fail: boolean) => void}).releaseEncounterSave(true));
+	await expect(page.locator("#ew-status[role=alert]")).toContainText("Storage full");
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+	await expect(concentration).toBeEnabled();
+	await expect(concentration).toHaveAttribute("aria-pressed", "false");
+	await expect(restoreSurge).toBeDisabled();
+	await expect(recharge).toBeEnabled();
+});
+
 test("a thousand collapsed cards do not render inline resources until opened", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({count: 1000, monsterOverride: {trait: [{name: "Ward (2/Day)", entries: ["Ward an ally."]}]}});

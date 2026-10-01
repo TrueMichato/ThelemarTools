@@ -429,9 +429,16 @@ export class EncounterWorkspacePage {
 		this._resourceContainers.forEach(container => container.querySelectorAll("button, input, select").forEach(control => {
 			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
 		}));
+		this._tiles.forEach(tile => this._setTileResourcesBusy(tile, isBusy));
 		this._eleDamageDecisions.querySelectorAll("select").forEach(control => { control.disabled = isBusy; });
 		this._updateControls();
 		this._updateFocusStatus();
+	}
+
+	_setTileResourcesBusy (tile, isBusy) {
+		tile.querySelectorAll(".ew__concentration, .ew__inline-resource-button").forEach(control => {
+			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
+		});
 	}
 
 	_updateControls () {
@@ -2288,6 +2295,7 @@ export class EncounterWorkspacePage {
 		this._resourceContainers.set(instance.id, resources);
 		tile.append(resources);
 		this._tiles.set(instance.id, tile);
+		if (this._isBusy) this._setTileResourcesBusy(tile, true);
 		return tile;
 	}
 

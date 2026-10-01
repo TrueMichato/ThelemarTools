@@ -121,8 +121,8 @@ function getPipRow ({name, current, max, resourceKey, onChange}) {
 	return row;
 }
 
-function getInlineButton (text, label, onClick, controlKey) {
-	const button = getButton(text, label, onClick, false, controlKey);
+function getInlineButton (text, label, onClick, controlKey, disabled = false) {
+	const button = getButton(text, label, onClick, disabled, controlKey);
 	button.className = "ew__inline-resource-button";
 	button.addEventListener("click", event => event.stopPropagation());
 	button.addEventListener("mousedown", event => event.stopPropagation());
@@ -147,11 +147,9 @@ function getInlineUses ({name, current, max, resourceKey, onChange}) {
 	} else {
 		group.append(
 			create("span", "ew__inline-resource-count", `${current}/${max}`),
-			getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`),
-			getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`),
+			getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`, !current),
+			getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`, current >= max),
 		);
-		group.querySelector(`[data-resource-control="${resourceKey}:spend"]`).disabled = !current;
-		group.querySelector(`[data-resource-control="${resourceKey}:restore"]`).disabled = current >= max;
 	}
 	return group;
 }
