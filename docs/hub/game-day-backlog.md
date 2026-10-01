@@ -51,8 +51,11 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   The entitlement browser probe now honors a server-supplied bounded `Retry-After` when other
   serial journeys exhaust the shared IP's campaign-creation quota, without relaxing the 201/403
   authorization assertions or the server limit. The full dependency-updated local stack passes
-  59/59 PostgreSQL checks and 47/47 browser journeys. CI for this exact head, independent
-  review, and another separately authorized release remain pending.
+  59/59 PostgreSQL checks and 47/47 browser journeys. Exact-source CI run `36843468676`
+  passed all four jobs at `a247865bf47c8d324a1d808d99e968af54ae9c88`, including
+  59/59 PostgreSQL checks and 47/47 real-stack browser journeys. Independent review and
+  another separately authorized release remain pending; passing CI does not reverse the
+  physical P1 HARD NO-GO.
 - **R11b-to-r11c history:** read-only audit confirmed one ordinary character PATCH at
   the route transition (revision 22 -> 23). Synthetic red-first tests found that Fighter's synthetic
   Second Wind pool was re-minting a generic `resources[]` row, while source-managed modifier IDs also
