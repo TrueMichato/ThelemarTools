@@ -103,14 +103,14 @@ function getPipRow ({name, current, max, resourceKey, onChange}) {
 	const actions = create("div", "ew__resource-actions");
 	actions.setAttribute("role", "group");
 	actions.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
-	if (max <= MAX_VISIBLE_PIPS) {
-		actions.append(getPipIndicators({current, max}));
-	}
-	actions.append(
-		getButton("−", `Spend one ${name} use`, () => onChange(-1), !current, `${resourceKey}:spend`),
-		getButton("+", `Restore one ${name} use`, () => onChange(1), current >= max, `${resourceKey}:restore`),
-	);
-	row.append(heading, count, actions);
+	const spend = getButton("−", `Spend one ${name} use`, () => onChange(-1), !current, `${resourceKey}:spend`);
+	const restore = getButton("+", `Restore one ${name} use`, () => onChange(1), current >= max, `${resourceKey}:restore`);
+	spend.classList.add("ew__resource-step");
+	restore.classList.add("ew__resource-step");
+	actions.append(spend, max <= MAX_VISIBLE_PIPS ? getPipIndicators({current, max}) : count, restore);
+	row.append(heading);
+	if (max <= MAX_VISIBLE_PIPS) row.append(count);
+	row.append(actions);
 	return row;
 }
 
@@ -138,15 +138,13 @@ function getInlineUses ({name, current, max, resourceKey, onChange}) {
 	group.dataset.inlineResource = resourceKey;
 	group.setAttribute("role", "group");
 	group.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
-	if (max <= MAX_INLINE_PIPS) {
-		group.append(getPipIndicators({current, max, isInline: true}));
-	} else {
-		group.append(create("span", "ew__inline-resource-count", `${current}/${max}`));
-	}
-	group.append(
-		getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`, !current),
-		getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`, current >= max),
-	);
+	const spend = getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`, !current);
+	const restore = getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`, current >= max);
+	spend.classList.add("ew__resource-step");
+	restore.classList.add("ew__resource-step");
+	group.append(spend, max <= MAX_INLINE_PIPS
+		? getPipIndicators({current, max, isInline: true})
+		: create("span", "ew__inline-resource-count", `${current}/${max}`), restore);
 	return group;
 }
 
