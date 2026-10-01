@@ -5,6 +5,39 @@ export class CreatureTransformationPage {
 
 	get root () { return this.page.locator(".bqa__transformation:visible"); }
 
+	templateChoice (id: string) {
+		return this.root.locator(`.bqa__transformation-choice[data-recipe-id="${id}"]`);
+	}
+
+	async templateContrast (id: string) {
+		return this.templateChoice(id).evaluate(node => {
+			const background = getComputedStyle(node).backgroundColor;
+			const luminance = (value: string) => {
+				const channels = value.match(/\d+/g)!.slice(0, 3).map(channel => {
+					const normalized = Number(channel) / 255;
+					return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+				});
+				return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+			};
+			const base = luminance(background);
+			return ["name", "meta", "detail"].map(part => {
+				const foreground = luminance(getComputedStyle(node.querySelector(`.bqa__transformation-choice-${part}`)!).color);
+				return (Math.max(base, foreground) + 0.05) / (Math.min(base, foreground) + 0.05);
+			});
+		});
+	}
+
+	async expectLongTemplateTitleFits (id: string) {
+		const choice = this.templateChoice(id);
+		const fits = await choice.evaluate(node => {
+			const name = node.querySelector(".bqa__transformation-choice-name");
+			if (!name) return false;
+			name.textContent = "The Ancient Shadow Dragon of the SupercalifragilisticexpialidociousMountainPass";
+			return node.scrollWidth <= node.clientWidth + 1 && name.scrollWidth <= name.clientWidth + 1;
+		});
+		expect(fits).toBe(true);
+	}
+
 	async choose (id: string) {
 		await this.chooseCategory(id.startsWith("race:") ? "Species" : "Templates");
 		await this.root.getByRole("combobox", {name: "Creature transformation"}).selectOption(id);
