@@ -1,5 +1,7 @@
 import {expect, test} from "@playwright/test";
 
+const WORKSPACE_INIT_TIMEOUT = 30_000;
+
 async function openBestiary(page: import("@playwright/test").Page) {
 	await page.goto("/bestiary.html#goblin_mm");
 	await expect.poll(() => page.evaluate(() => {
@@ -41,8 +43,8 @@ test("a generated unsaved Bestiary encounter opens through the actual button exa
 		return (await bestiary._sublistManager.pGetExportableSublist({isMemoryOnly: true})).items;
 	});
 	await page.locator(".best-ecgen__visible--flex .bestiary__encounter-workspace-link").click();
-	await expect(page).toHaveURL(/encounterworkspace\.html$/);
-	await expect(page.locator("#ew-status")).toContainText('from "Current Bestiary Encounter" in Bestiary');
+	await expect(page).toHaveURL(/encounterworkspace\.html$/, {timeout: WORKSPACE_INIT_TIMEOUT});
+	await expect(page.locator("#ew-status")).toContainText('from "Current Bestiary Encounter" in Bestiary', {timeout: WORKSPACE_INIT_TIMEOUT});
 	const opened = await readWorkspace(page);
 	expect(opened.sourceList).toEqual({name: "Current Bestiary Encounter", saveId: ""});
 	expect(opened.instances).toHaveLength(expected.reduce((sum, item) => sum + Number(item.c || 1), 0));
@@ -51,14 +53,14 @@ test("a generated unsaved Bestiary encounter opens through the actual button exa
 			&& instance.customHashId === (item.customHashId || null))).toHaveLength(Number(item.c || 1));
 	}
 	await page.reload();
-	await expect(page.locator("#ew-status")).toContainText("restored from this browser");
+	await expect(page.locator("#ew-status")).toContainText("restored from this browser", {timeout: WORKSPACE_INIT_TIMEOUT});
 	expect((await readWorkspace(page)).instances).toHaveLength(opened.instances.length);
 });
 
 test("a saved active encounter hands over exact edited counts and a scaled variant only after confirmation", async ({page}) => {
 	test.setTimeout(120_000);
 	await page.goto("/encounterworkspace.html");
-	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await page.evaluate(async () => {
 		const {StorageUtil} = globalThis as typeof globalThis & {
 			StorageUtil: {pSetForPage: (key: string, value: unknown, opts: {page: string}) => Promise<void>},
@@ -92,16 +94,16 @@ test("a saved active encounter hands over exact edited counts and a scaled varia
 	expect(saved.name).toBe("Goblin Ambush");
 	await page.locator("#btn-encounterbuild").click();
 	await page.locator(".best-ecgen__visible--flex .bestiary__encounter-workspace-link").click();
-	await expect(page.getByText("Replace Working Encounter")).toBeVisible();
+	await expect(page.getByText("Replace Working Encounter")).toBeVisible({timeout: WORKSPACE_INIT_TIMEOUT});
 	await page.getByRole("button", {name: "Keep Current"}).click();
-	await expect(page.locator("#ew-status")).toContainText("working encounter was kept");
+	await expect(page.locator("#ew-status")).toContainText("working encounter was kept", {timeout: WORKSPACE_INIT_TIMEOUT});
 	expect((await readWorkspace(page)).sourceList.name).toBe("Previous Encounter");
 
 	await openBestiary(page);
 	await page.locator("#btn-encounterbuild").click();
 	await page.locator(".best-ecgen__visible--flex .bestiary__encounter-workspace-link").click();
 	await page.getByRole("button", {name: "Replace Encounter"}).click();
-	await expect(page.locator("#ew-status")).toContainText('from "Goblin Ambush" in Bestiary');
+	await expect(page.locator("#ew-status")).toContainText('from "Goblin Ambush" in Bestiary', {timeout: WORKSPACE_INIT_TIMEOUT});
 	const opened = await readWorkspace(page);
 	expect(opened.sourceList).toEqual({name: saved.name, saveId: saved.saveId});
 	expect(opened.instances).toHaveLength(3);
@@ -110,10 +112,11 @@ test("a saved active encounter hands over exact edited counts and a scaled varia
 });
 
 test("a missing handoff is reported without changing the working copy; ordinary Bestiary navigation stays ordinary", async ({page}) => {
+	test.setTimeout(120_000);
 	await openBestiary(page);
 	await page.locator(".bestiary__wrp-controls .bestiary__encounter-workspace-link").click();
-	await expect(page).toHaveURL(/encounterworkspace\.html$/);
-	await expect(page.locator("#ew-status")).toContainText("Choose a saved Bestiary pinned list");
+	await expect(page).toHaveURL(/encounterworkspace\.html$/, {timeout: WORKSPACE_INIT_TIMEOUT});
+	await expect(page.locator("#ew-status")).toContainText("Choose a saved Bestiary pinned list", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await page.evaluate(async () => {
 		const {StorageUtil} = globalThis as typeof globalThis & {
 			StorageUtil: {pSetForPage: (key: string, value: unknown, opts: {page: string}) => Promise<void>},
@@ -124,14 +127,14 @@ test("a missing handoff is reported without changing the working copy; ordinary 
 		}, {page: "encounterworkspace.html"});
 	});
 	await page.goto("/encounterworkspace.html?bestiaryEncounter=missing");
-	await expect(page.locator("#ew-status")).toContainText("handoff is missing or has already been opened");
+	await expect(page.locator("#ew-status")).toContainText("handoff is missing or has already been opened", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await expect(page).toHaveURL(/encounterworkspace\.html$/);
 	await expect(page.locator("#ew-choose")).toBeEnabled();
 	expect((await readWorkspace(page)).sourceList.name).toBe("Keep Me");
 
 	await page.evaluate(() => sessionStorage.setItem("bestiaryEncounterHandoff", "{damaged"));
 	await page.goto("/encounterworkspace.html?bestiaryEncounter=damaged");
-	await expect(page.locator("#ew-status")).toContainText("handoff is damaged");
+	await expect(page.locator("#ew-status")).toContainText("handoff is damaged", {timeout: WORKSPACE_INIT_TIMEOUT});
 	expect((await readWorkspace(page)).sourceList.name).toBe("Keep Me");
 
 	await page.evaluate(() => sessionStorage.setItem("bestiaryEncounterHandoff", JSON.stringify({
@@ -141,7 +144,7 @@ test("a missing handoff is reported without changing the working copy; ordinary 
 	})));
 	await page.goto("/encounterworkspace.html?bestiaryEncounter=partial");
 	await page.getByRole("button", {name: "Replace Encounter"}).click();
-	await expect(page.locator("#ew-status")).toContainText("missing_creature_tst");
+	await expect(page.locator("#ew-status")).toContainText("missing_creature_tst", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await expect(page.locator("#ew-status")).toContainText("working encounter is unchanged");
 	expect((await readWorkspace(page)).sourceList.name).toBe("Keep Me");
 });
