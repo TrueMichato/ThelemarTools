@@ -1,3 +1,5 @@
+import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
+
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const _ENTRY_SECTIONS = new Set(["trait", "action", "bonus", "reaction", "legendary"]);
@@ -125,11 +127,7 @@ function _validateMatch (match) {
 }
 
 function _validateEntry (entry) {
-	_expectKeys(entry, ["name", "source", "entries"], "Statblock entry");
-	_expectString(entry.name, "Entry name");
-	_expectString(entry.source, "Entry source");
-	_expectArray(entry.entries, "Entry entries");
-	entry.entries.forEach(it => _expectString(it, "Entry text"));
+	if (!isTransformationEntry(entry)) _fail("Unsupported or oversized statblock entry.");
 }
 
 function _validateChange (change) {
@@ -143,6 +141,10 @@ function _validateChange (change) {
 				_expectString(change.value.type, "Creature type");
 				if (change.value.tags != null) _expectArray(change.value.tags, "Creature type tags");
 			} else _expectString(change.value, "Creature type");
+			break;
+		case "setSize":
+			_expectKeys(change, ["type", "value"], change.type);
+			if (!["T", "S", "M", "L", "H", "G"].includes(change.value)) _fail("Unsupported creature size.");
 			break;
 		case "setAbility":
 		case "minimumAbility":
@@ -179,6 +181,9 @@ function _validateChange (change) {
 			_expectKeys(change, ["type", "sense", "range"], change.type);
 			if (!_SENSES.has(change.sense)) _fail(`Unsupported sense "${change.sense}".`);
 			_expectInteger(change.range, "Sense range", {min: 1});
+			break;
+		case "grantSpell":
+			if (!isTransformationSpell(change, "type")) _fail("Unsupported species spell grant.");
 			break;
 		case "grantSpeed":
 			_expectKeys(change, ["type", "mode", "feet"], change.type);
@@ -347,6 +352,12 @@ function _applyChange (creature, change, chassis) {
 			out.type = _copy(change.value);
 			after = out.type;
 			break;
+		case "setSize":
+			path = "size";
+			before = out.size;
+			out.size = [change.value];
+			after = out.size;
+			break;
 		case "setAbility":
 		case "minimumAbility":
 		case "maximumAbility":
@@ -418,6 +429,31 @@ function _applyChange (creature, change, chassis) {
 				}
 			}
 			break;
+		case "grantSpell": {
+			if (out.spellcasting != null && !Array.isArray(out.spellcasting)) _fail("Spellcasting must be an array.");
+			out.spellcasting ||= [];
+			const [name] = change.spell.split("|");
+			const entry = {
+				name: `Species Magic: ${name} (${change.usage})`,
+				source: change.source,
+				type: "spellcasting",
+				headerEntries: [
+					...["known", "prepared"].includes(change.usage)
+						? [`The creature ${change.usage === "known" ? "knows" : "has prepared"} {@spell ${change.spell}} from its species. It needs its own spell slots to cast it; this trait grants no slots.`]
+						: [],
+					change.ability
+						? `Its spellcasting ability for this spell is ${change.ability.toUpperCase()}; the DM determines spell attack and save modifiers.`
+						: "The DM determines the spellcasting ability and any attack or save modifiers.",
+				],
+				...change.usage === "will" ? {will: [`{@spell ${change.spell}}`]} : {},
+				...["daily", "rest"].includes(change.usage) ? {[change.usage]: {[`${change.uses}e`]: [`{@spell ${change.spell}}`]}} : {},
+			};
+			path = _getEntryKey("spellcasting", entry, chassis);
+			if (out.spellcasting.some(it => _getEntryKey("spellcasting", it, chassis) === path)) _fail(`Duplicate entry "${path}".`, "CREATURE_TRANSFORMATION_ENTRY_MATCH");
+			out.spellcasting.push(entry);
+			after = entry;
+			break;
+		}
 		case "addEntry":
 		case "removeEntry":
 		case "replaceEntry":
@@ -465,7 +501,7 @@ function _getDiff (before, after, prefix = "") {
 	const entries = [];
 	for (const key of [...paths].sort()) {
 		const path = prefix ? `${prefix}.${key}` : key;
-		if (_ENTRY_SECTIONS.has(key) && !prefix && Array.isArray(before[key] || []) && Array.isArray(after[key] || [])) {
+		if ((_ENTRY_SECTIONS.has(key) || key === "spellcasting") && !prefix && Array.isArray(before[key] || []) && Array.isArray(after[key] || [])) {
 			const oldEntries = before[key] || [];
 			const newEntries = after[key] || [];
 			const getIdentity = it => `${it.name || ""}|${it.source || ""}`.toLowerCase();
@@ -483,7 +519,7 @@ function _getDiff (before, after, prefix = "") {
 export class BestiaryCreatureTransformation {
 	static get MAX_OPERATION_BYTES () { return _MAX_OPERATION_BYTES; }
 
-	static preview ({original, current, resolved, priorWrites = [], acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, historyFingerprint = ""}) {
+	static preview ({original, current, resolved, priorWrites = [], acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, historyFingerprint = "", allowLegacyNoEffect = false}) {
 		_validateRecipe(resolved);
 		_assertJson(original, new WeakSet(), {strict: false});
 		_assertJson(current, new WeakSet(), {strict: false});
@@ -534,6 +570,9 @@ export class BestiaryCreatureTransformation {
 		}
 		const writes = [...appliedWrites.values()].filter(it => !_equal(it.before, it.after));
 		const unresolvedConflicts = conflicts.filter(it => !Object.hasOwn(conflictDecisions, it.path));
+		if (resolved.kind === "race" && !allowLegacyNoEffect && !unresolvedConflicts.length && !writes.length) {
+			_fail("This species has no executable change for this monster; review its unresolved traits and choices with the DM.", "CREATURE_TRANSFORMATION_NO_EFFECT");
+		}
 		return {
 			original: _copy(original),
 			current: _copy(current),
@@ -555,6 +594,7 @@ export class BestiaryCreatureTransformation {
 	static createOperation ({preview, currentPreview, conflictDecisions = {}}) {
 		if (preview?.token !== currentPreview?.token || !_equal(preview?.original, currentPreview.original) || !_equal(preview?.current, currentPreview.current) || !_equal(preview?.resolved, currentPreview.resolved) || !_equal(preview?.conflicts, currentPreview.conflicts) || !_equal(preview?.manualReview, currentPreview.manualReview)) _fail("Transformation preview is stale or has been changed.", "CREATURE_TRANSFORMATION_STALE");
 		if (!currentPreview.canApply) _fail("Preview has unresolved conflicts; choose each existing or incoming winner.");
+		if (currentPreview.resolved.kind === "race" && !currentPreview.writes.length) _fail("This species has no executable change for this monster.", "CREATURE_TRANSFORMATION_NO_EFFECT");
 		if (!_isObject(conflictDecisions)) _fail("Conflict decisions must be keyed by field path.");
 		if (currentPreview.conflicts.some(it => !["existing", "incoming"].includes(conflictDecisions[it.path])) || Object.keys(conflictDecisions).some(path => !currentPreview.conflicts.some(it => it.path === path))) _fail("Missing or tampered conflict decisions.");
 		const data = {
@@ -590,10 +630,11 @@ export class BestiaryCreatureTransformation {
 			acknowledgedPrerequisites: data.acknowledgedPrerequisites,
 			dmApproved: data.dmApproved,
 		};
-		const preliminary = this.preview(options);
+		const preliminary = this.preview({...options, allowLegacyNoEffect: true});
 		const preview = this.preview({
 			...options,
 			conflictDecisions: Object.fromEntries(Object.entries(decisions).filter(([path]) => preliminary.conflicts.some(it => it.path === path))),
+			allowLegacyNoEffect: true,
 		});
 		for (const conflict of preview.conflicts) {
 			const approved = savedConflicts.find(it => it.path === conflict.path);

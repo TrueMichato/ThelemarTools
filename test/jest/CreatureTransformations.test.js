@@ -40,6 +40,31 @@ describe("app-owned creature transformation schema and source corpus", () => {
 		}
 	});
 
+	it("schema accepts only bounded structured trait entries and typed species steps", () => {
+		const recipe = byId("Skeleton", "DMG");
+		const changes = [
+			{op: "setSize", value: "M"},
+			{op: "grantSpell", spell: "light|phb", source: "PHB", usage: "will", ability: "cha"},
+			{op: "addEntry",
+				section: "trait",
+				entry: {
+					name: "Nested Trait",
+					source: "PHB",
+					entries: ["Text", {type: "list", items: [{type: "item", name: "Option", entry: "Nested text."}]}],
+				}},
+		];
+		const validate = getCreatureTransformationValidator();
+		expect(getCreatureTransformationSchemaErrors({data: {creatureTransformation: [{...recipe, changes}]}, filePath: "valid", validate})).toEqual([]);
+		for (const invalid of [
+			{op: "setSize", value: "X"},
+			{op: "grantSpell", spell: "light|phb", source: "PHB", usage: "daily"},
+			{op: "grantSpell", spell: "{@spell light|phb}", source: "PHB", usage: "known"},
+			{op: "grantSpell", spell: `${"x".repeat(255)}|phb`, source: "PHB", usage: "will"},
+			{op: "grantSpell", spell: "bad\nspell|phb", source: "PHB", usage: "will"},
+			{op: "addEntry", section: "trait", entry: {name: "Bad", source: "PHB", entries: [{type: "script", text: "no"}]}},
+		]) expect(getCreatureTransformationSchemaErrors({data: {creatureTransformation: [{...recipe, changes: [invalid]}]}, filePath: "invalid", validate})).not.toEqual([]);
+	});
+
 	it("rejects duplicate source-qualified IDs, groups, and options", () => {
 		const data = {creatureTransformation: [byId("Skeleton", "DMG"), {...byId("Skeleton", "DMG"), name: "sKeLeToN"}]};
 		expect(getCreatureTransformationIdentityErrors({data, filePath: "fixture"})).toEqual(expect.arrayContaining([expect.stringContaining("duplicate creature transformation identity")]));
@@ -248,6 +273,27 @@ describe("source-qualified candidate and resolution API", () => {
 			getVersions: race => DataUtil.generic.getVersions(race, {isExternalApplicationIdentityOnly: false}),
 		});
 		expect(withBrew.find(it => it.id === "race:elf (moon)|hbr").baseIdentity).toEqual({name: "Elf", source: "PHB"});
+		expect(withBrew.find(it => it.id === "race:elf (moon)|hbr").manualReview).toContainEqual(expect.objectContaining({field: "traits", reason: expect.stringMatching(/source attribution/)}));
+	});
+
+	it("converts the complete site race corpus after resolving _copy before inline versions", async () => {
+		const raw = JSON.parse(fs.readFileSync("data/races.json", "utf8"));
+		const merged = DataUtil.race.getPostProcessedSiteJson(raw, {isAddBaseRaces: true}).race;
+		const result = await pLoadCreatureTransformationCandidates({
+			dataUtil: {
+				loadJSON: async () => catalog,
+				generic: DataUtil.generic,
+				race: {
+					loadJSON: async () => ({race: merged}),
+					loadPrerelease: async () => ({race: []}),
+					loadBrew: async () => ({race: []}),
+					pMergeCopy: (...args) => DataUtil.race.pMergeCopy(...args),
+				},
+			},
+		});
+		expect(result.filter(it => it.kind === "race").length).toBeGreaterThan(merged.length);
+		expect(result.find(it => it.id === "race:dragonborn (red)|xphb~v:dragonborn|xphb:8").changes).toContainEqual({op: "grantResistance", value: "fire"});
+		expect(result.find(it => it.id === "race:elf (high)|phb").changes).toContainEqual({op: "adjustAbility", ability: "int", amount: 1, floor: 1});
 	});
 
 	it("replays the DMG Skeleton's vulnerability and escalates unsupported race vulnerability choices", () => {
@@ -265,9 +311,11 @@ describe("source-qualified candidate and resolution API", () => {
 		});
 		const resolved = resolveCreatureTransformation({candidates, id: "race:skeleton|dmg"});
 		expect(resolved.changes).toContainEqual({op: "grantVulnerability", value: "bludgeoning"});
-		const choice = resolveCreatureTransformation({candidates, id: "race:choice skeleton|dmg"});
+		expect(() => resolveCreatureTransformation({candidates, id: "race:choice skeleton|dmg"})).toThrow("Invalid selection");
+		const choice = resolveCreatureTransformation({candidates, id: "race:choice skeleton|dmg", selections: {vulnerable: ["choice-1"]}});
 		expect(choice.changes).toContainEqual({op: "grantVulnerability", value: "bludgeoning"});
-		expect(choice.manualReview).toContainEqual({field: "traits", reason: expect.stringContaining("vulnerable")});
+		expect(choice.changes).toContainEqual({op: "grantVulnerability", value: "fire"});
+		expect(candidates.find(it => it.id === "race:choice skeleton|dmg").optionGroups[0].options.map(it => it.name)).toEqual(["fire", "cold"]);
 		const complex = resolveCreatureTransformation({candidates, id: "race:complex skeleton|dmg"});
 		expect(complex.changes).not.toContainEqual(expect.objectContaining({op: "grantVulnerability"}));
 		expect(complex.manualReview).toContainEqual({field: "traits", reason: expect.stringContaining("vulnerable")});

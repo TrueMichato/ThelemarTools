@@ -68,10 +68,20 @@
 			"properties": {
 				"name": {"type": "string", "minLength": 1},
 				"source": {"type": "string", "minLength": 1},
-				"entries": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}
+				"entries": {"type": "array", "items": {"$ref": "#/$defs/entryContent"}, "minItems": 1}
 			},
 			"required": ["name", "source", "entries"],
 			"additionalProperties": false
+		},
+		"entryContent": {
+			"oneOf": [
+				{"type": "string", "minLength": 1},
+				{"type": "integer"},
+				{"type": "object", "properties": {"type": {"enum": ["entries", "inset"]}, "name": {"type": "string", "minLength": 1}, "entries": {"type": "array", "items": {"$ref": "#/$defs/entryContent"}, "minItems": 1}}, "required": ["type", "entries"], "additionalProperties": false},
+				{"type": "object", "properties": {"type": {"const": "list"}, "style": {"type": "string"}, "items": {"type": "array", "items": {"$ref": "#/$defs/entryContent"}, "minItems": 1}}, "required": ["type", "items"], "additionalProperties": false},
+				{"type": "object", "properties": {"type": {"enum": ["item", "itemSpell"]}, "name": {"type": "string", "minLength": 1}, "entry": {"$ref": "#/$defs/entryContent"}, "entries": {"type": "array", "items": {"$ref": "#/$defs/entryContent"}, "minItems": 1}}, "required": ["type", "name"], "oneOf": [{"required": ["entry"]}, {"required": ["entries"]}], "additionalProperties": false},
+				{"type": "object", "properties": {"type": {"const": "table"}, "caption": {"type": "string"}, "colLabels": {"type": "array", "items": {"$ref": "#/$defs/entryContent"}, "minItems": 1}, "colStyles": {"type": "array", "items": {"type": "string"}}, "rows": {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/entryContent"}, "minItems": 1}, "minItems": 1}}, "required": ["type", "colLabels", "rows"], "additionalProperties": false}
+			]
 		},
 		"entryMatch": {
 			"oneOf": [
@@ -83,6 +93,7 @@
 		"change": {
 			"oneOf": [
 				{"type": "object", "properties": {"op": {"const": "setType"}, "value": {"$ref": "#/$defs/creatureType"}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "setSize"}, "value": {"$ref": "#/$defs/size"}}, "required": ["op", "value"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"enum": ["setAbility", "minimumAbility", "maximumAbility"]}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "value": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["op", "ability", "value"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "adjustAbility"}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "amount": {"type": "integer", "minimum": -30, "maximum": 30}, "floor": {"const": 1}}, "required": ["op", "ability", "amount", "floor"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "scaleAbility"}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "factor": {"const": 0.5}, "round": {"const": "down"}, "floor": {"const": 1}}, "required": ["op", "ability", "factor", "round", "floor"], "additionalProperties": false},
@@ -91,6 +102,7 @@
 				{"type": "object", "properties": {"op": {"const": "grantSense"}, "sense": {"enum": ["darkvision", "blindsight", "tremorsense", "truesight"]}, "range": {"type": "integer", "minimum": 1}}, "required": ["op", "sense", "range"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "grantSpeed"}, "mode": {"enum": ["walk", "fly", "swim", "climb", "burrow"]}, "feet": {"type": "integer", "minimum": 0}}, "required": ["op", "mode", "feet"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "grantLanguage"}, "value": {"type": "string", "minLength": 1}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantSpell"}, "spell": {"type": "string", "maxLength": 256, "pattern": "^[^{}<>|#&\\r\\n]+\\|[A-Za-z0-9-]{2,40}$"}, "source": {"type": "string", "pattern": "^[A-Za-z0-9-]{2,40}$"}, "usage": {"enum": ["known", "prepared", "will", "daily", "rest"]}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "uses": {"type": "integer", "minimum": 1, "maximum": 9}}, "required": ["op", "spell", "source", "usage"], "allOf": [{"if": {"properties": {"usage": {"enum": ["daily", "rest"]}}}, "then": {"required": ["uses"]}, "else": {"not": {"required": ["uses"]}}}], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "grantConditionalDefense"}, "kind": {"enum": ["resistance", "immunity"]}, "value": {"$ref": "#/$defs/damage"}, "when": {"enum": ["nonmagical", "nonmagicalUnsilvered", "dimLightOrDarkness"]}}, "required": ["op", "kind", "value", "when"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "addEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "entry": {"$ref": "#/$defs/entry"}}, "required": ["op", "section", "entry"], "additionalProperties": false},
 				{"type": "object", "properties": {"op": {"const": "removeEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "match": {"$ref": "#/$defs/entryMatch"}}, "required": ["op", "section", "match"], "additionalProperties": false},

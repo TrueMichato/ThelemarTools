@@ -9,6 +9,51 @@ export class CreatureTransformationPage {
 		return this.root.locator(`.bqa__transformation-choice[data-recipe-id="${id}"]`);
 	}
 
+	recipeInfo (id: string) {
+		return this.templateChoice(id).locator("..").locator(".bqa__transformation-info");
+	}
+
+	optionInfo (group: string, value: string) {
+		return this.optionControl(group, value).locator("..").locator("..").locator(".bqa__transformation-info");
+	}
+
+	selectedRecipeInfo () {
+		return this.root.locator(".bqa__transformation-selected .bqa__transformation-info");
+	}
+
+	optionByName (group: string, name: string) {
+		return this.root.getByRole("group", {name: new RegExp(`^${group}(?: \\(required\\))?$`)})
+			.locator(".bqa__transformation-option", {hasText: name}).locator("input");
+	}
+
+	get beforeStatblock () { return this.root.locator(".bqa__transformation-statblock").first(); }
+	get afterStatblock () { return this.root.locator(".bqa__transformation-statblock").nth(1); }
+
+	async deltaLayout () {
+		return this.root.locator(".bqa__transformation-config").evaluate(node => {
+			const delta = node.querySelector(".bqa__transformation-delta");
+			if (!delta) throw new Error("Selected recipe has no mechanical delta.");
+			return {
+				isFullWidth: node.classList.contains("bqa__transformation-config--no-options"),
+				widthRatio: delta.getBoundingClientRect().width / node.getBoundingClientRect().width,
+				fontSize: parseFloat(getComputedStyle(delta.querySelector("li") || delta).fontSize),
+			};
+		});
+	}
+
+	get nativeHover () {
+		return this.page.locator(".ve-hwin:visible").last();
+	}
+
+	async dismissNativeHover () {
+		await this.page.mouse.move(0, 0);
+		for (let ix = 0; ix < 5 && await this.page.locator(".ve-hwin:visible").count(); ix++) {
+			await this.nativeHover.locator('[title="Close (CTRL to Close All)"]').click();
+			await this.page.mouse.move(0, 0);
+		}
+		await expect(this.page.locator(".ve-hwin:visible")).toHaveCount(0);
+	}
+
 	optionControl (group: string, value: string) {
 		return this.root.getByRole("group", {name: new RegExp(`^${group}(?: \\(required\\))?$`)})
 			.locator(`.bqa__transformation-option input[value="${value}"]`);
@@ -44,7 +89,7 @@ export class CreatureTransformationPage {
 				return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
 			};
 			const base = luminance(background);
-			return ["name", "meta", "detail"].map(part => {
+			return ["name", "meta"].map(part => {
 				const foreground = luminance(getComputedStyle(node.querySelector(`.bqa__transformation-choice-${part}`)!).color);
 				return (Math.max(base, foreground) + 0.05) / (Math.min(base, foreground) + 0.05);
 			});
@@ -68,7 +113,7 @@ export class CreatureTransformationPage {
 	}
 
 	async chooseCategory (category: "Species" | "Templates") {
-		await this.categoryButton(category).click();
+		await this.categoryButton(category).press("Enter");
 	}
 
 	async selectSource (source: string) {
@@ -156,20 +201,11 @@ export class CreatureTransformationPage {
 		await this.optionControl(group, value).check();
 	}
 
-	async acknowledge () {
-		const group = this.root.getByRole("group", {name: "Confirm before preview"});
-		const checks = group.getByRole("checkbox");
-		for (let ix = 0; ix < await checks.count(); ix++) await checks.nth(ix).check();
-	}
-
-	async preview ({bulk = false}: {bulk?: boolean} = {}) {
-		await this.root.getByRole("button", {name: bulk ? "Preview selected monsters" : "Preview transformation"}).click();
-		await expect(this.root.locator(".bqa__transformation-target").first()).toBeVisible();
-		await expect(this.root.locator(".bqa__transformation-statblock")).toHaveCount(bulk ? 4 : 2);
-	}
-
-	async acknowledgeReview () {
-		await this.root.getByRole("checkbox", {name: /I understand these items still require manual DM review/}).check();
+	async expectLivePreview ({targets = 1}: {targets?: number} = {}) {
+		await expect(this.root.locator(".bqa__transformation-target")).toHaveCount(targets);
+		await expect(this.root.locator(".bqa__transformation-statblock")).toHaveCount(targets * 2);
+		await expect(this.root.locator(".bqa__transformation-delta")).toBeVisible();
+		await expect(this.root.getByRole("button", {name: /Preview (transformation|selected monsters)/})).toHaveCount(0);
 	}
 
 	async pickIncomingWinners () {
@@ -180,8 +216,64 @@ export class CreatureTransformationPage {
 	}
 
 	async apply ({bulk = false, count = 1}: {bulk?: boolean, count?: number} = {}) {
-		await this.acknowledgeReview();
-		await this.root.getByRole("button", {name: bulk ? `Apply to ${count} · one save` : "Apply transformation"}).click();
+		const apply = this.root.getByRole("button", {name: bulk ? `Apply to ${count} · one save` : "Apply transformation"});
+		const confirmation = this.root.getByRole("group", {name: "Confirm before applying"});
+		if (await confirmation.isHidden()) await apply.click();
+		if (await confirmation.isVisible()) {
+			const checks = confirmation.getByRole("checkbox", {includeHidden: false});
+			for (let ix = 0; ix < await checks.count(); ix++) await checks.nth(ix).check();
+			await apply.click();
+		}
 		if (bulk) await expect(this.page.locator("#ew-status")).toContainText("Saved statblock edits");
+	}
+
+	async requestConfirmation () {
+		await this.root.getByRole("button", {name: "Apply transformation"}).click();
+		await expect(this.root.getByRole("group", {name: "Confirm before applying"})).toBeVisible();
+	}
+
+	async confirmPrerequisites () {
+		const checks = this.root.getByRole("group", {name: "Confirm before applying"}).getByRole("checkbox", {includeHidden: false});
+		for (let ix = 0; ix < await checks.count(); ix++) await checks.nth(ix).check();
+	}
+
+	async savedEncounter () {
+		return this.page.evaluate(async () => {
+			const {StorageUtil} = globalThis as typeof globalThis & {
+				StorageUtil: {pGetForPage: (key: string, options: {page: string}) => Promise<unknown>},
+			};
+			return StorageUtil.pGetForPage("encounterWorkspaceState", {page: "encounterworkspace.html"});
+		});
+	}
+
+	async failEncounterWrites () {
+		await this.page.evaluate(() => {
+			const {StorageUtil} = globalThis as typeof globalThis & {
+				StorageUtil: {pSetForPage: (key: string, value: unknown, options: {page: string}) => Promise<void>},
+			};
+			const save = StorageUtil.pSetForPage.bind(StorageUtil);
+			StorageUtil.pSetForPage = async (key, value, options) => {
+				if (key === "encounterWorkspaceState") throw new Error("Simulated storage failure");
+				return save(key, value, options);
+			};
+		});
+	}
+
+	async monitorOperationCreation () {
+		await this.page.evaluate(async () => {
+			const moduleUrl = "/js/bestiary/bestiary-quick-actions-engine.js";
+			const {BestiaryQuickActionsUtil} = await import(moduleUrl);
+			const original = BestiaryQuickActionsUtil.createCreatureTransformationOperation;
+			const globals = globalThis as typeof globalThis & {transformationOperationsCreated?: number};
+			globals.transformationOperationsCreated = 0;
+			BestiaryQuickActionsUtil.createCreatureTransformationOperation = function (...args) {
+				globals.transformationOperationsCreated!++;
+				return original.apply(this, args);
+			};
+		});
+	}
+
+	async createdOperations () {
+		return this.page.evaluate(() => (globalThis as typeof globalThis & {transformationOperationsCreated?: number}).transformationOperationsCreated);
 	}
 }

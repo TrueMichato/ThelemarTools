@@ -115,7 +115,7 @@ describe("catalog-to-replay transformation adapter", () => {
 			{type: "grantSpeed", mode: "walk", feet: 0},
 			{type: "grantVulnerability", value: "bludgeoning"},
 		]));
-		expect(base.manualReview).toEqual(expect.arrayContaining([expect.objectContaining({field: "traits", reason: expect.stringContaining("not executable")})]));
+		expect(base.manualReview).toEqual(expect.arrayContaining([expect.objectContaining({field: "traits", reason: expect.stringContaining("not added")})]));
 		const version = resolveCreatureTransformation({candidates: raceCandidates, id: "race:skeleton|ua~v:skeleton|ua:1"});
 		expect(version.changes).toEqual(expect.arrayContaining([{op: "grantSense", sense: "darkvision", range: 60}]));
 		expect(() => resolveCreatureTransformation({candidates: raceCandidates, id: "race:skeleton|missing"})).toThrow(/unavailable/i);

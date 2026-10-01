@@ -1,3 +1,5 @@
+import {getRenderableSpeciesTrait, isTransformationEntry, isTransformationSpell} from "./creature-transformation-entries.js";
+
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
 	{field: "hp", reason: "Recheck hit points and Hit Dice after changing type or abilities."},
@@ -11,6 +13,8 @@ const CONDITION_TYPES = new Set(["blinded", "charmed", "deafened", "exhaustion",
 const CREATURE_TYPES = new Set(["aberration", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend", "giant", "humanoid", "monstrosity", "ooze", "plant", "undead"]);
 const SENSES = new Set(["darkvision", "blindsight", "tremorsense", "truesight"]);
 const SPEEDS = new Set(["walk", "fly", "swim", "climb", "burrow"]);
+const SIZES = new Set(["T", "S", "M", "L", "H", "G"]);
+const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const ENTRY_SECTIONS = new Set(["trait", "action", "bonus", "reaction", "legendary"]);
 const ENTRY_ROLES = new Set(["breathWeapon", "bite", "healingTouch", "angelicWeapons"]);
 const REVIEW_FIELDS = new Set(["ac", "hp", "attacks", "cr", "characterLevel", "eligibility", "abilities", "traits", "spellcasting", "other"]);
@@ -31,12 +35,7 @@ const assertIdentity = (entity) => {
 		throw new Error("Creature transformation requires a nonempty name and source.");
 	}
 };
-const isEntry = entry => {
-	if (Object.keys(entry || {}).sort().join(",") !== "entries,name,source" || !Array.isArray(entry.entries) || !entry.entries.length) return false;
-	return typeof entry.name === "string" && !!entry.name.trim()
-		&& typeof entry.source === "string" && !!entry.source.trim()
-		&& entry.entries.every(it => typeof it === "string" && !!it.trim());
-};
+const isEntry = isTransformationEntry;
 const isEntryMatch = match => {
 	const keys = Object.keys(match || {}).sort().join(",");
 	return (keys === "name,source" && typeof match.name === "string" && !!match.name.trim() && typeof match.source === "string" && !!match.source.trim())
@@ -65,6 +64,7 @@ const assertChanges = changes => {
 		const valid = (() => {
 			switch (step?.op) {
 				case "setType": return props === "op,value" && CREATURE_TYPES.has(step.value);
+				case "setSize": return props === "op,value" && SIZES.has(step.value);
 				case "setAbility":
 				case "minimumAbility":
 				case "maximumAbility": return props === "ability,op,value" && ["str", "dex", "con", "int", "wis", "cha"].includes(step.ability) && Number.isInteger(step.value) && step.value >= 1 && step.value <= 30;
@@ -77,6 +77,7 @@ const assertChanges = changes => {
 				case "grantSense": return props === "op,range,sense" && SENSES.has(step.sense) && Number.isInteger(step.range) && step.range > 0;
 				case "grantSpeed": return props === "feet,mode,op" && SPEEDS.has(step.mode) && Number.isInteger(step.feet) && step.feet >= 0;
 				case "grantLanguage": return props === "op,value" && typeof step.value === "string" && !!step.value.trim();
+				case "grantSpell": return isTransformationSpell(step);
 				case "grantConditionalDefense": return props === "kind,op,value,when" && ["resistance", "immunity"].includes(step.kind) && DAMAGE_TYPES.has(step.value) && ["nonmagical", "nonmagicalUnsilvered", "dimLightOrDarkness"].includes(step.when);
 				case "addEntry": return props === "entry,op,section" && ENTRY_SECTIONS.has(step.section) && isEntry(step.entry);
 				case "removeEntry": return props === "match,op,section" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match);
@@ -89,47 +90,263 @@ const assertChanges = changes => {
 	}
 };
 
+const getCombinations = (values, count) => {
+	if (!Array.isArray(values) || !values.length || values.length > 24 || new Set(values).size !== values.length
+		|| !Number.isInteger(count) || count < 1 || count > 6 || count > values.length) return null;
+	const result = [];
+	const visit = (start, selected) => {
+		if (selected.length === count) {
+			result.push(selected);
+			return;
+		}
+		for (let i = start; i < values.length && result.length <= 24; i++) visit(i + 1, [...selected, values[i]]);
+	};
+	visit(0, []);
+	return result.length <= 24 ? result : null;
+};
+
+const getSpellUid = value => {
+	if (typeof value !== "string" || value.length > 258 || value.includes("{") || value.includes("}") || (value.includes("#") && !value.endsWith("#c"))) return null;
+	const clean = value.replace(/#c$/, "");
+	if (!/^[^{}<>|#\r\n&]+?(?:\|[a-zA-Z0-9-]{2,40})?$/.test(clean)) return null;
+	const [name, source = "PHB"] = clean.split("|");
+	return name?.trim() && `${name.trim()}|${source.toLowerCase()}`;
+};
+
+const getSpellBlock = (block, source, ability) => {
+	const changes = [];
+	const manualReview = [];
+	const review = reason => manualReview.push({field: "spellcasting", reason});
+	for (const category of ["known", "prepared", "innate"]) {
+		if (block[category] == null) continue;
+		if (!block[category] || typeof block[category] !== "object" || Array.isArray(block[category])) {
+			review(`Resolve the ${category} species spells manually.`);
+			continue;
+		}
+		for (const [level, grant] of Object.entries(block[category])) {
+			if (!["_", "1"].includes(level)) {
+				manualReview.push({field: "characterLevel", reason: `Resolve species spells at character level ${level} with the DM; they were not granted.`});
+				review(`Species spells at level ${level} were not granted automatically.`);
+				continue;
+			}
+			const add = (spells, usage, uses) => {
+				if (!Array.isArray(spells)) {
+					review(`Resolve non-concrete ${category} spell choices with the DM.`);
+					return;
+				}
+				for (const spell of spells) {
+					const uid = getSpellUid(spell);
+					if (!uid) review(`Choose a concrete ${category} spell and casting level with the DM.`);
+					else {
+						changes.push({op: "grantSpell",
+							spell: uid,
+							source,
+							usage: ["known", "prepared"].includes(usage) && spell.endsWith("#c") ? "will" : usage,
+							...ability ? {ability} : {},
+							...uses ? {uses} : {}});
+					}
+				}
+			};
+			if (category !== "innate") {
+				if (Array.isArray(grant)) add(grant, category);
+				else if (grant && typeof grant === "object" && Array.isArray(grant._)) {
+					add(grant._, category);
+					if (Object.keys(grant).some(key => key !== "_")) review(`Resolve additional ${category} spell usage with the DM.`);
+				} else review(`Resolve non-concrete ${category} spell choices with the DM.`);
+				continue;
+			}
+			if (!grant || typeof grant !== "object" || Array.isArray(grant)) {
+				review("Resolve innate spell usage with the DM.");
+				continue;
+			}
+			if (grant.will != null) {
+				if (Array.isArray(grant.will)) add(grant.will, "will");
+				else review("Resolve non-concrete innate at-will spells with the DM.");
+			}
+			for (const duration of ["daily", "rest"]) {
+				if (grant[duration] == null) continue;
+				if (!grant[duration] || typeof grant[duration] !== "object" || Array.isArray(grant[duration])) {
+					review(`Resolve innate ${duration} spell uses with the DM.`);
+					continue;
+				}
+				for (const [count, spells] of Object.entries(grant[duration])) {
+					if (!/^[1-9]e?$/.test(count) || !Array.isArray(spells) || (!count.endsWith("e") && spells.length > 1)) {
+						review(`Resolve shared or non-concrete ${duration} spell uses with the DM.`);
+						continue;
+					}
+					add(spells, duration, Number(count[0]));
+				}
+			}
+			for (const key of Object.keys(grant)) if (!["will", "daily", "rest"].includes(key)) review(`Resolve unsupported innate spell usage "${key}" with the DM.`);
+		}
+	}
+	for (const key of Object.keys(block)) if (!["name", "ability", "known", "prepared", "innate"].includes(key)) review(`Resolve unsupported species spell property "${key}" with the DM.`);
+	return {changes, manualReview};
+};
+
 const getRaceRecipe = race => {
 	const changes = [];
+	const optionGroups = [];
 	const manualReview = copy(REVIEW_CHASSIS);
-	const addDamage = (key, op) => {
+	const review = (field, reason) => manualReview.push({field, reason});
+	const choose = (id, name, values, count, getChanges, field) => {
+		const combinations = getCombinations(values, count);
+		if (!combinations) {
+			review(field, `Resolve ${name} choice with the DM; it cannot be represented as bounded, fixed options.`);
+			return;
+		}
+		const groupId = optionGroups.some(it => it.id === id) ? `${id}-${optionGroups.filter(it => it.id === id || it.id.startsWith(`${id}-`)).length + 1}` : id;
+		optionGroups.push({
+			id: groupId,
+			name,
+			selection: "one",
+			required: true,
+			options: combinations.map((selected, ix) => ({
+				id: `choice-${ix + 1}`,
+				name: selected.join(" + "),
+				changes: selected.flatMap(getChanges),
+				manualReview: [],
+			})),
+		});
+	};
+	const addTyped = (key, op, allowed, field = "traits") => {
 		if (race[key] == null) return;
 		if (!Array.isArray(race[key])) {
-			manualReview.push({field: "traits", reason: `Resolve this species' ${key} choice or nonstandard damage type.`});
+			review(field, `Resolve this species' ${key} choice or nonstandard value with the DM.`);
 			return;
 		}
 		for (const value of race[key]) {
-			if (typeof value === "string" && DAMAGE_TYPES.has(value)) changes.push({op, value});
-			else manualReview.push({field: "traits", reason: `Resolve this species' ${key} choice or nonstandard damage type.`});
+			if (typeof value === "string" && allowed.has(value)) changes.push({op, value});
+			else if (value?.choose && Array.isArray(value.choose.from) && value.choose.from.every(it => allowed.has(it))
+				&& Object.keys(value).length === 1 && Object.keys(value.choose).every(it => ["from", "count"].includes(it))) {
+				choose(key, `Species ${key}`, value.choose.from, value.choose.count ?? 1, item => [{op, value: item}], field);
+			} else review(field, `Resolve this species' ${key} choice or nonstandard value with the DM.`);
 		}
 	};
-	const addConditions = () => {
-		for (const value of race.conditionImmune || []) {
-			if (typeof value === "string" && CONDITION_TYPES.has(value)) changes.push({op: "grantConditionImmunity", value});
-			else manualReview.push({field: "traits", reason: "Resolve this species' conditional condition immunity."});
-		}
-	};
+	if (race.creatureTypes == null) changes.push({op: "setType", value: "humanoid"});
+	else if (Array.isArray(race.creatureTypes) && race.creatureTypes.length === 1 && CREATURE_TYPES.has(race.creatureTypes[0])) changes.push({op: "setType", value: race.creatureTypes[0]});
+	else if (Array.isArray(race.creatureTypes) && race.creatureTypes.length > 1 && race.creatureTypes.every(it => CREATURE_TYPES.has(it))) {
+		choose("type", "Creature type", race.creatureTypes, 1, value => [{op: "setType", value}], "eligibility");
+	} else review("eligibility", "Resolve this species' creature type with the DM.");
 
-	if (race.creatureTypes?.length === 1 && CREATURE_TYPES.has(race.creatureTypes[0])) changes.push({op: "setType", value: race.creatureTypes[0]});
-	else if (race.creatureTypes?.length) manualReview.push({field: "eligibility", reason: "Choose the species' creature type with the DM."});
-	else if (!race.creatureTypes) changes.push({op: "setType", value: "humanoid"});
-	addDamage("resist", "grantResistance");
-	addDamage("immune", "grantImmunity");
-	addDamage("vulnerable", "grantVulnerability");
-	addConditions();
-	if (Number.isInteger(race.darkvision) && race.darkvision > 0) changes.push({op: "grantSense", sense: "darkvision", range: race.darkvision});
-	if (typeof race.speed === "number" && Number.isInteger(race.speed) && race.speed >= 0) changes.push({op: "grantSpeed", mode: "walk", feet: race.speed});
-	else if (race.speed && typeof race.speed === "object") {
-		for (const mode of SPEEDS) {
-			if (Number.isInteger(race.speed[mode]) && race.speed[mode] >= 0) changes.push({op: "grantSpeed", mode, feet: race.speed[mode]});
-			else if (race.speed[mode] != null) manualReview.push({field: "traits", reason: `Resolve conditional ${mode} speed for this species.`});
+	if (Array.isArray(race.size) && race.size.length === 1 && SIZES.has(race.size[0])) changes.push({op: "setSize", value: race.size[0]});
+	else if (Array.isArray(race.size) && race.size.length > 1 && race.size.every(it => SIZES.has(it))) {
+		choose("size", "Species size", race.size, 1, value => [{op: "setSize", value}], "other");
+	} else if (race.size != null) review("other", "Resolve this species' size with the DM.");
+
+	if (race.ability != null) {
+		if (!Array.isArray(race.ability) || race.ability.length !== 1 || !race.ability[0] || typeof race.ability[0] !== "object") {
+			review("abilities", "Resolve alternative species ability adjustments with the DM.");
+		} else {
+			const ability = race.ability[0];
+			for (const [key, value] of Object.entries(ability)) {
+				if (ABILITIES.has(key) && Number.isInteger(value) && value >= -30 && value <= 30 && value !== 0) changes.push({op: "adjustAbility", ability: key, amount: value, floor: 1});
+				else if (key === "choose" && value && Array.isArray(value.from) && value.from.every(it => ABILITIES.has(it))
+					&& Number.isInteger(value.amount ?? 1) && (value.amount ?? 1) >= -30 && (value.amount ?? 1) <= 30
+					&& Object.keys(value).every(it => ["from", "count", "amount"].includes(it))) {
+					choose("ability", "Ability adjustment", value.from, value.count ?? 1,
+						item => [{op: "adjustAbility", ability: item, amount: value.amount ?? 1, floor: 1}], "abilities");
+				} else review("abilities", "Resolve non-fixed species ability adjustments with the DM.");
+			}
 		}
 	}
-	if (race.ability?.length) manualReview.push({field: "abilities", reason: "Choose whether ancestry ability adjustments apply to an NPC's existing scores."});
-	if (race.entries?.length) manualReview.push({field: "traits", reason: "Review species traits, proficiencies, and choices; they are not executable changes."});
-	if (race.additionalSpells?.length) manualReview.push({field: "spellcasting", reason: "Resolve spells, spell level, and casting ability for this NPC."});
-	if (race.size?.length) manualReview.push({field: "other", reason: "Confirm size against the selected chassis; the adapter does not replace it."});
-
+	addTyped("resist", "grantResistance", DAMAGE_TYPES);
+	addTyped("immune", "grantImmunity", DAMAGE_TYPES);
+	addTyped("vulnerable", "grantVulnerability", DAMAGE_TYPES);
+	addTyped("conditionImmune", "grantConditionImmunity", CONDITION_TYPES);
+	for (const sense of SENSES) {
+		if (race[sense] == null) continue;
+		if (Number.isInteger(race[sense]) && race[sense] > 0) changes.push({op: "grantSense", sense, range: race[sense]});
+		else review("traits", `Resolve non-fixed ${sense} range with the DM.`);
+	}
+	if (race.speed != null) {
+		if (Number.isInteger(race.speed) && race.speed >= 0) changes.push({op: "grantSpeed", mode: "walk", feet: race.speed});
+		else if (race.speed && typeof race.speed === "object" && !Array.isArray(race.speed)) {
+			for (const [mode, value] of Object.entries(race.speed)) {
+				if (SPEEDS.has(mode) && Number.isInteger(value) && value >= 0) changes.push({op: "grantSpeed", mode, feet: value});
+				else review("traits", `Resolve conditional or unsupported ${mode} speed for this species.`);
+			}
+		} else review("traits", "Resolve non-fixed species speed with the DM.");
+	}
+	if (race.languageProficiencies != null) {
+		if (!Array.isArray(race.languageProficiencies) || !race.languageProficiencies.length) review("traits", "Resolve nonstandard species languages with the DM.");
+		else {
+			const lists = race.languageProficiencies;
+			const fixed = Object.entries(lists[0]).filter(([key, value]) => value === true && key !== "other" && lists.every(list => list[key] === true));
+			for (const [key] of fixed) changes.push({op: "grantLanguage", value: key[0].toUpperCase() + key.slice(1)});
+			if (lists.length !== 1) review("traits", "Resolve alternative species language lists with the DM.");
+			else {
+				for (const [key, value] of Object.entries(lists[0])) {
+					if (fixed.some(([name]) => name === key)) continue;
+					if (key === "choose" && value && Array.isArray(value.from) && value.from.every(it => typeof it === "string" && it !== "other" && /^[a-z][a-z -]*$/i.test(it))) {
+						choose("languages", "Species language", value.from, value.count ?? 1, item => [{op: "grantLanguage", value: item[0].toUpperCase() + item.slice(1)}], "traits");
+					} else review("traits", `Resolve ${key} language proficiency with the DM.`);
+				}
+			}
+		}
+	}
+	if (race.additionalSpells != null) {
+		if (!Array.isArray(race.additionalSpells) || !race.additionalSpells.length || race.additionalSpells.length > 24) review("spellcasting", "Resolve nonstandard species spells with the DM.");
+		else if (race.additionalSpells.length > 1 && !race.additionalSpells.every(it => typeof it?.name === "string" && it.name.trim())) {
+			review("spellcasting", "Resolve whether the unnamed species spell grants are cumulative or alternatives with the DM; none were granted.");
+		} else {
+			const spellOptions = [];
+			for (const [ix, block] of race.additionalSpells.entries()) {
+				if (!block || typeof block !== "object" || Array.isArray(block)) {
+					review("spellcasting", "Resolve nonstandard species spell grants with the DM.");
+					continue;
+				}
+				const abilities = typeof block.ability === "string" ? [block.ability]
+					: block.ability?.choose && Array.isArray(block.ability.choose) && Object.keys(block.ability).length === 1
+						? block.ability.choose : [null];
+				if (!abilities.length || abilities.length > 6 || new Set(abilities).size !== abilities.length
+					|| abilities.some(it => it != null && !ABILITIES.has(it)) || (block.ability && abilities[0] == null)) {
+					review("spellcasting", "Choose a supported species spellcasting ability with the DM.");
+					continue;
+				}
+				for (const ability of abilities) {
+					const data = getSpellBlock(block, race.source, ability);
+					spellOptions.push({
+						id: `choice-${spellOptions.length + 1}`,
+						name: `${block.name || `Spell grant ${ix + 1}`}${abilities.length > 1 ? ` (${ability.toUpperCase()})` : ""}`,
+						changes: data.changes,
+						manualReview: data.manualReview,
+					});
+				}
+			}
+			if (race.additionalSpells.length > 1 || spellOptions.length > 1) {
+				if (spellOptions.length && spellOptions.length <= 24) optionGroups.push({id: "spells", name: "Species spell grant and ability", selection: "one", required: true, options: spellOptions});
+				else review("spellcasting", "Resolve species spell choices with the DM; no safe finite selection is available.");
+			} else if (spellOptions.length) {
+				changes.push(...spellOptions[0].changes);
+				manualReview.push(...spellOptions[0].manualReview);
+			}
+			if (spellOptions.some(it => it.changes.length && it.changes.some(change => !change.ability))) review("spellcasting", "Resolve the species spellcasting ability and spell DC with the DM.");
+		}
+	}
+	if (race.entries != null) {
+		if (!Array.isArray(race.entries)) review("traits", "Resolve nonstandard species trait entries with the DM.");
+		else {
+			for (const entry of race.entries) {
+				if (race._baseSource && race._baseSource !== race.source && !entry?.source) {
+					review("traits", `Review species trait "${entry?.name || "(unnamed)"}" with the DM; merged parent and subrace text has no reliable source attribution.`);
+					continue;
+				}
+				const trait = getRenderableSpeciesTrait(entry, race.source);
+				if (trait) changes.push({op: "addEntry", section: "trait", entry: trait});
+				else review("traits", `Review unsupported or oversized species trait "${entry?.name || "(unnamed)"}" with the DM; it was not added.`);
+			}
+			if (race.entries.length) review("traits", "Species trait rules are displayed, but their roll modifiers, proficiencies, and actions are not automated; adjudicate them with the DM.");
+		}
+	}
+	for (const key of ["skillProficiencies", "toolProficiencies", "weaponProficiencies", "armorProficiencies"]) {
+		if (race[key]?.length) review("traits", `Review ${key} with the DM; proficiency roll modifiers are not automated.`);
+	}
+	if (race.skillToolLanguageProficiencies?.length) review("traits", "Review combined skill, tool, and language proficiency choices with the DM; they were not automated.");
+	if (race.feats?.length) review("traits", "Review species-granted feats with the DM; they were not automated.");
+	if (race.creatureTypeTags?.length) review("traits", "Review species creature-type tags with the DM; only the primary type was changed.");
+	if (race.lineage) review("eligibility", "Review lineage selection with the DM; it was not inferred from this species.");
+	if (!changes.length && !optionGroups.length) review("other", "No safe executable species change is available for this entry.");
 	return {
 		kind: "race",
 		id: getId("race", race),
@@ -139,7 +356,7 @@ const getRaceRecipe = race => {
 		eligibility: {dmApproval: true},
 		prerequisites: [],
 		changes,
-		optionGroups: [],
+		optionGroups,
 		manualReview,
 	};
 };
@@ -245,9 +462,14 @@ async function pLoadCreatureTransformationCandidates ({dataUtil = globalThis.Dat
 	for (const [name, data] of [["prerelease", prerelease], ["homebrew", brew]]) {
 		if (!data || typeof data !== "object" || (data.race != null && !Array.isArray(data.race))) throw new Error(`${name} race source is malformed.`);
 	}
+	const races = JSON.parse(JSON.stringify([...(site.race || []), ...(prerelease.race || []), ...(brew.race || [])]));
+	if (races.some(race => race._copy) && typeof dataUtil.race.pMergeCopy !== "function") {
+		throw new Error("Race copies cannot be resolved without DataUtil.race.pMergeCopy.");
+	}
+	for (const race of races) if (race._copy) await dataUtil.race.pMergeCopy(races, race, {isErrorOnMissing: true});
 	return getCreatureTransformationCandidates({
 		catalog,
-		races: [...(site?.race || []), ...(prerelease?.race || []), ...(brew?.race || [])],
+		races,
 		getVersions: race => dataUtil.generic.getVersions(race, {isExternalApplicationIdentityOnly: false}),
 	});
 }

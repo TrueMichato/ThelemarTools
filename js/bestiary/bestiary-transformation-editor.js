@@ -45,6 +45,7 @@ function describeEligibility (rule) {
 function describeChange (step) {
 	switch (step.op) {
 		case "setType": return `Set type to ${step.value}`;
+		case "setSize": return `Set size to ${Parser.sizeAbvToFull(step.value)}`;
 		case "setAbility": return `Set ${Parser.attAbvToFull(step.ability)} to ${step.value}`;
 		case "minimumAbility": return `${Parser.attAbvToFull(step.ability)} at least ${step.value}`;
 		case "maximumAbility": return `${Parser.attAbvToFull(step.ability)} at most ${step.value}`;
@@ -57,17 +58,47 @@ function describeChange (step) {
 		case "grantSense": return `${step.sense} ${step.range} ft.`;
 		case "grantSpeed": return `${step.mode} speed ${step.feet} ft.`;
 		case "grantLanguage": return `Speak ${step.value}`;
+		case "grantSpell": {
+			const [name, source] = step.spell.split("|");
+			return `Grant ${name} (${source}) from ${step.source}, ${step.usage}${step.uses == null ? "" : ` · ${step.uses} use${step.uses === 1 ? "" : "s"}`}${step.ability ? ` · ${Parser.attAbvToFull(step.ability)}` : ""}`;
+		}
 		case "grantConditionalDefense": return `${step.kind} to ${step.value} (${{
 			nonmagical: "nonmagical damage",
 			nonmagicalUnsilvered: "nonmagical, unsilvered damage",
 			dimLightOrDarkness: "in dim light or darkness",
 		}[step.when]})`;
-		case "addEntry": return `Add ${step.section} ${step.entry.name} (${step.entry.source}): ${step.entry.entries.join(" ")}`;
+		case "addEntry": return `Add ${step.section} ${step.entry.name} (${step.entry.source})`;
 		case "removeEntry": return `Remove ${step.section} ${step.match.name || step.match.role} (${step.match.source})`;
 		case "replaceEntry": return `Replace ${step.section} ${step.match.name || step.match.role} with ${step.entry.name} (${step.entry.source})`;
 		case "replaceDamageType": return `Change ${step.section} ${step.match.name || step.match.role} damage to ${step.to}`;
 		default: throw new Error(`Unknown transformation change: ${step.op}`);
 	}
+}
+
+function getChangeHoverEntries (changes) {
+	return changes.flatMap(step => step.entry?.entries?.length
+		? [describeChange(step), {type: "entries", name: `${step.entry.name} (${step.entry.source})`, entries: step.entry.entries}]
+		: [describeChange(step)]);
+}
+
+function makeInfoButton ({name, entries, targets = []}) {
+	const info = button("ⓘ", () => hover.show(), "bqa__transformation-info bqa__entity-link ve-help ve-help--hover");
+	info.setAttribute("aria-label", `Details for ${name}`);
+	info.title = `View ${name} details`;
+	const hover = Renderer.hover.getMakePredefinedHover({type: "entries", name, entries: MiscUtil.copyFast(entries)}, {isBookContent: false});
+	for (const node of [info, ...targets]) {
+		node.addEventListener("mouseover", evt => hover.mouseOver(evt, node));
+		node.addEventListener("mousemove", evt => hover.mouseMove(evt, node));
+		node.addEventListener("mouseleave", evt => hover.mouseLeave(evt, node));
+		node.addEventListener("focus", () => {
+			if (!node.matches(":focus-visible")) return;
+			const bounds = node.getBoundingClientRect();
+			node.dispatchEvent(new MouseEvent("mouseover", {clientX: bounds.left + bounds.width / 2, clientY: bounds.top + bounds.height / 2, view: window}));
+		});
+		node.addEventListener("blur", () => node.dispatchEvent(new MouseEvent("mouseleave")));
+		node.addEventListener("touchstart", evt => hover.touchStart(evt, node), {passive: true});
+	}
+	return info;
 }
 
 function describeOption (option, candidate, group) {
@@ -77,6 +108,17 @@ function describeOption (option, candidate, group) {
 		option.changes.length ? `Mechanical changes: ${option.changes.map(describeChange).join("; ")}.` : "No automatic mechanical change.",
 		option.manualReview.length ? `DM review: ${option.manualReview.map(it => it.reason).join(" ")}` : "No additional DM review for this choice.",
 	].join(" ");
+}
+
+function getRecipeHoverEntries (candidate, sourceLabel) {
+	const {edition, page} = candidate.provenance;
+	return [
+		`${sourceLabel(candidate.identity.source)} · ${edition === "unverified" ? "Edition unverified" : edition === "one" ? "2024 edition" : "2014 edition"} · ${page == null ? "Page unverified" : `p. ${page}`}.`,
+		`Eligibility: ${describeEligibility(candidate.eligibility)}.`,
+		...(candidate.prerequisites.length ? [{type: "entries", name: "DM prerequisites", entries: candidate.prerequisites}] : []),
+		...(candidate.changes.length ? [{type: "entries", name: "Mechanical effects", entries: getChangeHoverEntries(candidate.changes)}] : []),
+		...(candidate.manualReview.length ? [{type: "entries", name: "Manual review", entries: candidate.manualReview.map(it => `${it.field}: ${it.reason}`)}] : []),
+	];
 }
 
 function renderStatblock (parent, creature, heading) {
@@ -101,11 +143,82 @@ function renderDiff (parent, diff) {
 		...diff.entries.map(({section, name, source, before, after}) =>
 			`${section}: ${name} (${source || "chassis"}): ${before ? JSON.stringify(before.entries) : "not present"} → ${after ? JSON.stringify(after.entries) : "removed"}`)];
 	const details = element("details", {className: "bqa__transformation-diff"});
-	details.open = true;
 	details.append(element("summary", {text: `Mechanical diff · ${changes.length} changed field${changes.length === 1 ? "" : "s"}`}));
 	if (changes.length) list(details, changes);
 	else paragraph(details, "No mechanically representable fields change. Manual review may still be required.");
 	parent.append(details);
+}
+
+const DELTA_FIELD_NAMES = {
+	type: "Creature type",
+	size: "Size",
+	resist: "Damage resistances",
+	immune: "Damage immunities",
+	vulnerable: "Damage vulnerabilities",
+	conditionImmune: "Condition immunities",
+	senses: "Senses",
+	languages: "Languages",
+	speed: "Speed",
+};
+
+const DELTA_ENTRY_NAMES = {
+	trait: "Traits",
+	action: "Actions",
+	bonus: "Bonus actions",
+	reaction: "Reactions",
+	legendary: "Legendary actions",
+	mythic: "Mythic actions",
+	spellcasting: "Spellcasting",
+};
+
+export function formatCreatureTransformationDeltaField ({path, before, after}) {
+	const abilities = ["str", "dex", "con", "int", "wis", "cha"];
+	const isAbility = abilities.includes(path);
+	const isSpeed = path === "speed" || path.startsWith("speed.");
+	const label = isAbility ? Parser.attAbvToFull(path)
+		: path.startsWith("speed.") ? `${path.slice("speed.".length).replace(/^\w/, char => char.toUpperCase())} speed`
+			: DELTA_FIELD_NAMES[path] || `Other field (${path})`;
+	const format = value => {
+		if (value == null) return "none";
+		if (path === "size" && Array.isArray(value)) return value.map(it => Parser.sizeAbvToFull(it)).join(", ") || "none";
+		if (path === "type" && (typeof value === "string" || typeof value?.type === "string")) return Parser.monTypeToFullObj(value).asText;
+		if (isSpeed && typeof value === "number") return `${value} ft.`;
+		if (path === "speed" && value && typeof value === "object" && !Array.isArray(value)
+			&& Object.values(value).every(it => typeof it === "number")) {
+			return Object.entries(value).map(([mode, feet]) => `${mode} ${feet} ft.`).join(", ") || "none";
+		}
+		if (["resist", "immune", "vulnerable", "conditionImmune", "senses", "languages"].includes(path) && Array.isArray(value)) {
+			return value.map(it => {
+				if (typeof it === "string") return it;
+				if (it && typeof it === "object" && Array.isArray(it[path]) && typeof it.note === "string") {
+					return `${it[path].join(", ")} (${it.note})`;
+				}
+				return JSON.stringify(it);
+			}).join(", ") || "none";
+		}
+		if (isAbility && typeof value === "number") return String(value);
+		return JSON.stringify(value);
+	};
+	return `${label}: ${format(before)} → ${format(after)}`;
+}
+
+function renderCompactDelta (parent, batch) {
+	parent.replaceChildren();
+	if (!batch?.previews.length) return;
+	const fieldChanges = new Map();
+	const entryChanges = new Set();
+	for (const {preview} of batch.previews) {
+		for (const field of preview.diff.fields) {
+			const label = formatCreatureTransformationDeltaField(field);
+			fieldChanges.set(label, (fieldChanges.get(label) || 0) + 1);
+		}
+		for (const {section, name, before, after} of preview.diff.entries) {
+			entryChanges.add(`${DELTA_ENTRY_NAMES[section] || `Other section (${section})`}: ${before && after ? "Changed" : after ? "Added" : "Removed"} ${name}`);
+		}
+	}
+	parent.append(element("h5", {text: "Mechanical delta · live preview"}));
+	const changes = [...fieldChanges].map(([text, count]) => batch.previews.length > 1 ? `${text} (${count} of ${batch.previews.length})` : text);
+	list(parent, [...changes, ...entryChanges].length ? [...changes, ...entryChanges] : ["No automatically representable change."]);
 }
 
 function renderPreviewTarget (parent, {id, label, preview}, decisions, onDecision) {
@@ -138,7 +251,7 @@ function renderPreviewTarget (parent, {id, label, preview}, decisions, onDecisio
 export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true}) {
 	const container = element("section", {className: "bqa__transformation"});
 	mount.replaceChildren(container);
-	paragraph(container, "Apply only the mechanical changes shown in the preview. Source text and manual-review items still need DM attention.");
+	paragraph(container, "Choose a recipe to see its effect. Previewing never edits the source creature or saved encounter.");
 	const error = element("p", {className: "bqa__transformation-error"});
 	error.setAttribute("role", "alert");
 	const status = element("p", {className: "bqa__transformation-status"});
@@ -147,7 +260,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const input = element("div", {className: "bqa__transformation-input"});
 	const details = element("div");
 	const result = element("div");
-	container.append(input, details, error, result, status);
+	container.append(input, details, error, status, result);
 	status.textContent = "Loading site, prerelease, and homebrew transformation candidates…";
 	const showError = message => { error.textContent = message; };
 	let candidates;
@@ -202,17 +315,15 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const choices = element("div", {className: "bqa__transformation-choices"});
 	choices.setAttribute("role", "group");
 	choices.setAttribute("aria-label", "Available templates");
-	const recipeInfo = element("section", {className: "bqa__transformation-recipe-info"});
-	recipeInfo.setAttribute("aria-label", "Recipe details");
-	input.append(category, sourceField, searchLabel, count, empty, choices, recipeInfo, pickerLabel);
-	const previewButton = button(isBulk ? "Preview selected monsters" : "Preview transformation", () => doPreview(), "ve-btn ve-btn-primary ve-btn-sm");
-	input.append(previewButton);
+	input.append(category, sourceField, searchLabel, count, empty, choices, pickerLabel);
 	let activeCategory = "catalog";
 	let visibleIds = new Set();
 	let selections = {};
-	let acknowledgementInputs = [];
+	let confirmationInputs = [];
 	let approvalInput = null;
-	let reviewInput = null;
+	let confirmation = null;
+	let delta = null;
+	let action = null;
 	let batch = null;
 	let stamp = null;
 	let candidate = null;
@@ -220,24 +331,13 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	let decisions = {};
 	let isSaving = false;
 
-	const showRecipeInfo = it => {
-		recipeInfo.replaceChildren();
-		recipeInfo.hidden = activeCategory !== "catalog" || !it;
-		if (recipeInfo.hidden) return;
-		const {edition, page} = it.provenance;
-		const heading = `${it.identity.name} (${it.identity.source})${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}` : ""}`;
-		recipeInfo.append(element("h5", {text: heading}));
-		paragraph(recipeInfo, `${sourceLabel(it.identity.source)} · ${edition === "unverified" ? "Edition unverified" : edition === "one" ? "2024 edition" : "2014 edition"} · ${page == null ? "Page unverified" : `p. ${page}`}.`);
-		paragraph(recipeInfo, `Eligibility: ${describeEligibility(it.eligibility)}.`);
-		const required = it.optionGroups.filter(group => group.required);
-		if (required.length) paragraph(recipeInfo, `Required choices: ${required.map(group => group.name).join(", ")}.`);
-		if (it.prerequisites.length) list(recipeInfo, it.prerequisites.map(text => `Before preview: ${text}`));
-	};
 	const clearPreview = () => {
 		batch = null;
 		stamp = null;
 		resolved = null;
 		result.replaceChildren();
+		delta?.replaceChildren();
+		action?.replaceChildren();
 		status.textContent = "";
 		showError("");
 	};
@@ -278,36 +378,36 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				const edition = it.provenance.edition === "unverified" ? "Edition unverified" : it.provenance.edition === "one" ? "2024 edition" : "2014 edition";
 				const page = it.provenance.page == null ? "Page unverified" : `p. ${it.provenance.page}`;
 				const required = it.optionGroups.filter(group => group.required).length;
-				const info = `Eligibility: ${describeEligibility(it.eligibility)}. ${required ? `${required} required choice${required === 1 ? "" : "s"}. ` : ""}${it.prerequisites.length ? "Review prerequisites before preview." : ""}`;
+				const info = `Eligibility: ${describeEligibility(it.eligibility)}. ${required ? `${required} required choice${required === 1 ? "" : "s"}.` : ""}`;
 				const choice = button("", () => {
 					picker.value = it.id;
 					renderCandidate();
 				}, "bqa__transformation-choice");
 				choice.dataset.recipeId = it.id;
-				choice.setAttribute("aria-label", `${title}, ${sourceLabel(it.identity.source)}, ${edition}, ${page}. ${info} ${it.prerequisites.join(" ")}`);
-				choice.addEventListener("pointerenter", () => showRecipeInfo(it));
-				choice.addEventListener("pointerleave", () => showRecipeInfo(document.activeElement === choice ? it : candidate));
-				choice.addEventListener("focus", () => showRecipeInfo(it));
-				choice.addEventListener("blur", () => showRecipeInfo(candidate));
+				choice.setAttribute("aria-label", `${title}, ${sourceLabel(it.identity.source)}, ${edition}, ${page}. ${info}`);
 				choice.append(
 					element("span", {className: "bqa__transformation-choice-name", text: title}),
 					element("span", {className: "bqa__transformation-choice-meta", text: `${it.identity.source} · ${page}`}),
-					element("span", {className: "bqa__transformation-choice-detail", text: info}),
 				);
-				choices.append(choice);
+				const row = element("div", {className: "bqa__transformation-choice-row"});
+				row.append(choice, makeInfoButton({
+					name: `${title} (${it.identity.source})`,
+					entries: getRecipeHoverEntries(it, sourceLabel),
+					targets: [choice],
+				}));
+				choices.append(row);
 			});
 		}
 		syncChoices();
 		count.textContent = `Showing ${matching.length} of ${inCategory.length} ${activeCategory === "catalog" ? "templates" : "species"}.`;
 		empty.textContent = matching.length ? "" : "No recipes match these filters. Try another source or clear the search.";
 		empty.hidden = !!matching.length;
-		previewButton.disabled = !picker.value;
-		showRecipeInfo(visibleIds.has(candidate?.id) ? candidate : null);
 	};
 	const onFilterChange = () => {
 		clearPreview();
 		refreshOptions();
 		if (candidate?.id !== picker.value) renderCandidate();
+		else if (candidate) doPreview();
 	};
 	const setCategory = kind => {
 		if (activeCategory === kind) return;
@@ -319,36 +419,33 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		clearPreview();
 		candidate = visibleIds.has(picker.value) ? candidates.find(it => it.id === picker.value) : null;
 		selections = {};
-		acknowledgementInputs = [];
+		confirmationInputs = [];
 		approvalInput = null;
-		reviewInput = null;
+		confirmation = null;
+		delta = null;
+		action = null;
+		decisions = {};
 		details.replaceChildren();
-		previewButton.disabled = !candidate;
 		syncChoices();
-		showRecipeInfo(candidate);
 		if (!candidate) {
 			paragraph(details, activeCategory === "catalog"
-				? "Select a template to review its prerequisites and preview the mechanical changes."
-				: "Choose a species to review its prerequisites and preview the mechanical changes.");
+				? "Select a template to see the live before/after statblocks."
+				: "Choose a species to see the live before/after statblocks.");
 			return;
 		}
 		const provenance = candidate.provenance;
 		const heading = element("div", {className: "bqa__transformation-selected"});
-		heading.append(element("h5", {text: candidate.identity.name}));
+		const title = element("h5", {text: candidate.identity.name});
+		heading.append(title);
 		paragraph(heading, `Source: ${candidate.identity.name} · ${sourceLabel(candidate.identity.source)} · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
+		heading.append(makeInfoButton({
+			name: `${candidate.identity.name} (${candidate.identity.source})`,
+			entries: getRecipeHoverEntries(candidate, sourceLabel),
+			targets: [title],
+		}));
 		details.append(heading);
 		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
-		const eligibility = element("div", {className: "bqa__transformation-eligibility"});
-		details.append(eligibility);
-		const renderEligibility = () => {
-			eligibility.replaceChildren();
-			paragraph(eligibility, `Base eligibility: ${describeEligibility(candidate.eligibility)}.`);
-			for (const group of candidate.optionGroups) {
-				for (const option of group.options) {
-					if (selections[group.id]?.includes(option.id)) paragraph(eligibility, `${group.name} · ${option.name}: ${describeEligibility(option.eligibility || {})}.`);
-				}
-			}
-		};
+		paragraph(details, `Eligibility: ${describeEligibility(candidate.eligibility)}. Details and source rules are available from each info button.`);
 		const options = element("div", {className: "bqa__transformation-options"});
 		const groupControls = new Map();
 		for (const group of candidate.optionGroups) {
@@ -357,26 +454,32 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 			const controls = [];
 			const groupName = `bqa-transformation-group-${++nextOptionGroupId}`;
 			const addOption = (option, {isNone = false} = {}) => {
-				const label = element("label", {className: "bqa__transformation-check bqa__transformation-option"});
+				const row = element("div", {className: "bqa__transformation-option"});
+				const label = element("label", {className: "bqa__transformation-check"});
 				const control = element("input");
 				control.type = group.selection === "one" ? "radio" : "checkbox";
 				if (control.type === "radio") control.name = groupName;
 				control.value = option?.id || "";
 				if (isNone) control.checked = true;
-				const detail = element("span", {
-					className: "bqa__transformation-option-detail",
-					text: isNone
-						? `No ${group.name.toLowerCase()} selected for ${candidate.identity.name} (${candidate.identity.source}).`
-						: describeOption(option, candidate, group),
-				});
-				detail.id = `bqa-transformation-detail-${++nextOptionGroupId}`;
-				control.setAttribute("aria-describedby", detail.id);
 				control.addEventListener("change", () => updateSelection(group, control.type === "radio"
 					? (control.value ? [control.value] : [])
 					: controls.filter(it => it.checked).map(it => it.value)));
 				controls.push(control);
-				label.append(control, element("span", {className: "bqa__transformation-option-name", text: isNone ? "None" : option.name}), detail);
-				fieldset.append(label);
+				label.append(control, element("span", {className: "bqa__transformation-option-name", text: isNone ? "None" : option.name}));
+				row.append(label);
+				if (option) {
+					const info = makeInfoButton({
+						name: `${candidate.identity.name} (${candidate.identity.source}) · ${group.name} · ${option.name}`,
+						entries: [
+							describeOption(option, candidate, group),
+							...getChangeHoverEntries(option.changes).filter(it => typeof it !== "string"),
+						],
+						targets: [control],
+					});
+					row.append(info);
+					control.setAttribute("aria-describedby", info.id = `bqa-transformation-detail-${++nextOptionGroupId}`);
+				}
+				fieldset.append(row);
 			};
 			if (group.selection === "one") {
 				if (!group.required) addOption(null, {isNone: true});
@@ -402,45 +505,48 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		};
 		const updateSelection = (group, values) => {
 			selections[group.id] = values;
+			decisions = {};
 			syncConditional();
 			clearPreview();
-			reviewInput.checked = false;
-			renderEligibility();
+			confirmation.hidden = true;
+			confirmationInputs.forEach(it => { it.checked = false; });
 			renderReview();
+			doPreview();
 		};
 		syncConditional();
-		renderEligibility();
-		details.append(options);
-		const confirmations = element("fieldset", {className: "bqa__transformation-group"});
-		confirmations.append(element("legend", {text: "Confirm before preview"}));
-		acknowledgementInputs = candidate.prerequisites.map(prerequisite => {
+		const config = element("div", {className: "bqa__transformation-config"});
+		delta = element("div", {className: "bqa__transformation-delta"});
+		if (candidate.optionGroups.length) config.append(options);
+		else config.classList.add("bqa__transformation-config--no-options");
+		config.append(delta);
+		details.append(config);
+		confirmation = element("fieldset", {className: "bqa__transformation-group bqa__transformation-confirm"});
+		confirmation.hidden = true;
+		confirmation.append(element("legend", {text: "Confirm before applying"}));
+		confirmationInputs = candidate.prerequisites.map(prerequisite => {
 			const label = element("label", {className: "bqa__transformation-check"});
 			const control = element("input");
 			control.type = "checkbox";
-			control.addEventListener("change", clearPreview);
 			label.append(control, document.createTextNode(` ${prerequisite}`));
-			confirmations.append(label);
-			return {control, prerequisite};
+			confirmation.append(label);
+			return control;
 		});
-		approvalInput = element("input");
-		approvalInput.type = "checkbox";
-		approvalInput.addEventListener("change", clearPreview);
-		const approvalLabel = element("label", {className: "bqa__transformation-check"});
-		approvalLabel.append(approvalInput, document.createTextNode(" I approve this transformation and any selected option restrictions as DM."));
-		confirmations.append(approvalLabel);
-		details.append(confirmations);
-		details.append(element("h5", {text: "Manual review · not applied automatically"}));
-		details.append(element("div", {className: "bqa__transformation-review"}));
-		const reviewLabel = element("label", {className: "bqa__transformation-check"});
-		reviewInput = element("input");
-		reviewInput.type = "checkbox";
-		reviewInput.addEventListener("change", () => {
-			const apply = result.querySelector(".bqa__transformation-apply");
-			if (apply) apply.disabled = !reviewInput.checked;
-		});
-		reviewLabel.append(reviewInput, document.createTextNode(" I understand these items still require manual DM review after applying the mechanical changes."));
-		details.append(reviewLabel);
+		if (candidate.eligibility.dmApproval || candidate.optionGroups.some(group => group.options.some(option => option.eligibility?.dmApproval))) {
+			approvalInput = element("input");
+			approvalInput.type = "checkbox";
+			const approvalLabel = element("label", {className: "bqa__transformation-check"});
+			approvalLabel.append(approvalInput, document.createTextNode(" I approve this transformation and its selected options as DM."));
+			confirmation.append(approvalLabel);
+			confirmationInputs.push(approvalInput);
+		}
+		if (confirmationInputs.length) details.append(confirmation);
+		const review = element("details", {className: "bqa__transformation-review"});
+		review.append(element("summary"));
+		details.append(review);
+		action = element("div", {className: "bqa__transformation-actions"});
+		details.append(action);
 		renderReview();
+		doPreview();
 	};
 	const renderReview = () => {
 		const review = details.querySelector(".bqa__transformation-review");
@@ -449,26 +555,25 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		for (const group of candidate.optionGroups) {
 			for (const option of group.options) if (selections[group.id]?.includes(option.id)) items.push(...option.manualReview);
 		}
-		review.replaceChildren();
-		list(review, items.map(it => `${it.field}: ${it.reason}`));
+		review.replaceChildren(element("summary", {text: `DM review · ${items.length} item${items.length === 1 ? "" : "s"} not applied automatically`}));
+		if (items.length) list(review, items.map(it => `${it.field}: ${it.reason}`));
 	};
 	search.addEventListener("input", onFilterChange);
 	source.addEventListener("change", onFilterChange);
 	picker.addEventListener("change", renderCandidate);
-	refreshSources();
-	refreshOptions();
-	renderCandidate();
 
 	const renderBatch = () => {
 		result.replaceChildren();
+		action?.replaceChildren();
 		if (!batch) return;
 		const summary = element("div", {className: "bqa__transformation-summary"});
-		paragraph(summary, `${batch.previews.length} eligible · ${batch.skipped.length} skipped. Each statblock below reflects only representable changes.`);
+		paragraph(summary, `${batch.previews.length} eligible · ${batch.skipped.length} skipped. Statblocks show only automatic changes; DM review remains separate.`);
 		if (batch.skipped.length) {
 			summary.append(element("h5", {text: "Skipped · unchanged"}));
 			list(summary, batch.skipped.map(it => `${it.label}: ${it.reason}`));
 		}
 		result.append(summary);
+		renderCompactDelta(delta, batch);
 		for (const target of batch.previews) {
 			renderPreviewTarget(result, target, decisions, (id, path, winner) => {
 				if (!decisions[id]) decisions[id] = {};
@@ -479,9 +584,8 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 						targets: batch.targets,
 						resolved,
 						acknowledgedPrerequisites: resolved.prerequisites,
-						dmApproved: approvalInput.checked,
+						dmApproved: true,
 						conflictDecisions: decisions,
-						validateOperation,
 					});
 					renderBatch();
 					result.querySelectorAll("select[data-conflict-id]").forEach(select => {
@@ -492,67 +596,118 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		}
 		if (!batch.previews.length) return;
 		if (batch.previews.some(it => !it.preview.canApply)) {
-			paragraph(result, "Choose an existing or incoming winner for every overlapping write before applying.");
-			return;
-		}
-		try {
-			const changes = createCreatureTransformationChanges({batch, targets: batch.targets, conflictDecisions: decisions});
-			const effects = getConsequences(changes);
-			if (effects?.resetHpIds?.length) paragraph(result, `HP reset: ${effects.resetHpIds.map(id => batch.targets.find(it => it.id === id).label).join(", ")} will reset current and maximum HP to the effective average (or Unset); temporary HP stays.`);
-			if (effects?.splitIds?.length) paragraph(result, `Group split: ${effects.splitIds.map(id => batch.targets.find(it => it.id === id).label).join(", ")} will leave incompatible groups and use individual initiative.`);
-		} catch (e) {
-			showError(`Cannot apply this preview: ${e.message}`);
+			paragraph(action, "Choose an existing or incoming winner for each overlapping change to complete the preview.");
 			return;
 		}
 		const apply = button(isBulk ? `Apply to ${batch.previews.length} · one save` : "Apply transformation", doApply, "bqa__transformation-apply ve-btn ve-btn-primary ve-btn-sm");
-		apply.disabled = !reviewInput.checked;
-		result.append(apply);
+		action.append(apply, element("span", {text: "Preview only · no changes saved yet."}));
 	};
 	const doPreview = () => {
 		clearPreview();
 		try {
 			if (!candidate || picker.value !== candidate.id || !visibleIds.has(candidate.id)) throw new Error("Choose a visible source-qualified recipe.");
-			if (acknowledgementInputs.some(it => !it.control.checked)) throw new Error("Acknowledge every narrative prerequisite before previewing.");
 			const missing = candidate.optionGroups.find(group =>
 				group.required && (!group.appliesTo || selections[group.appliesTo.group]?.includes(group.appliesTo.option)) && !selections[group.id]?.length);
-			if (missing) throw new Error(`Choose ${missing.name} before previewing.`);
+			if (missing) {
+				paragraph(delta, `Choose ${missing.name} to see the before/after statblocks.`);
+				return;
+			}
 			resolved = resolveCreatureTransformation({candidates, id: candidate.id, selections});
-			if (resolved.eligibility.some(it => it.dmApproval) && !approvalInput.checked) throw new Error("Confirm DM approval before previewing this recipe.");
-			decisions = {};
+			if (approvalInput) approvalInput.parentElement.hidden = !resolved.eligibility.some(it => it.dmApproval);
 			const targets = getTargets();
 			stamp = getStamp();
 			batch = previewCreatureTransformationTargets({
-				targets, resolved, acknowledgedPrerequisites: resolved.prerequisites, dmApproved: approvalInput.checked, validateOperation,
+				targets, resolved, acknowledgedPrerequisites: resolved.prerequisites, dmApproved: true, conflictDecisions: decisions,
 			});
 			renderBatch();
-			if (!batch.previews.length) showError("No eligible monster can use this recipe; review the exact skips below.");
+			if (!batch.previews.length) showError("No eligible monster can use this recipe; review the skipped targets below.");
 		} catch (e) { showError(e.message); }
 	};
 	const doApply = async () => {
 		if (isSaving || !batch) return;
+		if (batch.previews.some(it => !it.preview.canApply)) {
+			showError("Choose a winner for every conflicting statblock field before applying.");
+			return;
+		}
+		if (confirmationInputs.some(it => !it.parentElement.hidden) && confirmation.hidden) {
+			confirmation.hidden = false;
+			status.textContent = "Confirm the prerequisites and DM approval before applying; the preview has not been saved.";
+			confirmationInputs.find(it => !it.parentElement.hidden)?.focus();
+			return;
+		}
+		const missingConfirmation = confirmationInputs.find(it => !it.parentElement.hidden && !it.checked);
+		if (missingConfirmation) {
+			showError("Confirm every listed prerequisite and required DM approval before applying.");
+			missingConfirmation.focus();
+			return;
+		}
 		isSaving = true;
 		const selectedCandidate = candidate;
 		const selectedBatch = batch;
+		const selectedSelections = structuredClone(selections);
+		const selectedDecisions = structuredClone(decisions);
+		const apply = action.querySelector(".bqa__transformation-apply");
+		apply.disabled = true;
+		status.textContent = "Checking the live catalog, targets, and storage before saving…";
 		try {
-			if (!reviewInput?.checked) throw new Error("Confirm that the manual-review items still need DM adjudication.");
 			const currentCandidates = await load();
-			if (!isCurrent()) throw new Error("The editor changed while the catalog was loading. Preview again.");
-			if (batch !== selectedBatch || candidate !== selectedCandidate || picker.value !== selectedCandidate.id || !visibleIds.has(selectedCandidate.id)) throw new Error("The filters or selection changed. Preview again.");
+			if (!isCurrent()) throw new Error("The editor changed while the catalog was loading. Select the recipe again.");
+			if (batch !== selectedBatch || candidate !== selectedCandidate || picker.value !== selectedCandidate.id || !visibleIds.has(selectedCandidate.id)
+				|| JSON.stringify(selections) !== JSON.stringify(selectedSelections) || JSON.stringify(decisions) !== JSON.stringify(selectedDecisions)) {
+				throw new Error("The filters, choices, or conflict winners changed. Review the new preview before applying.");
+			}
 			const currentCandidate = currentCandidates.find(it => it.id === selectedCandidate.id);
-			if (JSON.stringify(currentCandidate) !== JSON.stringify(selectedCandidate)) throw new Error("The transformation catalog changed. Preview again.");
-			const currentResolved = resolveCreatureTransformation({candidates: currentCandidates, id: selectedCandidate.id, selections});
-			if (JSON.stringify(currentResolved) !== JSON.stringify(resolved) || getStamp() !== stamp) throw new Error("The selection, encounter, or catalog changed. Preview again.");
-			const changes = createCreatureTransformationChanges({batch, targets: getTargets(), conflictDecisions: decisions});
+			if (JSON.stringify(currentCandidate) !== JSON.stringify(selectedCandidate)) throw new Error("The transformation catalog changed. Select the recipe again.");
+			const currentResolved = resolveCreatureTransformation({candidates: currentCandidates, id: selectedCandidate.id, selections: selectedSelections});
+			if (JSON.stringify(currentResolved) !== JSON.stringify(resolved) || getStamp() !== stamp) throw new Error("The selection or encounter changed. Select the recipe again.");
+			const targets = getTargets();
+			if (JSON.stringify(targets) !== JSON.stringify(selectedBatch.targets)) throw new Error("A target or its statblock history changed. Select the recipe again.");
+			const verified = previewCreatureTransformationTargets({
+				targets,
+				resolved: currentResolved,
+				acknowledgedPrerequisites: confirmationInputs.slice(0, currentResolved.prerequisites.length)
+					.map((it, index) => it.checked ? currentResolved.prerequisites[index] : null).filter(Boolean),
+				dmApproved: !currentResolved.eligibility.some(it => it.dmApproval) || !!approvalInput?.checked,
+				conflictDecisions: selectedDecisions,
+				validateOperation,
+			});
+			const previewShape = snapshot => JSON.stringify({
+				skipped: snapshot.skipped,
+				previews: snapshot.previews.map(({id, preview}) => ({id, proposed: preview.proposed, conflicts: preview.conflicts, diff: preview.diff})),
+			});
+			if (previewShape(verified) !== previewShape(selectedBatch)) {
+				batch = verified;
+				renderBatch();
+				throw new Error("Storage or eligibility changed the preview. Review its skipped targets and apply again.");
+			}
+			const changes = createCreatureTransformationChanges({batch: verified, targets, conflictDecisions: selectedDecisions});
 			if (!changes.length) throw new Error("No eligible monster remains to transform.");
+			const effects = getConsequences(changes);
+			if (effects?.resetHpIds?.length || effects?.splitIds?.length) {
+				const names = ids => ids.map(id => targets.find(it => it.id === id).label).join(", ");
+				const effectsText = [
+					effects.resetHpIds?.length ? `HP will reset for ${names(effects.resetHpIds)}.` : "",
+					effects.splitIds?.length ? `${names(effects.splitIds)} will leave shared-turn groups.` : "",
+				].filter(Boolean).join(" ");
+				status.textContent = effectsText;
+			}
 			await pApply(changes);
 			clearPreview();
 			status.textContent = `Applied ${selectedCandidate.identity.name} to ${changes.length} ${changes.length === 1 ? "monster" : "monsters"}. Manual-review items still need DM adjudication.`;
 		} catch (e) {
 			if (e.isEncounterStatblockSaved) {
 				clearPreview();
-				previewButton.disabled = true;
 				status.textContent = e.message;
-			} else showError(`Transformation was not applied: ${e.message}`);
-		} finally { isSaving = false; }
+			} else {
+				status.textContent = "";
+				showError(`Transformation was not applied: ${e.message}`);
+			}
+		} finally {
+			isSaving = false;
+			if (apply.isConnected) apply.disabled = false;
+		}
 	};
+	refreshSources();
+	refreshOptions();
+	renderCandidate();
 }

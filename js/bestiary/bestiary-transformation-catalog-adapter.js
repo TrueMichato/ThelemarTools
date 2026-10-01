@@ -1,3 +1,5 @@
+import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
+
 const DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const SECTIONS = new Set(["trait", "action", "bonus", "reaction", "legendary"]);
@@ -24,9 +26,7 @@ function isString (value) {
 }
 
 function isEntry (entry) {
-	return keysAre(entry, ["name", "source", "entries"])
-		&& isString(entry.name) && isString(entry.source)
-		&& Array.isArray(entry.entries) && !!entry.entries.length && entry.entries.every(isString);
+	return isTransformationEntry(entry);
 }
 
 function isMatch (match) {
@@ -39,6 +39,8 @@ function validateStep (step) {
 	switch (op) {
 		case "setType":
 			return keysAre(step, ["op", "value"]) && CREATURE_TYPES.has(step.value);
+		case "setSize":
+			return keysAre(step, ["op", "value"]) && ["T", "S", "M", "L", "H", "G"].includes(step.value);
 		case "setAbility":
 		case "minimumAbility":
 		case "maximumAbility":
@@ -58,6 +60,8 @@ function validateStep (step) {
 			return keysAre(step, ["op", "value"]) && CONDITIONS.has(step.value);
 		case "grantLanguage":
 			return keysAre(step, ["op", "value"]) && isString(step.value);
+		case "grantSpell":
+			return isTransformationSpell(step);
 		case "grantSense":
 			return keysAre(step, ["op", "sense", "range"]) && SENSES.has(step.sense)
 				&& Number.isInteger(step.range) && step.range > 0;

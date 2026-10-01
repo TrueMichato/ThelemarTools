@@ -1,7 +1,7 @@
 import {getEncounterResourceDefaults, MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
 
 const MAX_VISIBLE_PIPS = 12;
-const MAX_INLINE_PIPS = 5;
+const MAX_INLINE_PIPS = 12;
 const MAX_INLINE_RESOURCES = 3;
 const RESOURCE_SECTIONS = [
 	["trait", "Traits"],
@@ -100,25 +100,29 @@ function getPipRow ({name, current, max, resourceKey, onChange}) {
 	const row = create("div", "ew__resource-row");
 	const heading = create("strong", "ew__resource-name", name);
 	const count = create("span", "ew__resource-count", `${current}/${max}`);
-	count.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
 	const actions = create("div", "ew__resource-actions");
+	actions.setAttribute("role", "group");
+	actions.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
 	if (max <= MAX_VISIBLE_PIPS) {
-		for (let index = 0; index < max; index++) {
-			const isAvailable = index < current;
-			const pip = getButton("", `${name}, use ${index + 1} of ${max}: ${isAvailable ? "available; spend one" : "spent; restore one"}`,
-				() => onChange(isAvailable ? -1 : 1), false, `${resourceKey}:pip:${index}`);
-			pip.classList.add("ew__resource-pip");
-			pip.classList.toggle("ew__resource-pip--available", isAvailable);
-			actions.append(pip);
-		}
-	} else {
-		actions.append(
-			getButton("−", `Spend one ${name} use`, () => onChange(-1), !current, `${resourceKey}:spend`),
-			getButton("+", `Restore one ${name} use`, () => onChange(1), current >= max, `${resourceKey}:restore`),
-		);
+		actions.append(getPipIndicators({current, max}));
 	}
+	actions.append(
+		getButton("−", `Spend one ${name} use`, () => onChange(-1), !current, `${resourceKey}:spend`),
+		getButton("+", `Restore one ${name} use`, () => onChange(1), current >= max, `${resourceKey}:restore`),
+	);
 	row.append(heading, count, actions);
 	return row;
+}
+
+function getPipIndicators ({current, max, isInline = false}) {
+	const indicators = create("span", isInline ? "ew__inline-resource-pips" : "ew__resource-pips");
+	indicators.setAttribute("aria-hidden", "true");
+	for (let index = 0; index < max; index++) {
+		const pip = create("span", isInline ? "ew__inline-resource-pip" : "ew__resource-pip");
+		pip.classList.toggle(isInline ? "ew__inline-resource-pip--available" : "ew__resource-pip--available", index < current);
+		indicators.append(pip);
+	}
+	return indicators;
 }
 
 function getInlineButton (text, label, onClick, controlKey, disabled = false) {
@@ -135,22 +139,14 @@ function getInlineUses ({name, current, max, resourceKey, onChange}) {
 	group.setAttribute("role", "group");
 	group.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
 	if (max <= MAX_INLINE_PIPS) {
-		for (let index = 0; index < max; index++) {
-			const available = index < current;
-			const pip = getInlineButton("",
-				`${name}, use ${index + 1} of ${max}: ${available ? "available; spend one" : "spent; restore one"}`,
-				() => onChange(available ? -1 : 1), `${resourceKey}:pip:${index}`);
-			pip.classList.add("ew__inline-resource-pip");
-			pip.classList.toggle("ew__inline-resource-pip--available", available);
-			group.append(pip);
-		}
+		group.append(getPipIndicators({current, max, isInline: true}));
 	} else {
-		group.append(
-			create("span", "ew__inline-resource-count", `${current}/${max}`),
-			getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`, !current),
-			getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`, current >= max),
-		);
+		group.append(create("span", "ew__inline-resource-count", `${current}/${max}`));
 	}
+	group.append(
+		getInlineButton("−", `Spend one ${name} use`, () => onChange(-1), `${resourceKey}:spend`, !current),
+		getInlineButton("+", `Restore one ${name} use`, () => onChange(1), `${resourceKey}:restore`, current >= max),
+	);
 	return group;
 }
 
