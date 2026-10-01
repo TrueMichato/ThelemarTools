@@ -33,6 +33,7 @@ const createPage = async ({isMissingHp = false} = {}) => {
 	page._setBusy = jest.fn(value => page._isBusy = value);
 	page._setStatus = jest.fn();
 	page._setError = jest.fn();
+	page._clearDamageFeedback = jest.fn();
 	page._renderVitals = jest.fn();
 	page._renderTurnOrder = jest.fn();
 	page._renderRollResults = jest.fn();

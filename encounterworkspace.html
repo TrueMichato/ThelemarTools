@@ -189,9 +189,37 @@
 								<p id="ew-target-names"></p>
 							</details>
 							<div class="ew__operation">
-								<h4>Selected monsters' HP</h4>
+								<h4>Apply typed damage</h4>
+								<div class="ew__damage-controls">
+									<label for="ew-damage-expression">Damage amount or dice
+										<input class="ve-form-control ew__hp-expression" id="ew-damage-expression" type="text" inputmode="text" placeholder="12 or 3d6" aria-describedby="ew-damage-hint">
+									</label>
+									<label for="ew-damage-type">Type
+										<select class="ve-form-control" id="ew-damage-type"></select>
+									</label>
+									<label for="ew-damage-source">Source
+										<select class="ve-form-control" id="ew-damage-source" aria-describedby="ew-damage-hint">
+											<option value="unspecified">Not specified</option>
+											<option value="nonmagicalAttack">Nonmagical attack</option>
+											<option value="magicalAttack">Magical attack</option>
+											<option value="other">Other effect</option>
+										</select>
+									</label>
+									<button type="button" class="ve-btn ve-btn-primary" id="ew-damage-apply">Apply damage</button>
+								</div>
+								<p class="ew__operation-help" id="ew-damage-hint">Roll once for all selected targets. Immunity, resistance, vulnerability and temporary HP apply per statblock. When a defense depends on context, review it before any damage is saved.</p>
+								<section class="ew__damage-review" id="ew-damage-review" aria-labelledby="ew-damage-review-title" hidden>
+									<h5 id="ew-damage-review-title">Review conditional defenses</h5>
+									<p>For each target, decide whether the listed defense applies. All targets wait until the review is complete.</p>
+									<div id="ew-damage-decisions" class="ew__damage-decisions"></div>
+									<button type="button" class="ve-btn ve-btn-primary" id="ew-damage-apply-reviewed">Apply reviewed damage</button>
+								</section>
+								<div class="ew__damage-report" id="ew-damage-report" role="status" aria-live="polite" hidden></div>
+							</div>
+							<div class="ew__operation">
+								<h4>Heal or adjust HP</h4>
 								<div class="ew__controls">
-									<label for="ew-hp-expression">Damage / heal / set</label>
+									<label for="ew-hp-expression">Damage / heal / set without type</label>
 									<input class="ve-form-control ew__hp-expression" id="ew-hp-expression" type="text" placeholder="8d6, +12, -30, =15" aria-describedby="ew-hp-hint">
 									<label class="ew__inline-check"><input id="ew-hp-half" type="checkbox"> Half damage</label>
 									<button type="button" class="ve-btn ve-btn-default" id="ew-hp-apply">Apply HP to selected</button>

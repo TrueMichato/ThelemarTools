@@ -22,14 +22,14 @@ test("shown members from two statblock groups receive only explicitly selected d
 	await expect(page.locator("#ew-summary")).not.toContainText("Goblin #2");
 
 	await page.locator("#ew-fast-damage").click();
-	await expect(page.locator("#ew-hp-expression")).toBeFocused();
+	await expect(page.locator("#ew-damage-expression")).toBeFocused();
 	await page.locator("#ew-target-list > summary").click();
 	await expect(page.locator("#ew-target-names")).toContainText("Goblin #1");
 	await expect(page.locator("#ew-target-names")).toContainText("Hobgoblin (Goblin #4)");
 	await expect(page.locator("#ew-target-names")).toContainText("Goblin #5");
-	await page.locator("#ew-hp-expression").fill("-3");
-	await page.locator("#ew-hp-apply").click();
-	await expect(page.locator("#ew-status")).toContainText("Updated HP for 3 monsters");
+	await page.locator("#ew-damage-expression").fill("3");
+	await page.locator("#ew-damage-apply").click();
+	await expect(page.locator("#ew-status")).toContainText("Applied 3 bludgeoning damage to 3 monsters");
 	for (const [id, hp] of [["one", 4], ["two", 7], ["creature-2", 7], ["creature-3", 4], ["creature-4", 4]] as const) {
 		await expect(page.locator(`.ew__roster-row[data-instance-id="${id}"] .ew__roster-meta`)).toContainText(`HP ${hp}/7`);
 	}

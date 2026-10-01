@@ -99,7 +99,7 @@ function renderPreviewTarget (parent, {id, label, preview}, decisions, onDecisio
 export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true}) {
 	const container = element("section", {className: "bqa__transformation"});
 	mount.replaceChildren(container);
-	paragraph(container, "Combine source-qualified recipes on the current statblock. Only the changes listed in the mechanical diff are applied; source text and manual-review items are not automatically converted.");
+	paragraph(container, "Apply only the mechanical changes shown in the preview. Source text and manual-review items still need DM attention.");
 	const error = element("p", {className: "bqa__transformation-error"});
 	error.setAttribute("role", "alert");
 	const status = element("p", {className: "bqa__transformation-status"});
@@ -160,7 +160,10 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	count.setAttribute("role", "status");
 	count.setAttribute("aria-live", "polite");
 	const empty = element("p", {className: "bqa__transformation-empty"});
-	input.append(category, sourceField, searchLabel, pickerLabel, count, empty);
+	const choices = element("div", {className: "bqa__transformation-choices"});
+	choices.setAttribute("role", "group");
+	choices.setAttribute("aria-label", "Available templates");
+	input.append(category, sourceField, searchLabel, count, empty, choices, pickerLabel);
 	const previewButton = button(isBulk ? "Preview selected monsters" : "Preview transformation", () => doPreview(), "ve-btn ve-btn-primary ve-btn-sm");
 	input.append(previewButton);
 	let activeCategory = "catalog";
@@ -183,6 +186,10 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		result.replaceChildren();
 		status.textContent = "";
 		showError("");
+	};
+	const syncChoices = () => {
+		choices.querySelectorAll("button[data-recipe-id]").forEach(node =>
+			node.setAttribute("aria-pressed", String(node.dataset.recipeId === picker.value)));
 	};
 	const refreshSources = () => {
 		const previous = source.value;
@@ -209,6 +216,30 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		picker.replaceChildren(new Option("Choose a source-qualified recipe…", ""));
 		matching.forEach(it => picker.add(new Option(`${it.identity.name} (${it.identity.source})${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}${it.provenance.page ? ` (p. ${it.provenance.page})` : ""}` : ""}`, it.id)));
 		picker.value = visibleIds.has(previous) ? previous : "";
+		choices.replaceChildren();
+		choices.hidden = activeCategory !== "catalog" || !matching.length;
+		if (!choices.hidden) {
+			matching.forEach(it => {
+				const title = `${it.identity.name}${it.duplicateVariant ? ` · Variant ${it.duplicateVariant}` : ""}`;
+				const edition = it.provenance.edition === "unverified" ? "Edition unverified" : it.provenance.edition === "one" ? "2024 edition" : "2014 edition";
+				const page = it.provenance.page == null ? "Page unverified" : `p. ${it.provenance.page}`;
+				const required = it.optionGroups.filter(group => group.required).length;
+				const info = `Eligibility: ${describeEligibility(it.eligibility)}. ${required ? `${required} required choice${required === 1 ? "" : "s"}. ` : ""}${it.prerequisites.length ? "Review prerequisites before preview." : ""}`;
+				const choice = button("", () => {
+					picker.value = it.id;
+					renderCandidate();
+				}, "bqa__transformation-choice");
+				choice.dataset.recipeId = it.id;
+				choice.setAttribute("aria-label", `${title}, ${sourceLabel(it.identity.source)}, ${edition}, ${page}. ${info}`);
+				choice.append(
+					element("span", {className: "bqa__transformation-choice-name", text: title}),
+					element("span", {className: "bqa__transformation-choice-meta", text: `${it.identity.source} · ${page}`}),
+					element("span", {className: "bqa__transformation-choice-detail", text: info}),
+				);
+				choices.append(choice);
+			});
+		}
+		syncChoices();
 		count.textContent = `Showing ${matching.length} of ${inCategory.length} ${activeCategory === "catalog" ? "templates" : "species"}.`;
 		empty.textContent = matching.length ? "" : "No recipes match these filters. Try another source or clear the search.";
 		empty.hidden = !!matching.length;
@@ -234,9 +265,18 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		reviewInput = null;
 		details.replaceChildren();
 		previewButton.disabled = !candidate;
-		if (!candidate) return;
+		syncChoices();
+		if (!candidate) {
+			paragraph(details, activeCategory === "catalog"
+				? "Select a template to review its prerequisites and preview the mechanical changes."
+				: "Choose a species to review its prerequisites and preview the mechanical changes.");
+			return;
+		}
 		const provenance = candidate.provenance;
-		paragraph(details, `Source: ${candidate.identity.name} · ${sourceLabel(candidate.identity.source)} · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
+		const heading = element("div", {className: "bqa__transformation-selected"});
+		heading.append(element("h5", {text: candidate.identity.name}));
+		paragraph(heading, `Source: ${candidate.identity.name} · ${sourceLabel(candidate.identity.source)} · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
+		details.append(heading);
 		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
 		const eligibility = element("div", {className: "bqa__transformation-eligibility"});
 		details.append(eligibility);
@@ -349,6 +389,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	picker.addEventListener("change", renderCandidate);
 	refreshSources();
 	refreshOptions();
+	renderCandidate();
 
 	const renderBatch = () => {
 		result.replaceChildren();

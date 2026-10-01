@@ -12,6 +12,8 @@ This catalog is **app-owned data**, not the 5etools-utils `monsterTemplate` form
 
 `identity` always has `{name, source}`. A source must be installed or otherwise resolvable by the eventual browser for linked entities; no bare display-name fallback is permitted. The `provenance` of published recipes has edition and a verified page. For `BEG`, `published-example` page 25 belongs to the enclosing Adult Black Shadow Dragon **example**, not a page printed on the embedded template. The screenshots supplied for `SCRE` have no verified page or edition; `SCRE` is a provisional, user-attributed Spectre Creations source key pending verification. The screenshot markings do not independently establish that publisher. Never present an invented page as fact.
 
+In Bestiary and Encounter Workspace, the shared Templates tab lists source-qualified recipes alongside the existing source, search, and selection controls. Hover, keyboard focus, and selection expose baseline eligibility and required-choice hints; hovering never selects, previews, or applies a recipe. Select a template to inspect its provenance, prerequisites, and manual-review requirements, then explicitly preview the statblock diff. Filtering or changing the selected recipe invalidates any earlier preview; Species retains the source-qualified dropdown rather than rendering hundreds of extra choices.
+
 ### Typed steps
 
 The schema at `schema/site/creature-transformation.json` is strict, with no arbitrary path, JavaScript, regex, or `_copy._mod` execution. A later engine must first check all eligibility and prerequisites against the chosen monster and adjudicate `manualReview`. The permitted `changes` are:

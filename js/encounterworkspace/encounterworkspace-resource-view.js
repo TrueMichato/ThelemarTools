@@ -1,4 +1,17 @@
-import {MAX_ENCOUNTER_RESOURCE_COUNT, getEncounterResourceSummary} from "./encounterworkspace-resources.js";
+import {MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
+
+const MAX_VISIBLE_PIPS = 12;
+const MAX_INLINE_RESOURCES = 3;
+const RESOURCE_SECTIONS = [
+	["trait", "Traits"],
+	["action", "Actions"],
+	["bonus", "Bonus actions"],
+	["reaction", "Reactions"],
+	["legendary", "Legendary actions"],
+	["mythic", "Mythic actions"],
+	["equipment", "Equipment"],
+	["other", "Other abilities"],
+];
 
 const create = (tag, className, text) => {
 	const element = document.createElement(tag);
@@ -67,56 +80,133 @@ function getEditForm ({name, current, max, resourceKey, isNameEditable, onSave, 
 	return details;
 }
 
-function getCounterRow ({name, current, max, resourceKey, onSpend, onRestore, edit}) {
+function getResourceSection (resource) {
+	if (resource.id === "auto:legendary-actions") return "legendary";
+	if (resource.id.startsWith("auto:equipment")) return "equipment";
+	const section = resource.id.match(/^auto:(?:ability|recharge):(trait|action|bonus|reaction|legendary|mythic):/);
+	return section?.[1] || "other";
+}
+
+function getPipRow ({name, current, max, resourceKey, onChange}) {
 	const row = create("div", "ew__resource-row");
 	const heading = create("strong", "ew__resource-name", name);
 	const count = create("span", "ew__resource-count", `${current}/${max}`);
 	count.setAttribute("aria-label", `${name}: ${current} of ${max} remaining`);
 	const actions = create("div", "ew__resource-actions");
-	actions.append(
-		getButton("−", `Spend one ${name} use`, onSpend, !current, `${resourceKey}:spend`),
-		getButton("+", `Restore one ${name} use`, onRestore, current >= max, `${resourceKey}:restore`),
-	);
-	row.append(heading, count, actions, edit);
+	if (max <= MAX_VISIBLE_PIPS) {
+		for (let index = 0; index < max; index++) {
+			const isAvailable = index < current;
+			const pip = getButton("", `${name}, use ${index + 1} of ${max}: ${isAvailable ? "available; spend one" : "spent; restore one"}`,
+				() => onChange(isAvailable ? -1 : 1), false, `${resourceKey}:pip:${index}`);
+			pip.classList.add("ew__resource-pip");
+			pip.classList.toggle("ew__resource-pip--available", isAvailable);
+			actions.append(pip);
+		}
+	} else {
+		actions.append(
+			getButton("−", `Spend one ${name} use`, () => onChange(-1), !current, `${resourceKey}:spend`),
+			getButton("+", `Restore one ${name} use`, () => onChange(1), current >= max, `${resourceKey}:restore`),
+		);
+	}
+	row.append(heading, count, actions);
 	return row;
 }
 
 export function getEncounterResourcePanel ({instance, label, onAction}) {
 	const {resources} = instance;
-	const section = create("details", "ew__resources");
+	const section = create("section", "ew__resources");
 	section.setAttribute("aria-label", `Combat resources for ${label}`);
-	const overview = create("summary", "ew__resource-overview");
-	overview.dataset.resourceControl = "resources:toggle";
-	const title = create("h4", "ew__resource-title");
-	title.append(
-		create("span", "ew__resource-label", "Combat resources"),
-		create("span", "ew__resource-summary", getEncounterResourceSummary(resources) || "No limited uses tracked"),
+	const header = create("div", "ew__resource-header");
+	header.append(create("h4", "ew__resource-title", "Combat resources"));
+	const concentration = getButton(
+		resources.concentration.active ? `Concentrating${resources.concentration.label ? `: ${resources.concentration.label}` : ""}` : "Start concentration",
+		`${label}: ${resources.concentration.active ? "end" : "start"} concentration${resources.concentration.label ? ` on ${resources.concentration.label}` : ""}`,
+		() => onAction({kind: "concentration", active: !resources.concentration.active, label: ""}), false, "concentration:toggle",
 	);
-	overview.append(title);
-	section.append(overview);
+	concentration.classList.add("ew__concentration");
+	concentration.classList.toggle("ew__concentration--active", resources.concentration.active);
+	concentration.setAttribute("aria-pressed", String(resources.concentration.active));
+	header.append(concentration);
+	section.append(header);
+
+	const tracker = create("div", "ew__resource-tracker");
+	const slotEntries = Object.entries(resources.spellSlots).sort(([a], [b]) => Number(a) - Number(b));
+	if (slotEntries.length) {
+		const slots = create("div", "ew__resource-group");
+		slots.append(create("h5", null, "Spell slots"));
+		for (const [rawLevel, {current, max}] of slotEntries) {
+			const level = Number(rawLevel);
+			slots.append(getPipRow({
+				name: `Level ${level}`,
+				current,
+				max,
+				resourceKey: `slots:${level}`,
+				onChange: change => onAction({kind: "slots", level, current: current + change, max}),
+			}));
+		}
+		tracker.append(slots);
+	}
+	const grouped = new Map();
+	for (const resource of [...resources.abilities, ...resources.recharges]) {
+		const key = getResourceSection(resource);
+		if (!grouped.has(key)) grouped.set(key, []);
+		grouped.get(key).push(resource);
+	}
+	for (const [key, title] of RESOURCE_SECTIONS) {
+		if (!grouped.has(key)) continue;
+		const group = create("div", "ew__resource-group");
+		group.append(create("h5", null, title));
+		const entries = grouped.get(key);
+		let more;
+		if (entries.length > MAX_INLINE_RESOURCES) {
+			more = create("details", "ew__resource-more");
+			more.dataset.resourceKey = `more:${key}`;
+			more.append(create("summary", null, `Show ${entries.length - MAX_INLINE_RESOURCES} more ${title.toLowerCase()} resources`));
+		}
+		for (const [index, resource] of entries.entries()) {
+			let row;
+			if (Object.hasOwn(resource, "ready")) {
+				row = create("div", "ew__resource-row ew__resource-row--recharge");
+				row.append(
+					create("strong", "ew__resource-name", `${resource.name} (recharge ${resource.min}–6)`),
+					create("span", "ew__resource-count", resource.ready ? "Ready" : "Spent"),
+					getButton(resource.ready ? "Mark spent" : "Mark ready", `${resource.name}: mark ${resource.ready ? "spent" : "ready"}`,
+						() => onAction({kind: "recharge", rechargeId: resource.id, ready: !resource.ready}), false, `recharge:${resource.id}:toggle`),
+				);
+			} else {
+				row = getPipRow({
+					...resource,
+					resourceKey: `ability:${resource.id}`,
+					onChange: change => onAction({kind: "abilityUse", abilityId: resource.id, change}),
+				});
+			}
+			(index < MAX_INLINE_RESOURCES ? group : more).append(row);
+		}
+		if (more) group.append(more);
+		tracker.append(group);
+	}
+	if (!tracker.children.length) tracker.append(create("p", "ew__resource-empty", "No counted uses yet. Add a spell level or ability below."));
+	section.append(tracker);
+
+	const manager = create("details", "ew__resource-manager");
+	const overview = create("summary", "ew__resource-overview", "Manage counts and names");
+	overview.dataset.resourceControl = "resources:toggle";
+	manager.append(overview);
 	const fieldset = create("fieldset", "ew__resource-fields");
 	fieldset.append(create("legend", "ve-hidden", `Combat resources for ${label}`));
 
 	const slots = create("div", "ew__resource-group");
 	slots.append(create("h5", null, "Spell slots"));
-	for (const [rawLevel, {current, max}] of Object.entries(resources.spellSlots)) {
+	for (const [rawLevel, {current, max}] of slotEntries) {
 		const level = Number(rawLevel);
 		const name = `Level ${level} spell slot`;
-		slots.append(getCounterRow({
+		slots.append(getEditForm({
 			name,
 			current,
 			max,
 			resourceKey: `slots:${level}`,
-			onSpend: () => onAction({kind: "slots", level, current: current - 1, max}),
-			onRestore: () => onAction({kind: "slots", level, current: current + 1, max}),
-			edit: getEditForm({
-				name,
-				current,
-				max,
-				resourceKey: `slots:${level}`,
-				onSave: values => onAction({kind: "slots", level, ...values}),
-				onRemove: () => onAction({kind: "removeSlots", level}),
-			}),
+			onSave: values => onAction({kind: "slots", level, ...values}),
+			onRemove: () => onAction({kind: "removeSlots", level}),
 		}));
 	}
 	if (!Object.keys(resources.spellSlots).length) slots.append(create("p", "ew__resource-empty", "No spell slots tracked."));
@@ -150,18 +240,12 @@ export function getEncounterResourcePanel ({instance, label, onAction}) {
 	const abilities = create("div", "ew__resource-group");
 	abilities.append(create("h5", null, "Limited-use abilities"));
 	for (const ability of resources.abilities) {
-		abilities.append(getCounterRow({
+		abilities.append(getEditForm({
 			...ability,
 			resourceKey: `ability:${ability.id}`,
-			onSpend: () => onAction({kind: "abilityUse", abilityId: ability.id, change: -1}),
-			onRestore: () => onAction({kind: "abilityUse", abilityId: ability.id, change: 1}),
-			edit: getEditForm({
-				...ability,
-				resourceKey: `ability:${ability.id}`,
-				isNameEditable: true,
-				onSave: values => onAction({kind: "ability", ability: {id: ability.id, ...values}}),
-				onRemove: () => onAction({kind: "removeAbility", abilityId: ability.id}),
-			}),
+			isNameEditable: true,
+			onSave: values => onAction({kind: "ability", ability: {id: ability.id, ...values}}),
+			onRemove: () => onAction({kind: "removeAbility", abilityId: ability.id}),
 		}));
 	}
 	if (!resources.abilities.length) abilities.append(create("p", "ew__resource-empty", "No uses listed; add one for an ability described only in prose."));
@@ -189,28 +273,9 @@ export function getEncounterResourcePanel ({instance, label, onAction}) {
 	addAbility.append(addForm);
 	abilities.append(addAbility);
 
-	const recharges = create("div", "ew__resource-group");
-	recharges.append(create("h5", null, "Recharge abilities"));
-	for (const recharge of resources.recharges) {
-		const row = create("div", "ew__resource-row");
-		row.append(
-			create("strong", "ew__resource-name", `${recharge.name} (recharge ${recharge.min}–6)`),
-			create("span", "ew__resource-count", recharge.ready ? "Ready" : "Spent"),
-			getButton(recharge.ready ? "Mark spent" : "Mark ready", `${recharge.name}: mark ${recharge.ready ? "spent" : "ready"}`,
-				() => onAction({kind: "recharge", rechargeId: recharge.id, ready: !recharge.ready}), false, `recharge:${recharge.id}:toggle`),
-		);
-		recharges.append(row);
-	}
-	if (!resources.recharges.length) recharges.append(create("p", "ew__resource-empty", "No tagged recharge abilities."));
-
-	const concentration = create("div", "ew__resource-group ew__resource-concentration");
-	concentration.append(create("h5", null, "Concentration"));
-	const toggle = getButton(resources.concentration.active ? "End concentration" : "Mark concentrating",
-		`${label}: ${resources.concentration.active ? "end" : "start"} concentration`,
-		() => onAction({kind: "concentration", active: !resources.concentration.active, label: ""}), false, "concentration:toggle");
-	toggle.setAttribute("aria-pressed", String(resources.concentration.active));
-	concentration.append(toggle);
+	const concentrationEdit = create("div", "ew__resource-group ew__resource-concentration");
 	if (resources.concentration.active) {
+		concentrationEdit.append(create("h5", null, "Concentration label"));
 		const form = create("form", "ew__resource-form");
 		const field = getField("Spell or effect (optional)", {type: "text", value: resources.concentration.label, controlKey: "concentration:label"});
 		const button = create("button", "ew__resource-button ve-btn ve-btn-default", "Save label");
@@ -221,9 +286,11 @@ export function getEncounterResourcePanel ({instance, label, onAction}) {
 			event.preventDefault();
 			onAction({kind: "concentration", active: true, label: field.input.value.trim()});
 		});
-		concentration.append(form);
+		concentrationEdit.append(form);
 	}
-	fieldset.append(slots, abilities, recharges, concentration);
-	section.append(fieldset);
+	fieldset.append(slots, abilities);
+	if (resources.concentration.active) fieldset.append(concentrationEdit);
+	manager.append(fieldset);
+	section.append(manager);
 	return section;
 }
