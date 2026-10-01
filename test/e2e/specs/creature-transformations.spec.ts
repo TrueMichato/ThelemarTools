@@ -113,6 +113,29 @@ test("an option changes the live delta and its exact source-qualified mechanics 
 	await expect(page.locator(".ew__statblock .ve-stats")).not.toContainText("Lightning");
 });
 
+test("Fairy flight previews as armor-restricted movement and survives encounter reload", async ({page}) => {
+	test.setTimeout(120_000);
+	await new EncounterRollPage(page).seed({count: 1});
+	const editor = new CreatureTransformationPage(page);
+	const before = await editor.savedEncounter();
+	await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	await editor.choose("race:fairy|mpmm");
+	await editor.chooseOption("Species spell grant and ability", "choice-1");
+	await editor.expectLivePreview();
+	await expect(editor.beforeStatblock).not.toContainText(/fly 30 ft/i);
+	await expect(editor.afterStatblock).toContainText(/fly 30 ft\. while not wearing medium or heavy armor/i);
+	expect(await editor.savedEncounter()).toEqual(before);
+	await editor.apply();
+	const saved = await editor.savedEncounter() as {instances: {monster: {speed: {fly?: number}}, statblockOperations: {data: {resolved: {changes: {type: string, mode?: string, relativeTo?: string, condition?: string}[]}}}[]}[]};
+	expect(saved.instances[0].monster.speed.fly).toBeUndefined();
+	expect(saved.instances[0].statblockOperations[0].data.resolved.changes).toEqual(expect.arrayContaining([
+		{type: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"},
+	]));
+	await page.reload();
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText(/fly 30 ft\. while not wearing medium or heavy armor/i);
+});
+
 test("catalog failures stay visible without a success-shaped picker or status", async ({page}) => {
 	await page.route("**/data/creature-transformations.json", route => route.abort("failed"));
 	await page.goto("/bestiary.html#goblin_mm");

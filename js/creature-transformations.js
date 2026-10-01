@@ -13,6 +13,14 @@ const CONDITION_TYPES = new Set(["blinded", "charmed", "deafened", "exhaustion",
 const CREATURE_TYPES = new Set(["aberration", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend", "giant", "humanoid", "monstrosity", "ooze", "plant", "undead"]);
 const SENSES = new Set(["darkvision", "blindsight", "tremorsense", "truesight"]);
 const SPEEDS = new Set(["walk", "fly", "swim", "climb", "burrow"]);
+const RELATIVE_SPEED_MODES = {flying: "fly", swimming: "swim", climbing: "climb", burrowing: "burrow"};
+const RELATIVE_SPEED_MENTIONS = {
+	fly: /\b(?:fly|flies|flying|flight|wings?)\b/i,
+	swim: /\b(?:swim|swimming)\b/i,
+	climb: /\b(?:climb|climbing|climber)\b/i,
+	burrow: /\b(?:burrow|burrowing)\b/i,
+};
+const RELATIVE_SPEED_TRAIT = /^(?:Because of your wings, |Thanks to your wings, |Your walking speed is \d+ feet, and )?you have a (flying|swimming|climbing|burrowing) speed equal to your walking speed\.(?: (You can't use this flying speed if you're wearing medium or heavy armor\.))?$/i;
 const SIZES = new Set(["T", "S", "M", "L", "H", "G"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const ENTRY_SECTIONS = new Set(["trait", "action", "bonus", "reaction", "legendary"]);
@@ -76,6 +84,9 @@ const assertChanges = changes => {
 				case "grantConditionImmunity": return props === "op,value" && CONDITION_TYPES.has(step.value);
 				case "grantSense": return props === "op,range,sense" && SENSES.has(step.sense) && Number.isInteger(step.range) && step.range > 0;
 				case "grantSpeed": return props === "feet,mode,op" && SPEEDS.has(step.mode) && Number.isInteger(step.feet) && step.feet >= 0;
+				case "grantRelativeSpeed": return (props === "mode,op,relativeTo" || props === "condition,mode,op,relativeTo")
+					&& SPEEDS.has(step.mode) && step.mode !== "walk" && step.relativeTo === "walk"
+					&& (step.condition === undefined || (step.mode === "fly" && step.condition === "noMediumOrHeavyArmor"));
 				case "grantLanguage": return props === "op,value" && typeof step.value === "string" && !!step.value.trim();
 				case "grantSpell": return isTransformationSpell(step);
 				case "grantConditionalDefense": return props === "kind,op,value,when" && ["resistance", "immunity"].includes(step.kind) && DAMAGE_TYPES.has(step.value) && ["nonmagical", "nonmagicalUnsilvered", "dimLightOrDarkness"].includes(step.when);
@@ -184,6 +195,21 @@ const getSpellBlock = (block, source, ability) => {
 	return {changes, manualReview};
 };
 
+const getRelativeSpeed = (race, mode) => {
+	const entries = Array.isArray(race.entries) ? race.entries : [];
+	const relevant = entries.filter(entry => RELATIVE_SPEED_MENTIONS[mode].test(JSON.stringify(entry)));
+	if (!relevant.length) return race.speed?.[mode] === true ? {op: "grantRelativeSpeed", mode, relativeTo: "walk"} : null;
+	if (relevant.length !== 1 || !Array.isArray(relevant[0]?.entries) || relevant[0].entries.length !== 1 || typeof relevant[0].entries[0] !== "string") return null;
+	const match = RELATIVE_SPEED_TRAIT.exec(relevant[0].entries[0]);
+	if (!match || RELATIVE_SPEED_MODES[match[1].toLowerCase()] !== mode) return null;
+	return {
+		op: "grantRelativeSpeed",
+		mode,
+		relativeTo: "walk",
+		...match[2] ? {condition: "noMediumOrHeavyArmor"} : {},
+	};
+};
+
 const getRaceRecipe = race => {
 	const changes = [];
 	const optionGroups = [];
@@ -264,9 +290,17 @@ const getRaceRecipe = race => {
 		else if (race.speed && typeof race.speed === "object" && !Array.isArray(race.speed)) {
 			for (const [mode, value] of Object.entries(race.speed)) {
 				if (SPEEDS.has(mode) && Number.isInteger(value) && value >= 0) changes.push({op: "grantSpeed", mode, feet: value});
-				else review("traits", `Resolve conditional or unsupported ${mode} speed for this species.`);
+				else if (value !== true || mode === "walk" || !SPEEDS.has(mode)) review("traits", `Resolve conditional or unsupported ${mode} speed for this species.`);
 			}
 		} else review("traits", "Resolve non-fixed species speed with the DM.");
+	}
+	for (const mode of Object.values(RELATIVE_SPEED_MODES)) {
+		if (race.speed?.[mode] != null && race.speed[mode] !== true) continue;
+		const relative = getRelativeSpeed(race, mode);
+		if (relative) changes.push(relative);
+		else if (race.speed?.[mode] === true || (Array.isArray(race.entries) && race.entries.some(entry => RELATIVE_SPEED_MENTIONS[mode].test(JSON.stringify(entry))))) {
+			review("traits", `Resolve ${mode} speed with the DM; its conditions or choices cannot be applied automatically.`);
+		}
 	}
 	if (race.languageProficiencies != null) {
 		if (!Array.isArray(race.languageProficiencies) || !race.languageProficiencies.length) review("traits", "Resolve nonstandard species languages with the DM.");
