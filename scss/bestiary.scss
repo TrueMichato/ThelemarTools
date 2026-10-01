@@ -54,16 +54,17 @@
 	// endregion
 
 	// region Statblock control bar
-	// The control bar under the statblock (Encounter Builder, Proficiency Dice, Two Columns,
-	// Printer View, Compare, Table View, Wide View, Manage Content) is centered and non-wrapping
-	// by default. In the tabbed layout the content pane is only ~half the container (~547px), which
-	// is narrower than the buttons' combined width (~669px) — so a `nowrap` row overflows and clips
-	// "Encounter Builder" on the left and the "Manage Content" group on the right. Allow the button
-	// groups to wrap onto additional rows instead; `row-gap` keeps wrapped rows legible while the
-	// existing `ve-mr-2` utilities handle horizontal spacing.
 	.bestiary__wrp-controls {
+		max-width: 100%;
 		flex-wrap: wrap;
 		row-gap: 4px;
+
+		> .ve-flex-v-center {
+			max-width: 100%;
+			flex-wrap: wrap;
+			justify-content: center;
+			row-gap: 4px;
+		}
 	}
 	// endregion
 

@@ -36,6 +36,7 @@ import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-vi
 import {getEncounterResourceSummary} from "./encounterworkspace/encounterworkspace-resources.js";
 import {getEncounterResourcePanel} from "./encounterworkspace/encounterworkspace-resource-view.js";
 import {ENCOUNTER_DAMAGE_TYPES} from "./encounterworkspace/encounterworkspace-damage.js";
+import {BESTIARY_ENCOUNTER_HANDOFF_PARAM, takeBestiaryEncounterHandoff} from "./encounterworkspace/encounterworkspace-bestiary-handoff.js";
 
 const STATBLOCK_BATCH_SIZE = 12;
 
@@ -392,6 +393,7 @@ export class EncounterWorkspacePage {
 		if (catalogError) this._setError(`Bestiary sources could not be initialized: ${this._getErrorMessage(catalogError)}. ${this._hasUnreadableSave ? "The saved encounter also could not be opened." : "The saved encounter is still available."} Importing another list is disabled until the page can load those sources.`);
 		else if (referenceError) this._setError(`Condition and skill reference data could not be loaded: ${this._getErrorMessage(referenceError)}. Standard conditions and skills remain available. You can still choose a saved Bestiary list.${this._hasUnreadableSave ? " The saved encounter also could not be opened; choose a saved list to replace it." : ""}`);
 		await this._pRefreshHandoff();
+		await this._pOpenBestiaryHandoff();
 	}
 
 	_getErrorMessage (error) { return String(error?.message || error).replace(/[.!?]+$/, ""); }
@@ -586,6 +588,58 @@ export class EncounterWorkspacePage {
 		this._eleStatus.textContent = text;
 	}
 
+	async _pOpenBestiaryHandoff () {
+		if (!window.location?.href) return;
+		const url = new URL(window.location.href);
+		if (!url.searchParams.has(BESTIARY_ENCOUNTER_HANDOFF_PARAM)) return;
+		const token = url.searchParams.get(BESTIARY_ENCOUNTER_HANDOFF_PARAM);
+		url.searchParams.delete(BESTIARY_ENCOUNTER_HANDOFF_PARAM);
+		window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+		this._setBusy(true);
+		let isSaved = false;
+		try {
+			const exportedSublist = takeBestiaryEncounterHandoff({token});
+			if (!this._isCatalogReady) throw new Error("Bestiary sources are not available");
+			if (this._hasUnreadableSave && !await this._pConfirmReplace({isFromBestiary: true})) {
+				return this._setStatus("The unreadable encounter was kept. Return to Bestiary to send it again.");
+			}
+			const next = await this._store.pReplace({
+				currentState: this._state,
+				exportedSublist,
+				isRequireAllItems: true,
+				pConfirm: () => this._pConfirmReplace({isFromBestiary: true}),
+			});
+			if (next === this._state) return this._setStatus("The working encounter was kept. Return to Bestiary to send it again.");
+			isSaved = true;
+			this._setLoadedEncounter(next, {isFromBestiary: true});
+		} catch (e) {
+			this._setError(isSaved
+				? `The Bestiary encounter was saved, but could not be displayed: ${this._getErrorMessage(e)}. Reload the workspace; do not send it again.`
+				: `Could not open the current Bestiary encounter: ${this._getErrorMessage(e)}. The working encounter is unchanged. Return to Bestiary and click Encounter Workspace again, or choose a saved list here.`);
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
+	_setLoadedEncounter (next, {isFromBestiary = false} = {}) {
+		this._state = next;
+		this._hpUndo = [];
+		this._clearDamageFeedback();
+		this._clearInitiativeMove();
+		this._collapsedGroups.clear();
+		this._focusedInstanceId = null;
+		this._viewMode = "focused";
+		this._selViewMode.value = "focused";
+		this._shownCards = STATBLOCK_BATCH_SIZE;
+		this._expandedCards.clear();
+		this._hasUnreadableSave = false;
+		this._render();
+		const loaded = next.instances.length
+			? `Loaded ${next.instances.length} independent ${next.instances.length === 1 ? "monster" : "monsters"}`
+			: "Loaded an empty working encounter";
+		this._setStatus(`${loaded} from "${next.sourceList.name}"${isFromBestiary ? " in Bestiary" : ""}.${next.omissions.length ? ` ${next.omissions.length} ${next.omissions.length === 1 ? "entry was" : "entries were"} omitted; see details below.` : ""}`);
+	}
+
 	async _pChoose () {
 		if (this._isBusy) return;
 		this._setBusy(true);
@@ -623,22 +677,7 @@ export class EncounterWorkspacePage {
 				this._setStatus("The working encounter was not replaced.");
 				return;
 			}
-			this._state = next;
-			this._hpUndo = [];
-			this._clearDamageFeedback();
-			this._clearInitiativeMove();
-			this._collapsedGroups.clear();
-			this._focusedInstanceId = null;
-			this._viewMode = "focused";
-			this._selViewMode.value = "focused";
-			this._shownCards = STATBLOCK_BATCH_SIZE;
-			this._expandedCards.clear();
-			this._hasUnreadableSave = false;
-			this._render();
-			const loaded = next.instances.length
-				? `Loaded ${next.instances.length} independent ${next.instances.length === 1 ? "monster" : "monsters"}`
-				: "Loaded an empty working encounter";
-			this._setStatus(`${loaded} from "${next.sourceList.name}".${next.omissions.length ? ` ${next.omissions.length} ${next.omissions.length === 1 ? "entry was" : "entries were"} omitted; see details below.` : ""}`);
+			this._setLoadedEncounter(next);
 		} catch (e) {
 			this._setError(`The saved list could not be loaded: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
 		} finally {
@@ -646,10 +685,10 @@ export class EncounterWorkspacePage {
 		}
 	}
 
-	_pConfirmReplace () {
+	_pConfirmReplace ({isFromBestiary = false} = {}) {
 		return InputUiUtil.pGetUserBoolean({
 			title: "Replace Working Encounter",
-			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, targets, statblock edits, conditions, notes, roll effects, HP, initiative, and turns will be lost. The saved Bestiary list will not change.",
+			htmlDescription: `Replace the current working encounter with a copy of ${isFromBestiary ? "the current Bestiary encounter" : "this saved Bestiary list"}? Its roster, targets, statblock edits, conditions, notes, roll effects, HP, initiative, and turns will be lost. ${isFromBestiary ? "The Bestiary encounter and its saved list" : "The saved Bestiary list"} will not change.`,
 			textYes: "Replace Encounter",
 			textNo: "Keep Current",
 		});

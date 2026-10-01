@@ -923,9 +923,14 @@ export class EncounterWorkspaceStore {
 		return valid;
 	}
 
-	async pReplace ({currentState, exportedSublist, pConfirm, pResolveItem, fnUid}) {
+	async pReplace ({currentState, exportedSublist, pConfirm, pResolveItem, fnUid, isRequireAllItems = false}) {
 		if (currentState.sourceList && !await pConfirm()) return currentState;
 		const next = await EncounterWorkspaceState.pFromSavedList({exportedSublist, pResolveItem, fnUid});
+		if (isRequireAllItems && (!next.instances.length || next.omissions.length)) {
+			throw new Error(next.omissions.length
+				? `${next.omissions.length} creature ${next.omissions.length === 1 ? "entry could" : "entries could"} not be brought over (${next.omissions.map(it => `${it.hash}: ${it.reason}`).join("; ")}). Correct the encounter in Bestiary and try again`
+				: "The current Bestiary encounter has no usable creatures. Add creatures there and try again");
+		}
 		return this.pSave(next);
 	}
 }
