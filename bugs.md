@@ -3,6 +3,16 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 63 — Multiclass, spells, tool checks, progression, and TGTT copy
+
+- **S1 (bugs 1–2) — Multiclass proficiencies and Hit Dice:** Proficiencies sometimes display twice after multiclassing. The Overview Hit Die action chooses the largest die, so a Ranger/Druid cannot spend a Druid die while Ranger dice remain. Own proficiency aggregation/display and the Overview Hit Die picker, including its pool rendering; preserve Short Rest's independent per-die choice. Coordinate the resulting tool-proficiency shape with S3.
+- **S2 (bug 3) — Shadow Blade:** Casting the XGE spell must create a usable weapon with its authored damage, properties, proficiency, range, dim-light advantage, scaling, and lifecycle; its damage must not become a universal buff to other attacks. Own Shadow Blade casting, generated-weapon identity, combat projection, and spell cleanup, without changing unrelated attack rules.
+- **S3 (bug 4) — Tool-roll skill choice:** Roll Tool Check should offer any skill, while only a proficient paired skill grants the applicable advantage. Own tool-check setup/roll and linked-check behavior; verify the candidate list and enabled state against S1's deduplicated proficiency output.
+- **S4 (bugs 5–6) — Monk improvements and repeatable ASI feat:** TGTT Monk ASI/Feat opportunities are missing from Level Up and Quick Build; the XPHB Ability Score Improvement feat is marked repeatable in source data but cannot be selected repeatedly. Own shared improvement/feat eligibility and its affected flows, including regression coverage for progression-history replay and Respec; preserve class/source specificity.
+- **S5 (bugs 7–8) — TGTT text and duration:** Rewrite Unhindered Flurry's broken sentence to state its intended no-Focus-Point rule clearly, and encode Andrui's Baneful Backfire's duration as lasting until triggered using the established spell-duration form. Own only these two homebrew entries and focused data tests; do not change the TGTT Monk class-feature reference list owned by S4.
+
+The orchestrator alone updates this file. Each session supplies causal Jest coverage and a shared-surface report; integration checks cross-session behavior and runs the full repository gate before moving `character-sheet-wip`. The existing item-editor follow-up remains open.
+
 ### Round 62 — Item editor follow-up (plan only)
 
 - **Custom/Modify Item editor (bug 7):** The item-editor session completed a phased plan based on the previously approved shared-editor design and the DMG/XDMG Boots findings. Create/Modify/catalog-clone implementation is still pending; no editor code was changed in this round.
