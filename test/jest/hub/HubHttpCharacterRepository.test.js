@@ -307,6 +307,44 @@ describe("HTTP character repository", () => {
 		expect(api.pPatchCharacter).not.toHaveBeenCalled();
 	});
 
+	it("keeps the canonical operation watermark outside character data but inside reconciliation coverage", async () => {
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner-1"}}),
+				pGetCharacterProjection: async () => ({
+					kind: "owner_truth",
+					operationWatermark: 375,
+					character: {
+						id: "character-1",
+						ownerAccountId: "owner-1",
+						campaignId: "campaign-1",
+						revision: 23,
+						data: {name: "Mira"},
+					},
+				}),
+			},
+		});
+		await expect(repository.pGet({characterId: "character-1"}))
+			.resolves.toEqual({id: "character-1", name: "Mira"});
+		expect(repository._accepted.get("character-1").operationWatermark).toBe(375);
+		expect(repository._getCoverageBook("character-1").live).toMatchObject({
+			revision: 23,
+			acceptedSequence: 375,
+		});
+	});
+
+	it("does not clear newly fetched coverage through an old alias during a character switch", () => {
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: {}});
+		repository._canonicalIds.set("temporary-id", "canonical-id");
+		repository._getCoverageBook("canonical-id").live.revision = 23;
+		repository._getCoverageBook("previous-id").live.revision = 4;
+		repository.clearRealtimeReconciliation({characterId: "temporary-id", exceptCharacterId: "canonical-id"});
+		expect(repository._coverage.get("canonical-id").live.revision).toBe(23);
+		repository.clearRealtimeReconciliation({characterId: "previous-id", exceptCharacterId: "canonical-id"});
+		expect(repository._coverage.has("previous-id")).toBe(false);
+	});
+
 	it("keeps failed owner recovery account-scoped and never substitutes it for fresh DM truth", async () => {
 		const stored = new Map();
 		const storage = {

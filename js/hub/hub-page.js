@@ -3700,9 +3700,9 @@ async function pInitCampaignForms ({
 			fnIsCurrent,
 		});
 		if (!fnIsCurrent() || transferState.isFenced) return {pendingTransferIds: [], isFenced: true};
-		const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 		const restoreTransferControlState = () => {
 			if (!fnIsCurrent()) return false;
+			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 			if (pendingProposal) {
 				setTransferProposalControls({
 					form,
@@ -4281,12 +4281,19 @@ async function pInitCampaignForms ({
 						let proposed;
 						try {
 							proposed = await api.pProposeTransfer(proposalRequest);
-							if (!fnIsCurrent()) return null;
 						} catch (error) {
 							if (!isTransferOutcomeUncertain(error)) {
 								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 							}
 							throw error;
+						}
+						if (!["proposed", "reserved", "committed", "rejected", "cancelled", "expired"].includes(proposed?.transfer?.status)) {
+							throw new HubApiError({code: "RESPONSE_INVALID", status: 0});
+						}
+						if (!fnIsCurrent()) {
+							if (proposalRequest.isAutoResolved && ["proposed", "reserved"].includes(proposed.transfer.status)) return null;
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: proposalRequest.isAutoResolved, targetKind: proposalRequest.targetKind};
 						}
 						const transfers = await api.pListTransfers({campaignId});
 						if (!fnIsCurrent()) return null;
@@ -4377,12 +4384,19 @@ async function pInitCampaignForms ({
 					let proposed;
 					try {
 						proposed = await api.pProposeTransfer(proposalRequest);
-						if (!fnIsCurrent()) return null;
 					} catch (error) {
 						if (!isTransferOutcomeUncertain(error)) {
 							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 						}
 						throw error;
+					}
+					if (!["proposed", "reserved", "committed", "rejected", "cancelled", "expired"].includes(proposed?.transfer?.status)) {
+						throw new HubApiError({code: "RESPONSE_INVALID", status: 0});
+					}
+					if (!fnIsCurrent()) {
+						if (isAutoResolved && ["proposed", "reserved"].includes(proposed.transfer.status)) return null;
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: proposed.transfer, isAutoResolved, targetKind};
 					}
 					if (!isAutoResolved) {
 						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});

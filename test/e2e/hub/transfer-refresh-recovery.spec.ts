@@ -85,8 +85,10 @@ test("a fenced transfer balance retry remains recoverable until replacement refr
 		const postStarted = new Promise<void>(resolve => signalPost = resolve);
 		let releasePost = () => {};
 		const postGate = new Promise<void>(resolve => releasePost = resolve);
+		let postCount = 0;
 		await player.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
 			if (route.request().method() === "POST") {
+				postCount++;
 				signalPost();
 				await postGate;
 			}
@@ -108,11 +110,12 @@ test("a fenced transfer balance retry remains recoverable until replacement refr
 		);
 		releasePost();
 		expect((await firstResponse).status()).toBe(201);
-		await expect(player.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
-		await player.page.locator("#campaign-transfer-form button[type='submit']").click();
 		await expect(player.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+		await expect(player.page.locator("#campaign-transfer-form button[type='submit']")).toHaveText("Submit transfer");
 		await dm.hub.gotoCampaign(campaignId);
 		await expect(dm.page.locator("#campaign-pending-transfers .hub-data-row").filter({hasText: "Party inventory"})).toHaveCount(1);
+		await expect(player.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+		expect(postCount).toBe(1);
 	} finally {
 		await Promise.all([
 			pCloseContext(playerContext),

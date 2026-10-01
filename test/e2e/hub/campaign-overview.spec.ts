@@ -1196,6 +1196,7 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 	};
 	const dmContext = await browser.newContext(contextOptions);
 	const ownerContext = await browser.newContext(contextOptions);
+	let releaseSnapshot = () => {};
 	try {
 		const dm = new HubCampaignPage(await dmContext.newPage());
 		const owner = new HubCampaignPage(await ownerContext.newPage());
@@ -1220,43 +1221,12 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
 		}));
 
-		let markFirstRefreshStarted = () => {};
-		const firstRefreshStarted = new Promise<void>(resolve => {
-			markFirstRefreshStarted = resolve;
-		});
-		let continueFirstRefresh = () => {};
-		const firstRefreshGate = new Promise<void>(resolve => {
-			continueFirstRefresh = resolve;
-		});
-		let isRefreshGateEnabled = false;
-		let transferRefreshCount = 0;
-		let signalCurrencyRefresh = () => {};
-		const currencyRefreshStarted = new Promise<void>(resolve => signalCurrencyRefresh = resolve);
-		let releaseCurrencyRefresh = () => {};
-		const currencyRefreshGate = new Promise<void>(resolve => releaseCurrencyRefresh = resolve);
-		let isCurrencyGateEnabled = false;
-		await dm.page.route(`**/api/campaigns/${campaignId}/party-inventory`, async route => {
-			if (route.request().method() === "GET" && isCurrencyGateEnabled) {
-				isCurrencyGateEnabled = false;
-				signalCurrencyRefresh();
-				await currencyRefreshGate;
-			}
-			await route.continue();
-		});
-		await dm.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
-			if (route.request().method() !== "GET") {
-				await route.continue();
-				return;
-			}
-			if (!isRefreshGateEnabled) {
-				await route.continue();
-				return;
-			}
-			transferRefreshCount++;
-			if (transferRefreshCount === 1) {
-				markFirstRefreshStarted();
-				await firstRefreshGate;
-			}
+		const snapshotGate = new Promise<void>(resolve => releaseSnapshot = resolve);
+		let snapshotRequestCount = 0;
+		await dm.page.route(`**/api/campaigns/${campaignId}/snapshot`, async route => {
+			if (route.request().method() !== "GET") return route.continue();
+			snapshotRequestCount++;
+			if (snapshotRequestCount === 1) await snapshotGate;
 			await route.continue();
 		});
 
@@ -1268,33 +1238,28 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 				identity: {mode: "hide"},
 			},
 		};
-		isRefreshGateEnabled = true;
-		isCurrencyGateEnabled = true;
 		const firstUpdate = await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: policy.projectionRevision,
 			policy: changedPolicy,
 		});
-		await currencyRefreshStarted;
 		await expect.poll(() => dm.page.locator("#campaign-transfer-form").evaluate(form =>
 			!!(form as HTMLFormElement & {_hubProjectionTransferDraft?: object})._hubProjectionTransferDraft,
 		)).toBe(true);
+		await expect.poll(() => snapshotRequestCount).toBeGreaterThan(0);
 		// The in-flight input event can arrive after concealment captures the older draft.
 		await dm.page.locator("#campaign-transfer-sp").evaluate(input => {
 			(input as HTMLInputElement).value = "2";
 			input.dispatchEvent(new Event("input", {bubbles: true}));
 		});
-		releaseCurrencyRefresh();
-		await firstRefreshStarted;
 		await expect(dm.page.locator("#campaign-transfer-sp")).toHaveValue("2");
 		await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: firstUpdate.projectionRevision,
 			policy: policy.policy,
 		});
-		continueFirstRefresh();
+		releaseSnapshot();
 
-		await expect.poll(() => transferRefreshCount).toBeGreaterThanOrEqual(2);
 		await expect.poll(() => dm.page.evaluate(() => ({
 			source: (document.getElementById("campaign-transfer-source") as HTMLSelectElement).value,
 			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
@@ -1304,6 +1269,7 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 		}))).toEqual({...selections, gp: "7", sp: "2", hasDraft: false});
 		await expect(dm.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
 	} finally {
+		releaseSnapshot();
 		await Promise.all([pCloseContext(dmContext), pCloseContext(ownerContext)]);
 	}
 });

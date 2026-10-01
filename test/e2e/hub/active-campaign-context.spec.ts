@@ -238,6 +238,9 @@ test.describe("device-scoped active campaign context", () => {
 
 			await hub.gotoCampaign(campaignId);
 			await hub.waitForSelectedCampaign(campaignId);
+			await hub.applyDamage({campaignId, characterName: "Canonical Route Hero", amount: 1});
+			const afterEffect = await hub.getCharacter(character.id);
+			expect(afterEffect.revision).toBeGreaterThan(character.revision);
 
 			// Ordinary site entry and Campaign Overview entry both use the same campaign repository.
 			const ordinary = new HubCampaignPage(await context.newPage());
@@ -263,7 +266,30 @@ test.describe("device-scoped active campaign context", () => {
 				const latest = await hub.getCharacter(character.id);
 				return state.revision != null && state.revision === latest.revision && !state.pending && !state.loading;
 			}, {timeout: 30_000}).toBe(true);
+			await ordinary.page.locator("#charsheet-ipt-hp-current").evaluate((input: HTMLInputElement) => {
+				input.value = "9";
+				input.dispatchEvent(new Event("change", {bubbles: true}));
+			});
+			await expect.poll(
+				async () => (await hub.getCharacter(character.id)).data.hp.current,
+				{timeout: 30_000},
+			).toBe(9);
 			const canonicalAfterOrdinary = await hub.getCharacter(character.id);
+			const operationWatermark = (await hub.getCharacterProjection(character.id)).operationWatermark;
+			expect(canonicalAfterOrdinary.revision).toBeGreaterThan(afterEffect.revision);
+			expect(operationWatermark).toBeGreaterThan(0);
+			await expect.poll(
+				() => ordinary.page.evaluate(id => {
+					const repository = (window as any).charSheet?._characterRepository;
+					const coverage = repository?._coverage?.get(id)?.live;
+					return {
+						revision: coverage?.revision ?? null,
+						sequence: coverage?.acceptedSequence ?? null,
+						blocked: repository?.isSaveBlocked?.(id) ?? true,
+					};
+				}, character.id),
+				{timeout: 30_000},
+			).toEqual({revision: canonicalAfterOrdinary.revision, sequence: operationWatermark, blocked: false});
 			const ordinaryAcceptedRevision = await ordinary.page.evaluate(
 				id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
 				character.id,

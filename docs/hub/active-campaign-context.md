@@ -234,6 +234,11 @@ keeps Sign out as the sole enabled campaign-content control while every mutation
 including after an in-flight request settles.
 If a projection refresh completes while a transfer proposal is still in flight, its retry control explains
 that confirmation is pending rather than leaving a blank status or claiming another transfer can be sent.
+Control restoration consults the current proposal at application time, not a pending draft captured before
+an asynchronous inbox read. A definite successful proposal response received after a projection-generation
+change clears a non-auto-resolved draft and defers its confirmation until authorized controls are restored;
+auto-resolved proposals remain pending until their separate decision completes. A refresh cannot revert a
+confirmed transfer to an unconfirmed retry or prematurely mark an unfinished auto-resolution as complete.
 
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local
@@ -298,7 +303,10 @@ Character Sheet-owned navigation uses one shared route builder for ordinary camp
 cloud characters, explicit Local mode, and exact campaign return. The lightweight Campaign Overview preserves
 the same canonical URL form without importing another static module into its signed-out boot graph. This
 normalizes destinations without moving authorization out of the BFF. Future cross-surface breadcrumbs may reuse
-the descriptor, but may not infer authority from the URL.
+the descriptor, but may not infer authority from the URL. Navigation saves pending work before leaving; an
+unreconciled campaign effect blocks that transition rather than discarding local state. A no-edit route round
+trip must not acquire a character lease, send a PATCH, or advance the canonical revision even when the
+character has a prior semantic effect followed by an ordinary patch.
 
 ## Files
 

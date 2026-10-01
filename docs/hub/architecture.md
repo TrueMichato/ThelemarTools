@@ -321,6 +321,14 @@ The Character Sheet page owns the subsequent authoritative-document reconciliati
 layer owns ADR 0012 operation-aware base/live transforms. Party Inventory refreshes its own stash projection
 and direct inventory-transfer effects; it does not own generic character-document reconnect recovery.
 
+The owner/DM canonical projection carries `operationWatermark` on its envelope, outside `character.data`.
+Canonical repository reads and subsequent resync fetches retain that watermark as document metadata. A successful
+Character Sheet load detaches the old realtime subscription without clearing the newly fetched character's
+coverage; on a character switch it clears only the previous character's reconciliation state, never the new
+canonical identity reached through a temporary alias. An older applied operation replayed after an ordinary
+patch is therefore already covered by the loaded revision, not a reason to block saving or claim that campaign
+effect history is unavailable.
+
 ## Campaign content overlay
 
 ```mermaid

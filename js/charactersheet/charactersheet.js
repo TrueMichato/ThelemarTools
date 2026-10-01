@@ -3600,10 +3600,16 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
-			this._closeCharacterScopedTransientUi?.();
-			this._detachHubRealtime?.();
-			this._campaign?.resetCharacterScope?.();
 			const resolvedId = canonical?.id || charId;
+			this._closeCharacterScopedTransientUi?.();
+			this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
+			if (previousCharacterId && previousCharacterId !== resolvedId) {
+				this._characterRepository.clearRealtimeReconciliation?.({
+					characterId: previousCharacterId,
+					exceptCharacterId: resolvedId,
+				});
+			}
+			this._campaign?.resetCharacterScope?.();
 			this._currentCharacterId = resolvedId;
 			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: resolvedId})
 				|| CHARACTER_ACCESS_MODES.OWNER;

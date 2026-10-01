@@ -5,6 +5,7 @@ import {
 	HubCharacterRepository,
 	LocalCharacterRepository,
 } from "../../../js/hub/hub-character-repository.js";
+import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 import {CHARACTER_ACCESS_MODES} from "../../../js/hub/hub-character-view.js";
 import {CHARACTER_REALTIME_ACCESS_END_CAUSES} from "../../../js/charactersheet/charactersheet-realtime.js";
 
@@ -2386,6 +2387,86 @@ describe("Character Sheet repository seam", () => {
 			characterId: "character-1",
 			generation: 1,
 		});
+	});
+
+	it.each([
+		["initial load", null, false],
+		["switch from another character", "previous-id", false],
+		["canonicalize an old alias", "temporary-id", true],
+	])("keeps freshly loaded canonical coverage during %s", async (_scenario, previousId, isAlias) => {
+		const previousLocation = globalThis.window.location;
+		const previousHistory = globalThis.window.history;
+		globalThis.window.location = new URL("http://test/charactersheet.html");
+		globalThis.window.history = {replaceState: jest.fn()};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner-1"}}),
+				pGetCharacterProjection: async () => ({
+					kind: "owner_truth",
+					operationWatermark: 375,
+					character: {
+						id: "character-1",
+						ownerAccountId: "owner-1",
+						campaignId: "campaign-1",
+						revision: 23,
+						data: {name: "Mira", hp: {current: 10, max: 20, temp: 0}},
+					},
+				}),
+			},
+		});
+		if (isAlias) repository._canonicalIds.set(previousId, "character-1");
+		if (previousId) repository._getCoverageBook(previousId).live.revision = 4;
+		const host = Object.assign(Object.create(CharacterSheetPage.prototype), {
+			_characterRepository: repository,
+			_characterLoadGeneration: 0,
+			_currentCharacterId: previousId,
+			_isHubCharacter: true,
+			_hubRealtimeGeneration: 0,
+			_hubRealtime: {detach: jest.fn()},
+			_state: {
+				clearCampaignSettingsOverlay: jest.fn(),
+				loadFromJson: jest.fn(),
+				setCampaignSettingsOverlay: jest.fn(),
+				getBackgroundTheme: () => null,
+				getViewMode: () => "sheet",
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_reconcileClassFeatures: jest.fn(() => null),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+		});
+		try {
+			await expect(host._pLoadCharacter("character-1")).resolves.toBe(true);
+			if (previousId) expect(repository._coverage.has(previousId)).toBe(false);
+			expect(repository._getCoverageBook("character-1").live).toMatchObject({
+				revision: 23,
+				acceptedSequence: 375,
+			});
+			const result = repository.applyRealtimeOperation({
+				characterId: "character-1",
+				operation: {
+					operationId: "old-damage",
+					kind: "hp.damage",
+					version: 1,
+					targetCharacterId: "character-1",
+					arguments: {amount: 4},
+				},
+				resultingCharacterRevision: 22,
+				eventId: "old-event",
+				sequence: 375,
+				liveData: {name: "Mira", hp: {current: 10, max: 20, temp: 0}},
+			});
+			expect(result.status).toBe("suppressed");
+			expect(repository.hasPendingResync("character-1")).toBe(false);
+			expect(repository.isSaveBlocked("character-1")).toBe(false);
+		} finally {
+			globalThis.window.location = previousLocation;
+			globalThis.window.history = previousHistory;
+		}
 	});
 
 	it("conceals stale DM truth when a disconnected role-demoted viewer selects another character", async () => {

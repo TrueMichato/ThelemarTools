@@ -6,7 +6,7 @@ import {CHARACTER_OPERATION_LEGS, getCharacterOperationRouting, getOperationLegK
 import {getCharacterDocumentWithoutDeterministicItemAliases} from "./hub-inventory-equivalence.js";
 import {
 	CHARACTER_ACCESS_MODES,
-	getCanonicalCharacter,
+	getCanonicalCharacterWithOperationWatermark,
 	getCanonicalProjectionAccess,
 } from "./hub-character-view.js";
 import {
@@ -336,7 +336,7 @@ export class HubHttpCharacterRepository {
 			? await this._api.pGetCharacterProjection({characterId: canonicalId})
 			: null;
 		const character = projection
-			? getCanonicalCharacter(projection)
+			? getCanonicalCharacterWithOperationWatermark(projection)
 			: await this._api.pGetCharacter({characterId: canonicalId});
 		this._assertCharacterScope(character);
 		const access = getCanonicalProjectionAccess(projection) || this._getListedCharacterAccess(character);
@@ -878,7 +878,7 @@ export class HubHttpCharacterRepository {
 	 * Forget every reconciliation-scoped structure for a character. Called on teardown paths (switch, detach,
 	 * archive, access loss) so pending envelopes and coverage cannot outlive the subscription that produced them.
 	 */
-	clearRealtimeReconciliation ({characterId} = {}) {
+	clearRealtimeReconciliation ({characterId, exceptCharacterId = null} = {}) {
 		if (characterId == null) {
 			this._coverage.clear();
 			this._appliedEventIds.clear();
@@ -892,6 +892,7 @@ export class HubHttpCharacterRepository {
 			return true;
 		}
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		if (exceptCharacterId && canonicalId === (this._canonicalIds.get(exceptCharacterId) || exceptCharacterId)) return false;
 		for (const map of [this._coverage, this._appliedEventIds, this._appliedOperationLegIds, this._pendingResync, this._realtimeCursors, this._saveBlocks, this._liveConflicts, this._operationConflicts]) {
 			map.delete(canonicalId);
 		}

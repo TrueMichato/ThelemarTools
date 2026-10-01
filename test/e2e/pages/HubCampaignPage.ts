@@ -2558,9 +2558,13 @@ export class HubCampaignPage {
 			const heldPhase = refreshPhase === "pre_fence_retry" || refreshPhase === "manual_retry"
 				? refreshPhase
 				: null;
+			const retryText = heldPhase && !getHeldRefresh(heldPhase)
+				? await this.page.locator("#campaign-transfer-form-status button").textContent({timeout: 100}).catch(() => null)
+				: null;
 			if (
 				!heldPhase
 				|| getHeldRefresh(heldPhase)
+				|| retryText !== "Retrying..."
 			) {
 				failedRefreshCount++;
 				return route.fulfill({

@@ -1,4 +1,4 @@
-import {isCanonicalProjection} from "./hub-character-view.js";
+import {getCanonicalCharacterWithOperationWatermark, isCanonicalProjection} from "./hub-character-view.js";
 import {HUB_PROTOCOL_VERSION} from "./hub-capabilities.js";
 
 export class HubApiError extends Error {
@@ -612,7 +612,7 @@ export class HubApiClient {
 		if (!isCanonicalProjection(projection)) {
 			throw new HubApiError({code: "CHARACTER_PROJECTION_SCOPED", status: 403});
 		}
-		return projection.character;
+		return getCanonicalCharacterWithOperationWatermark(projection);
 	}
 
 	async pListCampaignCharacterProjections ({campaignId}) {
