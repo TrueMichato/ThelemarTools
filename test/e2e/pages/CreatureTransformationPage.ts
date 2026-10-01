@@ -17,6 +17,18 @@ export class CreatureTransformationPage {
 		return this.optionControl(group, value).locator("..").locator("..").locator(".bqa__transformation-info");
 	}
 
+	selectedRecipeInfo () {
+		return this.root.locator(".bqa__transformation-selected .bqa__transformation-info");
+	}
+
+	optionByName (group: string, name: string) {
+		return this.root.getByRole("group", {name: new RegExp(`^${group}(?: \\(required\\))?$`)})
+			.locator(".bqa__transformation-option", {hasText: name}).locator("input");
+	}
+
+	get beforeStatblock () { return this.root.locator(".bqa__transformation-statblock").first(); }
+	get afterStatblock () { return this.root.locator(".bqa__transformation-statblock").nth(1); }
+
 	get nativeHover () {
 		return this.page.locator(".ve-hwin:visible").last();
 	}

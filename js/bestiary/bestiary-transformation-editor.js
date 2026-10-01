@@ -154,9 +154,12 @@ function renderCompactDelta (parent, batch) {
 	if (!batch?.previews.length) return;
 	const fieldChanges = new Map();
 	const entryChanges = new Set();
+	const compactValue = (path, value) => path === "spellcasting" && Array.isArray(value)
+		? value.map(it => it.name).filter(Boolean).join(", ") || "none"
+		: JSON.stringify(value);
 	for (const {preview} of batch.previews) {
 		for (const {path, before, after} of preview.diff.fields) {
-			const label = `${path}: ${JSON.stringify(before)} → ${JSON.stringify(after)}`;
+			const label = `${path}: ${compactValue(path, before)} → ${compactValue(path, after)}`;
 			fieldChanges.set(label, (fieldChanges.get(label) || 0) + 1);
 		}
 		for (const {section, name, before, after} of preview.diff.entries) entryChanges.add(`${section}: ${before && after ? "Changed" : after ? "Added" : "Removed"} ${name}`);
@@ -380,8 +383,14 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		}
 		const provenance = candidate.provenance;
 		const heading = element("div", {className: "bqa__transformation-selected"});
-		heading.append(element("h5", {text: candidate.identity.name}));
+		const title = element("h5", {text: candidate.identity.name});
+		heading.append(title);
 		paragraph(heading, `Source: ${candidate.identity.name} · ${sourceLabel(candidate.identity.source)} · ${provenance.edition === "unverified" ? "Edition unverified" : provenance.edition === "one" ? "2024 edition" : "2014 edition"}${provenance.page == null ? " · Page unverified" : ` · p. ${provenance.page}`}.`);
+		heading.append(makeInfoButton({
+			name: `${candidate.identity.name} (${candidate.identity.source})`,
+			entries: getRecipeHoverEntries(candidate, sourceLabel),
+			targets: [title],
+		}));
 		details.append(heading);
 		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
 		paragraph(details, `Eligibility: ${describeEligibility(candidate.eligibility)}. Details and source rules are available from each info button.`);
@@ -444,6 +453,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		};
 		const updateSelection = (group, values) => {
 			selections[group.id] = values;
+			decisions = {};
 			syncConditional();
 			clearPreview();
 			confirmation.hidden = true;
