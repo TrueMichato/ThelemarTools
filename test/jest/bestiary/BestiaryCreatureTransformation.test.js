@@ -318,6 +318,23 @@ describe("resolved creature transformation preview and replay", () => {
 		expect(() => preview(monster, [], getRecipe("Overflow", [{type: "adjustAbility", ability: "str", amount: Number.MAX_SAFE_INTEGER, floor: 1}]))).toThrow(/invalid str score/i);
 	});
 
+	it("validates walking-relative speed changes before preview or persisted replay", () => {
+		const monster = getCreature();
+		const relative = {type: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"};
+		for (const invalid of [
+			{...relative, relativeTo: "swim"},
+			{...relative, mode: "walk"},
+			{...relative, mode: "swim"},
+			{...relative, condition: "arbitrary text"},
+			{...relative, feet: 40},
+		]) expect(() => preview(monster, [], getRecipe("Invalid flight", [invalid]))).toThrow(/relative speed|unsupported fields/i);
+		const draft = preview(monster, [], getRecipe("Conditional flight", [relative]));
+		expect(draft.proposed.speed.fly).toEqual({number: 40, condition: "while not wearing medium or heavy armor"});
+		const operation = commit(monster, [], draft);
+		operation.data.resolved.changes[0].condition = "arbitrary text";
+		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: [operation]})).toThrow(/changed|unsupported/i);
+	});
+
 	it("rejects unsupported operations, unsafe keys, missing/duplicate selectors, and forged conflict decisions", () => {
 		const monster = getCreature();
 		const getDraft = changes => preview(monster, [], getRecipe("Negative", changes));

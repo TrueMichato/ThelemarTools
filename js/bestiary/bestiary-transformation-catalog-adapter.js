@@ -68,6 +68,10 @@ function validateStep (step) {
 		case "grantSpeed":
 			return keysAre(step, ["op", "mode", "feet"]) && SPEEDS.has(step.mode)
 				&& Number.isInteger(step.feet) && step.feet >= 0;
+		case "grantRelativeSpeed":
+			return (keysAre(step, ["op", "mode", "relativeTo"]) || keysAre(step, ["op", "mode", "relativeTo", "condition"]))
+				&& SPEEDS.has(step.mode) && step.mode !== "walk" && step.relativeTo === "walk"
+				&& (step.condition === undefined || (step.mode === "fly" && step.condition === "noMediumOrHeavyArmor"));
 		case "grantConditionalDefense":
 			return keysAre(step, ["op", "kind", "value", "when"])
 				&& ["resistance", "immunity"].includes(step.kind) && DAMAGE_TYPES.has(step.value)

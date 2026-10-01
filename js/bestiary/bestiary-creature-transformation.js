@@ -11,6 +11,7 @@ const _CONDITIONS = {
 	nonmagicalUnsilvered: "from nonmagical attacks that aren't silvered",
 	dimLightOrDarkness: "while in dim light or darkness",
 };
+const _SPEED_CONDITIONS = {noMediumOrHeavyArmor: "while not wearing medium or heavy armor"};
 const _ENTRY_ROLES = {
 	breathWeapon: /\bbreath\b/i,
 	bite: /^bite\b/i,
@@ -189,6 +190,11 @@ function _validateChange (change) {
 			_expectKeys(change, ["type", "mode", "feet"], change.type);
 			if (!_SPEED_MODES.has(change.mode)) _fail(`Unsupported speed mode "${change.mode}".`);
 			_expectInteger(change.feet, "Speed");
+			break;
+		case "grantRelativeSpeed":
+			_expectKeys(change, ["type", "mode", "relativeTo", "condition"], change.type);
+			if (!_SPEED_MODES.has(change.mode) || change.mode === "walk" || change.relativeTo !== "walk"
+				|| (change.condition !== undefined && (change.mode !== "fly" || !Object.hasOwn(_SPEED_CONDITIONS, change.condition)))) _fail("Unsupported relative speed grant.");
 			break;
 		case "grantConditionalDefense":
 			_expectKeys(change, ["type", "kind", "value", "when"], change.type);
@@ -429,6 +435,41 @@ function _applyChange (creature, change, chassis) {
 				}
 			}
 			break;
+		case "grantRelativeSpeed": {
+			if (out.speed != null && typeof out.speed !== "number" && !_isObject(out.speed)) _fail("Creature speed must be a number or object.");
+			const walk = typeof out.speed === "number" ? out.speed : out.speed?.walk;
+			if (!Number.isSafeInteger(walk) || walk <= 0) _fail("A positive, unconditional walking speed is required for relative movement.", "CREATURE_TRANSFORMATION_SPEED_UNRESOLVED");
+			const speed = typeof out.speed === "number" ? {walk: out.speed} : out.speed || {};
+			const existing = speed[change.mode];
+			const condition = _SPEED_CONDITIONS[change.condition];
+			if (existing != null && !(typeof existing === "number" && Number.isSafeInteger(existing) && existing >= 0)
+				&& !(_isObject(existing) && Number.isSafeInteger(existing.number) && existing.number >= 0 && typeof existing.condition === "string")) {
+				_fail(`Cannot safely combine existing ${change.mode} speed with relative movement.`);
+			}
+			if (!condition && existing != null && typeof existing !== "number") _fail(`Cannot safely replace structured ${change.mode} speed.`);
+			const useAlternate = condition && (typeof existing === "number" || (existing?.condition !== condition && existing != null));
+			path = `speed.${useAlternate ? `alternate.${change.mode}` : change.mode}`;
+			if (useAlternate) {
+				if (speed.alternate != null && !_isObject(speed.alternate)) _fail("Alternate speeds must be an object.");
+				const alternates = speed.alternate?.[change.mode] || [];
+				if (!Array.isArray(alternates) || alternates.some(it => !_isObject(it) || !Number.isSafeInteger(it.number) || typeof it.condition !== "string")) _fail(`Cannot safely combine alternate ${change.mode} speeds.`);
+				before = _copy(speed.alternate?.[change.mode]);
+				if (!((typeof existing === "number" && existing >= walk) || (existing && !existing.condition && existing.number >= walk))) {
+					const matched = alternates.find(it => it.condition === condition);
+					if (matched) matched.number = Math.max(matched.number, walk);
+					else alternates.push({number: walk, condition});
+					speed.alternate ||= {};
+					speed.alternate[change.mode] = alternates;
+				}
+				after = _copy(speed.alternate?.[change.mode]);
+			} else {
+				before = _copy(existing);
+				after = condition ? {...existing, number: Math.max(existing?.number || 0, walk), condition} : Math.max(existing || 0, walk);
+				if (!_equal(before, after)) speed[change.mode] = after;
+			}
+			if (!_equal(before, after)) out.speed = speed;
+			break;
+		}
 		case "grantSpell": {
 			if (out.spellcasting != null && !Array.isArray(out.spellcasting)) _fail("Spellcasting must be an array.");
 			out.spellcasting ||= [];

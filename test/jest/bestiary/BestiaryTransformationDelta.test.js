@@ -31,6 +31,19 @@ describe("compact creature transformation delta", () => {
 		})).toBe("Damage resistances: none → slashing (from nonmagical attacks)");
 	});
 
+	it("labels effective-walk flight and retained alternate flight without claiming unconditional movement", () => {
+		const conditional = {number: 30, condition: "while not wearing medium or heavy armor"};
+		expect(formatCreatureTransformationDeltaField({path: "speed.fly", before: null, after: conditional}))
+			.toBe("Fly speed: none → 30 ft. while not wearing medium or heavy armor");
+		expect(formatCreatureTransformationDeltaField({path: "speed.alternate.fly", before: null, after: [conditional]}))
+			.toBe("Fly speed (alternate): none → 30 ft. while not wearing medium or heavy armor");
+		expect(formatCreatureTransformationDeltaField({
+			path: "speed",
+			before: {walk: 30, fly: 20},
+			after: {walk: 30, fly: 20, alternate: {fly: [conditional]}},
+		})).toBe("Speed: walk 30 ft., fly 20 ft. → walk 30 ft., fly 20 ft., alternate fly 30 ft. while not wearing medium or heavy armor");
+	});
+
 	it("keeps unrecognized fields identifiable and their values intact", () => {
 		expect(formatCreatureTransformationDeltaField({path: "customFlag", before: "old", after: {source: "HBR"}}))
 			.toBe("Other field (customFlag): \"old\" → {\"source\":\"HBR\"}");

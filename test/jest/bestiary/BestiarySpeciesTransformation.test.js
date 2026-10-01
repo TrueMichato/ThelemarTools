@@ -9,7 +9,7 @@ import "../../../js/utils-dataloader.js";
 import {getCreatureTransformationCandidates, resolveCreatureTransformation} from "../../../js/creature-transformations.js";
 import {normalizeCreatureTransformation} from "../../../js/bestiary/bestiary-transformation-catalog-adapter.js";
 import {BestiaryCreatureTransformation} from "../../../js/bestiary/bestiary-creature-transformation.js";
-import {BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsRegistry, BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
 import {previewCreatureTransformationTargets} from "../../../js/bestiary/bestiary-transformation-workflow.js";
 
 const catalog = {creatureTransformation: []};
@@ -46,6 +46,148 @@ const save = (resolved, base = monster, operations = []) => {
 };
 
 describe("species mechanics on a retained encounter chassis", () => {
+	it("derives Fairy flight from the effective walking speed and prints the armor restriction after save and reload", () => {
+		const fairy = raw.race.find(it => it.name === "Fairy" && it.source === "MPMM");
+		const candidates = candidatesFor([fairy]);
+		const candidate = candidates.find(it => it.id === "race:fairy|mpmm");
+		expect(candidate.changes).toContainEqual({op: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"});
+		const recipe = resolve(candidates, candidate.id, {spells: [candidate.optionGroups.find(it => it.id === "spells").options[0].id]});
+		const base = {...monster, speed: {walk: 45}};
+		const draft = preview(recipe, base);
+		expect(draft.proposed.speed).toEqual({walk: 45, fly: {number: 45, condition: "while not wearing medium or heavy armor"}});
+		expect(draft.writes).toEqual(expect.arrayContaining([expect.objectContaining({path: "speed.fly", after: draft.proposed.speed.fly})]));
+		expect(Parser.getSpeedString(draft.proposed, {styleHint: "classic"})).toMatch(/fly 45 ft\. while not wearing medium or heavy armor/i);
+		expect(base.speed).toEqual({walk: 45});
+		const registry = new BestiaryQuickActionsRegistry();
+		registry.addOperation({creature: base, operation: save(recipe, base)});
+		const reloaded = BestiaryQuickActionsUtil.applyOperations({baseCreature: base, operations: JSON.parse(JSON.stringify(registry.getOperations({creature: base})))});
+		expect(reloaded.speed).toEqual(draft.proposed.speed);
+		expect(Parser.getSpeedString(reloaded, {styleHint: "classic"})).toContain("while not wearing medium or heavy armor");
+	});
+
+	it("grants unconditional swimming after earlier walking changes without copying a race's 30-foot default", () => {
+		const lizardfolk = raw.race.find(it => it.name === "Lizardfolk" && it.source === "MPMM");
+		const recipe = resolve(candidatesFor([lizardfolk]), "race:lizardfolk|mpmm");
+		expect(recipe.changes).toContainEqual({type: "grantRelativeSpeed", mode: "swim", relativeTo: "walk"});
+		const faster = {...monster, speed: {walk: 50}};
+		expect(preview(recipe, faster).proposed.speed).toEqual({walk: 50, swim: 50});
+		const walking = {...recipe, kind: "catalog", id: "catalog:stride|hbr", eligibility: [{}], changes: [{type: "grantSpeed", mode: "walk", feet: 55}]};
+		const walkOperation = save(walking);
+		const draft = preview(recipe, monster, [walkOperation]);
+		expect(draft.proposed.speed).toEqual({walk: 55, swim: 55});
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([walkOperation, save(recipe, monster, [walkOperation])]))}).speed).toEqual(draft.proposed.speed);
+	});
+
+	it("grants real Dhampir Spider Climb without inferring its optional Ancestral Legacy speeds or level-3 ceiling movement", () => {
+		const dhampir = raw.race.find(it => it.name === "Dhampir" && it.source === "VRGR");
+		const candidates = candidatesFor([dhampir]);
+		const candidate = candidates.find(it => it.id === "race:dhampir|vrgr");
+		const size = candidate.optionGroups.find(it => it.id === "size");
+		const recipe = resolve(candidates, candidate.id, {size: [size.options.find(it => it.name === "S").id]});
+		expect(recipe.changes).toContainEqual({type: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"});
+		expect(recipe.changes).not.toContainEqual(expect.objectContaining({type: "grantRelativeSpeed", mode: "fly"}));
+		expect(recipe.changes).not.toContainEqual(expect.objectContaining({type: "grantRelativeSpeed", mode: "swim"}));
+		expect(recipe.manualReview).toContainEqual(expect.objectContaining({field: "traits", reason: expect.stringMatching(/Ancestral Legacy/)}));
+		const base = {...monster, speed: {walk: 45}};
+		const draft = preview(recipe, base);
+		expect(draft.proposed.speed).toEqual({walk: 45, climb: 45});
+		expect(draft.proposed.trait.find(it => it.name === "Spider Climb")?.entries[0]).toMatch(/at 3rd level/);
+		const operation = save(recipe, base);
+		const reloaded = BestiaryQuickActionsUtil.applyOperations({baseCreature: base, operations: JSON.parse(JSON.stringify([operation]))});
+		expect(reloaded.speed).toEqual(draft.proposed.speed);
+		expect(Parser.getSpeedString(reloaded, {styleHint: "classic"})).toMatch(/climb 45 ft/i);
+		const restricted = {
+			...dhampir,
+			name: "Restricted Dhampir",
+			entries: dhampir.entries.map(entry => entry.name === "Ancestral Legacy"
+				? {...entry, entries: [...entry.entries, "You cannot use your climbing speed while wearing medium armor."]} : entry),
+		};
+		const unsafe = candidatesFor([restricted])[0];
+		expect(unsafe.changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "climb"}));
+		expect(unsafe.manualReview).toContainEqual(expect.objectContaining({field: "traits", reason: expect.stringMatching(/climb speed/)}));
+	});
+
+	it("accepts a single unconditional top-level trait but refuses a movement-only no-op", () => {
+		const textOnly = {name: "Cliff Kin", source: "HBR", speed: 30, entries: [{type: "entries", name: "Climbing", entries: ["You have a climbing speed equal to your walking speed."]}]};
+		const climber = resolve(candidatesFor([textOnly]), "race:cliff kin|hbr");
+		expect(climber.changes).toContainEqual({type: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"});
+		expect(preview(climber, {...monster, speed: {walk: 40}}).proposed.speed).toEqual({walk: 40, climb: 40});
+		const unchanged = {name: "Unchanged Swimmer", source: "HBR", speed: {walk: 30, swim: true}};
+		const recipe = resolve(candidatesFor([unchanged]), "race:unchanged swimmer|hbr");
+		expect(recipe.changes).toContainEqual({type: "grantRelativeSpeed", mode: "swim", relativeTo: "walk"});
+		expect(() => preview(recipe, {...monster, speed: {walk: 30, swim: 30}})).toThrow(/no executable change/i);
+		expect(() => preview({...recipe, changes: [{type: "grantRelativeSpeed", mode: "swim", relativeTo: "walk"}]}, {...monster, speed: {walk: {number: 30, condition: "at night"}}})).toThrow(/unconditional walking speed/i);
+		expect(() => preview(recipe, {...monster, speed: {walk: 30, swim: {number: 20, condition: "underwater"}}})).toThrow(/structured swim speed/i);
+	});
+
+	it("retains unrestricted flight when adding conditional flight", () => {
+		const fairy = raw.race.find(it => it.name === "Fairy" && it.source === "MPMM");
+		const candidates = candidatesFor([fairy]);
+		const candidate = candidates.find(it => it.id === "race:fairy|mpmm");
+		const recipe = resolve(candidates, candidate.id, {spells: [candidate.optionGroups.find(it => it.id === "spells").options[0].id]});
+		const base = {...monster, speed: {walk: 45, fly: 20}};
+		const draft = preview(recipe, base);
+		expect(draft.proposed.speed).toEqual({walk: 45, fly: 20, alternate: {fly: [{number: 45, condition: "while not wearing medium or heavy armor"}]}});
+		expect(Parser.getSpeedString(draft.proposed, {styleHint: "classic"})).toMatch(/fly 20 ft\./i);
+		expect(Parser.getSpeedString(draft.proposed, {styleHint: "classic"})).toMatch(/fly 45 ft\. while not wearing medium or heavy armor/i);
+		const first = save(recipe, base);
+		const newWalk = {...recipe, kind: "catalog", id: "catalog:fast|hbr", eligibility: [{}], changes: [{type: "grantSpeed", mode: "walk", feet: 55}]};
+		const walkOperation = save(newWalk, base);
+		const pending = preview(recipe, base, [walkOperation]);
+		expect(pending.proposed.speed.fly).toBe(20);
+		expect(pending.proposed.speed.alternate.fly[0].number).toBe(55);
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: base, operations: [first]}).speed).toEqual(draft.proposed.speed);
+	});
+
+	it("requires a conflict winner when an earlier operation granted the same conditional mode", () => {
+		const fairy = raw.race.find(it => it.name === "Fairy" && it.source === "MPMM");
+		const candidates = candidatesFor([fairy]);
+		const candidate = candidates.find(it => it.id === "race:fairy|mpmm");
+		const recipe = resolve(candidates, candidate.id, {spells: [candidate.optionGroups.find(it => it.id === "spells").options[0].id]});
+		const earlyFlight = {
+			...recipe,
+			kind: "catalog",
+			id: "catalog:early flight|hbr",
+			eligibility: [{}],
+			changes: [{type: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"}],
+		};
+		const fasterWalk = {...earlyFlight, id: "catalog:fast walk|hbr", changes: [{type: "grantSpeed", mode: "walk", feet: 55}]};
+		const first = save(earlyFlight);
+		const second = save(fasterWalk, monster, [first]);
+		const pending = preview(recipe, monster, [first, second]);
+		expect(pending.conflicts).toEqual([expect.objectContaining({path: "speed.fly", existing: {number: 30, condition: "while not wearing medium or heavy armor"}, incoming: {number: 55, condition: "while not wearing medium or heavy armor"}})]);
+		expect(() => BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: monster, operations: [first, second], preview: pending})).toThrow(/unresolved conflicts/i);
+		const decision = {"speed.fly": "incoming"};
+		const chosen = BestiaryQuickActionsUtil.previewCreatureTransformation({baseCreature: monster, operations: [first, second], resolved: recipe, dmApproved: true, conflictDecisions: decision});
+		const operation = BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: monster, operations: [first, second], preview: chosen, conflictDecisions: decision});
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: monster, operations: JSON.parse(JSON.stringify([first, second, operation]))}).speed.fly.number).toBe(55);
+	});
+
+	it("does not grant nested options, later-level or temporary movement, or unknown armor restrictions", () => {
+		const simic = raw.race.find(it => it.name === "Simic Hybrid" && it.source === "GGR");
+		const hadozee = raw.race.find(it => it.name === "Hadozee" && it.source === "AAG");
+		const aasimar = raw.race.find(it => it.name === "Aasimar" && it.source === "MPMM");
+		const dragonborn = raw.race.find(it => it.name === "Dragonborn (Gem)" && it.source === "FTD");
+		const unknown = {
+			name: "Restricted Flyer",
+			source: "HBR",
+			speed: {walk: 30, fly: true},
+			entries: [{type: "entries", name: "Flight", entries: ["You have a flying speed equal to your walking speed. You can fly only while concentrating."]}],
+		};
+		const vague = {name: "Vague Flyer", source: "HBR", speed: {walk: 30, fly: true}, entries: [{type: "entries", name: "Wings", entries: ["You may fly only while it is dark."]}]};
+		const candidates = candidatesFor([simic, hadozee, aasimar, dragonborn, unknown, vague]);
+		for (const id of ["race:simic hybrid|ggr", "race:aasimar|mpmm", "race:dragonborn (gem)|ftd", "race:restricted flyer|hbr"]) {
+			const candidate = candidates.find(it => it.id === id);
+			expect(candidate.changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "fly"}));
+		}
+		expect(candidates.find(it => it.id === "race:simic hybrid|ggr").changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "climb"}));
+		expect(candidates.find(it => it.id === "race:simic hybrid|ggr").changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "swim"}));
+		expect(candidates.find(it => it.id === "race:hadozee|aag").changes).toContainEqual({op: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"});
+		expect(candidates.find(it => it.id === "race:hadozee|aag").changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "fly"}));
+		expect(candidates.find(it => it.id === "race:restricted flyer|hbr").manualReview).toContainEqual(expect.objectContaining({field: "traits", reason: expect.stringMatching(/fly speed/)}));
+		expect(candidates.find(it => it.id === "race:vague flyer|hbr").changes).not.toContainEqual(expect.objectContaining({op: "grantRelativeSpeed", mode: "fly"}));
+	});
+
 	it("applies classic fixed stats and source-qualified High Elf traits while leaving attacks and HP unchanged", () => {
 		const elf = raw.race.find(it => it.name === "Elf" && it.source === "PHB");
 		const high = raw.subrace.find(it => it.name === "High" && it.raceName === "Elf" && it.raceSource === "PHB");

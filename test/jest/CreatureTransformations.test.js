@@ -65,6 +65,22 @@ describe("app-owned creature transformation schema and source corpus", () => {
 		]) expect(getCreatureTransformationSchemaErrors({data: {creatureTransformation: [{...recipe, changes: [invalid]}]}, filePath: "invalid", validate})).not.toEqual([]);
 	});
 
+	it("validates walking-relative movement and its sole supported armor condition", () => {
+		const validate = getCreatureTransformationValidator();
+		const recipe = byId("Skeleton", "DMG");
+		const check = changes => getCreatureTransformationSchemaErrors({data: {creatureTransformation: [{...recipe, changes}]}, filePath: "movement", validate});
+		expect(check([{op: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"}])).toEqual([]);
+		expect(check([{op: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"}])).toEqual([]);
+		for (const invalid of [
+			{op: "grantRelativeSpeed", mode: "walk", relativeTo: "walk"},
+			{op: "grantRelativeSpeed", mode: "fly", relativeTo: "swim"},
+			{op: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "unknown"},
+			{op: "grantRelativeSpeed", mode: "swim", relativeTo: "walk", condition: "noMediumOrHeavyArmor"},
+			{op: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: null},
+			{op: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", feet: 30},
+		]) expect(check([invalid])).not.toEqual([]);
+	});
+
 	it("rejects duplicate source-qualified IDs, groups, and options", () => {
 		const data = {creatureTransformation: [byId("Skeleton", "DMG"), {...byId("Skeleton", "DMG"), name: "sKeLeToN"}]};
 		expect(getCreatureTransformationIdentityErrors({data, filePath: "fixture"})).toEqual(expect.arrayContaining([expect.stringContaining("duplicate creature transformation identity")]));

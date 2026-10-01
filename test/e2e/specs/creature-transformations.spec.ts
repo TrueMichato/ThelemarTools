@@ -113,6 +113,63 @@ test("an option changes the live delta and its exact source-qualified mechanics 
 	await expect(page.locator(".ew__statblock .ve-stats")).not.toContainText("Lightning");
 });
 
+test("Fairy flight previews as armor-restricted movement and survives encounter reload", async ({page}) => {
+	test.setTimeout(120_000);
+	await new EncounterRollPage(page).seed({count: 1});
+	const editor = new CreatureTransformationPage(page);
+	const before = await editor.savedEncounter();
+	await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	await editor.choose("race:fairy|mpmm");
+	await editor.chooseOption("Species spell grant and ability", "choice-1");
+	await editor.expectLivePreview();
+	await editor.selectedRecipeInfo().click();
+	await expect(editor.nativeHover).toContainText("fly speed equal to effective walking speed only while not wearing medium or heavy armor");
+	await editor.dismissNativeHover();
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Fly speed: none → 30 ft. while not wearing medium or heavy armor");
+	await expect(editor.beforeStatblock).not.toContainText(/fly 30 ft/i);
+	await expect(editor.afterStatblock).toContainText(/fly 30 ft\. while not wearing medium or heavy armor/i);
+	expect(await editor.savedEncounter()).toEqual(before);
+	await editor.apply();
+	const saved = await editor.savedEncounter() as {instances: {monster: {speed: {fly?: number}}, statblockOperations: {data: {resolved: {changes: {type: string, mode?: string, relativeTo?: string, condition?: string}[]}}}[]}[]};
+	expect(saved.instances[0].monster.speed.fly).toBeUndefined();
+	expect(saved.instances[0].statblockOperations[0].data.resolved.changes).toEqual(expect.arrayContaining([
+		{type: "grantRelativeSpeed", mode: "fly", relativeTo: "walk", condition: "noMediumOrHeavyArmor"},
+	]));
+	await page.reload();
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText(/fly 30 ft\. while not wearing medium or heavy armor/i);
+});
+
+test("Dhampir climb follows the walking speed without granting optional legacy movement", async ({page}) => {
+	test.setTimeout(120_000);
+	await new EncounterRollPage(page).seed({count: 1});
+	const editor = new CreatureTransformationPage(page);
+	const before = await editor.savedEncounter();
+	await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+	await page.getByRole("tab", {name: "Templates"}).click();
+	await editor.choose("race:dhampir|vrgr");
+	await editor.selectedRecipeInfo().click();
+	await expect(editor.nativeHover).toContainText("climb speed equal to effective walking speed");
+	await expect(editor.nativeHover).toContainText("Ancestral Legacy");
+	await editor.dismissNativeHover();
+	await editor.chooseOption("Species size", "choice-1");
+	await editor.expectLivePreview();
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Walk speed: 30 ft. → 35 ft.");
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Climb speed: none → 35 ft.");
+	await expect(editor.afterStatblock).toContainText(/climb 35 ft/i);
+	await expect(editor.afterStatblock).not.toContainText(/fly 35 ft/i);
+	expect(await editor.savedEncounter()).toEqual(before);
+	await editor.apply();
+	const saved = await editor.savedEncounter() as {instances: {monster: {speed: {climb?: number}}, statblockOperations: {data: {resolved: {changes: {type: string, mode?: string, relativeTo?: string}[]}}}[]}[]};
+	expect(saved.instances[0].monster.speed.climb).toBeUndefined();
+	expect(saved.instances[0].statblockOperations[0].data.resolved.changes).toEqual(expect.arrayContaining([
+		{type: "grantRelativeSpeed", mode: "climb", relativeTo: "walk"},
+	]));
+	await page.reload();
+	await expect(page.locator(".ew__statblock .ve-stats")).toContainText(/climb 35 ft/i);
+	await expect(page.locator(".ew__statblock .ve-stats")).not.toContainText(/fly 35 ft/i);
+});
+
 test("catalog failures stay visible without a success-shaped picker or status", async ({page}) => {
 	await page.route("**/data/creature-transformations.json", route => route.abort("failed"));
 	await page.goto("/bestiary.html#goblin_mm");
@@ -162,6 +219,66 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		await editor.chooseOption("Breath size", "large-or-smaller");
 		await editor.expectLivePreview();
 		for (const contrast of await editor.templateContrast("catalog:half-dragon|mm")) expect(contrast).toBeGreaterThanOrEqual(4.5);
+	});
+}
+
+for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
+	test(`${surface} explains undead groups and option names without selecting them`, async ({page}) => {
+		test.setTimeout(120_000);
+		const editor = new CreatureTransformationPage(page);
+		if (surface === "Bestiary") {
+			await page.goto("/bestiary.html#goblin_mm");
+			await page.locator(".bqa__btn-open:visible").first().click();
+		} else {
+			await new EncounterRollPage(page).seed({count: 1});
+			await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+		}
+		await page.getByRole("tab", {name: "Templates"}).click();
+		await editor.choose("catalog:undead|scre");
+		const category = editor.root.getByRole("group", {name: "Undead category (required)"});
+		const categoryLegend = category.locator("legend");
+		await expect(categoryLegend).toHaveAttribute("tabindex", "0");
+		await categoryLegend.hover();
+		await expect(editor.nativeHover).toContainText("Ghostly");
+		await expect(editor.nativeHover).toContainText("Halve Strength");
+		await expect(editor.nativeHover).toContainText("Replace movement with flight and hover");
+		await expect(editor.nativeHover).toContainText("Page unverified");
+		await expect(category.locator("input:checked")).toHaveCount(0);
+		await editor.dismissNativeHover();
+		await page.keyboard.press("Tab");
+		await categoryLegend.focus();
+		await expect(editor.nativeHover).toContainText("Ghostly");
+		expect(await categoryLegend.evaluate(node => getComputedStyle(node).outlineStyle)).not.toBe("none");
+		await categoryLegend.evaluate(node => (node as HTMLElement).blur());
+		await editor.dismissNativeHover();
+
+		const additional = editor.root.getByRole("group", {name: "Additional undead features"});
+		await additional.locator("legend").hover();
+		await expect(editor.nativeHover).toContainText("Deathly Aura");
+		await expect(editor.nativeHover).toContainText("Resolve aura range and damage with the DM");
+		await expect(editor.nativeHover).toContainText("Magic Resistance");
+		await expect(editor.nativeHover).toContainText("advantage on saving throws against spells and magical effects");
+		await editor.dismissNativeHover();
+		const magic = editor.optionControl("Additional undead features", "magic-resistance");
+		await expect(additional.getByRole("checkbox", {name: "Magic Resistance"})).toHaveCount(1);
+		await expect(editor.optionInfo("Additional undead features", "magic-resistance")).toHaveAttribute("aria-label", /Details for Undead \(SCRE\).*Magic Resistance/);
+		await magic.locator("..").locator(".bqa__transformation-option-name").hover();
+		await expect(editor.nativeHover).toContainText("Automatic mechanical effects");
+		await expect(editor.nativeHover).toContainText("advantage on saving throws against spells and magical effects");
+		await expect(editor.nativeHover).toContainText("Source attribution unverified");
+		await expect(magic).not.toBeChecked();
+		await editor.dismissNativeHover();
+		await editor.optionInfo("Additional undead features", "magic-resistance").click();
+		await expect(editor.nativeHover).toContainText("Automatic mechanical effects");
+		await editor.dismissNativeHover();
+		await editor.optionInfo("Additional undead features", "deathly-aura").click();
+		await expect(editor.nativeHover).toContainText("No automatic mechanical change");
+		await expect(editor.nativeHover).toContainText("Resolve aura range and damage with the DM");
+		await editor.dismissNativeHover();
+		await editor.chooseOption("Undead category", "skeletal");
+		await magic.check();
+		await editor.expectLivePreview();
+		await expect(editor.afterStatblock).toContainText("Magic Resistance");
 	});
 }
 
@@ -503,5 +620,31 @@ test.describe("mobile touch and night mode", () => {
 		await expect(editor.root.locator(".bqa__transformation-delta")).toBeVisible();
 		expect(await editor.textContrast(".bqa__transformation-option-name", ".bqa__transformation-option")).toBeGreaterThanOrEqual(4.5);
 		expect(await editor.textContrast(".bqa__transformation-delta h5", ".bqa__transformation-delta")).toBeGreaterThanOrEqual(4.5);
+	});
+
+	test("undead group heading opens rules on tap without selecting an option", async ({page}) => {
+		await page.goto("/bestiary.html#goblin_mm");
+		await page.locator(".bqa__btn-open:visible").first().tap();
+		await page.getByRole("tab", {name: "Templates"}).tap();
+		const editor = new CreatureTransformationPage(page);
+		await editor.choose("catalog:undead|scre");
+		const group = editor.root.getByRole("group", {name: "Additional undead features"});
+		await group.locator("legend").tap();
+		await expect(editor.nativeHover).toContainText("Deathly Aura");
+		const hoverBounds = await editor.nativeHover.boundingBox();
+		expect(hoverBounds).not.toBeNull();
+		expect(hoverBounds!.x).toBeGreaterThanOrEqual(0);
+		expect(hoverBounds!.x + hoverBounds!.width).toBeLessThanOrEqual(391);
+		await expect(group.locator("input:checked")).toHaveCount(0);
+		await editor.dismissNativeHover();
+		await editor.optionInfo("Additional undead features", "magic-resistance").tap();
+		await expect(editor.nativeHover).toContainText("Magic Resistance");
+		await expect(group.locator("input:checked")).toHaveCount(0);
+		expect(await editor.root.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+		await editor.dismissNativeHover();
+		const magic = editor.optionControl("Additional undead features", "magic-resistance");
+		await magic.locator("..").locator(".bqa__transformation-option-name").tap();
+		await expect(editor.nativeHover).toContainText("Automatic mechanical effects");
+		await expect(magic).toBeChecked();
 	});
 });
