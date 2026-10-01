@@ -135,6 +135,12 @@ All Thelemar variant rules are implemented as toggleable settings:
 | **Spell Rarity/Legality** | `thelemar_spellRarity` | Applies Thelemar spell rarity tags and legality rules |
 | **Official Ioun Bond Parity** | `enableTgtt` | Additively extends the Moorchlyne 7-day, accelerated, slot-free bond rules to all recognized official Ioun Stones. Disabling TGTT restores RAW official attunement but never removes intrinsic bond rules from Moorchlyne stones. |
 
+TGTT Monk borrows its 2024 ASI feature references from `Monk|XPHB`: class
+levels 4, 8, 12, and 16 offer the improvement choice in Level Up, Quick Build,
+and Respec. Its declared level-19 Epic Boon progression remains a feat-only
+choice. The optional Thelemar ASI **plus** feat rule still applies only at
+character level 4; it does not add a second feat at later Monk levels.
+
 ### Settings Location
 
 ```javascript

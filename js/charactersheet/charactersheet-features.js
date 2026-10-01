@@ -256,9 +256,15 @@ class CharacterSheetFeatures {
 		await this._pShowFeatPickerModal();
 	}
 
-	async _pShowFeatPickerModal () {
-		const knownFeatNames = this._state.getFeats().map(f => f.name.toLowerCase());
+	_getFeatPickerAvailability (feat) {
+		const uid = `${String(feat.name).toLowerCase()}|${String(feat.source).toLowerCase()}`;
+		const isKnown = this._state.getFeats().some(owned =>
+			`${String(owned.name).toLowerCase()}|${String(owned.source).toLowerCase()}` === uid,
+		);
+		return {isKnown, canAdd: !isKnown || feat.repeatable === true};
+	}
 
+	async _pShowFeatPickerModal () {
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🎖️ Add Feat",
 			isMinHeight0: true,
@@ -548,7 +554,7 @@ class CharacterSheetFeatures {
 				return true;
 			});
 
-			const knownCount = filtered.filter(f => knownFeatNames.includes(f.name.toLowerCase())).length;
+			const knownCount = filtered.filter(feat => this._getFeatPickerAvailability(feat).isKnown).length;
 			const countHtml = `<span>${filtered.length} feat${filtered.length !== 1 ? "s" : ""} found</span>${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
 			const dirty = isFeatFiltersDirty();
 			FilterPickerHelpers.renderResultsToolbar(resultsCount, {
@@ -581,39 +587,45 @@ class CharacterSheetFeatures {
 				section.append(e_({outer: `<div class="charsheet__modal-section-title">📂 ${category} <span style="opacity: 0.6;">(${categoryFeats.length})</span></div>`}));
 
 				categoryFeats.forEach(feat => {
-					const isKnown = knownFeatNames.includes(feat.name.toLowerCase());
+					const {isKnown, canAdd} = this._getFeatPickerAvailability(feat);
 					const prereqStr = feat.prerequisite ? this._formatPrerequisite(feat.prerequisite) : "";
 					const featLink = this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_FEATS, feat.name, feat.source) : feat.name;
 
 					const item = e_({outer: `
-						<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}">
+						<div class="charsheet__modal-list-item ${!canAdd ? "ve-muted" : ""}">
 							<div class="charsheet__modal-list-item-icon">🎖️</div>
 							<div class="charsheet__modal-list-item-content">
 								<div class="charsheet__modal-list-item-title">${featLink}</div>
 								<div class="charsheet__modal-list-item-subtitle">${prereqStr ? `Prereq: ${prereqStr} • ` : ""}${Parser.sourceJsonToAbv(feat.source)}</div>
 							</div>
 							${isKnown
-		? `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`
-		: `<button class="ve-btn ve-btn-primary ve-btn-xs feat-picker-add">+ Add</button>`
-}
+		? `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known${feat.repeatable ? " · Repeatable" : ""}</span>`
+		: ""}
+							${canAdd ? `<button class="ve-btn ve-btn-primary ve-btn-xs feat-picker-add">+ Add</button>` : ""}
 						</div>
 					`});
 
-					if (!isKnown) {
+					if (canAdd) {
 						const addBtn = item.querySelector(".feat-picker-add");
 						addBtn.addEventListener("click", async (e) => {
 							e.stopPropagation();
-							const choices = this._getFeatChoices(feat);
-							let featChoices = null;
-							if (choices) {
-								featChoices = await this._pShowFeatChoicesModal(feat, choices);
-								if (!featChoices) return; // User cancelled
+							addBtn.disabled = true;
+							try {
+								const choices = this._getFeatChoices(feat);
+								let featChoices = null;
+								if (choices) {
+									featChoices = await this._pShowFeatChoicesModal(feat, choices);
+									if (!featChoices) return; // User cancelled
+								}
+								if (!await this._addFeat(feat, featChoices)) return;
+								const scrollTop = list.scrollTop;
+								renderList();
+								list.scrollTop = scrollTop;
+								search.focus();
+								JqueryUtil.doToast({type: "success", content: `Added ${feat.name}`});
+							} finally {
+								addBtn.disabled = false;
 							}
-							await this._addFeat(feat, featChoices);
-							knownFeatNames.push(feat.name.toLowerCase());
-							item.classList.add("ve-muted");
-							addBtn.replaceWith(e_({outer: `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`}));
-							JqueryUtil.doToast({type: "success", content: `Added ${feat.name}`});
 						});
 
 						item.addEventListener("click", (e) => {
@@ -680,22 +692,36 @@ class CharacterSheetFeatures {
 	}
 
 	async _addFeat (feat, featChoices = null) {
+		if (!this._getFeatPickerAvailability(feat).canAdd) {
+			JqueryUtil.doToast({type: "warning", content: `${feat.name} is already selected.`});
+			return false;
+		}
 		// TGTT Lore Mastery: prompt for the RAW choice (increase 2 existing OR grant 2 new)
 		// before constructing the feat payload so picks are processed by addFeat.
 		let loreSkillPicks = null;
 		if (feat.name === "Lore Mastery" && this._page._showLoreMasteryChoiceModal) {
 			loreSkillPicks = await this._page._showLoreMasteryChoiceModal();
-			if (!loreSkillPicks) return; // user cancelled
+			if (!loreSkillPicks) return false; // user cancelled
 		}
 
+		const sourceDecisionKey = feat.repeatable
+			? `${globalThis.CharacterSheetProgression.getUnplacedFeatSemanticKey(feat)}:manual:${CryptUtil.uid()}`
+			: null;
+		const abilityAmount = featChoices?.ability
+			? CharacterSheetClassUtils.getEffectiveFeatAbility(feat)?.find(ability => ability.choose)?.choose?.amount || 1
+			: null;
 		const newFeat = {
 			name: feat.name,
 			source: feat.source,
+			category: feat.category,
+			repeatable: feat.repeatable === true,
+			...(sourceDecisionKey ? {sourceDecisionKey} : {}),
 			description: feat.entries ? Renderer.get().render({type: "entries", entries: feat.entries}) : "",
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
 			choices: featChoices
 				? {
 					...featChoices,
+					...(abilityAmount ? {amount: abilityAmount} : {}),
 					...(featChoices.optionalFeatures?.length
 						? {optionalFeaturePicks: featChoices.optionalFeatures.flatMap(group => group.picks || [])}
 						: {}),
@@ -704,48 +730,12 @@ class CharacterSheetFeatures {
 			...(loreSkillPicks ? {loreSkillPicks} : {}),
 		};
 
-		// Apply static ability score increases (non-choose)
-		if (feat.ability) {
-			feat.ability.forEach(abiSet => {
-				const max = abiSet.max || 20;
-				Object.entries(abiSet).forEach(([abi, bonus]) => {
-					if (abi === "max" || abi === "choose") return;
-					if (Parser.ABIL_ABVS.includes(abi) && typeof bonus === "number") {
-						const current = this._state.getAbilityBase(abi);
-						this._state.setAbilityBase(abi, CharacterSheetClassUtils.capAbilityIncrease(current, bonus, max));
-					}
-				});
-			});
+		const added = this._state.addFeat(newFeat, {allSpells: this._page.getSpells()});
+		if (!added) {
+			JqueryUtil.doToast({type: "warning", content: `${feat.name} is already selected.`});
+			return false;
 		}
-
-		// Apply user-selected feat choices
-		if (featChoices) {
-			if (featChoices.ability) {
-				const amount = feat.ability?.find(a => a.choose)?.choose?.amount || 1;
-				const cap = feat.ability?.find(a => a.choose)?.max || 20;
-				const current = this._state.getAbilityBase(featChoices.ability);
-				this._state.setAbilityBase(featChoices.ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, cap));
-			}
-			if (featChoices.skills?.length) {
-				featChoices.skills.forEach(skill => {
-					const normalized = skill.toLowerCase().replace(/\s+/g, "");
-					this._state.addSkillProficiency(normalized);
-				});
-			}
-			if (featChoices.expertise?.length) {
-				featChoices.expertise.forEach(skill => this._state.addExpertise(skill));
-			}
-			if (featChoices.languages?.length) {
-				featChoices.languages.forEach(lang => this._state.addLanguage(lang));
-			}
-		}
-
-		// Apply saving-throw proficiencies (e.g., Resilient — tied to the chosen ability)
-		CharacterSheetClassUtils.resolveFeatSaveProficiencies(feat, featChoices || {}).forEach(abbr => {
-			this._state.addSaveProficiency(abbr);
-		});
-
-		this._state.addFeat(newFeat, {allSpells: this._page.getSpells()});
+		CharacterSheetClassUtils.applyFeatBonuses(this._state, {...feat, sourceDecisionKey}, featChoices);
 		this.render();
 		// Re-render ability-dependent sections on main page
 		this._page._renderAbilityScores?.();
@@ -787,6 +777,7 @@ class CharacterSheetFeatures {
 			state: this._state,
 		});
 		this._page.saveCharacter();
+		return true;
 	}
 
 	_formatFeatChoices (choices) {

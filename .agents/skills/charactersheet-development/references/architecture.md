@@ -153,6 +153,16 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
     Growing as methods are extracted from LevelUp.
 ```
 
+For improvement slots, `getImprovementOpportunity` receives the resolved
+`classFeatures` catalog to verify TGTT 2024 classes' cross-source XPHB
+references. `getImprovementFeatDecisionKey` gives repeatable feats a stable
+per-class-level owner matching the progression manifest; Level Up and Quick
+Build pass it into `addFeat`. Stored feat effects and Respec removal use the
+specific feat ID, not a name/source-only match.
+The Features-tab picker matches known feats by name and source, retains the
+Add action for repeatable feats, and gives each manual repeat its own unplaced
+decision key so it cannot collide with a level-granted copy.
+
 ## Data Flow
 
 ### Initialization

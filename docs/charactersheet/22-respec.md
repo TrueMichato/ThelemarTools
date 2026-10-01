@@ -435,7 +435,24 @@ Fallback discovery from `classFeatures` accepts canonical four-part UIDs and
 source-qualified five-part UIDs. It validates the referenced class name and
 class source against the containing class before treating the feature as an
 improvement, so a wrong-source or malformed reference cannot create an Epic
-Boon opportunity.
+Boon opportunity. A TGTT 2024 class can also borrow an XPHB class feature
+when its exact class name, class source, feature source, and level resolve in
+the loaded feature catalog; an unresolvable or wrong-edition UID does not
+grant an improvement. TGTT Monk uses these references for levels 4/8/12/16
+and its own Epic Boon feat progression at level 19.
+
+Repeatable feats such as `Ability Score Improvement|XPHB` are stored once per
+improvement decision with separate feat IDs, choices, and effect receipts.
+Respec matches each feat by its source decision key when replacing it, so
+swapping the later occurrence leaves the earlier one's ability increase intact.
+Class feat-progression swaps also remove only the feat owned by their decision;
+the nested ability receipt and the feat's effect receipt are not reversed twice.
+The Features-tab free-add picker likewise keeps an owned repeatable feat
+selectable; each manual acquisition has its own source-qualified unplaced
+decision key and independently reversible effects. Non-repeatable feats remain
+unavailable after their first acquisition. The current feat choice UI
+implements the +2-to-one-score ASI option; the feat
+data's alternative +1-to-two-scores option is not yet selectable.
 
 Feat prerequisites are evaluated against the candidate for level, ability
 scores, spellcasting, race, background, armor/weapon proficiency, prior feats,

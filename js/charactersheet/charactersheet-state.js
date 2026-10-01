@@ -63295,8 +63295,10 @@ class CharacterSheetState {
 		}));
 	}
 
-	recordFeatAppliedEffects (featName, featSource, effects) {
-		const feat = this._data.feats.find(it => it.name === featName && it.source === featSource);
+	recordFeatAppliedEffects (featName, featSource, effects, featId = null) {
+		const feat = this._data.feats.find(it => featId
+			? it.id === featId
+			: it.name === featName && it.source === featSource);
 		if (!feat) return false;
 		const existing = feat.appliedEffects || {};
 		const mergeAdded = (current, next, getKey = value => String(value)) => {
@@ -63372,7 +63374,7 @@ class CharacterSheetState {
 		};
 	}
 
-	recordFeatAppliedEffectsSince (featName, featSource, before) {
+	recordFeatAppliedEffectsSince (featName, featSource, before, featId = null) {
 		if (!before) return false;
 		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
 		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
@@ -63405,7 +63407,7 @@ class CharacterSheetState {
 			innateSpellsAdded,
 			immunitiesAdded: (this._data.immunities || []).filter(value => !before.immunities?.has(value)),
 			conditionImmunitiesAdded: (this._data.conditionImmunities || []).filter(value => !before.conditionImmunities?.has(value)),
-		});
+		}, featId);
 	}
 
 	_hasOtherFeatEffectOwner (type, value) {
@@ -63491,8 +63493,9 @@ class CharacterSheetState {
 	}
 
 	addFeat (feat, opts = {}) {
-		// Check for duplicates
-		if (this._data.feats.find(f => f.name === feat.name && f.source === feat.source)) {
+		const sourceDecisionKey = opts.sourceDecisionKey || feat.sourceDecisionKey || null;
+		if (this._data.feats.some(f => f.name === feat.name && f.source === feat.source
+			&& (!feat.repeatable || !sourceDecisionKey || f.sourceDecisionKey === sourceDecisionKey))) {
 			return false;
 		}
 		const appliedEffectsBefore = this._captureFeatAppliedEffectsSnapshot();
@@ -63535,8 +63538,8 @@ class CharacterSheetState {
 			id: CryptUtil.uid(),
 			name: feat.name,
 			source: feat.source,
-			...(opts.sourceDecisionKey || feat.sourceDecisionKey
-				? {sourceDecisionKey: opts.sourceDecisionKey || feat.sourceDecisionKey}
+			...(sourceDecisionKey
+				? {sourceDecisionKey}
 				: {}),
 			description: description,
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
@@ -63642,7 +63645,7 @@ class CharacterSheetState {
 		if (feat.choices?.optionalFeaturePicks?.length) {
 			this.addFeatOptionalFeaturePicks(featData, feat.choices.optionalFeaturePicks, opts);
 		}
-		this.recordFeatAppliedEffectsSince(feat.name, feat.source, appliedEffectsBefore);
+		this.recordFeatAppliedEffectsSince(feat.name, feat.source, appliedEffectsBefore, featData.id);
 
 		return true;
 	}
