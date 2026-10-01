@@ -1,4 +1,5 @@
 import {jest} from "@jest/globals";
+import {readFileSync} from "node:fs";
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
@@ -34,6 +35,12 @@ const makeOverview = () => {
 };
 
 describe("Overview Use Hit Die multiclass choice", () => {
+	it("describes the pool choice before the first character render", () => {
+		const html = readFileSync(new URL("../../../charactersheet.html", import.meta.url), "utf8");
+		const button = html.match(/<button[^>]+id="charsheet-btn-use-hitdie"[^>]*>/)?.[0];
+		expect(button).toMatch(/choose its type if multiple are available/i);
+	});
+
 	const originalPicker = globalThis.InputUiUtil.pGetUserEnum;
 	const originalRoller = globalThis.RollerUtil.randomise;
 	const originalToast = globalThis.JqueryUtil.doToast;
