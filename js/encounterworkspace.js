@@ -35,6 +35,7 @@ import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./enc
 import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-view.js";
 import {getEncounterResourceSummary} from "./encounterworkspace/encounterworkspace-resources.js";
 import {getEncounterResourcePanel} from "./encounterworkspace/encounterworkspace-resource-view.js";
+import {ENCOUNTER_DAMAGE_TYPES} from "./encounterworkspace/encounterworkspace-damage.js";
 
 const STATBLOCK_BATCH_SIZE = 12;
 
@@ -62,6 +63,7 @@ export class EncounterWorkspacePage {
 		this._resourceContainers = new Map();
 		this._rosterMeta = new Map();
 		this._hpUndo = [];
+		this._pendingDamage = null;
 		this._initiativeUndo = null;
 		this._dragTurnId = null;
 		this._focusedInstanceId = null;
@@ -146,6 +148,13 @@ export class EncounterWorkspacePage {
 		this._checkHpHalf = document.getElementById("ew-hp-half");
 		this._btnHpApply = document.getElementById("ew-hp-apply");
 		this._btnHpUndo = document.getElementById("ew-hp-undo");
+		this._inpDamageExpression = document.getElementById("ew-damage-expression");
+		this._selDamageType = document.getElementById("ew-damage-type");
+		this._selDamageSource = document.getElementById("ew-damage-source");
+		this._btnDamageApply = document.getElementById("ew-damage-apply");
+		this._eleDamageReview = document.getElementById("ew-damage-review");
+		this._eleDamageDecisions = document.getElementById("ew-damage-decisions");
+		this._eleDamageReport = document.getElementById("ew-damage-report");
 		this._selInitMode = document.getElementById("ew-init-mode");
 		this._btnInitRoll = document.getElementById("ew-init-roll");
 		this._btnTurnStart = document.getElementById("ew-turn-start");
@@ -219,7 +228,7 @@ export class EncounterWorkspacePage {
 			this._pAddTargets(group?.memberIds || [activeId]);
 		});
 		this._btnSelectViewed.addEventListener("click", () => this._pAddTargets([this._focusedInstanceId]));
-		this._btnFastDamage.addEventListener("click", () => this._showFastActions(this._inpHpExpression, this._btnFastDamage));
+		this._btnFastDamage.addEventListener("click", () => this._showFastActions(this._inpDamageExpression, this._btnFastDamage));
 		this._btnFastSave.addEventListener("click", () => {
 			this._selRollType.value = "save";
 			this._renderRollKeys();
@@ -276,6 +285,12 @@ export class EncounterWorkspacePage {
 		this._selModRemove.addEventListener("change", () => this._updateControls());
 		this._btnHpApply.addEventListener("click", () => this._pApplyHp());
 		this._btnHpUndo.addEventListener("click", () => this._pUndoHp());
+		this._selDamageType.replaceChildren(...ENCOUNTER_DAMAGE_TYPES.map(type => new Option(type[0].toUpperCase() + type.slice(1), type)));
+		this._selDamageType.value = "bludgeoning";
+		this._btnDamageApply.addEventListener("click", () => this._pApplyTypedDamage());
+		[this._inpDamageExpression, this._selDamageType, this._selDamageSource].forEach(control => {
+			control.addEventListener(control === this._inpDamageExpression ? "input" : "change", () => this._clearDamageReview());
+		});
 		this._btnInitRoll.addEventListener("click", () => this._pRollInitiative());
 		this._btnTurnStart.addEventListener("click", () => this._pUpdateTurn("start"));
 		this._btnTurnNext.addEventListener("click", () => this._pUpdateTurn("next"));
@@ -406,6 +421,7 @@ export class EncounterWorkspacePage {
 		this._resourceContainers.forEach(container => container.querySelectorAll("button, input, select").forEach(control => {
 			control.disabled = isBusy || control.dataset.resourceDisabled === "true";
 		}));
+		this._eleDamageDecisions.querySelectorAll("select").forEach(control => { control.disabled = isBusy; });
 		this._updateControls();
 		this._updateFocusStatus();
 	}
@@ -436,6 +452,8 @@ export class EncounterWorkspacePage {
 		this._inpHpExpression.disabled = this._checkHpHalf.disabled = this._isBusy || !this._state.instances.length;
 		this._btnHpApply.disabled = this._isBusy || !hasTargets;
 		this._btnHpUndo.disabled = this._isBusy || !this._hpUndo.length;
+		this._inpDamageExpression.disabled = this._selDamageType.disabled = this._selDamageSource.disabled = this._isBusy || !this._state.instances.length;
+		this._btnDamageApply.disabled = this._isBusy || !hasTargets;
 		this._selInitMode.disabled = this._isBusy || !this._state.instances.length;
 		this._btnInitRoll.disabled = this._isBusy || !hasTargets;
 		const isStarted = !!this._state.turn?.round;
@@ -604,6 +622,7 @@ export class EncounterWorkspacePage {
 			}
 			this._state = next;
 			this._hpUndo = [];
+			this._clearDamageFeedback();
 			this._clearInitiativeMove();
 			this._collapsedGroups.clear();
 			this._focusedInstanceId = null;
@@ -640,6 +659,7 @@ export class EncounterWorkspacePage {
 		try {
 			const next = EncounterWorkspaceState.validate({...this._state, selectedIds: ids});
 			this._state = await this._store.pSave(next);
+			this._clearDamageFeedback();
 			this._updateTargets();
 			this._clearRollResults();
 			this._setStatus(`${this._state.selectedIds.length} of ${this._state.instances.length} monsters selected as targets.`);
@@ -1317,6 +1337,7 @@ export class EncounterWorkspacePage {
 			const next = EncounterWorkspaceState.withHp(this._state, {id, prop, value});
 			this._state = await this._store.pSave(next);
 			this._hpUndo = [];
+			this._clearDamageFeedback();
 			this._renderVitals([id]);
 			this._refreshRosterFor("hp");
 			this._setStatus(`Updated ${prop} HP for ${getEncounterInstanceLabels(this._state.instances).get(id)}.`);
@@ -1388,6 +1409,141 @@ export class EncounterWorkspacePage {
 		this._resourceContainers.set(id, panel);
 	}
 
+	_clearDamageReview () {
+		this._pendingDamage = null;
+		this._eleDamageReview.hidden = true;
+		this._eleDamageDecisions.replaceChildren();
+	}
+
+	_clearDamageFeedback () {
+		this._clearDamageReview();
+		this._eleDamageReport.hidden = true;
+		this._eleDamageReport.replaceChildren();
+	}
+
+	_showDamageReview (unresolved, {amount, raw, damageType, source, targetIds}) {
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		this._pendingDamage = {state: this._state, amount, raw, damageType, source, targetIds};
+		const fields = unresolved.map(({id, key, defense, note}) => {
+			const label = document.createElement("label");
+			label.textContent = `${labels.get(id)} · ${defense} · ${note}`;
+			const select = document.createElement("select");
+			select.className = "ve-form-control";
+			select.dataset.instanceId = id;
+			select.dataset.defenseKey = key;
+			select.setAttribute("aria-label", label.textContent);
+			select.replaceChildren(
+				new Option("Choose whether it applies", ""),
+				new Option("Applies", "yes"),
+				new Option("Does not apply", "no"),
+			);
+			label.append(select);
+			return label;
+		});
+		this._eleDamageDecisions.replaceChildren(...fields);
+		this._eleDamageReview.hidden = false;
+		this._setStatus(`Rolled ${amount} ${damageType} damage once. Review ${unresolved.length} conditional ${unresolved.length === 1 ? "defense" : "defenses"} for the selected targets, then apply; no damage has been saved.`);
+		fields[0].querySelector("select").focus({preventScroll: true});
+		this._eleDamageReview.scrollIntoView({block: "nearest"});
+	}
+
+	_renderDamageReport ({amount, damageType, results, skippedIds}) {
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		const heading = document.createElement("strong");
+		heading.textContent = `${amount} ${damageType} damage · ${results.length} ${results.length === 1 ? "target" : "targets"}${skippedIds.length ? ` · ${skippedIds.length} skipped (unset HP)` : ""}`;
+		const list = document.createElement("ul");
+		results.slice(0, 12).forEach(({id, damage, defenses, before, after, concentrationDc}) => {
+			const item = document.createElement("li");
+			const defensesText = Object.entries(defenses)
+				.filter(([, applies]) => applies)
+				.map(([name]) => ({immune: "immune", resist: "resistant", vulnerable: "vulnerable"})[name])
+				.join(", ");
+			item.textContent = `${labels.get(id)}: ${damage} applied${defensesText ? ` (${defensesText})` : ""}; temp ${before.temp} → ${after.temp}, HP ${before.current} → ${after.current}${concentrationDc ? `; concentration check DC ${concentrationDc} (not rolled)` : ""}.`;
+			list.append(item);
+		});
+		if (results.length > 12) {
+			const item = document.createElement("li");
+			item.textContent = `${results.length - 12} more targets processed; check the roster for their current HP.`;
+			list.append(item);
+		}
+		this._eleDamageReport.replaceChildren(heading, list);
+		this._eleDamageReport.hidden = false;
+	}
+
+	async _pApplyTypedDamage () {
+		if (this._isBusy) return;
+		const targetIds = [...this._state.selectedIds];
+		if (!targetIds.length) return this._setError("Select at least one monster before applying damage.");
+		if (!this._state.instances.some(it => targetIds.includes(it.id) && it.hp.max != null && it.hp.current != null)) {
+			return this._setError("No selected monsters have usable HP. Set both maximum and current HP before applying damage.");
+		}
+		const raw = this._inpDamageExpression.value.trim();
+		const damageType = this._selDamageType.value;
+		const source = this._selDamageSource.value;
+		let amount;
+		let decisions = {};
+		if (this._pendingDamage) {
+			const pending = this._pendingDamage;
+			if (pending.state !== this._state || pending.raw !== raw || pending.damageType !== damageType
+				|| pending.source !== source || pending.targetIds.length !== targetIds.length
+				|| pending.targetIds.some((id, index) => id !== targetIds[index])) {
+				this._clearDamageReview();
+				return this._setError("Targets or damage details changed. Apply again to review the current encounter.");
+			}
+			const incomplete = [...this._eleDamageDecisions.querySelectorAll("select")].find(select => !select.value);
+			if (incomplete) {
+				incomplete.focus();
+				return this._setError("Choose Applies or Does not apply for every conditional defense; no damage has been saved.");
+			}
+			amount = pending.amount;
+			this._eleDamageDecisions.querySelectorAll("select").forEach(select => {
+				(decisions[select.dataset.instanceId] ??= {})[select.dataset.defenseKey] = select.value === "yes";
+			});
+		} else {
+			if (!/^\d/.test(raw)) return this._setError("Enter a positive damage amount or dice expression, such as 12 or 3d6 (not a heal or HP set).");
+			let parsed;
+			try {
+				parsed = getNpcTrackerHpOperation({raw});
+			} catch (e) {
+				return this._setError(`Could not roll damage: ${this._getErrorMessage(e)}. No damage has been applied.`);
+			}
+			if (!parsed.ok || parsed.operation.mode !== "delta" || parsed.operation.value >= 0
+				|| !Number.isSafeInteger(parsed.operation.value)) {
+				return this._setError("Enter a positive whole-number damage amount or dice expression; no damage has been applied.");
+			}
+			amount = -parsed.operation.value;
+			this._eleDamageReport.hidden = true;
+		}
+		this._setBusy(true);
+		let saved = false;
+		try {
+			const {state, changedIds, skippedIds, snapshots, results} = EncounterWorkspaceState.withTypedDamage(this._state, {
+				amount, damageType, source, decisions, targetIds,
+			});
+			if (changedIds.length) {
+				this._state = await this._store.pSave(state);
+				saved = true;
+				this._hpUndo.push(snapshots);
+				if (this._hpUndo.length > 5) this._hpUndo.shift();
+				this._renderVitals(changedIds);
+				this._refreshRosterFor("hp");
+			}
+			this._clearDamageReview();
+			this._renderDamageReport({amount, damageType, results, skippedIds});
+			this._setStatus(`Applied ${amount} ${damageType} damage to ${results.length} ${results.length === 1 ? "monster" : "monsters"}${skippedIds.length ? `; skipped ${skippedIds.length} with unset HP: ${this._getTargetNames(skippedIds)}` : ""}.${!changedIds.length ? " No HP changed." : ""} See each target's adjusted damage below.${results.some(it => it.concentrationDc != null) ? " Concentration checks are noted, not rolled." : ""}`);
+		} catch (e) {
+			if (Array.isArray(e.unresolved)) {
+				this._showDamageReview(e.unresolved, {amount, raw, damageType, source, targetIds});
+			} else {
+				this._setError(saved
+					? `Damage was saved, but the page could not refresh: ${this._getErrorMessage(e)}. Reload to see the changes.`
+					: `Damage was not applied: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+			}
+		} finally {
+			this._setBusy(false);
+		}
+	}
+
 	async _pApplyHp () {
 		if (this._isBusy) return;
 		const targets = this._state.instances.filter(it => this._state.selectedIds.includes(it.id));
@@ -1408,6 +1564,7 @@ export class EncounterWorkspacePage {
 				this._state = await this._store.pSave(state);
 				this._hpUndo.push(snapshots);
 				if (this._hpUndo.length > 5) this._hpUndo.shift();
+				this._clearDamageFeedback();
 				this._renderVitals(changedIds);
 				this._refreshRosterFor("hp");
 			}
@@ -1427,6 +1584,7 @@ export class EncounterWorkspacePage {
 			const next = EncounterWorkspaceState.withHpUndo(this._state, snapshots);
 			this._state = await this._store.pSave(next);
 			this._hpUndo.pop();
+			this._clearDamageFeedback();
 			this._renderVitals(snapshots.map(it => it.id));
 			this._refreshRosterFor("hp");
 			this._setStatus(`Undid the last HP operation for ${snapshots.length} ${snapshots.length === 1 ? "monster" : "monsters"}.`);

@@ -8,6 +8,7 @@ const originalGlobals = {
 	PrereleaseUtil: globalThis.PrereleaseUtil,
 	BrewUtil2: globalThis.BrewUtil2,
 	ExcludeUtil: globalThis.ExcludeUtil,
+	Option: globalThis.Option,
 };
 
 let EncounterWorkspacePage;
@@ -39,6 +40,7 @@ const getElements = () => {
 
 beforeAll(async () => {
 	globalThis.window = {addEventListener: jest.fn()};
+	globalThis.Option = function (label, value) { this.label = label; this.value = value; };
 	({EncounterWorkspacePage} = await import("../../js/encounterworkspace.js"));
 });
 

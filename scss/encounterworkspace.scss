@@ -894,6 +894,74 @@
 			}
 		}
 
+		&__damage-controls {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: end;
+			gap: 8px;
+
+			> label {
+				display: grid;
+				flex: 1 1 145px;
+				gap: 5px;
+				min-width: 0;
+				margin: 0;
+				font-weight: 600;
+			}
+
+			:is(input, select) {
+				width: 100%;
+				min-height: 44px;
+				font-size: max(16px, 1rem);
+			}
+
+			button {
+				min-height: 44px;
+			}
+		}
+
+		&__damage-review,
+		&__damage-report {
+			margin-top: 12px;
+			padding-top: 10px;
+			border-top: 1px solid vars.$rgb-border-grey;
+
+			&[hidden] {
+				display: none;
+			}
+
+			h5,
+			p {
+				margin: 0 0 8px;
+			}
+		}
+
+		&__damage-decisions {
+			display: grid;
+			gap: 8px;
+			max-height: 280px;
+			overflow-y: auto;
+
+			label {
+				display: grid;
+				gap: 5px;
+				padding: 8px;
+				border: 1px solid vars.$rgb-border-grey;
+				overflow-wrap: anywhere;
+			}
+
+			select {
+				min-height: 44px;
+				font-size: max(16px, 1rem);
+			}
+		}
+
+		&__damage-report ul {
+			padding-left: 20px;
+			margin: 6px 0 0;
+			overflow-wrap: anywhere;
+		}
+
 		&__card {
 			min-width: 0;
 			border: 1px solid vars.$rgb-border-grey;
@@ -1358,6 +1426,12 @@
 		}
 
 		&__roster-row {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__damage-review,
+		&__damage-report,
+		&__damage-decisions label {
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
