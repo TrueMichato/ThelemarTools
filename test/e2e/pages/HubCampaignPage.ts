@@ -672,6 +672,7 @@ export class HubCampaignPage {
 		features = [],
 		className = "Fighter",
 		classSource = "PHB",
+		subclass = null,
 		race = null,
 		spellsKnown = [],
 		rulesVersionId = null,
@@ -683,6 +684,7 @@ export class HubCampaignPage {
 		features?: Array<{name: string; source: string}>;
 		className?: string;
 		classSource?: string;
+		subclass?: {name: string; source: string; shortName?: string} | null;
 		race?: {name: string; source: string; edition?: string} | null;
 		spellsKnown?: Array<{
 			id?: string;
@@ -708,7 +710,7 @@ export class HubCampaignPage {
 					abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
 					abilityBonuses: {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0},
 					...(race ? {race} : {}),
-					classes: [{name: className, source: classSource, level: 1}],
+					classes: [{name: className, source: classSource, level: 1, ...(subclass ? {subclass} : {})}],
 					xp: 0,
 					hp: {current: hpCurrent, max: 12, temp: 0},
 					features,

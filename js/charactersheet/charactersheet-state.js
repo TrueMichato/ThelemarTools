@@ -5971,14 +5971,14 @@ class CharacterSheetState {
 		};
 		const previousIds = new Map();
 		for (const modifier of storedModifiers) {
-			if (!modifier?.sourceType || typeof modifier.id !== "string") continue;
+			if (!(modifier?.sourceType || modifier?._divineFavor) || typeof modifier.id !== "string") continue;
 			const key = signature(modifier);
 			if (!previousIds.has(key)) previousIds.set(key, []);
 			previousIds.get(key).push(modifier.id);
 		}
 		const usedIds = new Set(this._data.namedModifiers.map(modifier => modifier.id));
 		for (const modifier of this._data.namedModifiers) {
-			if (!modifier?.sourceType) continue;
+			if (!(modifier?.sourceType || modifier?._divineFavor)) continue;
 			const oldId = previousIds.get(signature(modifier))?.shift();
 			if (!oldId || oldId === modifier.id || usedIds.has(oldId)) continue;
 			usedIds.delete(modifier.id);
@@ -29730,6 +29730,9 @@ class CharacterSheetState {
 	 * Should be called when class configuration changes.
 	 */
 	applyClassFeatureEffects () {
+		const previousNamedModifiers = (this._data.namedModifiers || [])
+			.filter(modifier => ["classFeature", "combatMethod"].includes(modifier.sourceType))
+			.map(modifier => MiscUtil.copyFast(modifier));
 		// First, clear all previously applied class feature effects
 		this._clearClassFeatureEffects();
 
@@ -29778,6 +29781,7 @@ class CharacterSheetState {
 		// (e.g. Iron Will). Idempotent; surfaces in the conditional-modifier opt-in picker.
 		this._syncCombatMethodConditionalModifiers();
 
+		this._reuseDerivedNamedModifierIds(previousNamedModifiers);
 		return appliedEffects;
 	}
 
@@ -44832,6 +44836,9 @@ class CharacterSheetState {
 	 */
 	applyDivineFavorEffects () {
 		const df = this._ensureDivineFavor();
+		const previousNamedModifiers = (this._data.namedModifiers || [])
+			.filter(modifier => modifier._divineFavor)
+			.map(modifier => MiscUtil.copyFast(modifier));
 
 		// --- 1. Strip prior contributions ------------------------------------
 		// 1a. namedModifiers tagged as divine-favor.
@@ -44957,6 +44964,7 @@ class CharacterSheetState {
 			}
 		});
 
+		this._reuseDerivedNamedModifierIds(previousNamedModifiers);
 		// Ability boosts must be live before limited-cast spell uses are derived below.
 		// This is the single cache rebuild for the Divine Favor reconciliation pass.
 		this._recalculateCustomModifiers();

@@ -596,6 +596,10 @@ generic `resources[]` row. `ensureFighterFeatureUses()` scales the feature uses 
 duplicate row, while Action Surge still retains its ordinary mirrored resource. On load, a
 source-managed named modifier rebuilt with identical effects reuses its persisted ID, so a
 read-only sheet rehydration does not turn new random IDs into a canonical character patch.
+The later class-feature and Divine Favor strip/reapply passes must preserve IDs for mechanically
+identical modifiers too; changed effects receive new IDs. Hub character snapshots compare the
+actual JSON wire shape, excluding `undefined` object fields that cannot survive an HTTP round
+trip, so those fields cannot produce a no-op whole-array PATCH during authority navigation.
 
 ### 2014 vs 2024 Rules
 

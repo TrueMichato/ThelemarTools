@@ -306,7 +306,10 @@ normalizes destinations without moving authorization out of the BFF. Future cros
 the descriptor, but may not infer authority from the URL. Navigation saves pending work before leaving; an
 unreconciled campaign effect blocks that transition rather than discarding local state. A no-edit route round
 trip must not acquire a character lease, send a PATCH, or advance the canonical revision even when the
-character has a prior semantic effect followed by an ordinary patch.
+character has a prior semantic effect followed by an ordinary patch. This includes characters
+whose catalog-backed class effects are re-applied on load: unchanged source-managed modifier IDs
+must survive that later pass, and `undefined` derived fields absent from JSON transport must not
+be diffed as a write. An actual edited effect still uses normal revision/lease authority.
 
 ## Files
 

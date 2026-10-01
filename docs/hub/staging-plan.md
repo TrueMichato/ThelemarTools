@@ -1,6 +1,6 @@
 # Campaign Hub staging plan
 
-> **Status:** r11c deployed and operationally verified; V1-G1 complete; physical rerun **NO-GO**
+> **Status:** r11d deployed and operationally verified; V1-G1 complete; physical rerun **NO-GO**
 > **Last reviewed:** 2026-10-01
 > **Owner:** Campaign Hub maintainers
 
@@ -8,12 +8,13 @@ The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r
 correction release, and physical re-entry gate. Earlier r7 drills below are historical evidence, not a
 claim that r7 is still deployed or that the r10 findings have been resolved. The 2026-09-29 r11
 promotion was interrupted after traffic changed; its compatible application rollback restored exact
-r10 with no schema migration. A new genuine-provenance r11b tag was then promoted and verified, with
-its newest encrypted prerelease backup matched off-machine. R11c was subsequently promoted with no
-migrations, passed independent runtime checks, and its newest encrypted backup matched off-machine.
-Targeting remains disabled. The r11b P1 return advanced the canonical revision without an edit; the
-r11c physical Open Local attempt stopped before navigation on a false client-side history warning without
-acquiring a lease or changing the canonical revision. Further retest is blocked pending a client correction.
+r10 with no schema migration. Genuine-provenance r11b, r11c, and r11d tags were subsequently promoted;
+r11d passed runtime/static checks and its newest encrypted prerelease backup matched off-machine.
+Its monitor timer failed once during cutover but a genuine later timer run succeeded and cleared the
+failed-unit state without resetting it. Targeting remains disabled. The r11b P1 return advanced the
+canonical revision without an edit; r11c stopped on a false client-side history warning; r11d's first
+physical Open Local leg again advanced canonical revision (23 -> 24) on a derived-modifier PATCH.
+Further retest is blocked pending a client correction.
 
 ## Objectives
 
@@ -27,8 +28,8 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- The independently verified deployed release is annotated `hub-staging-2026-09-30-r11c` at
-  `923ab69dc6f817c36d2ad70b294eefa632f21d3c`, with migrations `0001`-`0009`;
+- The independently verified deployed release is annotated `hub-staging-2026-10-01-r11d` at
+  `d26b0bf3f938b5cf6e687628b1823d06f11644b5`, with migrations `0001`-`0009`;
   Phase 6G is complete. Recheck live identity before the next promotion.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup

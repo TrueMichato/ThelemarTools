@@ -217,7 +217,12 @@ test.describe("device-scoped active campaign context", () => {
 			const hub = new HubCampaignPage(await context.newPage());
 			await hub.signInSynthetic({providerSubject: "authority-owner", displayName: "Authority Owner", secret: secret!});
 			const campaignId = await hub.createCampaign("Authority Routing E2E");
-			const character = await hub.createCharacter({campaignId, name: "Canonical Route Hero"});
+			const character = await hub.createCharacter({
+				campaignId,
+				name: "Canonical Route Hero",
+				className: "Sorcerer",
+				subclass: {name: "Draconic Bloodline", source: "PHB", shortName: "Draconic"},
+			});
 
 			// Deliberately reuse the canonical Hub id in the local repository. Repository authority,
 			// not id uniqueness, must keep the two documents isolated.
@@ -295,6 +300,22 @@ test.describe("device-scoped active campaign context", () => {
 				character.id,
 			);
 			expect(ordinaryAcceptedRevision).toBe(canonicalAfterOrdinary.revision);
+			expect(canonicalAfterOrdinary.data.namedModifiers?.filter(mod => mod.sourceType === "classFeature").length)
+				.toBeGreaterThan(0);
+			await expect.poll(
+				() => ordinary.page.evaluate(id => {
+					const sheet = (window as any).charSheet;
+					const stored = sheet?._characterRepository?._accepted?.get(id)?.data?.namedModifiers || [];
+					const live = sheet?._state?._data?.namedModifiers || [];
+					const canonical = stored.filter(mod => mod.sourceType === "classFeature");
+					const ids = new Set(live.filter(mod => mod.sourceType === "classFeature").map(mod => mod.id));
+					return {canonical: canonical.length, matched: canonical.filter(mod => ids.has(mod.id)).length};
+				}, character.id),
+				{timeout: 30_000},
+			).toEqual({
+				canonical: canonicalAfterOrdinary.data.namedModifiers.filter(mod => mod.sourceType === "classFeature").length,
+				matched: canonicalAfterOrdinary.data.namedModifiers.filter(mod => mod.sourceType === "classFeature").length,
+			});
 
 			const overview = new HubCampaignPage(await context.newPage());
 			await overview.gotoCampaign(campaignId);
@@ -321,7 +342,15 @@ test.describe("device-scoped active campaign context", () => {
 				return (window as any).__authorityBfcacheToken;
 			});
 			const routePatchPaths: string[] = [];
+			let routeLeaseCount = 0;
 			const onRouteRequest = request => {
+				if (
+					request.method() === "POST"
+					&& new URL(request.url()).pathname === `/api/characters/${character.id}/lease`
+				) {
+					routeLeaseCount++;
+					return;
+				}
 				if (
 					request.method() !== "PATCH"
 					|| new URL(request.url()).pathname !== `/api/characters/${character.id}`
@@ -339,6 +368,9 @@ test.describe("device-scoped active campaign context", () => {
 			expect(new URL(ordinary.page.url()).searchParams.get("id")).toBeNull();
 			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
+			expect(routePatchPaths).toEqual([]);
+			expect(routeLeaseCount).toBe(0);
+			expect((await hub.getCharacter(character.id)).revision).toBe(canonicalAfterOverview.revision);
 
 			await ordinary.page.goBack();
 			await ordinary.page.waitForURL(url =>
@@ -370,6 +402,7 @@ test.describe("device-scoped active campaign context", () => {
 				revision: canonicalAfterOverview.revision,
 				routePatchPaths: [],
 			});
+			expect(routeLeaseCount).toBe(0);
 
 			await ordinary.page.locator("#charsheet-sel-character").selectOption(character.id);
 			await expect(ordinary.page.locator("#charsheet-ipt-name")).toHaveValue("Local Collision Hero");

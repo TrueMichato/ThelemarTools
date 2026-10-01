@@ -133,7 +133,9 @@ export class HubHttpCharacterRepository {
 	}
 
 	_getSnapshotData (character) {
-		const out = structuredClone(character);
+		// Compare and persist the same JSON shape the API sends; undefined object fields
+		// otherwise produce whole-array patches even though the wire format omits them.
+		const out = JSON.parse(JSON.stringify(character));
 		delete out.id;
 		return out;
 	}

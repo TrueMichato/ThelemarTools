@@ -12,11 +12,12 @@ identifiers, provider subjects, tokens, or private evidence into Git.
 
 ## Current boundary
 
-- **Deployed:** genuine-provenance `hub-staging-2026-09-30-r11c`, annotated tag object
-  `ad56df49ea4da42720c9337b3c8b4f5054b18e5a` at
-  `923ab69dc6f817c36d2ad70b294eefa632f21d3c`, protocol 5, migrations `0001`-`0009`.
+- **Deployed:** genuine-provenance `hub-staging-2026-10-01-r11d`, annotated tag object
+  `ea11089954da44e18d2bd698ccad05e8c0b59a5e` at
+  `d26b0bf3f938b5cf6e687628b1823d06f11644b5`, protocol 5, migrations `0001`-`0009`.
   Exact-head CI, the authorized dry run, human-confirmed promotion, independent runtime/static checks,
-  and matching newest off-machine encrypted backup passed. This is not physical character acceptance.
+  a later genuine monitor-timer recovery, and matching newest off-machine encrypted backup passed.
+  This is not physical character acceptance; peer targeting remains disabled.
 - **Physical result:** final **NO-GO** at 2026-09-28T20:02:31Z. GD-FIND-014 is a confirmed P1
   refresh-persistent local/campaign Character Sheet divergence. GD-FIND-012 records that the
   campaign's player-targeting rollout was disabled. Several scenarios lack participant/device evidence.
@@ -33,7 +34,14 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   or revision change. The server retains the applied effect at its operation watermark, so this is a
   browser reconciliation failure rather than missing server history. No Return/BFCache/two-device
   check ran; the **P1 HARD NO-GO remains**.
-- **R11c source correction under validation, not deployed:** red-first tests found two client gaps:
+- **R11d physical retest:** verified current browser workers and owner/DM canonical views agreed at the
+  starting revision. The first Campaign -> Open Local action showed Local authority and a valid Return
+  control, but the DM then observed canonical revision **23 -> 24** before Return or any user edit.
+  Bounded Oracle metadata found exactly one lease, one `character.patch`, and one projection
+  invalidation, with no semantic operation. The patch was a top-level array replacement classified
+  as derived-modifier repair; no private values or character body were examined. **HARD NO-GO**:
+  Return, BFCache, two-device and targeting retests did not run.
+- **Next source correction, not deployed:** r11d's earlier coverage fix addressed two client gaps:
   loading a character cleared the newly fetched live coverage while detaching the previous subscription,
   and canonical projection reads dropped their envelope's operation watermark. The narrow correction
   preserves the freshly fetched coverage, clears only the previous character on switch, and retains
@@ -54,8 +62,16 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   59/59 PostgreSQL checks and 47/47 browser journeys. Exact-source CI run `36843468676`
   passed all four jobs at `a247865bf47c8d324a1d808d99e968af54ae9c88`, including
   59/59 PostgreSQL checks and 47/47 real-stack browser journeys. Independent review and
-  another separately authorized release remain pending; passing CI does not reverse the
-  physical P1 HARD NO-GO.
+  another separately authorized release remain pending; passing CI did not reverse the
+  physical P1 HARD NO-GO. A bounded read-only comparison in the affected DM view found three
+  mechanically identical class-feature modifiers whose IDs all drifted after the late
+  class-effect reapply. Synthetic red-first tests now preserve exact IDs across late class
+  and Divine Favor reapplication, but mint new IDs for changed effects. A separate synthetic
+  browser regression exposed `undefined` fields in derived arrays being diffed even though
+  JSON transport omits them; Hub snapshots now compare the actual wire shape. Focused
+  repository/Character Sheet tests and the real-stack subclass route pass with **zero lease,
+  zero PATCH, and a stable revision**; full gates and exact-head CI remain pending for this
+  new, undeployed correction.
 - **R11b-to-r11c history:** read-only audit confirmed one ordinary character PATCH at
   the route transition (revision 22 -> 23). Synthetic red-first tests found that Fighter's synthetic
   Second Wind pool was re-minting a generic `resources[]` row, while source-managed modifier IDs also
@@ -87,10 +103,10 @@ identifiers, provider subjects, tokens, or private evidence into Git.
 - **Release safety status:** the first r11 attempt was interrupted after traffic changed; its evidence
   records exit 130 in deploy, successful compatible rollback to r10, and no schema migration. Its
   placeholder-provenance tag remains immutable and unused. The separately approved, genuinely tagged
-  r11b and r11c releases passed their exact-head CI, dry run, human-confirmed promotion, and independent
+  r11b, r11c and r11d releases passed their exact-head CI, dry run, human-confirmed promotion, and independent
   post-release checks without rollback. DB/BFF/static/edge are healthy, one BFF serves, the ledger is unchanged,
   outbox/dispatcher are clear, and the deployed static/service-worker hashes match the public assets.
-  The r11c release-time encrypted prerelease archive matched off-machine by filename, size, and SHA-256
+  The r11d release-time encrypted prerelease archive matched off-machine by filename, size, and SHA-256
   at post-release verification; newer scheduled backups require a fresh comparison.
   **Targeting enrollment remains disabled, and the physical NO-GO has not been reversed.**
 
@@ -109,7 +125,7 @@ finding.
 
 | Priority | Finding | Observation and current disposition | Next acceptance evidence / lane |
 |---|---|---|---|
-| P1 | **GD-FIND-014** | The r11b physical return advanced the same canonical revision without an edit; r11c stopped safely on Open Local because fresh coverage was lost and an old effect was falsely classified as missing history. No r11c lease/PATCH occurred, but the intended round trip was never completed. Visible data loss is not established. | Validate and review the client coverage/watermark correction, release only with new approval, then prove zero lease/PATCH and stable canonical revision across both entry paths, Local return, refresh, BFCache, and two devices. **Physical re-entry remains blocked**. |
+| P1 | **GD-FIND-014** | The r11b return advanced canonical revision without an edit; r11c stopped safely on Open Local due to false missing-history coverage; r11d reached Local but acquired a lease and committed a derived-modifier repair, advancing 23 -> 24 before Return. No visible data loss is established. | Validate/review the late derived-identity and JSON-wire corrections, release only with new approval, then prove zero lease/PATCH and stable canonical revision across both entry paths, Local return, refresh, BFCache, and two devices. **Physical re-entry remains blocked**. |
 | P2 | **GD-FIND-012** | Cure Wounds targeting was absent because the peer source-cost campaign rollout was disabled. This does not prove a missing server template. | Operator-approved exact-campaign enrollment using the checked-in preflight; physical reject/cancel/expiry/accept/self-target checks with no early cost and one accepted cost/effect. **Release re-entry / Wave A**. |
 | P2, reproduce | **GD-FIND-003** | Character-information view opened from Campaign Overview closed after about ten seconds; interaction/timeout conditions were not captured. | Reproduce with pointer and keyboard interaction, distinguish intentional expiry from premature dismissal, keep a readable/focus-safe view, and test the real browser. **Overview UX**. |
 | P2 | **GD-FIND-006** | Inventory **Share** began a second step in a lower sheet panel without moving focus, scrolling, or announcing it; action looked stalled. No asset loss was reported. | Focus/announce the next actionable control; distinguish draft/pending/committed states and prove no duplicate submission. **B0/B2**. |
@@ -122,7 +138,7 @@ finding.
 | Design | **GD-FIND-008** | Participants want fewer routine stash approvals, transparent withdrawals and shared-weight handling. | Decide custody, concurrent debit/approval, carry ownership, activity and notifications before changing inventory authority. **B0/B3 decision; ADR if authority changes**. |
 | Design | **GD-FIND-010** | DM requested direct player-sheet editing/transfers with player notification; current arbitrary edit authority is intentionally limited. | Choose explicit typed, auditable DM operations and recipient notices; do not bypass owner leases or grant arbitrary writes. **Wave A/B authority decision**. |
 | Design | **GD-FIND-011** | A condition installed only as personal/site homebrew was unavailable in campaign authority, as designed. | If desired, design an explicit reviewed publish/select-to-campaign flow; never silently import personal brew. **Content-publication decision**. |
-| Resolved at r11c verification; recheck each release | **GD-FIND-001** | Newest encrypted backup was initially absent off-machine and then copied before play. The interrupted r11 attempt and the successful r11b and r11c releases each required a new encrypted prerelease copy. The r11c release-time Oracle and trusted-machine copies matched at verification; later scheduled archives may be newer. | Preserve bounded release/backup evidence; recheck newest host/off-machine copy and restore age before each later promotion. **Operations**. |
+| Resolved at r11d verification; recheck each release | **GD-FIND-001** | The interrupted r11 attempt and successful r11b/r11c/r11d releases each needed a new encrypted prerelease copy; a separate r11b command cancelled before traffic change also created an archive. The r11d release-time Oracle and trusted-machine copies matched at verification; later scheduled archives may be newer. | Preserve bounded release/backup evidence; recheck newest host/off-machine copy and restore age before each later promotion. **Operations**. |
 
 The 2026-09-13 game-day findings are historical, not silently closed by this list. R10 reproduced earlier
 entry-path finding #3 and rollout finding #18; its P1 is a *separate convergence-class recurrence*
@@ -143,11 +159,11 @@ remain untested or insufficiently evidenced unless the private report explicitly
    Rerun route/convergence and, if included, disclosure/projection-privacy journeys on the *integrated*
    head, plus full Hub, affected Character Sheet, relevant mutation and real-stack gates. The nested
    GD-FIND-005 request remains open either way.
-3. **Keep release identity separate from game-day acceptance.** The r11b and r11c corrections were
+3. **Keep release identity separate from game-day acceptance.** The r11b, r11c and r11d corrections were
    deployed from reviewed, immutable annotated tags; the initial r11 attempt rolled back and is not
-   a deployment, and its tag remains immutable and unused. R11c's runtime and off-machine backup
-   evidence passed, but the false history warning stopped its physical owner/DM/local route check.
-   The current coverage correction is not deployed. Every *future*
+   a deployment, and its tag remains immutable and unused. R11d's runtime and off-machine backup
+   evidence passed, but its first physical route leg again advanced canonical revision without an edit.
+   The current derived-modifier correction is not deployed. Every *future*
    promotion still requires its own immutable tag, fresh operational preflight, dry run, human-confirmed
    `deploy/hub/release.sh` invocation, and post-release checks. Do not treat a merge or this document as
    authorization for another release.

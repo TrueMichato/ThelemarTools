@@ -115,6 +115,36 @@ describe("HTTP character repository", () => {
 		await expect(repository.pList()).resolves.toEqual([{id: "server-1", name: "Mira"}]);
 	});
 
+	it("does not lease or patch when derived fields only contain omitted JSON properties", async () => {
+		const canonical = {
+			id: "character-1",
+			campaignId: "campaign-1",
+			ownerAccountId: "owner-1",
+			revision: 4,
+			data: {
+				name: "Synthetic Sorcerer",
+				acFormulas: [{base: 13, name: "Draconic Resilience", sourceType: "classFeature"}],
+			},
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner-1"}}),
+			pGetCharacterProjection: async () => ({kind: "owner_truth", character: structuredClone(canonical)}),
+			pAcquireCharacterLease: jest.fn(async () => ({epoch: 1})),
+			pPatchCharacter: jest.fn(async () => ({character: {...canonical, revision: 5}})),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		const loaded = await repository.pGet({characterId: canonical.id});
+		const derived = {
+			...loaded,
+			acFormulas: [{...loaded.acFormulas[0], addDex: undefined, conditional: undefined}],
+		};
+
+		await expect(repository.pUpsert({character: derived})).resolves.toEqual(loaded);
+		expect(api.pAcquireCharacterLease).not.toHaveBeenCalled();
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+		expect(repository._accepted.get(canonical.id).revision).toBe(4);
+	});
+
 	it("lists only detached documents when no campaign scope is selected", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),

@@ -5,16 +5,18 @@
 
 ## Status
 
-The last independently verified private invite-only release is `hub-staging-2026-09-30-r11c` at
-`923ab69dc6f817c36d2ad70b294eefa632f21d3c` on the reused, Hub-only Oracle Always Free ARM
+The last independently verified private invite-only release is `hub-staging-2026-10-01-r11d` at
+`d26b0bf3f938b5cf6e687628b1823d06f11644b5` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
-PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11c post-release
+PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11d post-release
 verification. Phase 6G deployment and V1-G1 host-operations evidence are complete. The 2026-09-28 r10
 physical rerun returned **NO-GO** for a P1 Character Sheet context divergence and disabled player targeting;
 r11b fixed the route identity but its physical return advanced the canonical revision without an edit. R11c
-stopped safely on a false campaign-effect history save block on Open Local; no canonical write occurred, but
-the round trip was not completed. A browser coverage/watermark correction is under validation and not
-deployed; targeting remains disabled. The private-launch verdict is still NO-GO. See the
+stopped safely on a false campaign-effect history save block on Open Local; no canonical write occurred.
+R11d deployed the coverage correction, but its first physical Campaign -> Local leg acquired a lease and
+persisted a derived-modifier repair, advancing the canonical revision from 23 to 24 without an edit.
+A source correction for late modifier reapplication and JSON-wire normalization is under validation and
+not deployed; targeting remains disabled. The private-launch verdict is still NO-GO. See the
 [prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
@@ -165,9 +167,9 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-09-30-r11c` at `923ab69dc6f817c36d2ad70b294eefa632f21d3c` is the last verified
-Oracle identity. Genuine daily timer and recovery evidence remain recorded; the independent r11c
-post-release check passed with a matching encrypted off-machine backup. The physical r11c retest's NO-GO
+`hub-staging-2026-10-01-r11d` at `d26b0bf3f938b5cf6e687628b1823d06f11644b5` is the last verified
+Oracle identity. Genuine daily timer and recovery evidence remain recorded; the independent r11d
+post-release check passed with a matching encrypted off-machine backup. The physical r11d retest's NO-GO
 is not overturned by deployment alone. The [backlog](game-day-backlog.md) owns the re-entry work.
 
 ## Implemented
