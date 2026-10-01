@@ -35,7 +35,7 @@ test("typed damage resolves per-target defenses, consumes temporary HP, reports 
 	await page.locator("#ew-damage-apply").click();
 	await expect(page.locator("#ew-status")).toContainText("Choose Applies or Does not apply");
 	await page.locator("#ew-damage-decisions select").selectOption("yes");
-	await page.locator("#ew-damage-apply").click();
+	await page.locator("#ew-damage-apply-reviewed").click();
 	await expect(page.locator("#ew-damage-review")).toBeHidden();
 	await expect(page.locator("#ew-status")).toContainText("Applied 9 fire damage to 3 monsters");
 	await expect(page.locator("#ew-damage-report")).toContainText("Goblin #1: 4 applied (resistant); temp 5 → 1, HP 7 → 7");
@@ -54,6 +54,24 @@ test("typed damage resolves per-target defenses, consumes temporary HP, reports 
 	await expect(page.locator("#ew-damage-report")).toContainText("Goblin #1: 9 applied; temp 5 → 0, HP 7 → 3");
 	await page.reload();
 	await expect(page.locator(".ew__statblock [data-field=current]")).toHaveValue("3");
+});
+
+test("visible statblock concentration remains active after typed damage and reports the correct check DC", async ({page}) => {
+	const encounter = new EncounterRollPage(page);
+	await encounter.seed({count: 1});
+	const panel = encounter.resourcePanel("one");
+	await panel.getByRole("button", {name: "Goblin #1: start concentration"}).click();
+	const concentrating = panel.getByRole("button", {name: "Goblin #1: end concentration"});
+	await expect(concentrating).toHaveAttribute("aria-pressed", "true");
+	await page.locator("#ew-fast-damage").click();
+	await page.locator("#ew-damage-expression").fill("26");
+	await page.locator("#ew-damage-type").selectOption("fire");
+	await page.locator("#ew-damage-apply").click();
+	await expect(page.locator("#ew-damage-report")).toContainText("Goblin #1: 26 applied; temp 0 → 0, HP 7 → 0; concentration check DC 13 (not rolled)");
+	await expect(concentrating).toHaveAttribute("aria-pressed", "true");
+	await page.reload();
+	await expect(concentrating).toHaveAttribute("aria-pressed", "true");
+	await expect(page.locator(".ew__statblock [data-field=current]")).toHaveValue("0");
 });
 
 test("selection changes discard a pending review and storage failures leave typed damage unapplied", async ({page}) => {
@@ -119,9 +137,13 @@ test("damage is not rolled when all selected targets have unset HP", async ({pag
 });
 
 test("open damage tools remain reachable without horizontal overflow on a narrow day/night screen", async ({page}) => {
-	await new EncounterRollPage(page).seed();
+	await new EncounterRollPage(page).seed({monsterOverride: {
+		resist: [{resist: ["fire"], note: "while in moonlight", cond: true}],
+	}});
 	await page.setViewportSize({width: 390, height: 844});
 	await page.locator("#ew-fast-damage").click();
+	await page.locator("#ew-damage-expression").fill("2");
+	await page.locator("#ew-damage-type").selectOption("fire");
 	for (const night of [false, true]) {
 		await page.locator("html").evaluate((html, enabled) => html.classList.toggle("ve-night-mode", enabled), night);
 		await expect(page.locator("#ew-damage-expression")).toBeVisible();
@@ -130,5 +152,17 @@ test("open damage tools remain reachable without horizontal overflow on a narrow
 			const bounds = await page.locator(`#${id}`).boundingBox();
 			expect(bounds?.height).toBeGreaterThanOrEqual(44);
 		}
+		await page.locator("#ew-damage-apply").click();
+		const decision = page.locator("#ew-damage-decisions select").first();
+		await decision.selectOption("yes");
+		const applyReviewed = page.locator("#ew-damage-apply-reviewed");
+		await expect(applyReviewed).toBeEnabled();
+		const decisionBounds = await decision.boundingBox();
+		const actionBounds = await applyReviewed.boundingBox();
+		expect(actionBounds!.y - (decisionBounds!.y + decisionBounds!.height)).toBeLessThan(32);
+		expect(actionBounds!.height).toBeGreaterThanOrEqual(44);
+		await applyReviewed.click();
+		await expect(page.locator("#ew-damage-review")).toBeHidden();
+		await expect(page.locator("#ew-damage-report")).toContainText("Goblin #1: 1 applied (resistant)");
 	}
 });

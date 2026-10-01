@@ -956,6 +956,11 @@
 			}
 		}
 
+		&__damage-review > button {
+			min-height: 44px;
+			margin-top: 10px;
+		}
+
 		&__damage-report ul {
 			padding-left: 20px;
 			margin: 6px 0 0;

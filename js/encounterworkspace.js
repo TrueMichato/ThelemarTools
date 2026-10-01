@@ -152,6 +152,7 @@ export class EncounterWorkspacePage {
 		this._selDamageType = document.getElementById("ew-damage-type");
 		this._selDamageSource = document.getElementById("ew-damage-source");
 		this._btnDamageApply = document.getElementById("ew-damage-apply");
+		this._btnDamageApplyReviewed = document.getElementById("ew-damage-apply-reviewed");
 		this._eleDamageReview = document.getElementById("ew-damage-review");
 		this._eleDamageDecisions = document.getElementById("ew-damage-decisions");
 		this._eleDamageReport = document.getElementById("ew-damage-report");
@@ -288,6 +289,7 @@ export class EncounterWorkspacePage {
 		this._selDamageType.replaceChildren(...ENCOUNTER_DAMAGE_TYPES.map(type => new Option(type[0].toUpperCase() + type.slice(1), type)));
 		this._selDamageType.value = "bludgeoning";
 		this._btnDamageApply.addEventListener("click", () => this._pApplyTypedDamage());
+		this._btnDamageApplyReviewed.addEventListener("click", () => this._pApplyTypedDamage());
 		[this._inpDamageExpression, this._selDamageType, this._selDamageSource].forEach(control => {
 			control.addEventListener(control === this._inpDamageExpression ? "input" : "change", () => this._clearDamageReview());
 		});
@@ -454,6 +456,7 @@ export class EncounterWorkspacePage {
 		this._btnHpUndo.disabled = this._isBusy || !this._hpUndo.length;
 		this._inpDamageExpression.disabled = this._selDamageType.disabled = this._selDamageSource.disabled = this._isBusy || !this._state.instances.length;
 		this._btnDamageApply.disabled = this._isBusy || !hasTargets;
+		this._btnDamageApplyReviewed.disabled = this._btnDamageApply.disabled;
 		this._selInitMode.disabled = this._isBusy || !this._state.instances.length;
 		this._btnInitRoll.disabled = this._isBusy || !hasTargets;
 		const isStarted = !!this._state.turn?.round;
