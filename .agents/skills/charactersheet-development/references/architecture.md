@@ -159,6 +159,9 @@ references. `getImprovementFeatDecisionKey` gives repeatable feats a stable
 per-class-level owner matching the progression manifest; Level Up and Quick
 Build pass it into `addFeat`. Stored feat effects and Respec removal use the
 specific feat ID, not a name/source-only match.
+The Features-tab picker matches known feats by name and source, retains the
+Add action for repeatable feats, and gives each manual repeat its own unplaced
+decision key so it cannot collide with a level-granted copy.
 
 ## Data Flow
 

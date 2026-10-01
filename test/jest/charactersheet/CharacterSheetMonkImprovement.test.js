@@ -9,6 +9,7 @@ import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-levelup.js";
 import "../../../js/charactersheet/charactersheet-quickbuild.js";
+import "../../../js/charactersheet/charactersheet-features.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
@@ -17,6 +18,7 @@ const Progression = globalThis.CharacterSheetProgression;
 const State = globalThis.CharacterSheetState;
 const LevelUp = globalThis.CharacterSheetLevelUp;
 const QuickBuild = globalThis.CharacterSheetQuickBuild;
+const Features = globalThis.CharacterSheetFeatures;
 const Respec = globalThis.CharacterSheetRespec;
 const copy = value => JSON.parse(JSON.stringify(value));
 const monkData = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "data/class/class-monk.json"), "utf8"));
@@ -200,6 +202,70 @@ describe("repeatable XPHB Ability Score Improvement feat", () => {
 		const unownedState = makeState(3);
 		expect(unownedState.addFeat(asiFeat)).toBe(true);
 		expect(unownedState.addFeat(asiFeat)).toBe(false);
+	});
+
+	describe("Features-tab repeatable feat acquisition", () => {
+		test("picker allows an owned repeatable feat by exact source but not an owned non-repeatable feat", () => {
+			const state = makeState(4);
+			state.addFeat({...asiFeat, source: "PHB", repeatable: false});
+			state.addFeat(controlFeat);
+			globalThis.document ??= {addEventListener () {}, removeEventListener () {}};
+			const features = new Features(makePage(state));
+			expect(features._getFeatPickerAvailability(asiFeat)).toMatchObject({isKnown: false, canAdd: true});
+			expect(features._getFeatPickerAvailability(controlFeat)).toMatchObject({isKnown: true, canAdd: false});
+			state.addFeat({...copy(asiFeat), sourceDecisionKey: "test:prior-improvement"});
+			expect(features._getFeatPickerAvailability(asiFeat)).toMatchObject({isKnown: true, canAdd: true});
+		});
+
+		test("direct add refuses an owned non-repeatable feat without changing the character", async () => {
+			const state = makeState(4);
+			const page = makePage(state);
+			globalThis.document ??= {addEventListener () {}, removeEventListener () {}};
+			const features = new Features(page);
+			features.render = jest.fn();
+			expect(await features._addFeat(controlFeat)).toBe(true);
+			const snapshot = state.toJson();
+			expect(await features._addFeat({...controlFeat, ability: [{choose: {from: ["dex"], amount: 2}}]}, {ability: "dex"})).toBe(false);
+			expect(state.toJson()).toEqual(snapshot);
+			expect(page.saveCharacter).toHaveBeenCalledTimes(2);
+		});
+
+		test("manual ASI repeats apply and persist distinct bonuses without consuming a progression-owned ASI", async () => {
+			const state = makeState(3);
+			await applyLevelUp(state, 4, "con");
+			const progressionFeat = copy(state.getFeats()[0]);
+			globalThis.document ??= {addEventListener () {}, removeEventListener () {}};
+			const page = makePage(state);
+			const features = new Features(page);
+			features.render = jest.fn();
+
+			await features._addFeat(asiFeat, {ability: "dex"});
+			await features._addFeat(asiFeat, {ability: "wis"});
+			const owned = state.getFeats().filter(feat => feat.name === asiFeat.name && feat.source === asiFeat.source);
+			expect(owned).toHaveLength(3);
+			expect(new Set(owned.map(feat => feat.id)).size).toBe(3);
+			expect(new Set(owned.map(feat => feat.sourceDecisionKey)).size).toBe(3);
+			expect(owned[0]).toMatchObject(progressionFeat);
+			expect(features._getFeatPickerAvailability(asiFeat)).toEqual({isKnown: true, canAdd: true});
+			expect(owned.slice(1).map(feat => features._formatFeatChoices(feat.choices))).toEqual([
+				"+2 Dexterity",
+				"+2 Wisdom",
+			]);
+			expect(owned.slice(1).map(feat => feat.appliedEffects.abilityDeltas)).toEqual([{dex: 2}, {wis: 2}]);
+			expect([state.getAbilityScore("con"), state.getAbilityScore("dex"), state.getAbilityScore("wis")]).toEqual([16, 14, 14]);
+			const manifest = Progression.syncCanonicalDecisions({page, state});
+			expect(manifest.base.decisions.filter(decision => decision.meta?.unplacedFeat)
+				.map(decision => decision.semanticKey)).toEqual([
+				owned[1].sourceDecisionKey,
+				owned[2].sourceDecisionKey,
+			]);
+
+			const loaded = State.deserialize(state.serialize());
+			expect(loaded.getFeats().map(feat => feat.appliedEffects.abilityDeltas)).toEqual([{con: 2}, {dex: 2}, {wis: 2}]);
+			loaded.removeFeat(owned[1].id);
+			expect(loaded.getFeats().map(feat => feat.id)).toEqual([owned[0].id, owned[2].id]);
+			expect([loaded.getAbilityScore("con"), loaded.getAbilityScore("dex"), loaded.getAbilityScore("wis")]).toEqual([16, 12, 14]);
+		});
 	});
 
 	test("two independent Level Up acquisitions grant and persist distinct mechanical bonuses", async () => {

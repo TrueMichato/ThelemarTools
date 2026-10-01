@@ -267,12 +267,16 @@ class CharacterSheetProgression {
 	}
 
 	static getUnplacedFeatSemanticKey (feat) {
-		return [
+		const baseKey = [
 			"unplaced",
 			"feat",
 			CharacterSheetProgression._slug(feat?.name),
 			CharacterSheetProgression._slug(feat?.source),
 		].join(":");
+		const manualKey = feat?.sourceDecisionKey;
+		return typeof manualKey === "string" && manualKey.startsWith(`${baseKey}:manual:`)
+			? manualKey
+			: baseKey;
 	}
 
 	static _getFeatDecisionSelections (decision) {

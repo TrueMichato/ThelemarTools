@@ -447,8 +447,11 @@ Respec matches each feat by its source decision key when replacing it, so
 swapping the later occurrence leaves the earlier one's ability increase intact.
 Class feat-progression swaps also remove only the feat owned by their decision;
 the nested ability receipt and the feat's effect receipt are not reversed twice.
-Non-repeatable feats remain unavailable after their first acquisition. The
-current feat choice UI implements the +2-to-one-score ASI option; the feat
+The Features-tab free-add picker likewise keeps an owned repeatable feat
+selectable; each manual acquisition has its own source-qualified unplaced
+decision key and independently reversible effects. Non-repeatable feats remain
+unavailable after their first acquisition. The current feat choice UI
+implements the +2-to-one-score ASI option; the feat
 data's alternative +1-to-two-scores option is not yet selectable.
 
 Feat prerequisites are evaluated against the candidate for level, ability

@@ -110,6 +110,6 @@ describe("Feat-granted spells reactive render", () => {
 		const {features, page} = makeFeatures();
 		delete page._spells; // optional chaining must keep this from throwing
 
-		await expect(features._addFeat(PLANTMENDER_FEAT)).resolves.toBeUndefined();
+		await expect(features._addFeat(PLANTMENDER_FEAT)).resolves.toBe(true);
 	});
 });
