@@ -4,23 +4,8 @@
 @layer vetools {
 	.ew {
 		&__resources {
-			border-bottom: 1px solid vars.$rgb-border-grey--muted;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
 			background: vars.$rgb-bg--alt;
-		}
-
-		&__resource-header {
-			display: flex;
-			flex-wrap: wrap;
-			align-items: center;
-			justify-content: space-between;
-			gap: 8px 16px;
-			padding: 9px 12px;
-		}
-
-		&__resource-title {
-			margin: 0;
-			font-size: 1rem;
-			font-weight: 700;
 		}
 
 		&__concentration {
@@ -29,6 +14,70 @@
 			text-align: left;
 
 			&--active {
+				border-color: vars.$rgb-active-blue;
+				color: vars.$rgb-active-blue;
+			}
+		}
+
+		&__inline-resource {
+			display: inline-flex;
+			align-items: center;
+			vertical-align: middle;
+			margin-left: 4px;
+			font-style: normal;
+			font-weight: normal;
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+		}
+
+		&__inline-resource-button {
+			display: inline-grid;
+			place-items: center;
+			min-width: 44px;
+			min-height: 44px;
+			padding: 0;
+			border: 1px solid transparent;
+			border-radius: 6px;
+			background: transparent;
+			color: inherit;
+			font-size: 1rem;
+			font-style: normal;
+			cursor: pointer;
+
+			&:hover:not(:disabled) {
+				background: vars.$rgb-bg--alt;
+			}
+
+			&:disabled {
+				opacity: 0.5;
+				cursor: not-allowed;
+			}
+		}
+
+		&__inline-resource-pip::before {
+			content: "";
+			width: 10px;
+			height: 10px;
+			border: 2px solid vars.$rgb-active-blue;
+			border-radius: 50%;
+		}
+
+		&__inline-resource-pip--available::before {
+			background: vars.$rgb-active-blue;
+		}
+
+		&__inline-resource-count {
+			margin-right: 4px;
+			font-size: 1rem;
+			font-weight: 600;
+		}
+
+		&__inline-recharge {
+			min-width: 52px;
+			margin-left: 4px;
+			border-color: vars.$rgb-border-grey--muted;
+
+			&--ready {
 				border-color: vars.$rgb-active-blue;
 				color: vars.$rgb-active-blue;
 			}
@@ -64,6 +113,10 @@
 
 		&__resource-manager {
 			border-top: 1px solid vars.$rgb-border-grey--muted;
+
+			&:first-child {
+				border-top: 0;
+			}
 		}
 
 		&__resource-more > summary {
@@ -220,6 +273,19 @@
 			background: vars-night.$rgb-link-blue--night;
 		}
 
+		&__inline-resource-pip::before {
+			border-color: vars-night.$rgb-link-blue--night;
+		}
+
+		&__inline-resource-pip--available::before {
+			background: vars-night.$rgb-link-blue--night;
+		}
+
+		&__inline-recharge--ready {
+			border-color: vars-night.$rgb-link-blue--night;
+			color: vars-night.$rgb-link-blue--night;
+		}
+
 		&__concentration--active {
 			border-color: vars-night.$rgb-link-blue--night;
 			color: vars-night.$rgb-link-blue--night;
@@ -233,6 +299,14 @@
 	}
 
 	@media (width <= 480px) {
+		.ew__statblock-heading {
+			flex-wrap: wrap;
+
+			.ew__statblock-title {
+				flex: 1 1 100%;
+			}
+		}
+
 		.ew__resource-row--recharge {
 			grid-template-columns: minmax(0, 1fr) auto;
 

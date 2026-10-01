@@ -34,7 +34,11 @@ import {
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "./encounterworkspace/encounterworkspace-handoff.js";
 import {getEncounterRosterView} from "./encounterworkspace/encounterworkspace-view.js";
 import {getEncounterResourceSummary} from "./encounterworkspace/encounterworkspace-resources.js";
-import {getEncounterResourcePanel} from "./encounterworkspace/encounterworkspace-resource-view.js";
+import {
+	getEncounterConcentrationButton,
+	getEncounterResourcePanel,
+	renderEncounterInlineResources,
+} from "./encounterworkspace/encounterworkspace-resource-view.js";
 import {ENCOUNTER_DAMAGE_TYPES} from "./encounterworkspace/encounterworkspace-damage.js";
 import {BESTIARY_ENCOUNTER_HANDOFF_PARAM, takeBestiaryEncounterHandoff} from "./encounterworkspace/encounterworkspace-bestiary-handoff.js";
 
@@ -1394,8 +1398,8 @@ export class EncounterWorkspacePage {
 
 	async _pUpdateResource (id, action) {
 		if (this._isBusy) return;
-		const panel = this._resourceContainers.get(id);
-		const focused = panel?.contains(document.activeElement) ? document.activeElement.dataset.resourceControl : null;
+		const tile = this._tiles.get(id);
+		const focused = tile?.contains(document.activeElement) ? document.activeElement.dataset.resourceControl : null;
 		this._setBusy(true);
 		let isSaved = false;
 		try {
@@ -1426,10 +1430,10 @@ export class EncounterWorkspacePage {
 		} finally {
 			this._setBusy(false);
 			if (focused) {
-				const currentPanel = this._resourceContainers.get(id);
-				const control = [...(currentPanel?.querySelectorAll("[data-resource-control]") || [])]
+				const currentTile = this._tiles.get(id);
+				const control = [...(currentTile?.querySelectorAll("[data-resource-control]") || [])]
 					.find(it => it.dataset.resourceControl === focused);
-				(control && !control.disabled ? control : currentPanel?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
+				(control && !control.disabled ? control : currentTile?.querySelector(".ew__resource-overview"))?.focus({preventScroll: true});
 			}
 		}
 	}
@@ -1437,12 +1441,20 @@ export class EncounterWorkspacePage {
 	_renderResourcePanel (id) {
 		const previous = this._resourceContainers.get(id);
 		if (!previous) return;
+		const tile = this._tiles.get(id);
 		const open = new Set([...previous.querySelectorAll("details[data-resource-key]")]
 			.filter(details => details.open).map(details => details.dataset.resourceKey));
 		const wasOpen = previous.querySelector(".ew__resource-manager").open;
 		const instance = this._state.instances.find(it => it.id === id);
 		const label = getEncounterInstanceLabels(this._state.instances).get(id);
-		const panel = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(id, action)});
+		const onAction = action => this._pUpdateResource(id, action);
+		const button = getEncounterConcentrationButton({instance, label, onAction});
+		tile.querySelector(".ew__concentration").replaceWith(button);
+		const table = tile.querySelector("table.ve-stats");
+		const matched = table
+			? renderEncounterInlineResources({instance, effective: getEncounterEffectiveMonster(instance), table, onAction})
+			: new Set();
+		const panel = getEncounterResourcePanel({instance, label, onAction, matched});
 		panel.querySelectorAll("details[data-resource-key]").forEach(details => {
 			details.open = open.has(details.dataset.resourceKey);
 		});
@@ -2243,7 +2255,8 @@ export class EncounterWorkspacePage {
 		edit.setAttribute("aria-label", `Edit statblock for ${label}`);
 		edit.disabled = this._isBusy;
 		edit.addEventListener("click", () => this._pOpenStatblockEditor(instance.id));
-		heading.append(title, edit);
+		const onResourceAction = action => this._pUpdateResource(instance.id, action);
+		heading.append(title, getEncounterConcentrationButton({instance, label, onAction: onResourceAction}), edit);
 		const conditions = document.createElement("div");
 		conditions.className = "ew__conditions";
 		conditions.setAttribute("aria-label", `Conditions for ${label}`);
@@ -2256,21 +2269,24 @@ export class EncounterWorkspacePage {
 		vitals.className = "ew__vitals";
 		vitals.setAttribute("aria-label", `HP and initiative for ${label}`);
 		this._vitalContainers.set(instance.id, vitals);
-		const resources = getEncounterResourcePanel({instance, label, onAction: action => this._pUpdateResource(instance.id, action)});
-		this._resourceContainers.set(instance.id, resources);
 		const table = document.createElement("table");
 		table.className = "ve-w-100 ve-stats";
 		const body = document.createElement("tbody");
+		let matched = new Set();
 		try {
 			body.innerHTML = Renderer.monster.getCompactRenderedString(MiscUtil.copyFast(effective), {isShowScalers: false});
 			table.append(body);
-			tile.append(heading, vitals, resources, conditions, effects, table);
+			matched = renderEncounterInlineResources({instance, effective, table, onAction: onResourceAction});
+			tile.append(heading, vitals, conditions, effects, table);
 		} catch (e) {
 			const failure = document.createElement("p");
 			failure.className = "ew__render-error";
 			failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-			tile.append(heading, vitals, resources, conditions, effects, failure);
+			tile.append(heading, vitals, conditions, effects, failure);
 		}
+		const resources = getEncounterResourcePanel({instance, label, onAction: onResourceAction, matched});
+		this._resourceContainers.set(instance.id, resources);
+		tile.append(resources);
 		this._tiles.set(instance.id, tile);
 		return tile;
 	}

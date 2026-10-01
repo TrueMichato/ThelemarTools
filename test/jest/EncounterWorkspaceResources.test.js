@@ -1,7 +1,11 @@
 import {jest} from "@jest/globals";
+import "../../js/parser.js";
+import "../../js/utils.js";
+import "../../js/render.js";
 import {BestiaryQuickActionsOperations} from "../../js/bestiary/bestiary-quick-actions-engine.js";
 import {EncounterWorkspaceState, EncounterWorkspaceStore} from "../../js/encounterworkspace/encounterworkspace-state.js";
 import {getEncounterResourceDefaults, getEncounterResourceSummary} from "../../js/encounterworkspace/encounterworkspace-resources.js";
+import {getEncounterInlineResourceEntry} from "../../js/encounterworkspace/encounterworkspace-resource-view.js";
 
 const monster = {
 	name: "Arcane Dragon",
@@ -39,6 +43,40 @@ const getStore = () => {
 };
 
 describe("Encounter Workspace combat resources", () => {
+	it("binds indexed defaults only to uniquely identified effective entries, never duplicate names or manual rows", () => {
+		const effective = {
+			trait: [
+				{name: "Echo (2/Day)", entries: ["First echo."]},
+				{name: "Echo (2/Day)", entries: ["Second echo."]},
+				{name: "Ward (3/Day)", entries: ["Ward an ally."]},
+			],
+			bonus: [{name: "Echo (2/Day)", entries: ["A different bonus action."]}],
+			action: [{name: "Breath {@recharge 5}", entries: ["Deal damage."]}],
+		};
+		const resources = getEncounterResourceDefaults(effective);
+		const bind = resource => getEncounterInlineResourceEntry({effective, resource});
+		expect(resources.abilities.map(({id}) => id)).toEqual([
+			"auto:ability:trait:0", "auto:ability:trait:1", "auto:ability:trait:2", "auto:ability:bonus:0",
+		]);
+		expect(resources.abilities.slice(0, 2).map(bind)).toEqual([null, null]);
+		expect(bind(resources.abilities[2])).toEqual({type: "ability", section: "trait", name: "Ward (3/Day)"});
+		expect(bind(resources.abilities[3])).toEqual({type: "ability", section: "bonus", name: "Echo (2/Day)"});
+		expect(bind(resources.recharges[0])).toEqual({type: "recharge", section: "action", name: "Breath {@recharge 5}"});
+		expect(bind({id: "manual:ward", name: "Ward (3/Day)"})).toBeNull();
+		expect(getEncounterInlineResourceEntry({
+			effective: {...effective, trait: [{name: "Other (3/Day)", entries: ["Other."]}, ...effective.trait.slice(1)]},
+			resource: resources.abilities[2],
+		})).toEqual({type: "ability", section: "trait", name: "Ward (3/Day)"});
+		expect(getEncounterInlineResourceEntry({
+			effective: {...effective, trait: [effective.trait[2], ...effective.trait.slice(0, 2)]},
+			resource: resources.abilities[2],
+		})).toBeNull();
+		expect(getEncounterInlineResourceEntry({
+			effective: {...effective, action: [{name: "Breath", entries: ["No recharge."]}]},
+			resource: resources.recharges[0],
+		})).toBeNull();
+	});
+
 	it("extracts only explicit counts, excluding implied legendary uses and daily spells", () => {
 		const resources = getEncounterResourceDefaults(monster);
 		expect(resources.spellSlots).toEqual({"1": {current: 4, max: 4}, "3": {current: 2, max: 2}});
