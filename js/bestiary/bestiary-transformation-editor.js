@@ -149,20 +149,72 @@ function renderDiff (parent, diff) {
 	parent.append(details);
 }
 
+const DELTA_FIELD_NAMES = {
+	type: "Creature type",
+	size: "Size",
+	resist: "Damage resistances",
+	immune: "Damage immunities",
+	vulnerable: "Damage vulnerabilities",
+	conditionImmune: "Condition immunities",
+	senses: "Senses",
+	languages: "Languages",
+	speed: "Speed",
+};
+
+const DELTA_ENTRY_NAMES = {
+	trait: "Traits",
+	action: "Actions",
+	bonus: "Bonus actions",
+	reaction: "Reactions",
+	legendary: "Legendary actions",
+	mythic: "Mythic actions",
+	spellcasting: "Spellcasting",
+};
+
+export function formatCreatureTransformationDeltaField ({path, before, after}) {
+	const abilities = ["str", "dex", "con", "int", "wis", "cha"];
+	const isAbility = abilities.includes(path);
+	const isSpeed = path === "speed" || path.startsWith("speed.");
+	const label = isAbility ? Parser.attAbvToFull(path)
+		: path.startsWith("speed.") ? `${path.slice("speed.".length).replace(/^\w/, char => char.toUpperCase())} speed`
+			: DELTA_FIELD_NAMES[path] || `Other field (${path})`;
+	const format = value => {
+		if (value == null) return "none";
+		if (path === "size" && Array.isArray(value)) return value.map(it => Parser.sizeAbvToFull(it)).join(", ") || "none";
+		if (path === "type" && (typeof value === "string" || typeof value?.type === "string")) return Parser.monTypeToFullObj(value).asText;
+		if (isSpeed && typeof value === "number") return `${value} ft.`;
+		if (path === "speed" && value && typeof value === "object" && !Array.isArray(value)
+			&& Object.values(value).every(it => typeof it === "number")) {
+			return Object.entries(value).map(([mode, feet]) => `${mode} ${feet} ft.`).join(", ") || "none";
+		}
+		if (["resist", "immune", "vulnerable", "conditionImmune", "senses", "languages"].includes(path) && Array.isArray(value)) {
+			return value.map(it => {
+				if (typeof it === "string") return it;
+				if (it && typeof it === "object" && Array.isArray(it[path]) && typeof it.note === "string") {
+					return `${it[path].join(", ")} (${it.note})`;
+				}
+				return JSON.stringify(it);
+			}).join(", ") || "none";
+		}
+		if (isAbility && typeof value === "number") return String(value);
+		return JSON.stringify(value);
+	};
+	return `${label}: ${format(before)} → ${format(after)}`;
+}
+
 function renderCompactDelta (parent, batch) {
 	parent.replaceChildren();
 	if (!batch?.previews.length) return;
 	const fieldChanges = new Map();
 	const entryChanges = new Set();
-	const compactValue = (path, value) => path === "spellcasting" && Array.isArray(value)
-		? value.map(it => it.name).filter(Boolean).join(", ") || "none"
-		: JSON.stringify(value);
 	for (const {preview} of batch.previews) {
-		for (const {path, before, after} of preview.diff.fields) {
-			const label = `${path}: ${compactValue(path, before)} → ${compactValue(path, after)}`;
+		for (const field of preview.diff.fields) {
+			const label = formatCreatureTransformationDeltaField(field);
 			fieldChanges.set(label, (fieldChanges.get(label) || 0) + 1);
 		}
-		for (const {section, name, before, after} of preview.diff.entries) entryChanges.add(`${section}: ${before && after ? "Changed" : after ? "Added" : "Removed"} ${name}`);
+		for (const {section, name, before, after} of preview.diff.entries) {
+			entryChanges.add(`${DELTA_ENTRY_NAMES[section] || `Other section (${section})`}: ${before && after ? "Changed" : after ? "Added" : "Removed"} ${name}`);
+		}
 	}
 	parent.append(element("h5", {text: "Mechanical delta · live preview"}));
 	const changes = [...fieldChanges].map(([text, count]) => batch.previews.length > 1 ? `${text} (${count} of ${batch.previews.length})` : text);
@@ -464,7 +516,9 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		syncConditional();
 		const config = element("div", {className: "bqa__transformation-config"});
 		delta = element("div", {className: "bqa__transformation-delta"});
-		config.append(options, delta);
+		if (candidate.optionGroups.length) config.append(options);
+		else config.classList.add("bqa__transformation-config--no-options");
+		config.append(delta);
 		details.append(config);
 		confirmation = element("fieldset", {className: "bqa__transformation-group bqa__transformation-confirm"});
 		confirmation.hidden = true;

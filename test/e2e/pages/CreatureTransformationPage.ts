@@ -29,6 +29,18 @@ export class CreatureTransformationPage {
 	get beforeStatblock () { return this.root.locator(".bqa__transformation-statblock").first(); }
 	get afterStatblock () { return this.root.locator(".bqa__transformation-statblock").nth(1); }
 
+	async deltaLayout () {
+		return this.root.locator(".bqa__transformation-config").evaluate(node => {
+			const delta = node.querySelector(".bqa__transformation-delta");
+			if (!delta) throw new Error("Selected recipe has no mechanical delta.");
+			return {
+				isFullWidth: node.classList.contains("bqa__transformation-config--no-options"),
+				widthRatio: delta.getBoundingClientRect().width / node.getBoundingClientRect().width,
+				fontSize: parseFloat(getComputedStyle(delta.querySelector("li") || delta).fontSize),
+			};
+		});
+	}
+
 	get nativeHover () {
 		return this.page.locator(".ve-hwin:visible").last();
 	}
@@ -101,7 +113,7 @@ export class CreatureTransformationPage {
 	}
 
 	async chooseCategory (category: "Species" | "Templates") {
-		await this.categoryButton(category).click();
+		await this.categoryButton(category).press("Enter");
 	}
 
 	async selectSource (source: string) {

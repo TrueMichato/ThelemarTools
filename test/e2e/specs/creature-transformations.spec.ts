@@ -12,7 +12,14 @@ test("Bestiary previews immediately, leaves the source untouched, and stacks exp
 	await editor.choose("catalog:skeleton|dmg");
 	await editor.expectLivePreview();
 	expect(await editor.createdOperations()).toBe(0);
-	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("type:");
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Creature type: Humanoid (Goblinoid) → Undead");
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Charisma: 8 → 4");
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Condition immunities: none → exhaustion, poisoned");
+	await expect(editor.root.locator(".bqa__transformation-delta")).not.toContainText('"exhaustion"');
+	const {isFullWidth, widthRatio, fontSize} = await editor.deltaLayout();
+	expect(isFullWidth).toBe(true);
+	expect(widthRatio).toBeGreaterThan(0.95);
+	expect(fontSize).toBeGreaterThanOrEqual(16);
 	await expect(editor.root.locator(".bqa__transformation-target")).toContainText("vulnerable");
 	await expect(page.locator(".bqa__changes .bqa__row")).toHaveCount(0);
 	await editor.requestConfirmation();
@@ -88,7 +95,7 @@ test("an option changes the live delta and its exact source-qualified mechanics 
 	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Choose Breath size");
 	await editor.chooseOption("Breath size", "large-or-smaller");
 	await editor.expectLivePreview();
-	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("resist");
+	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Damage resistances");
 	await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("fire");
 	expect(await editor.savedEncounter()).toEqual(before);
 	await editor.optionInfo("Dragon ancestry", "red").click();
@@ -302,7 +309,7 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		await expect(editor.beforeStatblock).not.toContainText("Fey Ancestry");
 		await expect(editor.afterStatblock).toContainText("Fey Ancestry");
 		await expect(editor.afterStatblock).toContainText("Elvish");
-		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("dex: 14 → 16");
+		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Dexterity: 14 → 16");
 		await editor.selectedRecipeInfo().click();
 		await expect(editor.nativeHover).toContainText("Elf Weapon Training");
 		await expect(editor.nativeHover).toContainText("Set size to Medium");
@@ -342,7 +349,7 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		const selectedSpellOption = await editor.optionByName("Species spell grant and ability", "Drow (CHA)").getAttribute("value");
 		await editor.expectLivePreview();
 		await expect(editor.afterStatblock).toContainText("Species Magic: dancing lights (will)");
-		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("spellcasting:");
+		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Spellcasting: Added");
 		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Species Magic: dancing lights (will)");
 		await expect(editor.root.locator(".bqa__transformation-delta")).not.toContainText('"will":');
 		await editor.optionByName("Species spell grant and ability", "Drow (CHA)").locator("..").locator("..").locator(".bqa__transformation-info").click();
@@ -376,7 +383,7 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 		const before = surface === "Encounter Workspace" ? await editor.savedEncounter() : null;
 		await editor.choose("race:dragonborn (red)|xphb~v:dragonborn|xphb:8");
 		await editor.expectLivePreview();
-		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("size:");
+		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Size: Small → Medium");
 		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("fire");
 		await expect(editor.beforeStatblock).not.toContainText("Breath Weapon");
 		await expect(editor.afterStatblock).toContainText("Breath Weapon");
@@ -472,6 +479,13 @@ test.describe("mobile touch and night mode", () => {
 		await page.locator(".bqa__btn-open:visible").first().tap();
 		await page.getByRole("tab", {name: "Templates"}).tap();
 		const editor = new CreatureTransformationPage(page);
+		await editor.choose("catalog:skeleton|dmg");
+		await editor.expectLivePreview();
+		await expect(editor.root.locator(".bqa__transformation-delta")).toContainText("Condition immunities: none → exhaustion, poisoned");
+		expect((await editor.deltaLayout()).widthRatio).toBeGreaterThan(0.95);
+		await editor.useNightMode();
+		expect((await editor.deltaLayout()).fontSize).toBeGreaterThanOrEqual(16);
+		expect(await editor.textContrast(".bqa__transformation-delta li", ".bqa__transformation-delta")).toBeGreaterThanOrEqual(4.5);
 		await editor.expectLongTemplateTitleFits("catalog:skeletal wyrmling|ar8");
 		await editor.recipeInfo("catalog:half-dragon|mm").tap();
 		await expect(editor.nativeHover).toContainText("Dragon");
