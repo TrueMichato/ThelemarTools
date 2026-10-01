@@ -4102,7 +4102,9 @@ class CharacterSheetRespec {
 			const stored = currentFeat
 				&& feat.name === currentFeat.name
 				&& feat.source === currentFeat.source
-				? this._state.getFeats?.().find(it => it.name === feat.name && it.source === feat.source)
+				? (decision
+					? this._getFeatOwnedByDecision(decision, currentFeat)
+					: this._state.getFeats?.().find(it => it.name === feat.name && it.source === feat.source))
 				: null;
 			selectedFeat._featChoices = {
 				...emptyFeatChoices(),
@@ -4227,6 +4229,11 @@ class CharacterSheetRespec {
 	}
 
 	_applyClassFeatProgressionDecisionChange (decision, nextFeat, featChoices = {}) {
+		const hasAbilityChildReceipt = this._engine.manifest.decisions.some(candidate =>
+			candidate.type === "nestedAbility"
+				&& candidate.parentSemanticKey === decision.semanticKey
+				&& candidate.receipt?.effects?.some(effect => effect.type === "abilityDelta"),
+		);
 		try {
 			this._engine.stageGraphMutation(decision.id, null, {
 				// removeFeat below owns the historical feat teardown, so the
@@ -4238,14 +4245,15 @@ class CharacterSheetRespec {
 					try {
 						const previous = decision.selection;
 						if (previous?.name) {
-							const stored = state.getFeats().find(feat =>
-								feat.name === previous.name && feat.source === previous.source);
+							const stored = this._getFeatOwnedByDecision(decision, previous);
+							if (!stored) throw new Error("The feat owned by this class progression slot could not be found.");
 							this._assertLevelFeatSkillReceipt(stored);
-							state.removeFeat(previous.name, previous.source);
+							state.removeFeat(stored.id, stored.source, {skipAbilityDeltas: hasAbilityChildReceipt});
 						}
 						const feat = MiscUtil.copyFast(nextFeat);
 						feat.choices = MiscUtil.copyFast(featChoices);
 						feat._featChoices = MiscUtil.copyFast(featChoices);
+						feat.sourceDecisionKey = decision.semanticKey;
 						const eligibility = CharacterSheetClassUtils.evaluateFeatPrerequisites(feat, state, {
 							totalLevel: decision.characterLevel,
 							excludeFeatUid: previous?.name ? `${previous.name}|${previous.source}` : "",
@@ -4254,6 +4262,7 @@ class CharacterSheetRespec {
 						const added = state.addFeat(feat, {
 							allSpells: this._page.getSpells?.() || [],
 							skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(feat),
+							sourceDecisionKey: decision.semanticKey,
 							classFeatProgression: {
 								className: decision.className,
 								classSource: decision.classSource,
@@ -4394,7 +4403,15 @@ class CharacterSheetRespec {
 	 */
 	async _applyClassFeatProgressionFeatChange (level, history, index, oldEntry, newFeat) {
 		// Remove the previously granted feat (cleans up its bonuses/spells/modifiers).
-		const existing = (this._state.getFeats() || []).find(f => f.name === oldEntry.name && f.source === oldEntry.source);
+		const matches = (this._state.getFeats() || []).filter(f => f.name === oldEntry.name && f.source === oldEntry.source);
+		const owned = matches.filter(f =>
+			f.classFeatProgression?.className === history.class?.name
+				&& f.classFeatProgression?.classSource === history.class?.source
+				&& Number(f.classFeatProgression?.level) === Number(level)
+				&& f.classFeatProgression?.progressionName === oldEntry.progressionName,
+		);
+		const existing = owned.length === 1 ? owned[0] : (matches.length === 1 ? matches[0] : null);
+		if (!existing && matches.length) throw new Error("The feat owned by this class progression slot could not be identified.");
 		if (existing) this._state.removeFeat?.(existing.id || existing.name, existing.source);
 
 		// Add the replacement through the real feat system so passive bonuses follow.
@@ -4408,7 +4425,8 @@ class CharacterSheetRespec {
 				progressionName: oldEntry.progressionName,
 			},
 		});
-		if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, featToAdd);
+		if (!added) throw new Error(`${featToAdd.name} is already selected.`);
+		CharacterSheetClassUtils.applyFeatBonuses(this._state, featToAdd);
 
 		// Update history record for this slot.
 		const updatedList = [...(history.choices.classFeatProgressionFeats || [])];
@@ -4763,6 +4781,15 @@ class CharacterSheetRespec {
 		this._recalcHpPreservingHealing();
 	}
 
+	_getFeatOwnedByDecision (decision, ref) {
+		if (!decision?.semanticKey || !ref?.name) return null;
+		const matches = this._state.getFeats().filter(feat =>
+			feat.name === ref.name && feat.source === ref.source,
+		);
+		return matches.find(feat => feat.sourceDecisionKey === decision.semanticKey)
+			|| (matches.length === 1 && !matches[0].sourceDecisionKey ? matches[0] : null);
+	}
+
 	_applyImprovementChange (decision, next) {
 		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
 		const previousFeat = decision.type === "feat"
@@ -4771,12 +4798,9 @@ class CharacterSheetRespec {
 		if (next?.mode === "feat"
 				&& previousFeat?.name === next.feat?.name
 				&& previousFeat?.source === next.feat?.source) {
-			const stored = this._state.getFeats().find(feat =>
-				feat.name === previousFeat.name && feat.source === previousFeat.source,
-			);
-			const isOwnedByDecision = !stored?.sourceDecisionKey || stored.sourceDecisionKey === decision.semanticKey;
-			if (isOwnedByDecision
-				&& JSON.stringify(stored?.choices || {}) === JSON.stringify(next.featChoices || {})) return true;
+			const stored = this._getFeatOwnedByDecision(decision, previousFeat);
+			if (stored
+				&& JSON.stringify(stored.choices || {}) === JSON.stringify(next.featChoices || {})) return true;
 		}
 		const hasAbilityChildReceipt = this._engine.manifest.decisions.some(candidate =>
 			candidate.type === "nestedAbility"
@@ -4854,13 +4878,8 @@ class CharacterSheetRespec {
 				: previous?.mode === "feat"
 					? previous.feat
 					: null;
-			const storedPreviousFeat = previousFeat?.name
-				? this._state.getFeats().find(feat =>
-					feat.name === previousFeat.name && feat.source === previousFeat.source,
-				)
-				: null;
-			const ownsPreviousFeat = !!storedPreviousFeat
-				&& (!storedPreviousFeat.sourceDecisionKey || storedPreviousFeat.sourceDecisionKey === decision.semanticKey);
+			const storedPreviousFeat = this._getFeatOwnedByDecision(decision, previousFeat);
+			const ownsPreviousFeat = !!storedPreviousFeat;
 			let pairedFeat = null;
 			if (decision.type === "asi") {
 				const pairedDecision = this._engine.manifest.decisions.find(it =>
@@ -4871,9 +4890,7 @@ class CharacterSheetRespec {
 						&& it.selection?.name,
 				);
 				if (pairedDecision) {
-					const stored = this._state.getFeats().find(feat =>
-						feat.name === pairedDecision.selection.name && feat.source === pairedDecision.selection.source,
-					);
+					const stored = this._getFeatOwnedByDecision(pairedDecision, pairedDecision.selection);
 					const canonical = (this._page.getFeats?.() || []).find(feat =>
 						feat.name === pairedDecision.selection.name && feat.source === pairedDecision.selection.source,
 					);
@@ -4888,7 +4905,7 @@ class CharacterSheetRespec {
 								_featChoices: choices,
 							},
 						};
-						this._state.removeFeat(pairedDecision.selection.name, pairedDecision.selection.source);
+						if (stored) this._state.removeFeat(stored.id, stored.source);
 					}
 				}
 			}

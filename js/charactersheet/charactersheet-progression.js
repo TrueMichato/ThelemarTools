@@ -980,6 +980,15 @@ class CharacterSheetProgression {
 		const featChoiceSpec = isLevelFeat
 			? CharacterSheetClassUtils.buildFeatChoicesSpec(entity, {page, state})
 			: null;
+		if (isLevelFeat && entity.name === "Ability Score Improvement" && entity.source === "XPHB") {
+			descriptors = descriptors.filter(descriptor =>
+				descriptor.kind !== "ability" || !/\.ability\[[1-9]\d*\]/.test(descriptor.sourcePath || ""),
+			).map(descriptor =>
+				descriptor.kind === "ability" && /\.ability\[0\]/.test(descriptor.sourcePath || "")
+					? {...descriptor, count: 1}
+					: descriptor,
+			);
+		}
 		if (featChoiceSpec?.skills && featChoiceSpec.expertise) {
 			const choices = entity.choices || entity._featChoices || {};
 			const currentSkills = Array.isArray(choices.skills) ? choices.skills : [];
@@ -3421,7 +3430,7 @@ class CharacterSheetProgression {
 			const improvement = CharacterSheetClassUtils.getImprovementOpportunity(
 				classData,
 				levelInfo.classLevel,
-				{grantBoth: grantsBoth},
+				{grantBoth: grantsBoth, classFeatures: page?.getClassFeatures?.() || []},
 			);
 			if (improvement) {
 				const legacyFeat = historyEntry?.choices?.feat || null;

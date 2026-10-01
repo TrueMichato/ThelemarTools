@@ -808,8 +808,8 @@ class CharacterSheetClassUtils {
 	 *
 	 * @param {*} classData - The resolved class data.
 	 * @param {number} classLevel - The class level being gained.
-	 * @param {{grantBoth?: boolean}} [opts] - Flow-specific additions such as TGTT's
-	 *   level-4 "ASI and feat" rule.
+	 * @param {{grantBoth?: boolean, classFeatures?: Array<*>}} [opts] - Flow-specific
+	 *   additions and the resolved feature catalog for source-qualified references.
 	 * @returns {null|{kind: "asiOrFeat"|"asiAndFeat"|"feat", label: string, categories: string[], allowsAnyQualifyingFeat: boolean, source: string}}
 	 */
 	static getImprovementOpportunity (/** @type {*} */ classData, /** @type {*} */ classLevel, /** @type {*} */ opts = {}) {
@@ -836,13 +836,23 @@ class CharacterSheetClassUtils {
 				// Class feature refs are four-part UIDs, with an optional fifth
 				// feature-source field used by source-qualified data such as EFA.
 				if (![4, 5].includes(parts.length)) return null;
-				const [name, className, classSourceRaw, levelRaw, featureSource] = parts;
+				const [name, className, classSourceRaw, levelRaw, featureSourceRaw] = parts;
 				const classSource = classSourceRaw || classData.source;
+				const featureSource = featureSourceRaw || classSource;
 				const featureLevel = Number(levelRaw);
 				if (!name || !className || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
-				if (parts.length === 5 && !featureSource) return null;
+				if (parts.length === 5 && !featureSourceRaw) return null;
 				if (normalize(className) !== normalize(classData.name)) return null;
-				if (normalize(classSource) !== normalize(classData.source)) return null;
+				if (normalize(classSource) !== normalize(classData.source)) {
+					if (classData.source !== "TGTT" || classData.edition !== "one" || classSource !== "XPHB") return null;
+					if (!(opts.classFeatures || []).some(feature =>
+						normalize(feature.name) === normalize(name)
+							&& normalize(feature.className) === normalize(className)
+							&& normalize(feature.classSource) === normalize(classSource)
+							&& normalize(feature.source) === normalize(featureSource)
+							&& Number(feature.level) === featureLevel,
+					)) return null;
+				}
 				return {name, level: featureLevel};
 			}
 
@@ -888,6 +898,25 @@ class CharacterSheetClassUtils {
 			allowsAnyQualifyingFeat: true,
 			source: hasAsi ? "classFeature" : "legacyFallback",
 		};
+	}
+
+	/**
+	 * Match the acquisition's feat owner to its progression decision, including
+	 * the distinct level-4 TGTT "ASI and feat" slot and level-19 Epic Boon slot.
+	 */
+	static getImprovementFeatDecisionKey (classData, classLevel, improvement) {
+		if (!improvement || !globalThis.CharacterSheetProgression?.getSemanticKey) {
+			throw new Error("Cannot identify an improvement feat without its progression decision.");
+		}
+		return globalThis.CharacterSheetProgression.getSemanticKey({
+			className: classData.name,
+			classSource: classData.source,
+			classLevel,
+			type: improvement.kind === "asiOrFeat" ? "asiOrFeat" : "feat",
+			sourceKey: improvement.kind === "feat"
+				? "epic-boon-or-feat"
+				: improvement.kind === "asiAndFeat" ? "feat" : "asi-or-feat",
+		});
 	}
 
 	/**
@@ -8552,6 +8581,10 @@ class CharacterSheetClassUtils {
 		const choices = featChoices || feat._featChoices || {};
 		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
 		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
+		const storedFeat = (state.getFeats?.() || []).findLast(item =>
+			item.name === feat.name && item.source === feat.source
+				&& (!feat.sourceDecisionKey || item.sourceDecisionKey === feat.sourceDecisionKey),
+		);
 		const before = state._captureFeatAppliedEffectsSnapshot?.() || {
 			abilities: Object.fromEntries(abilityAbbreviations.map(ability => [ability, Number(state.getAbilityBase?.(ability)) || 0])),
 			skills: state.getSkillProficiencies?.() || {},
@@ -8580,7 +8613,12 @@ class CharacterSheetClassUtils {
 
 		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
 		if (/** @type {*} */ effectiveAbility) {
-			effectiveAbility.forEach((/** @type {*} */ ablChoice) => {
+			// XPHB ASI lists +2 to one score and +1 to two scores as alternatives,
+			// not two grants. The current single-ability picker selects the first.
+			const abilityGrants = feat.name === "Ability Score Improvement" && feat.source === "XPHB"
+				? effectiveAbility.slice(0, 1)
+				: effectiveAbility;
+			abilityGrants.forEach((/** @type {*} */ ablChoice) => {
 				const max = ablChoice.max || 20;
 
 				if (/** @type {*} */ ablChoice.choose) {
@@ -8718,7 +8756,7 @@ class CharacterSheetClassUtils {
 		}
 
 		if (state.recordFeatAppliedEffectsSince) {
-			state.recordFeatAppliedEffectsSince(feat.name, feat.source, before);
+			state.recordFeatAppliedEffectsSince(feat.name, feat.source, before, storedFeat?.id);
 			return;
 		}
 
@@ -8743,7 +8781,7 @@ class CharacterSheetClassUtils {
 				.map(spell => ({name: spell.name, source: spell.source})),
 			immunitiesAdded: (state?._data?.immunities || state.getImmunities?.() || []).filter(value => !before.immunities.has(value)),
 			conditionImmunitiesAdded: (state?._data?.conditionImmunities || state.getConditionImmunities?.() || []).filter(value => !before.conditionImmunities.has(value)),
-		});
+		}, storedFeat?.id);
 	}
 
 	/**
@@ -9941,12 +9979,21 @@ class CharacterSheetClassUtils {
 		]));
 		const normalize = value => String(value || "").trim().toLowerCase();
 		const storedFeats = state?.getFeats?.() || [];
-		const subFeatDeltas = ref => {
+		const subFeatDeltas = (ref, entry) => {
 			if (!ref?.name) return;
-			const stored = storedFeats.find(feat =>
+			const decisionKey = (entry?.decisions || []).find(decision =>
+				globalThis.CharacterSheetProgression?._getFeatDecisionSelections?.(decision)
+					.some(selection =>
+						normalize(selection.name) === normalize(ref.name)
+							&& normalize(selection.source) === normalize(ref.source),
+					),
+			)?.semanticKey;
+			const matches = storedFeats.filter(feat =>
 				normalize(feat?.name) === normalize(ref.name)
 					&& normalize(feat?.source) === normalize(ref.source),
 			);
+			const stored = matches.find(feat => decisionKey && feat.sourceDecisionKey === decisionKey)
+				|| (matches.length === 1 ? matches[0] : null);
 			for (const [ability, delta] of Object.entries(stored?.appliedEffects?.abilityDeltas || {})) {
 				scores[ability] = (scores[ability] || 0) - (Number(delta) || 0);
 			}
@@ -9960,8 +10007,8 @@ class CharacterSheetClassUtils {
 				}
 			}
 			if (level < Number(characterLevel)) continue;
-			subFeatDeltas(entry?.choices?.feat);
-			for (const feat of entry?.choices?.classFeatProgressionFeats || []) subFeatDeltas(feat);
+			subFeatDeltas(entry?.choices?.feat, entry);
+			for (const feat of entry?.choices?.classFeatProgressionFeats || []) subFeatDeltas(feat, entry);
 		}
 		return scores;
 	}

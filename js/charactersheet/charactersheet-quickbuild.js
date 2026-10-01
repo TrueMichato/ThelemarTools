@@ -250,6 +250,7 @@ class CharacterSheetQuickBuild {
 
 			const improvement = CharacterSheetClassUtils.getImprovementOpportunity(classData, classLevel, {
 				grantBoth: !!this._state.shouldGrantBothAsiAndFeat?.(characterLevel),
+				classFeatures: this._page.getClassFeatures(),
 			});
 			const hasAsi = !!improvement;
 
@@ -5552,8 +5553,20 @@ class CharacterSheetQuickBuild {
 		const applyFeat = () => {
 			if (!asiSel.feat) return;
 			applyFeatChoices();
-			const added = this._state.addFeat(asiSel.feat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(asiSel.feat)});
-			if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, asiSel.feat, asiSel.featChoices);
+			const opportunity = asiSel.feat.repeatable
+				? CharacterSheetClassUtils.getImprovementOpportunity(classData, classLevel, {
+					grantBoth: asiSel.isBoth,
+					classFeatures: this._page.getClassFeatures(),
+				})
+				: null;
+			const featToAdd = opportunity
+				? {
+					...asiSel.feat,
+					sourceDecisionKey: CharacterSheetClassUtils.getImprovementFeatDecisionKey(classData, classLevel, opportunity),
+				}
+				: asiSel.feat;
+			const added = this._state.addFeat(featToAdd, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(featToAdd)});
+			if (added) CharacterSheetClassUtils.applyFeatBonuses(this._state, featToAdd, asiSel.featChoices);
 		};
 
 		if (asiSel.isBoth) {

@@ -112,6 +112,7 @@ class CharacterSheetLevelUp {
 
 		const improvement = CharacterSheetClassUtils.getImprovementOpportunity(classData, newLevel, {
 			grantBoth: this._state.shouldGrantBothAsiAndFeat(totalLevel + 1),
+			classFeatures: this._page.getClassFeatures(),
 		});
 		const hasAsi = !!improvement;
 
@@ -4763,6 +4764,17 @@ class CharacterSheetLevelUp {
 		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
 		// targetClass.level was just updated above, so getTotalLevel() already reflects the new character level.
 		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat(this._state.getTotalLevel() || 0);
+		const getSelectedFeatForAcquisition = () => {
+			if (!selectedFeat?.repeatable) return selectedFeat;
+			const opportunity = CharacterSheetClassUtils.getImprovementOpportunity(classData, newLevel, {
+				grantBoth: isBothAsiAndFeat,
+				classFeatures: this._page.getClassFeatures(),
+			});
+			return {
+				...selectedFeat,
+				sourceDecisionKey: CharacterSheetClassUtils.getImprovementFeatDecisionKey(classData, newLevel, opportunity),
+			};
+		};
 
 		// Apply ASI and/or feat
 		if (isBothAsiAndFeat) {
@@ -4805,8 +4817,9 @@ class CharacterSheetLevelUp {
 				} else if (selectedFeat._featChoices) {
 					selectedFeat.choices = {...selectedFeat._featChoices};
 				}
-				const featAdded = this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
-				if (featAdded) CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
+				const featToAdd = getSelectedFeatForAcquisition();
+				const featAdded = this._state.addFeat(featToAdd, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(featToAdd)});
+				if (featAdded) CharacterSheetClassUtils.applyFeatBonuses(this._state, featToAdd);
 				await this._processFeatSpellChoices();
 			}
 		} else if (selectedFeat) {
@@ -4819,9 +4832,10 @@ class CharacterSheetLevelUp {
 			} else if (selectedFeat._featChoices) {
 				selectedFeat.choices = {...selectedFeat._featChoices};
 			}
-			const featAdded = this._state.addFeat(selectedFeat, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(selectedFeat)});
+			const featToAdd = getSelectedFeatForAcquisition();
+			const featAdded = this._state.addFeat(featToAdd, {allSpells: this._page.getSpells(), skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(featToAdd)});
 			// Apply feat bonuses only on a fresh add (applyFeatBonuses writes BASE non-idempotently)
-			if (featAdded) CharacterSheetClassUtils.applyFeatBonuses(this._state, selectedFeat);
+			if (featAdded) CharacterSheetClassUtils.applyFeatBonuses(this._state, featToAdd);
 			// Process pending spell choices from the feat
 			await this._processFeatSpellChoices();
 		} else if (asiChoices) {
