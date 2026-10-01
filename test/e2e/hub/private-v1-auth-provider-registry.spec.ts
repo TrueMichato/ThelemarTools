@@ -17,6 +17,32 @@ async function getAccountSessions (page: Page) {
 	}>;
 }
 
+async function pPostCampaignWithRateBudget (page: Page, name: string) {
+	const idempotencyKey = crypto.randomUUID();
+	const pPost = () => page.evaluate(async ({name, idempotencyKey}) => {
+		const session = await fetch("/api/session").then(response => response.json());
+		const response = await fetch("/api/campaigns", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-csrf-token": session.csrfToken,
+				"x-hub-protocol-version": "5",
+				"idempotency-key": idempotencyKey,
+			},
+			body: JSON.stringify({name}),
+		});
+		return {status: response.status, body: await response.json(), retryAfter: response.headers.get("retry-after")};
+	}, {name, idempotencyKey});
+	const first = await pPost();
+	if (first.status !== 429) return first;
+	const seconds = Number(first.retryAfter);
+	if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60) {
+		throw new Error(`Campaign creation returned an invalid Retry-After value: ${first.retryAfter || "<missing>"}.`);
+	}
+	await page.waitForTimeout(seconds * 1_000 + 250);
+	return pPost();
+}
+
 function expectSingleSessionRotation ({
 	before,
 	after,
@@ -125,41 +151,15 @@ test("operator reauthentication grants and revokes campaign creation through the
 
 		await targetPage.goto("/hub.html");
 		await expect(targetPage.locator("#hub-create-form")).toBeVisible();
-		const created = await targetPage.evaluate(async () => {
-			const session = await fetch("/api/session").then(response => response.json());
-			const response = await fetch("/api/campaigns", {
-				method: "POST",
-				headers: {
-					"content-type": "application/json",
-					"x-csrf-token": session.csrfToken,
-					"x-hub-protocol-version": "5",
-					"idempotency-key": crypto.randomUUID(),
-				},
-				body: JSON.stringify({name: "Entitled Campaign"}),
-			});
-			return {status: response.status, body: await response.json()};
-		});
+		const created = await pPostCampaignWithRateBudget(targetPage, "Entitled Campaign");
 		expect(created.status).toBe(201);
 		expect(created.body.campaign.name).toBe("Entitled Campaign");
 
 		await targetRow.getByRole("button", {name: "Revoke creator"}).click();
 		await expect(targetRow.getByRole("button", {name: "Grant creator"})).toBeVisible();
 
-		const denied = await targetPage.evaluate(async () => {
-			const session = await fetch("/api/session").then(response => response.json());
-			const response = await fetch("/api/campaigns", {
-				method: "POST",
-				headers: {
-					"content-type": "application/json",
-					"x-csrf-token": session.csrfToken,
-					"x-hub-protocol-version": "5",
-					"idempotency-key": crypto.randomUUID(),
-				},
-				body: JSON.stringify({name: "Denied Campaign"}),
-			});
-			return {status: response.status, body: await response.json()};
-		});
-		expect(denied).toEqual({
+		const denied = await pPostCampaignWithRateBudget(targetPage, "Denied Campaign");
+		expect({status: denied.status, body: denied.body}).toEqual({
 			status: 403,
 			body: {error: "CAMPAIGN_CREATE_NOT_ENTITLED"},
 		});

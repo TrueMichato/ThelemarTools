@@ -44,8 +44,15 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   the current projection is authorized and reads proposal state when restoring controls, while
   preserving unconfirmed auto-resolution. Red-first route/transfer tests and the full local Hub and
   Character Sheet Jest suites pass; the complete disposable stack passed 59/59 PostgreSQL checks
-  and 47/47 browser journeys on the candidate. Exact-head CI, independent review, and another
-  separately authorized release remain pending.
+  and 47/47 browser journeys on the candidate. Exact-head CI run `36841354346` passed
+  migration/roles and affected regressions but stopped before real-stack E2E when a newly
+  disclosed high-severity Fastify advisory failed the production dependency audit. The
+  follow-up pins the fixed `fastify@5.12.5`; local production audit reports zero vulnerabilities.
+  The entitlement browser probe now honors a server-supplied bounded `Retry-After` when other
+  serial journeys exhaust the shared IP's campaign-creation quota, without relaxing the 201/403
+  authorization assertions or the server limit. The full dependency-updated local stack passes
+  59/59 PostgreSQL checks and 47/47 browser journeys. CI for this exact head, independent
+  review, and another separately authorized release remain pending.
 - **R11b-to-r11c history:** read-only audit confirmed one ordinary character PATCH at
   the route transition (revision 22 -> 23). Synthetic red-first tests found that Fighter's synthetic
   Second Wind pool was re-minting a generic `resources[]` row, while source-managed modifier IDs also
