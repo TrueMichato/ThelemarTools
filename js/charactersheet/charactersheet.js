@@ -5360,7 +5360,7 @@ class CharacterSheetPage {
 
 			let profClass = "";
 			let profTitle = toolCheck
-				? `Derived from ${toolCheck.tool}${this._state.hasToolSkillAdvantage(skillKey) ? ` and ${this._formatSkillKeyLabel(toolCheck.skill)} proficiency (advantage)` : ""}`
+				? `${toolCheck.tool} + ${this._formatSkillKeyLabel(toolCheck.skill)}: use the higher tool or skill proficiency${this._state.hasToolSkillAdvantage(skillKey) ? "; advantage from both proficiencies" : ""}`
 				: "Not proficient - Click to toggle proficiency";
 			if (toolCheck && profLevel === 2) {
 				profClass = "charsheet__prof-indicator--expertise";
@@ -6645,7 +6645,7 @@ class CharacterSheetPage {
 			const toolCount = this._getToolCheckCandidates().length;
 			toolCheckBtn.disabled = toolCount === 0;
 			toolCheckBtn.title = toolCount
-				? "Roll a tool check, optionally pairing it with a proficient skill"
+				? "Roll a tool check, optionally pairing it with a relevant skill"
 				: "Add a tool proficiency or a feature which modifies a tool check first";
 		}
 
@@ -19586,11 +19586,11 @@ class CharacterSheetPage {
 			? this._state.aggregateModifiers(checkType, {appliedConditionalIds})
 			: checkProbe;
 
-		const proficiencyLevel = this._state.getToolCheckProficiencyLevel(toolName);
+		const toolLevel = this._state.getToolCheckProficiencyLevel(toolName);
+		const skillLevel = skillKey ? this._state.getToolSkillProficiencyLevel(null, skillKey) : 0;
+		const proficiencyLevel = Math.max(toolLevel, skillLevel);
 		const proficiencyBonus = proficiencyLevel * this._state.getProficiencyBonus();
-		const hasSkillAdvantage = !!skillKey
-			&& proficiencyLevel > 0
-			&& this._state.getEffectiveSkillProficiency(skillKey) > 0;
+		const hasSkillAdvantage = toolLevel > 0 && skillLevel > 0;
 		const advantageState = this._state.getAdvantageState?.(checkType, {appliedConditionalIds});
 		const hasAdvantage = hasSkillAdvantage || advantageState?.advantage || checkAggregate.advantage || toolAggregate.advantage;
 		const hasDisadvantage = advantageState?.disadvantage || checkAggregate.disadvantage || toolAggregate.disadvantage;
@@ -19599,7 +19599,7 @@ class CharacterSheetPage {
 		const substitutedAbility = this._state.getActiveAbilitySubstitution?.(checkType);
 		const abilityMod = this._state.getAbilityMod(substitutedAbility || ability);
 		const baseMod = abilityMod + checkAggregate.bonus + proficiencyBonus + toolAggregate.bonus;
-		const toolMinimum = this._state.getToolCheckRollMinimum?.(toolName);
+		const toolMinimum = this._state.getToolCheckRollMinimum?.(toolName, skillKey);
 		const minimumCandidates = [toolMinimum, checkAggregate.minimum, toolAggregate.minimum].filter(Number.isFinite);
 		const minimum = minimumCandidates.length ? Math.max(...minimumCandidates) : null;
 		let effectiveRoll = rollResult.roll;
@@ -19645,7 +19645,7 @@ class CharacterSheetPage {
 		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const proficiencyStr = proficiencyBonus
-			? ` + ${proficiencyBonus} (${proficiencyLevel === 2 ? "tool expertise" : "tool proficiency"})`
+			? ` + ${proficiencyBonus} (${toolLevel >= skillLevel ? "tool" : "skill"} ${proficiencyLevel === 2 ? "expertise" : "proficiency"})`
 			: "";
 		const toolBonusStr = toolAggregate.bonus ? ` ${toolAggregate.bonus >= 0 ? "+" : "-"} ${Math.abs(toolAggregate.bonus)} (tool bonus)` : "";
 		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
@@ -25970,8 +25970,8 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Show the tool-check setup. A paired proficient skill grants advantage and is
-	 * persisted as a custom skill so the same check becomes one-click thereafter.
+	 * Show the tool-check setup. A paired skill is persisted as a custom skill
+	 * so the same check becomes one-click thereafter.
 	 */
 	async _showToolCheckModal () {
 		const tools = this._getToolCheckCandidates();
@@ -25979,10 +25979,9 @@ class CharacterSheetPage {
 			JqueryUtil.doToast({type: "warning", content: "No tool checks are available. Add a tool proficiency first."});
 			return;
 		}
-		const proficientSkills = this.getSkillsList()
+		const skills = this.getSkillsList()
 			.filter(skill => !skill.isLoreSkill && !skill.toolCheck)
-			.map(skill => ({...skill, key: skill.name.toLowerCase().replace(/\s+/g, "")}))
-			.filter(skill => this._state.getEffectiveSkillProficiency(skill.key) > 0);
+			.map(skill => ({...skill, key: skill.name.toLowerCase().replace(/\s+/g, "")}));
 		const abilityOptions = [
 			{value: "", label: "Choose an ability"},
 			{value: "str", label: "Strength"},
@@ -25998,7 +25997,7 @@ class CharacterSheetPage {
 		});
 		const formEl = ee`<div class="ve-flex-col charsheet__tool-check-modal">
 			<p class="ve-muted ve-small mb-3">
-				Tool proficiency adds your proficiency bonus. If you also pair a proficient relevant skill, the check has advantage and is saved in Skills for next time.
+				Use your higher tool or skill proficiency bonus (never both). If proficient with both, the check has advantage. Paired checks are saved in Skills for next time.
 			</p>
 			<label class="mb-1" for="tool-check-tool">Tool</label>
 			<select class="ve-form-control mb-3" id="tool-check-tool">
@@ -26008,7 +26007,7 @@ class CharacterSheetPage {
 			<select class="ve-form-control mb-3" id="tool-check-ability">
 				${abilityOptions.map(option => `<option value="${option.value}">${option.label}</option>`).join("")}
 			</select>
-			<label class="mb-1" for="tool-check-skill">Relevant proficient skill <span class="ve-muted">(optional)</span></label>
+			<label class="mb-1" for="tool-check-skill">Relevant skill <span class="ve-muted">(optional)</span></label>
 			<select class="ve-form-control mb-1" id="tool-check-skill"></select>
 			<div class="ve-muted ve-small mb-3" id="tool-check-guidance"></div>
 			<div class="ve-flex-h-right">
@@ -26028,18 +26027,18 @@ class CharacterSheetPage {
 			const tool = getTool();
 			abilityEl.value = tool.defaultAbility || "";
 			const suggestedKeys = new Set(tool.suggestedSkills.map(skill => skill.name.toLowerCase().replace(/\s+/g, "")));
-			const availableSuggestions = proficientSkills.filter(skill => suggestedKeys.has(skill.key));
-			const orderedSkills = [...proficientSkills].sort((a, b) => {
+			const availableSuggestions = skills.filter(skill => suggestedKeys.has(skill.key));
+			const orderedSkills = [...skills].sort((a, b) => {
 				const aSuggested = suggestedKeys.has(a.key) ? 1 : 0;
 				const bSuggested = suggestedKeys.has(b.key) ? 1 : 0;
 				return bSuggested - aSuggested || a.name.localeCompare(b.name);
 			});
 			skillEl.innerHTML = `<option value="">No paired skill</option>${orderedSkills.map(skill => `<option value="${skill.key}">${skill.name}${suggestedKeys.has(skill.key) ? " — suggested" : ""}</option>`).join("")}`;
 			guidanceEl.textContent = availableSuggestions.length
-				? `Suggested from older tool guidance: ${availableSuggestions.map(skill => skill.name).join(" or ")}. Any relevant proficient skill may be paired.`
-				: proficientSkills.length
-					? "None of the older suggested skills are proficient; choose any proficient skill that is relevant to the task."
-					: "No proficient skills are available; roll with tool proficiency only.";
+				? `Suggested from older tool guidance: ${availableSuggestions.map(skill => skill.name).join(" or ")}. Any relevant skill may be paired.`
+				: skills.length
+					? "Choose any skill relevant to the task; advantage requires proficiency with both the tool and skill."
+					: "No skills are available to pair; roll with the tool alone.";
 			rollBtn.disabled = !abilityEl.value;
 			rollBtn.textContent = "Roll";
 		};
@@ -26053,7 +26052,7 @@ class CharacterSheetPage {
 		formEl.querySelector("#tool-check-cancel").addEventListener("click", () => doClose());
 		rollBtn.addEventListener("click", async () => {
 			const tool = getTool();
-			const skill = proficientSkills.find(it => it.key === skillEl.value) || null;
+			const skill = skills.find(it => it.key === skillEl.value) || null;
 			if (!abilityEl.value) {
 				JqueryUtil.doToast({type: "warning", content: "Choose an ability for the tool check."});
 				return;

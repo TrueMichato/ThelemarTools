@@ -1741,16 +1741,25 @@ Gated by the standard TGTT settings flag — non-TGTT characters never render th
 A custom skill may carry `toolCheck: {tool, toolKey, skill}`. This stores identity,
 not copied mechanics:
 
-- `getEffectiveSkillProficiency()` derives 1× PB from current tool proficiency, or
-  2× PB when Tool Expertise is active.
+- Roll Tool Check can pair **any relevant skill**, including an unproficient one.
+  Older tool guidance places suggested skills first; the tool's default ability
+  remains selected unless the player changes it.
+- `getEffectiveSkillProficiency()` uses the higher current tool or paired-skill
+  proficiency (including either side's expertise), never their sum. If the
+  tool is untrained but the skill is proficient, the skill's PB still applies.
 - `hasToolSkillAdvantage()` grants advantage only while both the linked tool and
-  linked skill are currently proficient.
+  linked skill are currently proficient. Pairing an unproficient skill never
+  grants advantage by itself.
+- Mind strain suppresses the paired skill's proficiency, not the tool's.
+  Proficiency-gated roll floors use whichever side is still proficient.
 - `_rollSkillCheck()` merges the custom skill, underlying ability check, and
   `tool:<toolKey>` modifier pools by stable contribution identity.
 
 This keeps saved combinations such as `Thieves' Tools + Investigation` live:
-removing a proficiency or its granting Specialty immediately removes the
-corresponding proficiency, advantage, or bonus die without a migration.
+changes to either proficiency update the effective PB and advantage without
+a migration. Removing the tool proficiency removes advantage but preserves
+skill proficiency when present; tool-specific bonuses remain tied to the
+tool's modifier source.
 
 ### `settings.skipConditionalPrompt`
 

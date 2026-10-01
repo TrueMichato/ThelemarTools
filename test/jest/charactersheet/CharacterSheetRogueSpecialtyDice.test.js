@@ -18,10 +18,14 @@ const TGTT_DATA = JSON.parse(
 let CharacterSheetPage;
 let savedWindow;
 let savedDocument;
+let savedEe;
+let toolCheckModalEe;
 
 beforeAll(async () => {
 	savedWindow = globalThis.window;
 	savedDocument = globalThis.document;
+	savedEe = globalThis.ee;
+	globalThis.ee = (...args) => toolCheckModalEe ? toolCheckModalEe(...args) : savedEe(...args);
 	globalThis.window = {
 		addEventListener: () => {},
 		dispatchEvent: () => {},
@@ -48,6 +52,7 @@ afterEach(() => {
 afterAll(() => {
 	globalThis.window = savedWindow;
 	globalThis.document = savedDocument;
+	globalThis.ee = savedEe;
 });
 
 const SPECIALTY_TEXT = {
@@ -134,6 +139,49 @@ function makeRollPage (state, {conditional = false} = {}) {
 	page.pAnimateD20 = async () => {};
 	page._showDiceResult = jest.fn();
 	return page;
+}
+
+async function openToolCheckModal (state) {
+	const page = makeRollPage(state);
+	page._skillsData = [
+		{name: "Investigation", ability: "int", source: "XPHB"},
+		{name: "Perception", ability: "wis", source: "XPHB"},
+		{name: "Stealth", ability: "dex", source: "XPHB"},
+	];
+	page._itemsData = [{
+		name: "Thieves' Tools",
+		source: "XPHB",
+		type: "T",
+		entries: [{type: "item", name: "Ability:", entries: ["Dexterity"]}],
+		additionalEntries: [{type: "entries", name: "Investigation and Perception", entries: []}],
+	}];
+	page._renderSkills = jest.fn();
+	page._saveCurrentCharacter = jest.fn(async () => {});
+	const controls = new Map([
+		["#tool-check-tool", globalThis.e_({tag: "select", value: "thievestools"})],
+		["#tool-check-ability", globalThis.e_({tag: "select"})],
+		["#tool-check-skill", globalThis.e_({tag: "select"})],
+		["#tool-check-guidance", globalThis.e_({tag: "div"})],
+		["#tool-check-roll", globalThis.e_({tag: "button"})],
+		["#tool-check-cancel", globalThis.e_({tag: "button"})],
+	]);
+	const form = globalThis.e_({tag: "div"});
+	form.querySelector = selector => controls.get(selector);
+	const modalInner = globalThis.e_({tag: "div"});
+	const doClose = jest.fn();
+	toolCheckModalEe = (parts, ...values) => {
+		form.outerHTML = parts.reduce((html, part, ix) => html + part + (values[ix] ?? ""), "");
+		return form;
+	};
+	const modalSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetShow")
+		.mockResolvedValue({eleModalInner: modalInner, doClose});
+	try {
+		await page._showToolCheckModal();
+	} finally {
+		toolCheckModalEe = null;
+		modalSpy.mockRestore();
+	}
+	return {page, controls, form, doClose};
 }
 
 describe("Rogue Specialty d10 parsing", () => {
@@ -404,6 +452,107 @@ describe("Rogue Specialty d10 roll integration", () => {
 });
 
 describe("linked tool custom skills", () => {
+	test.each(["investigation", "stealth"])("the modal saves an unproficient %s skill with tool-only PB and no advantage", async skillKey => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.setAbilityBase("int", 18);
+		state.addToolProficiency("Thieves' Tools");
+		state.setSkillProficiency("perception", 1);
+		const {page, controls, form, doClose} = await openToolCheckModal(state);
+		const skillEl = controls.get("#tool-check-skill");
+		const rollBtn = controls.get("#tool-check-roll");
+		const options = skillEl.innerHTML;
+
+		expect(controls.get("#tool-check-ability").value).toBe("dex");
+		expect(options).toMatch(/value="investigation"[^<]*suggested[\s\S]*value="perception"[^<]*suggested[\s\S]*value="stealth"/);
+		expect(form.outerHTML).toContain("Relevant skill");
+		skillEl.value = skillKey;
+		skillEl._handlers.change();
+		expect(rollBtn.textContent).toBe("Save & Roll");
+		page._rollD20 = jest.fn(() => ({roll: 10, mode: "normal", thelemar_critBonus: 0}));
+
+		await rollBtn._handlers.click();
+
+		const key = `thieves'tools+${skillKey}`;
+		expect(state.getToolCheckLink(key)).toEqual({
+			tool: "Thieves' Tools",
+			toolKey: "thievestools",
+			skill: skillKey,
+		});
+		expect(page._rollD20).toHaveBeenCalledWith(expect.objectContaining({stateAdvantage: false}));
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String), 12, expect.any(String), expect.any(String), expect.any(String),
+		);
+		expect(state.getSkillBreakdown(key).components.filter(it => it.type === "proficiency")).toEqual([
+			expect.objectContaining({value: 2}),
+		]);
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+		expect(doClose).toHaveBeenCalledTimes(1);
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+		expect(reloaded.getToolCheckLink(key)?.skill).toBe(skillKey);
+		expect(reloaded.getSkillMod(key)).toBe(2);
+		expect(reloaded.hasToolSkillAdvantage(key)).toBe(false);
+	});
+
+	test("leaving the skill unpaired uses a direct tool roll without saving a custom skill", async () => {
+		const state = new CharacterSheetState();
+		state.addToolProficiency("Thieves' Tools");
+		const {page, controls, doClose} = await openToolCheckModal(state);
+		const rollBtn = controls.get("#tool-check-roll");
+		page._rollToolCheck = jest.fn(async () => ({total: 12}));
+
+		expect(rollBtn.textContent).toBe("Roll");
+		await rollBtn._handlers.click();
+
+		expect(page._rollToolCheck).toHaveBeenCalledWith({toolName: "Thieves' Tools", ability: "dex"});
+		expect(page._saveCurrentCharacter).not.toHaveBeenCalled();
+		expect(state.getCustomSkills()).toEqual([]);
+		expect(doClose).toHaveBeenCalledTimes(1);
+	});
+
+	test("the modal grants advantage for a proficient paired skill without stacking two proficiency bonuses", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.addToolProficiency("Thieves' Tools");
+		state.setSkillProficiency("perception", 1);
+		const {page, controls} = await openToolCheckModal(state);
+		const skillEl = controls.get("#tool-check-skill");
+		skillEl.value = "perception";
+		skillEl._handlers.change();
+		page._rollD20 = jest.fn(() => ({roll: 10, mode: "advantage", thelemar_critBonus: 0}));
+
+		await controls.get("#tool-check-roll")._handlers.click();
+
+		const key = "thieves'tools+perception";
+		expect(state.hasToolSkillAdvantage(key)).toBe(true);
+		expect(page._rollD20).toHaveBeenCalledWith(expect.objectContaining({stateAdvantage: true}));
+		expect(state.getSkillMod(key)).toBe(2);
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String), 12, expect.any(String), expect.any(String), expect.any(String),
+		);
+	});
+
+	test("a tool from a feature can pair with an expert skill even without tool proficiency", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.setSkillProficiency("investigation", 2);
+		state.addNamedModifier({name: "Skeleton Key", type: "tool:thievestools", value: 1});
+		const {page, controls} = await openToolCheckModal(state);
+		controls.get("#tool-check-skill").value = "investigation";
+		page._rollD20 = jest.fn(() => ({roll: 10, mode: "normal", thelemar_critBonus: 0}));
+
+		await controls.get("#tool-check-roll")._handlers.click();
+
+		const key = "thieves'tools+investigation";
+		expect(state.getEffectiveSkillProficiency(key)).toBe(2);
+		expect(state.hasToolSkillAdvantage(key)).toBe(false);
+		expect(page._rollD20).toHaveBeenCalledWith(expect.objectContaining({stateAdvantage: false}));
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String), 15, expect.any(String), expect.any(String), expect.any(String),
+		);
+	});
+
 	test("derive proficiency and advantage from the live tool and paired skill", () => {
 		const state = new CharacterSheetState();
 		state.addClass({name: "Rogue", source: "TGTT", level: 13});
@@ -428,6 +577,149 @@ describe("linked tool custom skills", () => {
 			skill: "survival",
 		});
 		expect(reloaded.hasToolSkillAdvantage(key)).toBe(true);
+	});
+
+	test("persisted pair uses the stronger proficiency without stacking and tracks independent changes", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.addToolProficiency("Thieves' Tools");
+		state.addCustomSkill("Thieves' Tools + Investigation", "dex", {
+			toolCheck: {tool: "Thieves' Tools", skill: "investigation"},
+		});
+		const reloaded = new CharacterSheetState();
+		reloaded.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+		const key = "thieves'tools+investigation";
+
+		expect(reloaded.getSkillMod(key)).toBe(2);
+		expect(reloaded.hasToolSkillAdvantage(key)).toBe(false);
+		reloaded.setSkillProficiency("investigation", 2);
+		expect(reloaded.getEffectiveSkillProficiency(key)).toBe(2);
+		expect(reloaded.getSkillMod(key)).toBe(4);
+		expect(reloaded.getSkillBreakdown(key).components.filter(it => it.type === "proficiency")).toEqual([
+			expect.objectContaining({value: 4}),
+		]);
+		expect(reloaded.hasToolSkillAdvantage(key)).toBe(true);
+
+		reloaded.removeToolProficiency("Thieves' Tools");
+		expect(reloaded.getSkillMod(key)).toBe(4);
+		expect(reloaded.hasToolSkillAdvantage(key)).toBe(false);
+		const page = makeRollPage(reloaded);
+		page._rollD20 = jest.fn(() => ({roll: 10, mode: "normal", thelemar_critBonus: 0}));
+		expect((await page._rollSkillCheck(key, "Thieves' Tools + Investigation", null)).total).toBe(14);
+		expect(page._rollD20).toHaveBeenCalledWith(expect.objectContaining({stateAdvantage: false}));
+
+		reloaded.setSkillProficiency("investigation", 0);
+		expect(reloaded.getSkillMod(key)).toBe(0);
+		expect(reloaded.getEffectiveSkillProficiency(key)).toBe(0);
+	});
+
+	test("tool expertise wins over regular skill proficiency without adding their bonuses", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.addToolProficiency("Thieves' Tools");
+		state._data._classFeatureToolExpertise = true;
+		state.setSkillProficiency("investigation", 1);
+		state.addCustomSkill("Thieves' Tools + Investigation", "dex", {
+			toolCheck: {tool: "Thieves' Tools", skill: "investigation"},
+		});
+		const key = "thieves'tools+investigation";
+		const page = makeRollPage(state);
+
+		expect(state.getEffectiveSkillProficiency(key)).toBe(2);
+		expect(state.getSkillMod(key)).toBe(4);
+		expect(state.hasToolSkillAdvantage(key)).toBe(true);
+		expect((await page._rollSkillCheck(key, "Thieves' Tools + Investigation", null)).total).toBe(14);
+	});
+
+	test("a paired unproficient skill still receives tool-specific bonuses once", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.addToolProficiency("Thieves' Tools");
+		state.addNamedModifier({name: "Fine Picks", type: "tool:thievestools", value: 2});
+		const {page, controls} = await openToolCheckModal(state);
+		controls.get("#tool-check-skill").value = "stealth";
+
+		await controls.get("#tool-check-roll")._handlers.click();
+
+		const key = "thieves'tools+stealth";
+		expect(state.getSkillMod(key)).toBe(4);
+		expect(state.getSkillBreakdown(key).components).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "tool", name: "Fine Picks", value: 2}),
+		]));
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String), 14, expect.any(String), expect.any(String), expect.any(String),
+		);
+		expect(state.hasToolSkillAdvantage(key)).toBe(false);
+	});
+
+	test("skill suppression removes only the skill side of a paired tool check", () => {
+		const state = new CharacterSheetState();
+		state.addToolProficiency("Thieves' Tools");
+		state.setSkillProficiency("investigation", 2);
+		state.addCustomSkill("Thieves' Tools + Investigation", "dex", {
+			toolCheck: {tool: "Thieves' Tools", skill: "investigation"},
+		});
+		jest.spyOn(state, "_getActiveStrainState").mockReturnValue({loseSkillProficiencies: true});
+		const key = "thieves'tools+investigation";
+
+		expect(state.getEffectiveSkillProficiency(key)).toBe(1);
+		expect(state.hasToolSkillAdvantage(key)).toBe(false);
+		state.removeToolProficiency("Thieves' Tools");
+		expect(state.getEffectiveSkillProficiency(key)).toBe(0);
+	});
+
+	test("a legacy self-linked tool check cannot recursively project its own proficiency", () => {
+		const state = new CharacterSheetState();
+		state.addToolProficiency("Thieves' Tools");
+		state.addCustomSkill("Thieves' Tools + Investigation", "dex", {
+			toolCheck: {tool: "Thieves' Tools", skill: "thieves'tools+investigation"},
+		});
+		const key = "thieves'tools+investigation";
+
+		expect(state.getEffectiveSkillProficiency(key)).toBe(1);
+		expect(state.hasToolSkillAdvantage(key)).toBe(false);
+	});
+
+	test("a paired tool check uses skill proficiency when the tool is untrained without granting advantage", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.setSkillProficiency("investigation", 2);
+		const page = makeRollPage(state);
+		page._rollD20 = jest.fn(() => ({roll: 10, mode: "normal", thelemar_critBonus: 0}));
+
+		const result = await page._rollToolCheck({
+			toolName: "Thieves' Tools",
+			ability: "dex",
+			skillKey: "investigation",
+		});
+
+		expect(result.total).toBe(14);
+		expect(page._rollD20).toHaveBeenCalledWith(expect.objectContaining({stateAdvantage: false}));
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String), 14, expect.stringMatching(/skill expertise/), expect.any(String), expect.not.stringMatching(/advantage from both/),
+		);
+	});
+
+	test("skill proficiency enables a direct tool check's proficiency-gated roll floor", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		state.setSkillProficiency("investigation", 1);
+		state._data.rollFloors = {skill: {all: {minimum: 10, requiresProficiency: true, source: "Reliable Talent"}}};
+		const page = makeRollPage(state);
+		page._rollD20 = jest.fn(() => ({roll: 2, mode: "normal", thelemar_critBonus: 0}));
+
+		const result = await page._rollToolCheck({
+			toolName: "Thieves' Tools",
+			ability: "dex",
+			skillKey: "investigation",
+		});
+
+		expect(result.total).toBe(12);
+		expect(page._rollD20).toHaveBeenCalledWith(expect.objectContaining({stateAdvantage: false}));
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String), 12, expect.stringMatching(/skill proficiency/),
+			expect.any(String), expect.stringMatching(/Minimum 10 applied/),
+		);
 	});
 
 	test("a linked check rolls its tool Specialty die and gains advantage from both proficiencies", async () => {

@@ -16473,13 +16473,14 @@ class CharacterSheetState {
 	 * suppression effects. Currently only psionic mind strain (Talent, 3+ mind strain)
 	 * suppresses skill proficiency; the raw grant stays intact in `getSkillProficiency`
 	 * so level-up / expertise / respec logic keeps seeing the character's real training.
+	 * Tool proficiency is independent of this skill-only suppression.
 	 * @param {string} skill - The skill name
 	 * @returns {number} 0 = none, 1 = proficient, 2 = expertise
 	 */
 	getEffectiveSkillProficiency (skill) {
-		if (this._isStrainSuppressingSkillProficiency()) return 0;
 		const toolCheck = this.getToolCheckLink(skill);
-		if (toolCheck) return this.getToolCheckProficiencyLevel(toolCheck.tool);
+		if (toolCheck) return this.getToolSkillProficiencyLevel(toolCheck.tool, toolCheck.skill);
+		if (this._isStrainSuppressingSkillProficiency()) return 0;
 		return this.getSkillProficiency(skill);
 	}
 
@@ -16909,10 +16910,20 @@ class CharacterSheetState {
 		return this._data._classFeatureToolExpertise ? 2 : 1;
 	}
 
-	getToolCheckRollMinimum (tool) {
+	getToolSkillProficiencyLevel (tool, skill) {
+		const toolLevel = this.getToolCheckProficiencyLevel(tool);
+		// Read the skill's own training, not another linked tool check. This also
+		// prevents malformed saved links from recursively projecting each other.
+		const skillLevel = skill && !this._isStrainSuppressingSkillProficiency()
+			? this.getSkillProficiency(skill)
+			: 0;
+		return Math.max(toolLevel, skillLevel);
+	}
+
+	getToolCheckRollMinimum (tool, skill = null) {
 		const floor = this._data.rollFloors?.skill?.["all"];
 		if (!floor) return null;
-		if (floor.requiresProficiency && this.getToolCheckProficiencyLevel(tool) < 1) return null;
+		if (floor.requiresProficiency && this.getToolSkillProficiencyLevel(tool, skill) < 1) return null;
 		return Number.isFinite(floor.minimum) ? floor.minimum : null;
 	}
 
@@ -16937,7 +16948,7 @@ class CharacterSheetState {
 	hasToolSkillAdvantage (skill) {
 		const link = this.getToolCheckLink(skill);
 		if (!link || !this.hasToolProficiency(link.tool)) return false;
-		return this.getEffectiveSkillProficiency(link.skill) > 0;
+		return this.getToolSkillProficiencyLevel(null, link.skill) > 0;
 	}
 
 	getToolModifierTargets () {

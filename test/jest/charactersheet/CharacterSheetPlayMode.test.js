@@ -530,18 +530,18 @@ describe("CharacterSheetPlayMode", () => {
 			);
 		});
 
-		it("renders derived tool proficiency as fixed in Play Mode", () => {
+		it("keeps linked proficiency fixed and names the live tool or skill source of expertise", () => {
 			state.addToolProficiency("Thieves' Tools");
 			state.setSkillProficiency("sleightofhand", 1);
 			state.addCustomSkill("Thieves' Tools + Sleight of Hand", "dex", {
 				toolCheck: {tool: "Thieves' Tools", skill: "sleightofhand"},
 			});
+			const key = "thieves'tools+sleightofhand";
 			const page = {
 				getState: () => state,
 				_rollSkillCheck: jest.fn(),
 			};
 			const pm = new CharacterSheetPlayMode(page);
-			const created = [];
 			pm._ce = jest.fn((tag, className, parent) => {
 				const element = {
 					tag,
@@ -552,23 +552,43 @@ describe("CharacterSheetPlayMode", () => {
 					setAttribute: jest.fn(),
 				};
 				parent?.children?.push(element);
-				created.push(element);
 				return element;
 			});
 			pm._pip = jest.fn(() => ({classList: {add: jest.fn()}}));
 			pm._makeClickable = jest.fn();
+			const renderToggle = () => {
+				const parent = {children: []};
+				pm._renderSkillRow(parent, {
+					name: "Thieves' Tools + Sleight of Hand",
+					key,
+					ability: "dex",
+					profLevel: state.getEffectiveSkillProficiency(key),
+				});
+				return parent.children[0].children.find(element => element.className === "pm-skill__prof-toggle");
+			};
 
-			pm._renderSkillRow({children: []}, {
-				name: "Thieves' Tools + Sleight of Hand",
-				key: "thieves'tools+sleightofhand",
-				ability: "dex",
-				profLevel: state.getEffectiveSkillProficiency("thieves'tools+sleightofhand"),
-			});
-
-			const toggle = created.find(element => element.className === "pm-skill__prof-toggle");
+			let toggle = renderToggle();
 			expect(toggle.disabled).toBe(true);
-			expect(toggle.title).toMatch(/Derived from Thieves' Tools proficiency/);
+			expect(toggle.title).toBe("Thieves' Tools proficiency (advantage from both proficiencies)");
 			expect(toggle.addEventListener).not.toHaveBeenCalled();
+
+			state.setSkillProficiency("sleightofhand", 2);
+			toggle = renderToggle();
+			expect(state.getEffectiveSkillProficiency(key)).toBe(2);
+			expect(toggle.title).toBe("Paired skill expertise (advantage from both proficiencies)");
+			expect(toggle.setAttribute).toHaveBeenCalledWith("aria-label", toggle.title);
+			expect(toggle.disabled).toBe(true);
+
+			state._data._classFeatureToolExpertise = true;
+			state.setSkillProficiency("sleightofhand", 1);
+			toggle = renderToggle();
+			expect(state.getEffectiveSkillProficiency(key)).toBe(2);
+			expect(toggle.title).toBe("Thieves' Tools expertise (advantage from both proficiencies)");
+
+			state.removeToolProficiency("Thieves' Tools");
+			toggle = renderToggle();
+			expect(toggle.title).toBe("Paired skill proficiency");
+			expect(toggle.setAttribute).toHaveBeenCalledWith("aria-label", toggle.title);
 		});
 	});
 

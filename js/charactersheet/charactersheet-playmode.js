@@ -1176,7 +1176,12 @@ export class CharacterSheetPlayMode {
 		}
 		if (toolCheck) {
 			profToggle.disabled = true;
-			profToggle.title = `Derived from ${toolCheck.tool} proficiency`;
+			const toolLevel = this._state.getToolCheckProficiencyLevel(toolCheck.tool);
+			const skillLevel = this._state.getToolSkillProficiencyLevel(null, toolCheck.skill);
+			const source = skillLevel > toolLevel ? "Paired skill" : toolCheck.tool;
+			profToggle.title = skill.profLevel
+				? `${source} ${skill.profLevel === 2 ? "expertise" : "proficiency"}${this._state.hasToolSkillAdvantage(skill.key) ? " (advantage from both proficiencies)" : ""}`
+				: "No tool or paired skill proficiency";
 			profToggle.setAttribute("aria-label", profToggle.title);
 		} else {
 			profToggle.title = PROF_TITLES[Math.min(skill.profLevel, 2)];
