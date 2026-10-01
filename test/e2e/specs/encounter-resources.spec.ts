@@ -439,9 +439,9 @@ test.describe("touch resource controls", () => {
 		await editWard.locator("summary").click();
 		await editWard.getByLabel("Remaining").fill("0");
 		await editWard.getByRole("button", {name: "Save"}).click();
-		await expect(spendWard).toBeDisabled();
-		expect(await spendWard.evaluate(element => getComputedStyle(element).opacity)).toBe("0.45");
 		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 0 of 12 remaining");
+		await expect(spendWard).toBeDisabled();
+		await expect(spendWard).toHaveCSS("opacity", "0.45");
 		await restoreWard.tap();
 		await expect(ward).toHaveAttribute("aria-label", "Ward (12/Day): 1 of 12 remaining");
 		const add = manager.locator('details[data-resource-key="ability:add"]');
