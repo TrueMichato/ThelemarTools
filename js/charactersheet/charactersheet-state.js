@@ -4793,7 +4793,7 @@ class CharacterSheetState {
 	}
 
 	static normalizeToolKey (tool) {
-		return FeatureModifierParser.normalizeToolKey(tool);
+		return FeatureModifierParser.normalizeToolKey(tool?.full ?? tool?.name ?? tool);
 	}
 
 	/** Base melee reach for Small/Medium creatures, in feet. */
@@ -11376,8 +11376,18 @@ class CharacterSheetState {
 		//      `_firstClassStartGrants` / `applyFirstClassStartingProficiencies` (promotion path).
 		if (choices.multiclassProficiencies) {
 			const mcp = choices.multiclassProficiencies;
-			(mcp.armor || []).forEach(a => this.removeArmorProficiency(a));
-			(mcp.weapons || []).forEach(w => this.removeWeaponProficiency(w));
+			// Receipts include attempted grants even when an equivalent first-class
+			// proficiency already existed; never reverse that first-class owner.
+			(mcp.armor || []).forEach(a => {
+				if (this._data._firstClassStartGrants?.armor?.some(value =>
+					this._normalizeArmorProfToken(value) === this._normalizeArmorProfToken(a))) return;
+				this.removeArmorProficiency(a);
+			});
+			(mcp.weapons || []).forEach(w => {
+				if (this._data._firstClassStartGrants?.weapons?.some(value =>
+					this._normalizeWeaponProfToken(value) === this._normalizeWeaponProfToken(w))) return;
+				this.removeWeaponProficiency(w);
+			});
 			(mcp.tools || []).forEach(t => this.removeToolProficiency(t));
 		}
 
@@ -16214,6 +16224,11 @@ class CharacterSheetState {
 		});
 
 		this._data._firstClassStartGrants = grants;
+		if (prev && (prev.className !== classData.name || prev.classSource !== classData.source)) {
+			// Promoting a new first class can release a token that previously masked
+			// a still-active class-feature grant. Rebuild after reversing that token.
+			this.applyClassFeatureEffects();
+		}
 	}
 	// #endregion
 
@@ -19821,11 +19836,21 @@ class CharacterSheetState {
 
 	// #region Proficiencies
 	getProficiencies () {
+		const unique = (entries, getKey) => {
+			const seen = new Set();
+			return entries.filter(entry => {
+				const name = typeof entry === "string" ? entry : entry?.full || entry?.name;
+				const key = getKey(name);
+				if (!key || seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
+		};
 		return {
-			armor: [...this._data.armorProficiencies],
-			weapons: [...this._data.weaponProficiencies],
-			tools: [...this._data.toolProficiencies],
-			languages: [...this._data.languages],
+			armor: unique(this._data.armorProficiencies, name => this._normalizeArmorProfToken(name)),
+			weapons: unique(this._data.weaponProficiencies, name => this._normalizeWeaponProfToken(name)),
+			tools: unique(this._data.toolProficiencies, name => CharacterSheetState.normalizeToolKey(name)),
+			languages: unique(this._data.languages, name => String(name || "").trim().toLowerCase()),
 		};
 	}
 
@@ -19993,8 +20018,9 @@ class CharacterSheetState {
 	 */
 	hasWeaponProficiency (weapon) {
 		const weaponLower = weapon.toLowerCase();
+		const key = this._normalizeWeaponProfToken(weapon);
 		// Check normal proficiencies
-		if (this._data.weaponProficiencies.some(w => w.toLowerCase() === weaponLower)) {
+		if (this._data.weaponProficiencies.some(w => this._normalizeWeaponProfToken(w) === key)) {
 			return true;
 		}
 
@@ -20039,7 +20065,8 @@ class CharacterSheetState {
 	}
 
 	addArmorProficiency (armor) {
-		if (!this._data.armorProficiencies.includes(armor)) {
+		const key = this._normalizeArmorProfToken(armor);
+		if (key && !this._data.armorProficiencies.some(value => this._normalizeArmorProfToken(value) === key)) {
 			this._data.armorProficiencies.push(armor);
 		}
 	}
@@ -20084,7 +20111,8 @@ class CharacterSheetState {
 	}
 
 	addWeaponProficiency (weapon) {
-		if (!this._data.weaponProficiencies.includes(weapon)) {
+		const key = this._normalizeWeaponProfToken(weapon);
+		if (key && !this._data.weaponProficiencies.some(value => this._normalizeWeaponProfToken(value) === key)) {
 			this._data.weaponProficiencies.push(weapon);
 		}
 	}
@@ -20127,7 +20155,7 @@ class CharacterSheetState {
 		if (typeof resolved === "string" && resolved.includes("|")) {
 			resolved = resolved.split("|")[0].trim().toTitleCase();
 		}
-		if (!this._data.languages.includes(resolved)) {
+		if (resolved && !this._data.languages.some(value => value.toLowerCase() === resolved.toLowerCase())) {
 			this._data.languages.push(resolved);
 		}
 	}
@@ -39315,7 +39343,8 @@ class CharacterSheetState {
 		// Remove class feature tool proficiencies
 		if (this._data._classFeatureToolProficiencies) {
 			this._data._classFeatureToolProficiencies.forEach(t => {
-				const idx = this._data.toolProficiencies.findIndex(p => p.toLowerCase() === t.toLowerCase());
+				const idx = this._data.toolProficiencies.findIndex(p =>
+					CharacterSheetState.normalizeToolKey(p) === CharacterSheetState.normalizeToolKey(t));
 				if (idx >= 0) this._data.toolProficiencies.splice(idx, 1);
 			});
 		}
@@ -39451,18 +39480,18 @@ class CharacterSheetState {
 
 	_addClassFeatureWeaponProficiency (weapon) {
 		if (!this._data._classFeatureWeaponProficiencies) this._data._classFeatureWeaponProficiencies = [];
-		const weaponLower = weapon.toLowerCase();
-		if (!this._data.weaponProficiencies.some(w => w.toLowerCase() === weaponLower)) {
-			this._data.weaponProficiencies.push(weapon);
+		const key = this._normalizeWeaponProfToken(weapon);
+		if (key && !this._data.weaponProficiencies.some(w => this._normalizeWeaponProfToken(w) === key)) {
+			this.addWeaponProficiency(weapon);
 			this._data._classFeatureWeaponProficiencies.push(weapon);
 		}
 	}
 
 	_addClassFeatureArmorProficiency (armor) {
 		if (!this._data._classFeatureArmorProficiencies) this._data._classFeatureArmorProficiencies = [];
-		const armorLower = armor.toLowerCase();
-		if (!this._data.armorProficiencies.some(a => a.toLowerCase() === armorLower)) {
-			this._data.armorProficiencies.push(armor);
+		const key = this._normalizeArmorProfToken(armor);
+		if (key && !this._data.armorProficiencies.some(a => this._normalizeArmorProfToken(a) === key)) {
+			this.addArmorProficiency(armor);
 			this._data._classFeatureArmorProficiencies.push(armor);
 		}
 	}
@@ -39479,17 +39508,16 @@ class CharacterSheetState {
 
 	_addClassFeatureToolProficiency (tool) {
 		if (!this._data._classFeatureToolProficiencies) this._data._classFeatureToolProficiencies = [];
-		const toolLower = tool.toLowerCase();
-		if (!this._data.toolProficiencies.some(t => t.toLowerCase() === toolLower)) {
-			this._data.toolProficiencies.push(tool);
+		if (!this.hasToolProficiency(tool)) {
+			this.addToolProficiency(tool);
 			this._data._classFeatureToolProficiencies.push(tool);
 		}
 	}
 
 	_addClassFeatureLanguage (language) {
 		if (!this._data._classFeatureLanguages) this._data._classFeatureLanguages = [];
-		if (!this._data.languages.includes(language)) {
-			this._data.languages.push(language);
+		if (!this._data.languages.some(l => l.toLowerCase() === language.toLowerCase())) {
+			this.addLanguage(language);
 			this._data._classFeatureLanguages.push(language);
 		}
 	}
@@ -62489,9 +62517,8 @@ class CharacterSheetState {
 					}
 				} else if (profType === "armor") {
 					const armorName = profTarget.replace(/armor/gi, " armor").replace(/shields/gi, "shields").trim().toTitleCase();
-					if (!this._data.armorProficiencies.some(a => a.toLowerCase() === armorName.toLowerCase())) {
-						this.addArmorProficiency(armorName);
-					}
+					if (CharacterSheetState._isClassFeatureEffectSource(feature)) this._addClassFeatureArmorProficiency(armorName);
+					else this.addArmorProficiency(armorName);
 				} else if (profType === "weapon") {
 					const weaponName = profTarget
 						.replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -62499,10 +62526,8 @@ class CharacterSheetState {
 						.replace(/\s+/g, " ")
 						.trim()
 						.toTitleCase();
-					if (!this._data.weaponProficiencies.some(w => w.toLowerCase() === weaponName.toLowerCase())) {
-						if (CharacterSheetState._isClassFeatureEffectSource(feature)) this._addClassFeatureWeaponProficiency(weaponName);
-						else this.addWeaponProficiency(weaponName);
-					}
+					if (CharacterSheetState._isClassFeatureEffectSource(feature)) this._addClassFeatureWeaponProficiency(weaponName);
+					else this.addWeaponProficiency(weaponName);
 				} else if (profType === "tool") {
 					const canonicalTool = CharacterSheetClassUtils.getChoiceToolCatalog?.()
 						.find(tool => CharacterSheetState.normalizeToolKey(tool) === CharacterSheetState.normalizeToolKey(profTarget));

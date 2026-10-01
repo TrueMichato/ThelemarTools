@@ -222,17 +222,10 @@ skillProficiencies: ["athletics", "intimidation", "perception", "stealth"],
 skillExpertise: ["stealth"],
 
 // Tools
-toolProficiencies: [
-    {name: "Thieves' Tools", source: "Rogue"},
-    {name: "Gaming Set (Dice)", source: "Background"},
-],
+toolProficiencies: ["Thieves' Tools", "Gaming Set (Dice)"],
 
 // Languages
-languageProficiencies: [
-    {name: "Common", source: "Race"},
-    {name: "Dwarvish", source: "Race"},
-    {name: "Thieves' Cant", source: "Rogue"},
-],
+languages: ["Common", "Dwarvish", "Thieves' Cant"],
 
 // Weapons (strings or patterns)
 weaponProficiencies: ["simple", "martial"],
@@ -240,6 +233,19 @@ weaponProficiencies: ["simple", "martial"],
 // Armor
 armorProficiencies: ["light", "medium", "heavy", "shields"],
 ```
+
+Armor categories (`light`/`Light Armor`, `shield`/`Shields`) and weapon
+categories (`simple`/`Simple weapons`, `martial`/`Martial weapons`) are compared
+by canonical meaning when added, including multiclass grants. Named
+proficiencies (such as Longsword versus Shortsword), different tools, and
+distinct languages/dialects remain separate. `getProficiencies()` returns a
+de-duplicated **display copy**, including for older saves with duplicate raw
+entries; it does not rewrite the saved arrays or the grant/ownership ledgers.
+The Overview displays category-friendly labels, and its tool-check candidates
+still use the unique tool entries. Multiclass receipts can record attempted
+grants that were already owned by the first class, so reversing those receipts
+must preserve that first-class grant; promoting a new first class re-applies
+still-active class-feature grants afterward.
 
 The XPHB level-3 Barbarian feature **Primal Knowledge** (also used by the
 TGTT Barbarian) queues one skill proficiency from the owning class's

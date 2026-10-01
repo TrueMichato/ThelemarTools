@@ -6622,8 +6622,12 @@ class CharacterSheetPage {
 			return armorTokenLabels[token] || raw;
 		};
 		const armor = profs.armor.map(armorLabel).join(", ");
-		const weapons = profs.weapons.map(w => typeof w === "string" ? w : w.full).join(", ");
-		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full).join(", ");
+		const weaponTokenLabels = {simple: "Simple Weapons", martial: "Martial Weapons"};
+		const weapons = profs.weapons.map(w => {
+			const raw = typeof w === "string" ? w : w.full || w.name;
+			return weaponTokenLabels[this._state._normalizeWeaponProfToken(raw)] || raw;
+		}).join(", ");
+		const tools = profs.tools.map(t => typeof t === "string" ? t : t.full || t.name).join(", ");
 
 		(/** @type {*} */ (document.getElementById("charsheet-prof-armor"))).innerHTML = `${Renderer.get().render(armor)}` || "—";
 		(/** @type {*} */ (document.getElementById("charsheet-prof-weapons"))).innerHTML = `${Renderer.get().render(weapons)}` || "—";
