@@ -681,6 +681,32 @@ _castAtLevel(spell, slotInfo) {
 
 ---
 
+### Shadow Blade (XGE): summoned weapon
+
+A committed cast creates an equipped, simple melee **Shadow Blade** in
+Inventory and Attacks instead of applying extra damage to other weapons.
+Its psychic weapon dice are 2d8 with a 2nd-level slot, 3d8 with a 3rd- or
+4th-level slot, 4d8 with a 5th- or 6th-level slot, and 5d8 with a 7th-level
+or higher slot. The caster is proficient with this sword; it has finesse,
+light, and thrown (20/60) properties. On its attack row, toggle **Dim
+target** if the target is in dim light or darkness to apply advantage to
+this sword's attack roll only. **Throw** rolls a ranged attack and leaves
+one damage roll available for that throw. The same controls and roll path
+are available in Play Mode.
+
+Unequipping (dropping) or throwing releases the sword: it cannot be picked
+back up or used for another attack, and dissipates at the end of the turn.
+While its one-minute concentration remains, use **Re-summon Shadow Blade
+(Bonus Action)** in Attacks after it dissipates; this keeps the original
+spell slot level and does not spend another spell slot. Recasting replaces
+the old sword; ending or losing concentration removes it. Saved characters
+keep the cast's sword identity, and older active Shadow Blade damage buffs
+are migrated away on load. A variant component that removes concentration
+cannot be used with this summoned weapon (the cast is rejected before any
+resource is spent).
+
+---
+
 ## Concentration
 
 ### Tracking Concentration

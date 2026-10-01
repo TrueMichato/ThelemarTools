@@ -405,6 +405,42 @@ class CharacterSheetCombat {
 			this._rollAttack(attackId, e);
 		});
 
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const button = e.target.closest(".charsheet__attack-throw");
+			if (!button) return;
+			const attackId = button.closest(".charsheet__attack-item")?.dataset.attackId;
+			void this._rollAttack(attackId, e, {thrown: true});
+		});
+
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			const button = e.target.closest(".charsheet__attack-dim-target");
+			if (!button) return;
+			const attackId = button.closest(".charsheet__attack-item")?.dataset.attackId;
+			const attack = this._findAttackById(attackId);
+			if (this.toggleSummonedWeaponDimTarget(attack)) this._page._playMode?._renderActionsHub?.();
+		});
+
+		document.addEventListener("click", (/** @type {*} */ e) => {
+			if (!e.target.closest(".charsheet__resummon-spell-weapon")) return;
+			const spell = this._state.getSummonedSpellWeaponToResummon?.();
+			if (!spell) return;
+			const result = this._state.resummonSpellWeapon(spell);
+			if (!result.ok) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: result.code === "action-unavailable"
+						? "Your Bonus Action is already used this turn."
+						: `Could not re-summon ${spell.name}: ${result.code}.`,
+				});
+				return;
+			}
+			this.renderAttacks();
+			this._page._inventory?.render?.();
+			this._page._renderActiveStates?.();
+			this._page._playMode?._renderActionsHub?.();
+			this._page.saveCharacter?.();
+		});
+
 		// Roll attack recklessly (Bug #7): activate the recklessAttack state (if needed)
 		// then roll via the normal path. Isolated, append-only delegated handler.
 		document.addEventListener("click", (/** @type {*} */ e) => {
@@ -1388,6 +1424,13 @@ class CharacterSheetCombat {
 			attack = stateAttacks.find(a => a.id === attackId);
 		}
 		if (!attack) return false;
+		const summonedBenefits = this._state.getSummonedSpellWeaponAttackBenefits?.(attack);
+		if (attack.sourceItem?._summonedSpell && !summonedBenefits) {
+			JqueryUtil.doToast({type: "warning", content: "That summoned weapon is no longer in hand."});
+			return false;
+		}
+		if (opts.thrown && (!summonedBenefits || !attack.isThrown)) return false;
+		if (opts.thrown) attack = {...attack, isMelee: false, isRanged: true, isThrown: true};
 		if (!this._canRollAttackActionAttack(attack)) {
 			JqueryUtil.doToast({type: "warning", content: "No attacks remain in this Attack action."});
 			return false;
@@ -1446,6 +1489,9 @@ class CharacterSheetCombat {
 			|| conditionalAggregate.advantage
 			|| maneuverAdvantage
 			|| shadowTargetAdvantage
+			|| (summonedBenefits?.targetLightAdvantage && (
+				opts.targetInDimLightOrDarkness ?? !!this._summonedWeaponDimTargets?.has(attack.sourceItem?.id)
+			))
 			|| pendingAttackAdvantage;
 		const resoluteWeaponDisadvantage = this._state.isStateTypeActive?.("resoluteStance") && !attack.isSpell;
 		const hasDisadvantage = this._state.hasDisadvantageFromStates?.(attackType)
@@ -1765,6 +1811,19 @@ class CharacterSheetCombat {
 		if (bladesongEnded) {
 			this._page._renderCharacter();
 			this._page._saveCurrentCharacter();
+		}
+		if (opts.thrown && this._state.releaseSummonedSpellWeapon(attack.sourceItem.id)) {
+			this._pendingSummonedWeaponThrow = {
+				attackId,
+				attack,
+				itemId: attack.sourceItem.id,
+				castId: attack.sourceItem._summonedSpell.castId,
+				turnId: this._state.queryTurnReceipt("summoned-weapon-throw").turnId,
+			};
+			this.renderAttacks();
+			this._page._inventory?.render?.();
+			this._page._playMode?._renderActionsHub?.();
+			this._page.saveCharacter?.();
 		}
 		return true;
 	}
@@ -3964,6 +4023,7 @@ class CharacterSheetCombat {
 		if (!attack && this._cachedAttacks?.length) {
 			attack = this._cachedAttacks.find(a => a.id === attackId);
 		}
+		if (!attack && this._pendingSummonedWeaponThrow?.attackId === attackId) attack = this._pendingSummonedWeaponThrow.attack;
 		// Check temporary attacks
 		if (!attack) {
 			const tempAttacks = this._state.getTemporaryAttacks?.() || [];
@@ -3975,6 +4035,15 @@ class CharacterSheetCombat {
 			attack = stateAttacks.find(a => a.id === attackId);
 		}
 		if (!attack || !attack.damage) return;
+		if (attack.sourceItem?._summonedSpell) {
+			const pending = this._pendingSummonedWeaponThrow;
+			const canFinishThrow = pending?.attackId === attackId
+				&& pending.itemId === attack.sourceItem.id
+				&& pending.castId === attack.sourceItem._summonedSpell.castId
+				&& pending.turnId === this._state.queryTurnReceipt("summoned-weapon-throw").turnId
+				&& this._state.getItemRaw(pending.itemId)?._summonedSpell?.status === "released";
+			if (!this._state.isSummonedSpellWeaponAttack(attack) && !canFinishThrow) return;
+		}
 
 		const pendingBrutalStrike = this._getPendingBrutalStrikeForAttack(attackId);
 		const brutalStrikeOutcome = pendingBrutalStrike
@@ -4532,6 +4601,10 @@ class CharacterSheetCombat {
 		}
 		if (committedItemRiderReceipts.length) this._page.saveCharacter?.();
 		if (pendingBrutalStrike) this._pendingBrutalStrike = null;
+		if (this._pendingSummonedWeaponThrow?.attackId === attackId) {
+			this._pendingSummonedWeaponThrow = null;
+			this.renderAttacks?.();
+		}
 
 		// Auto-disable sneak attack after use (once per turn)
 		if (sneakAttackDamage > 0 || cunningStrikeEffects.length) {
@@ -4827,6 +4900,31 @@ class CharacterSheetCombat {
 			lastAttack: null,
 			replacements: new Map(),
 		};
+	}
+
+	toggleSummonedWeaponDimTarget (attack) {
+		if (!this._state.getSummonedSpellWeaponAttackBenefits?.(attack)?.targetLightAdvantage) return false;
+		this._summonedWeaponDimTargets ||= new Set();
+		const id = attack.sourceItem.id;
+		if (this._summonedWeaponDimTargets.has(id)) this._summonedWeaponDimTargets.delete(id);
+		else this._summonedWeaponDimTargets.add(id);
+		this.renderAttacks();
+		return true;
+	}
+
+	async rollSummonedSpellWeaponAttack (attack, event, opts = {}) {
+		if (!this._state.isSummonedSpellWeaponAttack(attack)) return false;
+		this._cachedAttacks = [...(this._cachedAttacks || []).filter(it => it.id !== attack.id), attack];
+		return this._rollAttack(attack.id, event, opts);
+	}
+
+	getPendingSummonedWeaponThrow () {
+		const pending = this._pendingSummonedWeaponThrow;
+		if (!pending) return null;
+		if (pending.turnId === this._state.queryTurnReceipt("summoned-weapon-throw").turnId
+			&& this._state.getItemRaw(pending.itemId)?._summonedSpell?.status === "released") return pending;
+		this._pendingSummonedWeaponThrow = null;
+		return null;
 	}
 
 	canUseBattleMasterAction (actionType) {
@@ -5747,7 +5845,8 @@ class CharacterSheetCombat {
 
 		equippedWeapons.forEach(weapon => {
 			// Check if we already have an attack for this weapon
-			const existingAttack = attacks.find(a => a.name === weapon.name);
+			const existingAttack = attacks.find(a => a.sourceItem?.id === weapon.id
+				|| (!weapon._summonedSpell && a.name === weapon.name));
 			if (!existingAttack) {
 				const autoAttack = this._state.buildAutoAttackFromWeapon?.(weapon);
 				if (autoAttack) attacks.push(autoAttack);
@@ -5789,8 +5888,16 @@ class CharacterSheetCombat {
 		const activeStateAttacks = this._state.getActiveStateAttacks?.() || [];
 		for (const asa of activeStateAttacks) attacks.push(asa);
 
+		const pendingThrow = this.getPendingSummonedWeaponThrow();
+		if (pendingThrow) attacks.push({...pendingThrow.attack, pendingThrownDamage: true});
+
+		const spellToResummon = this._state.getSummonedSpellWeaponToResummon?.();
+		const resummonHtml = spellToResummon
+			? `<button type="button" class="ve-btn ve-btn-sm ve-btn-primary charsheet__resummon-spell-weapon mb-2" title="Use a Bonus Action to bring ${CharacterSheetClassUtils.escapeHtml(spellToResummon.name)} back into your hand">Re-summon ${CharacterSheetClassUtils.escapeHtml(spellToResummon.name)} (Bonus Action)</button>`
+			: "";
 		if (!attacks.length) {
 			container.innerHTML = `
+				${resummonHtml}
 				<p class="ve-muted text-center">
 					No attacks configured. Equip weapons from Inventory or add custom attacks.
 					<br>
@@ -5803,6 +5910,7 @@ class CharacterSheetCombat {
 			document.getElementById("charsheet-add-attack-empty")?.addEventListener("click", () => this._showAttackCreator());
 			return;
 		}
+		if (resummonHtml) container.insertAdjacentHTML("beforeend", resummonHtml);
 
 		// Compute reach context once for this render pass (avoids re-walking
 		// features/feats/active states per attack).
@@ -5919,6 +6027,13 @@ class CharacterSheetCombat {
 	}
 
 	_renderAttackItem (attack, reachCtx = {}) {
+		if (attack.pendingThrownDamage) {
+			return e_({outer: `
+				<div class="charsheet__attack-item" data-attack-id="${attack.id}">
+					<span class="charsheet__attack-name">${CharacterSheetClassUtils.escapeHtml(attack.name)} (thrown; resolve damage)</span>
+					<button type="button" class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" aria-label="Roll damage for thrown ${CharacterSheetClassUtils.escapeHtml(attack.name)}">Damage</button>
+				</div>`});
+		}
 		const {isMelee: attackIsMelee} = this._getAttackRollKind(attack);
 		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
 		const abilityResolution = attackBreakdown?.abilityResolution
@@ -6105,6 +6220,12 @@ class CharacterSheetCombat {
 			? `<button class="ve-btn ve-btn-sm ve-btn-default charsheet__attack-brutal" title="Brutal Strike: on your turn, use Reckless Attack but forgo all Advantage on this Strength-based roll with no Disadvantage. On a confirmed hit, add ${barbarian.level >= 17 ? "2d10 and two different effects" : "1d10 and one effect"}; once per turn.">Brutal Strike</button>`
 			: "";
 		const handsUsedHtml = this._renderHandsUsedToggle(attack);
+		const summonedBenefits = this._state.getSummonedSpellWeaponAttackBenefits?.(attack);
+		const targetIsDim = summonedBenefits?.targetLightAdvantage && !!this._summonedWeaponDimTargets?.has(attack.sourceItem.id);
+		const summonedControls = summonedBenefits
+			? `<button type="button" class="ve-btn ve-btn-sm ${targetIsDim ? "ve-btn-warning" : "ve-btn-default"} charsheet__attack-dim-target" aria-pressed="${!!targetIsDim}" title="Target in dim light or darkness: ${targetIsDim ? "advantage on this sword's attacks" : "toggle on to grant this sword advantage"}">Dim target: ${targetIsDim ? "ON" : "OFF"}</button>
+				<button type="button" class="ve-btn ve-btn-sm ve-btn-default charsheet__attack-throw" title="Throw ${CharacterSheetClassUtils.escapeHtml(attack.name)} (range 20/60); it dissipates at the end of the turn">Throw</button>`
+			: "";
 		// Always-on prose riders (e.g. Gambler's Coins ricochet ignoring half cover).
 		// Generic + data-driven via `getAttackRiderNotes`; surfaced as badges so the
 		// player can see, at a glance, how this weapon resolves differently.
@@ -6147,6 +6268,7 @@ class CharacterSheetCombat {
 					</button>
 					${recklessBtnHtml}
 					${brutalBtnHtml}
+					${summonedControls}
 					<button class="ve-btn ve-btn-sm ve-btn-danger charsheet__attack-damage" title="Roll Damage (Shift-click or Shift+Enter for critical damage)" aria-label="Roll damage; Shift-click or press Shift+Enter for critical damage">
 						<span class="glyphicon glyphicon-fire"></span> Damage
 					</button>

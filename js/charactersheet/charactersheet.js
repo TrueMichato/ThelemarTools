@@ -10770,9 +10770,15 @@ class CharacterSheetPage {
 					</div>
 				`});
 				concRow.querySelector(".charsheet__end-concentration-btn").addEventListener("click", () => {
+					const hadSummonedWeapon = this._state.getConcentrations().some(it => it.summonedWeapon);
 					this._state.breakConcentration();
 					this._saveCurrentCharacter();
 					this._renderActiveStates();
+					if (hadSummonedWeapon) {
+						this._combat?.renderAttacks?.();
+						this._inventory?.render?.();
+						this._playMode?._renderActionsHub?.();
+					}
 				});
 				activeSection.append(concRow);
 			}
@@ -20060,6 +20066,13 @@ class CharacterSheetPage {
 	}
 
 	async _rollAttack (attack, event) {
+		if (attack?.sourceItem?._summonedSpell) {
+			if (!this._combat) {
+				JqueryUtil.doToast({type: "warning", content: "Combat rolls are unavailable for this summoned weapon."});
+				return false;
+			}
+			return this._combat.rollSummonedSpellWeaponAttack(attack, event);
+		}
 		const exhaustionPenalty = this._getExhaustionPenalty();
 
 		// Determine attack type for advantage/disadvantage matching
@@ -23709,8 +23722,14 @@ class CharacterSheetPage {
 	getState () { return this._state; }
 	openAdventurersAtlasLongRest () { return this._rest?.openAdventurersAtlasLongRest?.(); }
 	resetTurnEconomy () {
+		const releasedSword = this._state.getInventory().some(row => row.item?._summonedSpell?.status === "released");
 		this._state.resetTurnEconomy();
 		this._combat?.resetTurnAttackUsage?.();
+		if (releasedSword) {
+			this._combat?.renderAttacks?.();
+			this._inventory?.render?.();
+			this._playMode?._renderActionsHub?.();
+		}
 		this._renderCompanions?.();
 		this._playMode?._refreshOpenDrawer?.("companions");
 		void this._saveCurrentCharacter();
@@ -23722,8 +23741,14 @@ class CharacterSheetPage {
 	}
 
 	advanceCombatRound () {
+		const releasedSword = this._state.getInventory().some(row => row.item?._summonedSpell?.status === "released");
 		const expired = this._state.advanceRound();
 		this._combat?.resetTurnAttackUsage?.();
+		if (releasedSword) {
+			this._combat?.renderAttacks?.();
+			this._inventory?.render?.();
+			this._playMode?._renderActionsHub?.();
+		}
 		return expired;
 	}
 

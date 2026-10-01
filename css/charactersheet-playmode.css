@@ -231,7 +231,7 @@
 	gap: var(--cs-space-xs, 4px);
 	cursor: pointer;
 	padding: 4px 8px;
-	border-radius: var(--cs-radius-sm, 6px);
+	border-radius: 6px;
 	transition: background var(--cs-transition-fast, 150ms);
 	position: relative;
 }
@@ -1020,6 +1020,33 @@
 
 .pm-attack:active {
 	transform: scale(0.99);
+}
+
+.pm-attack--summoned {
+	flex-wrap: wrap;
+}
+
+.pm-attack__spell-controls {
+	flex: 0 0 100%;
+	display: flex;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.pm-attack__spell-btn {
+	border: 1px solid var(--cs-primary, #6366f1);
+	border-radius: var(--cs-radius-sm, 6px);
+	background: transparent;
+	color: var(--cs-text-primary, #f1f5f9);
+	padding: 2px 4px;
+	font-size: var(--cs-text-xs, 0.75rem);
+	cursor: pointer;
+}
+
+.pm-attack__spell-btn[aria-pressed="true"] {
+	background: var(--cs-primary-strong, #4f46e5);
+	color: #fff;
 }
 
 .pm-attack__icon {

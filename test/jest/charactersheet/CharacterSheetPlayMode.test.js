@@ -13,6 +13,8 @@ import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-
 const CharacterSheetState = globalThis.CharacterSheetState;
 const artificerData = JSON.parse(fs.readFileSync(new URL("../../../data/class/class-artificer.json", import.meta.url), "utf8"));
 const objectData = JSON.parse(fs.readFileSync(new URL("../../../data/objects.json", import.meta.url), "utf8")).object;
+const shadowBlade = JSON.parse(fs.readFileSync(new URL("../../../data/spells/spells-xge.json", import.meta.url), "utf8"))
+	.spell.find(spell => spell.name === "Shadow Blade" && spell.source === "XGE");
 const fullArtificer = {
 	...artificerData.class.find(cls => cls.name === "Artificer" && cls.source === "EFA"),
 	subclasses: artificerData.subclass.filter(sc => sc.className === "Artificer" && sc.classSource === "EFA"),
@@ -27,6 +29,7 @@ function makeCartographer () {
 		level: 5,
 		subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
 	});
+
 	state.setAbilityBase("int", 16);
 	return state;
 }
@@ -130,6 +133,64 @@ const getDescendants = root => [
 	root,
 	...root.children.flatMap(child => getDescendants(child)),
 ];
+
+describe("Play Mode Shadow Blade controls", () => {
+	test("routes the sword through Combat's attack roll and exposes light, throw, and re-summon actions", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Wizard", source: "PHB", level: 5});
+		state.startCombat();
+		state.setConcentration({name: shadowBlade.name, source: shadowBlade.source, level: 3});
+		const {itemId} = state.summonSpellWeapon(shadowBlade, 3);
+		const combat = {
+			rollSummonedSpellWeaponAttack: jest.fn(async () => true),
+			toggleSummonedWeaponDimTarget: jest.fn(() => true),
+			renderAttacks: jest.fn(),
+			getPendingSummonedWeaponThrow: jest.fn(() => null),
+		};
+		const {pm, page, actionsHub} = prepareCannonPlayMode({state, combat});
+		page._rollAttack = jest.fn();
+		page._inventory = {render: jest.fn()};
+		page.saveCharacter = jest.fn();
+		pm._getEntityNote = () => "";
+		pm._isFavorite = () => false;
+		pm._setIcon = jest.fn();
+		pm._makeClickable = jest.fn();
+		pm._renderAttacks();
+
+		const row = getDescendants(actionsHub).find(el =>
+			el.className.includes("pm-attack--summoned") && el.children.some(child => child.textContent === "Shadow Blade"));
+		expect(row).toBeDefined();
+		const dim = getDescendants(row).find(el => el.textContent === "Dim target: OFF");
+		const thrown = getDescendants(row).find(el => el.textContent === "Throw (20/60)");
+		expect(dim?.attributes["aria-pressed"]).toBe("false");
+		dim.handlers.click({stopPropagation: jest.fn()});
+		expect(combat.toggleSummonedWeaponDimTarget).toHaveBeenCalled();
+		row.handlers.keydown({target: dim, key: "Enter"});
+		expect(combat.rollSummonedSpellWeaponAttack).not.toHaveBeenCalled();
+		row.handlers.click({});
+		expect(combat.rollSummonedSpellWeaponAttack).toHaveBeenCalledWith(expect.objectContaining({name: "Shadow Blade"}), {}, {});
+		thrown.handlers.click({stopPropagation: jest.fn()});
+		expect(combat.rollSummonedSpellWeaponAttack).toHaveBeenLastCalledWith(expect.objectContaining({name: "Shadow Blade"}), expect.anything(), {thrown: true});
+		expect(page._rollAttack).not.toHaveBeenCalled();
+
+		state.releaseSummonedSpellWeapon(itemId);
+		state.resetTurnEconomy();
+		const remount = prepareCannonPlayMode({state, combat});
+		remount.pm._getEntityNote = () => "";
+		remount.pm._isFavorite = () => false;
+		remount.pm._setIcon = jest.fn();
+		remount.pm._makeClickable = jest.fn();
+		remount.pm._renderActionsHub = jest.fn();
+		remount.page._inventory = {render: jest.fn()};
+		remount.page.saveCharacter = jest.fn();
+		remount.pm._renderAttacks();
+		const resummon = getDescendants(remount.actionsHub).find(el => el.textContent === "Re-summon Shadow Blade (Bonus Action)");
+		expect(resummon).toBeDefined();
+		resummon.handlers.click({stopPropagation: jest.fn()});
+		expect(state.getItemRaw(itemId)?.dmg1).toBe("3d8");
+		expect(state.isActionTypeAvailable("bonus")).toBe(false);
+	});
+});
 
 describe("CharacterSheetPlayMode", () => {
 	let state;
