@@ -8,6 +8,40 @@
 			background: vars.$rgb-bg--alt;
 		}
 
+		&__resource-header {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px 16px;
+			padding: 9px 12px;
+		}
+
+		&__resource-title {
+			margin: 0;
+			font-size: 1rem;
+			font-weight: 700;
+		}
+
+		&__concentration {
+			min-height: 44px;
+			overflow-wrap: anywhere;
+			text-align: left;
+
+			&--active {
+				border-color: vars.$rgb-active-blue;
+				color: vars.$rgb-active-blue;
+			}
+		}
+
+		&__resource-tracker {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+			gap: 10px 18px;
+			min-width: 0;
+			padding: 0 12px 10px;
+		}
+
 		&__resource-overview {
 			display: flex;
 			align-items: center;
@@ -28,31 +62,18 @@
 			}
 		}
 
-		&__resources[open] > .ew__resource-overview::before {
+		&__resource-manager {
+			border-top: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__resource-more > summary {
+			min-height: 44px;
+			padding: 8px 0;
+			cursor: pointer;
+		}
+
+		&__resource-manager[open] > .ew__resource-overview::before {
 			content: "-";
-		}
-
-		&__resource-title {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			min-width: 0;
-			margin: 0;
-			font-size: 1rem;
-			font-weight: 700;
-		}
-
-		&__resource-label {
-			white-space: nowrap;
-		}
-
-		&__resource-summary {
-			min-width: 0;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-			font-weight: 400;
-			font-variant-numeric: tabular-nums;
 		}
 
 		&__resource-fields {
@@ -69,18 +90,22 @@
 			min-width: 0;
 
 			h5 {
-				margin: 0 0 5px;
+				margin: 0 0 4px;
 				font-size: 1rem;
 			}
 		}
 
 		&__resource-row {
 			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto auto;
+			grid-template-columns: minmax(0, 1fr) auto;
 			align-items: center;
-			gap: 4px 8px;
+			gap: 2px 8px;
 			padding: 5px 0;
 			border-top: 1px solid vars.$rgb-border-grey--muted;
+
+			&--recharge {
+				grid-template-columns: minmax(0, 1fr) auto auto;
+			}
 		}
 
 		&__resource-name {
@@ -96,7 +121,9 @@
 
 		&__resource-actions {
 			display: flex;
+			flex-wrap: wrap;
 			gap: 4px;
+			grid-column: 1 / -1;
 		}
 
 		&__resource-button {
@@ -105,9 +132,29 @@
 			padding: 5px 10px;
 		}
 
+		&__resource-pip {
+			display: grid;
+			place-items: center;
+			width: 44px;
+			height: 44px;
+			padding: 0;
+
+			&::before {
+				content: "";
+				width: 18px;
+				height: 18px;
+				border: 2px solid vars.$rgb-active-blue;
+				border-radius: 50%;
+			}
+
+			&--available::before {
+				background: vars.$rgb-active-blue;
+			}
+		}
+
 		&__resource-edit {
-			grid-column: 1 / -1;
 			min-width: 0;
+			border-top: 1px solid vars.$rgb-border-grey--muted;
 
 			summary {
 				display: inline-flex;
@@ -159,8 +206,23 @@
 			background: vars-night.$rgb-bg--alt-night;
 		}
 
-		&__resource-row {
+		&__resource-row,
+		&__resource-edit,
+		&__resource-manager {
 			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__resource-pip::before {
+			border-color: vars-night.$rgb-link-blue--night;
+		}
+
+		&__resource-pip--available::before {
+			background: vars-night.$rgb-link-blue--night;
+		}
+
+		&__concentration--active {
+			border-color: vars-night.$rgb-link-blue--night;
+			color: vars-night.$rgb-link-blue--night;
 		}
 	}
 
@@ -171,11 +233,12 @@
 	}
 
 	@media (width <= 480px) {
-		.ew__resource-row {
+		.ew__resource-row--recharge {
 			grid-template-columns: minmax(0, 1fr) auto;
 
-			.ew__resource-actions {
+			.ew__resource-button {
 				grid-column: 1 / -1;
+				justify-self: start;
 			}
 		}
 	}

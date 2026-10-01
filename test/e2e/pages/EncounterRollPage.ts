@@ -111,5 +111,32 @@ export class EncounterRollPage {
 		await links.nth(index).click();
 	}
 
+	resourcePanel (instanceId: string) {
+		return this.page.locator(`.ew__statblock[data-instance-id="${instanceId}"] .ew__resources`);
+	}
+
+	resourceManager (instanceId: string) {
+		return this.resourcePanel(instanceId).locator(":scope > .ew__resource-manager");
+	}
+
+	async addSavedStatblockPatch (instanceIndex: number, id: string, set: Record<string, number>, migrateFromV4 = false) {
+		await this.page.evaluate(async ({instanceIndex, id, set, migrateFromV4}) => {
+			const globals = globalThis as typeof globalThis & {
+				StorageUtil: {
+					pGetForPage: (key: string, options: {page: string}) => Promise<{
+						version: number,
+						instances: {statblockOperations: {id: string, type: string, data: {patch: {set: Record<string, number>}}}[]}[],
+					}>,
+					pSetForPage: (key: string, value: unknown, options: {page: string}) => Promise<void>,
+				},
+			};
+			const options = {page: "encounterworkspace.html"};
+			const state = await globals.StorageUtil.pGetForPage("encounterWorkspaceState", options);
+			if (migrateFromV4) state.version = 6;
+			state.instances[instanceIndex].statblockOperations.push({id, type: "patch", data: {patch: {set}}});
+			await globals.StorageUtil.pSetForPage("encounterWorkspaceState", state, options);
+		}, {instanceIndex, id, set, migrateFromV4});
+	}
+
 	get rolledEntries () { return this.page.locator(".out-roll-item[title]"); }
 }
