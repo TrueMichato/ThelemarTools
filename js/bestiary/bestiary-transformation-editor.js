@@ -81,12 +81,9 @@ function getChangeHoverEntries (changes) {
 		: [describeChange(step)]);
 }
 
-function makeInfoButton ({name, entries, targets = []}) {
-	const info = button("ⓘ", () => hover.show(), "bqa__transformation-info bqa__entity-link ve-help ve-help--hover");
-	info.setAttribute("aria-label", `Details for ${name}`);
-	info.title = `View ${name} details`;
+function bindInfoHover ({name, entries, targets}) {
 	const hover = Renderer.hover.getMakePredefinedHover({type: "entries", name, entries: MiscUtil.copyFast(entries)}, {isBookContent: false});
-	for (const node of [info, ...targets]) {
+	for (const node of targets) {
 		node.addEventListener("mouseover", evt => hover.mouseOver(evt, node));
 		node.addEventListener("mousemove", evt => hover.mouseMove(evt, node));
 		node.addEventListener("mouseleave", evt => hover.mouseLeave(evt, node));
@@ -98,22 +95,68 @@ function makeInfoButton ({name, entries, targets = []}) {
 		node.addEventListener("blur", () => node.dispatchEvent(new MouseEvent("mouseleave")));
 		node.addEventListener("touchstart", evt => hover.touchStart(evt, node), {passive: true});
 	}
+	return hover;
+}
+
+function makeInfoButton ({name, entries, targets = []}) {
+	const info = button("ⓘ", () => hover.show(), "bqa__transformation-info bqa__entity-link ve-help ve-help--hover");
+	info.setAttribute("aria-label", `Details for ${name}`);
+	info.title = `View ${name} details`;
+	const hover = bindInfoHover({name, entries, targets: [info, ...targets]});
 	return info;
 }
 
-function describeOption (option, candidate, group) {
+function describeProvenance (candidate, sourceLabel) {
+	const {edition, page, evidence} = candidate.provenance;
+	return `${sourceLabel(candidate.identity.source)} · ${edition === "unverified" ? "Edition unverified" : edition === "one" ? "2024 edition" : "2014 edition"} · ${page == null ? "Page unverified" : `p. ${page}`}${evidence === "user-screenshot" ? " · Source attribution unverified (user-supplied screenshot)" : ""}.`;
+}
+
+function getOptionDetailsEntries (option) {
+	return [
+		`Eligibility: ${describeEligibility(option.eligibility || {})}.`,
+		option.changes.length
+			? {type: "entries", name: "Automatic mechanical effects", entries: getChangeHoverEntries(option.changes)}
+			: "No automatic mechanical change.",
+		option.manualReview.length
+			? {type: "entries", name: "DM review (not applied automatically)", entries: option.manualReview.map(it => `${it.field}: ${it.reason}`)}
+			: "No additional DM review for this choice.",
+	];
+}
+
+export function getCreatureTransformationOptionHoverEntries ({candidate, group, option, sourceLabel}) {
 	return [
 		`${candidate.identity.name} (${candidate.identity.source}) · ${group.name} · ${option.name}.`,
-		`Eligibility: ${describeEligibility(option.eligibility || {})}.`,
-		option.changes.length ? `Mechanical changes: ${option.changes.map(describeChange).join("; ")}.` : "No automatic mechanical change.",
-		option.manualReview.length ? `DM review: ${option.manualReview.map(it => it.reason).join(" ")}` : "No additional DM review for this choice.",
-	].join(" ");
+		describeProvenance(candidate, sourceLabel),
+		`Recipe eligibility: ${describeEligibility(candidate.eligibility)}.`,
+		...getOptionDetailsEntries(option),
+	];
+}
+
+export function getCreatureTransformationGroupHoverEntries ({candidate, group, sourceLabel}) {
+	const appliesTo = group.appliesTo && candidate.optionGroups
+		.find(it => it.id === group.appliesTo.group)?.options.find(it => it.id === group.appliesTo.option)?.name;
+	return [
+		describeProvenance(candidate, sourceLabel),
+		`Selection: ${group.selection === "one" ? "Choose one" : "Choose any number"}; ${group.required ? "required before preview" : "optional"}.`,
+		`Available choices: ${group.options.map(it => it.name).join(", ")}. Hover an option name or use its info button for individual rules.`,
+		`Recipe eligibility: ${describeEligibility(candidate.eligibility)}.`,
+		...(appliesTo ? [`Available when ${appliesTo} is selected.`] : []),
+		...(candidate.prerequisites.length ? [{type: "entries", name: "DM prerequisites", entries: candidate.prerequisites}] : []),
+		{
+			type: "entries",
+			name: "Options",
+			entries: group.options.map(option => ({
+				type: "entries",
+				name: option.name,
+				entries: getOptionDetailsEntries(option),
+			})),
+		},
+	];
 }
 
 function getRecipeHoverEntries (candidate, sourceLabel) {
-	const {edition, page} = candidate.provenance;
 	return [
-		`${sourceLabel(candidate.identity.source)} · ${edition === "unverified" ? "Edition unverified" : edition === "one" ? "2024 edition" : "2014 edition"} · ${page == null ? "Page unverified" : `p. ${page}`}.`,
+		describeProvenance(candidate, sourceLabel),
 		`Eligibility: ${describeEligibility(candidate.eligibility)}.`,
 		...(candidate.prerequisites.length ? [{type: "entries", name: "DM prerequisites", entries: candidate.prerequisites}] : []),
 		...(candidate.changes.length ? [{type: "entries", name: "Mechanical effects", entries: getChangeHoverEntries(candidate.changes)}] : []),
@@ -450,7 +493,21 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		const groupControls = new Map();
 		for (const group of candidate.optionGroups) {
 			const fieldset = element("fieldset", {className: "bqa__transformation-group"});
-			fieldset.append(element("legend", {text: `${group.name}${group.required ? " (required)" : ""}`}));
+			const legend = element("legend", {className: "ve-help ve-help--hover", text: `${group.name}${group.required ? " (required)" : ""}`});
+			legend.tabIndex = 0;
+			legend.title = `View ${group.name} options`;
+			const groupHover = bindInfoHover({
+				name: `${candidate.identity.name} (${candidate.identity.source}) · ${group.name}`,
+				entries: getCreatureTransformationGroupHoverEntries({candidate, group, sourceLabel}),
+				targets: [legend],
+			});
+			legend.addEventListener("click", () => groupHover.show());
+			legend.addEventListener("keydown", evt => {
+				if (evt.key !== "Enter" && evt.key !== " ") return;
+				evt.preventDefault();
+				groupHover.show();
+			});
+			fieldset.append(legend);
 			const controls = [];
 			const groupName = `bqa-transformation-group-${++nextOptionGroupId}`;
 			const addOption = (option, {isNone = false} = {}) => {
@@ -465,19 +522,20 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 					? (control.value ? [control.value] : [])
 					: controls.filter(it => it.checked).map(it => it.value)));
 				controls.push(control);
-				label.append(control, element("span", {className: "bqa__transformation-option-name", text: isNone ? "None" : option.name}));
+				const optionName = element("span", {className: "bqa__transformation-option-name", text: isNone ? "None" : option.name});
+				label.append(control, optionName);
 				row.append(label);
 				if (option) {
 					const info = makeInfoButton({
 						name: `${candidate.identity.name} (${candidate.identity.source}) · ${group.name} · ${option.name}`,
-						entries: [
-							describeOption(option, candidate, group),
-							...getChangeHoverEntries(option.changes).filter(it => typeof it !== "string"),
-						],
-						targets: [control],
+						entries: getCreatureTransformationOptionHoverEntries({candidate, group, option, sourceLabel}),
+						targets: [control, optionName],
 					});
 					row.append(info);
 					control.setAttribute("aria-describedby", info.id = `bqa-transformation-detail-${++nextOptionGroupId}`);
+					optionName.addEventListener("click", evt => {
+						if (evt.pointerType === "touch" || evt.sourceCapabilities?.firesTouchEvents) info.click();
+					});
 				}
 				fieldset.append(row);
 			};

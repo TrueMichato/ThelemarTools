@@ -188,6 +188,66 @@ for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
 	});
 }
 
+for (const surface of ["Bestiary", "Encounter Workspace"] as const) {
+	test(`${surface} explains undead groups and option names without selecting them`, async ({page}) => {
+		test.setTimeout(120_000);
+		const editor = new CreatureTransformationPage(page);
+		if (surface === "Bestiary") {
+			await page.goto("/bestiary.html#goblin_mm");
+			await page.locator(".bqa__btn-open:visible").first().click();
+		} else {
+			await new EncounterRollPage(page).seed({count: 1});
+			await page.getByRole("button", {name: "Edit statblock for Goblin #1"}).click();
+		}
+		await page.getByRole("tab", {name: "Templates"}).click();
+		await editor.choose("catalog:undead|scre");
+		const category = editor.root.getByRole("group", {name: "Undead category (required)"});
+		const categoryLegend = category.locator("legend");
+		await expect(categoryLegend).toHaveAttribute("tabindex", "0");
+		await categoryLegend.hover();
+		await expect(editor.nativeHover).toContainText("Ghostly");
+		await expect(editor.nativeHover).toContainText("Halve Strength");
+		await expect(editor.nativeHover).toContainText("Replace movement with flight and hover");
+		await expect(editor.nativeHover).toContainText("Page unverified");
+		await expect(category.locator("input:checked")).toHaveCount(0);
+		await editor.dismissNativeHover();
+		await page.keyboard.press("Tab");
+		await categoryLegend.focus();
+		await expect(editor.nativeHover).toContainText("Ghostly");
+		expect(await categoryLegend.evaluate(node => getComputedStyle(node).outlineStyle)).not.toBe("none");
+		await categoryLegend.evaluate(node => (node as HTMLElement).blur());
+		await editor.dismissNativeHover();
+
+		const additional = editor.root.getByRole("group", {name: "Additional undead features"});
+		await additional.locator("legend").hover();
+		await expect(editor.nativeHover).toContainText("Deathly Aura");
+		await expect(editor.nativeHover).toContainText("Resolve aura range and damage with the DM");
+		await expect(editor.nativeHover).toContainText("Magic Resistance");
+		await expect(editor.nativeHover).toContainText("advantage on saving throws against spells and magical effects");
+		await editor.dismissNativeHover();
+		const magic = editor.optionControl("Additional undead features", "magic-resistance");
+		await expect(additional.getByRole("checkbox", {name: "Magic Resistance"})).toHaveCount(1);
+		await expect(editor.optionInfo("Additional undead features", "magic-resistance")).toHaveAttribute("aria-label", /Details for Undead \(SCRE\).*Magic Resistance/);
+		await magic.locator("..").locator(".bqa__transformation-option-name").hover();
+		await expect(editor.nativeHover).toContainText("Automatic mechanical effects");
+		await expect(editor.nativeHover).toContainText("advantage on saving throws against spells and magical effects");
+		await expect(editor.nativeHover).toContainText("Source attribution unverified");
+		await expect(magic).not.toBeChecked();
+		await editor.dismissNativeHover();
+		await editor.optionInfo("Additional undead features", "magic-resistance").click();
+		await expect(editor.nativeHover).toContainText("Automatic mechanical effects");
+		await editor.dismissNativeHover();
+		await editor.optionInfo("Additional undead features", "deathly-aura").click();
+		await expect(editor.nativeHover).toContainText("No automatic mechanical change");
+		await expect(editor.nativeHover).toContainText("Resolve aura range and damage with the DM");
+		await editor.dismissNativeHover();
+		await editor.chooseOption("Undead category", "skeletal");
+		await magic.check();
+		await editor.expectLivePreview();
+		await expect(editor.afterStatblock).toContainText("Magic Resistance");
+	});
+}
+
 test("filters and duplicate homebrew IDs invalidate selection without blocking other templates", async ({page}) => {
 	await page.goto("/bestiary.html#goblin_mm");
 	const editor = new CreatureTransformationPage(page);
@@ -526,5 +586,31 @@ test.describe("mobile touch and night mode", () => {
 		await expect(editor.root.locator(".bqa__transformation-delta")).toBeVisible();
 		expect(await editor.textContrast(".bqa__transformation-option-name", ".bqa__transformation-option")).toBeGreaterThanOrEqual(4.5);
 		expect(await editor.textContrast(".bqa__transformation-delta h5", ".bqa__transformation-delta")).toBeGreaterThanOrEqual(4.5);
+	});
+
+	test("undead group heading opens rules on tap without selecting an option", async ({page}) => {
+		await page.goto("/bestiary.html#goblin_mm");
+		await page.locator(".bqa__btn-open:visible").first().tap();
+		await page.getByRole("tab", {name: "Templates"}).tap();
+		const editor = new CreatureTransformationPage(page);
+		await editor.choose("catalog:undead|scre");
+		const group = editor.root.getByRole("group", {name: "Additional undead features"});
+		await group.locator("legend").tap();
+		await expect(editor.nativeHover).toContainText("Deathly Aura");
+		const hoverBounds = await editor.nativeHover.boundingBox();
+		expect(hoverBounds).not.toBeNull();
+		expect(hoverBounds!.x).toBeGreaterThanOrEqual(0);
+		expect(hoverBounds!.x + hoverBounds!.width).toBeLessThanOrEqual(391);
+		await expect(group.locator("input:checked")).toHaveCount(0);
+		await editor.dismissNativeHover();
+		await editor.optionInfo("Additional undead features", "magic-resistance").tap();
+		await expect(editor.nativeHover).toContainText("Magic Resistance");
+		await expect(group.locator("input:checked")).toHaveCount(0);
+		expect(await editor.root.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+		await editor.dismissNativeHover();
+		const magic = editor.optionControl("Additional undead features", "magic-resistance");
+		await magic.locator("..").locator(".bqa__transformation-option-name").tap();
+		await expect(editor.nativeHover).toContainText("Automatic mechanical effects");
+		await expect(magic).toBeChecked();
 	});
 });
