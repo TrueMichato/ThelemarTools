@@ -7349,7 +7349,10 @@
 			},
 			"duration": [
 				{
-					"type": "special"
+					"type": "permanent",
+					"ends": [
+						"trigger"
+					]
 				}
 			],
 			"entries": [
@@ -20845,7 +20848,7 @@
 			"classSource": "TGTT",
 			"level": 8,
 			"entries": [
-				"When you reach 8th level, your ability to hit without stop becomes a second nature to you. Your {@classFeature Flurry of Blows|Monk|XPHB||2} without expending any Focus Points."
+				"At 8th level, you can use {@classFeature Flurry of Blows|Monk|XPHB|2} without expending any Focus Points."
 			]
 		},
 		{
