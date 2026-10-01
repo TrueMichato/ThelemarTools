@@ -9,6 +9,7 @@ import {
 	validateEncounterModifier,
 } from "./encounterworkspace-effects.js";
 import {getEncounterResourceDefaults, validateEncounterResources} from "./encounterworkspace-resources.js";
+import {getEncounterDamageForMonster} from "./encounterworkspace-damage.js";
 
 const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
@@ -700,6 +701,55 @@ export class EncounterWorkspaceState {
 			}),
 		});
 		return {state: next, changedIds, skippedIds, snapshots};
+	}
+
+	static withTypedDamage (state, {amount, damageType, source, decisions = {}, targetIds = state.selectedIds}) {
+		const {eligibleIds} = getEncounterEffectTargets(state, {targetIds});
+		if (!decisions || typeof decisions !== "object" || Array.isArray(decisions)) throw new Error("Damage defense decisions must be explicit.");
+		getEncounterDamageForMonster({amount, damageType, source});
+		const selected = new Set(eligibleIds);
+		const changedIds = [];
+		const skippedIds = [];
+		const snapshots = [];
+		const results = [];
+		const unresolved = [];
+		const instances = state.instances.map(instance => {
+			if (!selected.has(instance.id)) return instance;
+			if (instance.hp.max == null || instance.hp.current == null) {
+				skippedIds.push(instance.id);
+				return instance;
+			}
+			const calculation = getEncounterDamageForMonster({
+				monster: getEncounterEffectiveMonster(instance),
+				amount,
+				damageType,
+				source,
+				decisions: Object.hasOwn(decisions, instance.id) ? decisions[instance.id] : {},
+			});
+			if (calculation.unresolved.length) {
+				unresolved.push(...calculation.unresolved.map(defense => ({id: instance.id, ...defense})));
+				return instance;
+			}
+			const hp = getNpcTrackerHpAfterOperation({
+				hp: instance.hp,
+				operation: {mode: "delta", value: -calculation.damage},
+			});
+			validateHp(hp);
+			const concentrationDc = instance.resources?.concentration.active && calculation.damage
+				? Math.max(10, Math.floor(calculation.damage / 2))
+				: null;
+			results.push({id: instance.id, damage: calculation.damage, defenses: calculation.defenses, before: {...instance.hp}, after: hp, concentrationDc});
+			if (Object.keys(hp).every(prop => hp[prop] === instance.hp[prop])) return instance;
+			changedIds.push(instance.id);
+			snapshots.push({id: instance.id, before: {...instance.hp}, after: hp});
+			return {...instance, hp};
+		});
+		if (unresolved.length) {
+			const error = new Error("Resolve the named conditional defenses before applying damage to any target.");
+			error.unresolved = unresolved;
+			throw error;
+		}
+		return {state: this.validate({...state, instances}), changedIds, skippedIds, snapshots, results};
 	}
 
 	static withHpUndo (state, snapshots) {
