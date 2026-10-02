@@ -556,6 +556,26 @@ Feature and feat cards share a button disclosure. The button's
 expanded state as its body on mouse click, Enter/Space, and re-render. Clicking
 the non-interactive header area also toggles the corresponding card.
 
+The Features tab's class list, Overview feature summary, and **All Class
+Features** modal share `_getFeatureDisplayType()`. Class, subclass, and optional
+features (including invocations, metamagic, and subclass choices) belong to the
+class display. Untyped legacy rows need class/subclass metadata, an unambiguous
+name-and-source catalog match, or the source attribution supported by old-save
+migration; a level alone does not make a manual feature a class feature.
+Species, legacy Race, and Subrace remain in the species category; backgrounds
+and feats remain separate. Explicit unrelated/manual categories are not
+reclassified by incidental class or level fields.
+
+Overview keeps its importance filter and caps of five class, three species,
+and two background rows. If none qualify, it samples up to three class, two
+species, and two background rows instead. Both paths use the same classification
+and display-only `mergeEquivalentFeaturesForDisplay()` projection for their
+counts; capped class/species lists link to their complete expanded modal,
+including less-important rows. Stored descriptions take precedence, followed by
+stored entries and an unambiguous source-qualified class/subclass/optional
+catalog description. Display grouping, description lookup, and equivalent-row
+merging never change stored rows, source identity, ownership, or resource uses.
+
 ---
 
 ## CharacterSheetRest
