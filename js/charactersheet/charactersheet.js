@@ -21094,27 +21094,92 @@ class CharacterSheetPage {
 		this._rollHistory?.addRoll({title, total, breakdown, resultClass, resultNote});
 
 		// Remove existing result
-		document.querySelector(".charsheet__dice-result")?.remove();
+		this._dismissDiceResult(document.querySelector(".charsheet__dice-result"));
 
 		const totalClass = resultClass ? ` ${resultClass}` : "";
 		const noteHtml = resultNote ? `<div class="charsheet__dice-result-note">${resultNote}</div>` : "";
 
 		const resultEl = e_({outer: `
 			<div class="charsheet__dice-result" role="status" aria-live="assertive">
-				<span class="charsheet__dice-result-close glyphicon glyphicon-remove"></span>
+				<button type="button" class="charsheet__dice-result-close" aria-label="Dismiss roll result"><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></button>
 				<div class="charsheet__dice-result-header">${title}</div>
 				<div class="charsheet__dice-result-total${totalClass}">${total}</div>
-				<div class="charsheet__dice-result-breakdown">${breakdown}</div>
-				${noteHtml}
+				<div class="charsheet__dice-result-body" tabindex="0" role="region" aria-label="Roll breakdown">
+					<div class="charsheet__dice-result-breakdown">${breakdown}</div>
+					${noteHtml}
+				</div>
 			</div>
 		`});
 
 		resultEl.querySelector(".charsheet__dice-result-close").addEventListener("click", () => this._dismissDiceResult(resultEl));
 		document.body.append(resultEl);
 		this._lastDiceResultEl = resultEl;
+		this._watchDiceResultPosition(resultEl);
 
 		this._scheduleDiceResultDismiss(resultEl, duration);
 		return resultEl;
+	}
+
+	_positionDiceResult (el) {
+		const viewport = window.visualViewport;
+		const top = viewport?.offsetTop || 0;
+		const bottom = Math.min(window.innerHeight, top + (viewport?.height || window.innerHeight));
+		let availableBottom = bottom;
+		for (const chrome of document.querySelectorAll("#charsheet-tabs, .charsheet-mobile__status")) {
+			const style = window.getComputedStyle(chrome);
+			const rect = chrome.getBoundingClientRect();
+			if (style.position !== "fixed" || style.visibility === "hidden" || !rect.height || rect.bottom <= top || rect.top >= bottom) continue;
+			// The measured rect already includes safe-area padding and text-size growth.
+			availableBottom = Math.min(availableBottom, Math.max(top, rect.top));
+		}
+		el.style.setProperty("--cs-roll-bottom-offset", `${window.innerHeight - availableBottom}px`);
+		el.style.setProperty("--cs-roll-viewport-top", `${top}px`);
+		el.style.setProperty("--cs-roll-viewport-height", `${window.innerHeight}px`);
+	}
+
+	_watchDiceResultPosition (el) {
+		let frame = null;
+		const resizeObserver = window.ResizeObserver ? new window.ResizeObserver(() => queuePosition()) : null;
+		const observedChrome = new Set();
+		const updatePosition = () => {
+			frame = null;
+			if (!el.isConnected) {
+				this._dismissDiceResult(el);
+				return;
+			}
+			for (const chrome of observedChrome) {
+				if (chrome.isConnected) continue;
+				resizeObserver?.unobserve(chrome);
+				observedChrome.delete(chrome);
+			}
+			for (const chrome of document.querySelectorAll("#charsheet-tabs, .charsheet-mobile__status")) {
+				if (observedChrome.has(chrome)) continue;
+				resizeObserver?.observe(chrome);
+				observedChrome.add(chrome);
+			}
+			this._positionDiceResult(el);
+		};
+		const queuePosition = () => {
+			if (frame !== null) return;
+			frame = window.requestAnimationFrame(updatePosition);
+		};
+		const mutationObserver = new window.MutationObserver(queuePosition);
+		mutationObserver.observe(document.body, {attributes: true, attributeFilter: ["class"], childList: true});
+		const sheet = document.querySelector(".charsheet-page");
+		if (sheet) mutationObserver.observe(sheet, {attributes: true, attributeFilter: ["class"]});
+		window.addEventListener("resize", queuePosition);
+		window.visualViewport?.addEventListener("resize", queuePosition);
+		window.visualViewport?.addEventListener("scroll", queuePosition);
+		el.__positionCleanup = () => {
+			if (frame !== null) window.cancelAnimationFrame(frame);
+			resizeObserver?.disconnect();
+			mutationObserver.disconnect();
+			window.removeEventListener("resize", queuePosition);
+			window.visualViewport?.removeEventListener("resize", queuePosition);
+			window.visualViewport?.removeEventListener("scroll", queuePosition);
+			el.__positionCleanup = null;
+		};
+		updatePosition();
 	}
 
 	/**
@@ -21128,7 +21193,7 @@ class CharacterSheetPage {
 		if (!el) return;
 		this._clearDiceResultDismiss(el);
 		el.__dismissTimer = setTimeout(() => {
-			el.__dismissTimer = setTimeout(() => el.remove(), 300);
+			el.__dismissTimer = setTimeout(() => this._dismissDiceResult(el), 300);
 		}, duration);
 	}
 
@@ -21140,7 +21205,9 @@ class CharacterSheetPage {
 	/** (R26 #8) Immediately dismiss a dice-result toast (clearing its timer first). */
 	_dismissDiceResult (el) {
 		this._clearDiceResultDismiss(el);
+		el?.__positionCleanup?.();
 		el?.remove();
+		if (this._lastDiceResultEl === el) this._lastDiceResultEl = null;
 	}
 	// #endregion
 
