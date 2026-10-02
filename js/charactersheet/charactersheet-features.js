@@ -810,6 +810,66 @@ class CharacterSheetFeatures {
 	}
 
 	/**
+	 * Resolve legacy display rows only by an unambiguous, source-qualified catalog identity.
+	 */
+	_getFeatureDisplayCatalogEntry (feature) {
+		if (!feature.name || !feature.source) return null;
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const type = normalize(feature.featureType);
+		const isOptional = type === "optional feature" || feature.optionalFeatureTypes?.length || Array.isArray(feature.featureType);
+		const isSubclass = feature.isSubclassFeature || feature.subclassShortName || feature.subclassName
+			|| ["subclass", "subclass feature", "subclassfeature"].includes(type);
+		const catalog = isOptional
+			? this._page.getOptionalFeatures?.() || []
+			: isSubclass
+				? this._page.getSubclassFeatures?.() || []
+				: [
+					...(this._page.getClassFeatures?.() || []),
+					...(this._page.getSubclassFeatures?.() || []),
+					...(this._page.getOptionalFeatures?.() || []),
+				];
+		const matches = catalog.filter(entry =>
+			normalize(entry.name) === normalize(feature.name)
+			&& normalize(entry.source) === normalize(feature.source)
+			&& ["className", "classSource", "subclassShortName", "subclassSource"].every(key =>
+				!feature[key] || !entry[key] || normalize(entry[key]) === normalize(feature[key]))
+			&& (!feature.level || !entry.level || feature.isFeatureOption || feature.parentFeature || entry.level === feature.level),
+		);
+		return matches.length === 1 ? matches[0] : null;
+	}
+
+	_getFeatureDisplayType (feature) {
+		const type = typeof feature.featureType === "string" ? feature.featureType.trim().toLowerCase() : "";
+		if (["species", "race", "subrace"].includes(type)) return "Species";
+		if (type === "background") return "Background";
+		if (type === "feat" || feature.featType) return "Feat";
+		if (["class", "subclass", "class feature", "subclass feature", "classfeature", "subclassfeature", "optional feature"].includes(type)) return "Class";
+		// An explicit unrelated/manual category takes precedence over incidental level/owner fields.
+		if (type || feature.sourceAbilityId || feature.dmGranted) return "Other";
+		if (feature.className || feature.classSource || feature.subclassShortName || feature.subclassSource || feature.isSubclassFeature
+			|| feature.optionalFeatureTypes?.length || CharacterSheetClassUtils.isCombatMethod(feature)) return "Class";
+		if (this._getFeatureDisplayCatalogEntry(feature)) return "Class";
+
+		// Match the source attribution supported by old-save feature migration; never guess from level alone.
+		const source = String(feature.source || "").toLowerCase();
+		if (this._state.getClasses().some(cls => cls.name && source.includes(cls.name.toLowerCase()))) return "Class";
+		const raceName = this._state.getRace()?.name?.toLowerCase();
+		if (raceName && source.includes(raceName)) return "Species";
+		const backgroundName = this._state.getBackground()?.name?.toLowerCase();
+		if (backgroundName && source.includes(backgroundName)) return "Background";
+		return "Other";
+	}
+
+	_getFeatureDisplayDescription (feature) {
+		if (feature.description) return feature.description;
+		const entries = feature.entries?.length
+			? feature.entries
+			: this._getFeatureDisplayType(feature) === "Class" ? this._getFeatureDisplayCatalogEntry(feature)?.entries : null;
+		if (!entries?.length) return "";
+		return Renderer.get().render({type: "entries", entries: this._thelemarizeEntries(entries)});
+	}
+
+	/**
 	 * Show modal with all features of a given type (Class or Species)
 	 * @param {string} featureType - "Class" or "Species"
 	 */
@@ -820,10 +880,10 @@ class CharacterSheetFeatures {
 		let features;
 		let title;
 		if (featureType === "Class") {
-			features = allFeatures.filter(f => f.featureType === "Class");
+			features = allFeatures.filter(f => this._getFeatureDisplayType(f) === "Class");
 			title = "All Class Features";
 		} else if (featureType === "Species") {
-			features = allFeatures.filter(f => f.featureType === "Species" || f.featureType === "Subrace" || f.featureType === "Race");
+			features = allFeatures.filter(f => this._getFeatureDisplayType(f) === "Species");
 			title = "All Species Features";
 		} else {
 			return;
@@ -843,6 +903,7 @@ class CharacterSheetFeatures {
 		// Render each feature
 		const list = e_({tag: "div", clazz: "ve-flex-col"});
 		features.forEach(feature => {
+			const description = this._getFeatureDisplayDescription(feature);
 			const usesStr = feature.uses
 				? `<span class="ve-muted ml-2">(${feature.uses.current}/${feature.uses.max} uses)</span>`
 				: "";
@@ -854,7 +915,7 @@ class CharacterSheetFeatures {
 						${usesStr}
 						${feature.className ? `<span class="ve-muted ml-auto ve-small">${feature.className}${feature.level ? ` L${feature.level}` : ""}</span>` : ""}
 					</div>
-					${feature.description ? `<div class="ve-small mt-1">${feature.description}</div>` : ""}
+					${description ? `<div class="ve-small mt-1">${description}</div>` : ""}
 				</div>
 			`});
 			list.append(featureEntry);
@@ -964,37 +1025,7 @@ class CharacterSheetFeatures {
 
 		const classes = this._state.getClasses();
 		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
-		const classNames = classes.map(c => c.name?.toLowerCase()).filter(Boolean);
-
-		// Filter for class features - be lenient for compatibility with old saves
-		// Old saves may have features without explicit featureType markers
-		const features = allFeatures.filter(f => {
-			// Explicitly marked as Class feature
-			if (f.featureType === "Class") return true;
-			// Optional Features (invocations, metamagic, etc.) are displayed with class features
-			if (f.featureType === "Optional Feature") return true;
-			// Has className property (primary indicator of a class feature)
-			if (f.className) return true;
-			// Has classSource property
-			if (f.classSource) return true;
-			// Has a level property (class features have levels, racial/background don't)
-			if (f.level && typeof f.level === "number") return true;
-			// Exclude features explicitly marked as other types
-			if (f.featureType === "Race" || f.featureType === "Background" || f.featureType === "Feat") return false;
-			// For old saves without markers: if we have classes but this feature isn't marked as race/background,
-			// and there are no race/background features with this name, treat it as a class feature
-			if (classes.length > 0 && !f.featureType) {
-				// Check if this might be a known class feature by source containing class name
-				if (f.source) {
-					const sourceLower = f.source.toLowerCase();
-					if (classNames.some(cn => sourceLower.includes(cn))) return true;
-				}
-				// Default: include unmarked features when character has classes
-				// This handles old saves where features weren't typed
-				return true;
-			}
-			return false;
-		});
+		const features = allFeatures.filter(f => this._getFeatureDisplayType(f) === "Class");
 
 		if (!classes.length) {
 			container.append(e_({outer: `<div class="ve-muted ve-text-center py-2">Select a class to see features</div>`}));
@@ -1803,7 +1834,7 @@ class CharacterSheetFeatures {
 
 		container.innerHTML = "";
 
-		const features = this._state.getFeatures();
+		const features = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
 		const classes = this._state.getClasses();
 		const race = this._state.getRace();
 
@@ -1875,7 +1906,7 @@ class CharacterSheetFeatures {
 			if (feature.important) return true;
 			// Key features by name OR description
 			const nameLower = feature.name?.toLowerCase() || "";
-			const descLower = feature.description?.toLowerCase() || "";
+			const descLower = this._getFeatureDisplayDescription(feature).toLowerCase();
 
 			// Check keyword matches
 			if (importantKeywords.some(keyword =>
@@ -1888,26 +1919,11 @@ class CharacterSheetFeatures {
 			return false;
 		};
 
-		// Get important features grouped by type
-		const importantFeatures = features.filter(isImportantFeature);
-
-		// Group by feature type
-		const byType = {
-			"Class": [],
-			"Species": [],
-			"Subrace": [],
-			"Background": [],
-			"Other": [],
-		};
-
-		importantFeatures.forEach(f => {
-			const type = f.featureType || "Other";
-			if (byType[type]) {
-				byType[type].push(f);
-			} else {
-				byType.Other.push(f);
-			}
+		const allByType = {Class: [], Species: [], Background: []};
+		features.forEach(feature => {
+			allByType[this._getFeatureDisplayType(feature)]?.push(feature);
 		});
+		const byType = Object.fromEntries(Object.entries(allByType).map(([type, rows]) => [type, rows.filter(isImportantFeature)]));
 
 		let hasContent = false;
 
@@ -1925,7 +1941,7 @@ class CharacterSheetFeatures {
 		}
 
 		// Then Species/Race features
-		const speciesFeatures = [...byType.Species, ...byType.Subrace];
+		const speciesFeatures = byType.Species;
 		if (speciesFeatures.length) {
 			hasContent = true;
 			container.append(e_({outer: `<div class="ve-small ve-muted mb-1 ${byType.Class.length ? "mt-2" : ""}"><strong>Species</strong></div>`}));
@@ -1949,15 +1965,23 @@ class CharacterSheetFeatures {
 		// Fallback if no important features found
 		if (!hasContent) {
 			// Show a representative sample from each type
-			const classFeatures = features.filter(f => f.featureType === "Class").slice(0, 3);
-			const raceFeatures = features.filter(f => f.featureType === "Species" || f.featureType === "Subrace").slice(0, 2);
+			const classFeatures = allByType.Class.slice(0, 3);
+			const raceFeatures = allByType.Species.slice(0, 2);
+			const backgroundFeatures = allByType.Background.slice(0, 2);
 
-			[...classFeatures, ...raceFeatures].forEach(feature => {
+			[...classFeatures, ...raceFeatures, ...backgroundFeatures].forEach(feature => {
 				container.append(e_({outer: `<div class="charsheet__feature-summary-item">${getFeatureHtml(feature)}</div>`}));
 			});
+			for (const [type, shown] of [["Class", classFeatures], ["Species", raceFeatures]]) {
+				const remaining = allByType[type].length - shown.length;
+				if (remaining > 0) {
+					container.append(e_({outer: `<div class="ve-muted ve-small charsheet__feature-summary-more" data-feature-type="${type}">+${remaining} more ${type.toLowerCase()} features</div>`}));
+				}
+			}
 
-			if (features.length > 5) {
-				container.append(e_({outer: `<div class="ve-muted ve-small text-center">View all ${features.length} features in Features tab</div>`}));
+			const displayFeatureCount = Object.values(allByType).reduce((count, rows) => count + rows.length, 0);
+			if (displayFeatureCount > 5) {
+				container.append(e_({outer: `<div class="ve-muted ve-small text-center">View all ${displayFeatureCount} features in Features tab</div>`}));
 			}
 		}
 	}
