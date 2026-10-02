@@ -450,9 +450,31 @@ the nested ability receipt and the feat's effect receipt are not reversed twice.
 The Features-tab free-add picker likewise keeps an owned repeatable feat
 selectable; each manual acquisition has its own source-qualified unplaced
 decision key and independently reversible effects. Non-repeatable feats remain
-unavailable after their first acquisition. The current feat choice UI
-implements the +2-to-one-score ASI option; the feat
-data's alternative +1-to-two-scores option is not yet selectable.
+unavailable after their first acquisition.
+
+The XPHB ASI feat offers mutually exclusive **+2 to one ability** and **+1
+to two distinct abilities** modes in LevelUp, QuickBuild, Builder handoff,
+the Features free-add picker, and both Respec feat decision paths. All use
+the shared ClassUtils ability picker/resolver; counts, amounts, allowed
+abilities, and caps come from the selected authored entry. Switching modes
+clears the previous picks. Incomplete or duplicate selections cannot be
+applied. Staging a wholly unpicked feat in the decision graph still creates
+a required unresolved ability child (and grants no default increase);
+Respec Apply remains blocked until that child is resolved. Ordinary ASIs
+and scalar half-feat choices retain their existing
+controls and mechanics.
+
+Legacy `choices.ability: "str"` saves still select the one-score option.
+New split selections persist as
+`choices: {ability: {str: 1, dex: 1}, abilityOption: 1}`; the option index
+identifies one alternative, not a second stacked grant. A split feat has
+one nested ability decision selecting both abilities and an exact receipt
+for each actual capped delta. Historical-score previews, replacement,
+Apply/Undo, and save/load consume only that acquisition's receipts, so a
+later repeat never reverses its sibling's increase.
+LevelUp and QuickBuild record ordinary ASI history only when that allocation
+was actually applied; switching to a feat does not leave a phantom ASI that
+historical previews or Respec could subtract a second time.
 
 Feat prerequisites are evaluated against the candidate for level, ability
 scores, spellcasting, race, background, armor/weapon proficiency, prior feats,

@@ -2418,6 +2418,37 @@ class CharacterSheetRespec {
 
 		if (decision.type === "nestedAbility" || decision.type === "nestedConfiguration") {
 			if (decision.type === "nestedAbility") {
+				if (decision.meta?.descriptorRules?.featAbilityChoice) {
+					const feat = this._state._data.feats.find(candidate =>
+						candidate.sourceDecisionKey === decision.parentSemanticKey || candidate.id === decision.meta?.featId);
+					if (!feat) throw new Error("The feat owning this ability choice could not be found.");
+					const canonical = (this._page.getFeats?.() || []).find(candidate =>
+						candidate.name === feat.name && candidate.source === feat.source) || feat;
+					const amount = decision.meta.descriptorRules.amount;
+					const choices = {
+						...(feat.choices || {}),
+						ability: decision.count === 1 ? next[0] || null : Object.fromEntries(next.map(ability => [ability, amount])),
+						...(CharacterSheetClassUtils.getFeatAbilityOptions(canonical).length > 1
+							? {abilityOption: decision.meta.descriptorRules.abilityOption}
+							: {}),
+					};
+					const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(canonical, choices);
+					if (!resolved.valid) throw new Error(resolved.error);
+					const deltas = {};
+					decision.meta.receiptPreviousAbility = {};
+					for (const [ability, increase] of Object.entries(resolved.increases)) {
+						const before = this._state.getAbilityBase(ability);
+						const after = CharacterSheetClassUtils.capAbilityIncrease(before, increase, resolved.option.max);
+						decision.meta.receiptPreviousAbility[ability] = before;
+						this._state.setAbilityBase(ability, after);
+						if (after !== before) deltas[ability] = after - before;
+					}
+					feat.choices = choices;
+					feat._featChoices = MiscUtil.copyFast(choices);
+					feat.appliedEffects ||= {};
+					feat.appliedEffects.abilityDeltas = deltas;
+					return;
+				}
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
 				const isOriginAbility = decision.scope === "origin"
 					&& ["race", "background"].includes(decision.provenance?.ownerType);
@@ -4229,6 +4260,11 @@ class CharacterSheetRespec {
 	}
 
 	_applyClassFeatProgressionDecisionChange (decision, nextFeat, featChoices = {}) {
+		if ((featChoices.ability != null || featChoices.abilityOption != null)
+			&& !CharacterSheetClassUtils.resolveFeatAbilityChoice(nextFeat, featChoices).valid) {
+			JqueryUtil.doToast({type: "danger", content: `Complete all choices for ${nextFeat.name}, including its ability increase.`});
+			return false;
+		}
 		const hasAbilityChildReceipt = this._engine.manifest.decisions.some(candidate =>
 			candidate.type === "nestedAbility"
 				&& candidate.parentSemanticKey === decision.semanticKey
@@ -4792,6 +4828,11 @@ class CharacterSheetRespec {
 
 	_applyImprovementChange (decision, next) {
 		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
+		if (next?.mode === "feat" && (next.featChoices?.ability != null || next.featChoices?.abilityOption != null)
+			&& !CharacterSheetClassUtils.resolveFeatAbilityChoice(next.feat, next.featChoices).valid) {
+			JqueryUtil.doToast({type: "danger", content: `Complete all choices for ${next.feat.name}, including its ability increase.`});
+			return false;
+		}
 		const previousFeat = decision.type === "feat"
 			? decision.selection
 			: decision.selection?.mode === "feat" ? decision.selection.feat : null;

@@ -12482,30 +12482,25 @@ class CharacterSheetState {
 				const feat = this._data.feats.find(candidate =>
 					candidate.sourceDecisionKey === parent?.semanticKey,
 				);
-				const ability = String(decision.selection).toLowerCase();
-				const recordedAmount = Number(feat?.appliedEffects?.abilityDeltas?.[ability]) || 0;
-				const amount = recordedAmount
-					|| (decision.meta?.unplacedFeatAbility
-						? Number(decision.meta?.descriptorRules?.amount) || 1
-						: 0);
-				if (amount) {
+				const abilities = (Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+					.map(value => String(value).toLowerCase());
+				const effects = [];
+				for (const ability of abilities) {
+					if (!Parser.ABIL_ABVS.includes(ability)) continue;
+					const hasExplicitAllocation = feat?.choices?.abilityOption != null || typeof feat?.choices?.ability === "object";
+					const amount = feat?.appliedEffects?.abilityDeltas && (hasExplicitAllocation || !decision.meta?.unplacedFeatAbility)
+						? Number(feat.appliedEffects.abilityDeltas[ability]) || 0
+						: Number(feat?.appliedEffects?.abilityDeltas?.[ability]) || (decision.meta?.unplacedFeatAbility
+							? Number(decision.meta?.descriptorRules?.amount) || 1
+							: 0);
+					if (!amount && !feat?.appliedEffects?.abilityDeltas) continue;
 					const before = this.getAbilityBase(ability) - amount;
 					decision.meta ||= {};
 					decision.meta.receiptPreviousAbility = {
 						...(decision.meta.receiptPreviousAbility || {}),
 						[ability]: before,
 					};
-					decision.receipt = {
-						version: 1,
-						sourceDecisionKey: decision.semanticKey,
-						effects: [{
-							type: "abilityDelta",
-							sourceDecisionKey: decision.semanticKey,
-							ability,
-							amount,
-							before,
-						}],
-					};
+					effects.push({type: "abilityDelta", sourceDecisionKey: decision.semanticKey, ability, amount, before});
 					if (decision.meta.unplacedFeatAbility && feat) {
 						feat.appliedEffects ||= {};
 						feat.appliedEffects.abilityDeltas = {
@@ -12514,6 +12509,7 @@ class CharacterSheetState {
 						};
 					}
 				}
+				if (effects.length) decision.receipt = {version: 1, sourceDecisionKey: decision.semanticKey, effects};
 			}
 			if (
 				decision.meta?.unplacedFeatChoice
@@ -63703,10 +63699,16 @@ class CharacterSheetState {
 			const revertedAppliedEffects = this._revertFeatAppliedEffects(feat, {skipAbilityDeltas});
 			if (!revertedAppliedEffects) this.removeInnateSpellsByFeature(feat.name);
 			if (!revertedAppliedEffects && feat.choices) {
-				if (feat.choices.ability) {
-					const amount = feat.choices.amount || 1;
-					const current = this.getAbilityBase(feat.choices.ability);
-					this.setAbilityBase(feat.choices.ability, Math.max(1, current - amount));
+				if (feat.choices.ability && !skipAbilityDeltas) {
+					const increases = typeof feat.choices.ability === "string"
+						? {[feat.choices.ability]: feat.choices.amount || 1}
+						: Array.isArray(feat.choices.ability)
+							? Object.fromEntries(feat.choices.ability.map(ability => [ability, feat.choices.amount || 1]))
+							: feat.choices.ability;
+					for (const [ability, amount] of Object.entries(increases)) {
+						if (!Parser.ABIL_ABVS.includes(ability)) continue;
+						this.setAbilityBase(ability, Math.max(1, this.getAbilityBase(ability) - amount));
+					}
 				}
 				if (feat.choices.skills?.length) {
 					feat.choices.skills.forEach(skill => {

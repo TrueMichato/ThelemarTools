@@ -333,6 +333,7 @@ export class LevelUpPage {
 		if (await firstSelect.isVisible()) {
 			await firstSelect.selectOption(firstAbility);
 		}
+
 		if (secondAbility) {
 			const secondSelect = this.page.locator(`[data-testid="levelup-asi-second"]`);
 			if (await secondSelect.isVisible()) {
@@ -342,6 +343,45 @@ export class LevelUpPage {
 	}
 
 	// ========== SUBCLASS SECTION ==========
+
+	async selectAsiFeat (): Promise<void> {
+		await this.expandAccordion("asi");
+		const accordion = this.page.locator('[data-accordion-id="asi"]');
+		const mode = accordion.locator('input[name="asi-type"][value="feat"]');
+		if (await mode.count()) await mode.check();
+		await accordion.getByPlaceholder("Search feats...").fill("Ability Score Improvement");
+		const row = accordion.locator('.charsheet__levelup-feat-option[data-feat="Ability Score Improvement"]');
+		await expect(row).toHaveCount(1);
+		await row.click();
+		await expect(accordion.locator("[data-feat-ability-mode]")).toBeVisible();
+	}
+
+	async setFeatAbilityMode (mode: 0 | 1): Promise<void> {
+		await this.page.locator(".charsheet__levelup-wizard [data-feat-ability-mode]").selectOption(`${mode}`);
+	}
+
+	async pickFeatAbility (ability: string): Promise<void> {
+		await this.page.locator(`.charsheet__levelup-wizard [data-feat-ability="${ability}"]`).click();
+	}
+
+	async expectFeatAbilitySelection (abilities: string[]): Promise<void> {
+		const picked = this.page.locator('.charsheet__levelup-wizard [data-feat-ability][aria-pressed="true"]');
+		await expect(picked).toHaveCount(abilities.length);
+		for (const ability of abilities) {
+			await expect(this.page.locator(`.charsheet__levelup-wizard [data-feat-ability="${ability}"]`)).toHaveAttribute("aria-pressed", "true");
+		}
+		const grid = this.page.locator(".charsheet__levelup-wizard [data-feat-ability-grid]");
+		const required = Number(await grid.getAttribute("data-required"));
+		if (required > 1 && abilities.length === required) {
+			for (const button of await grid.locator('[aria-pressed="false"]').all()) await expect(button).toBeDisabled();
+		}
+	}
+
+	async expectIncompleteFeatCannotFinish (): Promise<void> {
+		await this.btnFinish.click();
+		await expect(this.modalContainer).toBeVisible();
+		await expect(this.page.locator(".toast__wrp-content").filter({hasText: /complete all choices.*Ability Score Improvement/i}).first()).toBeVisible();
+	}
 
 	/**
 	 * Select a subclass by name (clicks the radio button container)
@@ -830,7 +870,9 @@ export class LevelUpPage {
 
 			// Switch to ASI mode whenever it's available and not already
 			// selected. Click both the wrapper AND the radio for safety.
-			if (modeAsi && !modeAsi.disabled && !modeAsi.checked) {
+			const hasExplicitFeatAbility = !!asi.querySelector("[data-feat-ability-grid]")
+				&& !!asi.querySelector(".charsheet__levelup-feat-option input:checked");
+			if (!hasExplicitFeatAbility && modeAsi && !modeAsi.disabled && !modeAsi.checked) {
 				const wrap = (modeAsi.closest("label") || modeAsi.parentElement) as HTMLElement | null;
 				if (wrap) robustClick(wrap);
 				robustClick(modeAsi);
@@ -849,6 +891,8 @@ export class LevelUpPage {
 					|| Array.from(wizard.querySelectorAll<HTMLElement>(".charsheet__levelup-accordion"))
 						.find(el => /ASI|Ability Score Improvement/i.test(el.textContent || "")) || null;
 				if (!asi) return 0;
+				const asiMode = asi.querySelector<HTMLInputElement>("input[name='asi-type'][value='asi']");
+				if (asiMode && !asiMode.checked) return 0;
 				const text = asi.textContent || "";
 				const m = text.match(/Points remaining:\s*(\d+)/i);
 				const left = m ? parseInt(m[1], 10) : 0;
@@ -877,6 +921,8 @@ export class LevelUpPage {
 			if (!asi) return;
 			// If the ASI requirement is satisfied (no ⚠️ Required), bail.
 			if (!/⚠️\s*Required/.test(asi.textContent || "")) return;
+			if (asi.querySelector("[data-feat-ability-grid]")
+				&& asi.querySelector(".charsheet__levelup-feat-option input:checked")) return;
 			// If steppers exist but Points remaining > 0, the user is in
 			// ASI mode and we already failed to drive them — try feat.
 			// Find the Feat-mode radio and switch to it, then pick a feat.
@@ -978,7 +1024,7 @@ export class LevelUpPage {
 							|| grid.parentElement?.querySelector("label")?.textContent
 							|| "");
 						const m = RE_COUNT.exec(labelTxt);
-						const want = m ? Number(m[1]) : 1;
+						const want = Number(grid.dataset.required) || (m ? Number(m[1]) : 1);
 						if (btns.filter(isPicked).length >= want) continue; // group satisfied
 						const next = btns.find(b => !isPicked(b));
 						if (!next) continue;
@@ -987,7 +1033,7 @@ export class LevelUpPage {
 					}
 
 					const sel = Array.from(box.querySelectorAll<HTMLSelectElement>("select"))
-						.find(s => !s.value || s.selectedIndex <= 0);
+						.find(s => !s.hasAttribute("data-feat-ability-mode") && (!s.value || s.selectedIndex <= 0));
 					if (sel) {
 						const opt = Array.from(sel.options).find((o, i) => i > 0 && !o.disabled);
 						if (opt) {

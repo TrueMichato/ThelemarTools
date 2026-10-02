@@ -8579,6 +8579,10 @@ class CharacterSheetClassUtils {
 	 */
 	static applyFeatBonuses (/** @type {*} */ state, /** @type {*} */ feat, /** @type {*} */ featChoices = null) {
 		const choices = featChoices || feat._featChoices || {};
+		const abilityChoice = CharacterSheetClassUtils.resolveFeatAbilityChoice(feat, choices);
+		if (!abilityChoice.valid && (choices.ability != null || choices.abilityOption != null)) {
+			throw new Error(abilityChoice.error);
+		}
 		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
 		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
 		const storedFeat = (state.getFeats?.() || []).findLast(item =>
@@ -8611,32 +8615,9 @@ class CharacterSheetClassUtils {
 			});
 		}
 
-		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
-		if (/** @type {*} */ effectiveAbility) {
-			// XPHB ASI lists +2 to one score and +1 to two scores as alternatives,
-			// not two grants. The current single-ability picker selects the first.
-			const abilityGrants = feat.name === "Ability Score Improvement" && feat.source === "XPHB"
-				? effectiveAbility.slice(0, 1)
-				: effectiveAbility;
-			abilityGrants.forEach((/** @type {*} */ ablChoice) => {
-				const max = ablChoice.max || 20;
-
-				if (/** @type {*} */ ablChoice.choose) {
-					if (choices.ability) {
-						const amount = ablChoice.choose.amount || 1;
-						const current = state.getAbilityBase(choices.ability);
-						state.setAbilityBase(choices.ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, max));
-					}
-				} else {
-					Object.entries(ablChoice).forEach(([abl, bonus]) => {
-						if (abl === "max") return;
-						if (Parser.ABIL_ABVS.includes(abl)) {
-							const current = state.getAbilityBase(abl);
-							state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(current, bonus, max));
-						}
-					});
-				}
-			});
+		for (const [ability, amount] of Object.entries(abilityChoice.increases)) {
+			const current = state.getAbilityBase(ability);
+			state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, abilityChoice.option?.max || 20));
 		}
 
 		// Apply saving-throw proficiencies (e.g., Resilient — tied to the chosen ability)
@@ -10084,6 +10065,120 @@ class CharacterSheetClassUtils {
 		return feat.ability;
 	}
 
+	static getFeatAbilityOptions (feat) {
+		return (CharacterSheetClassUtils.getEffectiveFeatAbility(feat) || [])
+			.filter(entry => entry?.choose)
+			.map(entry => ({
+				count: entry.choose.count ?? 1,
+				amount: entry.choose.amount ?? 1,
+				from: entry.choose.from || Parser.ABIL_ABVS,
+				max: entry.max ?? 20,
+				...(Parser.ABIL_ABVS.some(ability => entry[ability])
+					? {fixed: Object.fromEntries(Parser.ABIL_ABVS.filter(ability => entry[ability]).map(ability => [ability, entry[ability]]))}
+					: {}),
+			}));
+	}
+
+	/** Scalar saves select a one-score option; new multi-picks use the ordinary ASI allocation map. */
+	static resolveFeatAbilityChoice (feat, choices = {}, spec = null) {
+		const options = spec?.alternatives || (spec ? [spec] : CharacterSheetClassUtils.getFeatAbilityOptions(feat));
+		const error = "Complete the feat's ability choice: select the required number of distinct allowed abilities for one increase option.";
+		if (!options.length) {
+			const entry = CharacterSheetClassUtils.getEffectiveFeatAbility(feat)?.[0];
+			return {
+				valid: true,
+				optionIndex: 0,
+				option: {max: entry?.max || 20},
+				abilities: [],
+				increases: Object.fromEntries(Parser.ABIL_ABVS.filter(ability => entry?.[ability]).map(ability => [ability, entry[ability]])),
+			};
+		}
+		const picked = choices.ability;
+		const abilities = typeof picked === "string" ? [picked]
+			: Array.isArray(picked) ? picked
+				: picked && typeof picked === "object" ? Object.keys(picked) : [];
+		const matches = option => abilities.length === option.count
+			&& new Set(abilities).size === abilities.length
+			&& abilities.every(ability => typeof ability === "string"
+				&& Parser.ABIL_ABVS.includes(ability)
+				&& option.from.includes(ability)
+				&& (typeof picked !== "object" || Array.isArray(picked) || picked[ability] === option.amount));
+		const optionIndex = choices.abilityOption != null ? choices.abilityOption
+			: options.findIndex(matches);
+		const option = Number.isInteger(optionIndex) ? options[optionIndex] : null;
+		const valid = !!option && Number.isInteger(option.count) && option.count > 0
+			&& Number.isFinite(option.amount) && option.amount > 0
+			&& Number.isFinite(option.max) && option.max > 0 && matches(option);
+		return {
+			valid,
+			error: valid ? null : error,
+			optionIndex: optionIndex >= 0 ? optionIndex : 0,
+			option: option || options[0],
+			abilities,
+			increases: valid ? {...(option.fixed || {}), ...Object.fromEntries(abilities.map(ability => [ability, option.amount]))} : {},
+		};
+	}
+
+	static renderFeatAbilityChoices ({feat, spec, choices, container, state, pendingScores = null, onChange = null}) {
+		container.replaceChildren();
+		const options = spec.alternatives || [spec];
+		const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(feat, choices, spec);
+		const optionIndex = Math.min(resolved.optionIndex, options.length - 1);
+		const option = options[optionIndex];
+		const render = () => CharacterSheetClassUtils.renderFeatAbilityChoices({feat, spec, choices, container, state, pendingScores, onChange});
+		const changed = () => {
+			render();
+			onChange?.();
+		};
+		if (options.length > 1) {
+			const label = e_({tag: "label", clazz: "ve-small", txt: "Ability increase option:"});
+			const select = e_({tag: "select", clazz: "ve-form-control ve-input-sm mb-1"});
+			select.dataset.featAbilityMode = "";
+			select.setAttribute("aria-label", "Ability increase option");
+			options.forEach((entry, index) => {
+				const name = `+${entry.amount} to ${entry.count === 1 ? "one ability" : `${entry.count} distinct abilities`}`;
+				select.append(e_({tag: "option", val: `${index}`, txt: name}));
+			});
+			select.value = `${optionIndex}`;
+			select.addEventListener("change", () => {
+				choices.abilityOption = Number(select.value);
+				choices.ability = null;
+				delete choices.amount;
+				changed();
+			});
+			label.append(select);
+			container.append(label);
+		}
+		container.append(e_({tag: "label", clazz: "ve-small", txt: `Choose ${option.count} ${option.count === 1 ? "ability" : "distinct abilities"} to increase by ${option.amount} (maximum ${option.max}):`}));
+		const grid = e_({tag: "div", clazz: "ve-flex-wrap gap-1 mt-1 charsheet__feat-ability-grid"});
+		grid.dataset.featAbilityGrid = "";
+		grid.dataset.required = `${option.count}`;
+		const picked = resolved.abilities;
+		option.from.forEach(ability => {
+			const selected = picked.includes(ability);
+			const score = pendingScores?.[ability] ?? state.getAbilityScore(ability);
+			const capped = score >= option.max;
+			const after = CharacterSheetClassUtils.capAbilityIncrease(score, option.amount, option.max);
+			const button = e_({tag: "button", clazz: `ve-btn ve-btn-xs ${selected ? "ve-btn-primary" : "ve-btn-default"}`, txt: `${Parser.attAbvToFull(ability)} (${score} → ${after})`});
+			button.type = "button";
+			button.dataset.featAbility = ability;
+			button.setAttribute("aria-pressed", `${selected}`);
+			button.disabled = !selected && (capped || (option.count > 1 && picked.length >= option.count));
+			if (capped) button.title = `Already at maximum (${option.max})`;
+			button.addEventListener("click", () => {
+				const next = selected ? picked.filter(value => value !== ability)
+					: option.count === 1 ? [ability] : [...picked, ability];
+				choices.ability = option.count === 1 ? next[0] || null
+					: Object.fromEntries(next.map(value => [value, option.amount]));
+				if (options.length > 1) choices.abilityOption = optionIndex;
+				delete choices.amount;
+				changed();
+			});
+			grid.append(button);
+		});
+		container.append(grid, e_({tag: "div", clazz: "ve-small ve-muted mt-1", txt: `Selected: ${picked.length}/${option.count}`}));
+	}
+
 	/**
 	 * Build the "feat choices spec" describing every sub-choice a feat presents
 	 * (skill / language / tool / expertise / ability / optionalFeature / spell choices).
@@ -10151,19 +10246,12 @@ class CharacterSheetClassUtils {
 
 		// Ability score increases (choose from) — uses the effective ability array so
 		// uncategorized feats that default to General surface a +1 ASI picker.
-		const effectiveAbility = CharacterSheetClassUtils.getEffectiveFeatAbility(feat);
-		if (Array.isArray(effectiveAbility)) {
-			for (const ab of effectiveAbility) {
-				if (ab?.choose) {
-					choices.ability = {
-						count: ab.choose.count || 1,
-						amount: ab.choose.amount || 1,
-						from: ab.choose.from || Parser.ABIL_ABVS,
-						max: ab.max || 20,
-					};
-					break;
-				}
-			}
+		const abilityOptions = CharacterSheetClassUtils.getFeatAbilityOptions(feat);
+		if (abilityOptions.length) {
+			choices.ability = {
+				...abilityOptions[0],
+				...(abilityOptions.length > 1 ? {alternatives: abilityOptions} : {}),
+			};
 		}
 
 		// Optional-feature picks (Eldritch Adept etc.) — only available when ctx has state+page
@@ -10256,22 +10344,13 @@ class CharacterSheetClassUtils {
 	static isFeatChoiceSpecComplete (/** @type {*} */ feat, /** @type {*} */ spec = null, /** @type {*} */ ctx = {}) {
 		if (!feat || typeof feat !== "object") return true;
 		const sp = spec || CharacterSheetClassUtils.buildFeatChoicesSpec(feat, ctx);
-		const fc = feat._featChoices || {};
+		const fc = feat._featChoices || feat.choices || {};
 
 		if (sp.skills && (!Array.isArray(fc.skills) || fc.skills.length < sp.skills.count)) return false;
 		if (sp.languages && (!Array.isArray(fc.languages) || fc.languages.length < sp.languages.count)) return false;
 		if (sp.tools && (!Array.isArray(fc.tools) || fc.tools.length < sp.tools.count)) return false;
 		if (sp.expertise && (!Array.isArray(fc.expertise) || fc.expertise.length < sp.expertise.count)) return false;
-		if (sp.ability) {
-			const picked = typeof fc.ability === "string"
-				? 1
-				: Array.isArray(fc.ability)
-					? fc.ability.length
-					: fc.ability && typeof fc.ability === "object"
-						? Object.keys(fc.ability).length
-						: 0;
-			if (picked < sp.ability.count) return false;
-		}
+		if (sp.ability && !CharacterSheetClassUtils.resolveFeatAbilityChoice(feat, fc, sp.ability).valid) return false;
 		if (Array.isArray(sp.optionalFeatures) && sp.optionalFeatures.length) {
 			const picks = Array.isArray(fc.optionalFeatures) ? fc.optionalFeatures : [];
 			for (const optSpec of sp.optionalFeatures) {

@@ -157,8 +157,14 @@ describe("R21 #10 — improvement opportunities are data-driven and shared", () 
 	});
 
 	test("both choice UIs consume the propagated ability max", () => {
-		expect(LEVELUP_SRC).toMatch(/const\s+cap\s*=\s*abilityChoiceSpec\.max\s*\|\|\s*20/);
-		expect(QUICKBUILD_SRC).toMatch(/const\s+cap\s*=\s*choices\.ability\.max\s*\|\|\s*20/);
+		const levelUpPicker = LEVELUP_SRC.match(/_renderFeatAbilityButtons \([\s\S]*?\n\t\}/)[0];
+		expect(levelUpPicker).toMatch(/CharacterSheetClassUtils\.renderFeatAbilityChoices/);
+		expect(levelUpPicker).toMatch(/spec:\s*abilityChoiceSpec/);
+		const quickBuildPicker = QUICKBUILD_SRC.match(/CharacterSheetClassUtils\.renderFeatAbilityChoices\(\{[\s\S]*?\}\);/)[0];
+		expect(quickBuildPicker).toMatch(/spec:\s*choices\.ability/);
+		const sharedPicker = readSrc("../../../js/charactersheet/charactersheet-class-utils.js")
+			.match(/static renderFeatAbilityChoices \([\s\S]*?\n\t\}/)[0];
+		expect(sharedPicker).toMatch(/CharacterSheetClassUtils\.capAbilityIncrease\(score,\s*option\.amount,\s*option\.max\)/);
 		expect(QUICKBUILD_SRC).toMatch(/CharacterSheetClassUtils\.buildFeatChoicesSpec\(feat/);
 	});
 

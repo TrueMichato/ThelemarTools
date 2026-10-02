@@ -2151,8 +2151,10 @@ class CharacterSheetLevelUp {
 			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 				const baseScore = this._state.getAbilityScore(abl);
 				let increase = (/** @type {*} */ (asiValues))[abl] || 0;
-				if (_currentSelectedFeat?._featChoices?.ability === abl && _currentFeatChoices?.ability) {
-					increase += _currentFeatChoices.ability.amount || 1;
+				if (_currentSelectedFeat) {
+					increase += CharacterSheetClassUtils.resolveFeatAbilityChoice(
+						_currentSelectedFeat, _currentSelectedFeat._featChoices,
+					).increases[abl] || 0;
 				}
 				(/** @type {*} */ (scores))[abl] = CharacterSheetClassUtils.capAbilityIncrease(baseScore, increase, 20);
 			});
@@ -2167,8 +2169,10 @@ class CharacterSheetLevelUp {
 			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 				const baseScore = this._state.getAbilityScore(abl);
 				let featBonus = 0;
-				if (_currentSelectedFeat?._featChoices?.ability === abl && _currentFeatChoices?.ability) {
-					featBonus = _currentFeatChoices.ability.amount || 1;
+				if (_currentSelectedFeat) {
+					featBonus = CharacterSheetClassUtils.resolveFeatAbilityChoice(
+						_currentSelectedFeat, _currentSelectedFeat._featChoices,
+					).increases[abl] || 0;
 				}
 				const newScore = CharacterSheetClassUtils.capAbilityIncrease(baseScore, ((/** @type {*} */ (asiValues))[abl] || 0) + featBonus, 20);
 				const newEl = abilitiesContainer.querySelector(`#asi-new-${abl}`);
@@ -2458,36 +2462,15 @@ class CharacterSheetLevelUp {
 	 * @param {*} [pendingScores] - Optional pre-computed scores (for QuickBuild running scores)
 	 */
 	_renderFeatAbilityButtons (/** @type {*} */ feat, /** @type {*} */ abilityChoiceSpec, /** @type {*} */ container, /** @type {*} */ onAbilityChange = null, /** @type {*} */ pendingScores = null) {
-		// Remove existing button grid if re-rendering, but preserve the label
-		container.querySelector(".charsheet__feat-ability-grid")?.remove();
-
-		const abilityGrid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1 charsheet__feat-ability-grid"></div>`});
-
-		abilityChoiceSpec.from.forEach((/** @type {*} */ abl) => {
-			const isSelected = feat._featChoices.ability === abl;
-			const currentScore = pendingScores ? (/** @type {*} */ (pendingScores))[abl] : this._state.getAbilityScore(abl);
-			const amount = abilityChoiceSpec.amount || 1;
-			const cap = abilityChoiceSpec.max || 20;
-			const newScore = CharacterSheetClassUtils.capAbilityIncrease(currentScore, amount, cap);
-			const isCapped = currentScore >= cap;
-
-			const btn = e_({outer: `
-				<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isCapped ? `disabled title="Already at maximum (${cap})"` : ""}>
-					${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})
-				</button>
-			`});
-
-			btn.addEventListener("click", () => {
-				if (isCapped) return;
-				feat._featChoices.ability = isSelected ? null : abl;
-				abilityGrid.querySelectorAll(".ve-btn").forEach((/** @type {*} */ el) => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
-				if (!isSelected) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
-				if (onAbilityChange) onAbilityChange();
-			});
-			abilityGrid.append(btn);
+		CharacterSheetClassUtils.renderFeatAbilityChoices({
+			feat,
+			spec: abilityChoiceSpec,
+			choices: feat._featChoices,
+			container,
+			state: this._state,
+			pendingScores,
+			onChange: onAbilityChange,
 		});
-
-		container.append(abilityGrid);
 	}
 
 	/**
@@ -2815,8 +2798,6 @@ class CharacterSheetLevelUp {
 		// Ability score choices
 		if (choices.ability) {
 			const abilitySection = e_({outer: `<div class="mb-2 charsheet__levelup-feat-ability-choices"></div>`});
-			abilitySection.insertAdjacentHTML("beforeend", `<label class="ve-small">Choose ability to increase by ${choices.ability.amount}:</label>`);
-
 			this._renderFeatAbilityButtons(feat, choices.ability, abilitySection, onAbilityChange);
 
 			container.append(abilitySection);
@@ -5220,7 +5201,7 @@ class CharacterSheetLevelUp {
 		}
 
 		// Record ASI choice (if any) - separate from feat for Thelemar rule support
-		if (asiChoices) {
+		if (asiChoices && (isBothAsiAndFeat || !selectedFeat)) {
 			/** @type {Object<string, *>} */ const asiData = {};
 			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 				if ((/** @type {*} */ (asiChoices))[abl]) {
