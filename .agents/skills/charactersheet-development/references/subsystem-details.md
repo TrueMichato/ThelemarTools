@@ -20,6 +20,31 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Fixed Proficiency with Fallback Transactions
 - Feature-Companion Acquisition and Setup
 - EFA Steel Defender Lifecycle Surfaces
+- Feat Ability Alternatives and Owned Receipts
+
+## Feat Ability Alternatives and Owned Receipts
+
+Use ClassUtils `getFeatAbilityOptions`, `resolveFeatAbilityChoice`, and
+`renderFeatAbilityChoices` for authored feat ability choices. The XPHB ASI
+feat's entries are exclusive alternatives: scalar `choices.ability: "str"`
+remains a +2 legacy pick; a new split pick is
+`{ability: {str: 1, dex: 1}, abilityOption: 1}`. The allocation map is the
+existing ordinary ASI representation, not another state store. Resolver and
+picker enforce the same distinct count, amount, allowlist, and per-entry cap;
+mode changes clear the old selection.
+
+Each repeatable feat keeps its own ID, source decision key, and exact
+`appliedEffects.abilityDeltas`. Progression `getFeatAbilityDecisionEffects`
+projects its nested receipt from those actual deltas, including zero at a
+cap. Historical scores and Respec reversal must never substitute authored
+amounts for an exact modern receipt or reverse a sibling acquisition.
+LevelUp and QuickBuild history must omit abandoned ordinary ASI allocations
+in feat-only mode; retain them only for an actual ASI or ASI-and-feat grant.
+Respec can stage an entirely unpicked parent with a required unresolved
+child, but rejects provided invalid allocations and blocks Apply until
+choices are complete. `CharacterSheetFeatAbilityChoices.test.js` covers
+split grants, replay/reload, capped receipts, historical scores, both feat
+decision paths, nested editing, candidate isolation, and Apply/Undo.
 
 ## Gemstone Empowerment
 

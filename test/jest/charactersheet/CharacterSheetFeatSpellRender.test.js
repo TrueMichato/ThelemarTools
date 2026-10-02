@@ -68,7 +68,7 @@ describe("Feat-granted spells reactive render", () => {
 	test("adding a fixed-grant feat re-renders the Spells tab immediately", async () => {
 		const {features, spellsRenderSpy} = makeFeatures();
 
-		await features._addFeat(PLANTMENDER_FEAT);
+		await features._addFeat(PLANTMENDER_FEAT, {ability: "wis"});
 
 		// The Spells tab must be refreshed without waiting for a page reload.
 		expect(spellsRenderSpy).toHaveBeenCalledTimes(1);
@@ -77,7 +77,8 @@ describe("Feat-granted spells reactive render", () => {
 	test("granted cantrips and innate spells are queryable immediately after add", async () => {
 		const {features, state} = makeFeatures();
 
-		await features._addFeat(PLANTMENDER_FEAT);
+		await features._addFeat(PLANTMENDER_FEAT, {ability: "wis"});
+		expect(state.getAbilityBase("wis")).toBe(11);
 
 		const cantrips = state.getCantrips();
 		expect(cantrips.find(c => c.name === "Shillelagh")).toBeTruthy();
@@ -101,7 +102,7 @@ describe("Feat-granted spells reactive render", () => {
 			expect(state.getInnateSpells().some(s => s.name === "Barkskin")).toBe(true);
 		});
 
-		await features._addFeat(PLANTMENDER_FEAT);
+		await features._addFeat(PLANTMENDER_FEAT, {ability: "wis"});
 
 		expect(spellsRenderSpy).toHaveBeenCalledTimes(1);
 	});
@@ -110,6 +111,6 @@ describe("Feat-granted spells reactive render", () => {
 		const {features, page} = makeFeatures();
 		delete page._spells; // optional chaining must keep this from throwing
 
-		await expect(features._addFeat(PLANTMENDER_FEAT)).resolves.toBe(true);
+		await expect(features._addFeat(PLANTMENDER_FEAT, {ability: "wis"})).resolves.toBe(true);
 	});
 });

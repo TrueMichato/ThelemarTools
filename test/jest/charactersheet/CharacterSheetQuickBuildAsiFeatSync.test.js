@@ -26,6 +26,7 @@ import "../../../js/charactersheet/charactersheet-state.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const QUICKBUILD_PATH = resolve(__dirname, "../../../js/charactersheet/charactersheet-quickbuild.js");
 const QUICKBUILD_SRC = readFileSync(QUICKBUILD_PATH, "utf8");
+const SHARED_SRC = readFileSync(resolve(__dirname, "../../../js/charactersheet/charactersheet-class-utils.js"), "utf8");
 
 await import("../../../js/charactersheet/charactersheet-quickbuild.js");
 const CharacterSheetQuickBuild = globalThis.CharacterSheetQuickBuild;
@@ -105,10 +106,12 @@ describe("QuickBuild ASI ↔ Half-Feat score sync", () => {
 		});
 
 		test("half-feat ability buttons disable when at the score cap", () => {
-			// Guard for the cap-20 affordance ported from the level-up wizard.
-			expect(QUICKBUILD_SRC).toMatch(/const\s+cap\s*=\s*choices\.ability\.max\s*\|\|\s*20/);
-			expect(QUICKBUILD_SRC).toMatch(/const\s+isCapped\s*=\s*currentScore\s*>=\s*cap/);
-			expect(QUICKBUILD_SRC).toMatch(/if\s*\(isCapped\)\s*return;/);
+			const picker = QUICKBUILD_SRC.match(/CharacterSheetClassUtils\.renderFeatAbilityChoices\(\{[\s\S]*?\}\);/)[0];
+			expect(picker).toMatch(/spec:\s*choices\.ability/);
+			expect(picker).toMatch(/pendingScores:\s*runningScores/);
+			const shared = SHARED_SRC.match(/static renderFeatAbilityChoices \([\s\S]*?\n\t\}/)[0];
+			expect(shared).toMatch(/const\s+capped\s*=\s*score\s*>=\s*option\.max/);
+			expect(shared).toMatch(/button\.disabled\s*=\s*!selected\s*&&\s*\(capped/);
 		});
 	});
 });

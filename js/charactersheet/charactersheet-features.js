@@ -707,9 +707,12 @@ class CharacterSheetFeatures {
 		const sourceDecisionKey = feat.repeatable
 			? `${globalThis.CharacterSheetProgression.getUnplacedFeatSemanticKey(feat)}:manual:${CryptUtil.uid()}`
 			: null;
-		const abilityAmount = featChoices?.ability
-			? CharacterSheetClassUtils.getEffectiveFeatAbility(feat)?.find(ability => ability.choose)?.choose?.amount || 1
-			: null;
+		const abilityChoice = CharacterSheetClassUtils.resolveFeatAbilityChoice(feat, featChoices || {});
+		if (!abilityChoice.valid) {
+			JqueryUtil.doToast({type: "danger", content: abilityChoice.error});
+			return false;
+		}
+		const abilityAmount = typeof featChoices?.ability === "string" ? abilityChoice.option.amount : null;
 		const newFeat = {
 			name: feat.name,
 			source: feat.source,
@@ -782,7 +785,13 @@ class CharacterSheetFeatures {
 
 	_formatFeatChoices (choices) {
 		const parts = [];
-		if (choices.ability) parts.push(`+${choices.amount || 1} ${Parser.attAbvToFull(choices.ability)}`);
+		if (typeof choices.ability === "string") parts.push(`+${choices.amount || 1} ${Parser.attAbvToFull(choices.ability)}`);
+		else if (choices.ability && typeof choices.ability === "object") {
+			const increases = Array.isArray(choices.ability)
+				? choices.ability.map(ability => [ability, choices.amount || 1])
+				: Object.entries(choices.ability);
+			parts.push(...increases.map(([ability, amount]) => `+${amount} ${Parser.attAbvToFull(ability)}`));
+		}
 		if (choices.skills?.length) parts.push(`${choices.skills.map(s => s.toTitleCase()).join(", ")} proficiency`);
 		if (choices.expertise?.length) parts.push(`${choices.expertise.map(s => s.toTitleCase()).join(", ")} expertise`);
 		if (choices.languages?.length) parts.push(choices.languages.map(l => l.toTitleCase()).join(", "));
@@ -3141,7 +3150,7 @@ class CharacterSheetFeatures {
 
 			const updateConfirmBtn = () => {
 				let canConfirm = true;
-				if (choices.ability && !selected.ability) canConfirm = false;
+				if (choices.ability && !CharacterSheetClassUtils.resolveFeatAbilityChoice(feat, selected, choices.ability).valid) canConfirm = false;
 				if (choices.skills && selected.skills.length < choices.skills.count) canConfirm = false;
 				if (choices.expertise && selected.expertise.length < choices.expertise.count) canConfirm = false;
 				if (choices.languages && selected.languages.length < choices.languages.count) canConfirm = false;
@@ -3174,23 +3183,15 @@ class CharacterSheetFeatures {
 
 				// Ability choices
 				if (choices.ability) {
-					const section = e_({outer: `<div class="mb-3"><label class="ve-small ve-bold">Choose ability to increase by ${choices.ability.amount}:</label></div>`});
-					const grid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
-
-					choices.ability.from.forEach(abl => {
-						const currentScore = this._state.getAbilityScore(abl);
-						const cap = choices.ability.max || 20;
-						const newScore = CharacterSheetClassUtils.capAbilityIncrease(currentScore, choices.ability.amount || 1, cap);
-						const btn = e_({outer: `<button class="ve-btn ve-btn-xs ve-btn-default">${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})</button>`});
-						btn.addEventListener("click", () => {
-							selected.ability = selected.ability === abl ? null : abl;
-							grid.querySelectorAll(".ve-btn").forEach(el => { el.classList.remove("ve-btn-primary"); el.classList.add("ve-btn-default"); });
-							if (selected.ability) { btn.classList.remove("ve-btn-default"); btn.classList.add("ve-btn-primary"); }
-							updateConfirmBtn();
-						});
-						grid.append(btn);
+					const section = e_({outer: `<div class="mb-3"></div>`});
+					CharacterSheetClassUtils.renderFeatAbilityChoices({
+						feat,
+						spec: choices.ability,
+						choices: selected,
+						container: section,
+						state: this._state,
+						onChange: updateConfirmBtn,
 					});
-					section.append(grid);
 					content.append(section);
 				}
 

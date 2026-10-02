@@ -984,14 +984,32 @@ class CharacterSheetProgression {
 		const featChoiceSpec = isLevelFeat
 			? CharacterSheetClassUtils.buildFeatChoicesSpec(entity, {page, state})
 			: null;
-		if (isLevelFeat && entity.name === "Ability Score Improvement" && entity.source === "XPHB") {
-			descriptors = descriptors.filter(descriptor =>
-				descriptor.kind !== "ability" || !/\.ability\[[1-9]\d*\]/.test(descriptor.sourcePath || ""),
-			).map(descriptor =>
-				descriptor.kind === "ability" && /\.ability\[0\]/.test(descriptor.sourcePath || "")
-					? {...descriptor, count: 1}
-					: descriptor,
-			);
+		if (featChoiceSpec?.ability) {
+			const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(entity, entity.choices || entity._featChoices || {}, featChoiceSpec.ability);
+			let foundAbility = false;
+			descriptors = descriptors.flatMap(descriptor => {
+				if (descriptor.kind !== "ability" || !/\.ability\[\d+\]/.test(descriptor.sourcePath || "")) return [descriptor];
+				if (foundAbility) return [];
+				foundAbility = true;
+				return [{
+					...descriptor,
+					count: resolved.option.count,
+					options: resolved.option.from,
+					rules: {
+						...descriptor.rules,
+						count: resolved.option.count,
+						amount: resolved.option.amount,
+						max: resolved.option.max,
+						featAbilityChoice: true,
+						abilityOption: resolved.optionIndex,
+						abilityChoiceInvalid: resolved.abilities.length > 0 && !resolved.valid,
+						selectedValues: resolved.abilities.length
+							? resolved.option.count === 1 ? resolved.abilities[0] : resolved.abilities
+							: null,
+						optionSource: {kind: "explicitList", values: resolved.option.from},
+					},
+				}];
+			});
 		}
 		if (featChoiceSpec?.skills && featChoiceSpec.expertise) {
 			const choices = entity.choices || entity._featChoices || {};
@@ -1146,7 +1164,7 @@ class CharacterSheetProgression {
 			});
 			const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
 			const selection = exact?.selection ?? selectedGrant;
-			const isValid = CharacterSheetProgression._isSelectionValid({
+			const isValid = !descriptor.rules?.abilityChoiceInvalid && CharacterSheetProgression._isSelectionValid({
 				selection,
 				count: descriptor.count,
 				options: descriptor.options,
@@ -1186,7 +1204,7 @@ class CharacterSheetProgression {
 				count: descriptor.count,
 				options: descriptor.options,
 				selection,
-				status: (!isValid && featChoiceKey) || isAmbiguousFeatChoice ? "invalid" : exact?.status || null,
+				status: (!isValid && (featChoiceKey || (descriptor.rules?.featAbilityChoice && selection != null))) || isAmbiguousFeatChoice ? "invalid" : exact?.status || null,
 				receipt: childReceipt,
 				isValid,
 				meta: {
@@ -1926,7 +1944,7 @@ class CharacterSheetProgression {
 					options,
 					selection: childSelection,
 					receipt: storedChild?.receipt || null,
-					isValid: CharacterSheetProgression._isSelectionValid({
+					isValid: !rules.abilityChoiceInvalid && CharacterSheetProgression._isSelectionValid({
 						selection: childSelection,
 						count: Number(rules.count) || 1,
 						options,
@@ -1967,17 +1985,23 @@ class CharacterSheetProgression {
 				return child;
 			};
 
+			const resolvedAbility = CharacterSheetClassUtils.resolveFeatAbilityChoice(catalogFeat || feat, featChoices, choiceSpec.ability);
 			appendChild({
 				choiceKey: "ability",
 				type: "nestedAbility",
 				label: `${feat.name} Ability`,
 				slot: 0,
-				options: choiceSpec.ability.from || [],
-				selection: featChoices.ability,
+				options: resolvedAbility.option.from || [],
+				selection: resolvedAbility.abilities.length
+					? resolvedAbility.option.count === 1 ? resolvedAbility.abilities[0] : resolvedAbility.abilities
+					: null,
 				rules: {
-					count: choiceSpec.ability.count,
-					amount: Number(choiceSpec.ability.amount) || 1,
-					max: Number(choiceSpec.ability.max) || 20,
+					count: resolvedAbility.option.count,
+					amount: resolvedAbility.option.amount,
+					max: resolvedAbility.option.max,
+					featAbilityChoice: true,
+					abilityOption: resolvedAbility.optionIndex,
+					abilityChoiceInvalid: resolvedAbility.abilities.length > 0 && !resolvedAbility.valid,
 				},
 				meta: {unplacedFeatAbility: true},
 			});
@@ -4174,6 +4198,18 @@ class CharacterSheetProgression {
 		return manifest;
 	}
 
+	static getFeatAbilityDecisionEffects (decision, state) {
+		if (decision.type !== "nestedAbility" || !decision.meta?.descriptorRules?.featAbilityChoice) return null;
+		const feat = (state.getFeats?.() || []).find(candidate =>
+			candidate.sourceDecisionKey === decision.parentSemanticKey || candidate.id === decision.meta?.featId);
+		if (!feat?.appliedEffects?.abilityDeltas) return null;
+		const abilities = decision.selection == null ? [] : Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+		return abilities.map(ability => {
+			const amount = Number(feat.appliedEffects.abilityDeltas[ability]) || 0;
+			return {type: "abilityDelta", sourceDecisionKey: decision.semanticKey, ability, amount, before: state.getAbilityBase(ability) - amount};
+		});
+	}
+
 	static _stampAcquisitionReceipts (manifest, state) {
 		const typeMap = {
 			skills: "skills",
@@ -4202,8 +4238,9 @@ class CharacterSheetProgression {
 			const values = valuesOf(decision.selection);
 			const ownershipType = typeMap[decision.type];
 			if (["nestedAbility", "nestedConfiguration"].includes(decision.type) && values.length) {
+				const featEffects = CharacterSheetProgression.getFeatAbilityDecisionEffects(decision, state);
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
-				effects.push(...values.map(value => ({
+				effects.push(...(featEffects || values.map(value => ({
 					type: decision.type === "nestedAbility" ? "abilityDelta" : "configuration",
 					sourceDecisionKey: decision.semanticKey,
 					ability: decision.type === "nestedAbility" ? String(value) : undefined,
@@ -4212,7 +4249,7 @@ class CharacterSheetProgression {
 						? decision.meta?.receiptPreviousAbility?.[String(value || "").toLowerCase()]
 						: undefined,
 					value: decision.type === "nestedConfiguration" ? value : undefined,
-				})));
+				}))));
 			}
 			if (ownershipType && values.length) {
 				effects.push({

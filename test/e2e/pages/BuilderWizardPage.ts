@@ -910,6 +910,20 @@ export class BuilderWizardPage {
 		// to find and check unchecked checkboxes until the count is met.
 		// Run multiple passes to handle cascading dependencies.
 		for (let pass = 0; pass < 3; pass++) {
+			for (let pick = 0; pick < 12; pick++) {
+				const clicked = await this.page.evaluate(() => {
+					for (const grid of Array.from(document.querySelectorAll<HTMLElement>("[data-feat-ability-grid]"))) {
+						if (!grid.offsetHeight) continue;
+						const required = Number(grid.dataset.required);
+						const selected = grid.querySelectorAll('[aria-pressed="true"]').length;
+						if (selected >= required) continue;
+						const next = grid.querySelector<HTMLButtonElement>('button:not(:disabled)[aria-pressed="false"]');
+						if (next) { next.click(); return true; }
+					}
+					return false;
+				});
+				if (!clicked) break;
+			}
 			await this.page.evaluate(() => {
 				const $ = (window as any).jQuery || (window as any).$;
 				if (!$) return;

@@ -1584,9 +1584,9 @@ class CharacterSheetQuickBuild {
 				}
 
 				if ((prevSel.mode === "feat" || prevSel.isBoth) && prevSel.feat && prevSel.featChoices?.ability) {
-					const amount = this._getFeatAbilityAmount(prevSel.feat);
-					if (amount > 0) {
-						scores[prevSel.featChoices.ability] = (scores[prevSel.featChoices.ability] || 0) + amount;
+					const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(prevSel.feat, prevSel.featChoices);
+					for (const [ability, amount] of Object.entries(resolved.increases)) {
+						scores[ability] = CharacterSheetClassUtils.capAbilityIncrease(scores[ability] || 0, amount, resolved.option.max);
 					}
 				}
 			}
@@ -2038,36 +2038,15 @@ class CharacterSheetQuickBuild {
 			// Ability score choices
 			if (choices.ability) {
 				const abilitySection = e_({outer: `<div class="mb-2"></div>`});
-				abilitySection.append(e_({outer: `<label class="ve-small">Choose ability to increase by ${choices.ability.amount}:</label>`}));
-				const abilityGrid = e_({outer: `<div class="ve-flex-wrap gap-1 mt-1"></div>`});
-
-				choices.ability.from.forEach(abl => {
-					const isSelected = sel.featChoices.ability === abl;
-					const currentScore = runningScores ? runningScores[abl] : this._state.getAbilityScore(abl);
-					const amount = choices.ability.amount || 1;
-					const cap = choices.ability.max || 20;
-					const newScore = CharacterSheetClassUtils.capAbilityIncrease(currentScore, amount, cap);
-					const isCapped = currentScore >= cap;
-
-					const btn = e_({outer: `
-						<button class="ve-btn ve-btn-xs ${isSelected ? "ve-btn-primary" : "ve-btn-default"}" ${isCapped ? `disabled title="Already at maximum (${cap})"` : ""}>
-							${Parser.attAbvToFull(abl)} (${currentScore} → ${newScore})
-						</button>
-					`});
-
-					btn.addEventListener("click", () => {
-						if (isCapped) return;
-						sel.featChoices.ability = isSelected ? null : abl;
-						if (onFeatAbilityChanged) {
-							onFeatAbilityChanged();
-						} else {
-							renderFeatChoices();
-						}
-					});
-					abilityGrid.append(btn);
+				CharacterSheetClassUtils.renderFeatAbilityChoices({
+					feat: sel.feat,
+					spec: choices.ability,
+					choices: sel.featChoices,
+					container: abilitySection,
+					state: this._state,
+					pendingScores: runningScores,
+					onChange: onFeatAbilityChanged || renderFeatChoices,
 				});
-
-				abilitySection.append(abilityGrid);
 				choicesContainer.append(abilitySection);
 			}
 
@@ -5728,7 +5707,7 @@ class CharacterSheetQuickBuild {
 			Parser.ABIL_ABVS.forEach(abl => {
 				if (asiSel.abilityChoices?.[abl]) asiData[abl] = asiSel.abilityChoices[abl];
 			});
-			if (Object.keys(asiData).length > 0) entry.choices.asi = asiData;
+			if ((asiSel.mode === "asi" || asiSel.isBoth) && Object.keys(asiData).length > 0) entry.choices.asi = asiData;
 		}
 
 		// Subclass

@@ -32,6 +32,26 @@ import/manual origin still owns it. Cascades prune removed semantic sources and
 delete only values which no surviving or preserved source requires. See
 [22-respec.md](./22-respec.md).
 
+### Feat ability alternatives and effect ownership
+
+`CharacterSheetClassUtils.getFeatAbilityOptions` preserves every authored
+`ability.choose` alternative. `resolveFeatAbilityChoice` validates one
+exclusive selection and returns its full ability allocation; acquisition
+and candidate editors use the same resolver as the shared picker.
+Scalar legacy `choices.ability` selects a compatible one-score option.
+Multi-score choices reuse ordinary ASI allocation maps, with
+`choices.abilityOption` recording the alternative index.
+
+`applyFeatBonuses` applies only the resolved allocation and records actual
+capped changes in the owned feat's `appliedEffects.abilityDeltas`. Each
+repeatable acquisition retains its separate feat ID and source decision
+key. Progression child receipts derive each delta from that feat receipt,
+including a zero grant at the cap; they do not reconstruct the authored
+amount when an exact modern receipt is available. Respec updates both the
+saved allocation and its receipt, and teardown reverses every split delta
+once without touching another acquisition. Legacy scalar evidence adoption
+remains supported for old saves with empty receipts.
+
 ### Generated class summons
 
 Feature-created deployables use the existing `_data.companions[]` store with

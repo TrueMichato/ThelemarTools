@@ -27,6 +27,8 @@ import {dirname, resolve} from "path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LEVELUP_PATH = resolve(__dirname, "../../../js/charactersheet/charactersheet-levelup.js");
 const LEVELUP_SRC = readFileSync(LEVELUP_PATH, "utf8");
+const SHARED_SRC = readFileSync(resolve(__dirname, "../../../js/charactersheet/charactersheet-class-utils.js"), "utf8");
+const SHARED_PICKER = SHARED_SRC.match(/static renderFeatAbilityChoices \([\s\S]*?\n\t\}/)[0];
 
 describe("Level-up ASI ↔ Half-Feat score sync", () => {
 	describe("Feat-click handlers refresh ability buttons with pending ASI", () => {
@@ -56,25 +58,29 @@ describe("Level-up ASI ↔ Half-Feat score sync", () => {
 	});
 
 	describe("Half-feat ability buttons honour score cap", () => {
-		test("`_renderFeatAbilityButtons` derives the cap from `abilityChoiceSpec.max` (defaults to 20)", () => {
-			expect(LEVELUP_SRC).toMatch(/const\s+cap\s*=\s*abilityChoiceSpec\.max\s*\|\|\s*20/);
+		test("`_renderFeatAbilityButtons` passes pending scores and the authored spec to the shared picker", () => {
+			const delegated = LEVELUP_SRC.match(/_renderFeatAbilityButtons \([\s\S]*?\n\t\}/)[0];
+			expect(delegated).toMatch(/CharacterSheetClassUtils\.renderFeatAbilityChoices/);
+			expect(delegated).toMatch(/spec:\s*abilityChoiceSpec/);
+			expect(delegated).toMatch(/pendingScores/);
 		});
 
-		test("`_renderFeatAbilityButtons` computes `isCapped` from `currentScore >= cap`", () => {
-			expect(LEVELUP_SRC).toMatch(/const\s+isCapped\s*=\s*currentScore\s*>=\s*cap/);
+		test("shared picker computes capped from the pending score and selected option's cap", () => {
+			expect(SHARED_PICKER).toMatch(/pendingScores\?\.\[ability\]\s*\?\?\s*state\.getAbilityScore\(ability\)/);
+			expect(SHARED_PICKER).toMatch(/const\s+capped\s*=\s*score\s*>=\s*option\.max/);
 		});
 
-		test("`_renderFeatAbilityButtons` renders the button with a `disabled` attribute when capped", () => {
-			expect(LEVELUP_SRC).toMatch(/isCapped\s*\?\s*`disabled\s+title="Already at maximum/);
+		test("shared picker disables capped unselected abilities but allows deselection", () => {
+			expect(SHARED_PICKER).toMatch(/button\.disabled\s*=\s*!selected\s*&&\s*\(capped/);
 		});
 
-		test("`_renderFeatAbilityButtons` short-circuits click handler when `isCapped`", () => {
-			const click = LEVELUP_SRC.match(/btn\.addEventListener\("click",\s*\(\)\s*=>\s*\{\s*if\s*\(isCapped\)\s*return;[\s\S]{0,300}?_featChoices\.ability/);
-			expect(click).not.toBeNull();
+		test("shared picker stores only the selected mode's allocation", () => {
+			expect(SHARED_PICKER).toMatch(/choices\.ability\s*=\s*option\.count\s*===\s*1/);
+			expect(SHARED_PICKER).toMatch(/choices\.abilityOption\s*=\s*Number\(select\.value\);\s*choices\.ability\s*=\s*null/);
 		});
 
-		test("`_renderFeatAbilityButtons` caps the preview via capAbilityIncrease (no-lower, not a raw Math.min)", () => {
-			expect(LEVELUP_SRC).toMatch(/CharacterSheetClassUtils\.capAbilityIncrease\(currentScore,\s*amount,\s*cap\)/);
+		test("shared picker caps the preview via capAbilityIncrease (no-lower, not a raw Math.min)", () => {
+			expect(SHARED_PICKER).toMatch(/CharacterSheetClassUtils\.capAbilityIncrease\(score,\s*option\.amount,\s*option\.max\)/);
 		});
 	});
 });
