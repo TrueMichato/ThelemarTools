@@ -71,7 +71,12 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │
 ├── CharacterSheetFeatures (charactersheet-features.js, ~1,600 lines)
 │   Feature display, resource pip tracking, feat picker,
-│   description lookup.
+│   description lookup. `_getFeatureDisplayType()` classifies the class list,
+│   Overview summary and expanded modal consistently. Explicit species,
+│   background, feat and unrelated/manual categories take precedence;
+│   untyped class rows require provenance, never a level alone. Stored
+│   descriptions precede entries and an unambiguous source/owner catalog
+│   match. Display merging happens before summary caps/counts, not in state.
 │
 ├── CharacterSheetRest (charactersheet-rest.js, ~630 lines)
 │   Short rest (hit dice spending), long rest (full recovery),
@@ -452,6 +457,15 @@ Combat, Spells *and* Overview tabs all render from one code path) must adapt to 
 layer also owes clearance to what it covers: the mobile tab bar publishes
 `--cs-tabbar-height` (with `env(safe-area-inset-bottom)`), and scrollers it can occlude
 pad by that value rather than re-stacking shared site chrome.
+
+The live roll-result element is `.charsheet__dice-result`, not the unused
+`.cs-dice-result` style. It uses the toast layer and measures visible fixed tabs
+and the mobile status mirror for actual clearance, including text-size growth
+and safe-area padding. `_watchDiceResultPosition()` owns resize, visual-viewport
+and shell observers for one active result; replacement, dismissal and external
+removal release them. Mobile scrolls only the breakdown/note region, keeping the
+total, close button and post-roll actions reachable. Desktop retains 20px
+bottom/right placement; site modals temporarily own input above the result.
 
 ## Modals
 

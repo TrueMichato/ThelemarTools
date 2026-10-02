@@ -6972,9 +6972,19 @@ weaker, and narrowing it was not measured here.
 
 ---
 
-## CS-BUG-113 — "All Class Features" omits every Optional Feature and every subclass-feature row (13.5% of real feature rows), and the Overview summary card drops them into a write-only bucket
+## CS-BUG-113 — "All Class Features" omits every Optional Feature and every subclass-feature row (13.5% of real feature rows), and the Overview summary card drops them into a write-only bucket — FIXED
 
-**Status: Open** (product). Player-visible. Not fixed — filed only.
+**Status: Fixed** in `6e7e9f771` (Round 64).
+
+The class list, Overview summary/fallback/counts and expanded modal now share
+`_getFeatureDisplayType()`. Class, subclass and optional features use the same
+display-only merged projection; species/background/feat/manual precedence and
+source/owner-qualified description lookup prevent unrelated rows from being
+misclassified. Overview remains intentionally condensed, while its expanded
+class modal includes the complete classified list. The 21 rendering regressions
+in `CharacterSheetFeatureSummary.test.js` include real feature acquisition,
+mixed kinds, caps/fallback, distinct sources, descriptions and state preservation.
+The investigation below records the pre-fix behavior.
 
 Two read gates in `js/charactersheet/charactersheet-features.js` accept a
 narrower set of `featureType` values than the writers produce. The rows are
