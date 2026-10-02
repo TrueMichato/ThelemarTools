@@ -74,6 +74,30 @@ carries no class). The redesign added/tuned:
 
 See `DESIGN.md` frontmatter for the full token catalog with values.
 
+### Mobile roll-result clearance
+
+The real floating result is `.charsheet__dice-result`, produced by
+`CharacterSheetPage._showDiceResult()` (not the unused `.cs-dice-result` style).
+It uses `--cs-z-toast`, but stacking alone must not cover navigation. While a
+result is alive, the Page measures visible fixed `#charsheet-tabs` and
+`.charsheet-mobile__status` rectangles, including their actual text-sized
+height and safe-area padding. Mobile placement reserves their occupied space
+plus a 12px gap; safe-area clearance is applied once. Resize/visual-viewport
+events, chrome resize observation, and shell visibility changes update that
+placement. Replacement, manual close, and timed close all release the same
+listeners/observers and dismiss timer.
+
+The mobile card bounds itself to the available viewport. Its breakdown/note
+region scrolls without truncation; the total, keyboard-operable close button,
+and post-roll reaction controls remain outside that scroller. Desktop keeps
+its existing 20px bottom/right placement. Short landscape puts the title and
+total on one row to preserve usable breakdown space beside reaction controls.
+A site modal temporarily demotes
+the result to `--cs-z-sticky` and disables its pointer input, so modal controls
+retain ownership. Play Mode hides Manager tabs, but the mobile status mirror
+can remain fixed: only actually visible chrome is reserved, including that
+mirror. Play Mode drawers remain beneath the toast layer.
+
 ---
 
 ## Work streams

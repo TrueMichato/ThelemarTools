@@ -18,6 +18,78 @@
 
 @media (max-width: 768px), (max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
 
+	.charsheet__dice-result {
+		/* Measured occupied chrome includes its safe area; do not add it twice. */
+		--cs-roll-bottom: calc(max(var(--cs-roll-bottom-offset, 0px), env(safe-area-inset-bottom, 0px)) + 12px);
+		bottom: var(--cs-roll-bottom);
+		right: max(12px, env(safe-area-inset-right, 0px));
+		width: min(420px, calc(100% - max(12px, env(safe-area-inset-left, 0px)) - max(12px, env(safe-area-inset-right, 0px))));
+		min-width: 0;
+		box-sizing: border-box;
+		max-height: calc(var(--cs-roll-viewport-height, 100dvh) - var(--cs-roll-viewport-top, 0px) - var(--cs-roll-bottom) - max(12px, env(safe-area-inset-top, 0px)));
+		display: flex;
+		flex-direction: column;
+		padding: 0.75rem;
+		overflow-wrap: anywhere;
+	}
+
+	.charsheet__dice-result-header,
+	.charsheet__dice-result-total,
+	.charsheet__dice-result-gs {
+		flex-shrink: 0;
+	}
+
+	.charsheet__dice-result-header {
+		padding-right: 2.25rem;
+	}
+
+	.charsheet__dice-result-body {
+		min-height: 0;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
+	.charsheet__dice-result-close {
+		top: 0.25rem;
+		right: 0.25rem;
+		min-width: 44px;
+		min-height: 44px;
+	}
+
+	.charsheet__dice-result-gs .ve-btn {
+		min-height: 44px;
+		white-space: normal;
+	}
+
+	.charsheet__dice-result-gs-btn {
+		flex: 1;
+		min-width: 0;
+	}
+
+	@media (height <= 480px) and (orientation: landscape) {
+		.charsheet__dice-result {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-rows: auto minmax(0, 1fr) auto;
+		}
+
+		.charsheet__dice-result-header {
+			margin-bottom: 0;
+			padding: 0;
+			border-bottom: 0;
+			align-self: center;
+		}
+
+		.charsheet__dice-result-total {
+			padding-right: 2.5rem;
+		}
+
+		.charsheet__dice-result-body,
+		.charsheet__dice-result-gs {
+			grid-column: 1 / -1;
+		}
+	}
+
 	.cs-roll-followup {
 		margin-bottom: 0.625rem;
 		padding: 0.625rem;

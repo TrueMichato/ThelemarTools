@@ -11605,10 +11605,15 @@ body.has-quickbuild-overlay .toast__container {
 	border-radius: 8px;
 	padding: 1.25rem;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-	z-index: var(--cs-z-overlay, 1000);
+	z-index: var(--cs-z-toast, 1060);
 	min-width: 240px;
 	font-size: 1.1rem;
 	animation: slideIn 0.3s ease;
+}
+
+body.is-charsheet-page.ve-ui-modal__body-active .charsheet__dice-result {
+	z-index: var(--cs-z-sticky, 100);
+	pointer-events: none;
 }
 
 @keyframes slideIn {
@@ -11682,9 +11687,16 @@ body.has-quickbuild-overlay .toast__container {
 	right: 0.5rem;
 	cursor: pointer;
 	opacity: 0.7;
+	border: 0;
+	padding: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	line-height: 1;
 }
 
-.charsheet__dice-result-close:hover {
+.charsheet__dice-result-close:hover,
+.charsheet__dice-result-close:focus-visible {
 	opacity: 1;
 }
 
