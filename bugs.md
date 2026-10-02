@@ -3,23 +3,41 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 64 — Split ASI choices, complete feature summaries, and mobile roll results
-
-- **S1 — 2024 ASI allocation:** The repeatable XPHB Ability Score Improvement feat only offers +2 to one ability. Support its authored alternative of +1 to two distinct abilities through the shared feat-choice, validation, application, history, and Respec paths; preserve existing single-ability saves and repeated-feat ownership.
-- **S2 — Complete feature summaries (CS-BUG-113):** Overview and All Class Features omit optional and subclass-feature rows that the main Features tab can display. Reconcile their read-side classification, fallback, and counts without changing feature acquisition or merging unrelated species/background/manual categories.
-- **S3 — Mobile roll-result visibility:** Floating roll results can appear behind the fixed bottom tab bar (`#charsheet-tabs`). Keep the live result and its controls readable above occupied navigation, including narrow/short viewports, safe areas, and resizing; preserve desktop behavior and verify Play Mode applicability.
-
-The orchestrator owns this ledger and shared bug-status/reference reconciliation.
-S1 owns feat acquisition/choices, S2 owns feature display, and S3 owns roll-result
-presentation; S1 and S2 must keep their edits to `charactersheet-features.js`
-function-disjoint. Every branch supplies causal regressions before the merged
-repository gate and publication to `character-sheet-wip`.
-
-### Round 62 — Item editor follow-up (plan only)
-
-- **Custom/Modify Item editor (bug 7):** The item-editor session completed a phased plan based on the previously approved shared-editor design and the DMG/XDMG Boots findings. Create/Modify/catalog-clone implementation is still pending; no editor code was changed in this round.
+_No open items in this round tracker. Additional character-sheet reports remain
+in [the known-bugs tracker](docs/charactersheet/known-bugs.md)._
 
 ## Closed Bugs
+
+### Round 64 — Split ASI choices, complete feature summaries, and mobile roll results
+
+**Integration.** Three isolated branches were merged `--no-ff`. The two
+function-disjoint edits to `charactersheet-features.js` union-merged cleanly,
+and shared feat-picker/display, progression/Respec, and mobile result checks
+ran against the combined tree. Final repository ESLint, configured Stylelint
+and JSON validation passed; the memory-bounded full Jest run passed
+**755 suites / 19,486 tests** (2 suites / 208 tests skipped). The combined
+Chromium run passed **6 tests**: two real ASI acquisition cases, three mobile
+result cases, and one generated Champion L5 smoke. This is not a full MEGA
+suite or real-device Safari validation.
+
+- **2024 ASI allocation:** A shared resolver and picker now offer either +2
+  to one ability or +1 to two distinct abilities, never both at once. Legacy
+  scalar choices remain valid; split allocation maps, exact capped receipts,
+  repeated acquisition, replay, reload and Respec use the existing ownership
+  contract. The browser build drivers recognize the new picker. Abandoned
+  ordinary ASI choices no longer survive in feat-only level history.
+- **Complete feature summaries (CS-BUG-113):** The class list, Overview
+  summary/fallback/counts and All Class Features use one display classifier
+  and display-only equivalent-row projection. Optional/subclass rows remain
+  reachable with source/owner-safe descriptions, without reclassifying
+  unrelated species, background, feat or manual rows. Overview stays condensed;
+  the expanded class modal is complete.
+- **Mobile roll-result visibility:** The actual result card clears the
+  measured fixed tabs and mobile status mirror, including text-size growth
+  and safe-area padding, and uses the toast layer. Long breakdowns scroll while
+  totals, dismissal and post-roll actions stay reachable. Resize, short
+  landscape, Play Mode and modal ownership are handled, with observers and
+  timers cleaned up when the result ends. Desktop retains its 20px placement.
 
 ### Round 63 — Multiclass, spells, tool checks, progression, and TGTT copy
 
@@ -31,7 +49,8 @@ choice. The unchanged baseline's three failing Jest suites (18 tests) were
 repaired in test fixtures/assertions without production changes. Final ESLint,
 configured Stylelint, and JSON validation passed; the memory-bounded full Jest
 run passed **752 suites / 19,438 tests** (2 suites / 208 tests skipped). The
-unrelated Round 62 item-editor follow-up remains open.
+Round 62 item-editor follow-up was still marked open at that handoff; its stale
+status is reconciled below.
 
 - **Multiclass proficiencies (bug 1):** Equivalent armor/weapon labels could be
   granted or rendered twice, and legacy saves already contained duplicate
@@ -58,14 +77,24 @@ unrelated Round 62 item-editor follow-up remains open.
 - **Repeatable 2024 ASI (bug 6):** Duplicate-name feat rejection and
   first-match ownership discarded later picks. Each repeated ASI now has its
   own decision, ID, choice, and effect receipt across leveling, replay, reload,
-  and Respec; the Features picker also permits repeatable feats. The existing
-  picker still only offers +2 to one ability, not the data's +1/+1 alternative.
+  and Respec; the Features picker also permits repeatable feats. The +1/+1
+  alternative was still unavailable in Round 63 and is completed in Round 64.
 - **Unhindered Flurry (bug 7):** Its wording now states that the level-8
   ability costs no Focus Points, and its XPHB Flurry of Blows reference uses the
   correct level-2 feature UID.
 - **Andrui's Baneful Backfire (bug 8):** Its duration uses the established
   spell representation rendered as **Until triggered**, without adding an
   unspoken expiry or repeat-trigger rule.
+
+### Round 62 — Item editor follow-up status reconciliation
+
+- **Custom/Modify Item editor:** The old "implementation pending" entry was
+  stale. The merged inventory controller and
+  [magic-item coverage documentation](docs/charactersheet/19-magic-item-coverage.md)
+  already contain the shared Create/Modify/catalog-clone editor, typed damage
+  controls and persistence rollback (including `ad30350a1`, `4c2b3c34f` and
+  `00d38795a`). Round 64 corrects this tracking status, not the editor code;
+  bespoke reference-only item effects remain manual.
 
 ### Round 62 — Character Sheet regressions and Marathoner
 

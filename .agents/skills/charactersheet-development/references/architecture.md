@@ -168,6 +168,17 @@ The Features-tab picker matches known feats by name and source, retains the
 Add action for repeatable feats, and gives each manual repeat its own unplaced
 decision key so it cannot collide with a level-granted copy.
 
+Feat ability discovery, rendering, completion and mechanics share ClassUtils'
+`getFeatAbilityOptions()`, `resolveFeatAbilityChoice()` and
+`renderFeatAbilityChoices()`. Authored alternatives are exclusive; the XPHB ASI
+supports either +2 to one score or +1 to two distinct scores. Legacy scalar
+`choices.ability` remains valid; multi-picks use the ordinary ASI allocation
+map with `abilityOption` identifying the authored alternative. Changing modes
+clears prior picks. Progression and Respec use the acquisition's actual capped
+ability deltas, including zero, rather than reversing the authored amount.
+An entirely unpicked staged feat can retain an unresolved required child, but
+cannot be applied until that choice is complete.
+
 ## Data Flow
 
 ### Initialization
