@@ -3,6 +3,18 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 64 — Split ASI choices, complete feature summaries, and mobile roll results
+
+- **S1 — 2024 ASI allocation:** The repeatable XPHB Ability Score Improvement feat only offers +2 to one ability. Support its authored alternative of +1 to two distinct abilities through the shared feat-choice, validation, application, history, and Respec paths; preserve existing single-ability saves and repeated-feat ownership.
+- **S2 — Complete feature summaries (CS-BUG-113):** Overview and All Class Features omit optional and subclass-feature rows that the main Features tab can display. Reconcile their read-side classification, fallback, and counts without changing feature acquisition or merging unrelated species/background/manual categories.
+- **S3 — Mobile roll-result visibility:** Floating roll results can appear behind the fixed bottom tab bar (`#charsheet-tabs`). Keep the live result and its controls readable above occupied navigation, including narrow/short viewports, safe areas, and resizing; preserve desktop behavior and verify Play Mode applicability.
+
+The orchestrator owns this ledger and shared bug-status/reference reconciliation.
+S1 owns feat acquisition/choices, S2 owns feature display, and S3 owns roll-result
+presentation; S1 and S2 must keep their edits to `charactersheet-features.js`
+function-disjoint. Every branch supplies causal regressions before the merged
+repository gate and publication to `character-sheet-wip`.
+
 ### Round 62 — Item editor follow-up (plan only)
 
 - **Custom/Modify Item editor (bug 7):** The item-editor session completed a phased plan based on the previously approved shared-editor design and the DMG/XDMG Boots findings. Create/Modify/catalog-clone implementation is still pending; no editor code was changed in this round.
