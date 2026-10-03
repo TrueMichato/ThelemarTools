@@ -25,7 +25,7 @@ function grantAsi (state, decision, ability, amount, id) {
 	};
 }
 
-async function fixture ({pairedFeat = feat, pairedChoices = null} = {}) {
+async function fixture ({pairedFeat = feat, pairedChoices = null, legacy = false} = {}) {
 	const selectedFeat = {...pairedFeat, choices: pairedChoices, _featChoices: pairedChoices};
 	const state = new State();
 	state.setSetting("thelemar_asiFeat", true);
@@ -50,17 +50,26 @@ async function fixture ({pairedFeat = feat, pairedChoices = null} = {}) {
 	await seed.stageGraphMutation(ordinary.id, {str: 2}, {
 		apply: ({state: candidate}) => ({receipt: grantAsi(candidate, ordinary, "str", 2, "seed-asi")}),
 	});
-	await seed.stageGraphMutation(paired.id, selectedFeat, {
-		apply: ({state: candidate}) => {
-			candidate.addFeat(selectedFeat, {sourceDecisionKey: paired.semanticKey});
-			globalThis.CharacterSheetClassUtils.applyFeatBonuses(candidate, {...selectedFeat, sourceDecisionKey: paired.semanticKey});
-		},
-	});
+	if (!legacy) {
+		await seed.stageGraphMutation(paired.id, selectedFeat, {
+			apply: ({state: candidate}) => {
+				candidate.addFeat(selectedFeat, {sourceDecisionKey: paired.semanticKey});
+				globalThis.CharacterSheetClassUtils.applyFeatBonuses(candidate, {...selectedFeat, sourceDecisionKey: paired.semanticKey});
+			},
+		});
+	}
 	await seed.apply();
+	if (legacy) {
+		const history = state.getLevelHistoryEntry(4);
+		state.recordLevelChoice({...history, choices: {...history.choices, feat: {name: pairedFeat.name, source: pairedFeat.source}, featChoices: pairedChoices}, decisions: history.decisions.filter(row => row.semanticKey === ordinary.semanticKey)});
+		state.addFeat(selectedFeat);
+		globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, selectedFeat);
+		expect(state.getFeats()[0].sourceDecisionKey).toBeUndefined();
+	}
 	expect(state.getAbilityBase("str")).toBe(20);
 	const engine = new Engine({state, page});
 	engine.begin();
-	return {state, page, engine, ordinaryKey: ordinary.semanticKey, pairedKey: paired.semanticKey, pairedFeat, pairedChoices};
+	return {state, page, engine, ordinaryKey: ordinary.semanticKey, pairedKey: paired.semanticKey, pairedFeat, pairedChoices, pairedId: state.getFeats()[0].id};
 }
 
 async function replace (fixture, {ability = "con", amount = 2, alter = null, reuse = false, pairedChoices = fixture.pairedChoices} = {}) {
@@ -70,7 +79,7 @@ async function replace (fixture, {ability = "con", amount = 2, alter = null, reu
 	const selection = amount === 1 ? {[ability]: 1, dex: 1} : {[ability]: amount};
 	return engine.stageGraphMutation(decision.id, selection, {
 		apply: async ({state, captureReceiptBaseline, captureReceiptResult}) => {
-			const previous = state.getFeats().find(row => row.sourceDecisionKey === pairedKey);
+			const previous = state.getFeats().find(row => row.sourceDecisionKey === pairedKey || row.id === fixture.pairedId);
 			if (!reuse) state.removeFeat(previous.id);
 			state.reverseProgressionImprovementReceipt(decision);
 			if (alter === "before baseline") captureReceiptResult();
@@ -155,6 +164,48 @@ describe("Observed ASI end boundary and exact retained paired feat ownership", (
 		}})).rejects.toThrow(/unproven/);
 		expect(data.state.toJson()).toEqual(live);
 		expect(data.engine.state.toJson()).toEqual(draft);
+	});
+
+	it("retains a uniquely declared legacy paired feat without injecting a source key into its original wrapper", async () => {
+		const data = await fixture({legacy: true});
+		expect(data.engine.state.getFeats()[0].sourceDecisionKey).toBeUndefined();
+		await replace(data, {ability: "str", amount: 1});
+		expect(data.engine.state.getAbilityBase("str")).toBe(20);
+		expect(data.engine.state.getFeats()[0]).toMatchObject({sourceDecisionKey: data.pairedKey, appliedEffects: {abilityDeltas: {str: 1}}});
+		await replace(data);
+		expect(data.engine.state.getAbilityBase("str")).toBe(19);
+		expect(data.engine.state.getAbilityBase("con")).toBe(12);
+		await data.engine.apply();
+		data.state.loadFromJson(data.state.toJson());
+		expect(data.state.getAbilityBase("str")).toBe(19);
+		expect(data.state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({str: 1});
+	});
+
+	it.each(["ambiguous", "foreign"])("does not turn %s legacy evidence into paired ownership", async mode => {
+		const data = await fixture({legacy: true});
+		if (mode === "ambiguous") data.engine.state.addFeat({...feat, repeatable: true}, {sourceDecisionKey: "independent:feat"});
+		else data.engine.state._data.feats[0].sourceDecisionKey = "foreign:feat";
+		const live = data.state.toJson();
+		const draft = data.engine.state.toJson();
+		await expect(replace(data)).rejects.toThrow(/original paired feat owner/);
+		expect(data.state.toJson()).toEqual(live);
+		expect(data.engine.state.toJson()).toEqual(draft);
+	});
+
+	it.each([false, true])("uses exact materialized legacy IDs and rejects conflicting evidence (foreign=%s)", async foreign => {
+		const data = await fixture({legacy: true});
+		if (foreign) data.engine.state.addFeat({...feat, repeatable: true}, {sourceDecisionKey: "independent:feat"});
+		const row = data.engine.manifest.decisions.find(decision => decision.semanticKey === data.pairedKey);
+		const reference = data.engine.state.getFeats().find(value => foreign ? value.sourceDecisionKey === "independent:feat" : value.id === data.pairedId);
+		row.receipt = {version: 1, sourceDecisionKey: row.semanticKey, effects: [{type: "materialized", feats: [{id: reference.id, name: reference.name, source: reference.source}]}]};
+		const draft = data.engine.state.toJson();
+		if (foreign) {
+			await expect(replace(data)).rejects.toThrow(/original paired feat owner/);
+			expect(data.engine.state.toJson()).toEqual(draft);
+		} else {
+			await replace(data);
+			expect(data.engine.state.getAbilityBase("str")).toBe(19);
+		}
 	});
 
 	it.each([
