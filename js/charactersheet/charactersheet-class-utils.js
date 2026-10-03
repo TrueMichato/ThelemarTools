@@ -827,6 +827,24 @@ class CharacterSheetClassUtils {
 		collectFeatureRefs(classData.classFeatures || []);
 
 		const normalize = value => String(value || "").trim().toLowerCase();
+		const isVerifiedReference = (name, className, classSource, featureSource, featureLevel) =>
+			(opts.classFeatures || []).some(feature =>
+				normalize(feature.name) === normalize(name)
+				&& normalize(feature.className) === normalize(className)
+				&& normalize(feature.classSource) === normalize(classSource)
+				&& normalize(feature.source) === normalize(featureSource)
+				&& Number(feature.level) === featureLevel,
+			);
+		const isSupportedOwner = (name, className, classSource, featureSource, featureLevel) => {
+			if (normalize(classSource) === normalize(classData.source)) {
+				return normalize(featureSource) === normalize(classSource)
+					|| isVerifiedReference(name, className, classSource, featureSource, featureLevel);
+			}
+			// Thelemar's 2024 chassis intentionally reuses authored features from both editions.
+			return normalize(classData.source) === "tgtt" && classData.edition === "one"
+				&& ["phb", "xphb"].includes(normalize(classSource))
+				&& isVerifiedReference(name, className, classSource, featureSource, featureLevel);
+		};
 		const getFeatureMeta = ref => {
 			const rawRef = typeof ref === "string"
 				? ref
@@ -843,16 +861,7 @@ class CharacterSheetClassUtils {
 				if (!name || !className || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
 				if (parts.length === 5 && !featureSourceRaw) return null;
 				if (normalize(className) !== normalize(classData.name)) return null;
-				if (normalize(classSource) !== normalize(classData.source)) {
-					if (classData.source !== "TGTT" || classData.edition !== "one" || classSource !== "XPHB") return null;
-					if (!(opts.classFeatures || []).some(feature =>
-						normalize(feature.name) === normalize(name)
-							&& normalize(feature.className) === normalize(className)
-							&& normalize(feature.classSource) === normalize(classSource)
-							&& normalize(feature.source) === normalize(featureSource)
-							&& Number(feature.level) === featureLevel,
-					)) return null;
-				}
+				if (!isSupportedOwner(name, className, classSource, featureSource, featureLevel)) return null;
 				return {name, level: featureLevel};
 			}
 
@@ -862,7 +871,7 @@ class CharacterSheetClassUtils {
 			const featureLevel = Number(ref.level);
 			if (!ref.name || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
 			if (normalize(className) !== normalize(classData.name)) return null;
-			if (normalize(classSource) !== normalize(classData.source)) return null;
+			if (!isSupportedOwner(ref.name, className, classSource, ref.source || classSource, featureLevel)) return null;
 			return {name: ref.name, level: featureLevel};
 		};
 		const featureMetas = featureRefs.map(getFeatureMeta).filter(Boolean);
@@ -917,6 +926,56 @@ class CharacterSheetClassUtils {
 				? "epic-boon-or-feat"
 				: improvement.kind === "asiAndFeat" ? "feat" : "asi-or-feat",
 		});
+	}
+
+	static applyClassAsi (state, {className, classSource, classLevel, characterLevel, asi, grantBoth = false}) {
+		const allocations = Object.entries(asi || {}).filter(([, amount]) => amount);
+		if (!allocations.length) return null;
+		if (allocations.some(([ability, amount]) => !Parser.ABIL_ABVS.includes(ability)
+			|| !Number.isInteger(amount) || amount < 1)) throw new Error("Invalid Ability Score Improvement allocation.");
+		if (allocations.reduce((total, [, amount]) => total + amount, 0) !== 2) {
+			throw new Error("An Ability Score Improvement must allocate exactly 2 points.");
+		}
+		const type = grantBoth ? "asi" : "asiOrFeat";
+		const sourceKey = grantBoth ? "asi" : "asi-or-feat";
+		const semanticKey = CharacterSheetProgression.getSemanticKey({className, classSource, classLevel, type, sourceKey});
+		const decision = {
+			type,
+			sourceKey,
+			semanticKey,
+			className,
+			classSource,
+			classLevel,
+			characterLevel,
+			selection: grantBoth ? MiscUtil.copyFast(asi) : {mode: "asi", asi: MiscUtil.copyFast(asi)},
+		};
+		const feature = {
+			name: "Ability Score Improvement",
+			source: classSource,
+			className,
+			classSource,
+			level: classLevel,
+			featureType: "Class",
+			description: `<p><strong>Ability Score Increases:</strong> ${allocations.map(([ability, amount]) => `${Parser.attAbvToFull(ability)} +${amount}`).join(", ")}</p>`,
+			isAsiChoice: true,
+		};
+		if (!state.addFeature(feature)) {
+			const stored = state.getLevelHistory().flatMap(entry => entry.decisions || [])
+				.find(candidate => candidate.semanticKey === semanticKey);
+			return stored ? MiscUtil.copyFast(stored) : null;
+		}
+		const effects = allocations.map(([ability, amount]) => {
+			const before = state.getAbilityBase(ability);
+			state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(before, amount, 20));
+			const after = state.getAbilityBase(ability);
+			return {type: "abilityDelta", sourceDecisionKey: semanticKey, ability, amount: after - before, before, after};
+		});
+		const storedFeature = state.getFeatures().find(candidate =>
+			candidate.isAsiChoice && candidate.className === className && candidate.classSource === classSource
+			&& candidate.source === classSource && Number(candidate.level) === Number(classLevel),
+		);
+		effects.push({type: "materialized", features: [{id: storedFeature.id, name: storedFeature.name, source: storedFeature.source}]});
+		return {...decision, receipt: {version: 1, sourceDecisionKey: semanticKey, effects}};
 	}
 
 	/**
@@ -8760,7 +8819,9 @@ class CharacterSheetClassUtils {
 		}
 
 		if (state.recordFeatAppliedEffectsSince) {
-			state.recordFeatAppliedEffectsSince(feat.name, feat.source, before, storedFeat?.id);
+			state.recordFeatAppliedEffectsSince(feat.name, feat.source, before, storedFeat?.id, {
+				abilityTargets: Object.keys(abilityChoice.increases),
+			});
 			return;
 		}
 
@@ -8775,7 +8836,7 @@ class CharacterSheetClassUtils {
 		state.recordFeatAppliedEffects?.(feat.name, feat.source, {
 			abilityDeltas: Object.fromEntries(abilityAbbreviations
 				.map(ability => [ability, (Number(state.getAbilityBase?.(ability)) || 0) - before.abilities[ability]])
-				.filter(([, delta]) => delta !== 0)),
+				.filter(([ability, delta]) => delta !== 0 || Object.hasOwn(abilityChoice.increases, ability))),
 			skillProficiencies,
 			saveProficienciesAdded: (state.getSaveProficiencies?.() || []).filter(value => !before.saves.has(value)),
 			toolProficienciesAdded: (state.getToolProficiencies?.() || []).filter(value => !before.tools.has(value)),

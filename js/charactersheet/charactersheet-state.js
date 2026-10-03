@@ -63408,7 +63408,7 @@ class CharacterSheetState {
 		};
 	}
 
-	recordFeatAppliedEffectsSince (featName, featSource, before, featId = null) {
+	recordFeatAppliedEffectsSince (featName, featSource, before, featId = null, {abilityTargets = []} = {}) {
 		if (!before) return false;
 		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
 		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
@@ -63432,7 +63432,7 @@ class CharacterSheetState {
 		return this.recordFeatAppliedEffects(featName, featSource, {
 			abilityDeltas: Object.fromEntries(abilityAbbreviations
 				.map(ability => [ability, (Number(this.getAbilityBase(ability)) || 0) - (Number(before.abilities?.[ability]) || 0)])
-				.filter(([, delta]) => delta !== 0)),
+				.filter(([ability, delta]) => delta !== 0 || abilityTargets.includes(ability))),
 			skillProficiencies,
 			saveProficienciesAdded: this.getSaveProficiencies().filter(value => !before.saves?.has(value)),
 			toolProficienciesAdded: this.getToolProficiencies().filter(value => !before.tools?.has(value)),
