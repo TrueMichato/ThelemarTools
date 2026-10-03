@@ -54,7 +54,9 @@ replacement is not grandfathered; unrelated changes do not require inventing
 its missing acquisition evidence.
 
 Apply/save rollback and one-step Undo restore the exact raw live snapshot, not
-only a migrated reload that could lose an unrelated resource.
+only a migrated reload that could lose an unrelated resource. Failed graph and
+background draft edits also restore their exact raw candidate data, including
+invalid duplicate evidence, rather than silently normalizing it during rejection.
 
 ### Callback ASI receipts
 
@@ -152,8 +154,12 @@ and mixed-origin free +2/+1 retain their existing ownership rules.
 
 Fixed ability replacement reads and writes only the origin bonus channel;
 named/custom and direct bonuses are never folded back into it. Fixed authored
-alternatives without evidence of the selected branch produce an actionable
-targeted replacement error rather than subtracting or applying every branch.
+alternatives require an explicit distribution choice on acquisition. Its owned
+fixed receipt is reversed once, preserving later independent adjustments.
+Applicable legacy alternatives without evidence of the selected branch produce
+an actionable targeted replacement error rather than subtracting or applying
+every branch. No such proof is required for background ability alternatives
+which were inapplicable because the PHB race owns its own ability bonuses.
 Changing a parent clears its old branch and requires the new children.
 Cancel discards the whole background dialog, including staged child choices.
 Change Background transfers the completed graph to the Respec candidate, not
@@ -166,6 +172,23 @@ missing legacy selections are repairable, not inferred from the complete
 proficiency list. Fixed background grants use the source-qualified origin
 owner; independent overlap and unrelated ability/item/custom bonuses survive
 replacement. Selected and fixed origin feats retain nested child decisions.
+Origin feat ability choices use the canonical exclusive option, count and cap,
+including a recorded zero at the cap. Retargeting synchronizes the owning feat's
+choices and actual applied-effect map; removing the background reverses only
+that exact wrapper's remaining owned deltas, never an independent repeatable
+instance with the same feat UID.
+
+Origin feat spell children fulfill the existing pending-choice slots, preserving
+the authored sibling `count`, daily/rest uses, recharge and spellcasting ability.
+Choosing a caster is configuration, never a base ability-score increase. For
+example, Sage's canonical Magic Initiate; Wizard requires two cantrips and one
+level-1 spell, not one cantrip. Choices synchronize the owning feat's canonical
+records, and reselection removes only the outgoing child grant.
+Innate choices forward an optional stable `grantId` through `fulfillSpellChoice`;
+their receipt identifies that exact copy, so an independently owned spell with
+the same name/source retains its UUID, caster and remaining uses. Ordinary
+fulfillment without a grant ID keeps the existing coalescing behavior. No new
+spell ledger or blanket pending-queue cleanup is introduced.
 
 Feature, feat, optional-feature, species, and background descriptors are
 discovered recursively. A selected parent grant becomes the parent node for

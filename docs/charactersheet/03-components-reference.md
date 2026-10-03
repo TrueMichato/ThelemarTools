@@ -337,7 +337,12 @@ can be edited or replaced.
 Respec background replacement uses an isolated origin-choice graph, including
 selectable skills, tools, languages, ability distributions, origin feats, and
 the chosen feat's nested choices. Fixed grants are shown read-only; changing a
-parent clears its previous child choices. Cancel leaves the character and main
+parent clears its previous child choices. Authored fixed ability alternatives
+require an explicit mode only when the background owns abilities; origin feat
+children synchronize canonical choices and exact owned deltas, including zero
+at a cap. Spell children fulfill all authored slots with their chosen caster,
+count and uses; exact innate-grant receipts preserve independent same-UID copies.
+Cancel leaves the character and main
 Respec draft unchanged. See [Respec](22-respec.md#nested-decisions).
 Unchanged pre-existing issues can remain during a partial repair: Review and
 Apply confirmation explicitly list them, and the saved decisions remain

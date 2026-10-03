@@ -25060,7 +25060,7 @@ class CharacterSheetState {
 	 * @param {string} choiceId - ID of the pending choice
 	 * @param {object} spell - The spell data to add
 	 */
-	fulfillSpellChoice (choiceId, spell) {
+	fulfillSpellChoice (choiceId, spell, {grantId = null} = {}) {
 		const choice = this._data.pendingSpellChoices?.find(c => c.id === choiceId);
 		if (!choice) {
 			// eslint-disable-next-line no-console
@@ -25071,6 +25071,7 @@ class CharacterSheetState {
 		// Add the spell based on the choice configuration
 		if (choice.innate) {
 			this.addInnateSpell({
+				...(grantId ? {grantId} : {}),
 				name: spell.name,
 				source: spell.source,
 				level: spell.level,

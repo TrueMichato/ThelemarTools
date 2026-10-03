@@ -396,6 +396,84 @@ class CharacterSheetRespecEngine {
 
 	_reverseDecisionReceipt (decision) {
 		const type = decision?.type;
+		const isOriginFeatAbility = decision?.scope === "origin" && type === "nestedAbility"
+			&& decision.meta?.descriptorRules?.featAbilityChoice
+			&& (decision.status !== "missing" || (decision.receipt?.effects || []).some(effect => effect.type === "abilityDelta"));
+		const ownedFeat = isOriginFeatAbility
+			? (this._candidateState.getFeats?.() || []).find(feat => feat.sourceDecisionKey === decision.parentSemanticKey)
+			: null;
+		let reversal = decision;
+		if (decision?.scope === "origin" && decision.meta?.descriptorRules?.originFeatSpellChoice
+			&& decision.meta.descriptorRules.spellMode === "innate" && ["nestedSpell", "nestedCantrip"].includes(type)) {
+			const feat = this._candidateState._data.feats.find(row => row.sourceDecisionKey === decision.parentSemanticKey);
+			const selected = Array.isArray(decision.selection) ? decision.selection : decision.selection ? [decision.selection] : [];
+			for (const spell of selected) {
+				const grantId = `respec:${decision.semanticKey}:${CharacterSheetProgression.getEntityUid(spell)}`;
+				if (!(decision.receipt?.effects || []).some(effect =>
+					(effect.ownership || []).some(owned => owned.type === "innateSpells" && owned.value?.grantId === grantId))) continue;
+				const owned = this._candidateState.getInnateSpells().filter(row => row.grantId === grantId);
+				if (!feat || owned.length !== 1 || owned[0].sourceFeature !== feat.name
+					|| CharacterSheetProgression.getEntityUid(owned[0]) !== CharacterSheetProgression.getEntityUid(spell)) {
+					throw new Error("The origin feat's exact innate spell grant no longer matches its receipt.");
+				}
+				this._candidateState.removeInnateSpell(owned[0].id);
+				this._candidateState.releaseProgressionOwnership("innateSpells", spell, decision.semanticKey);
+				reversal = CharacterSheetProgression._copy(reversal);
+				for (const effect of reversal.receipt.effects) {
+					if (effect.type === "ownership") effect.ownership = effect.ownership.filter(value => value.value?.grantId !== grantId);
+				}
+				if (feat?.appliedEffects && !this._candidateState._getProgressionOwnershipEntry("innateSpells", spell)?.sources?.includes(`feat:${feat.id}`)) {
+					feat.appliedEffects.innateSpellsAdded = (feat.appliedEffects.innateSpellsAdded || [])
+						.filter(value => CharacterSheetProgression.getEntityUid(value) !== CharacterSheetProgression.getEntityUid(spell));
+				}
+			}
+		}
+		const originBonuses = decision?.scope === "origin"
+			&& ["race", "background"].includes(decision.provenance?.ownerType)
+			? (decision.receipt?.effects || []).filter(effect => effect.type === "abilityBonusDelta")
+			: [];
+		if (originBonuses.length) {
+			if (decision.receipt.sourceDecisionKey !== decision.semanticKey || originBonuses.some(effect =>
+				effect.sourceDecisionKey !== decision.semanticKey || !Parser.ABIL_ABVS.includes(effect.ability)
+				|| !Number.isFinite(effect.amount) || effect.amount < 0
+				|| (this._candidateState._data.abilityBonuses[effect.ability] || 0) < effect.amount)) {
+				throw new Error("The origin ability bonus no longer agrees with its source-owned receipt. Restore its saved choices before replacing this grant.");
+			}
+			reversal = CharacterSheetProgression._copy(decision);
+			for (const effect of reversal.receipt.effects) {
+				if (effect.type === "abilityBonusDelta") delete effect.before;
+			}
+		}
+		if (isOriginFeatAbility) {
+			const deltas = (decision.receipt?.effects || []).filter(effect => effect.type === "abilityDelta");
+			if (!ownedFeat || !deltas.length || deltas.some(effect =>
+				effect.sourceDecisionKey !== decision.semanticKey
+				|| !Number.isFinite(effect.amount) || effect.amount < 0
+				|| ownedFeat.appliedEffects?.abilityDeltas?.[effect.ability] !== effect.amount)) {
+				throw new Error("The origin feat's ability receipt no longer agrees with its recorded owner. Restore its saved choices before replacing this grant.");
+			}
+			reversal = CharacterSheetProgression._copy(reversal);
+			for (const effect of reversal.receipt.effects) {
+				if (effect.type === "abilityDelta") delete effect.before;
+			}
+		}
+		if (decision?.scope === "origin" && type === "nestedFeat") {
+			const feats = this._candidateState.getFeats?.() || [];
+			const owned = feats.filter(feat => feat.sourceDecisionKey === decision.semanticKey);
+			for (const effect of decision.receipt?.effects || []) {
+				for (const reference of effect.type === "materialized" ? effect.feats || [] : []) {
+					const recorded = reference.id && feats.find(feat => feat.id === reference.id);
+					if (recorded && !owned.includes(recorded)) {
+						throw new Error("The origin feat receipt identifies a different grant's owner. Restore its saved choices before replacing this background.");
+					}
+				}
+			}
+			for (const feat of owned) this._candidateState.removeFeat(feat.id);
+			reversal = CharacterSheetProgression._copy(decision);
+			for (const effect of reversal.receipt?.effects || []) {
+				if (effect.type === "materialized") effect.feats = [];
+			}
+		}
 		const family = ["class", "subclass", "subclassChoice"].includes(type)
 			? "class"
 			: [
@@ -425,8 +503,15 @@ class CharacterSheetRespecEngine {
 			origin: "reverseProgressionOriginReceipt",
 			configuration: "reverseProgressionConfigurationReceipt",
 		}[family];
-		if (typeof this._candidateState[method] === "function") return this._candidateState[method](decision);
-		return this._candidateState.reverseProgressionDecisionReceipt?.(decision);
+		const result = typeof this._candidateState[method] === "function"
+			? this._candidateState[method](reversal)
+			: this._candidateState.reverseProgressionDecisionReceipt?.(reversal);
+		if (ownedFeat) {
+			for (const effect of decision.receipt.effects) {
+				if (effect.type === "abilityDelta") delete ownedFeat.appliedEffects.abilityDeltas[effect.ability];
+			}
+		}
+		return result;
 	}
 
 	_makeDecisionReceipt (decision, selection, state = this._candidateState) {
@@ -453,7 +538,9 @@ class CharacterSheetRespecEngine {
 			cantrips: "cantrips",
 			preparedCantrips: "cantrips",
 		};
-		const ownershipType = typeMap[decision?.type];
+		const isOriginFeatInnate = decision.scope === "origin" && decision.meta?.descriptorRules?.originFeatSpellChoice
+			&& decision.meta.descriptorRules.spellMode === "innate";
+		const ownershipType = isOriginFeatInnate ? "innateSpells" : typeMap[decision?.type];
 		const values = selection == null ? [] : (Array.isArray(selection) ? selection : [selection]);
 		const effects = [];
 		if (["nestedAbility", "nestedConfiguration"].includes(decision?.type) && values.length) {
@@ -476,11 +563,28 @@ class CharacterSheetRespecEngine {
 					: undefined,
 				value: decision.type === "nestedConfiguration" ? value : undefined,
 			}))));
+			if (decision.type === "nestedConfiguration" && decision.scope === "origin" && decision.meta?.originAbilityDistribution) {
+				for (const [ability, amount] of Object.entries(values[0]?.fixedBonuses || {})) {
+					effects.push({
+						type: "abilityBonusDelta",
+						sourceDecisionKey: decision.semanticKey,
+						ability,
+						amount,
+						before: (state._data.abilityBonuses[ability] || 0) - amount,
+					});
+				}
+			}
 		}
 		if (ownershipType) {
 			effects.push({
 				type: "ownership",
 				ownership: values.map(value => {
+					if (isOriginFeatInnate) {
+						return {
+							type: ownershipType,
+							value: {...value, grantId: `respec:${decision.semanticKey}:${CharacterSheetProgression.getEntityUid(value)}`},
+						};
+					}
 					if (decision.type !== "nestedSkillTool" || !value || typeof value !== "object") return {type: ownershipType, value};
 					const kind = String(value.kind || "").toLowerCase();
 					return {
@@ -539,7 +643,7 @@ class CharacterSheetRespecEngine {
 					.map(value => ({name: value.name, source: value.source})),
 			});
 		}
-		if (["nestedSpell", "nestedCantrip", "knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"].includes(decision?.type) && values.length) {
+		if (!isOriginFeatInnate && ["nestedSpell", "nestedCantrip", "knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"].includes(decision?.type) && values.length) {
 			effects.push({
 				type: "spells",
 				spellType: ["nestedCantrip", "cantrips", "preparedCantrips"].includes(decision.type) ? "cantrips" : "spells",
@@ -726,6 +830,7 @@ class CharacterSheetRespecEngine {
 			return this._manifest;
 		}
 		const stateSnapshot = this._candidateState.toJson();
+		const rawStateSnapshot = CharacterSheetProgression._copy(this._candidateState._data);
 		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
 		const isDirtySnapshot = this._isDirty;
@@ -751,7 +856,7 @@ class CharacterSheetRespecEngine {
 		if (this._isMechanicallyCompleteSkillNoOp(decision, stored, selection, status)) return this._manifest;
 
 		const rollback = error => {
-			this._candidateState.loadFromJson(stateSnapshot);
+			this._restoreStateSnapshot(this._candidateState, stateSnapshot, rawStateSnapshot);
 			this._manifest = manifestSnapshot;
 			this._isDirty = isDirtySnapshot;
 			this._undoSnapshot = undoSnapshot;
@@ -1006,6 +1111,7 @@ class CharacterSheetRespecEngine {
 		if (typeof apply !== "function") throw new Error("A candidate mutation callback is required.");
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
 		const stateSnapshot = this._candidateState.toJson();
+		const rawStateSnapshot = CharacterSheetProgression._copy(this._candidateState._data);
 		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
 		const isDirtySnapshot = this._isDirty;
@@ -1021,7 +1127,7 @@ class CharacterSheetRespecEngine {
 			this._trackChangedDecisions(manifestSnapshot, this._manifest);
 			return result;
 		} catch (error) {
-			this._candidateState.loadFromJson(stateSnapshot);
+			this._restoreStateSnapshot(this._candidateState, stateSnapshot, rawStateSnapshot);
 			this._manifest = manifestSnapshot;
 			this._isDirty = isDirtySnapshot;
 			this._undoSnapshot = undoSnapshot;
@@ -1144,16 +1250,19 @@ class CharacterSheetRespecEngine {
 		return changes;
 	}
 
-	_restoreLiveSnapshot (snapshot, rawData) {
+	_restoreStateSnapshot (state, snapshot, rawData) {
 		try {
-			if (this._liveState.loadFromJson(snapshot) === false) {
+			if (state.loadFromJson(snapshot) === false) {
 				throw new Error("The character could not be restored after the failed Respec transaction.");
 			}
 		} finally {
-			// Loading an older save can create migration fields and new modifier IDs.
-			// Restore the exact data so the draft's unchanged-live guard allows retry.
-			this._liveState._data = rawData;
+			// Migrations can change IDs or deduplicate evidence; a failed edit must preserve the exact data.
+			state._data = rawData;
 		}
+	}
+
+	_restoreLiveSnapshot (snapshot, rawData) {
+		this._restoreStateSnapshot(this._liveState, snapshot, rawData);
 	}
 
 	async apply () {
