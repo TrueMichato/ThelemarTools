@@ -14,6 +14,7 @@ function fixture () {
 	state.addClass({...cls, level: 4});
 	for (let level = 1; level <= 4; level++) state.recordLevelChoice({level, class: {name: cls.name, source: cls.source}, choices: {}});
 	state.setAbilityBase("str", 19);
+	state.setAbilityBase("dex", 19);
 	const page = {
 		getClasses: () => [cls],
 		getClassFeatures: () => [improvement],
@@ -52,6 +53,7 @@ function applyWithReceipt (decision, state, {ability = "str", amount = 2, featur
 describe("Respec validates canonical callback ASI acquisition receipts", () => {
 	it("preserves actual capped deltas through finalize, refresh, stamping, Apply/reload and reversal", async () => {
 		const {state, page, engine, decision} = fixture();
+		const original = state.toJson();
 		let supplied;
 		await engine.stageGraphMutation(decision.id, selectionFor(decision, {str: 2}), {
 			apply: ({state: candidate}) => {
@@ -63,6 +65,18 @@ describe("Respec validates canonical callback ASI acquisition receipts", () => {
 		expect(engine.manifest.decisions.find(candidate => candidate.semanticKey === decision.semanticKey).receipt).toEqual(supplied);
 		engine.refreshManifest();
 		expect(engine.manifest.decisions.find(candidate => candidate.semanticKey === decision.semanticKey).receipt).toEqual(supplied);
+		const previous = engine.manifest.decisions.find(candidate => candidate.semanticKey === decision.semanticKey);
+		await engine.stageGraphMutation(previous.id, selectionFor(previous, {dex: 2}), {
+			apply: ({state: candidate, captureReceiptBaseline}) => {
+				candidate.reverseProgressionImprovementReceipt(previous);
+				captureReceiptBaseline();
+				supplied = applyWithReceipt(previous, candidate, {ability: "dex", featureId: "second-canonical-asi"});
+				return {selection: selectionFor(previous, {dex: 2}), receipt: supplied};
+			},
+		});
+		expect(supplied.effects[0]).toMatchObject({ability: "dex", amount: 1, before: 19, after: 20});
+		expect(engine.state.getAbilityBase("str")).toBe(19);
+		expect(engine.manifest.decisions.find(candidate => candidate.semanticKey === decision.semanticKey).receipt).toEqual(supplied);
 		await engine.apply();
 		const loaded = new State();
 		expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
@@ -71,7 +85,9 @@ describe("Respec validates canonical callback ASI acquisition receipts", () => {
 		const next = reopened.manifest.decisions.find(candidate => candidate.semanticKey === decision.semanticKey);
 		expect(next.receipt).toEqual(supplied);
 		reopened.state.reverseProgressionImprovementReceipt(next);
-		expect(reopened.state.getAbilityBase("str")).toBe(19);
+		expect(reopened.state.getAbilityBase("dex")).toBe(19);
+		await engine.undo();
+		expect(state.toJson()).toEqual(original);
 	});
 
 	it("retains a zero applied delta rather than later reversing the authored amount", async () => {

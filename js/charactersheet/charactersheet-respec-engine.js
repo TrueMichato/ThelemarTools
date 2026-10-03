@@ -555,7 +555,7 @@ class CharacterSheetRespecEngine {
 		};
 	}
 
-	_validateAsiReceipt (decision, receipt, beforeAbilities, beforeFeatures) {
+	_validateAsiReceipt (decision, receipt, beforeAbilities, beforeFeatures, observedResult = null) {
 		const fail = () => { throw new Error("The replacement ASI receipt does not match its owner or observed ability changes. The edit was rolled back; reopen this choice and apply it again with exact acquisition evidence."); };
 		const hasOnly = (value, keys) => value && typeof value === "object" && !Array.isArray(value)
 			&& Object.keys(value).every(key => keys.includes(key));
@@ -563,6 +563,8 @@ class CharacterSheetRespecEngine {
 			|| receipt.version !== 1 || receipt.sourceDecisionKey !== decision.semanticKey
 			|| !Array.isArray(receipt.effects)) fail();
 		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
+		const afterAbilities = observedResult?.abilities || this._candidateState._data.abilities;
+		const afterFeatures = observedResult?.features || this._candidateState.getFeatures();
 		const represented = new Set();
 		for (const effect of receipt.effects) {
 			if (effect?.type === "abilityDelta") {
@@ -571,7 +573,7 @@ class CharacterSheetRespecEngine {
 					|| !abilities.includes(effect.ability) || represented.has(effect.ability)
 					|| ![effect.amount, effect.before, effect.after].every(value => typeof value === "number" && Number.isFinite(value))
 					|| effect.before !== beforeAbilities[effect.ability]
-					|| effect.after !== this._candidateState.getAbilityBase(effect.ability)
+					|| effect.after !== afterAbilities[effect.ability]
 					|| effect.amount < 0 || effect.amount !== effect.after - effect.before) fail();
 				represented.add(effect.ability);
 				continue;
@@ -581,16 +583,54 @@ class CharacterSheetRespecEngine {
 			for (const evidence of effect.features) {
 				if (!hasOnly(evidence, ["id", "name", "source"])
 					|| !["id", "name", "source"].every(key => typeof evidence[key] === "string" && evidence[key])) fail();
-				const current = this._candidateState.getFeatures().find(feature => feature.id === evidence.id);
+				const current = afterFeatures.find(feature => feature.id === evidence.id);
+				const finalFeature = this._candidateState.getFeatures().find(feature => feature.id === evidence.id);
 				const previous = beforeFeatures.find(feature => feature.id === evidence.id);
-				if (!current || current.name !== evidence.name || current.source !== evidence.source
+				if (!current || !finalFeature || finalFeature.name !== evidence.name || finalFeature.source !== evidence.source
+					|| (finalFeature.sourceDecisionKey && finalFeature.sourceDecisionKey !== decision.semanticKey)
+					|| current.name !== evidence.name || current.source !== evidence.source
 					|| (current.sourceDecisionKey && current.sourceDecisionKey !== decision.semanticKey)
 					|| (previous && previous.sourceDecisionKey !== decision.semanticKey)) fail();
 			}
 		}
 		if (!represented.size || abilities.some(ability =>
-			beforeAbilities[ability] !== this._candidateState.getAbilityBase(ability) && !represented.has(ability))) fail();
+			beforeAbilities[ability] !== afterAbilities[ability] && !represented.has(ability))) fail();
 		return CharacterSheetProgression._copy(receipt);
+	}
+
+	_validateAsiReceiptTail (observedResult) {
+		const fail = () => { throw new Error("The replacement ASI receipt has unproven changes after its observed result boundary. Only the exact retained paired feat may change abilities there; the edit was rolled back."); };
+		const explained = Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, 0]));
+		const isDeltaMap = map => map && typeof map === "object" && !Array.isArray(map)
+			&& Object.entries(map).every(([ability, amount]) => Parser.ABIL_ABVS.includes(ability) && Number.isFinite(amount) && amount >= 0);
+		for (const owner of observedResult.pairedOwners) {
+			const before = observedResult.feats.filter(feat => feat.sourceDecisionKey === owner.semanticKey);
+			const after = this._candidateState.getFeats().filter(feat => feat.sourceDecisionKey === owner.semanticKey);
+			if (before.length > 1 || after.length !== 1
+				|| [...before, ...after].some(feat => CharacterSheetProgression.getEntityUid(feat) !== owner.uid)) fail();
+			const canonical = (this._page.getFeats?.() || []).find(feat => CharacterSheetProgression.getEntityUid(feat) === owner.uid);
+			if (!canonical) fail();
+			const current = after[0];
+			const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(canonical, current.choices || current._featChoices || {});
+			if (!resolved.valid) fail();
+			const oldDeltas = before.length ? before[0].appliedEffects?.abilityDeltas : {};
+			const newDeltas = current.appliedEffects?.abilityDeltas;
+			if (!isDeltaMap(oldDeltas) || !isDeltaMap(newDeltas)) fail();
+			for (const ability of Parser.ABIL_ABVS) {
+				const oldAmount = oldDeltas[ability] || 0;
+				const newAmount = newDeltas[ability] || 0;
+				const increase = resolved.increases[ability] || 0;
+				const beforeIncoming = observedResult.abilities[ability] - oldAmount;
+				const expected = increase ? CharacterSheetClassUtils.capAbilityIncrease(
+					beforeIncoming, increase, resolved.option.max,
+				) - beforeIncoming : 0;
+				if (!Number.isFinite(increase) || increase < 0 || beforeIncoming < 1 || newAmount !== expected) fail();
+				explained[ability] += newAmount - oldAmount;
+			}
+		}
+		for (const ability of Parser.ABIL_ABVS) {
+			if (this._candidateState.getAbilityBase(ability) - observedResult.abilities[ability] !== explained[ability]) fail();
+		}
 	}
 
 	_isMechanicallyCompleteSkillNoOp (decision, stored, selection, status) {
@@ -720,9 +760,29 @@ class CharacterSheetRespecEngine {
 
 		let callbackEntryAbilities = null;
 		let receiptBaseline = null;
+		let receiptResult = null;
 		const captureReceiptBaseline = () => {
 			if (receiptBaseline) throw new Error("The ASI receipt baseline can only be captured once per edit.");
 			receiptBaseline = CharacterSheetProgression._copy(this._candidateState._data.abilities);
+		};
+		const captureReceiptResult = () => {
+			if (!["asi", "asiOrFeat"].includes(decision.type) || !receiptBaseline) {
+				throw new Error("Capture the observed ASI baseline before capturing its result boundary.");
+			}
+			if (receiptResult) throw new Error("The ASI receipt result can only be captured once per edit.");
+			const classUid = row => CharacterSheetProgression.getEntityUid({name: row.className, source: row.classSource});
+			const paired = (manifestSnapshot.decisions || []).filter(row =>
+				decision.type === "asi" && row.type === "feat" && row.sourceKey === "feat" && row.scope === "level"
+				&& row.meta?.improvement?.kind === "asiAndFeat" && row.status === "resolved"
+				&& classUid(row) === classUid(decision) && row.classLevel === decision.classLevel
+				&& row.characterLevel === decision.characterLevel && row.semanticKey !== decision.semanticKey);
+			if (paired.length > 1) throw new Error("The ASI result boundary has ambiguous paired feat ownership.");
+			receiptResult = CharacterSheetProgression._copy({
+				abilities: this._candidateState._data.abilities,
+				features: this._candidateState.getFeatures(),
+				feats: this._candidateState.getFeats(),
+				pairedOwners: paired.map(row => ({semanticKey: row.semanticKey, uid: CharacterSheetProgression.getEntityUid(row.selection)})),
+			});
 		};
 		const finalize = applyResult => {
 			const effectiveSelection = applyResult && Object.prototype.hasOwnProperty.call(applyResult, "selection")
@@ -739,6 +799,9 @@ class CharacterSheetRespecEngine {
 			);
 			if (!currentStored) throw new Error("The staged progression decision is no longer available in the draft ledger.");
 			let receipt = null;
+			if (receiptResult && !Object.prototype.hasOwnProperty.call(applyResult || {}, "receipt")) {
+				throw new Error("The observed ASI result requires its exact acquisition receipt; the edit was rolled back.");
+			}
 			if (["asi", "asiOrFeat"].includes(decision.type) && applyResult && Object.prototype.hasOwnProperty.call(applyResult, "receipt")) {
 				let beforeAbilities = receiptBaseline;
 				if (!beforeAbilities) {
@@ -755,7 +818,8 @@ class CharacterSheetRespecEngine {
 						for (const effect of outgoing) beforeAbilities[effect.ability] -= effect.amount;
 					}
 				}
-				receipt = this._validateAsiReceipt(decision, applyResult.receipt, beforeAbilities, stateSnapshot.features || []);
+				receipt = this._validateAsiReceipt(decision, applyResult.receipt, beforeAbilities, stateSnapshot.features || [], receiptResult);
+				if (receiptResult) this._validateAsiReceiptTail(receiptResult);
 			} else receipt = this._makeDecisionReceipt(decision, effectiveSelection, this._candidateState);
 			const updated = CharacterSheetProgression.normalizeDecision({
 				...currentStored,
@@ -876,7 +940,7 @@ class CharacterSheetRespecEngine {
 			}
 			callbackEntryAbilities = CharacterSheetProgression._copy(this._candidateState._data.abilities);
 			const applyResult = typeof apply === "function"
-				? apply({decision, stored, state: this._candidateState, captureReceiptBaseline})
+				? apply({decision, stored, state: this._candidateState, captureReceiptBaseline, captureReceiptResult})
 				: null;
 			if (applyResult && typeof applyResult.then === "function") {
 				return Promise.resolve(applyResult)

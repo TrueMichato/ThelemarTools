@@ -73,6 +73,17 @@ unverified intermediate `before` number is insufficient. Mismatched evidence
 rolls back only the targeted transaction. The ASI application/eligibility helpers
 remain the owning class-improvement subsystem.
 
+An ordinary ASI with a retained `asiAndFeat` sibling also calls
+`captureReceiptResult()` once, immediately after the ordinary grant and before
+reapplying its paired feat. The ordinary receipt is checked against that observed
+end, not the whole callback's final scores. Only the pre-existing, resolved,
+source-qualified sibling at the same class acquisition may explain subsequent
+ability changes. Its canonical feat choice and exact owned applied-effect deltas
+must match the cap calculation and the complete remaining score vector; a
+retained wrapper may be recomputed without changing its UUID. Missing, dishonest,
+foreign-owner or untracked evidence rolls back the transaction. This preserves
+the ordinary-ASI-before-paired-feat order without combining their receipts.
+
 Feature-companion setup follows the same isolation rule. Subclass replacement
 runs `reconcileFeatureCompanionGrants({reason: "respecCandidate"})` against the
 candidate only. A legal exact-owner setup and companion retain their stable
