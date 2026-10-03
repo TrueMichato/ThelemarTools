@@ -339,6 +339,9 @@ selectable skills, tools, languages, ability distributions, origin feats, and
 the chosen feat's nested choices. Fixed grants are shown read-only; changing a
 parent clears its previous child choices. Cancel leaves the character and main
 Respec draft unchanged. See [Respec](22-respec.md#nested-decisions).
+Unchanged pre-existing issues can remain during a partial repair: Review and
+Apply confirmation explicitly list them, and the saved decisions remain
+repairable. New or edited unresolved choices still block Apply.
 
 ### Key State Properties
 

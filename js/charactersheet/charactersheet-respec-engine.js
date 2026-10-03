@@ -13,6 +13,8 @@ class CharacterSheetRespecEngine {
 		this._undoRawData = null;
 		this._isDirty = false;
 		this._preexistingPendingKeys = new Set();
+		this._baselineDecisionIssues = new Map();
+		this._touchedDecisionKeys = new Set();
 	}
 
 	get state () { return this._candidateState || this._liveState; }
@@ -51,6 +53,7 @@ class CharacterSheetRespecEngine {
 		);
 		this._candidateState._onProgressionLedgerChange = () => this._setDirty();
 		this._isDirty = false;
+		this._touchedDecisionKeys = new Set();
 		// Materialise any lazy compatibility queues before taking the baseline.
 		// Otherwise a first manifest refresh could mistake an existing legacy
 		// pending item for a mutation-created obligation.
@@ -66,6 +69,7 @@ class CharacterSheetRespecEngine {
 		this._addPreexistingPendingWarnings(this._originalManifest);
 		this._manifest = this._originalManifest;
 		this._persistManifest();
+		this._baselineDecisionIssues = this._getDecisionIssueIndex(this._originalManifest);
 		return this._candidateState;
 	}
 
@@ -76,6 +80,8 @@ class CharacterSheetRespecEngine {
 		this._originalSnapshot = null;
 		this._isDirty = false;
 		this._preexistingPendingKeys = new Set();
+		this._baselineDecisionIssues = new Map();
+		this._touchedDecisionKeys = new Set();
 	}
 
 	refreshManifest ({persist = true} = {}) {
@@ -272,8 +278,87 @@ class CharacterSheetRespecEngine {
 	}
 
 	markDirty () {
+		const previous = this._manifest;
 		this._setDirty();
-		return this.refreshManifest();
+		const next = this.refreshManifest();
+		this._trackChangedDecisions(previous, next);
+		return next;
+	}
+
+	static _getSemanticValue (value) {
+		if (Array.isArray(value)) return value.map(item => this._getSemanticValue(item));
+		if (!value || typeof value !== "object") return value;
+		return Object.fromEntries(Object.entries(value)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([key, item]) => [key, this._getSemanticValue(item)]));
+	}
+
+	_getDecisionFingerprint (decision, manifest) {
+		const contract = row => {
+			const provenance = {...row.provenance};
+			delete provenance.characterLevel;
+			delete provenance.acquisitionLevel;
+			return CharacterSheetRespecEngine._getSemanticValue({
+				semanticKey: row.semanticKey,
+				type: row.type,
+				scope: row.scope,
+				className: row.className,
+				classSource: row.classSource,
+				classLevel: row.classLevel,
+				sourceKey: row.sourceKey,
+				required: row.required,
+				count: row.count,
+				status: row.status,
+				selection: row.selection,
+				provenance,
+				parentSemanticKey: row.parentSemanticKey,
+				rootSemanticKey: row.rootSemanticKey,
+				meta: row.meta,
+				receipt: row.receipt,
+				options: (row.options || []).map(option => CharacterSheetRespecEngine._getSemanticValue(option))
+					.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+			});
+		};
+		const byKey = new Map((manifest?.decisions || []).map(row => [row.semanticKey, row]));
+		const lineage = [];
+		const seen = new Set([decision.semanticKey]);
+		let parentKey = decision.parentSemanticKey;
+		while (parentKey) {
+			if (seen.has(parentKey)) return null;
+			seen.add(parentKey);
+			const parent = byKey.get(parentKey);
+			if (!parent) return null;
+			lineage.push(contract(parent));
+			parentKey = parent.parentSemanticKey;
+		}
+		return JSON.stringify({decision: contract(decision), lineage});
+	}
+
+	_getDecisionIssueIndex (manifest) {
+		const index = new Map();
+		for (const decision of manifest?.decisions || []) {
+			if (!["missing", "invalid", "ambiguous"].includes(decision.status)
+				|| (!decision.required && decision.status === "missing")) continue;
+			const key = decision.semanticKey;
+			if (!key || index.has(key)) {
+				if (key) index.set(key, null);
+				continue;
+			}
+			index.set(key, this._getDecisionFingerprint(decision, manifest));
+		}
+		return index;
+	}
+
+	_trackChangedDecisions (before, after) {
+		const beforeByKey = new Map((before?.decisions || []).map(decision => [decision.semanticKey, decision]));
+		for (const decision of after?.decisions || []) {
+			const previous = beforeByKey.get(decision.semanticKey);
+			if (!previous || this._getDecisionFingerprint(previous, before) !== this._getDecisionFingerprint(decision, after)) {
+				this._touchedDecisionKeys.add(decision.semanticKey);
+			}
+			beforeByKey.delete(decision.semanticKey);
+		}
+		for (const key of beforeByKey.keys()) this._touchedDecisionKeys.add(key);
 	}
 
 	_setDirty () {
@@ -470,6 +555,44 @@ class CharacterSheetRespecEngine {
 		};
 	}
 
+	_validateAsiReceipt (decision, receipt, beforeAbilities, beforeFeatures) {
+		const fail = () => { throw new Error("The replacement ASI receipt does not match its owner or observed ability changes. The edit was rolled back; reopen this choice and apply it again with exact acquisition evidence."); };
+		const hasOnly = (value, keys) => value && typeof value === "object" && !Array.isArray(value)
+			&& Object.keys(value).every(key => keys.includes(key));
+		if (!hasOnly(receipt, ["version", "sourceDecisionKey", "effects"])
+			|| receipt.version !== 1 || receipt.sourceDecisionKey !== decision.semanticKey
+			|| !Array.isArray(receipt.effects)) fail();
+		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
+		const represented = new Set();
+		for (const effect of receipt.effects) {
+			if (effect?.type === "abilityDelta") {
+				if (!hasOnly(effect, ["type", "sourceDecisionKey", "ability", "amount", "before", "after"])
+					|| effect.sourceDecisionKey !== decision.semanticKey
+					|| !abilities.includes(effect.ability) || represented.has(effect.ability)
+					|| ![effect.amount, effect.before, effect.after].every(value => typeof value === "number" && Number.isFinite(value))
+					|| effect.before !== beforeAbilities[effect.ability]
+					|| effect.after !== this._candidateState.getAbilityBase(effect.ability)
+					|| effect.amount < 0 || effect.amount !== effect.after - effect.before) fail();
+				represented.add(effect.ability);
+				continue;
+			}
+			if (effect?.type !== "materialized" || !hasOnly(effect, ["type", "features"])
+				|| !Array.isArray(effect.features)) fail();
+			for (const evidence of effect.features) {
+				if (!hasOnly(evidence, ["id", "name", "source"])
+					|| !["id", "name", "source"].every(key => typeof evidence[key] === "string" && evidence[key])) fail();
+				const current = this._candidateState.getFeatures().find(feature => feature.id === evidence.id);
+				const previous = beforeFeatures.find(feature => feature.id === evidence.id);
+				if (!current || current.name !== evidence.name || current.source !== evidence.source
+					|| (current.sourceDecisionKey && current.sourceDecisionKey !== decision.semanticKey)
+					|| (previous && previous.sourceDecisionKey !== decision.semanticKey)) fail();
+			}
+		}
+		if (!represented.size || abilities.some(ability =>
+			beforeAbilities[ability] !== this._candidateState.getAbilityBase(ability) && !represented.has(ability))) fail();
+		return CharacterSheetProgression._copy(receipt);
+	}
+
 	_isMechanicallyCompleteSkillNoOp (decision, stored, selection, status) {
 		const expectedLevel = {
 			nestedSkill: 1,
@@ -566,6 +689,7 @@ class CharacterSheetRespecEngine {
 		const isDirtySnapshot = this._isDirty;
 		const undoSnapshot = this._undoSnapshot;
 		const undoRawData = this._undoRawData;
+		const touchedSnapshot = new Set(this._touchedDecisionKeys);
 
 		const {container} = this._getDecisionStore(decision);
 		const stored = container?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey)
@@ -590,9 +714,16 @@ class CharacterSheetRespecEngine {
 			this._isDirty = isDirtySnapshot;
 			this._undoSnapshot = undoSnapshot;
 			this._undoRawData = undoRawData;
+			this._touchedDecisionKeys = touchedSnapshot;
 			throw error;
 		};
 
+		let callbackEntryAbilities = null;
+		let receiptBaseline = null;
+		const captureReceiptBaseline = () => {
+			if (receiptBaseline) throw new Error("The ASI receipt baseline can only be captured once per edit.");
+			receiptBaseline = CharacterSheetProgression._copy(this._candidateState._data.abilities);
+		};
 		const finalize = applyResult => {
 			const effectiveSelection = applyResult && Object.prototype.hasOwnProperty.call(applyResult, "selection")
 				? applyResult.selection
@@ -607,11 +738,30 @@ class CharacterSheetRespecEngine {
 				item.id === decisionId || item.semanticKey === decision.semanticKey,
 			);
 			if (!currentStored) throw new Error("The staged progression decision is no longer available in the draft ledger.");
+			let receipt = null;
+			if (["asi", "asiOrFeat"].includes(decision.type) && applyResult && Object.prototype.hasOwnProperty.call(applyResult, "receipt")) {
+				let beforeAbilities = receiptBaseline;
+				if (!beforeAbilities) {
+					beforeAbilities = CharacterSheetProgression._copy(callbackEntryAbilities);
+					if (!reverseParent && decision.selection != null) {
+						const outgoing = decision.receipt?.effects?.filter(effect => effect.type === "abilityDelta") || [];
+						if (decision.receipt?.version !== 1 || decision.receipt.sourceDecisionKey !== decision.semanticKey
+							|| !outgoing.length || outgoing.some(effect => effect.sourceDecisionKey !== decision.semanticKey
+								|| !["str", "dex", "con", "int", "wis", "cha"].includes(effect.ability)
+								|| typeof effect.amount !== "number" || !Number.isFinite(effect.amount) || effect.amount < 0)
+							|| new Set(outgoing.map(effect => effect.ability)).size !== outgoing.length) {
+							throw new Error("Capture the observed post-teardown ASI baseline before applying this replacement; the edit was rolled back.");
+						}
+						for (const effect of outgoing) beforeAbilities[effect.ability] -= effect.amount;
+					}
+				}
+				receipt = this._validateAsiReceipt(decision, applyResult.receipt, beforeAbilities, stateSnapshot.features || []);
+			} else receipt = this._makeDecisionReceipt(decision, effectiveSelection, this._candidateState);
 			const updated = CharacterSheetProgression.normalizeDecision({
 				...currentStored,
 				selection: CharacterSheetProgression._copy(effectiveSelection),
 				status: effectiveStatus,
-				receipt: this._makeDecisionReceipt(decision, effectiveSelection, this._candidateState),
+				receipt,
 			}, currentContainer);
 			Object.assign(currentStored, updated);
 			if (!["origin", "unplaced"].includes(decision.scope)) {
@@ -654,6 +804,9 @@ class CharacterSheetRespecEngine {
 			}
 			this._assertNoNewUnrepresentedPending(pendingSnapshot, this._manifest);
 			this._persistManifest();
+			this._touchedDecisionKeys.add(decision.semanticKey);
+			for (const snapshot of descendantSnapshots) this._touchedDecisionKeys.add(snapshot.decision.semanticKey);
+			this._trackChangedDecisions(manifestSnapshot, this._manifest);
 			return this._manifest;
 		};
 
@@ -721,8 +874,9 @@ class CharacterSheetRespecEngine {
 					});
 				}
 			}
+			callbackEntryAbilities = CharacterSheetProgression._copy(this._candidateState._data.abilities);
 			const applyResult = typeof apply === "function"
-				? apply({decision, stored, state: this._candidateState})
+				? apply({decision, stored, state: this._candidateState, captureReceiptBaseline})
 				: null;
 			if (applyResult && typeof applyResult.then === "function") {
 				return Promise.resolve(applyResult)
@@ -750,12 +904,14 @@ class CharacterSheetRespecEngine {
 		const isDirtySnapshot = this._isDirty;
 		const undoSnapshot = this._undoSnapshot;
 		const undoRawData = this._undoRawData;
+		const touchedSnapshot = new Set(this._touchedDecisionKeys);
 		try {
 			const result = await apply({state: this._candidateState});
 			this._setDirty();
 			this.refreshManifest({persist: false});
 			this._assertNoNewUnrepresentedPending(pendingSnapshot, this._manifest);
 			this._persistManifest();
+			this._trackChangedDecisions(manifestSnapshot, this._manifest);
 			return result;
 		} catch (error) {
 			this._candidateState.loadFromJson(stateSnapshot);
@@ -763,6 +919,7 @@ class CharacterSheetRespecEngine {
 			this._isDirty = isDirtySnapshot;
 			this._undoSnapshot = undoSnapshot;
 			this._undoRawData = undoRawData;
+			this._touchedDecisionKeys = touchedSnapshot;
 			throw error;
 		}
 	}
@@ -774,6 +931,29 @@ class CharacterSheetRespecEngine {
 	getValidation () {
 		if (!this._manifest) this.refreshManifest();
 		const issues = [...(this._manifest?.issues || [])];
+		const decisionIssues = new Set();
+		const rows = this._manifest?.decisions || [];
+		const byKey = new Map();
+		const ids = new Set();
+		for (const decision of rows) {
+			if (!decision.semanticKey || !decision.id || byKey.has(decision.semanticKey) || ids.has(decision.id)) {
+				issues.push({severity: "error", code: "unsafe-decision-identity", message: "Respec discovery has missing or duplicate decision identities. Refresh the source data before applying changes."});
+			}
+			byKey.set(decision.semanticKey, decision);
+			ids.add(decision.id);
+		}
+		for (const decision of rows) {
+			const lineage = new Set([decision.semanticKey]);
+			let parentKey = decision.parentSemanticKey;
+			while (parentKey) {
+				if (lineage.has(parentKey) || !byKey.has(parentKey)) {
+					issues.push({severity: "error", code: "unsafe-decision-lineage", message: "Respec discovery has an incomplete or cyclic choice hierarchy. Refresh the source data before applying changes."});
+					break;
+				}
+				lineage.add(parentKey);
+				parentKey = byKey.get(parentKey).parentSemanticKey;
+			}
+		}
 		for (const decision of this._manifest?.decisions || []) {
 			if (decision.status === "resolved" || (!decision.required && decision.status === "deferred")) continue;
 			if (!decision.required && !["invalid", "ambiguous"].includes(decision.status)) continue;
@@ -782,21 +962,39 @@ class CharacterSheetRespecEngine {
 				manifest: this._manifest,
 				decision,
 			});
-			issues.push({
+			const issue = {
 				level: decision.characterLevel,
 				severity: "error",
 				code: `decision-${decision.status}`,
 				decisionId: decision.id,
+				semanticKey: decision.semanticKey,
 				message: unattributed.length
 					? `${decision.label} has no recorded choice. ${unattributed.join(", ")} may be the Rogue's old language or independent grants; use Repair to attribute an existing language or confirm they are independent before selecting a new one.`
 					: decision.meta?.validationMessage || `${decision.label} is ${decision.status}.`,
-			});
+			};
+			issues.push(issue);
+			decisionIssues.add(issue);
 		}
+		const currentById = new Map((this._manifest?.decisions || []).map(decision => [decision.id, decision]));
+		const errors = issues.filter(issue => issue.severity === "error").map(issue => {
+			const decision = currentById.get(issue.decisionId);
+			const baseline = decision && this._baselineDecisionIssues.get(decision.semanticKey);
+			const carriedForward = decisionIssues.has(issue) && !!decision && ["decision-missing", "decision-invalid", "decision-ambiguous"].includes(issue.code)
+				&& !!baseline
+				&& !this._touchedDecisionKeys.has(decision.semanticKey)
+				&& baseline === this._getDecisionFingerprint(decision, this._manifest);
+			return {...issue, carriedForward};
+		});
+		const blockingErrors = errors.filter(issue => !issue.carriedForward);
+		const carriedForwardIssues = errors.filter(issue => issue.carriedForward);
 		return {
-			issues,
-			errors: issues.filter(issue => issue.severity === "error"),
+			issues: [...errors, ...issues.filter(issue => issue.severity !== "error")],
+			errors,
 			warnings: issues.filter(issue => issue.severity !== "error"),
-			isValid: !issues.some(issue => issue.severity === "error"),
+			blockingErrors,
+			carriedForwardIssues,
+			canApply: !blockingErrors.length,
+			isValid: !errors.length,
 		};
 	}
 
@@ -854,8 +1052,8 @@ class CharacterSheetRespecEngine {
 	async apply () {
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
 		const validation = this.getValidation();
-		if (!validation.isValid) {
-			throw new Error(`Resolve ${validation.errors.length} required Respec item${validation.errors.length === 1 ? "" : "s"} before applying.`);
+		if (!validation.canApply) {
+			throw new Error(`Resolve ${validation.blockingErrors.length} required Respec item${validation.blockingErrors.length === 1 ? "" : "s"} before applying.`);
 		}
 
 		const beforeApply = this._liveState.toJson();
@@ -882,6 +1080,8 @@ class CharacterSheetRespecEngine {
 		this._manifest = null;
 		this._originalManifest = null;
 		this._isDirty = false;
+		this._baselineDecisionIssues = new Map();
+		this._touchedDecisionKeys = new Set();
 		return true;
 	}
 

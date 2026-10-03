@@ -232,7 +232,9 @@ describe("EFA Alchemist Respec candidate isolation", () => {
 		expect(state.getInventory().some(row => row.id === artifacts.validItemId)).toBe(true);
 		expect(state.getEfaExperimentalElixirActiveEffects()).toHaveLength(1);
 		const liveLoadSpy = jest.spyOn(state, "loadFromJson");
-		jest.spyOn(respec._engine, "getValidation").mockReturnValue({isValid: true, errors: []});
+		jest.spyOn(respec._engine, "getValidation").mockReturnValue({
+			isValid: true, canApply: true, errors: [], blockingErrors: [], carriedForwardIssues: [], issues: [], warnings: [],
+		});
 
 		await respec._engine.apply();
 

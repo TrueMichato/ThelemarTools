@@ -30,7 +30,7 @@ export class RespecBackgroundPage {
 		await expect(row).toHaveCount(1);
 		this.needsConfirmation = !await row.evaluate(element => element.classList.contains("charsheet__respec-feat-current"));
 		await row.click();
-		await expect(this.modal.locator(".charsheet__respec-choices-panel")).toContainText("Complete every background choice");
+		await expect(this.modal.locator(".charsheet__respec-choices-panel")).toContainText("Complete every new or changed background choice");
 	}
 
 	async choose (type: string, labels: string[], index = 0) {

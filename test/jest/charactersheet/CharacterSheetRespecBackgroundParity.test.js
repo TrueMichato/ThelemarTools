@@ -222,4 +222,52 @@ describe("Background replacement uses the complete origin graph", () => {
 		expect(draft._state.getAbilityBonus("cha")).toBe(4);
 		expect(respec._getBackgroundDraftIssues(draft)).toEqual([]);
 	});
+
+	it("replaces only the fixed background origin channel, preserving named/direct bonuses through Cancel, Apply and Undo", async () => {
+		const old = {name: "Fixed Old", source: "TST", ability: [{str: 2}]};
+		const next = {name: "Fixed New", source: "TST", ability: [{con: 1}]};
+		const {state, respec} = fixture({race: {name: "Dwarf", source: "XPHB"}, background: old});
+		state.setAbilityBonus("str", 2);
+		state.addNamedModifier({name: "Independent Strength", type: "ability:str", value: 1});
+		state.addAbilityBonus("str", 1);
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const original = state.toJson();
+		expect(state.getAbilityBonus("str")).toBe(4);
+		expect(state.getAbilityScore("str")).toBe(14);
+		const cancelled = await respec._createBackgroundDraft(next, {choices: {}});
+		expect(cancelled._state.getAbilityBonus("str")).toBe(2);
+		expect(cancelled._state.toJson().abilityBonuses.str).toBe(0);
+		cancelled._engine.cancel();
+		expect(state.toJson()).toEqual(original);
+		expect(respec._state.getAbilityBonus("str")).toBe(4);
+		const draft = await respec._createBackgroundDraft(next, {choices: {}});
+		await respec._stageBackgroundDraft(draft);
+		await respec._engine.apply();
+		expect(state.getAbilityScore("str")).toBe(12);
+		expect(state.getAbilityScore("con")).toBe(11);
+		expect(state.toJson()).toMatchObject({
+			abilityBonuses: {str: 0, con: 1},
+			directAbilityBonuses: {str: 1},
+			customModifiers: {abilityScores: {str: 1}},
+		});
+		expect(state.getNamedModifiers()).toContainEqual(expect.objectContaining({name: "Independent Strength", value: 1}));
+		await respec._engine.undo();
+		expect(state.toJson()).toEqual(original);
+		expect(state.getAbilityScore("str")).toBe(14);
+	});
+
+	it("does not subtract all authored fixed alternatives when the applied branch cannot be proven", async () => {
+		const old = {name: "Legacy Alternatives", source: "TST", ability: [{str: 2}, {dex: 2}]};
+		const {state, respec} = fixture({race: {name: "Dwarf", source: "XPHB"}, background: old});
+		state.setAbilityBonus("str", 2);
+		state.setAbilityBonus("dex", 0);
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const original = state.toJson();
+		await expect(respec._createBackgroundDraft(oldBackground, {choices: {}})).rejects.toThrow(/fixed ability alternatives without a recorded selected branch/);
+		expect(state.toJson()).toEqual(original);
+		expect(respec._state.getAbilityBonus("str")).toBe(2);
+		expect(respec._state.getAbilityBonus("dex")).toBe(0);
+	});
 });

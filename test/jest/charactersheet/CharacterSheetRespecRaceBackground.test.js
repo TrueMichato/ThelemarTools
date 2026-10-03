@@ -34,6 +34,7 @@ describe("CharacterSheetRespec race/background", () => {
 		let levelHistoryUpdates = {};
 
 		respec._state = {
+			_data: {abilityBonuses},
 			getRace: () => currentRace,
 			getSubrace: () => currentSubrace,
 			getRaceName: () => currentRace?.name || null,
