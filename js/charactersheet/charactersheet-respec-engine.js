@@ -781,12 +781,42 @@ class CharacterSheetRespecEngine {
 			if (paired.length > 1) throw new Error("The ASI result boundary has ambiguous paired feat ownership.");
 			const pairedOwners = paired.map(row => {
 				const uid = CharacterSheetProgression.getEntityUid(row.selection);
-				const original = (stateSnapshot.feats || []).filter(feat => feat.sourceDecisionKey === row.semanticKey);
+				const matches = (stateSnapshot.feats || []).filter(feat => CharacterSheetProgression.getEntityUid(feat) === uid);
+				let original = matches.filter(feat => feat.sourceDecisionKey === row.semanticKey);
+				if (row.receipt && (row.receipt.version !== 1 || row.receipt.sourceDecisionKey !== row.semanticKey)) {
+					throw new Error("The ASI result boundary has a foreign paired feat receipt.");
+				}
+				const references = (row.receipt?.effects || []).flatMap(effect => effect.type === "materialized" ? effect.feats || [] : []);
+				if (references.some(reference => !reference.id || CharacterSheetProgression.getEntityUid(reference) !== uid)
+					|| new Set(references.map(reference => reference.id)).size > 1
+					|| (original.length && references.some(reference => {
+						const recorded = (stateSnapshot.feats || []).find(feat => feat.id === reference.id);
+						return recorded && !original.includes(recorded);
+					}))) {
+					throw new Error("The ASI result boundary has contradictory paired feat materialized evidence.");
+				}
+				if (!original.length && references.length) {
+					const ids = new Set(references.filter(reference => CharacterSheetProgression.getEntityUid(reference) === uid).map(reference => reference.id));
+					original = matches.filter(feat => ids.has(feat.id) && (!feat.sourceDecisionKey || feat.sourceDecisionKey === row.semanticKey));
+				}
+				const level = (stateSnapshot.levelHistory || []).find(entry => entry.level === row.characterLevel);
+				const ledgerFeatUid = CharacterSheetProgression.getEntityUid(level?.choices?.feat);
+				const claims = (manifestSnapshot.decisions || []).filter(other =>
+					other.status === "resolved"
+					&& ["feat", "asiOrFeat", "classFeatProgressionFeat", "originFeat", "nestedFeat"].includes(other.type)
+					&& CharacterSheetProgression.getEntityUid(other.selection?.mode === "feat" ? other.selection.feat : other.selection) === uid);
+				if (!original.length && !references.length && matches.length === 1 && !matches[0].sourceDecisionKey
+					&& ledgerFeatUid === uid && classUid({className: level?.class?.name, classSource: level?.class?.source}) === classUid(row)
+					&& (stateSnapshot.levelHistory || []).filter(entry => entry.level <= row.characterLevel
+						&& CharacterSheetProgression.getEntityUid(entry.class) === classUid(row)).length === row.classLevel
+					&& claims.length === 1 && claims[0].semanticKey === row.semanticKey) original = matches;
 				const canonical = (this._page.getFeats?.() || []).find(feat => CharacterSheetProgression.getEntityUid(feat) === uid);
 				if (!canonical || original.length !== 1 || CharacterSheetProgression.getEntityUid(original[0]) !== uid) {
 					throw new Error("The ASI result boundary lacks the exact original paired feat owner.");
 				}
-				const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(canonical, original[0].choices || original[0]._featChoices || {});
+				const choices = original[0].choices || original[0]._featChoices || {};
+				const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(canonical,
+					choices.ability != null || choices.abilityOption != null ? choices : level?.choices?.featChoices || choices);
 				if (!resolved.valid) throw new Error("The ASI result boundary has an unresolved original paired feat ability choice.");
 				return {semanticKey: row.semanticKey, uid, abilityChoice: {optionIndex: resolved.optionIndex, max: resolved.option.max, increases: resolved.increases}};
 			});

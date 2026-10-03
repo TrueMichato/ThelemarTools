@@ -88,6 +88,11 @@ record and must remain the same canonical option, cap and allocation. Equivalent
 legacy scalar and allocation-map representations are accepted; a different
 otherwise legal ability is not. Only own delta-map properties count as receipt
 evidence, so inherited values which disappear on JSON save cannot justify a gain.
+Original ownership may also come from exact source-qualified materialized feat
+IDs. An older unkeyed wrapper is supported only when its unique exact feat UID
+is declared by that same qualified class acquisition and no other resolved
+decision claims it. Ambiguous, foreign or contradictory evidence is rejected
+without requiring older valid saves to invent a source key.
 
 Feature-companion setup follows the same isolation rule. Subclass replacement
 runs `reconcileFeatureCompanionGrants({reason: "respecCandidate"})` against the
