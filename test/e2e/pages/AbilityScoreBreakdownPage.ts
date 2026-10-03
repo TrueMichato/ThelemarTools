@@ -110,6 +110,19 @@ export class AbilityScoreBreakdownPage {
 		await expect(input).toHaveCount(0);
 	}
 
+	async addFixedFeat (name: string, sourceLabel: string): Promise<void> {
+		await this.page.locator("#charsheet-add-feat").click();
+		await this.page.getByPlaceholder("🔍 Search feats by name...").fill(name);
+		const row = this.page.locator(".charsheet__modal-list-item")
+			.filter({has: this.page.locator(".charsheet__modal-list-item-title", {hasText: name})})
+			.filter({has: this.page.locator(".charsheet__modal-list-item-subtitle", {hasText: new RegExp(`(?:^| • )${sourceLabel}$`)})});
+		await expect(row).toHaveCount(1);
+		await row.locator(".feat-picker-add").click();
+		await expect(row.locator(".feat-picker-add")).toHaveCount(0);
+		await this.page.keyboard.press("Escape");
+		await expect(this.page.locator(".ve-ui-modal__inner:visible")).toHaveCount(0);
+	}
+
 	async clickCheck (): Promise<void> {
 		await this.page.locator('.charsheet__ability-roll-check[data-ability="str"]').click();
 	}

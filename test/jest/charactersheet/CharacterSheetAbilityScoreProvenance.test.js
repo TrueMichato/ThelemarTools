@@ -6,6 +6,7 @@ import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-quickbuild.js";
+import "../../../js/charactersheet/charactersheet-levelup.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
@@ -13,7 +14,8 @@ const State = globalThis.CharacterSheetState;
 const Utils = globalThis.CharacterSheetClassUtils;
 const QuickBuild = globalThis.CharacterSheetQuickBuild;
 const fighter = JSON.parse(fs.readFileSync("data/class/class-fighter.json", "utf8")).class.find(cls => cls.source === "PHB");
-const feat = JSON.parse(fs.readFileSync("data/feats.json", "utf8")).feat.find(f => f.name === "Ability Score Improvement" && f.source === "XPHB");
+const feats = JSON.parse(fs.readFileSync("data/feats.json", "utf8")).feat;
+const feat = feats.find(f => f.name === "Ability Score Improvement" && f.source === "XPHB");
 const copy = value => JSON.parse(JSON.stringify(value));
 const sum = rows => rows.reduce((total, row) => total + (row.amount || 0), 0);
 
@@ -33,6 +35,68 @@ function acquireAsi (state, level, allocation) {
 }
 
 describe("read-only ability score provenance", () => {
+	test("projects actual LevelUp history receipts, including a capped zero, without replacing legacy evidence", async () => {
+		const state = new State();
+		state.setSetting("thelemar_asiFeat", false);
+		state.setAbilityBase("str", 19);
+		state.addClass({name: fighter.name, source: fighter.source, level: 3});
+		const levelUp = new globalThis.CharacterSheetLevelUp({
+			getState: () => state,
+			getClasses: () => [fighter],
+			getClassFeatures: () => [],
+			getSubclassFeatures: () => [],
+			getOptionalFeatures: () => [],
+			getFeats: () => feats,
+			getSpells: () => [],
+			getSkillsList: () => [],
+			filterByAllowedSources: values => values,
+			saveCharacter: async () => {},
+			renderCharacter: () => {},
+			_updateTabVisibility: () => {},
+		});
+		for (const newLevel of [4, 5, 6]) {
+			await levelUp._applyLevelUp({
+				classEntry: state.getClasses()[0],
+				classData: fighter,
+				newLevel,
+				asiChoices: newLevel === 5 ? null : {str: 2},
+				newFeatures: [],
+				hpMethod: "average",
+				selectedOptionalFeatures: {},
+				selectedFeatureOptions: {},
+			});
+		}
+		const before = state.serialize();
+		const breakdown = state.getAbilityScoreBreakdown("str");
+		const rows = breakdown.components.filter(component => component.source === "acquisition");
+		expect(rows.map(row => row.amount)).toEqual([1, 0]);
+		expect(rows.map(row => row.label)).toEqual([
+			expect.stringContaining("Fighter [PHB] level 4"),
+			expect.stringContaining("Fighter [PHB] level 6"),
+		]);
+		expect(breakdown.components[0].amount).toBe(19);
+		expect(sum(breakdown.components)).toBe(20);
+		expect(state.serialize()).toBe(before);
+		expect(State.deserialize(before).getAbilityScoreBreakdown("str")).toEqual(breakdown);
+	});
+
+	test("a real fixed-at-cap feat writer supplies an explicit zero disclosure after reload", () => {
+		const state = new State();
+		state.setAbilityBase("con", 20);
+		const durable = feats.find(candidate => candidate.name === "Durable" && candidate.source === "PHB");
+		expect(state.addFeat(copy(durable))).toBe(true);
+		Utils.applyFeatBonuses(state, durable);
+		expect(state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({con: 0});
+		const before = state.serialize();
+		const breakdown = state.getAbilityScoreBreakdown("con");
+		expect(breakdown.components.filter(component => component.source === "featAcquisition"))
+			.toEqual([{source: "featAcquisition", label: "Durable [PHB] - unplaced acquisition; acquisition 1", amount: 0}]);
+		expect(breakdown.components[0].amount).toBe(20);
+		expect(sum(breakdown.components)).toBe(20);
+		expect(state.serialize()).toBe(before);
+		expect(State.deserialize(before).getAbilityScoreBreakdown("con")).toEqual(breakdown);
+	});
+
 	test("lists two real ordinary ASIs separately without crediting authored gains as actual receipts", () => {
 		const state = new State();
 		state.setAbilityBase("str", 19);

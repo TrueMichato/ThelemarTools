@@ -1,5 +1,7 @@
 import {expect, test} from "@playwright/test";
 import {AsiAcquisitionPage} from "../pages/AsiAcquisitionPage";
+import {AbilityScoreBreakdownPage} from "../pages/AbilityScoreBreakdownPage";
+import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 
 for (const source of ["PHB", "XPHB", "TGTT"]) {
 	for (const className of ["Monk", "Sorcerer"]) {
@@ -86,6 +88,22 @@ for (const secondWizard of ["LevelUp", "QuickBuild"]) {
 			amount: Math.min(20, before.bases.con + 2) - before.bases.con, sourceDecisionKey: ordinary?.semanticKey,
 		}]);
 		expect(first.feats[0].sourceDecisionKey).not.toBe(ordinary?.semanticKey);
+		const scores = new AbilityScoreBreakdownPage(page);
+		const sheet = new CharacterSheetPage(page);
+		await sheet.switchToTab(sheet.tabOverview);
+		const conBreakdown = (await scores.evidence("con")).breakdown;
+		const ordinaryRows = conBreakdown.components.filter(component =>
+			component.source === "acquisition" && component.label.includes("Sorcerer [TGTT] level 4"));
+		expect(ordinaryRows).toHaveLength(1);
+		expect(ordinaryRows[0]).toMatchObject({
+			label: expect.stringContaining("Sorcerer [TGTT] level 4"),
+			amount: Math.min(20, before.bases.con + 2) - before.bases.con,
+		});
+		expect((await scores.evidence("str")).breakdown.components.filter(component => component.source === "featAcquisition"))
+			.toEqual([expect.objectContaining({label: expect.stringContaining("Sorcerer [TGTT] level 4"), amount: 2})]);
+		const detail = await scores.inspect("compact", "con", "hover");
+		expect(detail.some(text => text.includes(ordinaryRows[0].label) && text.endsWith(`+${ordinaryRows[0].amount}`))).toBe(true);
+		await scores.close("compact", "con");
 		if (secondWizard === "LevelUp") {
 			for (let level = 5; level <= 7; level++) await asi.advanceWithoutImprovement();
 			await asi.openLevelUp();
@@ -101,10 +119,13 @@ for (const secondWizard of ["LevelUp", "QuickBuild"]) {
 		expect(new Set(repeated.feats.map(feat => feat.sourceDecisionKey)).size).toBe(2);
 		expect(repeated.feats.map(feat => feat.appliedEffects.abilityDeltas)).toEqual([{str: 2}, {dex: 1, wis: 1}]);
 		expect(repeated.bases).toMatchObject({str: first.bases.str, dex: first.bases.dex + 1, wis: first.bases.wis + 1});
+		expect((await scores.evidence("dex")).breakdown.components.filter(component => component.source === "featAcquisition"))
+			.toEqual([expect.objectContaining({label: expect.stringContaining("Sorcerer [TGTT] level 8"), amount: 1})]);
 		await asi.reload();
 		const reloaded = await asi.evidence();
 		expect(reloaded.feats).toEqual(repeated.feats);
 		expect(reloaded.history.flatMap(entry => entry.decisions || []).find(decision => decision.semanticKey === ordinary?.semanticKey)?.receipt)
 			.toEqual(ordinary?.receipt);
+		expect((await scores.evidence("con")).breakdown).toEqual(conBreakdown);
 	});
 }
