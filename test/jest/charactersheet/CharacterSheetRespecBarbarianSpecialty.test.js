@@ -555,10 +555,12 @@ describe("Respec TGTT Barbarian Specialty ownership", () => {
 		expect(state.getNamedModifiers()).toEqual(expect.arrayContaining([expect.objectContaining({id: independentId})]));
 	});
 
-	it("blocks Apply for a genuinely missing subclass even when the preserved bonus is only a warning", async () => {
+	it("applies an unrelated valid Specialty edit while the unchanged missing subclass and preserved bonus remain visible", async () => {
 		const state = makeState();
 		state.addNamedModifier({name: "Lead the Pack", type: "skill:athletics", value: 1});
 		const {respec} = getRespec(state);
+		const baselineSubclass = respec._engine.getValidation().errors.find(issue => issue.message === "Barbarian Subclass is missing.");
+		expect(baselineSubclass.carriedForward).toBe(true);
 		await replaceSpecialty(respec, 6, "Path of Drowning Springs");
 		const validation = respec._engine.getValidation();
 		expect(validation.warnings).toEqual(expect.arrayContaining([
@@ -567,7 +569,20 @@ describe("Respec TGTT Barbarian Specialty ownership", () => {
 		expect(validation.errors).toEqual(expect.arrayContaining([
 			expect.objectContaining({code: "decision-missing", message: "Barbarian Subclass is missing."}),
 		]));
-		await expect(respec._engine.apply()).rejects.toThrow(/Resolve \d+ required Respec items? before applying/);
-		expect(state.getSkillMod("athletics")).toBe(6);
+		expect(validation).toMatchObject({isValid: false, canApply: true, blockingErrors: []});
+		expect(validation.carriedForwardIssues).toContainEqual(expect.objectContaining({semanticKey: baselineSubclass.semanticKey, carriedForward: true}));
+		await expect(respec._engine.apply()).resolves.toBe(true);
+		expect(state.getNamedModifiers()).toContainEqual(expect.objectContaining({name: "Lead the Pack", type: "skill:athletics", value: 1}));
+		expect(state.getSkillMod("athletics")).toBe(3);
+		const loaded = new CharacterSheetState();
+		expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+		const reopened = new CharacterSheetRespec({page: getPage(loaded), state: loaded});
+		reopened._engine.begin();
+		reopened._state = reopened._engine.state;
+		const remaining = reopened._engine.getValidation();
+		expect(remaining).toMatchObject({isValid: false, canApply: true});
+		expect(remaining.carriedForwardIssues).toContainEqual(expect.objectContaining({semanticKey: baselineSubclass.semanticKey, message: "Barbarian Subclass is missing."}));
+		expect(reopened._getEditableChoices(3, reopened._state.getLevelHistoryEntry(3)))
+			.toContainEqual(expect.objectContaining({decision: expect.objectContaining({status: "missing", semanticKey: baselineSubclass.semanticKey})}));
 	});
 });

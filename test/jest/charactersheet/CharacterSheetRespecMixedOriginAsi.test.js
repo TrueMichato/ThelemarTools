@@ -15,6 +15,8 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const readData = file => JSON.parse(fs.readFileSync(path.resolve(process.cwd(), `data/${file}`), "utf8"));
 const races = readData("races.json").race;
 const backgrounds = readData("backgrounds.json").background;
+Parser.LANGUAGES_STANDARD = ["Common", "Dwarvish", "Elvish", "Gnomish"];
+Parser.LANGUAGES_ALL = Parser.LANGUAGES_STANDARD;
 const getRace = (name, source) => copy(races.find(race => race.name === name && race.source === source));
 const getBackground = (name, source) => copy(backgrounds.find(background => background.name === name && background.source === source));
 const CLASS = {
@@ -38,7 +40,8 @@ function build ({raceName = "Half-Elf", raceSource = "PHB", backgroundName = "Ou
 		getClassFeatures: () => [],
 		getSubclassFeatures: () => [],
 		getOptionalFeatures: () => [],
-		getFeats: () => [],
+		getFeats: () => readData("feats.json").feat.flatMap(feat => [feat, ...(feat._versions || [])]
+			.map(({name, source, category}) => ({name: name?.replace("; ", " (").replace(/ \(([^)]*)$/, " ($1)"), source, category}))),
 		getSpells: () => [],
 		getFilteredSpellData: () => [],
 		getSkillsList: () => [],
@@ -53,6 +56,9 @@ function build ({raceName = "Half-Elf", raceSource = "PHB", backgroundName = "Ou
 	builder._selectedRace = race;
 	builder._selectedBackground = background;
 	builder._selectedClass = copy(classData);
+	if (race.languageProficiencies?.some(entry => entry.anyStandard)) builder._selectedRacialLanguages = {0: ["Gnomish"]};
+	if (background.toolProficiencies?.some(entry => entry.anyMusicalInstrument)) builder._selectedToolProficiencies = [{tool: "Bagpipes"}];
+	if (background.languageProficiencies?.some(entry => entry.anyStandard)) builder._selectedLanguages = [{language: "Gnomish"}];
 	if (race.name === "Half-Elf" && race.source === "PHB") builder._selectedRacialSkills = ["Athletics", "Arcana"];
 	builder._applyClassFeatures = () => {};
 	builder._clearClassApplication = () => {};
@@ -468,24 +474,11 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 	])("background editor respects ASI ownership for $raceName|$raceSource", async ({raceName, raceSource, shouldOffer}) => {
 		const {state, page} = build({raceName, raceSource, racePicks: [], backgroundName: "Sage", backgroundSource: "XPHB"});
 		const respec = openRespec(reload(state), page);
-		const modalInner = e_({tag: "div"});
-		const originalShow = globalThis.CharacterSheetModal.pGetShow;
-		const picker = jest.spyOn(respec, "_renderAbilityChoicePickers").mockReturnValue({
-			type: "ability",
-			isComplete: () => false,
-		});
-		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
-		try {
-			await respec._editBackground(1, respec._state.getLevelHistoryEntry(1), null);
-			const list = findByClass(modalInner, "charsheet__respec-feat-list");
-			expect(list?._children).toHaveLength(1);
-			list._children[0].click();
-			expect(picker).toHaveBeenCalledTimes(shouldOffer ? 1 : 0);
-		} finally {
-			globalThis.CharacterSheetModal.pGetShow = originalShow;
-			picker.mockRestore();
-			respec._engine.cancel();
-		}
+		const draft = await respec._createBackgroundDraft(respec._state.getBackground(), respec._state.getLevelHistoryEntry(1));
+		const abilities = respec._getBackgroundDraftDecisions(draft).filter(decision => decision.meta?.originAbilityDistribution);
+		expect(abilities).toHaveLength(shouldOffer ? 1 : 0);
+		if (shouldOffer) expect(abilities[0]).toMatchObject({required: true, status: "missing", type: "nestedConfiguration"});
+		respec._engine.cancel();
 	});
 
 	it("keeps all-PHB fixed ASIs independent of class edition", () => {
@@ -640,41 +633,24 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 		const loaded = reload(state);
 		const before = loaded.toJson();
 		const respec = openRespec(loaded, page);
-		const modalInner = e_({tag: "div"});
-		const originalShow = globalThis.CharacterSheetModal.pGetShow;
-		const language = jest.spyOn(respec, "_renderLanguageChoicePickers").mockReturnValue(null);
-		const tool = jest.spyOn(respec, "_renderToolChoicePickers").mockReturnValue(null);
-		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
-		try {
-			await respec._editBackground(1, respec._state.getLevelHistoryEntry(1), null);
-			findByClass(modalInner, "charsheet__respec-feat-list")._children[0].click();
-			const selects = findAll(modalInner, element => element?._html?.startsWith("<select") && element._handlers.change);
-			expect(selects).toHaveLength(2);
-			["dex", "int"].forEach((ability, ix) => {
-				selects[ix].value = ability;
-				selects[ix]._handlers.change();
-			});
-			await findByClass(modalInner, "charsheet__respec-btn-row")._children[1]._handlers.click();
-			expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 2, int: 1, wis: 4});
-			expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
-				.toMatchObject({bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1});
-			expect(loaded.toJson()).toEqual(before);
-			await respec._engine.apply();
-			const reopened = openRespec(reload(loaded), page);
-			expect(reopened._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
-				.map(decision => decision.selection)).toEqual([
-				expect.objectContaining({weights: [2, 1]}), "dex", "int",
-			]);
-			expect(reopened._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 2, int: 1, wis: 4});
-			reopened._engine.cancel();
-			expect(await respec._engine.undo()).toBe(true);
-			expect(withoutRegeneratedModifierIds(loaded.toJson())).toEqual(withoutRegeneratedModifierIds(before));
-		} finally {
-			globalThis.CharacterSheetModal.pGetShow = originalShow;
-			language.mockRestore();
-			tool.mockRestore();
-			respec._engine.cancel();
-		}
+		const draft = await respec._createBackgroundDraft(respec._state.getBackground(), respec._state.getLevelHistoryEntry(1));
+		await draft._stageSameBackgroundAbilityChoices({selectedAbilityBonuses: {bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1}});
+		await respec._stageBackgroundDraft(draft);
+		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 2, int: 1, wis: 4});
+		expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
+			.toMatchObject({bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1});
+		expect(loaded.toJson()).toEqual(before);
+		await respec._engine.apply();
+		const reopened = openRespec(reload(loaded), page);
+		expect(reopened._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
+			.map(decision => decision.selection)).toEqual([
+			expect.objectContaining({weights: [2, 1]}), "dex", "int",
+		]);
+		expect(reopened._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 2, int: 1, wis: 4});
+		reopened._engine.cancel();
+		expect(await respec._engine.undo()).toBe(true);
+		expect(withoutRegeneratedModifierIds(loaded.toJson())).toEqual(withoutRegeneratedModifierIds(before));
+		respec._engine.cancel();
 	});
 
 	it("keeps the exact free grant when switching between no-ASI PHB backgrounds", async () => {
@@ -707,6 +683,13 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 		expect(respec._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility)
 			.map(decision => [decision.semanticKey, decision.receipt]))
 			.toEqual(before.map(decision => [decision.semanticKey, decision.receipt]));
+		expect(respec._engine.getValidation().errors).toEqual([
+			expect.objectContaining({code: "decision-missing", message: "languageProficiencies is missing."}),
+		]);
+		const language = respec._engine.manifest.base.decisions.find(decision => decision.type === "nestedLanguage" && decision.provenance.ownerType === "background");
+		await respec._engine.stageGraphMutation(language.id, ["Elvish", "Dwarvish"], {
+			reverseParent: true, apply: ({state: candidate}) => respec._applyManifestSelectionMechanics(language, ["Elvish", "Dwarvish"], language.options, candidate),
+		});
 		expect(respec._engine.getValidation().errors).toEqual([]);
 		respec._engine.cancel();
 	});
@@ -722,37 +705,26 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 		state.setAbilityBonus("dex", 3);
 		const loaded = reload(state);
 		const respec = openRespec(loaded, page);
-		const modalInner = e_({tag: "div"});
-		const originalShow = globalThis.CharacterSheetModal.pGetShow;
-		const language = jest.spyOn(respec, "_renderLanguageChoicePickers").mockReturnValue({
-			type: "language", isComplete: () => true, getSelections: () => ["Common"],
-		});
-		const tool = jest.spyOn(respec, "_renderToolChoicePickers").mockReturnValue({
-			type: "tool", isComplete: () => true, getSelections: () => ["Bagpipes"],
-		});
-		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
-		try {
-			await respec._editBackground(1, respec._state.getLevelHistoryEntry(1), null);
-			findByClass(modalInner, "charsheet__respec-feat-list")._children[0].click();
-			const selects = findAll(modalInner, element => element?._html?.startsWith("<select") && element._handlers.change);
-			expect(selects).toHaveLength(2);
-			["dex", "int"].forEach((ability, ix) => {
-				selects[ix].value = ability;
-				selects[ix]._handlers.change();
+		const draft = await respec._createBackgroundDraft(respec._state.getBackground(), respec._state.getLevelHistoryEntry(1));
+		await draft._stageSameBackgroundAbilityChoices({selectedAbilityBonuses: {bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1}});
+		for (const [type, selection] of [["nestedLanguage", "Dwarvish"], ["nestedTool", "Lute"]]) {
+			const decision = draft._engine.manifest.base.decisions.find(candidate => candidate.type === type);
+			await draft._engine.stageGraphMutation(decision.id, selection, {
+				reverseParent: true, apply: ({state: candidate}) => draft._applyManifestSelectionMechanics(decision, selection, decision.options, candidate),
 			});
-			await findByClass(modalInner, "charsheet__respec-btn-row")._children[1]._handlers.click();
-			expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 5, int: 1});
-			expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
-				.toMatchObject({bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1});
-			expect(respec._engine.getValidation().errors).toEqual([]);
-			await respec._engine.apply();
-			expect(reload(loaded).toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 5, int: 1});
-		} finally {
-			globalThis.CharacterSheetModal.pGetShow = originalShow;
-			language.mockRestore();
-			tool.mockRestore();
-			respec._engine.cancel();
 		}
+		await respec._stageBackgroundDraft(draft);
+		expect(respec._state.toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 5, int: 1});
+		expect(respec._state.getBaseBackgroundUserChoices().selectedAbilityBonuses)
+			.toMatchObject({bg_0: "dex", bg_0_weight: 2, bg_1: "int", bg_1_weight: 1});
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		expect(respec._state.getLanguages()).toContain("Dwarvish");
+		expect(respec._state.getLanguages()).not.toContain("Gnomish");
+		expect(respec._state.hasToolProficiency("Lute")).toBe(true);
+		expect(respec._state.hasToolProficiency("Bagpipes")).toBe(false);
+		await respec._engine.apply();
+		expect(reload(loaded).toJson().abilityBonuses).toMatchObject({str: 0, con: 0, dex: 5, int: 1});
+		respec._engine.cancel();
 	});
 
 	it("replaces the free grant with an explicitly picked XPHB background ASI", async () => {

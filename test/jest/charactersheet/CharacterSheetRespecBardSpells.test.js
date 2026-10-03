@@ -794,25 +794,41 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 		});
 	});
 
-	it("blocks the same exact cantrip acquired at two Bard levels in the manifest and Apply", async () => {
+	it("preserves an unchanged baseline duplicate cantrip as invalid and repairable after Apply and reload", async () => {
 		const {state, page} = getRecordedBard({level: 4});
 		const first = state.getLevelHistoryEntry(1).choices.cantrips[0];
 		state.getLevelHistoryEntry(4).choices.cantrips = [copy(first)];
-		const original = state.toJson();
 		const respec = new CharacterSheetRespec({page, state});
 		respec._engine.begin();
 		const fourth = respec._engine.manifest.decisions.find(it => it.type === "cantrips" && it.classLevel === 4);
 
 		expect(fourth.selection).toEqual([first]);
 		expect(fourth.status).toBe("invalid");
+		expect(fourth).toMatchObject({className: "Bard", classSource: "TGTT", classLevel: 4});
+		expect(respec._engine.getValidation()).toMatchObject({isValid: false, canApply: true, blockingErrors: []});
 		expect(respec._engine.getValidation().errors).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				decisionId: fourth.id,
+				semanticKey: fourth.semanticKey,
+				carriedForward: true,
 				message: expect.stringContaining("Level 1"),
 			}),
 		]));
-		await expect(respec._engine.apply()).rejects.toThrow(/Resolve .* required Respec item/);
-		expect(state.toJson()).toEqual(original);
+		await respec._engine.apply();
+		expect(state.getLevelHistoryEntry(4)).toMatchObject({
+			class: {name: "Bard", source: "TGTT"},
+			choices: {cantrips: [first]},
+		});
+		state.loadFromJson(state.toJson());
+		const reopened = new CharacterSheetRespec({page, state});
+		reopened._engine.begin();
+		expect(reopened._engine.manifest.decisions.find(it => it.semanticKey === fourth.semanticKey)).toMatchObject({
+			className: "Bard", classSource: "TGTT", classLevel: 4, selection: [first], status: "invalid",
+		});
+		expect(reopened._engine.getValidation()).toMatchObject({isValid: false, canApply: true});
+		expect(reopened._engine.getValidation().carriedForwardIssues).toEqual(expect.arrayContaining([
+			expect.objectContaining({semanticKey: fourth.semanticKey, message: expect.stringContaining("Level 1")}),
+		]));
 	});
 
 	it("revalidates a newly staged duplicate cantrip and an older repeated known spell", () => {

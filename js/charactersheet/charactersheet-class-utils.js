@@ -4732,16 +4732,39 @@ class CharacterSheetClassUtils {
 					const choose = value.choose || value;
 					if (!choose) return;
 					const isAny = Number(choose.any) > 0;
+					const categories = kind === "language"
+						? {anyStandard: globalThis.Parser?.LANGUAGES_STANDARD || []}
+						: kind === "tool"
+							? {
+								anyArtisansTool: CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.artisan,
+								anyMusicalInstrument: CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.instrument,
+								anyTool: CharacterSheetClassUtils.getChoiceToolCatalog(),
+							}
+							: {};
+					for (const [category, catalog] of Object.entries(categories)) {
+						if (!Number(choose[category])) continue;
+						add({
+							kind,
+							label: value.name || field,
+							count: Number(choose[category]),
+							options: catalog,
+							grantKey: `${field}.${ix}.${category}`,
+							sourcePath: `${path}.${field}[${ix}].${category}`,
+							rules: {optionSource: {kind: "explicitList", values: catalog}},
+						});
+					}
 					if (!isAny && (!choose.from && !choose.options && !choose.weighted && !Array.isArray(choose))) return;
 					const options = getOptions(normalizeChoose(choose));
 					const catalog = kind === "skill"
 						? CharacterSheetClassUtils.getChoiceSkillCatalog?.() || []
-						: [];
+						: kind === "tool"
+							? CharacterSheetClassUtils.getChoiceToolCatalog()
+							: kind === "language" ? globalThis.Parser?.LANGUAGES_ALL || [] : [];
 					if (isAny && !options.length) options.push(...catalog);
 					add({
 						kind,
 						label: value.name || field,
-						count: getCount(value.choose),
+						count: isAny ? Number(choose.any) : getCount(value.choose),
 						options,
 						grantKey: `${field}.${ix}`,
 						sourcePath: `${path}.${field}[${ix}]`,

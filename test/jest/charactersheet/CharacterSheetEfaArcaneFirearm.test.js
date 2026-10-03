@@ -199,7 +199,9 @@ describe("EFA Arcane Firearm exact-owner existing-item binding", () => {
 		};
 		const engine = new CharacterSheetRespecEngine({page, state});
 		const candidate = engine.begin();
-		engine.getValidation = () => ({isValid: true, errors: []});
+		engine.getValidation = () => ({
+			isValid: true, canApply: true, errors: [], blockingErrors: [], carriedForwardIssues: [], issues: [], warnings: [],
+		});
 		candidate.removeItem(firearm.id);
 
 		expect(candidate.getEfaArcaneFirearmStatus()).toEqual(expect.objectContaining({binding: null}));
