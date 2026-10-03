@@ -1153,11 +1153,12 @@ Score provenance reads the existing history/base decisions and each specific
 feat's `appliedEffects.abilityDeltas`, without constructing a manifest or
 writing any receipt. Decision `receipt.effects` of type `abilityDelta` or
 `abilityBonusDelta` require a finite actual `amount` and `before`; mirrored
-effects are deduplicated by source decision key and ability. A feat's own
-receipt takes precedence over its nested decision mirrors. Linked nested
-ability decisions can supply a missing target or exact receipt. Empty modern
-feat deltas mean zero only for an evidenced target, never the authored amount;
-a capped fixed-target feat whose target was not saved cannot be attributed.
+effects are deduplicated by source decision key and ability. A finite numeric
+own-target feat delta takes precedence over nested decision mirrors, including
+an explicit `0`. A missing or nonfinite target instead uses proven linked
+nested receipts; an empty or unrelated delta map never proves zero. Without
+either numeric source, an evidenced target has an unknown applied amount. A
+capped fixed-target feat whose target was not saved cannot be attributed.
 Source/owner/level labels and acquisition ordinals distinguish repeated feats.
 Exact origin bonus receipts distinguish species and background contributions.
 

@@ -13722,9 +13722,9 @@ class CharacterSheetState {
 				const decision = decisions.find(d =>
 					(feat.sourceDecisionKey && d.semanticKey === feat.sourceDecisionKey)
 					|| (d.meta?.featId && d.meta.featId === feat.id));
-				// Empty modern deltas are evidence of zero, not the authored increase.
 				const actualNestedEffects = [...nestedEffects.values()].filter(effect => Number.isFinite(effect.amount) && Number.isFinite(effect.before));
-				const amount = deltas ? Number(deltas[ability] || 0)
+				const ownDelta = Object.hasOwn(deltas || {}, ability) ? deltas[ability] : null;
+				const amount = Number.isFinite(ownDelta) ? ownDelta
 					: actualNestedEffects.length ? actualNestedEffects.reduce((sum, effect) => sum + effect.amount, 0) : null;
 				push(`feat:${feat.id || index}`, "featAcquisition",
 					`${feat.name}${feat.source ? ` [${feat.source}]` : ""} - ${context(decision)}; acquisition ${index + 1}`,

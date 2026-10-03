@@ -48,21 +48,97 @@ describe("read-only ability score provenance", () => {
 		expect(sum(breakdown.components)).toBe(breakdown.total);
 	});
 
-	test("uses each real repeatable feat acquisition's scalar/split actual capped delta, including zero", () => {
+	test("uses real repeatable scalar/split deltas and an explicit nested capped-zero receipt", () => {
 		const state = new State();
 		state.setAbilityBase("str", 18);
 		acquireFeat(state, {ability: "str"}, "first");
-		acquireFeat(state, {ability: {str: 1, dex: 1}, abilityOption: 1}, "second");
+		const stored = acquireFeat(state, {ability: {str: 1, dex: 1}, abilityOption: 1}, "second");
+		const child = {
+			semanticKey: "second.ability",
+			parentSemanticKey: "second",
+			type: "nestedAbility",
+			selection: ["str", "dex"],
+			meta: {descriptorRules: {featAbilityChoice: true}},
+		};
+		child.receipt = {effects: globalThis.CharacterSheetProgression.getFeatAbilityDecisionEffects(child, state)};
+		state.recordLevelChoice({level: 8,
+			class: fighter,
+			classLevel: 8,
+			decisions: [
+				{semanticKey: "second", type: "feat", meta: {featId: stored.id}},
+				child,
+			]});
 		const breakdown = state.getAbilityScoreBreakdown("str");
 		const rows = breakdown.components.filter(c => c.source === "featAcquisition");
 		expect(rows.map(c => c.amount)).toEqual([2, 0]);
 		expect(rows.map(c => c.label)).toEqual([
 			"Ability Score Improvement [XPHB] - unplaced acquisition; acquisition 1",
-			"Ability Score Improvement [XPHB] - unplaced acquisition; acquisition 2",
+			"Ability Score Improvement [XPHB] - Fighter [PHB] level 8; acquisition 2",
 		]);
 		expect(breakdown.components[0].amount).toBe(18);
 		expect(state.getAbilityScoreBreakdown("dex").components.filter(c => c.source === "featAcquisition").map(c => c.amount)).toEqual([1]);
 		expect(sum(breakdown.components)).toBe(20);
+	});
+
+	test("a real nested Respec grant remains attributed after an initially empty parent receipt and reload", () => {
+		const state = new State();
+		const parent = {semanticKey: "deferred.feat", type: "nestedFeat"};
+		state.addFeat({...copy(feat), sourceDecisionKey: parent.semanticKey});
+		expect(state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({});
+		const child = {
+			semanticKey: "deferred.feat.ability",
+			parentSemanticKey: parent.semanticKey,
+			type: "nestedAbility",
+			selection: null,
+			meta: {descriptorRules: {amount: 2, max: 20}},
+		};
+		const respec = Object.create(globalThis.CharacterSheetRespec.prototype);
+		respec._state = state;
+		respec._engine = {manifest: {decisions: [parent, child]}};
+		respec._applyManifestSelectionMechanics(child, "str", ["str"], state);
+		const engine = Object.create(globalThis.CharacterSheetRespecEngine.prototype);
+		child.receipt = engine._makeDecisionReceipt(child, "str", state);
+		child.selection = "str";
+		state.recordLevelChoice({level: 4, class: fighter, classLevel: 4, decisions: [parent, child]});
+		expect(state.getAbilityBase("str")).toBe(12);
+		expect(state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({});
+		expect(child.receipt.effects).toContainEqual({type: "abilityDelta", sourceDecisionKey: child.semanticKey, ability: "str", amount: 2, before: 10});
+		const before = copy(state._data);
+		const breakdown = state.getAbilityScoreBreakdown("str");
+		expect(breakdown.components.filter(c => c.source === "featAcquisition").map(c => c.amount)).toEqual([2]);
+		expect(breakdown.components[0].amount).toBe(10);
+		expect(sum(breakdown.components)).toBe(12);
+		expect(state._data).toEqual(before);
+		expect(State.deserialize(state.serialize()).getAbilityScoreBreakdown("str")).toEqual(breakdown);
+		for (const deltas of [{dex: 1}, {str: NaN}, Object.create({str: 0})]) {
+			state._data.feats[0].appliedEffects.abilityDeltas = deltas;
+			expect(state.getAbilityScoreBreakdown("str").components[1].amount).toBe(2);
+		}
+		state._data.feats[0].appliedEffects.abilityDeltas = {str: 0};
+		const targetedZero = state.getAbilityScoreBreakdown("str");
+		expect(targetedZero.components[1].amount).toBe(0);
+		expect(targetedZero.components[0].amount).toBe(12);
+		expect(sum(targetedZero.components)).toBe(12);
+	});
+
+	test.each([
+		{deltas: {}, expected: null},
+		{deltas: {dex: 1}, expected: null},
+		{deltas: {str: undefined}, expected: null},
+		{deltas: {str: null}, expected: null},
+		{deltas: {str: NaN}, expected: null},
+		{deltas: {str: Infinity}, expected: null},
+		{deltas: {str: "2"}, expected: null},
+		{deltas: Object.create({str: 2}), expected: null},
+		{deltas: {str: 0}, expected: 0},
+		{deltas: {str: 2}, expected: 2},
+	])("requires finite own-target evidence without a proven nested receipt: $deltas", ({deltas, expected}) => {
+		const state = new State();
+		acquireFeat(state, {ability: "str"}, "legacy");
+		state._data.feats[0].appliedEffects.abilityDeltas = deltas;
+		const breakdown = state.getAbilityScoreBreakdown("str");
+		expect(breakdown.components[1].amount).toBe(expected);
+		expect(sum(breakdown.components)).toBe(state.getAbilityScore("str"));
 	});
 
 	test("never mutates acquisition evidence and preserves repeat ownership after reload/removal", () => {
