@@ -754,13 +754,22 @@ runtime/non-Respec payloads. Unsupported required persisted decision types are
 preserved and reported as blocking issues.
 
 `charactersheet-respec-engine.js` owns candidate isolation and the single
-staged graph mutation boundary. The mutation snapshots candidate JSON and the
-manifest, reverses descendants deepest-first, applies mechanics inside the
+staged graph mutation boundary. The mutation snapshots candidate JSON, exact
+raw data and the manifest, reverses descendants deepest-first, applies mechanics inside the
 candidate, rediscoveries the graph, retains only exact legal child identities,
 and persists the resulting manifest once. State ownership is source-keyed so
 overlapping manual, origin, and progression grants survive unrelated edits;
 materialized features, modifiers, spells, resources, and configuration are
 covered by receipts.
+
+Background replacement stages an isolated origin graph, including the selected
+feat's canonical nested choices. Additional-spell discovery preserves an authored
+sibling `count`; selecting a caster is configuration, not a score increase.
+Spell children fulfill the existing pending slots and synchronize the owning
+feat's choices. Optional `fulfillSpellChoice(choiceId, spell, {grantId})` forwarding
+distinguishes exact innate copies without changing ordinary coalescing. Reversal
+requires a unique receipt-qualified row before `removeInnateSpell(row.id)`;
+independent same-UID spells retain their caster and remaining uses.
 
 Ordinary ASI callbacks capture the engine-observed post-teardown baseline and
 ordinary result before reapplying a retained Thelemar paired feat. The engine
@@ -774,8 +783,9 @@ issues may carry forward through valid edits, but touched, changed, worsened
 or structural errors block Apply. Semantic source/selection/contract/lineage
 fingerprints, not error counts, establish unchanged problems. Review and the
 explicit Apply confirmation keep remaining issues visible; their ledger and
-pending choices survive saving. Save rollback and Undo preserve the exact raw
-snapshot alongside reload-compatible data.
+pending choices survive saving. Failed candidate edits, save rollback and Undo
+preserve the exact raw snapshot alongside reload-compatible data; rejection
+must not silently deduplicate invalid evidence.
 
 Subclass-change preview and mutation use the same exact old-subclass identity:
 legacy history may have only `name|source`, while stored features identify their

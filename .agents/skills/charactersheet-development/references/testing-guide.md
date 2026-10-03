@@ -132,6 +132,13 @@ reload and Respec reversal. Final totals alone cannot detect ordinary/paired
 cap-order errors. Temporarily remove the real persistence/write call and
 require the primary assertion to fail before trusting the gate.
 
+Origin-spell tests must fulfill the actual pending slots and assert authored
+counts, casting ability, recharge and uses. Preserve an independent same-UID
+copy's original ID and remaining uses through reselection, reload and removal.
+Failed edits must retain invalid duplicate evidence exactly, not normalize it
+away during rollback. Real background and partial-repair browser tests belong
+alongside these state controls; an empty queue alone does not prove correct grants.
+
 ### What setup.js Mocks
 
 | Global | Mocked Methods |

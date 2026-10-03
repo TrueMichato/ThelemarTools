@@ -2416,6 +2416,13 @@ ledger-less legacy saves, where `sourceFeature` is the only surviving provenance
 }
 ```
 
+Respec origin choices may additionally carry an exact `grantId`.
+`fulfillSpellChoice(choiceId, spell, {grantId})` forwards it to innate creation;
+omitting the option preserves existing coalescing. An origin receipt must resolve
+one matching grant before removing its row by ID. Never remove every same-UID
+copy or reset another grant's caster/remaining uses. This reuses ordinary innate
+rows and progression ownership, not a parallel spell ledger.
+
 ### Spell Slots (`_data.spellcasting.spellSlots`)
 ```javascript
 {
