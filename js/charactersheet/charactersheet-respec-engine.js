@@ -612,13 +612,15 @@ class CharacterSheetRespecEngine {
 			if (!canonical) fail();
 			const current = after[0];
 			const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(canonical, current.choices || current._featChoices || {});
-			if (!resolved.valid) fail();
+			if (!resolved.valid || resolved.optionIndex !== owner.abilityChoice.optionIndex
+				|| resolved.option.max !== owner.abilityChoice.max
+				|| Parser.ABIL_ABVS.some(ability => (resolved.increases[ability] || 0) !== (owner.abilityChoice.increases[ability] || 0))) fail();
 			const oldDeltas = before.length ? before[0].appliedEffects?.abilityDeltas : {};
 			const newDeltas = current.appliedEffects?.abilityDeltas;
 			if (!isDeltaMap(oldDeltas) || !isDeltaMap(newDeltas)) fail();
 			for (const ability of Parser.ABIL_ABVS) {
-				const oldAmount = oldDeltas[ability] || 0;
-				const newAmount = newDeltas[ability] || 0;
+				const oldAmount = Object.hasOwn(oldDeltas, ability) ? oldDeltas[ability] : 0;
+				const newAmount = Object.hasOwn(newDeltas, ability) ? newDeltas[ability] : 0;
 				const increase = resolved.increases[ability] || 0;
 				const beforeIncoming = observedResult.abilities[ability] - oldAmount;
 				const expected = increase ? CharacterSheetClassUtils.capAbilityIncrease(
@@ -777,11 +779,22 @@ class CharacterSheetRespecEngine {
 				&& classUid(row) === classUid(decision) && row.classLevel === decision.classLevel
 				&& row.characterLevel === decision.characterLevel && row.semanticKey !== decision.semanticKey);
 			if (paired.length > 1) throw new Error("The ASI result boundary has ambiguous paired feat ownership.");
+			const pairedOwners = paired.map(row => {
+				const uid = CharacterSheetProgression.getEntityUid(row.selection);
+				const original = (stateSnapshot.feats || []).filter(feat => feat.sourceDecisionKey === row.semanticKey);
+				const canonical = (this._page.getFeats?.() || []).find(feat => CharacterSheetProgression.getEntityUid(feat) === uid);
+				if (!canonical || original.length !== 1 || CharacterSheetProgression.getEntityUid(original[0]) !== uid) {
+					throw new Error("The ASI result boundary lacks the exact original paired feat owner.");
+				}
+				const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(canonical, original[0].choices || original[0]._featChoices || {});
+				if (!resolved.valid) throw new Error("The ASI result boundary has an unresolved original paired feat ability choice.");
+				return {semanticKey: row.semanticKey, uid, abilityChoice: {optionIndex: resolved.optionIndex, max: resolved.option.max, increases: resolved.increases}};
+			});
 			receiptResult = CharacterSheetProgression._copy({
 				abilities: this._candidateState._data.abilities,
 				features: this._candidateState.getFeatures(),
 				feats: this._candidateState.getFeats(),
-				pairedOwners: paired.map(row => ({semanticKey: row.semanticKey, uid: CharacterSheetProgression.getEntityUid(row.selection)})),
+				pairedOwners,
 			});
 		};
 		const finalize = applyResult => {
