@@ -5123,14 +5123,15 @@ class CharacterSheetPage {
 			const ability = e_({outer: `
 				<div class="charsheet__ability" data-ability="${abl}" title="Click to roll ${Parser.attAbvToFull(abl)} (Shift=Adv, Ctrl=Dis)">
 					<div class="charsheet__ability-name">${abl.toUpperCase()}</div>
-					<div class="charsheet__ability-score" id="charsheet-ability-${abl}-score">${score}</div>
+					<button type="button" class="charsheet__ability-score charsheet__score-disclosure" id="charsheet-ability-${abl}-score">${score}</button>
 					<div class="charsheet__ability-mod" id="charsheet-ability-${abl}-mod">${mod}</div>
 					<div class="charsheet__ability-drain" id="charsheet-ability-${abl}-drain" hidden></div>
 				</div>
 			`});
 
 			ability.addEventListener("click", (e) => this._rollAbilityCheck(abl, e));
-			this._bindActivate(ability, {label: `Roll ${Parser.attAbvToFull(abl)} check`});
+			this._bindActivate(ability.querySelector(".charsheet__ability-mod"), {label: `Roll ${Parser.attAbvToFull(abl)} check`});
+			this._bindAbilityScoreDisclosure(ability.querySelector(".charsheet__ability-score"), abl);
 			container.append(ability);
 		});
 
@@ -5220,6 +5221,7 @@ class CharacterSheetPage {
 			const canonical = breakdown.canonical ?? breakdown.total;
 			const effective = breakdown.total;
 			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
+			this._refreshAbilityScoreDisclosure(document.getElementById(`charsheet-ability-${abl}-score`), abl);
 			const modCell = /** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`));
 			const tooltip = this._formatD20BreakdownTooltip(breakdown);
 			// Pass the breakdown as the effective span's tooltip so hovering the
@@ -5256,6 +5258,103 @@ class CharacterSheetPage {
 		// is data-driven, so refresh it here in the hot render path — _renderAbilities
 		// (structural) is not called on every in-place re-render.
 		this._renderAbilityDamageAffordance();
+	}
+
+	_formatAbilityScoreBreakdown (breakdown) {
+		return [
+			...breakdown.components.map(c => `${c.label}: ${c.amount == null ? "applied amount unknown" : `${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}`}${c.isReplacement ? " (replacement)" : ""}`),
+			`Total: ${breakdown.total}`,
+		].join("\n");
+	}
+
+	_refreshAbilityScoreDisclosure (el, ability) {
+		if (!el) return;
+		const breakdown = this._state.getAbilityScoreBreakdown(ability);
+		el.title = this._formatAbilityScoreBreakdown(breakdown);
+		el.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score ${breakdown.total}; show score breakdown`);
+		const popover = document.getElementById(el.getAttribute("aria-controls"));
+		if (!popover) return;
+		popover.replaceChildren();
+		const heading = document.createElement("strong");
+		heading.textContent = `${Parser.attAbvToFull(ability)} score`;
+		popover.append(heading);
+		breakdown.components.forEach(c => {
+			const row = document.createElement("div");
+			row.className = "charsheet__score-detail-row";
+			const label = document.createElement("span");
+			label.textContent = c.label;
+			const value = document.createElement("span");
+			value.textContent = c.amount == null ? "Applied amount unknown" : `${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}${c.isReplacement ? " (replacement)" : ""}`;
+			row.append(label, value);
+			popover.append(row);
+		});
+		const total = document.createElement("div");
+		total.className = "charsheet__score-detail-total";
+		total.textContent = `Total: ${breakdown.total}`;
+		popover.append(total);
+	}
+
+	_bindAbilityScoreDisclosure (el, ability) {
+		if (!el) return;
+		const popover = document.createElement("div");
+		popover.id = `charsheet-score-detail-${CryptUtil.uid()}`;
+		popover.className = "charsheet__score-detail";
+		popover.setAttribute("popover", "auto");
+		popover.setAttribute("role", "region");
+		popover.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score breakdown`);
+		el.parentElement.append(popover);
+		el.setAttribute("aria-controls", popover.id);
+		el.setAttribute("aria-expanded", "false");
+		let pinned = false;
+		let hideTimer;
+		const cancelHide = () => window.clearTimeout(hideTimer);
+		const show = () => {
+			cancelHide();
+			this._refreshAbilityScoreDisclosure(el, ability);
+			popover.showPopover();
+			const rect = el.getBoundingClientRect();
+			const width = document.documentElement.clientWidth;
+			const height = window.innerHeight;
+			popover.style.left = `${Math.max(8, Math.min(rect.left, width - popover.offsetWidth - 8))}px`;
+			const below = rect.bottom + 6;
+			popover.style.top = `${Math.max(8, Math.min(below + popover.offsetHeight <= height - 8 ? below : rect.top - popover.offsetHeight - 6, height - popover.offsetHeight - 8))}px`;
+			el.setAttribute("aria-expanded", "true");
+		};
+		const hide = () => {
+			cancelHide();
+			if (pinned || !popover.isConnected) return;
+			popover.hidePopover();
+			el.setAttribute("aria-expanded", "false");
+		};
+		const scheduleHide = () => {
+			cancelHide();
+			hideTimer = window.setTimeout(() => {
+				if (document.activeElement !== el) hide();
+			}, 150);
+		};
+		el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") show(); });
+		el.addEventListener("pointerleave", e => { if (!popover.contains(e.relatedTarget)) scheduleHide(); });
+		popover.addEventListener("pointerenter", cancelHide);
+		popover.addEventListener("pointerleave", e => { if (!el.contains(e.relatedTarget)) scheduleHide(); });
+		el.addEventListener("focus", show);
+		el.addEventListener("blur", hide);
+		el.addEventListener("keydown", e => {
+			e.stopPropagation();
+			if (e.key === "Escape") { pinned = false; hide(); }
+		});
+		el.addEventListener("click", e => {
+			e.stopPropagation();
+			pinned = !pinned;
+			if (pinned) show();
+			else hide();
+		});
+		popover.addEventListener("click", e => e.stopPropagation());
+		popover.addEventListener("toggle", () => {
+			const isOpen = popover.matches(":popover-open");
+			el.setAttribute("aria-expanded", String(isOpen));
+			if (!isOpen) pinned = false;
+		});
+		this._refreshAbilityScoreDisclosure(el, ability);
 	}
 
 	_renderPassiveScores () {
@@ -9222,19 +9321,6 @@ class CharacterSheetPage {
 			// Get related skills for this ability
 			const relatedSkills = skills.filter(s => this._state.getSkillAbility(s.name) === abl);
 
-			// Per-source bonus breakdown (mirrors the skill-hover breakdown): the
-			// aggregate "+N bonus" now carries a tooltip itemizing each contribution
-			// by its source (Racial, Item, named features like "Pan's Apostle", …).
-			const abilityBreakdown = this._state.getAbilityBonusBreakdown(abl);
-			const abilityTooltipLines = [`🧬 Base: ${abilityBreakdown.base}`];
-			abilityBreakdown.contributions.forEach(c => {
-				abilityTooltipLines.push(c.isReplacement
-					? `↔️ ${c.label}`
-					: `➕ ${c.label}: ${c.amount >= 0 ? "+" : ""}${c.amount}`);
-			});
-			abilityTooltipLines.push(`─────────\n🎯 Total: ${abilityBreakdown.total}`);
-			const abilityTooltip = abilityTooltipLines.join("\n").replace(/"/g, "&quot;");
-
 			const card = e_({outer: `
 				<div class="charsheet__ability-hero-card" data-ability="${abl}" style="--ability-color: ${abilityColors[abl]}">
 					<div class="charsheet__ability-hero-header">
@@ -9245,12 +9331,12 @@ class CharacterSheetPage {
 						</div>
 					</div>
 					<div class="charsheet__ability-hero-scores">
-						<div class="charsheet__ability-hero-total">${total}</div>
+						<button type="button" class="charsheet__ability-hero-total charsheet__score-disclosure">${total}</button>
 						<div class="charsheet__ability-hero-mod">${modStr}</div>
 					</div>
-					<div class="charsheet__ability-hero-breakdown"${bonus !== 0 ? ` title="${abilityTooltip}"` : ""}>
+					<div class="charsheet__ability-hero-breakdown">
 						<span class="charsheet__ability-hero-base">Base ${base}</span>
-						${bonus !== 0 ? `<span class="charsheet__ability-hero-bonus" title="${abilityTooltip}">${bonus >= 0 ? "+" : ""}${bonus} bonus</span>` : ""}
+						${bonus !== 0 ? `<span class="charsheet__ability-hero-bonus">${bonus >= 0 ? "+" : ""}${bonus} bonus</span>` : ""}
 					</div>
 					<div class="charsheet__ability-hero-save">
 						<span class="charsheet__ability-save-prof ${isProficient ? "active" : ""}">${isProficient ? "●" : "○"}</span>
@@ -9285,6 +9371,7 @@ class CharacterSheetPage {
 				</div>
 			`});
 
+			this._bindAbilityScoreDisclosure(card.querySelector(".charsheet__ability-hero-total"), abl);
 			// Click handlers - pass event for shift/ctrl (advantage/disadvantage)
 			card.querySelector(".charsheet__ability-roll-check").addEventListener("click", (e) => {
 				e.stopPropagation();
@@ -26731,7 +26818,7 @@ class CharacterSheetPage {
 					</div>
 					<div class="ve-muted ve-small charsheet__edit-ability-breakdown ability-breakdown"></div>
 					<div class="charsheet__edit-ability-result">
-						<span class="ability-total"></span>
+						<button type="button" class="ability-total charsheet__score-disclosure"></button>
 						<span class="ve-muted ability-mod"></span>
 					</div>
 				</div>
@@ -26743,6 +26830,7 @@ class CharacterSheetPage {
 			const modEl = row.querySelector(".ability-mod");
 			const decBtn = row.querySelector(".ability-dec");
 			const incBtn = row.querySelector(".ability-inc");
+			this._bindAbilityScoreDisclosure(totalEl, abl);
 
 			const updateDisplay = () => {
 				const curBase = this._state.getAbilityBase(abl);
@@ -26752,30 +26840,12 @@ class CharacterSheetPage {
 
 				inputEl.value = curBase;
 
-				// (R27 #1) Itemize the bonus PER SOURCE instead of one flat "+N bonus"
-				// lump, mirroring the ability hero-card / skill-hover breakdowns. Each
-				// contribution is attributed to its origin (Racial, Item, Primal Champion,
-				// named features like "Pan's Apostle", …) so the player can see exactly
-				// what is raising the score. A tooltip repeats the itemization for narrow
-				// displays where the inline text is clipped.
-				const breakdown = this._state.getAbilityBonusBreakdown(abl);
-				const parts = [`Base ${breakdown.base}`];
-				breakdown.contributions.forEach(c => {
-					parts.push(c.isReplacement
-						? `↔ ${c.label}`
-						: `${c.amount >= 0 ? "+" : ""}${c.amount} ${c.label}`);
-				});
-				breakdownEl.textContent = parts.join(" | ");
-				const tipLines = [`🧬 Base: ${breakdown.base}`];
-				breakdown.contributions.forEach(c => {
-					tipLines.push(c.isReplacement
-						? `↔️ ${c.label}`
-						: `➕ ${c.label}: ${c.amount >= 0 ? "+" : ""}${c.amount}`);
-				});
-				tipLines.push(`─────────\n🎯 Total: ${breakdown.total}`);
-				breakdownEl.title = tipLines.join("\n");
+				const breakdown = this._state.getAbilityScoreBreakdown(abl);
+				breakdownEl.textContent = this._formatAbilityScoreBreakdown(breakdown).split("\n").join(" | ");
+				breakdownEl.title = this._formatAbilityScoreBreakdown(breakdown);
 
 				totalEl.textContent = curTotal;
+				this._refreshAbilityScoreDisclosure(totalEl, abl);
 				modEl.textContent = `(${curModStr})`;
 			};
 

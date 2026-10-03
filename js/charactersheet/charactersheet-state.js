@@ -13557,7 +13557,10 @@ class CharacterSheetState {
 		const feature = this._data.customModifiers?.abilityScores?.[ability] || 0;
 		const direct = this._data.directAbilityBonuses?.[ability] || 0;
 		const itemBonus = this._data.itemAbilityOverrides?.bonus?.[ability] || 0;
-		push("racial", "Racial", racial);
+		const origins = this._getAbilityAcquisitionComponents(ability, "abilityBonusDelta");
+		origins.forEach(c => push("racial", c.label, c.amount));
+		const attributedOrigin = origins.reduce((sum, c) => sum + (c.amount || 0), 0);
+		push("racial", origins.length ? "Species / background / manual (unattributed)" : "Racial", racial - attributedOrigin);
 		// Itemize the additive feature/custom channel by its source feature(s) so each
 		// shows e.g. "Pan's Apostle" instead of one generic "Custom Modifier" lump. A
 		// residual line covers any directly-set remainder (no backing named modifier)
@@ -13611,12 +13614,146 @@ class CharacterSheetState {
 			}
 		}
 
+		for (const state of this._data.activeStates || []) {
+			if (!state.active) continue;
+			const amount = (state.customEffects || [])
+				.filter(effect => effect.type === "abilityScoreBonus" && effect.ability === ability)
+				.reduce((sum, effect) => sum + (Number(effect.value) || 0), 0);
+			push("activeState", state.name || state.type || "Active state", amount);
+			running += amount;
+		}
+		const damage = this._getAbilityDamageFromStatesRaw(ability);
+		if (damage) {
+			const after = Math.max(0, running - damage);
+			push("abilityDamage", "Ability damage", after - running);
+			running = after;
+		}
+
 		// Defensive reconciliation: should be a no-op, but guarantees the invariant
 		// even if getAbilityScore gains a channel this method does not yet mirror.
 		const diff = total - running;
 		if (diff !== 0) push("other", "Other", diff);
 
 		return {ability, base, total, bonus: total - base, contributions};
+	}
+
+	/**
+	 * Full score disclosure, separate from the base/bonus and d20-roll contracts.
+	 * Null amounts mean history proves a choice, but not its actual capped gain.
+	 * The numeric residual is deliberately unattributed, never an inferred roll.
+	 */
+	getAbilityScoreBreakdown (ability) {
+		const breakdown = this.getAbilityBonusBreakdown(ability);
+		const acquisitions = this._getAbilityAcquisitionComponents(ability);
+		const attributed = acquisitions.reduce((sum, c) => sum + (c.amount || 0), 0);
+		return {
+			ability,
+			total: breakdown.total,
+			components: [
+				{source: "base", label: "Unallocated base (manual / unknown history)", amount: breakdown.base - attributed},
+				...acquisitions,
+				...breakdown.contributions.map(c => c.source === "racial" && c.label === "Racial"
+					? {...c, label: "Species / background / manual (unattributed)"}
+					: c),
+			],
+		};
+	}
+
+	_getAbilityAcquisitionComponents (ability, effectType = "abilityDelta") {
+		const history = this._data.levelHistory || [];
+		const decisions = [
+			...(this._data.characterBase?.decisions || []),
+			...history.flatMap(entry => entry.decisions || []),
+		];
+		const byKey = new Map(decisions.filter(d => d.semanticKey).map(d => [d.semanticKey, d]));
+		const components = [];
+		const seen = new Set();
+		const context = (decision, entry) => {
+			const owner = decision?.provenance;
+			if (owner?.ownerType === "race" || owner?.ownerType === "background") {
+				return `${owner.ownerType === "race" ? "Species" : "Background"}: ${owner.ownerName || owner.ownerUid || "unknown"}`;
+			}
+			const cls = decision?.className || entry?.class?.name;
+			const src = decision?.classSource || entry?.class?.source;
+			const level = decision?.classLevel || entry?.classLevel || entry?.level;
+			const characterLevel = decision?.characterLevel || entry?.level;
+			return cls && cls !== "Base" && cls !== "Unknown"
+				? `${cls}${src ? ` [${src}]` : ""}${level ? ` level ${level}` : ""}${characterLevel && characterLevel !== level ? ` (character level ${characterLevel})` : ""}`
+				: "unplaced acquisition";
+		};
+		const push = (key, source, label, amount) => {
+			if (seen.has(key)) return;
+			seen.add(key);
+			components.push({source, label, amount});
+		};
+		const feats = this._data.feats || [];
+		const featOwner = decision => {
+			const visited = new Set();
+			for (let current = decision; current && !visited.has(current); current = byKey.get(current.parentSemanticKey)) {
+				visited.add(current);
+				const feat = feats.find(f =>
+					(f.sourceDecisionKey && f.sourceDecisionKey === current.semanticKey)
+					|| (current.meta?.featId && current.meta.featId === f.id)
+					|| current.receipt?.effects?.some(effect => effect.feats?.some(ref => ref.id === f.id)));
+				if (feat) return feat;
+			}
+			return null;
+		};
+		if (effectType === "abilityDelta") {
+			feats.forEach((feat, index) => {
+				const deltas = feat.appliedEffects?.abilityDeltas;
+				const choice = feat.choices?.ability;
+				const nestedDecisions = decisions.filter(d => d.type === "nestedAbility" && featOwner(d) === feat);
+				const nestedEffects = new Map();
+				nestedDecisions.forEach((d, nestedIndex) => {
+					(d.receipt?.effects || []).filter(effect => effect.type === effectType && effect.ability === ability)
+						.forEach(effect => {
+							const key = effect.sourceDecisionKey || d.semanticKey || nestedIndex;
+							if (!nestedEffects.has(key) || (Number.isFinite(effect.amount) && Number.isFinite(effect.before))) nestedEffects.set(key, effect);
+						});
+				});
+				const isChosen = choice === ability
+					|| (Array.isArray(choice) && choice.includes(ability))
+					|| (choice && typeof choice === "object" && Object.hasOwn(choice, ability))
+					|| nestedDecisions.some(d => d.selection === ability || (Array.isArray(d.selection) && d.selection.includes(ability)))
+					|| nestedEffects.size > 0
+					|| feat.ability?.some(grant => Object.hasOwn(grant, ability));
+				if (!Object.hasOwn(deltas || {}, ability) && !isChosen) return;
+				const decision = decisions.find(d =>
+					(feat.sourceDecisionKey && d.semanticKey === feat.sourceDecisionKey)
+					|| (d.meta?.featId && d.meta.featId === feat.id));
+				const actualNestedEffects = [...nestedEffects.values()].filter(effect => Number.isFinite(effect.amount) && Number.isFinite(effect.before));
+				const ownDelta = Object.hasOwn(deltas || {}, ability) ? deltas[ability] : null;
+				const amount = Number.isFinite(ownDelta) ? ownDelta
+					: actualNestedEffects.length ? actualNestedEffects.reduce((sum, effect) => sum + effect.amount, 0) : null;
+				push(`feat:${feat.id || index}`, "featAcquisition",
+					`${feat.name}${feat.source ? ` [${feat.source}]` : ""} - ${context(decision)}; acquisition ${index + 1}`,
+					Number.isFinite(amount) ? amount : null);
+			});
+		}
+		decisions.forEach((decision, index) => {
+			if (effectType === "abilityDelta" && featOwner(decision)) return;
+			const recordedEffects = (decision.receipt?.effects || []).filter(effect =>
+				effect.type === effectType && effect.ability === ability);
+			const effects = recordedEffects.filter(effect => Number.isFinite(effect.amount) && Number.isFinite(effect.before));
+			const entry = history.find(h => (h.decisions || []).includes(decision));
+			const label = `${decision.label || "Ability Score Improvement"} - ${context(decision, entry)}`;
+			// One mechanical effect may be mirrored on parent and nested receipts.
+			effects.forEach(effect => push(
+				`${effect.sourceDecisionKey || decision.semanticKey || index}:${effectType}:${ability}`,
+				effectType === "abilityBonusDelta" ? "origin" : "acquisition",
+				label, effect.amount));
+			if (effectType !== "abilityDelta" || effects.length) return;
+			const allocation = decision.type === "asi" ? decision.selection
+				: decision.type === "asiOrFeat" && decision.selection?.mode === "asi" ? decision.selection.asi : null;
+			if (allocation && Object.hasOwn(allocation, ability)) {
+				push(`${decision.semanticKey || index}:${effectType}:${ability}`, "acquisition",
+					`${label} (recorded ${ability.toUpperCase()} +${allocation[ability]})`, null);
+			} else if (recordedEffects.length) {
+				push(`${decision.semanticKey || index}:${effectType}:${ability}`, "acquisition", label, null);
+			}
+		});
+		return components;
 	}
 
 	/**

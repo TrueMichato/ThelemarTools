@@ -1035,12 +1035,18 @@ export class CharacterSheetPlayMode {
 			const row = this._ce("div", "pm-ability", grid);
 			const elName = this._ce("span", "pm-ability__name", row);
 			elName.textContent = ABILITY_NAMES[abl];
-			const elScore = this._ce("span", "pm-ability__score", row);
+			const elScore = this._ce("button", "pm-ability__score charsheet__score-disclosure", row);
+			elScore.type = "button";
 			elScore.textContent = score;
+			this._page._bindAbilityScoreDisclosure(elScore, abl);
 			const elMod = this._ce("span", "pm-ability__mod", row);
 			elMod.textContent = this._fmtMod(mod);
 
-			this._makeClickable(row, `Roll ${ABILITY_NAMES[abl]} check`, (e) => this._page._rollAbilityCheck(abl, e));
+			row.addEventListener("click", e => this._page._rollAbilityCheck(abl, e));
+			this._makeClickable(elMod, `Roll ${ABILITY_NAMES[abl]} check`, e => {
+				e.stopPropagation();
+				this._page._rollAbilityCheck(abl, e);
+			});
 		});
 	}
 
@@ -6317,8 +6323,8 @@ export class CharacterSheetPlayMode {
 
 		const inputs = {};
 		ABILITIES.forEach(abl => {
-			const breakdown = this._state.getAbilityBonusBreakdown(abl);
-			const baseScore = breakdown.base;
+			const breakdown = this._state.getAbilityScoreBreakdown(abl);
+			const baseScore = this._state.getAbilityBase(abl);
 
 			const row = this._ce("div", "pm-modal__row pm-edit-abilities__row", panel);
 			const lbl = this._ce("label", "pm-modal__label pm-edit-abilities__label", row);
@@ -6331,9 +6337,7 @@ export class CharacterSheetPlayMode {
 			input.value = baseScore;
 			inputs[abl] = input;
 
-			if (breakdown.contributions.length) {
-				this._renderAbilityBonusBreakdown(row, breakdown);
-			}
+			this._renderAbilityBonusBreakdown(row, breakdown);
 		});
 
 		const btnRow = this._ce("div", "pm-modal__buttons", panel);
@@ -6368,20 +6372,20 @@ export class CharacterSheetPlayMode {
 	}
 
 	/**
-	 * Render a clean, wrap-friendly per-source bonus breakdown into an ability row,
-	 * e.g. "Racial +2 · Item +1 → 16". Each source is its own token so the layout
-	 * scales gracefully with the [data-textsize] setting. Consumes the read-only
-	 * CharacterSheetState.getAbilityBonusBreakdown() helper.
+	 * Render wrap-friendly score provenance tokens, accepting full-score or
+	 * legacy bonus breakdowns.
 	 */
 	_renderAbilityBonusBreakdown (row, breakdown) {
+		const contributions = breakdown.components || breakdown.contributions;
 		const wrap = this._ce("span", "pm-edit-abilities__bonus", row);
-		const readable = breakdown.contributions
-			.map(c => c.isReplacement ? `${c.label}` : `${c.label} ${this._fmtMod(c.amount)}`)
+		const format = c => `${c.label}: ${c.amount == null ? "applied amount unknown" : c.source === "base" ? c.amount : this._fmtMod(c.amount)}${c.isReplacement ? " (replacement)" : ""}`;
+		const readable = contributions
+			.map(format)
 			.join(", ");
 		wrap.setAttribute("aria-label", `${readable}, total ${breakdown.total}`);
-		breakdown.contributions.forEach(c => {
+		contributions.forEach(c => {
 			const token = this._ce("span", "pm-edit-abilities__bonus-src", wrap);
-			token.textContent = c.isReplacement ? c.label : `${c.label} ${this._fmtMod(c.amount)}`;
+			token.textContent = format(c);
 		});
 		const total = this._ce("span", "pm-edit-abilities__bonus-total", wrap);
 		total.textContent = `→ ${breakdown.total}`;

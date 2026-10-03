@@ -230,12 +230,27 @@ getAbilityScore(ability)  // e.g., getAbilityScore("str")
 // Get modifier (Math.floor((score - 10) / 2))
 getAbilityMod(ability)
 
+// Read-only score provenance; null amounts mean applied gains are unknown.
+getAbilityScoreBreakdown(ability) // {ability, total, components}
+
 // Set components
 setAbilityBase(ability, value)
 setAbilityRacialBonus(ability, value)
 setAbilityAsiBonus(ability, value)
 setAbilityMiscBonus(ability, value)
 ```
+
+Hover the **score** (not the check modifier), focus it with the keyboard, or
+tap it to inspect the same breakdown in Manager's compact grid, ability hero
+cards, and Play Mode. Enter/Space pins the detail; Escape dismisses it.
+Check and Save actions remain separate. The Edit Ability Scores dialog shows
+the same detail, while its input still edits the raw base, including acquired
+increases.
+
+Each evidenced ASI and feat acquisition has its own source/owner/level row.
+Actual capped receipts can show `+0`; legacy ASIs show their recorded choice
+with **applied amount unknown**. The unallocated base is explicitly manual /
+unknown history, not a reconstructed creation score.
 
 #### Computed Values
 
