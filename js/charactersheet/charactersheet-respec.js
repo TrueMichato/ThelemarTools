@@ -2063,11 +2063,113 @@ class CharacterSheetRespec {
 		return this._runDecisionMechanics(decision, selection, options, targetState, "configuration");
 	}
 
+	_applyOriginFeatSpellChoice (decision, next, options) {
+		const parent = this._engine.manifest.decisions.find(row => row.semanticKey === decision.parentSemanticKey);
+		const feat = this._state._data.feats.find(row => row.sourceDecisionKey === parent?.semanticKey
+			&& CharacterSheetProgression.getEntityUid(row) === decision.provenance.ownerUid);
+		if (!feat) throw new Error("The exact origin feat owner is no longer available.");
+		const rules = decision.meta.descriptorRules;
+		if (rules.spellcastingAbilityChoice) {
+			const ability = next[0];
+			if (next.length !== 1 || !Parser.ABIL_ABVS.includes(ability)) throw new Error("Choose one allowed spellcasting ability for this origin feat.");
+			feat.choices = {...(feat.choices || {}), spellcastingAbility: ability};
+			feat._featChoices = MiscUtil.copyFast(feat.choices);
+			const children = this._engine.manifest.decisions.filter(row =>
+				row.parentSemanticKey === parent.semanticKey && ["nestedSpell", "nestedCantrip"].includes(row.type));
+			for (const pending of this._state._data.pendingSpellChoices || []) {
+				if (pending.featureId !== feat.id) continue;
+				const owners = children.filter(child =>
+					child.meta.descriptorRules?.optionSource?.filter === pending.filter
+					&& (child.meta.descriptorRules?.spellMode === "innate") === !!pending.innate);
+				if (owners.length !== 1 || (pending.sourceDecisionKey && pending.sourceDecisionKey !== owners[0].semanticKey)) {
+					throw new Error("The origin feat's pending spell slot has no unique authored owner.");
+				}
+				pending.sourceDecisionKey = owners[0].semanticKey;
+				pending.ability = ability;
+			}
+			for (const child of children) {
+				const type = child.meta.descriptorRules?.spellMode === "innate" ? "innateSpells" : child.type === "nestedCantrip" ? "cantrips" : "spells";
+				const spells = type === "innateSpells" ? this._state.getInnateSpells() : type === "cantrips" ? this._state.getCantripsKnown() : this._state.getSpellsKnown();
+				for (const spell of spells) {
+					const ownership = this._state._getProgressionOwnershipEntry(type, spell);
+					const exactInnateGrant = type === "innateSpells"
+						&& spell.sourceFeature === feat.name
+						&& spell.grantId === `respec:${child.semanticKey}:${CharacterSheetProgression.getEntityUid(spell)}`;
+					if (exactInnateGrant || (spell.sourceFeature === feat.name && !ownership?.preserved
+						&& ownership?.sources?.length === 1 && ownership.sources[0] === child.semanticKey)) spell.spellcastingAbility = ability;
+				}
+			}
+			return;
+		}
+		const filter = rules.optionSource?.filter;
+		const innate = rules.spellMode === "innate";
+		const templates = SpellGrantParser.parseAdditionalSpells(feat.additionalSpells, feat.name)
+			.filter(slot => slot.requiresChoice && slot.choiceFilter === filter && !!slot.innate === innate);
+		if (templates.length !== decision.count || next.length !== decision.count) {
+			throw new Error("The origin feat's authored spell slots no longer match this choice.");
+		}
+		const ability = feat.choices?.spellcastingAbility;
+		if (templates.some(slot => typeof slot.ability === "object") && !Parser.ABIL_ABVS.includes(ability)) {
+			throw new Error("Choose this origin feat's spellcasting ability before selecting its spells.");
+		}
+		const before = this._state._captureFeatAppliedEffectsSnapshot();
+		for (const [index, selected] of next.entries()) {
+			const spell = options.find(option => CharacterSheetProgression.getEntityUid(option) === CharacterSheetProgression.getEntityUid(selected));
+			if (!spell?.name) throw new Error("The selected origin spell is no longer available.");
+			let pending = (this._state._data.pendingSpellChoices || []).find(slot =>
+				slot.featureId === feat.id && slot.filter === filter && !!slot.innate === innate);
+			if (!pending) {
+				const template = templates[index];
+				this._state.addPendingSpellChoice({
+					...template,
+					featureName: feat.name,
+					featureId: feat.id,
+					filter,
+					ability: ability || template.ability,
+					sourceDecisionKey: decision.semanticKey,
+				});
+				pending = this._state._data.pendingSpellChoices.at(-1);
+			}
+			const type = innate ? "innateSpells" : decision.type === "nestedCantrip" ? "cantrips" : "spells";
+			this._state.claimProgressionOwnership(type, spell, decision.semanticKey);
+			this._state.fulfillSpellChoice(pending.id, spell, {
+				grantId: innate ? `respec:${decision.semanticKey}:${CharacterSheetProgression.getEntityUid(spell)}` : null,
+			});
+		}
+		const key = decision.type === "nestedCantrip" ? "cantrips" : "spells";
+		const siblings = this._engine.manifest.decisions
+			.filter(child => child.parentSemanticKey === parent.semanticKey
+				&& child.semanticKey !== decision.semanticKey && child.type === decision.type)
+			.flatMap(child => (Array.isArray(child.selection) ? child.selection : child.selection ? [child.selection] : [])
+				.map(value => ({name: value.name, source: value.source, ...(child.meta.descriptorRules?.spellMode === "innate" ? {innate: true} : {})})));
+		feat.choices = {...(feat.choices || {}), [key]: [...siblings, ...next.map(value => ({name: value.name, source: value.source, ...(innate ? {innate: true} : {})}))]};
+		feat._featChoices = MiscUtil.copyFast(feat.choices);
+		this._state.recordFeatAppliedEffectsSince(feat.name, feat.source, before, feat.id);
+		const type = innate ? "innateSpells" : decision.type === "nestedCantrip" ? "cantrips" : "spells";
+		// Selectable grants belong to their child receipts, not a second feat-level set owner.
+		for (const spell of next) {
+			const key = this._state._getProgressionOwnershipKey(type, spell);
+			if (!(innate ? before.innateSpells : before.spells).has(key)) {
+				this._state.releaseProgressionOwnership(type, spell, `feat:${feat.id}`);
+			}
+		}
+		const previous = Array.isArray(decision.selection) ? decision.selection : decision.selection ? [decision.selection] : [];
+		const replaced = new Set(previous.map(spell => this._state._getProgressionOwnershipKey(type, spell)));
+		const effectKey = innate ? "innateSpellsAdded" : "spellsAdded";
+		feat.appliedEffects[effectKey] = (feat.appliedEffects[effectKey] || []).filter(spell =>
+			(!innate && spell.type !== type) || !replaced.has(this._state._getProgressionOwnershipKey(type, spell))
+			|| next.some(selected => CharacterSheetProgression.getEntityUid(selected) === CharacterSheetProgression.getEntityUid(spell))
+			|| this._state._getProgressionOwnershipEntry(type, spell)?.sources?.includes(`feat:${feat.id}`));
+	}
+
 	_applyManifestSelectionMechanicsInner (decision, selection, options, family = null) {
 		if (family && this._getDecisionMechanicsFamily(decision) !== family) {
 			throw new Error(`Progression decision "${decision?.type || "unknown"}" has no ${family} mechanics.`);
 		}
 		const next = Array.isArray(selection) ? selection : (selection == null ? [] : [selection]);
+		if (decision.scope === "origin" && decision.meta?.descriptorRules?.originFeatSpellChoice) {
+			return this._applyOriginFeatSpellChoice(decision, next, options);
+		}
 		const previous = Array.isArray(decision.selection)
 			? decision.selection
 			: (decision.selection == null ? [] : [decision.selection]);
@@ -2442,14 +2544,21 @@ class CharacterSheetRespec {
 
 		if (decision.type === "nestedAbility" || decision.type === "nestedConfiguration") {
 			if (decision.type === "nestedConfiguration" && decision.meta?.originAbilityDistribution) {
+				const mode = options.find(option => CharacterSheetRespec._getDecisionOptionKey(option) ===
+					CharacterSheetRespec._getDecisionOptionKey(next[0]));
+				if (!mode) throw new Error("The selected background ability distribution is no longer available.");
 				const choices = MiscUtil.copyFast(this._state.getBaseBackgroundUserChoices() || {});
 				choices.selectedAbilityBonuses = {};
-				(next[0]?.weights || []).forEach((weight, ix) => {
+				(mode.weights || []).forEach((weight, ix) => {
 					choices.selectedAbilityBonuses[`bg_${ix}`] = null;
 					choices.selectedAbilityBonuses[`bg_${ix}_weight`] = weight;
 				});
+				for (const [ability, amount] of Object.entries(mode.fixedBonuses || {})) {
+					const before = this._state._data.abilityBonuses[ability] || 0;
+					this._state.setAbilityBonus(ability, before + amount);
+				}
 				this._state.setBaseBackgroundUserChoices(choices);
-				return;
+				return {selection: mode};
 			}
 			if (decision.type === "nestedAbility") {
 				if (decision.meta?.descriptorRules?.featAbilityChoice) {
@@ -2475,7 +2584,7 @@ class CharacterSheetRespec {
 						const after = CharacterSheetClassUtils.capAbilityIncrease(before, increase, resolved.option.max);
 						decision.meta.receiptPreviousAbility[ability] = before;
 						this._state.setAbilityBase(ability, after);
-						if (after !== before) deltas[ability] = after - before;
+						if (after !== before || decision.scope === "origin") deltas[ability] = after - before;
 					}
 					feat.choices = choices;
 					feat._featChoices = MiscUtil.copyFast(choices);
@@ -6051,7 +6160,7 @@ class CharacterSheetRespec {
 			const parent = draft._engine.manifest.base.decisions.find(decision => decision.type === "originBackground");
 			const apply = ({state}) => {
 				draft._state = state;
-				draft._applyBackgroundChange(history, background);
+				draft._applyBackgroundChange(history, background, {}, {graphReversed: !!parent});
 			};
 			if (parent) await draft._engine.stageGraphMutation(parent.id, {name: background.name, source: background.source}, {apply});
 			else await draft._engine.stageCandidateMutation(apply);
@@ -6300,7 +6409,7 @@ class CharacterSheetRespec {
 	 * Clear old background grants and apply new background traits.
 	 * Mirrors the builder's _applyBackgroundFeatures pattern.
 	 */
-	_applyBackgroundChange (history, newBg, userChoices = {}) {
+	_applyBackgroundChange (history, newBg, userChoices = {}, {graphReversed = false} = {}) {
 		const oldBg = this._state.getBackground();
 		const sourceIdFor = background => CharacterSheetProgression.getOriginSemanticKey({
 			originType: "background", originUid: CharacterSheetProgression.getEntityUid(background), grantKey: "entity",
@@ -6308,20 +6417,30 @@ class CharacterSheetRespec {
 		const oldBackgroundSourceId = oldBg ? sourceIdFor(oldBg) : "base:origin-background";
 		const backgroundSourceId = sourceIdFor(newBg);
 		const oldUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history.choices?.backgroundUserChoices || {};
+		const raceOwnsAbilities = CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace());
 		const fixedAbilitySet = background => {
 			const sets = background?.ability || [];
 			if (sets.length > 1 && sets.some(set => Parser.ABIL_ABVS.some(ability => set[ability]))) {
-				const mode = (this._engine?.manifest?.base?.decisions || []).find(decision =>
-					decision.meta?.originAbilityDistribution && decision.provenance?.ownerUid === CharacterSheetProgression.getEntityUid(background))?.selection;
+				const distribution = (this._engine?.manifest?.base?.decisions || []).find(decision =>
+					decision.meta?.originAbilityDistribution && decision.type === "nestedConfiguration"
+						&& decision.provenance?.ownerUid === CharacterSheetProgression.getEntityUid(background));
+				const mode = distribution?.selection;
 				if (!Number.isInteger(mode?.modeIndex) || !sets[mode.modeIndex]) {
 					throw new Error("This background has fixed ability alternatives without a recorded selected branch. Restore the original background choices before replacing it; unrelated Respec changes remain available.");
 				}
-				return [sets[mode.modeIndex]];
+				const fixed = Object.entries(sets[mode.modeIndex]).filter(([ability]) => Parser.ABIL_ABVS.includes(ability));
+				if (fixed.length && (!graphReversed || distribution.receipt?.sourceDecisionKey !== distribution.semanticKey
+					|| fixed.some(([ability, amount]) => !distribution.receipt.effects.some(effect =>
+						effect.type === "abilityBonusDelta" && effect.sourceDecisionKey === distribution.semanticKey
+							&& effect.ability === ability && effect.amount === Number(amount))))) {
+					throw new Error("The selected fixed background branch lacks a proven ability receipt. Restore its saved choices before replacing this background.");
+				}
+				return [];
 			}
 			return sets;
 		};
-		const oldFixedAbilities = fixedAbilitySet(oldBg);
-		const newFixedAbilities = fixedAbilitySet(newBg);
+		const oldFixedAbilities = raceOwnsAbilities ? [] : fixedAbilitySet(oldBg);
+		const newFixedAbilities = newBg.ability?.length > 1 ? [] : newBg.ability || [];
 		const isFreeBefore = CharacterSheetClassUtils.hasFreeOriginAbilityPair(this._state.getRace(), oldBg);
 		const isFreeAfter = CharacterSheetClassUtils.hasFreeOriginAbilityPair(this._state.getRace(), newBg);
 		const keepFree = isFreeBefore && isFreeAfter && !userChoices.selectedAbilityBonuses;
@@ -6356,7 +6475,7 @@ class CharacterSheetRespec {
 				|| (!f.sourceDecisionKey && f.source === oldBg?.source && oldFeatureNames.has(f.name))))
 			.forEach(f => this._state.removeFeature(f.id));
 
-		if (!CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())) {
+		if (!raceOwnsAbilities) {
 			for (const ability of oldFixedAbilities) {
 				for (const [key, amount] of Object.entries(ability)) {
 					if (Parser.ABIL_ABVS.includes(key)) this._state.setAbilityBonus(key, (this._state._data.abilityBonuses[key] || 0) - Number(amount));
@@ -6410,7 +6529,7 @@ class CharacterSheetRespec {
 
 		// Reapply newly-selected background ability bonuses
 		// For 2024 backgrounds with ability choices, apply fixed bonuses only
-		if (newBg.ability && !CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())) {
+		if (newBg.ability && !raceOwnsAbilities) {
 			newFixedAbilities.forEach(abiSet => {
 				Object.entries(abiSet).forEach(([abi, bonus]) => {
 					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
@@ -6436,7 +6555,7 @@ class CharacterSheetRespec {
 		}
 
 		// Apply user-chosen ability bonuses
-		if (userChoices.selectedAbilityBonuses && !CharacterSheetClassUtils.raceProvidesAbilityBonuses(this._state.getRace())) {
+		if (userChoices.selectedAbilityBonuses && !raceOwnsAbilities) {
 			Object.entries(userChoices.selectedAbilityBonuses).forEach(([key, value]) => {
 				if (!key.includes("_weight") && value) {
 					const weightKey = `${key}_weight`;

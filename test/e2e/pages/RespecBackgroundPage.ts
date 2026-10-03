@@ -2,17 +2,29 @@ import {expect, Page} from "@playwright/test";
 
 interface OriginSnapshot {
 	background: {name: string; source: string};
+	abilities: Record<string, number>;
 	abilityBonuses: Record<string, number>;
 	skillProficiencies: Record<string, number>;
 	languages: string[];
 	toolProficiencies: string[];
 	feats: Array<{name: string; source: string; sourceDecisionKey: string}>;
+	pendingSpellChoices: unknown[];
+	spellcasting: {cantripsKnown: OriginSpell[]};
 	characterBase: {decisions: Array<{type: string; status: string; selection: unknown; semanticKey: string}>};
 }
 
+interface OriginSpell {
+	name: string;
+	source: string;
+	spellcastingAbility: string;
+	sourceFeature: string;
+	uses?: {current: number; max: number};
+	recharge?: string;
+}
+
 interface RespecRuntime {
-	_state: {toJson(): OriginSnapshot};
-	_respec: {_state: {toJson(): OriginSnapshot}; _engine: {getValidation(): {errors: unknown[]}}};
+	_state: {toJson(): OriginSnapshot; getInnateSpells(): OriginSpell[]};
+	_respec: {_state: {toJson(): OriginSnapshot; getInnateSpells(): OriginSpell[]}; _engine: {getValidation(): {errors: unknown[]}}};
 }
 
 export class RespecBackgroundPage {
@@ -37,7 +49,11 @@ export class RespecBackgroundPage {
 		const row = this.modal.locator(`[data-background-decision="${type}"]`).nth(index);
 		await row.getByRole("button", {name: /Choose|Change/}).click();
 		const editor = this.modal.locator(".charsheet__respec-decision-editor").last();
-		for (const label of labels) await editor.locator("label").filter({hasText: label}).locator("input").check();
+		for (const label of labels) {
+			const radio = editor.getByRole("radio", {name: label, exact: true});
+			if (await radio.count()) await radio.check();
+			else await editor.getByRole("checkbox", {name: label, exact: true}).check();
+		}
 		await editor.getByRole("button", {name: "Stage Choice", exact: true}).click();
 		await expect(editor).toBeHidden();
 	}
@@ -69,7 +85,11 @@ export class RespecBackgroundPage {
 			const confirmation = this.page.locator(".ve-ui-modal__overlay:visible").filter({has: heading});
 			await confirmation.getByRole("button", {name: /Change Background/}).click();
 		}
-		await expect(this.page.locator(".charsheet__respec-search-row input").filter({visible: true})).toHaveCount(0);
+		await expect.poll(async () => {
+			const errors = await this.page.locator(".toast--type-danger .toast__wrp-content").allTextContents();
+			if (errors.length) throw new Error(`Background replacement failed: ${errors.join(" ")}`);
+			return this.page.locator(".charsheet__respec-search-row input").filter({visible: true}).count();
+		}).toBe(0);
 	}
 
 	async cancel () {
@@ -79,7 +99,7 @@ export class RespecBackgroundPage {
 	async evidence () {
 		return this.page.evaluate(() => {
 			const cs: RespecRuntime = Reflect.get(globalThis, "charSheet");
-			return {live: cs._state.toJson(), draft: cs._respec._state.toJson(), validation: cs._respec._engine.getValidation()};
+			return {live: cs._state.toJson(), draft: cs._respec._state.toJson(), liveInnateSpells: cs._state.getInnateSpells(), draftInnateSpells: cs._respec._state.getInnateSpells(), validation: cs._respec._engine.getValidation()};
 		});
 	}
 

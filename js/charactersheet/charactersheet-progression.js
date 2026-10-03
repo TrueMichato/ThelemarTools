@@ -986,11 +986,33 @@ class CharacterSheetProgression {
 		}
 		const isLevelFeat = parentDecision?.scope === "level"
 			&& ["feat", "asiOrFeat", "classFeatProgressionFeat", "nestedFeat"].includes(parentDecision.type);
-		const featChoiceSpec = isLevelFeat
+		const isOriginFeat = parentDecision?.scope === "origin"
+			&& ["originFeat", "nestedFeat"].includes(parentDecision.type);
+		if (isOriginFeat) {
+			descriptors = descriptors.map(descriptor => {
+				if (!descriptor.sourcePath?.includes(".additionalSpells[")) return descriptor;
+				const isSpellAbility = /\.ability$/.test(descriptor.sourcePath);
+				return {
+					...descriptor,
+					kind: isSpellAbility ? "configuration" : descriptor.kind,
+					rules: {
+						...descriptor.rules,
+						originFeatSpellChoice: true,
+						spellcastingAbilityChoice: isSpellAbility,
+						spellMode: descriptor.sourcePath.includes(".innate.") ? "innate" : descriptor.sourcePath.includes(".known.") ? "known" : "prepared",
+					},
+				};
+			});
+		}
+		const originFeat = isOriginFeat
+			? (state?.getFeats?.() || []).find(feat => feat.sourceDecisionKey === parentDecision.semanticKey)
+			: null;
+		const featChoices = originFeat?.choices || originFeat?._featChoices || entity.choices || entity._featChoices || {};
+		const featChoiceSpec = isLevelFeat || isOriginFeat
 			? CharacterSheetClassUtils.buildFeatChoicesSpec(entity, {page, state})
 			: null;
 		if (featChoiceSpec?.ability) {
-			const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(entity, entity.choices || entity._featChoices || {}, featChoiceSpec.ability);
+			const resolved = CharacterSheetClassUtils.resolveFeatAbilityChoice(entity, featChoices, featChoiceSpec.ability);
 			let foundAbility = false;
 			descriptors = descriptors.flatMap(descriptor => {
 				if (descriptor.kind !== "ability" || !/\.ability\[\d+\]/.test(descriptor.sourcePath || "")) return [descriptor];
@@ -1017,7 +1039,7 @@ class CharacterSheetProgression {
 			});
 		}
 		if (featChoiceSpec?.skills && featChoiceSpec.expertise) {
-			const choices = entity.choices || entity._featChoices || {};
+			const choices = featChoices;
 			const currentSkills = Array.isArray(choices.skills) ? choices.skills : [];
 			const currentExpertise = Array.isArray(choices.expertise) ? choices.expertise : [];
 			const childAcquisitionKey = acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
@@ -1312,17 +1334,24 @@ class CharacterSheetProgression {
 			: (entity?.ability || [])
 				.map((abilitySet, modeIndex) => {
 					const choose = abilitySet?.choose;
-					if (!choose) return null;
-					const weights = choose.weighted?.weights
-					|| (choose.count ? Array(Number(choose.count) || 0).fill(Number(choose.amount) || 1) : []);
-					const from = choose.weighted?.from || choose.from || [];
-					if (!weights.length || !from.length) return null;
+					const fixedBonuses = Object.fromEntries(Parser.ABIL_ABVS
+						.filter(ability => abilitySet?.[ability] != null)
+						.map(ability => [ability, Number(abilitySet[ability])]));
+					if (!choose && entity.ability.length === 1) return null;
+					const weights = choose?.weighted?.weights
+					|| (choose ? Array(Number(choose.count ?? 1)).fill(Number(choose.amount ?? 1)) : []);
+					const from = choose?.weighted?.from || choose?.from || [];
+					if (!Object.keys(fixedBonuses).length && (!weights.length || !from.length)) return null;
 					return {
-						name: weights.map(weight => `+${weight}`).join("/"),
+						name: [
+							...Object.entries(fixedBonuses).map(([ability, amount]) => `${ability.toUpperCase()} +${amount}`),
+							...(weights.length ? [weights.map(weight => `+${weight}`).join("/")] : []),
+						].join(", "),
 						key: `mode-${modeIndex}`,
 						modeIndex,
 						weights: CharacterSheetProgression._copy(weights),
 						from: CharacterSheetProgression._copy(from),
+						...(Object.keys(fixedBonuses).length ? {fixedBonuses} : {}),
 					};
 				})
 				.filter(Boolean);
@@ -1342,15 +1371,18 @@ class CharacterSheetProgression {
 			.filter(key => /^bg_\d+_weight$/.test(key))
 			.sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]))
 			.map(key => Number(selectedBonuses[key]));
-		const persistedMode = modes.find(mode =>
+		const matchingModes = selectedWeights.length ? modes.filter(mode =>
 			mode.weights.length === selectedWeights.length
-				&& mode.weights.every((weight, ix) => weight === selectedWeights[ix]),
-		) || null;
+				&& !Object.keys(mode.fixedBonuses || {}).length
+				&& mode.weights.every((weight, ix) => weight === selectedWeights[ix])
+				&& mode.weights.every((weight, ix) => mode.from.includes(selectedBonuses[`bg_${ix}`])),
+		) : [];
+		const persistedMode = matchingModes.length === 1 ? matchingModes[0] : null;
 		const selection = isFreeOriginAbility ? modes[0] : stored?.selection ?? persistedMode;
 		const selectedMode = modes.find(mode =>
 			mode.key === selection?.key
 				|| (
-					Array.isArray(selection?.weights)
+					Array.isArray(selection?.weights) && selection.weights.length > 0
 					&& mode.weights.length === selection.weights.length
 					&& mode.weights.every((weight, ix) => weight === Number(selection.weights[ix]))
 				),

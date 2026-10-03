@@ -1243,6 +1243,17 @@ export class CharacterSheetPage {
 		// scores). Reveal it on demand so flows that read ability/skill rows from
 		// that tab can click its otherwise-hidden nav link.
 		if (tab === this.tabAbilities) await this.ensureAbilitiesTabVisible();
+		const mobileMore = this.page.locator(".charsheet-mobile__tab-more > a");
+		if (!await tab.isVisible() && await mobileMore.isVisible()) {
+			const href = await tab.getAttribute("href");
+			if (!href) throw new Error("The requested mobile section has no tab target.");
+			await mobileMore.click();
+			const sheet = this.page.getByRole("dialog", {name: "More sections", exact: true});
+			await expect(sheet).toBeVisible();
+			await sheet.locator(`[data-href="${href}"]`).click();
+			await expect(sheet).toBeHidden();
+			return;
+		}
 		// Bounded: an open modal overlay swallows pointer events, and an unbounded
 		// click would silently retry until the ENTIRE test timeout expired instead
 		// of failing. Retry once after clearing transient prompts, then fail loudly.

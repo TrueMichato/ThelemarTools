@@ -4916,7 +4916,7 @@ class CharacterSheetClassUtils {
 						add({
 							kind: isAbilityChoice ? "ability" : (isCantrip ? "cantrip" : "spell"),
 							label: value.name || (isAbilityChoice ? "Spellcasting Ability" : "Additional Spell"),
-							count: getCount(choose),
+							count: value.count ?? getCount(choose),
 							options,
 							grantKey: childPath,
 							sourcePath: childPath,

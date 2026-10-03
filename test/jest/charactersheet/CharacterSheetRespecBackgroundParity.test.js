@@ -160,6 +160,7 @@ describe("Background replacement uses the complete origin graph", () => {
 			expect(globalThis.DataUtil.generic.getVersions).toHaveBeenCalledWith(expect.objectContaining({name: "Magic Initiate", __prop: "feat"}));
 			const children = draft._engine.manifest.base.decisions.filter(decision => decision.parentSemanticKey === fixed.semanticKey);
 			expect(children.map(decision => decision.type)).toEqual(expect.arrayContaining(["nestedCantrip", "nestedSpell"]));
+			expect(children.find(decision => decision.type === "nestedCantrip").count).toBe(2);
 			expect(children.filter(decision => ["nestedCantrip", "nestedSpell"].includes(decision.type))
 				.every(decision => decision.required && decision.status === "missing")).toBe(true);
 			expect(respec._getBackgroundDraftIssues(draft).length).toBeGreaterThan(2);
@@ -167,6 +168,22 @@ describe("Background replacement uses the complete origin graph", () => {
 		} finally {
 			globalThis.DataUtil = dataUtil;
 		}
+	});
+
+	it("preserves sibling and nested additional-spell count encodings outside the origin graph", () => {
+		const descriptors = globalThis.CharacterSheetClassUtils.getChoiceDescriptors({
+			name: "Class Spell Training",
+			source: "TST",
+			additionalSpells: [{
+				known: {"_": [
+					{choose: "level=0|class=Wizard", count: 2},
+					{choose: {from: ["Light|XPHB", "Mage Hand|XPHB"], count: 2}},
+					{choose: "level=1|class=Wizard"},
+				]},
+			}],
+		}, {sourcePath: "classFeature", className: "Wizard", classSource: "XPHB"});
+		expect(descriptors.map(descriptor => descriptor.count)).toEqual([2, 2, 1]);
+		expect(descriptors.every(descriptor => descriptor.sourcePath.startsWith("classFeature.additionalSpells"))).toBe(true);
 	});
 
 	it("preserves independently owned overlap and exact ledger through Apply, reload and Undo", async () => {
