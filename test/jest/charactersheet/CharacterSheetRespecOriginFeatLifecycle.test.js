@@ -311,6 +311,145 @@ describe("Canonical origin feat lifecycle", () => {
 		expect(state.toJson()).toEqual(before);
 	});
 
+	it("acquires the exact second mixed mode despite equal weights, then clears its child and fixed grant on replacement/reload/Undo", async () => {
+		const {state, page, respec} = fixture();
+		const old = {...oldBackground, ability: [{con: 1}]};
+		const next = {
+			name: "Mixed Alternatives",
+			source: "TGTT",
+			ability: [
+				{dex: 2, choose: {from: ["str", "wis"], count: 1, amount: 1}},
+				{con: 2, choose: {from: ["int", "cha"], count: 1, amount: 1}},
+			],
+		};
+		state.setRace({name: "Dwarf", source: "XPHB"});
+		state.setBackground(old);
+		page.getBackgrounds = () => [old, next];
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const original = state.toJson();
+		const draft = await respec._createBackgroundDraft(next, {choices: {}});
+		const mode = draft._engine.manifest.base.decisions.find(decision => decision.meta.originAbilityDistribution);
+		expect(mode.options.map(option => option.weights)).toEqual([[1], [1]]);
+		await choose(draft, "nestedConfiguration", mode.options[1]);
+		const child = draft._engine.manifest.base.decisions.find(decision => decision.type === "nestedAbility");
+		expect(child.options).toEqual(["int", "cha"]);
+		expect(child.sourceKey).toContain("mode-1");
+		await choose(draft, "nestedAbility", "int");
+		expect(draft._state._data.abilityBonuses).toMatchObject({dex: 0, con: 4, int: 1});
+		expect(state.toJson()).toEqual(original);
+		await respec._stageBackgroundDraft(draft);
+		await respec._engine.apply();
+		state.loadFromJson(state.toJson());
+		const firstApplied = state.toJson();
+		const reopened = new Respec({page, state});
+		reopened._engine.begin();
+		reopened._state = reopened._engine.state;
+		expect(reopened._engine.manifest.base.decisions.find(decision => decision.type === "nestedAbility").options).toEqual(["int", "cha"]);
+		for (const key of [undefined, "unknown-mode"]) {
+			const unsafe = await reopened._createBackgroundDraft(next, {choices: {}});
+			const stored = unsafe._state._data.characterBase.decisions.find(decision => decision.semanticKey === mode.semanticKey);
+			if (key === undefined) delete stored.selection.key;
+			else stored.selection.key = key;
+			unsafe._engine.refreshManifest();
+			expect(unsafe._engine.manifest.base.decisions.find(decision => decision.semanticKey === mode.semanticKey).status).toBe("invalid");
+			expect(unsafe._engine.manifest.base.decisions.some(decision => decision.type === "nestedAbility")).toBe(false);
+			expect(unsafe._engine.getValidation().canApply).toBe(false);
+			await expect(unsafe._engine.apply()).rejects.toThrow();
+			expect(state.toJson()).toEqual(firstApplied);
+		}
+		const retarget = await reopened._createBackgroundDraft(next, {choices: {}});
+		const current = retarget._engine.manifest.base.decisions.find(decision => decision.semanticKey === mode.semanticKey);
+		await choose(retarget, "nestedConfiguration", current.options[0]);
+		const newChild = retarget._engine.manifest.base.decisions.find(decision => decision.type === "nestedAbility");
+		expect(newChild).toMatchObject({selection: null, status: "missing", options: ["str", "wis"]});
+		expect(newChild.semanticKey).not.toBe(child.semanticKey);
+		expect(retarget._state._data.abilityBonuses).toMatchObject({dex: 2, con: 2, int: 0});
+		await expect(reopened._stageBackgroundDraft(retarget)).rejects.toThrow();
+		await choose(retarget, "nestedAbility", "wis");
+		await reopened._stageBackgroundDraft(retarget);
+		await reopened._engine.apply();
+		state.loadFromJson(state.toJson());
+		expect(state._data.abilityBonuses).toMatchObject({dex: 2, con: 2, int: 0, wis: 1});
+		await reopened._engine.undo();
+		expect(state.toJson()).toEqual(firstApplied);
+		const final = new Respec({page, state});
+		final._engine.begin();
+		final._state = final._engine.state;
+		const removal = await final._createBackgroundDraft(old, {choices: {}});
+		expect(removal._state._data.abilityBonuses).toMatchObject({dex: 0, con: 3, int: 0, wis: 0});
+		expect(removal._state._data.directAbilityBonuses).toEqual({con: 2});
+	});
+
+	it.each([["con", 1], ["str", 0]])("requires actual own numeric %s delta proof (including %i) for a real acquired origin feat before reversal", async (ability, amount) => {
+		const {state, page, respec} = fixture();
+		const draft = await respec._createBackgroundDraft(background, {choices: {}});
+		await choose(draft, "nestedFeat", {name: originFeat.name, source: originFeat.source});
+		await choose(draft, "nestedAbility", ability);
+		const owned = draft._state._data.feats[0];
+		expect(Object.hasOwn(owned.appliedEffects.abilityDeltas, ability)).toBe(true);
+		expect(owned.appliedEffects.abilityDeltas[ability]).toBe(amount);
+		const child = draft._engine.manifest.base.decisions.find(decision => decision.type === "nestedAbility");
+		expect(child.receipt.effects).toContainEqual(expect.objectContaining({type: "abilityDelta", ability, amount, sourceDecisionKey: child.semanticKey}));
+		await respec._stageBackgroundDraft(draft);
+		await respec._engine.apply();
+		state.loadFromJson(state.toJson());
+		const reopened = new Respec({page, state});
+		reopened._engine.begin();
+		reopened._state = reopened._engine.state;
+		const liveBefore = state.toJson();
+		for (const damage of ["inherited", "missing", "non-numeric"]) {
+			const unsafe = await reopened._createBackgroundDraft(background, {choices: {}});
+			const feat = unsafe._state._data.feats[0];
+			const existing = {...feat.appliedEffects.abilityDeltas};
+			delete existing[ability];
+			feat.appliedEffects.abilityDeltas = damage === "inherited"
+				? Object.assign(Object.create({[ability]: amount}), existing)
+				: {...existing, ...(damage === "non-numeric" ? {[ability]: String(amount)} : {})};
+			expect(Object.hasOwn(feat.appliedEffects.abilityDeltas, ability)).toBe(damage === "non-numeric");
+			if (damage === "inherited") expect(feat.appliedEffects.abilityDeltas[ability]).toBe(amount);
+			const before = unsafe._state.toJson();
+			const manifest = unsafe._engine.manifest;
+			await expect(choose(unsafe, "nestedAbility", ability === "con" ? "str" : "con")).rejects.toThrow("ability receipt no longer agrees");
+			expect(unsafe._engine.state.toJson()).toEqual(before);
+			expect(unsafe._engine.manifest).toEqual(manifest);
+			expect(state.toJson()).toEqual(liveBefore);
+			expect(Object.hasOwn(unsafe._engine.state._data.feats[0].appliedEffects.abilityDeltas, ability)).toBe(damage === "non-numeric");
+		}
+		const valid = await reopened._createBackgroundDraft(background, {choices: {}});
+		await choose(valid, "nestedAbility", ability === "con" ? "str" : "con");
+		expect(valid._engine.getValidation().canApply).toBe(true);
+		expect(valid._state.getAbilityBase(ability)).toBe(ability === "str" ? 20 : 10);
+	});
+
+	it("retains a keyless legacy distribution only when its weights select one canonical mode", async () => {
+		const {state, page, respec} = fixture();
+		const old = {...oldBackground, ability: [{con: 1}]};
+		const next = {
+			name: "Weighted Legacy",
+			source: "XPHB",
+			ability: [
+				{choose: {weighted: {from: ["con", "int", "wis"], weights: [2, 1]}}},
+				{choose: {weighted: {from: ["con", "int", "wis"], weights: [1, 1, 1]}}},
+			],
+		};
+		state.setRace({name: "Dwarf", source: "XPHB"});
+		state.setBackground(old);
+		page.getBackgrounds = () => [old, next];
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const draft = await respec._createBackgroundDraft(next, {choices: {}});
+		const mode = draft._engine.manifest.base.decisions.find(decision => decision.meta.originAbilityDistribution);
+		await choose(draft, "nestedConfiguration", mode.options[1]);
+		const stored = draft._state._data.characterBase.decisions.find(decision => decision.semanticKey === mode.semanticKey);
+		delete stored.selection.key;
+		draft._engine.refreshManifest();
+		expect(draft._engine.manifest.base.decisions.find(decision => decision.semanticKey === mode.semanticKey).status).toBe("resolved");
+		expect(draft._engine.manifest.base.decisions.filter(decision => decision.type === "nestedAbility")).toHaveLength(3);
+		expect(draft._engine.manifest.base.decisions.filter(decision => decision.type === "nestedAbility")
+			.every(decision => decision.sourceKey.includes("mode-1") && decision.status === "missing")).toBe(true);
+	});
+
 	it("keeps an independent repeatable instance of the same feat when its background-owned instance is removed", async () => {
 		const {state, page, respec} = fixture();
 		const feat = {...originFeat, repeatable: true};

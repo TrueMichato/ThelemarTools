@@ -446,10 +446,13 @@ class CharacterSheetRespecEngine {
 		}
 		if (isOriginFeatAbility) {
 			const deltas = (decision.receipt?.effects || []).filter(effect => effect.type === "abilityDelta");
-			if (!ownedFeat || !deltas.length || deltas.some(effect =>
+			const ownedDeltas = ownedFeat?.appliedEffects?.abilityDeltas;
+			if (!ownedFeat || !ownedDeltas || Array.isArray(ownedDeltas) || !deltas.length || deltas.some(effect =>
 				effect.sourceDecisionKey !== decision.semanticKey
 				|| !Number.isFinite(effect.amount) || effect.amount < 0
-				|| ownedFeat.appliedEffects?.abilityDeltas?.[effect.ability] !== effect.amount)) {
+				|| !Object.hasOwn(ownedDeltas, effect.ability)
+				|| !Number.isFinite(ownedDeltas[effect.ability])
+				|| ownedDeltas[effect.ability] !== effect.amount)) {
 				throw new Error("The origin feat's ability receipt no longer agrees with its recorded owner. Restore its saved choices before replacing this grant.");
 			}
 			reversal = CharacterSheetProgression._copy(reversal);
