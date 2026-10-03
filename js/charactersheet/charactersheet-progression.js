@@ -979,6 +979,11 @@ class CharacterSheetProgression {
 			optionalFeatures: page?.getOptionalFeatures?.() || [],
 			feats: page?.getFeats?.() || [],
 		});
+		if (scope === "origin") {
+			descriptors = descriptors.map(descriptor => ({
+				...descriptor, rules: {...descriptor.rules, identityMode: "opportunity"},
+			}));
+		}
 		const isLevelFeat = parentDecision?.scope === "level"
 			&& ["feat", "asiOrFeat", "classFeatProgressionFeat", "nestedFeat"].includes(parentDecision.type);
 		const featChoiceSpec = isLevelFeat
@@ -1600,9 +1605,20 @@ class CharacterSheetProgression {
 					if (!isGranted || rawKey === "anyFromCategory") return;
 					const parsed = CharacterSheetProgression._parseFixedOriginFeatGrant(rawKey);
 					if (!parsed) return;
-					const catalogFeat = (page?.getFeats?.() || []).find(feat =>
-						CharacterSheetProgression.getEntityUid(feat) === CharacterSheetProgression.getEntityUid(parsed),
-					);
+					const featCatalog = page?.getFeats?.() || [];
+					const referenceUid = CharacterSheetProgression._normalize(rawKey);
+					let catalogFeat = featCatalog.find(feat => CharacterSheetProgression.getEntityUid(feat) === referenceUid);
+					if (!catalogFeat && rawKey.includes(";")) {
+						const [baseName, source] = rawKey.split("|");
+						const parent = featCatalog.find(feat => CharacterSheetProgression.getEntityUid(feat) ===
+							CharacterSheetProgression._normalize(`${baseName.split(";")[0]}|${source}`));
+						if (parent && globalThis.DataUtil?.generic?.getVersions) {
+							catalogFeat = DataUtil.generic.getVersions({...parent, __prop: "feat"})
+								.find(feat => CharacterSheetProgression.getEntityUid(feat) === referenceUid);
+						}
+					}
+					catalogFeat ||= featCatalog.find(feat => CharacterSheetProgression.getEntityUid(feat) ===
+						CharacterSheetProgression.getEntityUid(parsed));
 					const selection = {name: catalogFeat?.name || parsed.name, source: catalogFeat?.source || parsed.source};
 					const semanticKey = CharacterSheetProgression.getFixedOriginFeatSemanticKey({
 						originType,
@@ -1611,7 +1627,7 @@ class CharacterSheetProgression {
 						featSource: selection.source,
 					});
 					const stored = storedBasePool.get(semanticKey)?.find(decision => decision.selection != null);
-					base.decisions.push(CharacterSheetProgression._makeDecision({
+					const fixedDecision = CharacterSheetProgression._makeDecision({
 						characterLevel: 0,
 						className: "Base",
 						classSource: "",
@@ -1626,6 +1642,7 @@ class CharacterSheetProgression {
 						receipt: stored?.receipt || null,
 						meta: {
 							fixedOriginGrant: true,
+							legacyOriginFeatName: parsed.name,
 							originGrantIndex: featIx,
 						},
 						scope: "origin",
@@ -1644,7 +1661,34 @@ class CharacterSheetProgression {
 							occurrence: featIx,
 							pickSlot: grantIx,
 						},
-					}));
+					});
+					base.decisions.push(fixedDecision);
+					if (!catalogFeat) {
+						issues.push({level: 0,
+							severity: "error",
+							code: "missing-choice-catalog",
+							ownerUid: originUid,
+							sourcePath: fixedDecision.provenance.sourcePath,
+							message: `The fixed origin feat ${selection.name}|${selection.source} is not available.`});
+						return;
+					}
+					const acquired = (state?.getFeats?.() || []).find(feat => feat.sourceDecisionKey === semanticKey);
+					CharacterSheetProgression._discoverNestedForEntity({
+						entity: {...catalogFeat, ...(acquired || {})},
+						page,
+						state,
+						levelInfo: {characterLevel: 0, className: "Base", classSource: "", classLevel: 0},
+						decisions: [],
+						levelDecisions: base.decisions,
+						storedPool: storedBasePool,
+						parentDecision: fixedDecision,
+						parentEntity: entity,
+						acquisitionKey: semanticKey,
+						rootSemanticKey: entityKey,
+						depth: 2,
+						issues,
+						scope: "origin",
+					});
 				});
 			});
 			descriptors.forEach((descriptor, slot) => {
@@ -1690,9 +1734,12 @@ class CharacterSheetProgression {
 					&& originType === "race"
 					&& Array.isArray(selected)
 					&& selected.length === descriptor.count;
+				const originSelection = originType === "background" && ["skill", "tool", "language"].includes(descriptor.kind)
+					? CharacterSheetProgression._getOriginProficiencySelection(descriptor, choices)
+					: null;
 				const selectedFallback = hasOwnerQualifiedRaceAbilityChoices || hasCompleteRaceAbilityChoices
 					? selected
-					: storedDecision?.selection ?? selected ??
+					: storedDecision?.selection ?? originSelection ?? selected ??
 					choices?.[`selected${descriptor.kind[0].toUpperCase()}${descriptor.kind.slice(1)}s`] ??
 					(descriptor.kind === "ability" && descriptor.sourcePath.includes("additionalSpells")
 						? descriptor.options?.[0]
@@ -1794,12 +1841,12 @@ class CharacterSheetProgression {
 								classSource: "",
 								classLevel: 0,
 							},
-							decisions: base.decisions,
+							decisions: [],
 							levelDecisions: base.decisions,
 							storedPool: storedBasePool,
 							parentDecision: decision,
 							parentEntity: entity,
-							acquisitionKey: `${key}.${descriptor.grantKey}.${valueIx}`,
+							acquisitionKey: `${key}.${CharacterSheetProgression.getEntityUid(selectedEntity)}.${valueIx}`,
 							rootSemanticKey: entityKey,
 							depth: 2,
 							issues,
@@ -1833,6 +1880,17 @@ class CharacterSheetProgression {
 			}));
 		}
 		return base;
+	}
+
+	static _getOriginProficiencySelection (descriptor, choices) {
+		const key = {skill: "selectedSkills", tool: "selectedTools", language: "selectedLanguages"}[descriptor.kind];
+		const recorded = choices?.[key];
+		const values = Array.isArray(recorded) ? recorded : Object.values(recorded || {}).flat();
+		const normalized = values.map(value => typeof value === "string" ? value : value?.[descriptor.kind])
+			.filter(value => value != null);
+		const legal = new Set((descriptor.options || []).map(value => CharacterSheetProgression._normalize(value?.name || value)));
+		const matching = normalized.filter(value => legal.has(CharacterSheetProgression._normalize(value)));
+		return matching.length ? matching : null;
 	}
 
 	static _appendUnplacedFeatDecisions ({base, decisions, page, state, storedBasePool}) {

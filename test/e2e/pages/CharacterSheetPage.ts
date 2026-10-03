@@ -1,5 +1,6 @@
 import {Locator, Page, expect} from "@playwright/test";
 import {waitForToolsLoaded, uiGate} from "../utils/waitHelpers";
+import {RespecBackgroundPage} from "./RespecBackgroundPage";
 
 export interface FeatureCompanionIdentity {
 	ownerUid: string;
@@ -1339,23 +1340,14 @@ export class CharacterSheetPage {
 	}
 
 	async selectRespecBackgroundAndAbilities (name: string, source: string, abilities: [string, string]): Promise<void> {
-		const modal = this.page.locator(".ve-ui-modal__overlay:visible").last();
-		await modal.locator(".charsheet__respec-search-row input").fill(name);
-		const row = modal.locator(".charsheet__respec-feat-item")
-			.filter({has: this.page.locator("strong", {hasText: name})})
-			.filter({hasText: source});
-		await expect(row).toHaveCount(1);
-		await row.click();
-		const choices = modal.locator(".charsheet__respec-choices-panel");
-		for (const select of await choices.locator("select:not([data-asi-idx])").all()) {
-			await select.selectOption({index: 1});
+		const background = new RespecBackgroundPage(this.page);
+		await background.select(name, source);
+		const labels: Record<string, string> = {str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"};
+		for (let ix = 0; ix < abilities.length; ix++) {
+			await background.choose("nestedAbility", [labels[abilities[ix]]], ix);
 		}
-		const asi = choices.locator(".charsheet__respec-asi-choices select");
-		await expect(asi).toHaveCount(2);
-		for (let ix = 0; ix < abilities.length; ix++) await asi.nth(ix).selectOption(abilities[ix]);
-		await expect(modal.locator(".charsheet__respec-btn-row button", {hasText: "Change Background"})).toBeEnabled();
-		await modal.locator(".charsheet__respec-btn-row button", {hasText: "Change Background"}).click();
-		await expect(modal).toBeHidden();
+		await background.completeMissing();
+		await background.commit();
 	}
 
 	async getRespecDraftStatus (): Promise<string> {

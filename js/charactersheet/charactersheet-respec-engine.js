@@ -10,6 +10,7 @@ class CharacterSheetRespecEngine {
 		this._manifest = null;
 		this._originalManifest = null;
 		this._undoSnapshot = null;
+		this._undoRawData = null;
 		this._isDirty = false;
 		this._preexistingPendingKeys = new Set();
 	}
@@ -278,6 +279,7 @@ class CharacterSheetRespecEngine {
 	_setDirty () {
 		this._isDirty = true;
 		this._undoSnapshot = null;
+		this._undoRawData = null;
 	}
 
 	getDecision (decisionId) {
@@ -563,6 +565,7 @@ class CharacterSheetRespecEngine {
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
 		const isDirtySnapshot = this._isDirty;
 		const undoSnapshot = this._undoSnapshot;
+		const undoRawData = this._undoRawData;
 
 		const {container} = this._getDecisionStore(decision);
 		const stored = container?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey)
@@ -586,6 +589,7 @@ class CharacterSheetRespecEngine {
 			this._manifest = manifestSnapshot;
 			this._isDirty = isDirtySnapshot;
 			this._undoSnapshot = undoSnapshot;
+			this._undoRawData = undoRawData;
 			throw error;
 		};
 
@@ -745,6 +749,7 @@ class CharacterSheetRespecEngine {
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
 		const isDirtySnapshot = this._isDirty;
 		const undoSnapshot = this._undoSnapshot;
+		const undoRawData = this._undoRawData;
 		try {
 			const result = await apply({state: this._candidateState});
 			this._setDirty();
@@ -757,6 +762,7 @@ class CharacterSheetRespecEngine {
 			this._manifest = manifestSnapshot;
 			this._isDirty = isDirtySnapshot;
 			this._undoSnapshot = undoSnapshot;
+			this._undoRawData = undoRawData;
 			throw error;
 		}
 	}
@@ -870,6 +876,7 @@ class CharacterSheetRespecEngine {
 		}
 
 		this._undoSnapshot = beforeApply;
+		this._undoRawData = beforeApplyData;
 		this._originalSnapshot = this._liveState.toJson();
 		this._candidateState = null;
 		this._manifest = null;
@@ -884,7 +891,7 @@ class CharacterSheetRespecEngine {
 		const current = this._liveState.toJson();
 		const currentData = CharacterSheetProgression._copy(this._liveState._data);
 		try {
-			if (this._liveState.loadFromJson(restore) === false) throw new Error("The previous character snapshot could not be restored.");
+			this._restoreLiveSnapshot(restore, CharacterSheetProgression._copy(this._undoRawData));
 			await this._page.saveCharacter();
 			this._page.renderCharacter();
 		} catch (error) {
@@ -892,6 +899,7 @@ class CharacterSheetRespecEngine {
 			throw error;
 		}
 		this._undoSnapshot = null;
+		this._undoRawData = null;
 		return true;
 	}
 }

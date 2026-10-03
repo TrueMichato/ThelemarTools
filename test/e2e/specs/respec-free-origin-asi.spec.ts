@@ -32,7 +32,10 @@ test("Builder free mixed-origin ASI is editable in Respec and survives Apply and
 		expect.objectContaining({type: "nestedAbility", status: "resolved", selection: "dex", ownerUid: "dwarf|xphb"}),
 		expect.objectContaining({type: "nestedAbility", status: "resolved", selection: "con", ownerUid: "dwarf|xphb"}),
 	]);
-	expect(original.errors, JSON.stringify(original)).toEqual([]);
+	expect(original.errors, JSON.stringify(original)).toEqual([
+		expect.objectContaining({code: "decision-missing", message: "toolProficiencies is missing."}),
+		expect.objectContaining({code: "decision-missing", message: "languageProficiencies is missing."}),
+	]);
 
 	await charSheet.openRespecBackgroundEditor();
 	await charSheet.selectRespecBackgroundAndAbilities("Outlander", "PHB", ["str", "wis"]);

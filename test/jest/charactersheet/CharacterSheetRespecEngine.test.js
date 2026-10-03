@@ -272,6 +272,17 @@ describe("CharacterSheetRespecEngine", () => {
 		expect(state.getLevelHistoryEntry(1).choices.skills).toEqual(["athletics"]);
 	});
 
+	it("Undo restores exact original raw resources instead of accepting migration loss", async () => {
+		state._data.resources.push({id: "old-resource", name: "Second Wind", max: 1, current: 1, recharge: "short", featureId: "legacy-feature"});
+		const original = structuredClone(state._data);
+		engine.begin();
+		await engine.stageCandidateMutation(({state: candidate}) => candidate.setName("Background repair"));
+		await engine.apply();
+		await engine.undo();
+		expect(state._data).toEqual(original);
+		expect(state._data.resources).toContainEqual(expect.objectContaining({id: "old-resource", current: 1}));
+	});
+
 	it("refuses to overwrite live changes made while the draft was open", async () => {
 		engine.begin();
 		engine.state.updateLevelChoice(1, {skills: ["perception"]});

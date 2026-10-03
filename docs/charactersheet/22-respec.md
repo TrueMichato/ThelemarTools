@@ -70,6 +70,25 @@ their discovery; they never persist full catalog entities.
 
 ### Nested decisions
 
+**Change Background** edits a second isolated draft inside Respec. It exposes
+the origin graph's required skills, tools, languages, ability distribution,
+origin feat and selected feat/feature children through the existing inline
+decision editor. Fixed grants are shown without unnecessary controls. PHB
+racial ASIs suppress background ability controls; XPHB weighted distributions
+and mixed-origin free +2/+1 retain their existing ownership rules.
+Changing a parent clears its old branch and requires the new children.
+Cancel discards the whole background dialog, including staged child choices.
+Change Background transfers the completed graph to the Respec candidate, not
+the live character. Apply, save rollback and Undo remain engine transactions.
+
+Background proficiency descriptors expand `any`, `anyStandard`,
+`anyArtisansTool`, `anyMusicalInstrument` and `anyTool` to canonical catalogs
+with the authored count. Exact recorded selections remain origin evidence;
+missing legacy selections are repairable, not inferred from the complete
+proficiency list. Fixed background grants use the source-qualified origin
+owner; independent overlap and unrelated ability/item/custom bonuses survive
+replacement. Selected and fixed origin feats retain nested child decisions.
+
 Feature, feat, optional-feature, species, and background descriptors are
 discovered recursively. A selected parent grant becomes the parent node for
 its child decisions, so paths such as `Divine Order → Thaumaturge → cantrip`

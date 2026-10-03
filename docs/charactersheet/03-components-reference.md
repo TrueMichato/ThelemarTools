@@ -334,6 +334,12 @@ players create custom backgrounds through the dedicated builder action instead.
 The canonical data entity remains loaded so existing saves continue to render and
 can be edited or replaced.
 
+Respec background replacement uses an isolated origin-choice graph, including
+selectable skills, tools, languages, ability distributions, origin feats, and
+the chosen feat's nested choices. Fixed grants are shown read-only; changing a
+parent clears its previous child choices. Cancel leaves the character and main
+Respec draft unchanged. See [Respec](22-respec.md#nested-decisions).
+
 ### Key State Properties
 
 ```javascript

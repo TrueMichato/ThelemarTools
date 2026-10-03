@@ -1,5 +1,6 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
@@ -479,11 +480,13 @@ describe("CharacterSheetRespec race/background", () => {
 	// region _applyBackgroundChange
 
 	describe("_applyBackgroundChange clears old grants", () => {
-		test("removes features with Background featureType", () => {
+		test("removes only outgoing background-owned features and preserves independent backgrounds", () => {
 			const respec = makeRespec({
-				background: {name: "Sage", source: "PHB"},
+				background: {name: "Sage", source: "PHB", entries: [{name: "Researcher", entries: ["Research"]}]},
 				features: [
-					{id: "bf1", name: "Researcher", featureType: "Background"},
+					{id: "bf1", name: "Researcher", source: "PHB", featureType: "Background"},
+					{id: "bf2", name: "Independent", source: "TGTT", featureType: "Background"},
+					{id: "bf3", name: "Researcher", source: "PHB", featureType: "Background", sourceDecisionKey: "independent-owner"},
 					{id: "cf1", name: "Extra Attack", featureType: "Class"},
 				],
 			});
@@ -498,6 +501,8 @@ describe("CharacterSheetRespec race/background", () => {
 
 			expect(respec._test.removedFeatures).toContain("bf1");
 			expect(respec._test.removedFeatures).not.toContain("cf1");
+			expect(respec._test.removedFeatures).not.toContain("bf2");
+			expect(respec._test.removedFeatures).not.toContain("bf3");
 		});
 
 		test("clears old background skills", () => {
@@ -635,7 +640,7 @@ describe("CharacterSheetRespec race/background", () => {
 			expect(respec._test.levelHistoryUpdates.updates.background.name).toBe("Criminal");
 		});
 
-		test("reapplies racial ability bonuses after clearing", () => {
+		test("preserves racial and independent bonuses without clearing or reapplying", () => {
 			const respec = makeRespec({
 				race: {name: "Elf", source: "PHB", ability: [{dex: 2}]},
 				background: {name: "Sage", source: "PHB"},
@@ -646,11 +651,11 @@ describe("CharacterSheetRespec race/background", () => {
 				choices: {background: {name: "Sage", source: "PHB"}},
 			};
 			const newBg = {name: "Criminal", source: "PHB"};
+			respec._state.setAbilityBonus("dex", 5);
 
 			respec._applyBackgroundChange(history, newBg);
 
-			// Racial ability bonuses should be reapplied
-			expect(respec._test.abilityBonuses.dex).toBe(2);
+			expect(respec._test.abilityBonuses.dex).toBe(5);
 		});
 	});
 
@@ -912,7 +917,7 @@ describe("CharacterSheetRespec race/background", () => {
 	// region _reapplyRacialAbilityBonuses with user choices
 
 	describe("_reapplyRacialAbilityBonuses includes user-chosen racial bonuses", () => {
-		test("reapplies both fixed and user-chosen racial ability bonuses", () => {
+		test("preserves both fixed and user-chosen racial ability bonuses", () => {
 			const respec = makeRespec({
 				race: {name: "Half-Elf", source: "PHB", ability: [{cha: 2, choose: {from: ["str", "dex", "con", "int", "wis"], count: 2, amount: 1}}]},
 				background: {name: "Sage", source: "PHB"},
@@ -928,6 +933,9 @@ describe("CharacterSheetRespec race/background", () => {
 				},
 			};
 			const newBg = {name: "Criminal", source: "PHB"};
+			respec._state.setAbilityBonus("cha", 2);
+			respec._state.setAbilityBonus("dex", 1);
+			respec._state.setAbilityBonus("con", 1);
 
 			respec._applyBackgroundChange(history, newBg);
 
