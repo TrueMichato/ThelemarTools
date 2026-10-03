@@ -1035,11 +1035,36 @@ describe("CharacterSheetRespec workspace", () => {
 		]);
 		expect([respec._state.getAbilityBase("str"), respec._state.getAbilityBase("dex")]).toEqual([20, 11]);
 		expect(respec._state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({str: 1});
+		const pairedOwner = respec._state.getFeats()[0].sourceDecisionKey;
 		expect(respec._applyImprovementChange(splitDecision, {mode: "asi", asi: {con: 2}})).toBe(true);
 		expect(respec._state.getAbilityBase("str")).toBe(19);
 		expect(respec._state.getAbilityBase("con")).toBe(12);
 		expect(respec._state.getAbilityBase("dex")).toBe(10);
 		expect(respec._state.getFeats().map(it => it.name)).toEqual(["Strength Training"]);
+		const conDecision = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
+		expect(conDecision.receipt.effects.filter(effect => effect.type === "abilityDelta")).toEqual([
+			{type: "abilityDelta", sourceDecisionKey: conDecision.semanticKey, ability: "con", amount: 2, before: 10, after: 12},
+		]);
+		expect(respec._state.getFeats()[0]).toMatchObject({
+			name: strengthFeat.name,
+			source: strengthFeat.source,
+			sourceDecisionKey: pairedOwner,
+			appliedEffects: {abilityDeltas: {str: 1}},
+		});
+		expect(respec._applyImprovementChange(conDecision, {mode: "asi", asi: {str: 2}})).toBe(true);
+		const cappedDecision = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
+		expect(cappedDecision.receipt.effects.filter(effect => effect.type === "abilityDelta")).toEqual([
+			{type: "abilityDelta", sourceDecisionKey: cappedDecision.semanticKey, ability: "str", amount: 2, before: 18, after: 20},
+		]);
+		expect([respec._state.getAbilityBase("str"), respec._state.getAbilityBase("con")]).toEqual([20, 10]);
+		expect(respec._state.getFeats()[0]).toMatchObject({
+			name: strengthFeat.name,
+			source: strengthFeat.source,
+			sourceDecisionKey: pairedOwner,
+			appliedEffects: {abilityDeltas: {str: 0}},
+		});
+		expect(pairedOwner).not.toBe(cappedDecision.semanticKey);
+		expect(respec._applyImprovementChange(cappedDecision, {mode: "asi", asi: {con: 2}})).toBe(true);
 		const replacement = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
 		expect(replacement.receipt.effects.find(effect => effect.type === "abilityDelta"))
 			.toMatchObject({ability: "con", amount: 2, before: 10, after: 12});
