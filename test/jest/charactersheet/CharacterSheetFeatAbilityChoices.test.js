@@ -95,7 +95,7 @@ describe("authored feat ability alternatives", () => {
 		state.setAbilityBase("str", 20);
 		state.setAbilityBase("dex", 19);
 		const first = apply(state, split);
-		expect(first.appliedEffects.abilityDeltas).toEqual({dex: 1});
+		expect(first.appliedEffects.abilityDeltas).toEqual({str: 0, dex: 1});
 		apply(state, {ability: "wis"}, "test:asi:8");
 		const loaded = State.deserialize(state.serialize());
 		loaded.removeFeat(first.id, first.source);

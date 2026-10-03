@@ -5196,11 +5196,12 @@ class CharacterSheetQuickBuild {
 			this._state.ensureUnarmedStrike();
 
 			// 3. Apply ASI / Feat
+			let asiDecision = null;
 			if (analysis.hasAsi) {
 				const asiSel = this._selections.asi[levelKey];
 				if (asiSel) {
 					const classEntry = {name: className, source: classSource};
-					this._applyAsiOrFeat(asiSel, classEntry, classLevel, classData);
+					asiDecision = this._applyAsiOrFeat(asiSel, classEntry, classLevel, classData);
 				}
 			}
 
@@ -5277,6 +5278,7 @@ class CharacterSheetQuickBuild {
 
 			// 14. Stage level history entry (record after global selections are finalized)
 			const historyEntry = this._buildHistoryEntry(analysis, levelKey);
+			if (asiDecision) historyEntry.decisions = [...(historyEntry.decisions || []), asiDecision];
 			pendingHistoryEntries.push(historyEntry);
 		}
 
@@ -5495,35 +5497,14 @@ class CharacterSheetQuickBuild {
 			};
 		};
 
-		// Apply the ASI portion idempotently. `setAbilityBase` is a non-idempotent
-		// `+= delta` write, but `addFeature` dedupes the "Ability Score Improvement"
-		// tracking record by name+source+className+level. Gating the base writes on a
-		// FRESH feature add means a re-run (double-finish, second pass, re-analyze) can
-		// never silently double the base score (CS-BUG: DEX/CON base inflation).
-		const applyAsi = () => {
-			const increases = [];
-			Parser.ABIL_ABVS.forEach(abl => {
-				if (asiSel.abilityChoices?.[abl]) increases.push(`${Parser.attAbvToFull(abl)} +${asiSel.abilityChoices[abl]}`);
-			});
-			if (!increases.length) return;
-			const added = this._state.addFeature({
-				name: "Ability Score Improvement",
-				source: classData.source,
-				className: classEntry.name,
-				classSource: classEntry.source,
-				level: classLevel,
-				featureType: "Class",
-				description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
-				isAsiChoice: true,
-			});
-			if (!added) return; // already recorded for this slot — base already reflects it
-			Parser.ABIL_ABVS.forEach(abl => {
-				if (asiSel.abilityChoices?.[abl]) {
-					const currentBase = this._state.getAbilityBase(abl);
-					this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(currentBase, asiSel.abilityChoices[abl], 20));
-				}
-			});
-		};
+		const applyAsi = () => CharacterSheetClassUtils.applyClassAsi(this._state, {
+			className: classEntry.name,
+			classSource: classEntry.source,
+			classLevel,
+			characterLevel: this._state.getTotalLevel(),
+			asi: asiSel.abilityChoices,
+			grantBoth: asiSel.isBoth,
+		});
 
 		// Apply the feat portion idempotently. `applyFeatBonuses` writes BASE ability
 		// scores non-idempotently; `addFeat` dedupes by name+source and returns whether a
@@ -5549,13 +5530,15 @@ class CharacterSheetQuickBuild {
 		};
 
 		if (asiSel.isBoth) {
-			applyAsi();
+			const decision = applyAsi();
 			applyFeat();
+			return decision;
 		} else if (asiSel.mode === "feat" && asiSel.feat) {
 			applyFeat();
 		} else if (asiSel.mode === "asi") {
-			applyAsi();
+			return applyAsi();
 		}
+		return null;
 	}
 
 	_applyOptionalFeaturesForLevel (analysis, levelKey) {

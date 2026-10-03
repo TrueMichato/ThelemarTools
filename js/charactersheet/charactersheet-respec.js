@@ -4892,7 +4892,7 @@ class CharacterSheetRespec {
 		);
 		try {
 			this._engine.stageGraphMutation(decision.id, null, {
-				apply: ({state}) => {
+				apply: ({state, captureReceiptBaseline, captureReceiptResult}) => {
 					const previousState = this._state;
 					this._state = state;
 					try {
@@ -4900,8 +4900,10 @@ class CharacterSheetRespec {
 							throwOnError: true,
 							skipLedgerUpdate: true,
 							skipPreviousFeatAbilityDeltas: hasAbilityChildReceipt,
+							captureReceiptBaseline,
+							captureReceiptResult,
 						});
-						return {selection: result?.selection};
+						return {selection: result?.selection, ...(result?.receipt ? {receipt: result.receipt} : {})};
 					} finally {
 						this._state = previousState;
 					}
@@ -4945,7 +4947,7 @@ class CharacterSheetRespec {
 	_applyImprovementChangeInner (
 		decision,
 		next,
-		{throwOnError = false, skipLedgerUpdate = false, skipPreviousFeatAbilityDeltas = false} = {},
+		{throwOnError = false, skipLedgerUpdate = false, skipPreviousFeatAbilityDeltas = false, captureReceiptBaseline, captureReceiptResult} = {},
 	) {
 		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
 		const snapshot = this._state.toJson();
@@ -4961,6 +4963,25 @@ class CharacterSheetRespec {
 				: previous?.mode === "feat"
 					? previous.feat
 					: null;
+			const previousAsiEffects = decision.receipt?.effects?.filter(effect => effect.type === "abilityDelta") || [];
+			if (previousAsi && Object.keys(previousAsi).length) {
+				const receipt = decision.receipt;
+				const abilities = Object.keys(previousAsi).filter(ability => Number(previousAsi[ability]) > 0);
+				const isProven = receipt?.version === 1 && receipt.sourceDecisionKey === decision.semanticKey
+					&& previousAsiEffects.length === abilities.length
+					&& abilities.every(ability => {
+						const matches = previousAsiEffects.filter(effect => effect.ability === ability);
+						const effect = matches[0];
+						return matches.length === 1 && Parser.ABIL_ABVS.includes(ability)
+							&& effect.sourceDecisionKey === decision.semanticKey
+							&& [effect.amount, effect.before, effect.after].every(Number.isFinite)
+							&& effect.amount >= 0 && effect.amount <= Number(previousAsi[ability])
+							&& effect.after - effect.before === effect.amount;
+					});
+				if (!isProven) {
+					throw new Error("Cannot safely replace this ASI: its saved acquisition does not prove the actual applied ability increases. Authored amounts may have been reduced by the cap. Keep the original save and repair or rebuild this acquisition from evidenced history; do not infer its contribution from current totals. Other Respec choices remain available.");
+				}
+			}
 			const storedPreviousFeat = this._getFeatOwnedByDecision(decision, previousFeat);
 			const ownsPreviousFeat = !!storedPreviousFeat;
 			let pairedFeat = null;
@@ -4993,11 +5014,15 @@ class CharacterSheetRespec {
 				}
 			}
 
-			Object.entries(previousAsi || {}).forEach(([ability, bonus]) => {
-				this._state.setAbilityBase(ability, Math.max(1, this._state.getAbilityBase(ability) - (Number(bonus) || 0)));
-			});
+			if (previousAsi) {
+				previousAsiEffects.forEach(effect => {
+					this._state.setAbilityBase(effect.ability, this._state.getAbilityBase(effect.ability) - effect.amount);
+				});
+			}
 			this._state.getFeatures()
-				.filter(feature => feature.isAsiChoice && Number(feature.level) === Number(decision.characterLevel))
+				.filter(feature => feature.isAsiChoice && feature.className === decision.className
+					&& (feature.classSource || feature.source) === decision.classSource
+					&& Number(feature.level) === Number(decision.classLevel))
 				.forEach(feature => {
 					if (feature.id) this._state.removeFeature(feature.id);
 					else this._state._data.features = this._state._data.features.filter(it => it !== feature);
@@ -5010,25 +5035,26 @@ class CharacterSheetRespec {
 			}
 
 			let selection;
+			let receipt;
 			if (next.mode === "asi") {
 				if (decision.type === "feat") throw new Error("This level grants a feat and cannot be changed to an ASI.");
 				const asi = MiscUtil.copyFast(next.asi || {});
 				const total = Object.values(asi).reduce((sum, value) => sum + (Number(value) || 0), 0);
 				if (total !== 2) throw new Error("An Ability Score Improvement must allocate exactly 2 points.");
-				Object.entries(asi).forEach(([ability, bonus]) => {
-					const current = this._state.getAbilityBase(ability);
-					this._state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(current, Number(bonus) || 0, 20));
-				});
-				this._state.addFeature({
-					name: "Ability Score Improvement",
-					source: decision.classSource,
+				captureReceiptBaseline?.();
+				const acquired = CharacterSheetClassUtils.applyClassAsi(this._state, {
 					className: decision.className,
 					classSource: decision.classSource,
-					level: decision.characterLevel,
-					featureType: "Class",
-					description: `<p><strong>Ability Score Increases:</strong> ${Object.entries(asi).map(([ability, value]) => `${Parser.attAbvToFull(ability)} +${value}`).join(", ")}</p>`,
-					isAsiChoice: true,
+					classLevel: decision.classLevel,
+					characterLevel: decision.characterLevel,
+					asi,
+					grantBoth: decision.type === "asi",
 				});
+				if (acquired?.semanticKey !== decision.semanticKey || !acquired.receipt) {
+					throw new Error("The replacement ASI could not record its acquisition receipt.");
+				}
+				receipt = acquired.receipt;
+				captureReceiptResult?.();
 				selection = decision.type === "asi" ? asi : {mode: "asi", asi};
 			} else if (next.mode === "feat") {
 				const feat = MiscUtil.copyFast(next.feat);
@@ -5079,7 +5105,7 @@ class CharacterSheetRespec {
 			// prevents a caller from mutating first and snapshotting afterward.
 			if (!skipLedgerUpdate) throw new Error("Improvement mechanics must be staged through the Respec engine.");
 			this._recalcHpPreservingHealing();
-			return {selection};
+			return {selection, ...(receipt ? {receipt} : {})};
 		} catch (error) {
 			if (throwOnError) throw error;
 			this._state.loadFromJson(snapshot);

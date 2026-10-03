@@ -4745,6 +4745,15 @@ class CharacterSheetLevelUp {
 		// Thelemar rule: applies at CHARACTER level 4, not per-class level 4 (matters for multiclass).
 		// targetClass.level was just updated above, so getTotalLevel() already reflects the new character level.
 		const isBothAsiAndFeat = this._state.shouldGrantBothAsiAndFeat(this._state.getTotalLevel() || 0);
+		let asiDecision = null;
+		const applyAsi = () => CharacterSheetClassUtils.applyClassAsi(this._state, {
+			className: classEntry.name,
+			classSource: classEntry.source,
+			classLevel: newLevel,
+			characterLevel: this._state.getTotalLevel(),
+			asi: asiChoices,
+			grantBoth: isBothAsiAndFeat,
+		});
 		const getSelectedFeatForAcquisition = () => {
 			if (!selectedFeat?.repeatable) return selectedFeat;
 			const opportunity = CharacterSheetClassUtils.getImprovementOpportunity(classData, newLevel, {
@@ -4759,34 +4768,7 @@ class CharacterSheetLevelUp {
 
 		// Apply ASI and/or feat
 		if (isBothAsiAndFeat) {
-			// Thelemar rule: Apply BOTH ASI and Feat at level 4
-			// Apply ability score increases. Add the tracking feature FIRST and gate the
-			// non-idempotent base-score writes on a fresh add, so a re-run can never double
-			// the base (addFeature dedupes by name+source+className+level).
-			/** @type {*[]} */ const increases = [];
-			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-				if ((/** @type {*} */ (asiChoices))[abl]) increases.push(`${Parser.attAbvToFull(abl)} +${(/** @type {*} */ (asiChoices))[abl]}`);
-			});
-			if (increases.length > 0) {
-				const asiFeature = {
-					name: "Ability Score Improvement",
-					source: classData.source,
-					className: classEntry.name,
-					classSource: classEntry.source,
-					level: newLevel,
-					featureType: "Class",
-					description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
-					isAsiChoice: true,
-				};
-				if (this._state.addFeature(asiFeature)) {
-					Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-						if ((/** @type {*} */ (asiChoices))[abl]) {
-							const currentBase = this._state.getAbilityBase(abl);
-							this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(currentBase, (/** @type {*} */ (asiChoices))[abl], 20));
-						}
-					});
-				}
-			}
+			asiDecision = applyAsi();
 
 			// Also apply the feat
 			if (selectedFeat) {
@@ -4820,34 +4802,7 @@ class CharacterSheetLevelUp {
 			// Process pending spell choices from the feat
 			await this._processFeatSpellChoices();
 		} else if (asiChoices) {
-			// Apply ability score increases. Add the tracking feature FIRST and gate the
-			// non-idempotent base-score writes on a fresh add (see isBothAsiAndFeat above).
-			/** @type {*[]} */ const increases = [];
-			Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-				if ((/** @type {*} */ (asiChoices))[abl]) increases.push(`${Parser.attAbvToFull(abl)} +${(/** @type {*} */ (asiChoices))[abl]}`);
-			});
-
-			// Add a tracking feature for the ASI choice
-			if (increases.length > 0) {
-				const asiFeature = {
-					name: "Ability Score Improvement",
-					source: classData.source,
-					className: classEntry.name,
-					classSource: classEntry.source,
-					level: newLevel,
-					featureType: "Class",
-					description: `<p><strong>Ability Score Increases:</strong> ${increases.join(", ")}</p>`,
-					isAsiChoice: true, // Mark as ASI choice for special handling
-				};
-				if (this._state.addFeature(asiFeature)) {
-					Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
-						if ((/** @type {*} */ (asiChoices))[abl]) {
-							const currentBase = this._state.getAbilityBase(abl);
-							this._state.setAbilityBase(abl, CharacterSheetClassUtils.capAbilityIncrease(currentBase, (/** @type {*} */ (asiChoices))[abl], 20));
-						}
-					});
-				}
-			}
+			asiDecision = applyAsi();
 		}
 
 		if (selectedCombatTraditions != null) {
@@ -5414,6 +5369,7 @@ class CharacterSheetLevelUp {
 		}
 
 		// Record the history entry
+		if (asiDecision) historyEntry.decisions = [...(historyEntry.decisions || []), asiDecision];
 		this._state.recordLevelChoice(historyEntry);
 
 		// Expand any refSubclassFeature wrapper gained at this level before passive effects and
