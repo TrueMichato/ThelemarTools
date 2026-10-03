@@ -235,7 +235,9 @@ describe("EFA Battle Smith Arcane Jolt resource ownership", () => {
 			candidate.applyClassFeatureEffects();
 		});
 		expect(getJoltResource(engine.state)).toMatchObject({current: 1, max: 3, spentUses: 2});
-		jest.spyOn(engine, "getValidation").mockReturnValue({isValid: true, errors: []});
+		jest.spyOn(engine, "getValidation").mockReturnValue({
+			isValid: true, canApply: true, errors: [], blockingErrors: [], carriedForwardIssues: [], issues: [], warnings: [],
+		});
 		await engine.apply();
 		expect(getJoltResource(state)).toMatchObject({current: 1, max: 3, spentUses: 2});
 	});

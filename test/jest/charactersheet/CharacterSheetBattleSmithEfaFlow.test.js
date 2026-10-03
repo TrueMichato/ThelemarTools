@@ -844,7 +844,9 @@ describe("Battle Smith Respec isolation and exact-source rebinding", () => {
 		});
 		expect(live.getFeatureOwnedCompanions(TCE_STEEL_UID)).toEqual([]);
 
-		engine.getValidation = () => ({isValid: true, errors: []});
+		engine.getValidation = () => ({
+			isValid: true, canApply: true, errors: [], blockingErrors: [], carriedForwardIssues: [], issues: [], warnings: [],
+		});
 		await engine.apply();
 
 		expect(page.saveCharacter).toHaveBeenCalledTimes(1);

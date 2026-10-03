@@ -12373,6 +12373,14 @@ class CharacterSheetState {
 					candidate.name === decision.selection.name
 						&& candidate.source === decision.selection.source,
 				);
+				if (!feat && isFixedOriginGrant && decision.meta.legacyOriginFeatName) {
+					feat = this._data.feats.find(candidate => candidate.isOriginFeat
+						&& candidate.backgroundName === this.getBackgroundName()
+						&& candidate.name === decision.meta.legacyOriginFeatName
+						&& candidate.source === decision.selection.source
+						&& (!candidate.sourceDecisionKey || candidate.sourceDecisionKey === sourceDecisionKey));
+					if (feat) feat.name = decision.selection.name;
+				}
 				if (!feat && isFixedOriginGrant) {
 					const featData = (decision.options || []).find(option =>
 						CharacterSheetProgression.getEntityUid(option) ===
@@ -12609,6 +12617,7 @@ class CharacterSheetState {
 	initializeProgressionOwnership (manifest) {
 		const ownership = this._data.progressionOwnership ||= {version: 1, initialized: false, values: {}};
 		if (!ownership.initialized) ownership.values = {};
+		this.adoptBackgroundProgressionEvidence(manifest);
 
 		for (const decision of manifest?.decisions || []) {
 			for (const {type, value} of this._getProgressionDecisionOwnedValues(decision)) {
@@ -12640,6 +12649,28 @@ class CharacterSheetState {
 			}
 		}
 		ownership.initialized = true;
+	}
+
+	adoptBackgroundProgressionEvidence (manifest) {
+		const background = this.getBackground();
+		const root = manifest?.base?.decisions?.find(decision => decision.type === "originBackground"
+			&& decision.provenance?.ownerUid === CharacterSheetProgression.getEntityUid(background));
+		if (!root) return;
+		const owned = [];
+		for (const [field, type] of [["skillProficiencies", "skills"], ["toolProficiencies", "tools"], ["languageProficiencies", "languages"]]) {
+			for (const entry of background?.[field] || []) {
+				for (const [name, fixed] of Object.entries(entry)) {
+					if (fixed !== true) continue;
+					const value = type === "languages" ? CharacterSheetClassUtils.resolveLanguageProficiencyName(name)
+						: type === "tools" ? name.toTitleCase() : name;
+					owned.push({type, value});
+					this.claimProgressionOwnership(type, value, root.semanticKey);
+				}
+			}
+		}
+		root.receipt ||= {version: 1, sourceDecisionKey: root.semanticKey, effects: []};
+		root.receipt.effects = root.receipt.effects.filter(effect => effect.type !== "ownership");
+		root.receipt.effects.push({type: "ownership", ownership: owned});
 	}
 
 	_getNonProgressionOwnershipKeys (manifest) {
@@ -12684,13 +12715,15 @@ class CharacterSheetState {
 		}
 
 		const proficiencyMeta = new Set(["choose", "any", "anyStandard", "anyArtisansTool", "anyMusicalInstrument"]);
-		for (const entity of [this._data.race, this._data.subrace, this._data.background]) {
+		const backgroundIsRepresented = manifest?.base?.decisions?.some(decision => decision.type === "originBackground"
+			&& decision.provenance?.ownerUid === CharacterSheetProgression.getEntityUid(this._data.background));
+		for (const entity of [this._data.race, this._data.subrace, ...(backgroundIsRepresented ? [] : [this._data.background])]) {
 			addDefinitionKeys("skills", entity?.skillProficiencies, proficiencyMeta);
 			addDefinitionKeys("tools", entity?.toolProficiencies, proficiencyMeta);
 			addDefinitionKeys("languages", entity?.languageProficiencies, proficiencyMeta);
 		}
 		addUserChoices(this.getBaseRaceUserChoices());
-		addUserChoices(this.getBaseBackgroundUserChoices());
+		if (!backgroundIsRepresented) addUserChoices(this.getBaseBackgroundUserChoices());
 		for (const value of this._data.saveProficiencies || []) {
 			if (!(this._data.grantedProficiencies?.saves?.[value]?.length)) add("saves", value);
 		}

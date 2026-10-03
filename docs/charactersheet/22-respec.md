@@ -2,8 +2,9 @@
 
 The Respec tab is a transaction-based progression editor. It reconstructs the
 opportunities a character should have received at each level, including choices
-which were skipped or never recorded, and applies changes only after the entire
-draft is valid.
+which were skipped or never recorded. Safe changes and partial repairs can be
+applied while unchanged pre-existing problems remain explicitly visible.
+New, worsened, or edited-still-invalid choices must be repaired first.
 
 ## Architecture
 
@@ -20,6 +21,57 @@ Respec creates a candidate from `state.toJson()`. All controls target that
 candidate until Apply succeeds. An untouched candidate refreshes if the live
 character changes before editing begins; a dirty candidate is never replaced
 silently.
+
+### Partial repairs and Apply
+
+`getValidation().isValid` still answers whether the character has any unresolved
+errors. `canApply` separately answers whether this transaction introduces or
+touches an unresolved error. The result retains all `errors`, dividing them into
+`blockingErrors` and `carriedForwardIssues`; existing errors are not converted to
+warnings or removed.
+
+Baseline matching uses source-qualified semantic identity, selection, required
+count, option/descriptor contract, provenance, receipt evidence, and the full
+parent lineage. Generated IDs and chronological levels do not identify an
+issue. Reordering a timeline can preserve the same class-level opportunity;
+changing its owner, parent, contract, invalid selection, or required children
+cannot. Explicitly editing an unresolved choice makes it a blocker even if its
+final value happens to equal the original invalid value. Failed transactions
+restore this touched-choice tracking along with the candidate and ledger.
+
+For example, repairing one of three missing choices may leave two unchanged
+errors. Apply remains available, Review lists those errors separately from
+blockers, and Apply asks for explicit confirmation listing what will remain.
+The unresolved decision records, provenance, legacy pending queues, and repair
+controls survive save and reopening Respec. A same-background dialog can repair
+one existing family without demanding unrelated unchanged repairs; replacing
+the background still requires all newly introduced background children.
+
+Incomplete class/descriptor discovery, unavailable required catalogs,
+unsupported saved decisions, and unsafe ledger replacement remain hard
+failures, even if present before editing. An uncertain targeted legacy ASI
+replacement is not grandfathered; unrelated changes do not require inventing
+its missing acquisition evidence.
+
+Apply/save rollback and one-step Undo restore the exact raw live snapshot, not
+only a migrated reload that could lose an unrelated resource.
+
+### Callback ASI receipts
+
+For `asi`/`asiOrFeat` graph callbacks, a supplied version-1 receipt is retained
+only after validating its exact source decision owner, allowed effect shape,
+finite actual base-score deltas (including zero at a cap), and materialized
+feature identities. Other callback families retain the existing receipt builder.
+The receipt's `before` is the base score **after outgoing teardown, before the
+replacement grant**, not the net pre-transaction score.
+
+An exact outgoing delta receipt can establish that boundary. When a callback
+owns a supported teardown which the engine cannot derive, it calls the
+engine-provided `captureReceiptBaseline()` immediately after teardown and before
+applying the grant. This observes the candidate directly; returning an
+unverified intermediate `before` number is insufficient. Mismatched evidence
+rolls back only the targeted transaction. The ASI application/eligibility helpers
+remain the owning class-improvement subsystem.
 
 Feature-companion setup follows the same isolation rule. Subclass replacement
 runs `reconcileFeatureCompanionGrants({reason: "respecCandidate"})` against the
@@ -69,6 +121,30 @@ prose may retain a compact string option list until a generic descriptor owns
 their discovery; they never persist full catalog entities.
 
 ### Nested decisions
+
+**Change Background** edits a second isolated draft inside Respec. It exposes
+the origin graph's required skills, tools, languages, ability distribution,
+origin feat and selected feat/feature children through the existing inline
+decision editor. Fixed grants are shown without unnecessary controls. PHB
+racial ASIs suppress background ability controls; XPHB weighted distributions
+and mixed-origin free +2/+1 retain their existing ownership rules.
+
+Fixed ability replacement reads and writes only the origin bonus channel;
+named/custom and direct bonuses are never folded back into it. Fixed authored
+alternatives without evidence of the selected branch produce an actionable
+targeted replacement error rather than subtracting or applying every branch.
+Changing a parent clears its old branch and requires the new children.
+Cancel discards the whole background dialog, including staged child choices.
+Change Background transfers the completed graph to the Respec candidate, not
+the live character. Apply, save rollback and Undo remain engine transactions.
+
+Background proficiency descriptors expand `any`, `anyStandard`,
+`anyArtisansTool`, `anyMusicalInstrument` and `anyTool` to canonical catalogs
+with the authored count. Exact recorded selections remain origin evidence;
+missing legacy selections are repairable, not inferred from the complete
+proficiency list. Fixed background grants use the source-qualified origin
+owner; independent overlap and unrelated ability/item/custom bonuses survive
+replacement. Selected and fixed origin feats retain nested child decisions.
 
 Feature, feat, optional-feature, species, and background descriptors are
 discovered recursively. A selected parent grant becomes the parent node for
