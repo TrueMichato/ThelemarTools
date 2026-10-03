@@ -159,14 +159,34 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ```
 
 For improvement slots, `getImprovementOpportunity` receives the resolved
-`classFeatures` catalog to verify TGTT 2024 classes' cross-source XPHB
-references. `getImprovementFeatDecisionKey` gives repeatable feats a stable
+`classFeatures` catalog to verify TGTT 2024 classes' authored cross-source
+PHB and XPHB references by exact name, class, class source, feature source and
+level. Owner-source equality or an XPHB-only exception is insufficient:
+TGTT Sorcerer intentionally references PHB improvements. Level Up and Quick
+Build share this discovery path, including special Fighter/Rogue slots and
+level-19 Epic Boon precedence.
+`getImprovementFeatDecisionKey` gives repeatable feats a stable
 per-class-level owner matching the progression manifest; Level Up and Quick
 Build pass it into `addFeat`. Stored feat effects and Respec removal use the
 specific feat ID, not a name/source-only match.
 The Features-tab picker matches known feats by name and source, retains the
 Add action for repeatable feats, and gives each manual repeat its own unplaced
 decision key so it cannot collide with a level-granted copy.
+
+`applyClassAsi()` is the shared ordinary-ASI writer. Fresh tracking-feature
+insertion gates the base-score writes; the existing decision receipt records
+actual capped `before`, `after` and `amount`, including zero. Both wizards
+persist that returned decision, and replay retains its original receipt.
+Respec reverses these actual deltas, not the authored allocation. Unproven
+legacy ordinary replacements refuse only that targeted operation with
+recovery guidance; unrelated edits remain available.
+
+Score provenance is not roll-modifier math. `getAbilityScoreBreakdown()` reads
+existing receipts and each exact feat wrapper's applied deltas, separates
+acquisitions, and reconciles numeric components to the current score without
+mutating history. An own numeric zero is evidence; an empty map is not.
+Unknown gains remain `null`, and the manual/unknown residual is not a guessed
+creation score. Manager and Play Mode score disclosures share this projection.
 
 Feat ability discovery, rendering, completion and mechanics share ClassUtils'
 `getFeatAbilityOptions()`, `resolveFeatAbilityChoice()` and
@@ -741,6 +761,21 @@ and persists the resulting manifest once. State ownership is source-keyed so
 overlapping manual, origin, and progression grants survive unrelated edits;
 materialized features, modifiers, spells, resources, and configuration are
 covered by receipts.
+
+Ordinary ASI callbacks capture the engine-observed post-teardown baseline and
+ordinary result before reapplying a retained Thelemar paired feat. The engine
+validates each boundary and the exact original paired owner, canonical ability
+choice, capped delta receipt and remaining score vector. Preserve incoming
+ordinary-first ordering: a final score of 20 does not prove whether the ordinary
+ASI gained 2 and the feat 0, or each incorrectly gained 1.
+
+Respec distinguishes `isValid` from `canApply`. Unchanged pre-existing decision
+issues may carry forward through valid edits, but touched, changed, worsened
+or structural errors block Apply. Semantic source/selection/contract/lineage
+fingerprints, not error counts, establish unchanged problems. Review and the
+explicit Apply confirmation keep remaining issues visible; their ledger and
+pending choices survive saving. Save rollback and Undo preserve the exact raw
+snapshot alongside reload-compatible data.
 
 Subclass-change preview and mutation use the same exact old-subclass identity:
 legacy history may have only `name|source`, while stored features identify their

@@ -117,6 +117,21 @@ step"* asserted no die step, and rationalised the flat result in a comment rathe
 the missing import. **If a test asserts that a module changes something, assert the changed
 value, and confirm the test fails when the import is removed.**
 
+### Catalog realms and acquisition evidence
+
+When importing filesystem catalogs into Jest, spread `fs.readdirSync(...)`
+into the test realm **before** `map`/`flatMap`. `MiscUtil.copyFast()` uses
+`instanceof Array`; a Node-realm array can pass `Array.isArray()` but be copied
+as an indexed object. Fix the fixture boundary instead of adding production
+object-options fallbacks for a shape the live catalog does not produce.
+
+Acquisition tests must use the real writer and history producer. Do not inject
+an invented receipt to certify ordinary ASI persistence or a fixed feat's
+capped zero. Assert exact owner-qualified before/after gains, then projection,
+reload and Respec reversal. Final totals alone cannot detect ordinary/paired
+cap-order errors. Temporarily remove the real persistence/write call and
+require the primary assertion to fail before trusting the gate.
+
 ### What setup.js Mocks
 
 | Global | Mocked Methods |

@@ -1162,6 +1162,15 @@ capped fixed-target feat whose target was not saved cannot be attributed.
 Source/owner/level labels and acquisition ordinals distinguish repeated feats.
 Exact origin bonus receipts distinguish species and background contributions.
 
+New ordinary acquisitions use `CharacterSheetClassUtils.applyClassAsi()`.
+Level Up and Quick Build persist its existing version-1 decision receipt,
+including source-qualified owner, actual capped base-score `before`, `after`
+and `amount`, and materialized tracking-feature identity. Replay preserves that
+receipt rather than applying the gain again. The feat writer likewise retains
+an own targeted zero, including fixed abilities capped at acquisition.
+Respec observes replacement boundaries and reverses only actual recorded
+deltas; it does not subtract an authored +2 when the original gain was +1 or 0.
+
 An evidenced ordinary ASI without an actual capped receipt is still listed,
 with its recorded allocation and a `null` amount (**applied amount unknown**).
 Unrecorded creation rolls, manual adjustments and unknown legacy gains remain
