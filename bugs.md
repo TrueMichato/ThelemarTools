@@ -3,8 +3,21 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_No open items in this round tracker. Additional character-sheet reports remain
-in [the known-bugs tracker](docs/charactersheet/known-bugs.md)._
+### Round 65 — ASI regressions, ability-score provenance, and Respec repair
+
+- **S1 — Missing ASI steps (bug 1):** Reproduce lost Level Up and Quick Build improvement controls, identify the causal change and coverage gap, and restore ordinary/special improvement opportunities across PHB, XPHB and TGTT without weakening source or class identity.
+- **S1 — Repeatable ASI feat (bug 2):** Remove remaining acquisition-path exclusions for repeatable ASI feats; preserve independent selections, effects, receipts, historical ownership and save/reload behavior.
+- **S2 — Ability-score explanations (bug 3):** Make the score's calculation inspectable by hover, keyboard and touch. Attribute each evidenced ASI and feat acquisition separately, with useful source/level labels, without double-counting increases already stored in base scores or inventing missing legacy history.
+- **S3 — Complete background replacement (bug 4):** Respec must expose and apply every required choice of the selected background, including skills, origin feats and nested choices, while preserving independently owned grants and transaction isolation.
+- **S3 — Partial repairs (bug 5):** Permit applying valid edits or a subset of repairs while unchanged pre-existing problems remain clearly visible. New/worsened invalid choices and unsafe discovery failures still block Apply; unresolved records must not disappear from review or save data.
+
+The coordinator owns this ledger, known-bug status and shared architecture.
+S1 owns acquisition/improvement helpers and wizard drivers; S2 owns read-side
+ability provenance and score presentation; S3 owns background editing and
+Respec validation/review. S3 alone edits the shared CharacterSheetPage E2E
+page object; S1/S2 use separate companion page objects for new probes.
+Integration must prove restored ASI acquisition feeds separately attributed
+score-breakdown rows, not merely that each branch passes in isolation.
 
 ## Closed Bugs
 
