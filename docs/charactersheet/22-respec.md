@@ -83,6 +83,11 @@ must match the cap calculation and the complete remaining score vector; a
 retained wrapper may be recomputed without changing its UUID. Missing, dishonest,
 foreign-owner or untracked evidence rolls back the transaction. This preserves
 the ordinary-ASI-before-paired-feat order without combining their receipts.
+The paired ability choice is resolved from the exact original source-owned
+record and must remain the same canonical option, cap and allocation. Equivalent
+legacy scalar and allocation-map representations are accepted; a different
+otherwise legal ability is not. Only own delta-map properties count as receipt
+evidence, so inherited values which disappear on JSON save cannot justify a gain.
 
 Feature-companion setup follows the same isolation rule. Subclass replacement
 runs `reconcileFeatureCompanionGrants({reason: "respecCandidate"})` against the

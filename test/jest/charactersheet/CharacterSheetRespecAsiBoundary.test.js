@@ -25,7 +25,8 @@ function grantAsi (state, decision, ability, amount, id) {
 	};
 }
 
-async function fixture () {
+async function fixture ({pairedFeat = feat, pairedChoices = null} = {}) {
+	const selectedFeat = {...pairedFeat, choices: pairedChoices, _featChoices: pairedChoices};
 	const state = new State();
 	state.setSetting("thelemar_asiFeat", true);
 	state.addClass({...cls, level: 4});
@@ -36,7 +37,7 @@ async function fixture () {
 		getClassFeatures: () => [feature],
 		getSubclassFeatures: () => [],
 		getOptionalFeatures: () => [],
-		getFeats: () => [feat],
+		getFeats: () => [pairedFeat],
 		saveCharacter: jest.fn().mockResolvedValue(),
 		renderCharacter: jest.fn(),
 	};
@@ -49,21 +50,22 @@ async function fixture () {
 	await seed.stageGraphMutation(ordinary.id, {str: 2}, {
 		apply: ({state: candidate}) => ({receipt: grantAsi(candidate, ordinary, "str", 2, "seed-asi")}),
 	});
-	await seed.stageGraphMutation(paired.id, {name: feat.name, source: feat.source}, {
+	await seed.stageGraphMutation(paired.id, selectedFeat, {
 		apply: ({state: candidate}) => {
-			candidate.addFeat(feat, {sourceDecisionKey: paired.semanticKey});
-			globalThis.CharacterSheetClassUtils.applyFeatBonuses(candidate, {...feat, sourceDecisionKey: paired.semanticKey});
+			candidate.addFeat(selectedFeat, {sourceDecisionKey: paired.semanticKey});
+			globalThis.CharacterSheetClassUtils.applyFeatBonuses(candidate, {...selectedFeat, sourceDecisionKey: paired.semanticKey});
 		},
 	});
 	await seed.apply();
 	expect(state.getAbilityBase("str")).toBe(20);
 	const engine = new Engine({state, page});
 	engine.begin();
-	return {state, page, engine, ordinaryKey: ordinary.semanticKey, pairedKey: paired.semanticKey};
+	return {state, page, engine, ordinaryKey: ordinary.semanticKey, pairedKey: paired.semanticKey, pairedFeat, pairedChoices};
 }
 
-async function replace (fixture, {ability = "con", amount = 2, alter = null, reuse = false} = {}) {
+async function replace (fixture, {ability = "con", amount = 2, alter = null, reuse = false, pairedChoices = fixture.pairedChoices} = {}) {
 	const {engine, ordinaryKey, pairedKey} = fixture;
+	const selectedFeat = {...fixture.pairedFeat, choices: pairedChoices, _featChoices: pairedChoices};
 	const decision = engine.manifest.decisions.find(row => row.semanticKey === ordinaryKey);
 	const selection = amount === 1 ? {[ability]: 1, dex: 1} : {[ability]: amount};
 	return engine.stageGraphMutation(decision.id, selection, {
@@ -82,8 +84,8 @@ async function replace (fixture, {ability = "con", amount = 2, alter = null, reu
 				receipt.effects.splice(1, 0, {type: "abilityDelta", sourceDecisionKey: decision.semanticKey, ability: "dex", amount: after - before, before, after});
 			}
 			if (alter !== "early boundary") captureReceiptResult();
-			if (!reuse) state.addFeat(feat, {sourceDecisionKey: pairedKey});
-			globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, {...feat, sourceDecisionKey: pairedKey});
+			if (!reuse) state.addFeat(selectedFeat, {sourceDecisionKey: pairedKey});
+			globalThis.CharacterSheetClassUtils.applyFeatBonuses(state, {...selectedFeat, sourceDecisionKey: pairedKey});
 			if (typeof alter === "function") alter({state, receipt, pairedKey, captureReceiptResult});
 			return alter === "missing receipt" ? {} : {receipt};
 		},
@@ -124,6 +126,35 @@ describe("Observed ASI end boundary and exact retained paired feat ownership", (
 		expect(data.engine.state.getFeats().find(row => row.sourceDecisionKey === data.pairedKey))
 			.toMatchObject({id, appliedEffects: {abilityDeltas: {str: 1}}});
 		expect(data.engine.state.getAbilityBase("str")).toBe(20);
+	});
+
+	it("rejects a different valid canonical paired ability choice instead of retaining only its feat UID", async () => {
+		const data = await fixture({pairedFeat: {...feat, ability: [{choose: {from: ["str", "dex"], count: 1, amount: 1}}]}, pairedChoices: {ability: "str"}});
+		const live = data.state.toJson();
+		const draft = data.engine.state.toJson();
+		await expect(replace(data, {pairedChoices: {ability: "dex"}})).rejects.toThrow(/unproven/);
+		expect(data.state.toJson()).toEqual(live);
+		expect(data.engine.state.toJson()).toEqual(draft);
+		await replace(data, {pairedChoices: {ability: {str: 1}}});
+		expect(data.engine.state.getAbilityBase("str")).toBe(19);
+		await data.engine.apply();
+		data.state.loadFromJson(data.state.toJson());
+		expect(data.state.getFeats().find(row => row.sourceDecisionKey === data.pairedKey).choices).toEqual({ability: {str: 1}});
+	});
+
+	it("rejects inherited positive proof that disappears from the saved receipt", async () => {
+		const data = await fixture();
+		const live = data.state.toJson();
+		const draft = data.engine.state.toJson();
+		await expect(replace(data, {alter: ({state, pairedKey}) => {
+			const owned = state._data.feats.find(row => row.sourceDecisionKey === pairedKey);
+			owned.appliedEffects.abilityDeltas = Object.create({str: 1});
+			expect(Object.hasOwn(owned.appliedEffects.abilityDeltas, "str")).toBe(false);
+			expect(JSON.parse(JSON.stringify(owned.appliedEffects.abilityDeltas))).toEqual({});
+			expect(state.getAbilityBase("str")).toBe(19);
+		}})).rejects.toThrow(/unproven/);
+		expect(data.state.toJson()).toEqual(live);
+		expect(data.engine.state.toJson()).toEqual(draft);
 	});
 
 	it.each([
