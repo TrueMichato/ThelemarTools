@@ -156,6 +156,11 @@ Fixed ability replacement reads and writes only the origin bonus channel;
 named/custom and direct bonuses are never folded back into it. Fixed authored
 alternatives require an explicit distribution choice on acquisition. Its owned
 fixed receipt is reversed once, preserving later independent adjustments.
+An explicit distribution key selects that exact canonical branch before any
+weight matching; two mixed fixed/variable alternatives can share weights while
+granting different bonuses and child pools. Only keyless legacy selections with
+one unambiguous weight match may use the fallback. An unknown key or ambiguous
+fallback stays invalid and requires explicit repair instead of a default branch.
 Applicable legacy alternatives without evidence of the selected branch produce
 an actionable targeted replacement error rather than subtracting or applying
 every branch. No such proof is required for background ability alternatives
@@ -176,7 +181,9 @@ Origin feat ability choices use the canonical exclusive option, count and cap,
 including a recorded zero at the cap. Retargeting synchronizes the owning feat's
 choices and actual applied-effect map; removing the background reverses only
 that exact wrapper's remaining owned deltas, never an independent repeatable
-instance with the same feat UID.
+instance with the same feat UID. Reversal requires each target delta to be an
+own, finite numeric value, including an authoritative own zero at a cap;
+inherited, missing or non-numeric proof is rejected with exact candidate rollback.
 
 Origin feat spell children fulfill the existing pending-choice slots, preserving
 the authored sibling `count`, daily/rest uses, recharge and spellcasting ability.

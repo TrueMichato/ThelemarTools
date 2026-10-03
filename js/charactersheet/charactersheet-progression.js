@@ -1379,14 +1379,13 @@ class CharacterSheetProgression {
 		) : [];
 		const persistedMode = matchingModes.length === 1 ? matchingModes[0] : null;
 		const selection = isFreeOriginAbility ? modes[0] : stored?.selection ?? persistedMode;
-		const selectedMode = modes.find(mode =>
-			mode.key === selection?.key
-				|| (
-					Array.isArray(selection?.weights) && selection.weights.length > 0
-					&& mode.weights.length === selection.weights.length
-					&& mode.weights.every((weight, ix) => weight === Number(selection.weights[ix]))
-				),
-		) || null;
+		const weightMatches = selection?.key == null && Array.isArray(selection?.weights) && selection.weights.length
+			? modes.filter(mode => mode.weights.length === selection.weights.length
+				&& mode.weights.every((weight, ix) => weight === Number(selection.weights[ix])))
+			: [];
+		const selectedMode = selection?.key != null
+			? modes.find(mode => mode.key === selection.key) || null
+			: weightMatches.length === 1 ? weightMatches[0] : null;
 		const parent = CharacterSheetProgression._makeDecision({
 			characterLevel: 0,
 			className: "Base",
@@ -1398,7 +1397,7 @@ class CharacterSheetProgression {
 			count: 1,
 			options: modes,
 			selection,
-			isValid: CharacterSheetProgression._isSelectionValid({
+			isValid: (selection == null || !!selectedMode) && CharacterSheetProgression._isSelectionValid({
 				selection,
 				count: 1,
 				options: modes,
