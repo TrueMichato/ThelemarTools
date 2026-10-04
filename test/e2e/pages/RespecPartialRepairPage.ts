@@ -76,6 +76,9 @@ export class RespecPartialRepairPage {
 
 	async showMobileRepairLayout () {
 		await this.page.setViewportSize({width: 390, height: 844});
+		await expect(this.page.locator("body")).toHaveClass(/\bis-charsheet-mobile\b/);
+		await expect(this.page.locator('a[href="#charsheet-tab-respec"]')).toBeHidden();
+		await expect(this.page.locator(".charsheet-mobile__tab-more > a")).toBeVisible();
 	}
 
 	async evidence () {

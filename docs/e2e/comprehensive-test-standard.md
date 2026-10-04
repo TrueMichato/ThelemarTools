@@ -170,6 +170,13 @@ the exact base-plus-effect attack total. Keep weapon qualification, nonleakage,
 Radiant damage, and teardown checks; do not rerender merely to repair the UI
 before reading its badge.
 
+When resizing a desktop-built character to the mobile repair viewport, wait
+for the rendered mobile navigation before opening Respec: the mobile body class,
+hidden desktop Respec link, and visible **More** control must all be ready.
+`setViewportSize()` alone does not await the sheet's resize initialization.
+Navigate through the real More-sections dialog, not a forced or hidden-link
+click.
+
 > **Effect verification is a first-class requirement.**  When a feature
 > grants advantage on a save, prove the advantage flag flips.  When a
 > toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a
