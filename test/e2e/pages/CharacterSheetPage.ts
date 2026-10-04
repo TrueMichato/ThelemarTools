@@ -2223,17 +2223,29 @@ export class CharacterSheetPage {
 	}
 
 	async reloadCharacterSheet (): Promise<void> {
-		const characterId = await this.page.evaluate(() => (globalThis as any).charSheet?._currentCharacterId);
+		const characterId: string | undefined = await this.page.evaluate(() => (globalThis as any).charSheet?._currentCharacterId);
+		if (!characterId) throw new Error("Reload requires an active character ID");
+		// The wizard can return before its first save finishes; a runtime ID is not a saved option.
+		await expect.poll(() => this.page.evaluate(async expectedId => {
+			const storage = (globalThis as any).StorageUtil;
+			const characters: Array<{id: string}> | null = await storage.pGet("charsheet-characters");
+			return Boolean(characters?.some(character => character.id === expectedId));
+		}, characterId), {
+			message: "The exact active character must be persisted before reload",
+			intervals: [100],
+			timeout: 0,
+		}).toBe(true);
 		await this.page.reload({waitUntil: "domcontentloaded"});
-		await this.page.locator("#charsheet-tab-overview, #charsheet-tab-main").first().waitFor({state: "visible"});
+		// Published only after pInit finishes, including URL loading and saved-tab restoration.
+		await this.page.waitForFunction(() => Boolean((globalThis as any).charSheet));
 		const selector = this.page.locator("#charsheet-sel-character");
-		if (characterId && await selector.inputValue() !== characterId) await selector.selectOption(characterId);
+		if (await selector.inputValue() !== characterId) await selector.selectOption(characterId);
 		await this.page.waitForFunction(expectedId => {
 			const cs: any = (globalThis as any).charSheet;
 			return Boolean(cs?._state?.getLevelHistory?.()?.length)
-				&& (!expectedId || cs._currentCharacterId === expectedId);
+				&& cs._currentCharacterId === expectedId;
 		}, characterId);
-		if (characterId) await expect(selector).toHaveValue(characterId);
+		await expect(selector).toHaveValue(characterId);
 	}
 
 	async beginLevelUp (): Promise<void> {

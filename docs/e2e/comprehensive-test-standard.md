@@ -177,6 +177,15 @@ hidden desktop Respec link, and visible **More** control must all be ready.
 Navigate through the real More-sections dialog, not a forced or hidden-link
 click.
 
+Persistence probes wait for the exact active character ID to exist in the
+canonical async store before reloading; the wizard's in-memory name and class
+can already be present while its first save is still pending. Observe that save
+without issuing another one. After reload, wait for the published `charSheet`
+controller, which follows completed initialization and saved-tab restoration,
+before reading or selecting the exact saved ID. Static Overview visibility is
+not readiness: it can appear before initialization or remain hidden when Respec
+is legitimately restored. Keep exact-ID, ownership, and persisted-edit checks.
+
 > **Effect verification is a first-class requirement.**  When a feature
 > grants advantage on a save, prove the advantage flag flips.  When a
 > toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a
