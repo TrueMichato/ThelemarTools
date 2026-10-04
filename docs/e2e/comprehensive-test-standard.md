@@ -186,6 +186,14 @@ before reading or selecting the exact saved ID. Static Overview visibility is
 not readiness: it can appear before initialization or remain hidden when Respec
 is legitimately restored. Keep exact-ID, ownership, and persisted-edit checks.
 
+The PHB Fighter fixtures for background parity and partial repairs declare
+`optFeatCount: 1`, matching the authored one-style picker. In the existing
+wizard driver, `0` invokes a five-pick fallback rather than disabling that
+picker; attempts beyond its cap can click reference links and open extra pages.
+At the builder boundary, assert the exact `Archery|PHB` acquisition in the
+level-1 `Fighter|PHB` history and owned feature state, plus a single context page
+and no popup creation. Do not close spawned tabs to conceal an incorrect fixture.
+
 > **Effect verification is a first-class requirement.**  When a feature
 > grants advantage on a save, prove the advantage flag flips.  When a
 > toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a
