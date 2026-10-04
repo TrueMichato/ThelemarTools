@@ -19,15 +19,17 @@ test("real PHB background replacement completes all choices and preserves cancel
 	test.setTimeout(150_000);
 	await clearCharacterStorage(page);
 	await gotoWithThelemar(page);
+	const background = new RespecBackgroundPage(page);
+	background.observeFixturePages();
 	const {charSheet} = await createCharacterViaWizard(page, {
 		...PRESET_FIGHTER, name: "Background Parity", race: "Dwarf", raceSource: "PHB'24",
-		classSource: "PHB", masteryCount: 0, optFeatCount: 0,
+		classSource: "PHB", masteryCount: 0, optFeatCount: 1,
 		background: "Criminal", bgSource: "PHB", prioritySources: ["PHB", "XPHB"],
 		selectBackgroundAbilityBonuses: true,
 	});
+	await background.expectSingleFighterStyleFixture();
 	await charSheet.reloadCharacterSheet();
 	await charSheet.openRespec();
-	const background = new RespecBackgroundPage(page);
 	const original = await background.evidence();
 	await charSheet.openRespecBackgroundEditor();
 	await background.select("Acolyte", "PHB");
@@ -66,15 +68,17 @@ test("real XPHB Sage replaces a free pair with weighted abilities and the canoni
 	test.setTimeout(150_000);
 	await clearCharacterStorage(page);
 	await gotoWithThelemar(page);
+	const background = new RespecBackgroundPage(page);
+	background.observeFixturePages();
 	const {charSheet} = await createCharacterViaWizard(page, {
 		...PRESET_FIGHTER, name: "Sage Background Parity", race: "Dwarf", raceSource: "PHB'24",
-		classSource: "PHB", masteryCount: 0, optFeatCount: 0,
+		classSource: "PHB", masteryCount: 0, optFeatCount: 1,
 		background: "Criminal", bgSource: "PHB", prioritySources: ["PHB", "XPHB"],
 		selectBackgroundAbilityBonuses: true,
 	});
+	await background.expectSingleFighterStyleFixture();
 	await charSheet.reloadCharacterSheet();
 	await charSheet.openRespec();
-	const background = new RespecBackgroundPage(page);
 	const original = await background.evidence();
 	await charSheet.openRespecBackgroundEditor();
 	await background.select("Sage", "XPHB");

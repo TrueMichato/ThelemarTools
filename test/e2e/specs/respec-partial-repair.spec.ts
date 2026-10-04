@@ -12,14 +12,16 @@ for (const mobile of [false, true]) {
 			test.setTimeout(150_000);
 			await clearCharacterStorage(page);
 			await gotoWithThelemar(page);
+			const background = new RespecBackgroundPage(page);
+			background.observeFixturePages();
 			const {charSheet} = await createCharacterViaWizard(page, {
 				...PRESET_FIGHTER, name: "Partial Repair", race: "Dwarf", raceSource: "PHB'24",
-				classSource: "PHB", masteryCount: 0, optFeatCount: 0,
+				classSource: "PHB", masteryCount: 0, optFeatCount: 1,
 				background: "Outlander", bgSource: "PHB", prioritySources: ["PHB", "XPHB"],
 				selectBackgroundAbilityBonuses: true,
 			});
+			await background.expectSingleFighterStyleFixture();
 			const partial = new RespecPartialRepairPage(page);
-			const background = new RespecBackgroundPage(page);
 			await partial.importLegacyMissingSkillRecord();
 			await charSheet.reloadCharacterSheet();
 			if (mobile) await partial.showMobileRepairLayout();

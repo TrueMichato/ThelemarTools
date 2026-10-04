@@ -23,16 +23,60 @@ interface OriginSpell {
 }
 
 interface RespecRuntime {
-	_state: {toJson(): OriginSnapshot; getInnateSpells(): OriginSpell[]};
+	_state: {
+		toJson(): OriginSnapshot;
+		getInnateSpells(): OriginSpell[];
+		getFeatures(): Array<{
+			name: string; source: string; className?: string; classSource?: string;
+			level?: number; featureType?: string; optionalFeatureTypes?: string[];
+		}>;
+		getLevelHistoryEntry(level: number): {
+			class: {name: string; source: string};
+			choices: {optionalFeatures?: Array<{name: string; source: string; type: string}>};
+		} | null;
+	};
 	_respec: {_state: {toJson(): OriginSnapshot; getInnateSpells(): OriginSpell[]}; _engine: {getValidation(): {errors: unknown[]}}};
 }
 
 export class RespecBackgroundPage {
 	private needsConfirmation = false;
+	private readonly fixturePages: Page[] = [];
+	private readonly onFixturePage = (page: Page) => { this.fixturePages.push(page); };
 
 	constructor (readonly page: Page) {}
 
 	get modal () { return this.page.locator(".ve-ui-modal__overlay:visible").last(); }
+
+	observeFixturePages () {
+		this.page.context().on("page", this.onFixturePage);
+	}
+
+	async expectSingleFighterStyleFixture () {
+		this.page.context().off("page", this.onFixturePage);
+		expect(this.fixturePages.map(page => page.url()), "The builder must not open optional-feature reference pages").toEqual([]);
+		expect(this.page.context().pages(), "The fixture must retain only its character-sheet page").toHaveLength(1);
+		expect(this.page.context().pages()[0]).toBe(this.page);
+		const acquired = await this.page.evaluate(() => {
+			const cs: RespecRuntime = Reflect.get(globalThis, "charSheet");
+			const history = cs._state.getLevelHistoryEntry(1);
+			if (!history) throw new Error("The Fighter fixture requires its actual level-1 acquisition history");
+			return {
+				owner: history.class,
+				choices: (history.choices.optionalFeatures || [])
+					.filter(feature => feature.type.split("_").includes("FS:F"))
+					.map(({name, source, type}) => ({name, source, type})),
+				features: cs._state.getFeatures()
+					.filter(feature => feature.optionalFeatureTypes?.includes("FS:F"))
+					.map(({name, source, className, classSource, level, featureType}) => ({name, source, className, classSource, level, featureType})),
+			};
+		});
+		console.log("[respec-fighter-fixture]", JSON.stringify({pageCount: this.page.context().pages().length, ...acquired}));
+		expect(acquired.owner).toEqual({name: "Fighter", source: "PHB"});
+		expect(acquired.choices).toEqual([{name: "Archery", source: "PHB", type: "FS:F"}]);
+		expect(acquired.features).toEqual([{
+			name: "Archery", source: "PHB", className: "Fighter", classSource: "PHB", level: 1, featureType: "Optional Feature",
+		}]);
+	}
 
 	async select (name: string, source: string) {
 		await this.modal.locator(".charsheet__respec-search-row input").fill(name);
