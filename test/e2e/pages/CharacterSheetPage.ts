@@ -3016,8 +3016,24 @@ export class CharacterSheetPage {
 		await this.page.waitForTimeout(200);
 	}
 
+	private async _waitPastConditionalRoll (nextControl: Locator): Promise<void> {
+		const picker = this.page.locator(".charsheet__cond-pick:visible").last();
+		const rollWithout = picker.getByRole("button", {name: "Roll without", exact: true});
+		await rollWithout.or(nextControl).first().waitFor({state: "visible", timeout: uiGate(5000)});
+		if (await rollWithout.isVisible()) {
+			await expect(picker.locator(".charsheet__cond-pick-cb:checked")).toHaveCount(0);
+			await rollWithout.click({timeout: uiGate(5000)});
+			await picker.waitFor({state: "hidden", timeout: uiGate(5000)});
+		}
+		await nextControl.waitFor({state: "visible", timeout: uiGate(5000)});
+	}
+
 	async activateFeatureWithTargets (featureName: string, targetNames: string[], {contestWon = true} = {}): Promise<void> {
 		await this.switchToTab(this.tabOverview);
+		const hasContest = await this.page.evaluate(name => {
+			const state = (globalThis as any).charSheet?._state;
+			return !!state?.getActivatableFeatures?.().find((it: any) => it.feature?.name === name)?.activationInfo?.contestedCheck;
+		}, featureName);
 		const row = this.page.locator(".charsheet__activatable-row").filter({hasText: this._getFeatureActivationPattern(featureName)}).first();
 		const btn = row.locator(".charsheet__activate-btn");
 		await btn.waitFor({state: "visible", timeout: 5000});
@@ -3051,6 +3067,7 @@ export class CharacterSheetPage {
 		const contestButton = this.page.locator("button.ve-btn")
 			.filter({hasText: contestWon ? /^\s*Yes — contest won\s*$/i : /^\s*No\s*$/i})
 			.last();
+		if (hasContest) await this._waitPastConditionalRoll(contestButton);
 		if (await contestButton.isVisible({timeout: 5000}).catch(() => false)) {
 			await contestButton.evaluate((el: HTMLElement) => el.click());
 			await contestButton.waitFor({state: "hidden", timeout: 5000});
@@ -3123,12 +3140,14 @@ export class CharacterSheetPage {
 			stateStillActive: boolean;
 		};
 	}> {
+		await this.dismissTransientModals();
 		const before = await this.page.evaluate((name) => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
 			const feature = state?.getFeature?.(name);
 			return {
 				json: state?.toJson?.(),
+				data: structuredClone(state._data),
 				resources: Object.fromEntries((state?.getResources?.() || []).map((it: any) => [it.name, it.current])),
 				featureUses: feature?.uses?.current ?? null,
 				ac: state?.getAC?.() ?? 0,
@@ -3145,108 +3164,148 @@ export class CharacterSheetPage {
 		};
 		this.page.on("console", onConsole);
 
-		await this.switchToTab(this.tabFeatures);
-		const exactName = new RegExp(`^\\s*${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
-		const featureCard = this.page.locator(".charsheet__feature").filter({
-			has: this.page.locator(".charsheet__feature-name").filter({hasText: exactName}),
-		}).first();
-		const useButton = featureCard.locator(".charsheet__feature-use");
-		if (await useButton.isVisible({timeout: uiGate(2000)}).catch(() => false)) {
-			await useButton.click({timeout: uiGate(5000)});
-			clicked = true;
-		} else {
-			await this.switchToTab(this.tabOverview);
-			const row = this.page.locator(".charsheet__activatable-row")
-				.filter({hasText: this._getFeatureActivationPattern(featureName)})
-				.first();
-			const activateButton = row.locator(".charsheet__activate-btn");
-			if (await activateButton.isVisible({timeout: uiGate(2000)}).catch(() => false)) {
-				await activateButton.click({timeout: uiGate(5000)});
+		try {
+			await this.switchToTab(this.tabFeatures);
+			const exactName = new RegExp(`^\\s*${featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+			const featureCard = this.page.locator(".charsheet__feature").filter({
+				has: this.page.locator(".charsheet__feature-name").filter({hasText: exactName}),
+			}).first();
+			const useButton = featureCard.locator(".charsheet__feature-use");
+			if (await useButton.isVisible({timeout: uiGate(2000)}).catch(() => false)) {
+				await useButton.click({timeout: uiGate(5000)});
 				clicked = true;
-			}
-		}
-
-		if (clicked) {
-			const modal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
-			if (await modal.isVisible({timeout: uiGate(500)}).catch(() => false)) {
-				const commit = modal.locator("button.ve-btn")
-					.filter({hasText: /^Use \d+\s+/i})
+			} else {
+				await this.switchToTab(this.tabOverview);
+				const row = this.page.locator(".charsheet__activatable-row")
+					.filter({hasText: this._getFeatureActivationPattern(featureName)})
 					.first();
-				if (await commit.isVisible({timeout: uiGate(1000)}).catch(() => false)) {
-					await commit.click({timeout: uiGate(5000)});
-					await modal.waitFor({state: "hidden", timeout: uiGate(5000)}).catch(() => {});
+				const activateButton = row.locator(".charsheet__activate-btn");
+				if (await activateButton.isVisible({timeout: uiGate(2000)}).catch(() => false)) {
+					await activateButton.click({timeout: uiGate(5000)});
+					clicked = true;
 				}
 			}
-			await this.page.waitForTimeout(400);
-		}
 
-		const afterUse = await this.page.evaluate((name) => {
-			const cs: any = (globalThis as any).charSheet;
-			const state = cs?._state;
-			const feature = state?.getFeature?.(name);
-			const activeState = (state?.getActiveStates?.() || []).find((it: any) => it.sourceFeatureId === feature?.id && it.active);
-			return {
-				resources: Object.fromEntries((state?.getResources?.() || []).map((it: any) => [it.name, it.current])),
-				featureUses: feature?.uses?.current ?? null,
-				ac: state?.getAC?.() ?? 0,
-				activeState: activeState ? JSON.parse(JSON.stringify(activeState)) : null,
-				activeResourceCastSpells: JSON.parse(JSON.stringify(state?.getActiveResourceCastSpells?.() || [])),
-				concentration: JSON.parse(JSON.stringify(state?.getConcentration?.() || null)),
-			};
-		}, featureName);
+			const rolledResourceUse = before.activationInfo?.resourceTrigger?.timing === "onUse"
+				&& before.activationInfo?.rolledSaveDc;
+			let rolledDc: number | null = null;
+			if (clicked && rolledResourceUse) {
+				const resourceName = before.activationInfo.resourceTrigger.resourceName;
+				const modal = this.page.locator(".ve-ui-modal__inner:visible")
+					.filter({has: this.page.getByRole("radiogroup", {name: `${resourceName} options`, exact: true})}).last();
+				await modal.waitFor({state: "visible", timeout: uiGate(5000)});
+				const option = modal.getByRole("radio", {name: new RegExp(featureName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")});
+				await expect(option).toBeChecked();
+				await modal.getByRole("button", {name: `Use 1 ${resourceName}`, exact: true}).click({timeout: uiGate(5000)});
+				await modal.waitFor({state: "hidden", timeout: uiGate(5000)});
+				const result = this.page.locator(".charsheet__dice-result:visible").last();
+				await this._waitPastConditionalRoll(result);
+				rolledDc = Number((await result.locator(".charsheet__dice-result-total").innerText()).trim());
+				if (!Number.isFinite(rolledDc)) throw new Error(`${featureName}: the rendered check total was not numeric`);
+				await this.page.waitForFunction(({name, resourceName, resourceBefore, usesBefore}) => {
+					const state = (globalThis as any).charSheet?._state;
+					const resource = state?.getResources?.().find((it: any) => it.name === resourceName);
+					const feature = state?.getFeature?.(name);
+					return resource?.current === resourceBefore - 1
+						&& feature?.uses?.current === usesBefore - 1;
+				}, {name: featureName, resourceName, resourceBefore: before.resources[resourceName], usesBefore: before.featureUses},
+				{timeout: uiGate(5000)});
+			} else if (clicked) {
+				const modal = this.page.locator(".ve-ui-modal__inner:visible, .ui-modal__inner:visible").last();
+				if (await modal.isVisible({timeout: uiGate(500)}).catch(() => false)) {
+					const commit = modal.locator("button.ve-btn")
+						.filter({hasText: /^Use \d+\s+/i})
+						.first();
+					if (await commit.isVisible({timeout: uiGate(1000)}).catch(() => false)) {
+						await commit.click({timeout: uiGate(5000)});
+						await modal.waitFor({state: "hidden", timeout: uiGate(5000)}).catch(() => {});
+					}
+				}
+				await this.page.waitForTimeout(400);
+			}
 
-		let attack = null;
-		if (attackName) {
-			const clickResult = await this.clickAttackRoll(attackName);
-			await this.page.waitForTimeout(150);
-			const attackState = await this.page.evaluate((name) => {
+			const afterUse = await this.page.evaluate((name) => {
 				const cs: any = (globalThis as any).charSheet;
 				const state = cs?._state;
 				const feature = state?.getFeature?.(name);
+				const activeState = (state?.getActiveStates?.() || []).find((it: any) => it.sourceFeatureId === feature?.id && it.active);
 				return {
-					mode: cs?._combat?._lastAttackContext?.mode ?? null,
-					damageRiders: JSON.parse(JSON.stringify(cs?._combat?._pendingActiveStateDamageRiders?.riders || [])),
-					stateStillActive: (state?.getActiveStates?.() || []).some((it: any) => it.sourceFeatureId === feature?.id && it.active),
+					resources: Object.fromEntries((state?.getResources?.() || []).map((it: any) => [it.name, it.current])),
+					featureUses: feature?.uses?.current ?? null,
+					ac: state?.getAC?.() ?? 0,
+					activeState: activeState ? JSON.parse(JSON.stringify(activeState)) : null,
+					activeResourceCastSpells: JSON.parse(JSON.stringify(state?.getActiveResourceCastSpells?.() || [])),
+					concentration: JSON.parse(JSON.stringify(state?.getConcentration?.() || null)),
 				};
 			}, featureName);
-			attack = {...clickResult, ...attackState};
+
+			let attack = null;
+			if (attackName) {
+				const clickResult = await this.clickAttackRoll(attackName);
+				await this.page.waitForTimeout(150);
+				const attackState = await this.page.evaluate((name) => {
+					const cs: any = (globalThis as any).charSheet;
+					const state = cs?._state;
+					const feature = state?.getFeature?.(name);
+					return {
+						mode: cs?._combat?._lastAttackContext?.mode ?? null,
+						damageRiders: JSON.parse(JSON.stringify(cs?._combat?._pendingActiveStateDamageRiders?.riders || [])),
+						stateStillActive: (state?.getActiveStates?.() || []).some((it: any) => it.sourceFeatureId === feature?.id && it.active),
+					};
+				}, featureName);
+				attack = {...clickResult, ...attackState};
+			}
+
+			const combatActionEconomyText = captureCombatActionEconomy
+				? await this.getCombatActionEconomyText()
+				: null;
+			const rawToastText = (await this.page.locator(toastSelector).allTextContents()).join(" ");
+			const toastText = await this.page.evaluate((raw) => {
+				const template = document.createElement("template");
+				template.innerHTML = raw;
+				return template.content.textContent || raw;
+			}, rawToastText);
+			if (rolledDc != null) {
+				const saveLabels: Record<string, string> = {str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"};
+				const spec = before.activationInfo.rolledSaveDc;
+				const saveLabel = saveLabels[spec.saveAbility];
+				if (!saveLabel) throw new Error(`${featureName}: unsupported rolled-save ability ${spec.saveAbility}`);
+				expect(toastText).toContain(`DC ${rolledDc} ${saveLabel}`);
+				if (spec.range != null) expect(toastText).toContain(`within ${spec.range} ft.`);
+			}
+
+			return {
+				clicked,
+				toastText,
+				beforeResources: before.resources,
+				afterResources: afterUse.resources,
+				beforeFeatureUses: before.featureUses,
+				afterFeatureUses: afterUse.featureUses,
+				beforeAc: before.ac,
+				afterAc: afterUse.ac,
+				activeState: afterUse.activeState,
+				activeResourceCastSpells: afterUse.activeResourceCastSpells,
+				concentration: afterUse.concentration,
+				activationInfo: before.activationInfo,
+				runtimeErrors,
+				combatActionEconomyText,
+				attack,
+			};
+		} finally {
+			try {
+				await this.dismissTransientModals();
+				const restored = await this.page.evaluate((data) => {
+					const cs = (globalThis as any).charSheet;
+					// An in-memory probe must not rerun import migrations or regenerate owned IDs.
+					cs._state._data = structuredClone(data);
+					cs._renderCharacter();
+					return cs._state.toJson();
+				}, before.data);
+				expect(restored, `${featureName}: exact snapshot restoration`).toEqual(before.json);
+			} finally {
+				this.page.off("console", onConsole);
+			}
 		}
-
-		const combatActionEconomyText = captureCombatActionEconomy
-			? await this.getCombatActionEconomyText()
-			: null;
-		const rawToastText = (await this.page.locator(toastSelector).allTextContents()).join(" ");
-		const toastText = await this.page.evaluate((raw) => {
-			const template = document.createElement("template");
-			template.innerHTML = raw;
-			return template.content.textContent || raw;
-		}, rawToastText);
-		this.page.off("console", onConsole);
-
-		await this.page.evaluate((json) => {
-			const cs: any = (globalThis as any).charSheet;
-			cs?._state?.loadFromJson?.(json);
-			cs?._renderCharacter?.();
-		}, before.json);
-		await this.page.waitForTimeout(150);
-
-		return {
-			clicked,
-			toastText,
-			beforeResources: before.resources,
-			afterResources: afterUse.resources,
-			beforeFeatureUses: before.featureUses,
-			afterFeatureUses: afterUse.featureUses,
-			beforeAc: before.ac,
-			afterAc: afterUse.ac,
-			activeState: afterUse.activeState,
-			activeResourceCastSpells: afterUse.activeResourceCastSpells,
-			concentration: afterUse.concentration,
-			activationInfo: before.activationInfo,
-			runtimeErrors,
-			combatActionEconomyText,
-			attack,
-		};
 	}
 
 	async getCombatActionEconomyText (): Promise<string> {
