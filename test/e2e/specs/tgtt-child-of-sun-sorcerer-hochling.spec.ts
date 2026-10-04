@@ -145,19 +145,19 @@ const CHILD_OF_SUN_FEATURES_MATRIX: FeatureCheck[] = [
 			{kind: "stateCall", method: "onLongRest", ignoreResult: true},
 		]},
 	// Summer's Defiant Blood — arms a +CHA rider on the next spell's
-	// damage roll, once per round. The old comment here claimed there
+	// damage roll, once per turn. The old comment here claimed there
 	// was "no state-observable probe"; there now is one — the arm/consume
 	// pair is the generic `pendingSpellDamageBonus` family.
 	{level: 3, name: /summer'?s defiant blood/i, kind: "passive",
 		effects: [
-			{kind: "stateCall", method: "resetPendingSpellDamageBonusCooldowns", ignoreResult: true},
+			{kind: "stateCall", method: "resetTurnEconomy", ignoreResult: true},
 			{kind: "stateCall", method: "armSummersDefiantBlood", path: "ok", exact: true},
 			{kind: "stateCall", method: "isSummersDefiantBloodArmed", exact: true},
-			// Once per round: a second arm in the same round is refused.
+			// Once per turn: a second arm in the same turn is refused.
 			{kind: "stateCall", method: "armSummersDefiantBlood", path: "ok", exact: false},
-			// The round reset releases the lock again.
+			// The turn boundary releases the source-qualified receipt.
 			{kind: "stateCall", method: "clearPendingSpellDamageBonus", ignoreResult: true},
-			{kind: "stateCall", method: "resetPendingSpellDamageBonusCooldowns", ignoreResult: true},
+			{kind: "stateCall", method: "resetTurnEconomy", ignoreResult: true},
 			{kind: "stateCall", method: "armSummersDefiantBlood", path: "ok", exact: true},
 			{kind: "stateCall", method: "clearPendingSpellDamageBonus", ignoreResult: true},
 		]},

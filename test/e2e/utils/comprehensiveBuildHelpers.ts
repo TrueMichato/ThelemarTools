@@ -2945,38 +2945,64 @@ export async function runEffectCheck (
 				cs._renderCharacter?.();
 			});
 			await charSheet.activateFeature(e.feature);
-			const result = await charSheet.page.evaluate(({min, damageType}) => {
+			const result = await charSheet.page.evaluate(({featureName, min, damageType}) => {
 				const cs: any = (globalThis as any).charSheet;
 				const state = cs?._state;
 				const active = state?.getActiveStates?.().find((it: any) => it.active && it.stateTypeId === "sacredWeapon");
 				const weaponEffect = active?.customEffects?.find((it: any) => it.weaponId);
 				const weaponId = weaponEffect?.weaponId;
-				const attackBadge = weaponId
-					? document.querySelector(`.charsheet__attack-item[data-attack-id="${CSS.escape(weaponId)}"] .badge-primary`)
+				const feature = state?.getFeature?.(featureName);
+				const weapon = state?.getItems?.().find((it: any) => it.equipped && (it.weapon || it.item?.weapon) && state.getItemAttackId(it) === weaponId);
+				const attack = weapon ? state.buildAutoAttackFromWeapon(weapon) : null;
+				const expectedBonus = Math.max(1, state.getAbilityMod("cha"));
+				const breakdown = attack ? state.getAttackBonusBreakdown(attack) : null;
+				const base = attack ? state.getAttackBonusBreakdown(attack, {includeActiveStates: false}) : null;
+				const attackBadge = attack
+					? document.querySelector(`.charsheet__attack-item[data-attack-id="${CSS.escape(attack.id)}"] .badge-primary`)
 					: null;
 				const overviewRow = Array.from(document.querySelectorAll(".charsheet__attack-row"))
 					.find(row => (row.querySelector(".charsheet__attack-name")?.textContent || "").includes(weaponEffect?.weaponName || "__missing__"));
 				return {
 					active: !!active,
 					weaponId,
+					attackId: attack?.id,
+					sourceFeatureId: active?.sourceFeatureId,
+					featureId: feature?.id,
 					bonus: weaponId ? state.getBonusFromStates?.("attack", {weaponId}) : 0,
+					expectedBonus,
+					contributions: breakdown?.activeStateContributions,
+					expectedTotal: base ? base.total + expectedBonus : null,
+					total: breakdown?.total,
 					otherBonus: state.getBonusFromStates?.("attack", {weaponId: "__other__"}) || 0,
 					damageTypes: weaponId ? state.getWeaponDamageTypeChoices?.(weaponId, "slashing") : [],
 					attackBadgeTitle: attackBadge?.getAttribute("title") || "",
+					attackBadgeText: attackBadge?.textContent?.trim(),
 					overviewDamage: overviewRow?.querySelector(".charsheet__attack-damage")?.textContent || "",
 					min,
 					damageType,
 				};
-			}, {min: e.attackBonusMin, damageType: e.alternateDamageType});
+			}, {featureName: e.feature, min: e.attackBonusMin, damageType: e.alternateDamageType});
 			if (!result.active || !result.weaponId) throw new Error(`"${e.feature}" did not create a weapon-scoped active state`);
+			if (!result.attackId || !result.featureId || result.attackId !== result.weaponId || result.sourceFeatureId !== result.featureId || result.expectedTotal == null) {
+				throw new Error(`${e.feature}: the scoped attack did not retain its exact weapon and feature owner`);
+			}
 			if (result.bonus < e.attackBonusMin) throw new Error(`scoped attack bonus=${result.bonus}, expected >=${e.attackBonusMin}`);
+			expect(result.bonus, `${e.feature}: Charisma contribution`).toBe(result.expectedBonus);
+			expect(result.contributions, `${e.feature}: named scoped contribution`).toEqual([{name: "Active State", value: result.expectedBonus}]);
 			if (result.otherBonus !== 0) throw new Error(`scoped attack bonus leaked to another weapon: ${result.otherBonus}`);
-			if (!result.attackBadgeTitle.includes("active state")) throw new Error(`rendered attack badge omitted the active-state bonus`);
+			expect(result.attackBadgeTitle.split(", "), `${e.feature}: exact rendered source and amount`).toContain(`+${result.expectedBonus} Active State`);
+			expect(result.total, `${e.feature}: scoped attack total`).toBe(result.expectedTotal);
+			expect(result.attackBadgeText, `${e.feature}: displayed attack total on ${result.attackId}`).toBe(`${result.expectedTotal >= 0 ? "+" : ""}${result.expectedTotal}`);
 			if (!result.overviewDamage.toLowerCase().includes(e.alternateDamageType.toLowerCase())) throw new Error(`overview attack omitted alternate damage type "${e.alternateDamageType}"`);
 			if (!result.damageTypes.includes(e.alternateDamageType)) {
 				throw new Error(`alternate damage type "${e.alternateDamageType}" missing. seen=[${result.damageTypes.join(", ")}]`);
 			}
 			await charSheet.deactivateFeature(e.feature);
+			const after = await charSheet.page.evaluate(weaponId => {
+				const state = (globalThis as any).charSheet._state;
+				return {active: state.isStateTypeActive("sacredWeapon"), bonus: state.getBonusFromStates("attack", {weaponId})};
+			}, result.weaponId);
+			expect(after, `${e.feature}: scoped teardown`).toEqual({active: false, bonus: 0});
 			await charSheet.page.evaluate((featureName) => {
 				const cs: any = (globalThis as any).charSheet;
 				const state = cs?._state;

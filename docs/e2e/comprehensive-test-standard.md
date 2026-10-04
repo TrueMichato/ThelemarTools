@@ -143,6 +143,33 @@ the rendered result before closing it, and close it before the source-cleanup
 probe replaces and restores state; do not carry its live handlers across
 those reloads.
 
+### Feature activation contracts
+
+Drive per-roll conditional prompts explicitly. An unrelated Actor advantage
+does not apply to a Performance contest or rolled save DC: leave it unchecked
+and choose **Roll without**, then complete the real contest or read the real
+check result. Do not disable conditional prompts globally or substitute a
+state-only roll.
+
+For a resource-use augment such as Jester's Privilege, verify the intended
+augment is selected, confirm the resource dialog, complete the check, and wait
+for both the base resource and feature-use deductions. Its visible save DC must
+equal the rendered check total, with the correct saving ability and range.
+Close the result before restoring the exact in-memory character snapshot,
+including owned IDs; this isolated usage probe is not an import-migration test.
+
+One-per-turn probes advance the canonical `resetTurnEconomy()` boundary while
+retaining the same-turn refusal assertion. Resource rows whose feature patterns
+match multiple pools must declare an exact `resourceName`; do not weaken the
+shared ambiguity guard.
+
+Weapon-scoped effects use the equipped item's canonical attack ID. Sacred
+Weapon must retain its feature owner, contribute exactly the Charisma modifier
+(minimum +1), itemize the existing **Active State** label and amount, and display
+the exact base-plus-effect attack total. Keep weapon qualification, nonleakage,
+Radiant damage, and teardown checks; do not rerender merely to repair the UI
+before reading its badge.
+
 > **Effect verification is a first-class requirement.**  When a feature
 > grants advantage on a save, prove the advantage flag flips.  When a
 > toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a

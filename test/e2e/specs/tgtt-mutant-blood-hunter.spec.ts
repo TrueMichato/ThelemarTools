@@ -127,6 +127,7 @@ const MUTANT_FEATURES: FeatureCheck[] = [
 		level: 3,
 		name: /mutagen/i,
 		kind: "resource",
+		resourceName: "Mutagen",
 		resourceMax: [1, 3],
 		restoreOn: "short",
 	},
