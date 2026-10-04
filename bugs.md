@@ -3,23 +3,55 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 65 — ASI regressions, ability-score provenance, and Respec repair
-
-- **S1 — Missing ASI steps (bug 1):** Reproduce lost Level Up and Quick Build improvement controls, identify the causal change and coverage gap, and restore ordinary/special improvement opportunities across PHB, XPHB and TGTT without weakening source or class identity.
-- **S1 — Repeatable ASI feat (bug 2):** Remove remaining acquisition-path exclusions for repeatable ASI feats; preserve independent selections, effects, receipts, historical ownership and save/reload behavior.
-- **S2 — Ability-score explanations (bug 3):** Make the score's calculation inspectable by hover, keyboard and touch. Attribute each evidenced ASI and feat acquisition separately, with useful source/level labels, without double-counting increases already stored in base scores or inventing missing legacy history.
-- **S3 — Complete background replacement (bug 4):** Respec must expose and apply every required choice of the selected background, including skills, origin feats and nested choices, while preserving independently owned grants and transaction isolation.
-- **S3 — Partial repairs (bug 5):** Permit applying valid edits or a subset of repairs while unchanged pre-existing problems remain clearly visible. New/worsened invalid choices and unsafe discovery failures still block Apply; unresolved records must not disappear from review or save data.
-
-The coordinator owns this ledger, known-bug status and shared architecture.
-S1 owns acquisition/improvement helpers and wizard drivers; S2 owns read-side
-ability provenance and score presentation; S3 owns background editing and
-Respec validation/review. S3 alone edits the shared CharacterSheetPage E2E
-page object; S1/S2 use separate companion page objects for new probes.
-Integration must prove restored ASI acquisition feeds separately attributed
-score-breakdown rows, not merely that each branch passes in isolation.
+_None._
 
 ## Closed Bugs
+
+### Round 65 — ASI acquisition, ability-score sources, and Respec repair
+
+**Integration.** The three existing child branches were merged `--no-ff`,
+including the bounded regression-driver corrections. ESLint, configured
+Stylelint and site JSON validation passed; the final memory-bounded full Jest
+run passed **762 suites / 19,709 tests** (2 suites / 208 tests skipped).
+The seven corrected export identities, two original Gambler MEGAs and nine
+original feature-probe titles passed without weakening their assertions.
+The final background and desktop/mobile partial-repair workflows passed
+**4/4**, and the three observed Arcane Archer timeouts passed in an isolated
+single-worker follow-up.
+
+The final 433-case browser run was interrupted by a machine crash before its
+report was written and is **not** claimed as completed certification. Its
+artifacts and earlier failures are preserved; follow-ups were bounded and
+focused, not another full run. Existing whole-test and per-feature coverage
+opt-outs remain. Browser coverage is Chromium, not deployed-site or Safari
+certification.
+
+- **Missing ASI steps (bug 1):** Legitimate same-class, same-level improvement
+  references could be rejected because their authored source differed from
+  the owning TGTT class. Shared discovery now restores the Level Up and Quick
+  Build opportunities without admitting unrelated feature identities.
+- **Repeatable ASI feat (bug 2):** Restored acquisition opportunities and
+  source-keyed ownership keep repeated scalar/split selections independent.
+  Ordinary ASIs record actual capped deltas, including zero; Respec reverses
+  those observed deltas and separately validates any paired feat.
+- **Ability-score explanations (bug 3):** Hover, focus and touch disclosures
+  reconcile the score and attribute evidenced ASI/feat acquisitions separately,
+  without adding those gains twice. Missing legacy amounts remain explicitly
+  unknown. The disclosure does not roll; the accessible modifier control does.
+- **Complete background replacement (bug 4):** Respec stages the complete
+  origin-choice graph, including skills, tools, languages, ability distributions,
+  feats and required nested spells. Apply, cancellation, Undo and reload retain
+  exact ownership and independently acquired grants.
+- **Partial repairs (bug 5):** Apply permits valid edits while unchanged
+  pre-existing issues remain visible in review and saved data. New, worsened or
+  touched unsafe evidence still blocks it. Unproven legacy ordinary-ASI reversal
+  gets targeted recovery guidance rather than a blanket legacy-feat restriction.
+
+Regression fixtures now request the PHB Fighter's authored single Fighting
+Style instead of invoking a five-pick fallback which opened reference tabs.
+Persistence probes observe the exact canonical save and completed controller
+initialization; mobile navigation observes actual resize readiness. These are
+test-driver corrections, not production fallbacks or increased test budgets.
 
 ### Round 64 — Split ASI choices, complete feature summaries, and mobile roll results
 
