@@ -1472,9 +1472,11 @@ class CharacterSheetProgression {
 					level: 0,
 					severity: "error",
 					code: "free-origin-ability-evidence",
+					decisionId: parent.id,
+					semanticKey: parent.semanticKey,
 					repairable: canRepair,
 					message: canRepair
-						? "Free origin ability choices are incomplete. Select distinct +2/+1 abilities in Change Background before applying Respec."
+						? "Free origin ability choices are incomplete. Select distinct +2/+1 abilities in Change Background to repair them."
 						: "Free origin ability history is incomplete or mismatched. Restore the recorded +2/+1 choices and bonuses from a saved backup before editing or applying Respec.",
 				});
 			}

@@ -44,8 +44,11 @@ test.describe("Respec workspace", () => {
 		const {first, displaced} = await charSheet.prepareSavedBardCantripRepairFixture();
 		await charSheet.reloadCharacterSheet();
 		await charSheet.openRespec();
-		const blocked = await charSheet.getRespecBlockingDecisions();
+		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
+		const blocked = await charSheet.getRespecUnresolvedDecisions();
 		expect(blocked).toEqual([expect.objectContaining({type: "cantrips", characterLevel: 4, status: "invalid"})]);
+		expect((await charSheet.getRespecValidationSnapshot()).validation.carriedForwardIssues)
+			.toEqual([expect.objectContaining({code: "decision-invalid", carriedForward: true})]);
 		const before = await charSheet.getBardCantripRepairSnapshot();
 		expect(before.levels).toEqual(expect.arrayContaining([
 			expect.objectContaining({level: 1, status: "resolved", selection: expect.arrayContaining([first])}),
@@ -610,27 +613,39 @@ test.describe("Respec workspace", () => {
 		]));
 	});
 
-	test("repairs a legacy level-19 ASI into an Epic Boon even when no feat was originally chosen", async ({page}) => {
+	test("preserves an unproven legacy level-19 ASI and explains targeted refusal without blocking unrelated repairs", async ({page}) => {
+		test.slow();
 		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, name: "Legacy Boon Repair"});
 		const before = await charSheet.prepareLegacyEpicBoonRepairFixture();
 
 		await charSheet.openRespec();
 		const draftStatus = await charSheet.getRespecDraftStatus();
-		expect(draftStatus).toContain("need attention");
+		expect(draftStatus).toContain("Changes may be applied");
+		expect(draftStatus).toContain("unchanged issues will remain");
 		expect(draftStatus).not.toContain("spell choices grouped");
 		const invalid = await charSheet.getLevel19EpicBoonRepairSnapshot();
 		expect(invalid.status).toBe("invalid");
 		expect(invalid.selection).toMatchObject({mode: "asi", legacyAsi: {con: 2}});
+		expect(invalid.receipt).toBeNull();
+		expect(invalid.featName).toBeNull();
+		expect(invalid.con).toBe(before.con);
+		expect(invalid.abilityTotal).toBe(before.abilityTotal);
+		const original = await charSheet.getRespecTransactionSnapshot();
+		expect(original.dirty).toBe(false);
+		const validation = (await charSheet.getRespecValidationSnapshot()).validation;
+		expect(validation.canApply).toBe(true);
+		expect(validation.carriedForwardIssues).toContainEqual(expect.objectContaining({
+			code: "decision-invalid", carriedForward: true, message: expect.stringContaining("Epic Boon"),
+		}));
 
 		await charSheet.stageLevel19EpicBoonRepair();
-		const repaired = await charSheet.getLevel19EpicBoonRepairSnapshot();
-		expect(repaired.status).toBe("resolved");
-		expect(repaired.featName).toBe("Boon of Combat Prowess");
-		expect(repaired.con).toBe(before.con - 2);
-		expect(repaired.abilityTotal).toBe(before.abilityTotal - 1);
+		await charSheet.expectLegacyAsiRespecRefusal();
+		expect(await charSheet.getLevel19EpicBoonRepairSnapshot()).toEqual(invalid);
+		expect(await charSheet.getRespecTransactionSnapshot()).toEqual(original);
+		expect((await charSheet.getRespecValidationSnapshot()).validation).toEqual(validation);
 	});
 
-	test("edits a real nested Cleric choice inline without stacking a modal", async ({page}) => {
+	test("edits a real nested Cleric choice inline without stacking a modal", async ({page}, testInfo) => {
 		test.slow();
 		const {charSheet} = await createCharacterViaWizard(page, {
 			...PRESET_CLERIC,
@@ -640,6 +655,15 @@ test.describe("Respec workspace", () => {
 		});
 
 		await charSheet.openRespec();
+		const beforeValidation = await charSheet.getRespecValidationSnapshot();
+		await testInfo.attach("cleric-before-validation", {body: JSON.stringify(beforeValidation, null, 2), contentType: "application/json"});
+		expect(beforeValidation.validation.canApply).toBe(true);
+		expect(beforeValidation.validation.carriedForwardIssues).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "free-origin-ability-evidence", repairable: true, carriedForward: true}),
+			expect.objectContaining({code: "decision-missing", carriedForward: true, message: "languageProficiencies is missing."}),
+			expect.objectContaining({code: "decision-missing", carriedForward: true, message: "Free Origin Ability +2 is missing."}),
+			expect.objectContaining({code: "decision-missing", carriedForward: true, message: "Free Origin Ability +1 is missing."}),
+		]));
 		const beforeMechanics = await charSheet.getRespecMechanicsSnapshot();
 		expect(beforeMechanics.choice).toBe("Protector");
 		const beforeLive = await page.evaluate(() => (globalThis as any).charSheet._state.toJson());
@@ -692,6 +716,12 @@ test.describe("Respec workspace", () => {
 			.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
 			.some(selection => selection?.source === "XPHB")).toBe(true);
 		const withThaumaturgeCantrip = await charSheet.getRespecMechanicsSnapshot();
+		const afterValidation = await charSheet.getRespecValidationSnapshot();
+		await testInfo.attach("cleric-after-validation", {body: JSON.stringify(afterValidation, null, 2), contentType: "application/json"});
+		expect(afterValidation.origin).toEqual(beforeValidation.origin);
+		expect(afterValidation.validation.carriedForwardIssues).toEqual(beforeValidation.validation.carriedForwardIssues);
+		expect(afterValidation.validation.blockingErrors).toEqual([]);
+		expect(afterValidation.validation.canApply).toBe(true);
 		expect(withThaumaturgeCantrip.cantrips.length).toBeGreaterThanOrEqual(beforeCantrips.length);
 		expect(withThaumaturgeCantrip.cantrips.some(cantrip => !beforeCantrips.includes(cantrip))).toBe(true);
 		await charSheet.applyRespecDraft();
@@ -902,12 +932,12 @@ test.describe("Respec workspace", () => {
 		});
 		await levelUpTo(page, 3, {subclassName: "College of Valor", subclassSource: "TGTT-2024"});
 		await charSheet.openRespec();
-		expect((await charSheet.getRespecBlockingDecisions()).map(({label}) => label))
-			.toEqual(["Current Spell Repertoire"]);
-		await charSheet.stageRequiredRespecOptions("Current Spell Repertoire", 3);
-		await charSheet.applyRespecDraft();
-		await charSheet.openRespec();
 		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
+		const beforeValidation = await charSheet.getRespecValidationSnapshot();
+		expect(beforeValidation.validation.carriedForwardIssues.length).toBeGreaterThan(0);
+		expect(await charSheet.getRespecUnresolvedDecisions()).toContainEqual(expect.objectContaining({
+			type: "nestedTool", label: "toolProficiencies",
+		}));
 		const original = await charSheet.getRespecLiveJson();
 		const baseline = (await charSheet.getRespecFeatureSkillSnapshot()).live;
 		const label = await charSheet.getRespecSubclassDecisionLabel("Bard");
@@ -944,6 +974,8 @@ test.describe("Respec workspace", () => {
 		await charSheet.stageAllMissingNestedRespecChoices();
 		await charSheet.stageRequiredRespecOptionalFeatures("Jester's Acts", 3);
 		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
+		expect((await charSheet.getRespecValidationSnapshot()).validation.carriedForwardIssues)
+			.toEqual(beforeValidation.validation.carriedForwardIssues);
 		await charSheet.applyRespecDraft();
 		expect((await charSheet.getRespecSkillBonusSnapshot(chosen!)).live).toEqual(after.draft);
 		await charSheet.undoAppliedRespec();
@@ -958,6 +990,9 @@ test.describe("Respec workspace", () => {
 		await charSheet.applyRespecDraft();
 		await charSheet.reloadCharacterSheet();
 		expect((await charSheet.getRespecSkillBonusSnapshot(chosen!)).live).toEqual(after.draft);
+		await charSheet.openRespec();
+		expect((await charSheet.getRespecValidationSnapshot()).validation.carriedForwardIssues)
+			.toEqual(beforeValidation.validation.carriedForwardIssues);
 	});
 
 	test("applies a new feature-owned skill from an untouched Monk build and survives Undo and reload", async ({page}) => {
@@ -965,7 +1000,8 @@ test.describe("Respec workspace", () => {
 		const {charSheet} = await createCharacterViaWizard(page, {
 			...PRESET_TGTT_MERCY_MONK,
 			race: "Dwarf",
-			raceSource: "PHB",
+			raceSource: "PHB'14",
+			subrace: "Hill",
 			bgSource: "PHB",
 			prioritySources: ["TGTT", "PHB"],
 			classToolCategory: "artisan",
@@ -975,6 +1011,11 @@ test.describe("Respec workspace", () => {
 		});
 		await levelUpTo(page, 3, {subclassName: "Way of The Shackled", subclassSource: "TGTT"});
 		await charSheet.openRespec();
+		const beforeValidation = await charSheet.getRespecValidationSnapshot();
+		expect(beforeValidation.origin.race).toMatchObject({source: "PHB"});
+		expect(beforeValidation.origin.race.name).toContain("Dwarf");
+		expect(beforeValidation.origin.race.name).toContain("Hill");
+		expect(beforeValidation.validation.carriedForwardIssues.length).toBeGreaterThan(0);
 		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
 		const label = await charSheet.getRespecSubclassDecisionLabel("Monk");
 		await charSheet.stageRespecSubclassChoice(label, "Way of the Five Animals", "TGTT", 3);
@@ -1018,6 +1059,8 @@ test.describe("Respec workspace", () => {
 		expect(stagedOwner.draft.features.some(feature => feature.name === "Hidden Arts")).toBe(false);
 		expect(stagedOwner.draft.progressionSources).toContain(child!.semanticKey);
 		expect(await charSheet.getRespecBlockingDecisions()).toEqual([]);
+		expect((await charSheet.getRespecValidationSnapshot()).validation.carriedForwardIssues)
+			.toEqual(beforeValidation.validation.carriedForwardIssues);
 		await charSheet.closeRespecLevelEditor();
 		await charSheet.applyRespecDraft();
 		expect((await charSheet.getRespecSkillBonusSnapshot(chosen!)).live).toEqual(after.draft);
@@ -1036,5 +1079,8 @@ test.describe("Respec workspace", () => {
 		expect(reloadedOwner.progressionSources).toEqual(stagedOwner.draft.progressionSources);
 		expect(reloadedOwner.features.map(({name, source, subclassSource}) => ({name, source, subclassSource})))
 			.toEqual(stagedOwner.draft.features.map(({name, source, subclassSource}) => ({name, source, subclassSource})));
+		await charSheet.openRespec();
+		expect((await charSheet.getRespecValidationSnapshot()).validation.carriedForwardIssues)
+			.toEqual(beforeValidation.validation.carriedForwardIssues);
 	});
 });

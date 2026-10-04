@@ -14,6 +14,7 @@ class CharacterSheetRespecEngine {
 		this._isDirty = false;
 		this._preexistingPendingKeys = new Set();
 		this._baselineDecisionIssues = new Map();
+		this._baselineFreeOriginEvidence = null;
 		this._touchedDecisionKeys = new Set();
 	}
 
@@ -70,6 +71,7 @@ class CharacterSheetRespecEngine {
 		this._manifest = this._originalManifest;
 		this._persistManifest();
 		this._baselineDecisionIssues = this._getDecisionIssueIndex(this._originalManifest);
+		this._baselineFreeOriginEvidence = this._getFreeOriginEvidenceFingerprint();
 		return this._candidateState;
 	}
 
@@ -78,6 +80,7 @@ class CharacterSheetRespecEngine {
 		this._manifest = null;
 		this._originalManifest = null;
 		this._originalSnapshot = null;
+		this._baselineFreeOriginEvidence = null;
 		this._isDirty = false;
 		this._preexistingPendingKeys = new Set();
 		this._baselineDecisionIssues = new Map();
@@ -347,6 +350,38 @@ class CharacterSheetRespecEngine {
 			index.set(key, this._getDecisionFingerprint(decision, manifest));
 		}
 		return index;
+	}
+
+	_getFreeOriginEvidenceFingerprint () {
+		return JSON.stringify(CharacterSheetRespecEngine._getSemanticValue({
+			selectedAbilityBonuses: this._candidateState.getBaseBackgroundUserChoices()?.selectedAbilityBonuses,
+			abilityBonuses: this._candidateState.toJson().abilityBonuses,
+		}));
+	}
+
+	_isUnchangedMissingFreeOriginEvidence (issue) {
+		if (issue.code !== "free-origin-ability-evidence" || issue.repairable !== true || !issue.semanticKey) return false;
+		if (this._baselineFreeOriginEvidence !== this._getFreeOriginEvidenceFingerprint()) return false;
+		const baselineIssues = (this._originalManifest?.issues || []).filter(original =>
+			original.code === issue.code && original.semanticKey === issue.semanticKey && original.repairable === true,
+		);
+		if (baselineIssues.length !== 1) return false;
+		const relevant = manifest => (manifest?.decisions || []).filter(decision =>
+			decision.meta?.originFreeAbility || ["originRace", "originBackground"].includes(decision.type),
+		);
+		const before = relevant(this._originalManifest);
+		const after = relevant(this._manifest);
+		if (!before.length || before.length !== after.length) return false;
+		const byKey = new Map(before.map(decision => [decision.semanticKey, decision]));
+		if (byKey.size !== before.length || new Set(after.map(decision => decision.semanticKey)).size !== after.length) return false;
+		const parent = after.find(decision => decision.semanticKey === issue.semanticKey);
+		if (parent?.type !== "nestedConfiguration" || !parent.meta?.originFreeAbility) return false;
+		return after.every(decision => {
+			const original = byKey.get(decision.semanticKey);
+			if (!original || this._touchedDecisionKeys.has(decision.semanticKey)) return false;
+			const fingerprint = this._getDecisionFingerprint(original, this._originalManifest);
+			return !!fingerprint && fingerprint === this._getDecisionFingerprint(decision, this._manifest);
+		});
 	}
 
 	_trackChangedDecisions (before, after) {
@@ -1195,10 +1230,10 @@ class CharacterSheetRespecEngine {
 		const errors = issues.filter(issue => issue.severity === "error").map(issue => {
 			const decision = currentById.get(issue.decisionId);
 			const baseline = decision && this._baselineDecisionIssues.get(decision.semanticKey);
-			const carriedForward = decisionIssues.has(issue) && !!decision && ["decision-missing", "decision-invalid", "decision-ambiguous"].includes(issue.code)
+			const carriedForward = this._isUnchangedMissingFreeOriginEvidence(issue) || (decisionIssues.has(issue) && !!decision && ["decision-missing", "decision-invalid", "decision-ambiguous"].includes(issue.code)
 				&& !!baseline
 				&& !this._touchedDecisionKeys.has(decision.semanticKey)
-				&& baseline === this._getDecisionFingerprint(decision, this._manifest);
+				&& baseline === this._getDecisionFingerprint(decision, this._manifest));
 			return {...issue, carriedForward};
 		});
 		const blockingErrors = errors.filter(issue => !issue.carriedForward);
@@ -1300,6 +1335,7 @@ class CharacterSheetRespecEngine {
 		this._originalManifest = null;
 		this._isDirty = false;
 		this._baselineDecisionIssues = new Map();
+		this._baselineFreeOriginEvidence = null;
 		this._touchedDecisionKeys = new Set();
 		return true;
 	}

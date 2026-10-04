@@ -1541,6 +1541,7 @@ export class CharacterSheetPage {
 	async getLevel19EpicBoonRepairSnapshot (): Promise<{
 		status: string;
 		selection: any;
+		receipt: unknown;
 		featName: string | null;
 		con: number;
 		abilityTotal: number;
@@ -1556,6 +1557,7 @@ export class CharacterSheetPage {
 			return {
 				status: decision?.status || "missing",
 				selection: decision?.selection || null,
+				receipt: decision?.receipt || null,
 				featName: state?.getFeats?.().find((feat: any) => feat?.source === "XPHB" && /^Boon of /i.test(feat.name))?.name || null,
 				con: state?.getAbilityBase?.("con") || 0,
 				abilityTotal: scores.reduce((sum, score) => sum + score, 0),
@@ -1573,6 +1575,27 @@ export class CharacterSheetPage {
 		await featEditor.locator(".charsheet__respec-feat-item").filter({hasText: "Boon of Combat Prowess"}).first().click();
 		await featEditor.locator(".charsheet__feat-ability-grid button:not([disabled])").first().click();
 		await featEditor.locator("button", {hasText: "Apply Changes"}).click();
+	}
+
+	async expectLegacyAsiRespecRefusal (): Promise<void> {
+		const toast = this.page.locator(".toast").filter({hasText: "Cannot safely replace this ASI"}).last();
+		await expect(toast).toBeVisible();
+		await expect(toast).toContainText("saved acquisition does not prove the actual applied ability increases");
+		await expect(toast).toContainText("Other Respec choices remain available");
+		await expect(this.page.locator(".charsheet__respec-feat-modal:visible")).toBeVisible();
+	}
+
+	async getRespecTransactionSnapshot () {
+		return this.page.evaluate(() => {
+			const cs = (globalThis as any).charSheet;
+			const engine = cs._respec._engine;
+			return {
+				live: JSON.stringify(cs._state.toJson()),
+				draft: JSON.stringify(engine.state.toJson()),
+				manifest: JSON.stringify(engine.manifest),
+				dirty: engine.isDirty as boolean,
+			};
+		});
 	}
 
 	async stageFirstMissingRespecSkillChoice (missingSkills: string[] = []): Promise<string[]> {
@@ -1662,7 +1685,18 @@ export class CharacterSheetPage {
 			});
 			throw new Error(`Respec Apply remained disabled: ${JSON.stringify(validation)}`);
 		}
+		const {validation} = await this.getRespecValidationSnapshot();
+		expect(validation.canApply).toBe(true);
 		await apply.click();
+		if (validation.carriedForwardIssues.length) {
+			const heading = this.page.getByRole("heading", {name: "Apply Respec With Remaining Issues", exact: true});
+			await expect(heading).toBeVisible();
+			const modal = this.page.locator(".ve-ui-modal__overlay:visible").filter({has: heading});
+			await expect(modal).toContainText(`${validation.carriedForwardIssues.length} unchanged issue`);
+			for (const issue of validation.carriedForwardIssues) await expect(modal).toContainText(issue.message);
+			await modal.getByRole("button", {name: /Apply Changes and Keep Issues$/}).click();
+			await expect(modal).toBeHidden();
+		}
 		await expect(this.page.locator("#charsheet-respec-undo")).toBeEnabled();
 	}
 
@@ -1822,7 +1856,34 @@ export class CharacterSheetPage {
 		return this.page.evaluate(() => (globalThis as any).charSheet._state.toJson());
 	}
 
-	async getRespecBlockingDecisions (): Promise<Array<{
+	async getRespecValidationSnapshot () {
+		return this.page.evaluate(() => {
+			const engine = (globalThis as any).charSheet._respec._engine;
+			return {
+				validation: engine.getValidation() as {
+					isValid: boolean; canApply: boolean;
+					errors: Array<{code: string; decisionId?: string; semanticKey?: string; message: string; repairable?: boolean; carriedForward: boolean}>;
+					blockingErrors: Array<{code: string; decisionId?: string; semanticKey?: string; message: string; repairable?: boolean; carriedForward: boolean}>;
+					carriedForwardIssues: Array<{code: string; decisionId?: string; semanticKey?: string; message: string; repairable?: boolean; carriedForward: boolean}>;
+				},
+				origin: {
+					race: engine.state.getRace() as {name: string; source: string},
+					background: engine.state.getBackground() as {name: string; source: string},
+					choices: engine.state.getBaseBackgroundUserChoices() as object,
+					abilityBonuses: engine.state.toJson().abilityBonuses as Record<string, number>,
+					decisions: engine.manifest.base.decisions as Array<{
+						id: string; type: string; label: string; semanticKey: string; status: string; selection: unknown; meta: {originFreeAbility?: boolean};
+					}>,
+				},
+			};
+		});
+	}
+
+	async getRespecBlockingDecisions () {
+		return this.getRespecUnresolvedDecisions({blockingOnly: true});
+	}
+
+	async getRespecUnresolvedDecisions ({blockingOnly = false} = {}): Promise<Array<{
 		id: string;
 		type: string;
 		label: string;
@@ -1831,9 +1892,10 @@ export class CharacterSheetPage {
 		characterLevel: number;
 		optionCount: number;
 	}>> {
-		return this.page.evaluate(() => {
+		return this.page.evaluate(onlyBlockers => {
 			const engine = (globalThis as any).charSheet._respec._engine;
-			const blocked = new Set(engine.getValidation().errors.map((issue: any) => issue.decisionId));
+			const validation = engine.getValidation();
+			const blocked = new Set((onlyBlockers ? validation.blockingErrors : validation.errors).map((issue: any) => issue.decisionId));
 			return engine.manifest.decisions
 				.filter((decision: any) => blocked.has(decision.id))
 				.map((decision: any) => ({
@@ -1845,11 +1907,11 @@ export class CharacterSheetPage {
 					characterLevel: decision.characterLevel,
 					optionCount: decision.options?.length || 0,
 				}));
-		});
+		}, blockingOnly);
 	}
 
 	async stageRequiredRespecOptions (label: string, level: number): Promise<void> {
-		const decision = (await this.getRespecBlockingDecisions()).find(item =>
+		const decision = (await this.getRespecUnresolvedDecisions()).find(item =>
 			item.label === label && item.characterLevel === level);
 		if (!decision || !decision.count) throw new Error(`No missing ${label} decision at level ${level}`);
 		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
@@ -1867,12 +1929,12 @@ export class CharacterSheetPage {
 		}
 		expect(await selected.count()).toBe(decision.count);
 		await editor.locator("button", {hasText: "Stage Choice"}).click();
-		await expect.poll(async () => (await this.getRespecBlockingDecisions())
+		await expect.poll(async () => (await this.getRespecUnresolvedDecisions())
 			.some(item => item.id === decision.id)).toBe(false);
 	}
 
 	async stageRequiredRespecOptionalFeatures (label: string, level: number): Promise<void> {
-		const decision = (await this.getRespecBlockingDecisions()).find(item =>
+		const decision = (await this.getRespecUnresolvedDecisions()).find(item =>
 			item.type === "optionalFeatures" && item.label === label && item.characterLevel === level);
 		if (!decision || !decision.count) throw new Error(`No missing ${label} optional feature decision at level ${level}`);
 		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
@@ -1886,7 +1948,7 @@ export class CharacterSheetPage {
 		expect(await options.count()).toBeGreaterThanOrEqual(decision.count);
 		for (let i = 0; i < decision.count; i++) await options.nth(i).check();
 		await modal.locator("button.ve-btn-primary", {hasText: "Apply Changes"}).click();
-		await expect.poll(async () => (await this.getRespecBlockingDecisions())
+		await expect.poll(async () => (await this.getRespecUnresolvedDecisions())
 			.some(item => item.id === decision.id)).toBe(false);
 	}
 
