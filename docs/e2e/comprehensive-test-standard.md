@@ -61,6 +61,13 @@ owns the mechanics of the exact boon it selects.
 
 ## Post-test JSON export (automatic)
 
+Presets use `classSource` for the wizard's visible abbreviation. When that
+differs from the JSON key, independently declare `canonicalClassSource`
+(`PHB'24` -> `XPHB`, `TAP` -> `TalPsi`). The round-trip test checks the exact
+class name, canonical source, and level both before and after import, against
+that configured expectation; it never derives the expected source from the
+character's own export.
+
 Every generated test (single-class L1/L3/L5/L5-loadout/MEGA/USE/round-trip
 plus the multiclass plan test) dumps `cs._state.toJson()` to:
 

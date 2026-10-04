@@ -19,7 +19,10 @@ export interface CharacterPreset {
 	 */
 	subrace?: string;
 	className: string;
+	/** Visible source abbreviation used to select the class in the wizard. */
 	classSource: string;
+	/** Independently configured JSON source key when it differs from the visible abbreviation. */
+	canonicalClassSource?: string;
 	/** Override the sheet's source-priority filter before the Builder renders. */
 	prioritySources?: string[];
 	/** Disable per-roll conditional pickers for deterministic lifecycle probes. */
@@ -182,6 +185,7 @@ export const PRESET_FULL_XPHB_LIGHT_CLERIC: CharacterPreset = {
 	raceSource: "PHB'24",
 	className: "Cleric",
 	classSource: "PHB'24",
+	canonicalClassSource: "XPHB",
 	prioritySources: ["XPHB"],
 	skipConditionalPrompt: true,
 	background: "Acolyte",
@@ -200,6 +204,7 @@ export const PRESET_FULL_SEA_DRUID: CharacterPreset = {
 	raceSource: "PHB'24",
 	className: "Druid",
 	classSource: "PHB'24",
+	canonicalClassSource: "XPHB",
 	prioritySources: ["XPHB"],
 	skipConditionalPrompt: true,
 	background: "Hermit",
@@ -232,6 +237,7 @@ export const PRESET_FULL_XPHB_DEVOTION_PALADIN: CharacterPreset = {
 	raceSource: "PHB'24",
 	className: "Paladin",
 	classSource: "PHB'24",
+	canonicalClassSource: "XPHB",
 	prioritySources: ["XPHB"],
 	skipConditionalPrompt: true,
 	background: "Soldier",
@@ -732,6 +738,7 @@ export const PRESET_FULL_DAEMONOLOGIST_DWARF: CharacterPreset = {
 	raceSource: "PHB'24",
 	className: "Wizard",
 	classSource: "PHB'24",
+	canonicalClassSource: "XPHB",
 	prioritySources: ["XPHB", "GrimHollowPG24"],
 	background: "Sage",
 	bgSource: "PHB'24",
@@ -1055,6 +1062,7 @@ export const PRESET_FULL_TALENT_CHRONOPATH: CharacterPreset = {
 	// sheet renders, which for this brew is "TAP" (`_meta.sources[0].abbreviation`),
 	// not the JSON source key "TalPsi" used by `prioritySources`.
 	classSource: "TAP",
+	canonicalClassSource: "TalPsi",
 	prioritySources: ["TalPsi"],
 	skipConditionalPrompt: true,
 	background: "Sage",
@@ -1195,6 +1203,7 @@ export const PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER: CharacterPreset = {
 	raceSource: "PHB'24",
 	className: "Sorcerer",
 	classSource: "PHB'24",
+	canonicalClassSource: "XPHB",
 	prioritySources: ["XPHB"],
 	skipConditionalPrompt: true,
 	background: "Acolyte",
@@ -1232,6 +1241,7 @@ export const PRESET_FULL_SPELLFIRE_SORCERER: CharacterPreset = {
 	raceSource: "PHB'24",
 	className: "Sorcerer",
 	classSource: "PHB'24",
+	canonicalClassSource: "XPHB",
 	prioritySources: ["XPHB"],
 	skipConditionalPrompt: true,
 	background: "Acolyte",

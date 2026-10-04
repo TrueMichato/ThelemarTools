@@ -809,18 +809,20 @@ export function describeCharacter (spec: CharacterSpec): void {
 			// reads as a product failure and is not one.
 			test.setTimeout(120_000);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
+			const expectedClassIdentity = [{
+				name: preset.className,
+				source: preset.canonicalClassSource ?? preset.classSource,
+				level: 1,
+			}];
 			const exported = await page.evaluate(() => {
 				const cs: any = (globalThis as any).charSheet;
 				return cs?._state?.toJson?.() ?? null;
 			});
 			expect(exported, "state.toJson()").toBeTruthy();
-			expect(
-				exported.classes?.some((it: any) =>
-					it?.name === preset.className
-					&& it?.source === preset.classSource,
-				),
-				`export should preserve exact class identity ${preset.className}|${preset.classSource}`,
-			).toBe(true);
+			expect(exported.name).toBe(preset.name);
+			expect(exported.classes?.map(({name, source, level}: {name: string; source: string; level: number}) => ({name, source, level})),
+				"export should preserve exact independently configured class identity",
+			).toEqual(expectedClassIdentity);
 
 			const reimported = await page.evaluate((json) => {
 				const cs: any = (globalThis as any).charSheet;
@@ -833,13 +835,9 @@ export function describeCharacter (spec: CharacterSpec): void {
 				};
 			}, exported);
 			expect(reimported?.name).toBe(preset.name);
-			expect(
-				reimported?.classes?.some((it: any) =>
-					it?.name === preset.className
-					&& it?.source === preset.classSource,
-				),
-				`re-import should preserve exact class identity ${preset.className}|${preset.classSource}`,
-			).toBe(true);
+			expect(reimported?.classes?.map(({name, source, level}: {name: string; source: string; level: number}) => ({name, source, level})),
+				"re-import should preserve exact independently configured class identity",
+			).toEqual(expectedClassIdentity);
 			await charSheet.expectLevel(1);
 		});
 	});
