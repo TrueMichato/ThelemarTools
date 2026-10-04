@@ -36,13 +36,13 @@ const cls = {
 };
 const otherClass = {name: "Other", source: "TST", hd: {faces: 8}, classFeatures: []};
 
-function fixture ({skills = [], multiclass = false} = {}) {
+function fixture ({skills = [], multiclass = false, freeOrigin = false} = {}) {
 	Parser.LANGUAGES_STANDARD = ["Common", "Elvish", "Dwarvish"];
 	Parser.LANGUAGES_ALL = Parser.LANGUAGES_STANDARD;
 	const state = new State();
-	state.setRace(race);
+	state.setRace(freeOrigin ? {name: "Dwarf", source: "XPHB"} : race);
 	state.setBackground(background);
-	state.setAbilityBonus("dex", 2);
+	state.setAbilityBonus("dex", freeOrigin ? 0 : 2);
 	state.addClass({...cls, level: 1});
 	state.recordLevelChoice({level: 1, class: {name: cls.name, source: cls.source}, choices: {skills}});
 	if (multiclass) {
@@ -90,6 +90,63 @@ function reopen (state, page) {
 }
 
 describe("Respec partial repairs distinguish unchanged problems from unsafe changes", () => {
+	it("carries an untouched missing free-origin pair through unrelated repair, Apply/reload/Undo without losing the evidence diagnostic", async () => {
+		const {state, page, respec, engine} = fixture({freeOrigin: true});
+		const baseline = engine.getValidation();
+		const diagnostic = baseline.errors.find(issue => issue.code === "free-origin-ability-evidence");
+		expect(diagnostic).toMatchObject({repairable: true, carriedForward: true});
+		expect(baseline).toMatchObject({isValid: false, canApply: true, blockingErrors: []});
+		const origins = engine.manifest.base.decisions;
+		const original = state.toJson();
+		await repair(respec, "skills", ["athletics"]);
+		expect(engine.manifest.base.decisions).toEqual(origins);
+		expect(engine.getValidation().blockingErrors).toEqual([]);
+		expect(engine.getValidation().carriedForwardIssues).toContainEqual(diagnostic);
+		expect(engine.getValidation().carriedForwardIssues).toHaveLength(baseline.carriedForwardIssues.length - 1);
+		await engine.apply();
+		expect(state.toJson().abilityBonuses).toEqual(original.abilityBonuses);
+		const loaded = reopen(state, page);
+		expect(loaded._engine.getValidation()).toMatchObject({isValid: false, canApply: true, blockingErrors: []});
+		expect(loaded._engine.getValidation().carriedForwardIssues).toContainEqual(diagnostic);
+		expect(loaded._engine.manifest.base.decisions.filter(decision => decision.meta?.originFreeAbility && decision.type === "nestedAbility")
+			.every(decision => decision.selection == null && decision.status === "missing" && decision.required)).toBe(true);
+		await engine.undo();
+		expect(state.toJson()).toEqual(original);
+	});
+
+	it.each(["new", "touched-child", "touched-parent", "changed-background", "changed-race", "worsened-evidence", "changed-empty-evidence"])("blocks %s free-origin missing or unproven evidence instead of using unrelated baseline permission", async mode => {
+		const {state, engine} = fixture({freeOrigin: mode !== "new"});
+		const before = state.toJson();
+		if (mode === "new" || mode === "changed-race") {
+			const raceDecision = engine.manifest.decisions.find(decision => decision.type === "originRace");
+			await engine.stageGraphMutation(raceDecision.id, {name: "Other Dwarf", source: "XPHB"}, {
+				apply: ({state: candidate}) => {
+					candidate.setRace({name: "Other Dwarf", source: "XPHB"});
+					candidate.setAbilityBonus("dex", 0);
+				},
+			});
+		} else if (mode === "touched-child" || mode === "touched-parent") {
+			const choice = engine.manifest.decisions.find(decision => decision.meta?.originFreeAbility
+				&& decision.type === (mode === "touched-child" ? "nestedAbility" : "nestedConfiguration"));
+			await engine.updateDecisionSelection(choice.id, mode === "touched-child" ? null : choice.selection);
+		} else if (mode === "changed-background") {
+			const parent = engine.manifest.decisions.find(decision => decision.type === "originBackground");
+			await engine.stageGraphMutation(parent.id, {name: "Other Unfinished", source: "TST"}, {
+				apply: ({state: candidate}) => candidate.setBackground({...background, name: "Other Unfinished"}),
+			});
+		} else if (mode === "changed-empty-evidence") {
+			await engine.stageCandidateMutation(({state: candidate}) =>
+				candidate.setBaseBackgroundUserChoices({selectedAbilityBonuses: {unrecorded: 0}}),
+			);
+		} else {
+			await engine.stageCandidateMutation(({state: candidate}) => candidate.setAbilityBonus("str", 2));
+		}
+		expect(engine.getValidation().blockingErrors).toContainEqual(expect.objectContaining({code: "free-origin-ability-evidence", carriedForward: false}));
+		expect(engine.getValidation().canApply).toBe(false);
+		await expect(engine.apply()).rejects.toThrow();
+		expect(state.toJson()).toEqual(before);
+	});
+
 	it("repairs one of three real missing decisions and preserves two errors, pending evidence, reload and Undo", async () => {
 		const {state, page, respec, engine} = fixture();
 		const before = state.toJson();

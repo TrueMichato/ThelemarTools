@@ -47,6 +47,15 @@ controls survive save and reopening Respec. A same-background dialog can repair
 one existing family without demanding unrelated unchanged repairs; replacing
 the background still requires all newly introduced background children.
 
+A completely unassigned free-origin +2/+1 pair (no recorded picks, applied
+origin bonuses, or owned child receipts) is also an unresolved choice, not
+corrupt acquisition evidence. Its diagnostic is tied to the source-qualified
+distribution owner. It may remain through an unrelated repair only while the
+whole free-origin choice graph and both species/background parents are unchanged
+and untouched. It stays visible alongside the missing ability children after
+Apply and reload. New or touched origin choices, changed parents, and partial,
+contradictory, or unproven bonus evidence still block Apply.
+
 Incomplete class/descriptor discovery, unavailable required catalogs,
 unsupported saved decisions, and unsafe ledger replacement remain hard
 failures, even if present before editing. An uncertain targeted legacy ASI
