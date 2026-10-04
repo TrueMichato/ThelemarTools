@@ -1590,9 +1590,9 @@ export class CharacterSheetPage {
 			const cs = (globalThis as any).charSheet;
 			const engine = cs._respec._engine;
 			return {
-				live: cs._state.toJson() as object,
-				draft: engine.state.toJson() as object,
-				manifest: engine.manifest as object,
+				live: JSON.stringify(cs._state.toJson()),
+				draft: JSON.stringify(engine.state.toJson()),
+				manifest: JSON.stringify(engine.manifest),
 				dirty: engine.isDirty as boolean,
 			};
 		});

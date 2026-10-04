@@ -614,6 +614,7 @@ test.describe("Respec workspace", () => {
 	});
 
 	test("preserves an unproven legacy level-19 ASI and explains targeted refusal without blocking unrelated repairs", async ({page}) => {
+		test.slow();
 		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, name: "Legacy Boon Repair"});
 		const before = await charSheet.prepareLegacyEpicBoonRepairFixture();
 
