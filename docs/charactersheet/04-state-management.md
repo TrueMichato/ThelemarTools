@@ -1133,20 +1133,51 @@ getProficiencyBonus() {
 
 ### Ability Scores & Modifiers
 
-```javascript
-// Get total ability score
-getAbilityScore(ability) {
-    const scores = this._data.abilityScores[ability];
-    if (scores.overrideValue !== null) return scores.overrideValue;
-    return scores.base + scores.racialBonus + scores.asiBonus + scores.miscBonus;
-}
+`getAbilityBase(ability)` reads `_data.abilities`: ordinary ASIs and feat
+ability gains are already baked into that base. `getAbilityScore(ability)`
+adds the origin/direct/custom channels, Primal Champion and item bonuses,
+applies set-score overrides and the optional cap, then active-state bonuses
+and floored ability damage. Wild Shape replaces physical scores instead.
+`getAbilityMod(ability)` is `Math.floor((getAbilityScore(ability) - 10) / 2)`.
 
-// Get ability modifier
-getAbilityMod(ability) {
-    const score = this.getAbilityScore(ability);
-    return Math.floor((score - 10) / 2);
-}
-```
+Two **read-only** breakdown contracts serve distinct consumers:
+
+- `getAbilityBonusBreakdown(ability)` preserves
+  `{ability, base, total, bonus, contributions}`. Numeric contributions sum
+  to `total - base`; ASIs/feat acquisitions are not counted as bonuses again.
+- `getAbilityScoreBreakdown(ability)` returns `{ability, total, components}`.
+  It itemizes each acquisition, then the live bonus/override/cap/damage stages.
+  All numeric components sum to the exact current score.
+
+Score provenance reads the existing history/base decisions and each specific
+feat's `appliedEffects.abilityDeltas`, without constructing a manifest or
+writing any receipt. Decision `receipt.effects` of type `abilityDelta` or
+`abilityBonusDelta` require a finite actual `amount` and `before`; mirrored
+effects are deduplicated by source decision key and ability. A finite numeric
+own-target feat delta takes precedence over nested decision mirrors, including
+an explicit `0`. A missing or nonfinite target instead uses proven linked
+nested receipts; an empty or unrelated delta map never proves zero. Without
+either numeric source, an evidenced target has an unknown applied amount. A
+capped fixed-target feat whose target was not saved cannot be attributed.
+Source/owner/level labels and acquisition ordinals distinguish repeated feats.
+Exact origin bonus receipts distinguish species and background contributions.
+
+New ordinary acquisitions use `CharacterSheetClassUtils.applyClassAsi()`.
+Level Up and Quick Build persist its existing version-1 decision receipt,
+including source-qualified owner, actual capped base-score `before`, `after`
+and `amount`, and materialized tracking-feature identity. Replay preserves that
+receipt rather than applying the gain again. The feat writer likewise retains
+an own targeted zero, including fixed abilities capped at acquisition.
+Respec observes replacement boundaries and reverses only actual recorded
+deltas; it does not subtract an authored +2 when the original gain was +1 or 0.
+
+An evidenced ordinary ASI without an actual capped receipt is still listed,
+with its recorded allocation and a `null` amount (**applied amount unknown**).
+Unrecorded creation rolls, manual adjustments and unknown legacy gains remain
+in **Unallocated base (manual / unknown history)**. This residual is arithmetic
+reconciliation, not proof of a starting score. No parallel ability ledger or
+new persisted fields are introduced. The score disclosure re-reads this
+projection on render/open, including after reload and Respec.
 
 ### Armor Class
 

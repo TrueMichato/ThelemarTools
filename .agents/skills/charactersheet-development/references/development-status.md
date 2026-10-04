@@ -44,6 +44,16 @@ Three modules handle character progression with overlapping concerns:
 
 **Why this matters**: Duplicate logic across all three was the motivation for the ClassUtils refactor. If you fix a bug in LevelUp's feature parsing, check if QuickBuild/Builder have the same bug.
 
+Improvement discovery verifies authored TGTT cross-source PHB/XPHB references
+against the loaded catalog rather than assuming the referenced class source
+equals the chassis source. Ordinary acquisitions now share `applyClassAsi()`
+and retain actual capped gains, including zero, in existing decision receipts.
+Repeatable feats retain independent source-qualified acquisition owners.
+Score disclosures itemize this evidence without changing score math or
+inventing missing legacy history. The regression gate exercises actual
+Level Up/Quick Build controls, receipt persistence and read-side disclosures,
+not only summary headings or synthetic opportunities.
+
 ### Respec Progression Workspace
 **Status**: Implemented; continued parity hardening
 
@@ -78,6 +88,13 @@ release a known spell for later reacquisition. Cumulative legacy repertoires,
 other classes, and distinct source editions are not cross-level collisions.
 Overfull one-slot Repair decisions show checked boxes until reduced to one
 selection, then return to radio controls.
+
+Safe partial repairs may leave unchanged pre-existing decision errors visible.
+`getValidation().isValid` still reports those errors; `canApply` answers whether
+the current transaction is safe. New, worsened, explicitly edited-still-invalid
+and structural problems remain blockers. Review and Apply list carried issues,
+and unresolved evidence survives save/reopen. Exact raw Undo also preserves
+unrelated feature resources that a migrated reload alone could lose.
 
 Known validation baseline: `npm run test:data` still reports unrelated missing
 links in `data/crafting.json` (TGTT Identify, COMCRAF crafting material

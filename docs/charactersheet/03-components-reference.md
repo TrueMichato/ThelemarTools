@@ -230,12 +230,27 @@ getAbilityScore(ability)  // e.g., getAbilityScore("str")
 // Get modifier (Math.floor((score - 10) / 2))
 getAbilityMod(ability)
 
+// Read-only score provenance; null amounts mean applied gains are unknown.
+getAbilityScoreBreakdown(ability) // {ability, total, components}
+
 // Set components
 setAbilityBase(ability, value)
 setAbilityRacialBonus(ability, value)
 setAbilityAsiBonus(ability, value)
 setAbilityMiscBonus(ability, value)
 ```
+
+Hover the **score** (not the check modifier), focus it with the keyboard, or
+tap it to inspect the same breakdown in Manager's compact grid, ability hero
+cards, and Play Mode. Enter/Space pins the detail; Escape dismisses it.
+Check and Save actions remain separate. The Edit Ability Scores dialog shows
+the same detail, while its input still edits the raw base, including acquired
+increases.
+
+Each evidenced ASI and feat acquisition has its own source/owner/level row.
+Actual capped receipts can show `+0`; legacy ASIs show their recorded choice
+with **applied amount unknown**. The unallocated base is explicitly manual /
+unknown history, not a reconstructed creation score.
 
 #### Computed Values
 
@@ -570,6 +585,13 @@ Feature and feat cards share a button disclosure. The button's
 expanded state as its body on mouse click, Enter/Space, and re-render. Clicking
 the non-interactive header area also toggles the corresponding card.
 
+The feat picker identifies known feats by exact name and source. A repeatable
+feat remains selectable, including Ability Score Improvement (XPHB); each
+manual acquisition has its own ID, decision owner, choices, and applied-effects
+receipt. Scalar +2 and split +1/+1 choices use the authored alternatives. Capped
+targets retain an explicit zero in the existing ability-delta receipt rather
+than losing evidence of which ability the player selected.
+
 The Features tab's class list, Overview feature summary, and **All Class
 Features** modal share `_getFeatureDisplayType()`. Class, subclass, and optional
 features (including invocations, metamagic, and subclass choices) belong to the
@@ -655,6 +677,28 @@ _applyASI(choices)
 - Ability Score Improvement or Feat
 - Optional feature choices (invocations, maneuvers)
 - Spell selection for casters
+
+Level Up and Quick Build share `getImprovementOpportunity()`: authored
+class-feature references determine the slots, including Fighter 6/14 and Rogue
+10. TGTT's 2024 classes may intentionally reference PHB or XPHB features, but
+cross-source discovery requires an exact catalog match for class, class source,
+feature source, name, and level. Complete feature data does not silently fall
+back to standard levels. Level-19 Epic Boons retain their separate feat policy.
+
+Both wizards use canonical feat eligibility, so an already-owned repeatable ASI
+remains available at another improvement opportunity even when saved feat
+metadata is shallow. Thelemar's enabled level-4 ASI-and-feat policy keeps its
+separate ordinary ASI and feat decisions.
+
+Ordinary ASIs use `applyClassAsi()` to capture actual capped base-score changes
+at acquisition time in the existing progression decision receipt. The receipt
+records each targeted ability's before/after and actual delta, including zero,
+plus its tracking feature identity. Replaying an acquisition preserves the
+original receipt without applying or recording the increase again. Respec
+reverses those actual amounts, preserving later independent acquisitions. A
+legacy ASI with only authored allocations cannot prove how much survived the
+cap: only that replacement is refused, with guidance to keep the original save
+and repair/rebuild from evidenced history. Other Respec choices remain available.
 
 ---
 

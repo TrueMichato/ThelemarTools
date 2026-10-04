@@ -206,9 +206,13 @@ describe("#12 LevelUp main ASI/feat path is gated the same way (source guard)", 
 		"utf8",
 	);
 
-	test("ASI base writes are gated on a fresh addFeature(...) in the main path", () => {
-		// The increases loop that calls setAbilityBase must sit INSIDE an addFeature(...) gate.
-		expect(LEVELUP_SRC).toMatch(/if \(this\._state\.addFeature\(asiFeature\)\) \{[\s\S]*?setAbilityBase\(abl, CharacterSheetClassUtils\.capAbilityIncrease\(currentBase/);
+	test("LevelUp delegates to the shared writer whose base writes follow the fresh feature gate", () => {
+		const CLASS_UTILS_SRC = readFileSync(
+			resolve(dirname(fileURLToPath(import.meta.url)), "../../../js/charactersheet/charactersheet-class-utils.js"),
+			"utf8",
+		);
+		expect(LEVELUP_SRC).toMatch(/const applyAsi = \(\) => CharacterSheetClassUtils\.applyClassAsi\(this\._state/);
+		expect(CLASS_UTILS_SRC).toMatch(/static applyClassAsi[\s\S]*?if \(!state\.addFeature\(feature\)\) \{[\s\S]*?return stored[\s\S]*?state\.setAbilityBase\(ability, CharacterSheetClassUtils\.capAbilityIncrease\(before/);
 	});
 
 	test("feat bonuses are gated on a fresh addFeat(...) in the main path", () => {

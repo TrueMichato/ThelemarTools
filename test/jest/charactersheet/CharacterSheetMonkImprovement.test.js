@@ -141,13 +141,14 @@ describe("TGTT Monk improvement opportunities", () => {
 		expect(ClassUtils.getImprovementOpportunity(phbMonk, 19, opts)).toMatchObject({kind: "asiOrFeat"});
 	});
 
-	test("cross-source grants require an exact, verifiable referenced feature, not a same-name/wrong-edition UID", () => {
+	test("cross-source grants require the exact authored feature, not a same-name/wrong-source UID", () => {
 		const atFour = refs => ClassUtils.getImprovementOpportunity({
 			...monk,
 			featProgression: [],
 			classFeatures: refs,
 		}, 4, {classFeatures: monkData.classFeature});
-		expect(atFour(["Ability Score Improvement|Monk|PHB|4"])).toBeNull();
+		expect(atFour(["Ability Score Improvement|Monk|PHB|4"])).toMatchObject({kind: "asiOrFeat"});
+		expect(atFour(["Ability Score Improvement|Monk|PHB|4|XPHB"])).toBeNull();
 		expect(atFour(["Ability Score Improvement|Fighter|XPHB|4"])).toBeNull();
 		expect(atFour(["Ability Score Improvement|Monk|XPHB|8"])).toBeNull();
 		expect(atFour(["Ability Score Improvement|Monk|XPHB|4|PHB"])).toBeNull();

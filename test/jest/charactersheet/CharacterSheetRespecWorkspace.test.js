@@ -555,14 +555,31 @@ describe("CharacterSheetRespec workspace", () => {
 			entries: [],
 		};
 		state = new CharacterSheetState();
-		state.setAbilityBase("con", 14);
+		state.setAbilityBase("con", 12);
 		state.setAbilityBase("cha", 18);
 		state.addClass({...bard, level: 19});
+		const observedAsi = CharacterSheetClassUtils.applyClassAsi(state, {
+			className: "Bard", classSource: "TGTT", classLevel: 19, characterLevel: 19, asi: {con: 2},
+		});
+		const legacyKey = CharacterSheetProgression.getSemanticKey({
+			className: "Bard", classSource: "TGTT", classLevel: 19, type: "feat", sourceKey: "epic-boon-or-feat",
+		});
 		for (let level = 1; level <= 19; ++level) {
 			state.recordLevelChoice({
 				level,
 				class: {name: "Bard", source: "TGTT"},
 				choices: level === 19 ? {asi: {con: 2}} : {},
+				...(level === 19 ? {decisions: [{
+					...observedAsi,
+					type: "feat",
+					sourceKey: "epic-boon-or-feat",
+					semanticKey: legacyKey,
+					selection: {mode: "asi", legacyAsi: {con: 2}},
+					receipt: {...observedAsi.receipt,
+						sourceDecisionKey: legacyKey,
+						effects: observedAsi.receipt.effects.map(effect =>
+							effect.type === "abilityDelta" ? {...effect, sourceDecisionKey: legacyKey} : effect)},
+				}]} : {}),
 			});
 		}
 		const page = {
@@ -641,10 +658,16 @@ describe("CharacterSheetRespec workspace", () => {
 			entries: [],
 		};
 		state = new CharacterSheetState();
-		state.setAbilityBase("con", 15);
+		state.setAbilityBase("con", 13);
 		state.setAbilityBase("int", 10);
 		state.addClass({...bard, level: 20, subclass: jester});
 		state.addFeat(alert);
+		const observedAsi = CharacterSheetClassUtils.applyClassAsi(state, {
+			className: "Bard", classSource: "TGTT", classLevel: 19, characterLevel: 19, asi: {con: 2},
+		});
+		const legacyKey = CharacterSheetProgression.getSemanticKey({
+			className: "Bard", classSource: "TGTT", classLevel: 19, type: "feat", sourceKey: "epic-boon-or-feat",
+		});
 		for (let level = 1; level <= 20; ++level) {
 			state.recordLevelChoice({
 				level,
@@ -653,6 +676,17 @@ describe("CharacterSheetRespec workspace", () => {
 					...(level === 3 ? {subclass: jester} : {}),
 					...(level === 19 ? {asi: {con: 2}} : {}),
 				},
+				...(level === 19 ? {decisions: [{
+					...observedAsi,
+					type: "feat",
+					sourceKey: "epic-boon-or-feat",
+					semanticKey: legacyKey,
+					selection: {mode: "asi", legacyAsi: {con: 2}},
+					receipt: {...observedAsi.receipt,
+						sourceDecisionKey: legacyKey,
+						effects: observedAsi.receipt.effects.map(effect =>
+							effect.type === "abilityDelta" ? {...effect, sourceDecisionKey: legacyKey} : effect)},
+				}]} : {}),
 			});
 		}
 		const page = {
@@ -762,9 +796,15 @@ describe("CharacterSheetRespec workspace", () => {
 			subclasses: [jester],
 		};
 		state = new CharacterSheetState();
-		state.setAbilityBase("con", 14);
+		state.setAbilityBase("con", 12);
 		state.setAbilityBase("cha", 18);
 		state.addClass({...bard, level: 19, subclass: jester});
+		const observedAsi = CharacterSheetClassUtils.applyClassAsi(state, {
+			className: "Bard", classSource: "TGTT", classLevel: 19, characterLevel: 19, asi: {con: 2},
+		});
+		const legacyKey = CharacterSheetProgression.getSemanticKey({
+			className: "Bard", classSource: "TGTT", classLevel: 19, type: "feat", sourceKey: "epic-boon-or-feat",
+		});
 		for (let level = 1; level <= 19; ++level) {
 			state.recordLevelChoice({
 				level,
@@ -773,6 +813,17 @@ describe("CharacterSheetRespec workspace", () => {
 					...(level === 3 ? {subclass: jester} : {}),
 					...(level === 19 ? {asi: {con: 2}} : {}),
 				},
+				...(level === 19 ? {decisions: [{
+					...observedAsi,
+					type: "feat",
+					sourceKey: "epic-boon-or-feat",
+					semanticKey: legacyKey,
+					selection: {mode: "asi", legacyAsi: {con: 2}},
+					receipt: {...observedAsi.receipt,
+						sourceDecisionKey: legacyKey,
+						effects: observedAsi.receipt.effects.map(effect =>
+							effect.type === "abilityDelta" ? {...effect, sourceDecisionKey: legacyKey} : effect)},
+				}]} : {}),
 			});
 		}
 		const renderStates = [];
@@ -920,7 +971,7 @@ describe("CharacterSheetRespec workspace", () => {
 		}
 	});
 
-	it("recomputes a retained paired feat when its ASI changes below the ability cap", () => {
+	it("recomputes a retained paired feat when its ASI changes below the ability cap", async () => {
 		const fighterBoth = {
 			name: "Fighter",
 			source: "TGTT",
@@ -951,7 +1002,11 @@ describe("CharacterSheetRespec workspace", () => {
 					: {},
 			});
 		}
-		state.setAbilityBase("str", 20);
+		state.setAbilityBase("str", 18);
+		const observedAsi = CharacterSheetClassUtils.applyClassAsi(state, {
+			className: "Fighter", classSource: "TGTT", classLevel: 4, characterLevel: 4, asi: {str: 2}, grantBoth: true,
+		});
+		state.recordLevelChoice({...state.getLevelHistoryEntry(4), decisions: [observedAsi]});
 		state.addFeat(strengthFeat);
 		CharacterSheetClassUtils.applyFeatBonuses(state, strengthFeat);
 		const page = {
@@ -972,9 +1027,58 @@ describe("CharacterSheetRespec workspace", () => {
 		respec._state = respec._engine.state;
 		const asiDecision = respec._engine.manifest.decisions.find(it => it.type === "asi" && it.characterLevel === 4);
 
-		expect(respec._applyImprovementChange(asiDecision, {mode: "asi", asi: {con: 2}})).toBe(true);
+		expect(respec._applyImprovementChange(asiDecision, {mode: "asi", asi: {str: 1, dex: 1}})).toBe(true);
+		const splitDecision = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
+		expect(splitDecision.receipt.effects.filter(effect => effect.type === "abilityDelta")).toEqual([
+			{type: "abilityDelta", sourceDecisionKey: splitDecision.semanticKey, ability: "str", amount: 1, before: 18, after: 19},
+			{type: "abilityDelta", sourceDecisionKey: splitDecision.semanticKey, ability: "dex", amount: 1, before: 10, after: 11},
+		]);
+		expect([respec._state.getAbilityBase("str"), respec._state.getAbilityBase("dex")]).toEqual([20, 11]);
+		expect(respec._state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({str: 1});
+		const pairedOwner = respec._state.getFeats()[0].sourceDecisionKey;
+		expect(respec._applyImprovementChange(splitDecision, {mode: "asi", asi: {con: 2}})).toBe(true);
 		expect(respec._state.getAbilityBase("str")).toBe(19);
 		expect(respec._state.getAbilityBase("con")).toBe(12);
+		expect(respec._state.getAbilityBase("dex")).toBe(10);
 		expect(respec._state.getFeats().map(it => it.name)).toEqual(["Strength Training"]);
+		const conDecision = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
+		expect(conDecision.receipt.effects.filter(effect => effect.type === "abilityDelta")).toEqual([
+			{type: "abilityDelta", sourceDecisionKey: conDecision.semanticKey, ability: "con", amount: 2, before: 10, after: 12},
+		]);
+		expect(respec._state.getFeats()[0]).toMatchObject({
+			name: strengthFeat.name,
+			source: strengthFeat.source,
+			sourceDecisionKey: pairedOwner,
+			appliedEffects: {abilityDeltas: {str: 1}},
+		});
+		expect(respec._applyImprovementChange(conDecision, {mode: "asi", asi: {str: 2}})).toBe(true);
+		const cappedDecision = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
+		expect(cappedDecision.receipt.effects.filter(effect => effect.type === "abilityDelta")).toEqual([
+			{type: "abilityDelta", sourceDecisionKey: cappedDecision.semanticKey, ability: "str", amount: 2, before: 18, after: 20},
+		]);
+		expect([respec._state.getAbilityBase("str"), respec._state.getAbilityBase("con")]).toEqual([20, 10]);
+		expect(respec._state.getFeats()[0]).toMatchObject({
+			name: strengthFeat.name,
+			source: strengthFeat.source,
+			sourceDecisionKey: pairedOwner,
+			appliedEffects: {abilityDeltas: {str: 0}},
+		});
+		expect(pairedOwner).not.toBe(cappedDecision.semanticKey);
+		expect(respec._applyImprovementChange(cappedDecision, {mode: "asi", asi: {con: 2}})).toBe(true);
+		const replacement = respec._engine.manifest.decisions.find(it => it.semanticKey === observedAsi.semanticKey);
+		expect(replacement.receipt.effects.find(effect => effect.type === "abilityDelta"))
+			.toMatchObject({ability: "con", amount: 2, before: 10, after: 12});
+		expect(respec._state.getFeats()[0]).toMatchObject({appliedEffects: {abilityDeltas: {str: 1}}});
+		expect(respec._state.getFeats()[0].sourceDecisionKey).not.toBe(replacement.semanticKey);
+		await respec._engine.apply();
+		const loaded = CharacterSheetState.deserialize(state.serialize());
+		expect([loaded.getAbilityBase("str"), loaded.getAbilityBase("con")]).toEqual([19, 12]);
+		expect(loaded.getLevelHistoryEntry(4).decisions.find(it => it.semanticKey === observedAsi.semanticKey).receipt)
+			.toEqual(replacement.receipt);
+		await respec._engine.undo();
+		expect([state.getAbilityBase("str"), state.getAbilityBase("con")]).toEqual([20, 10]);
+		expect(state.getFeats()[0].appliedEffects.abilityDeltas).toEqual({str: 0});
+		expect(state.getLevelHistoryEntry(4).decisions.find(it => it.semanticKey === observedAsi.semanticKey).receipt)
+			.toEqual(observedAsi.receipt);
 	});
 });
