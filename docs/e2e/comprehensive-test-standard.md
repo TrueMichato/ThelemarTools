@@ -133,6 +133,16 @@ removal cleans applied table artifacts. State APIs may seed deterministic RNG
 and read durable assertions, but they must not replace the user-facing cast,
 choice, apply, resume, or cleanup interactions.
 
+Physical ability-check clicks must target the compact card's
+`.charsheet__ability-mod` check control, not the whole card or score button.
+The score button discloses the bonus breakdown and deliberately stops roll
+propagation. The modifier control supports mouse and Enter/Space activation;
+the driver must still reach the real `_rollAbilityCheck` handler and retain
+the fortune offer, resource, receipt, and rendered-result assertions. Read
+the rendered result before closing it, and close it before the source-cleanup
+probe replaces and restores state; do not carry its live handlers across
+those reloads.
+
 > **Effect verification is a first-class requirement.**  When a feature
 > grants advantage on a save, prove the advantage flag flips.  When a
 > toggle adds INT to AC, snapshot AC, toggle, assert the delta.  When a

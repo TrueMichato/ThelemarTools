@@ -3703,9 +3703,7 @@ export class CharacterSheetPage {
 		if (probe === "masterFortune") {
 			await this.prepareGamblerFortuneConsumer({d20: [1], table: [12, 88]});
 			await this.switchToTab(this.tabOverview);
-			const consumer = this.page.locator('.charsheet__ability[data-ability="str"]').first();
-			if (!await consumer.isVisible().catch(() => false)) return {ok: false, error: "Strength ability roll was not rendered"};
-			await consumer.click();
+			if (!await this.rollGamblerAbilityCheckViaUi()) return {ok: false, error: "Strength ability roll was not rendered"};
 			const offer = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__fortune__offer").filter({hasText: /Master of Fortune/i}).first();
 			await offer.waitFor({state: "visible", timeout: 5000});
 			await offer.evaluate((el: HTMLElement) => el.click());
@@ -3751,8 +3749,7 @@ export class CharacterSheetPage {
 
 			await this.prepareGamblerFortuneConsumer({d20: [1], table: [12, 88]});
 			await this.switchToTab(this.tabOverview);
-			const renderedConsumer = this.page.locator('.charsheet__ability[data-ability="str"]:visible').first();
-			await renderedConsumer.click();
+			if (!await this.rollGamblerAbilityCheckViaUi("Enter")) return {ok: false, error: "Strength ability roll was not rendered"};
 			const renderedOffer = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__fortune__offer").filter({hasText: /Master of Fortune/i}).first();
 			await renderedOffer.waitFor({state: "visible", timeout: 5000});
 			await renderedOffer.evaluate((el: HTMLElement) => el.click());
@@ -3768,6 +3765,8 @@ export class CharacterSheetPage {
 			await this.page.keyboard.press("Escape");
 			await this.page.locator(".charsheet__dice-result").last().waitFor({state: "visible", timeout: 5000});
 			const renderedResult = ((await this.page.locator(".charsheet__dice-result").last().textContent().catch(() => "")) || "");
+			await expect(this.page.locator(".charsheet__dice-result").last()).toContainText(/natural 1 treated as a natural 20/i);
+			await this.dismissTransientModals();
 			const cleanup = await this.probeGamblerSourceCleanup();
 			await this.dismissTransientModals();
 			const restoredChoice = beforeRestore.pending.some((it: any) => it.status === "awaiting-choice" && it.rolls[0] === 12 && it.rolls[1] === 88);
@@ -3996,6 +3995,18 @@ export class CharacterSheetPage {
 		}, probe);
 		await this.dismissTransientModals();
 		return result;
+	}
+
+	async rollGamblerAbilityCheckViaUi (activation: "click" | "Enter" | "Space" = "click"): Promise<boolean> {
+		await this.switchToTab(this.tabOverview);
+		const control = this.page.locator('.charsheet__ability[data-ability="str"]:visible .charsheet__ability-mod').first();
+		if (!await control.isVisible()) return false;
+		await expect(control).toHaveAttribute("role", "button");
+		await expect(control).toHaveAttribute("tabindex", "0");
+		await expect(control).toHaveAttribute("aria-label", "Roll Strength check");
+		if (activation === "click") await control.click();
+		else await control.press(activation);
+		return true;
 	}
 
 	async prepareGamblerFortuneConsumer ({d20, table = [], extraLuck = null}: {d20: number[]; table?: number[]; extraLuck?: number | null}): Promise<void> {
