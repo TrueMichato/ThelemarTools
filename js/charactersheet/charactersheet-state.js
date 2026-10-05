@@ -18006,103 +18006,7 @@ class CharacterSheetState {
 	 * @returns {{total: number, components: Array<{type: string, name: string, value: number, icon: string}>}}
 	 */
 	getSpeedBreakdown (type = "walk") {
-		const components = [];
-
-		const base = this._data.speed[type] || (type === "walk" ? 30 : 0);
-		if (base > 0) components.push({type: "base", name: type === "walk" ? "Base Speed" : `Base ${type.charAt(0).toUpperCase() + type.slice(1)} Speed`, value: base, icon: "🏃"});
-
-		// Enabled "equal to walking speed" grants (e.g. Roving's climb/swim) raise this
-		// speed's floor to the walking speed. Detect them up-front so a non-walk speed that
-		// exists ONLY because of such a grant still yields a breakdown — and so the total
-		// stays in sync with getSpeedByType()'s max(base, walkingSpeed) handling.
-		const equalToWalkMods = (this._data.namedModifiers || []).filter(m => m.type === `speed:${type}` && m.equalToWalk && m.enabled);
-
-		// For non-walk speeds that are 0, return empty breakdown
-		if (type !== "walk" && base === 0) {
-			const itemSpeedStatic = this._data.itemBonuses?.speedStatic || {};
-			const itemSpeedEqual = this._data.itemBonuses?.speedEqual || {};
-			if (!itemSpeedStatic[type] && !itemSpeedEqual[type] && !equalToWalkMods.length) {
-				return {total: 0, components: []};
-			}
-		}
-
-		// Equal-to-walk grant: add a component raising the running base to the walking speed,
-		// itemized by the granting feature's name. Mirrors getSpeedByType()'s max(base, walk).
-		if (equalToWalkMods.length) {
-			const runningBase = components.reduce((sum, c) => sum + c.value, 0);
-			const walkFloor = this.getWalkSpeed();
-			if (walkFloor > runningBase) {
-				components.push({type: "feature", name: `${equalToWalkMods[0].name || "Equal to Walking Speed"} (= walking speed)`, value: walkFloor - runningBase, icon: "🏃"});
-			}
-		}
-
-		const speedMods = this._data.customModifiers.speed || {};
-		const customMod = speedMods[type] || 0;
-		// Itemize named feature speed bonuses (e.g. "Roving", "Pursuit (Predator Focus)")
-		// so each shows its source instead of a single generic "Custom Modifier" lump.
-		// A residual line covers any unnamed/manual remainder and keeps the breakdown
-		// total exactly equal to getSpeed()/getSpeedByType(). Itemize whenever there are
-		// named components OR a non-zero aggregate (so offsetting named mods still show).
-		const namedComps = this._getSpeedNamedModifierComponents(type);
-		if (customMod !== 0 || namedComps.length) {
-			let itemized = 0;
-			namedComps.forEach(c => {
-				components.push({type: "custom", name: c.name, value: c.value, icon: "⚙️"});
-				itemized += c.value;
-			});
-			const residual = customMod - itemized;
-			if (residual !== 0) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️"});
-		}
-
-		const stateBonus = this.getSpeedBonusFromStates(type);
-		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
-
-		if (type === "walk") {
-			const unarmoredBonus = this.getUnarmoredMovementBonus();
-			if (unarmoredBonus !== 0) components.push({type: "feature", name: "Unarmored Movement", value: unarmoredBonus, icon: "🧘"});
-
-			const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus();
-			if (darkAugmentationSpeedBonus !== 0) components.push({type: "feature", name: "Dark Augmentation", value: darkAugmentationSpeedBonus, icon: "🩸"});
-			const stalkersProwessSpeedBonus = this.getStalkersProwessSpeedBonus();
-			if (stalkersProwessSpeedBonus !== 0) components.push({type: "feature", name: "Stalker's Prowess", value: stalkersProwessSpeedBonus, icon: "🐺"});
-
-			const armorPenalty = this.getArmorStrengthPenalty();
-			if (armorPenalty !== 0) components.push({type: "penalty", name: "Armor STR Penalty", value: armorPenalty, icon: "⚠️"});
-		}
-
-		const adeptSpeedBonus = this.getAdeptSpeedBonus();
-		if (adeptSpeedBonus !== 0) components.push({type: "feature", name: "Adept Speed", value: adeptSpeedBonus, icon: "💨"});
-
-		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
-		const typeItemBonus = (itemSpeedBonus[type] || 0) + (itemSpeedBonus["*"] || 0);
-		if (typeItemBonus !== 0) components.push({type: "item", name: "Magic Items", value: typeItemBonus, icon: "💎"});
-
-		const itemSpeedStatic = this._data.itemBonuses?.speedStatic || {};
-		if (itemSpeedStatic[type] && itemSpeedStatic[type] > base) {
-			components.push({type: "item", name: `Item Override (${itemSpeedStatic[type]} ft.)`, value: itemSpeedStatic[type] - base, icon: "💎"});
-		}
-
-		const speedMultiplier = this.getSpeedMultiplierFromConditions();
-		if (speedMultiplier === 0) {
-			components.push({type: "condition", name: "Grappled/Restrained", value: 0, icon: "🔗"});
-		} else if (speedMultiplier !== 1) {
-			const rawTotal = components.reduce((sum, comp) => sum + comp.value, 0);
-			const reducedAmount = Math.floor(rawTotal * speedMultiplier) - rawTotal;
-			if (reducedAmount !== 0) components.push({type: "condition", name: "Slowed", value: reducedAmount, icon: "🐌"});
-		}
-
-		const itemSpeedMultiply = this._data.itemBonuses?.speedMultiply || {};
-		const typeMultiplier = (itemSpeedMultiply[type] || 1) * (itemSpeedMultiply["*"] || 1);
-		if (typeMultiplier !== 1) {
-			const rawTotal = components.reduce((sum, comp) => sum + comp.value, 0);
-			const multipliedAmount = Math.floor(rawTotal * typeMultiplier) - rawTotal;
-			if (multipliedAmount !== 0) components.push({type: "item", name: `Speed Multiplier (×${typeMultiplier})`, value: multipliedAmount, icon: "⚡"});
-		}
-
-		const exhaustionPenalty = this._getExhaustionSpeedPenalty();
-		if (exhaustionPenalty !== 0) components.push({type: "penalty", name: "Exhaustion", value: -exhaustionPenalty, icon: "😫"});
-
-		const total = Math.max(0, components.reduce((sum, comp) => sum + comp.value, 0));
+		const {total, components} = this._getSpeedCalculation(type);
 		return {total, components};
 	}
 
@@ -19695,121 +19599,13 @@ class CharacterSheetState {
 	}
 
 	getSpeed (type) {
-		// If a type is specified, return just that speed value as a number
-		if (type) {
-			return this.getSpeedByType(type);
+		if (type) return this.getSpeedByType(type);
+		const walkCalculation = this._getSpeedCalculation("walk");
+		const parts = [`${walkCalculation.total} ft.`];
+		for (const speedType of ["fly", "swim", "climb", "burrow"]) {
+			const {total} = this._getSpeedCalculation(speedType, {walkCalculation});
+			if (total > 0) parts.push(`${speedType} ${total} ft.`);
 		}
-
-		// Apply condition-based speed multiplier (Grappled/Restrained → 0, Slowed → ×0.5)
-		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
-		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
-
-		// Item speed bonuses from equipped/attuned magic items (e.g., Boots of Speed)
-		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
-		const itemSpeedStatic = this._data.itemBonuses?.speedStatic || {};
-		const itemSpeedEqual = this._data.itemBonuses?.speedEqual || {};
-		const itemSpeedMultiply = this._data.itemBonuses?.speedMultiply || {};
-
-		// Otherwise return the formatted string for display
-		const speedMods = this._data.customModifiers.speed || {walk: 0, fly: 0, swim: 0, climb: 0, burrow: 0};
-		const stateBonus = this.getSpeedBonusFromStates();
-		const unarmoredBonus = this.getUnarmoredMovementBonus();
-		const adeptSpeedBonus = this.getAdeptSpeedBonus();
-		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
-		const materialSpeedBonus = this.getMaterialSpeedBonus();
-		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
-		const rawWalk = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + materialSpeedBonus + darkAugmentationSpeedBonus + (itemSpeedBonus.walk || 0) + (itemSpeedBonus["*"] || 0);
-		const walkMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
-		const exhaustionSpeedPenalty = ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty();
-		const walk = Math.max(0, Math.floor(rawWalk * walkMultiplier * speedMultiplier) - exhaustionSpeedPenalty);
-		const parts = [`${walk} ft.`];
-
-		// Check for "equal to walk" modifiers for each speed type
-		const hasEqualToWalkMod = (speedType) => !!this._data.namedModifiers?.some(m =>
-			m.type === `speed:${speedType}` && m.equalToWalk && m.enabled,
-		);
-		const getSpeedWithEqualToWalk = (speedType, base, bonus) => {
-			if (hasEqualToWalkMod(speedType)) {
-				return Math.max(base + bonus, rawWalk);
-			}
-			return base + bonus;
-		};
-
-		// Only apply bonuses to speeds that the character actually has (base > 0)
-		const baseFly = this._data.speed.fly || 0;
-		const baseSwim = this._data.speed.swim || 0;
-		const baseClimb = this._data.speed.climb || 0;
-		const baseBurrow = this._data.speed.burrow || 0;
-
-		// Apply item "equal to" speed grants (e.g., Winged Boots: fly = walk speed)
-		// These grant a movement type equal to another type's speed
-		const applyEqual = (speedType) => {
-			if (itemSpeedEqual[speedType]) {
-				const equalTo = itemSpeedEqual[speedType];
-				const equalToSpeed = equalTo === "walk" ? rawWalk : (this._data.speed[equalTo] || 0);
-				return equalToSpeed;
-			}
-			return 0;
-		};
-
-		// Apply item static speed overrides (e.g., Boots of Elvenkind granting fly 30)
-		let effectiveFly = itemSpeedStatic.fly ? Math.max(baseFly, itemSpeedStatic.fly) : baseFly;
-		// Volant gemstone grants hover flight = 2x walk
-		const gemFlightSpeed = this.getGemstoneFlightSpeed();
-		if (gemFlightSpeed > 0) effectiveFly = Math.max(effectiveFly, gemFlightSpeed);
-		let effectiveSwim = itemSpeedStatic.swim ? Math.max(baseSwim, itemSpeedStatic.swim) : baseSwim;
-		let effectiveClimb = itemSpeedStatic.climb ? Math.max(baseClimb, itemSpeedStatic.climb) : baseClimb;
-		let effectiveBurrow = itemSpeedStatic.burrow ? Math.max(baseBurrow, itemSpeedStatic.burrow) : baseBurrow;
-
-		// Apply equal-to grants (take highest between existing and equal-to speed)
-		effectiveFly = Math.max(effectiveFly, applyEqual("fly"));
-
-		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
-		const activeEffects = this.getActiveStateEffects();
-		const activeSpeedFloors = {
-			fly: 0,
-			swim: 0,
-			climb: 0,
-			burrow: 0,
-		};
-		for (const e of activeEffects) {
-			const speedType = e.type === "flySpeed"
-				? "fly"
-				: e.type === "swimSpeed"
-					? "swim"
-					: e.type === "climbSpeed"
-						? "climb"
-						: e.type === "burrowSpeed" ? "burrow" : null;
-			if (!speedType) continue;
-			if (e.walkMultiplier) {
-				activeSpeedFloors[speedType] = Math.max(activeSpeedFloors[speedType], this.getWalkSpeed() * Math.max(0, Number(e.walkMultiplier) || 0));
-				continue;
-			}
-			// `equalToWalk` resolves against the raw walking speed here, mirroring
-			// the existing equal-to grants in this formatted speed pipeline.
-			const granted = e.equalToWalk ? rawWalk : (e.value || 0);
-			if (speedType === "fly") effectiveFly = Math.max(effectiveFly, granted);
-			else if (speedType === "swim") effectiveSwim = Math.max(effectiveSwim, granted);
-			else if (speedType === "climb") effectiveClimb = Math.max(effectiveClimb, granted);
-			else if (speedType === "burrow") effectiveBurrow = Math.max(effectiveBurrow, granted);
-		}
-		effectiveSwim = Math.max(effectiveSwim, applyEqual("swim"));
-		effectiveClimb = Math.max(effectiveClimb, applyEqual("climb"));
-		effectiveBurrow = Math.max(effectiveBurrow, applyEqual("burrow"));
-
-		// Compute each movement type with per-type multipliers
-		const getTypeMultiplier = (speedType) => (itemSpeedMultiply[speedType] || 1) * (itemSpeedMultiply["*"] || 1);
-
-		const fly = Math.max(activeSpeedFloors.fly, (effectiveFly > 0 || hasEqualToWalkMod("fly") || this._getGrantedSpeedFromFeatures("fly") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
-		const swim = Math.max(activeSpeedFloors.swim, (effectiveSwim > 0 || hasEqualToWalkMod("swim") || this._getGrantedSpeedFromFeatures("swim") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
-		const climb = Math.max(activeSpeedFloors.climb, (effectiveClimb > 0 || hasEqualToWalkMod("climb") || this._getGrantedSpeedFromFeatures("climb") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
-		const burrow = Math.max(activeSpeedFloors.burrow, (effectiveBurrow > 0 || hasEqualToWalkMod("burrow") || this._getGrantedSpeedFromFeatures("burrow") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
-
-		if (fly > 0) parts.push(`fly ${fly} ft.`);
-		if (swim > 0) parts.push(`swim ${swim} ft.`);
-		if (climb > 0) parts.push(`climb ${climb} ft.`);
-		if (burrow > 0) parts.push(`burrow ${burrow} ft.`);
-
 		return parts.join(", ");
 	}
 
@@ -19818,116 +19614,118 @@ class CharacterSheetState {
 	}
 
 	getWalkSpeed () {
-		const speedMods = this._data.customModifiers.speed || {walk: 0};
-		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
-		const itemSpeedMultiply = this._data.itemBonuses?.speedMultiply || {};
-		const stateBonus = this.getSpeedBonusFromStates();
-		const unarmoredBonus = this.getUnarmoredMovementBonus();
-		const adeptSpeedBonus = this.getAdeptSpeedBonus();
-		const gemstoneSpeedBonus = this.getGemstoneSpeedBonus();
-		const materialSpeedBonus = this.getMaterialSpeedBonus();
-		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
-		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
-		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30)
-			+ (speedMods.walk || 0)
-			+ stateBonus
-			+ unarmoredBonus
-			+ adeptSpeedBonus
-			+ gemstoneSpeedBonus
-			+ materialSpeedBonus
-			+ darkAugmentationSpeedBonus
-			+ (itemSpeedBonus.walk || 0)
-			+ (itemSpeedBonus["*"] || 0)
-			+ armorPenalty;
-		const itemMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
-		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
-		return Math.max(0, Math.floor(raw * itemMultiplier * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
+		return this._getSpeedCalculation("walk").total;
 	}
 
 	getSpeedByType (type) {
-		const speedMods = this._data.customModifiers.speed || {};
+		return this._getSpeedCalculation(type).total;
+	}
+
+	/**
+	 * Resolve independent and walking-derived candidates through the same itemized math.
+	 * `beforeShared` retains the walking subtotal before wildcard/condition multipliers
+	 * and exhaustion, so a destination's own bonuses share those effects exactly once.
+	 */
+	_getSpeedCalculation (type, {walkCalculation = null} = {}) {
 		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
 		const itemSpeedStatic = this._data.itemBonuses?.speedStatic || {};
 		const itemSpeedEqual = this._data.itemBonuses?.speedEqual || {};
 		const itemSpeedMultiply = this._data.itemBonuses?.speedMultiply || {};
 		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
-		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-
-		let base = this._data.speed[type] || 0;
-		// Apply static speed from items (e.g., Winged Boots granting fly 30)
-		if (itemSpeedStatic[type]) base = Math.max(base, itemSpeedStatic[type]);
-
-		// Volant gemstone grants hover flight = 2x walk
-		if (type === "fly") {
-			const gemFlightSpeed = this.getGemstoneFlightSpeed();
-			if (gemFlightSpeed > 0) base = Math.max(base, gemFlightSpeed);
-		}
-
-		// Apply equal-to from items (e.g., Mariner's Armor: swim = walk)
-		if (itemSpeedEqual[type]) {
-			const equalTo = itemSpeedEqual[type];
-			const equalToSpeed = equalTo === "walk" ? this.getWalkSpeed() : (this._data.speed[equalTo] || 0);
-			base = Math.max(base, equalToSpeed);
-		}
-
-		const bonus = (speedMods[type] || 0)
-			+ this.getSpeedBonusFromStates(type)
-			+ this.getAdeptSpeedBonus()
-			+ (type === "walk" ? this.getGemstoneSpeedBonus() + this.getMaterialSpeedBonus() + this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus() : 0)
-			+ (itemSpeedBonus[type] || 0)
-			+ (itemSpeedBonus["*"] || 0);
-
-		// Check for "equal to walk" modifiers (e.g., "swimming speed equal to your walking speed")
-		const equalToWalkMod = this._data.namedModifiers?.find(m =>
-			m.type === `speed:${type}` && m.equalToWalk && m.enabled,
-		);
-		if (equalToWalkMod) {
-			// Override base with walking speed
-			base = Math.max(base, this.getWalkSpeed());
-		}
-
-		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
-		const spellSpeedType = `${type}Speed`; // e.g., "flySpeed", "swimSpeed"
+		const conditionMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
 		const activeEffects = this.getActiveStateEffects();
-		let activeSpeedFloor = 0;
-		for (const e of activeEffects) {
-			// `equalToWalk` is resolved HERE, at the read site, rather than baked
-			// into the effect: computing the walking speed while producing active
-			// state effects would re-enter the speed pipeline.
-			if (e.type === spellSpeedType) {
-				if (e.walkMultiplier) {
-					activeSpeedFloor = Math.max(activeSpeedFloor, this.getWalkSpeed() * Math.max(0, Number(e.walkMultiplier) || 0));
-					continue;
-				}
-				const granted = e.equalToWalk ? this.getWalkSpeed() : (e.value || 0);
-				base = Math.max(base, granted);
+		const components = [];
+		const sum = list => list.reduce((total, c) => total + c.value, 0);
+		const add = (list, componentType, name, value, icon) => {
+			if (value !== 0) list.push({type: componentType, name, value, icon});
+		};
+		const base = this._data.speed[type] || (type === "walk" ? 30 : 0);
+		add(components, "base", type === "walk" ? "Base Speed" : `Base ${type.charAt(0).toUpperCase() + type.slice(1)} Speed`, base, "🏃");
+		const raiseFloor = (value, componentType, name, icon) => {
+			const delta = value - sum(components);
+			if (delta > 0) add(components, componentType, name, delta, icon);
+		};
+		raiseFloor(itemSpeedStatic[type] || 0, "item", `Item Override (${itemSpeedStatic[type]} ft.)`, "💎");
+		if (itemSpeedEqual[type] && itemSpeedEqual[type] !== "walk") {
+			raiseFloor(this._data.speed[itemSpeedEqual[type]] || 0, "item", `Item Speed (= ${itemSpeedEqual[type]} speed)`, "💎");
+		}
+
+		let walkGrant = null;
+		const finalWalkFloors = [];
+		if (type !== "walk") {
+			const namedGrant = this._data.namedModifiers?.find(m => m.type === `speed:${type}` && m.equalToWalk && m.enabled);
+			if (namedGrant) walkGrant = {type: "feature", name: namedGrant.name || "Equal to Walking Speed", icon: "🏃"};
+			if (!walkGrant && itemSpeedEqual[type] === "walk") walkGrant = {type: "item", name: "Item Speed", icon: "💎"};
+		}
+		for (const effect of activeEffects) {
+			if (type !== "walk" && effect.type === "bonus" && effect.target === `speed:${type}` && effect.value === "walking") {
+				walkGrant ||= {type: "state", name: effect.stateName || "Active Effects", icon: "🔮"};
+			}
+			if (effect.type !== `${type}Speed`) continue;
+			if (effect.walkMultiplier && type !== "walk") {
+				finalWalkFloors.push({multiplier: Math.max(0, Number(effect.walkMultiplier) || 0), name: effect.stateName || "Active Effects"});
+			} else if (effect.equalToWalk) {
+				if (type !== "walk") walkGrant ||= {type: "state", name: effect.stateName || "Active Effects", icon: "🔮"};
+			} else {
+				raiseFloor(Number(effect.value) || 0, "state", effect.stateName || "Active Effects", "🔮");
 			}
 		}
 
-		// For non-walk speeds, only apply bonuses if character has that movement type
-		// (base > 0, or equalToWalk modifier grants it) — a flat "+10 speed" must
-		// not conjure a climb speed for a character who has none.
-		//
-		// An active state CAN grant a movement type outright, though ("you gain a
-		// flying speed of 60 feet" — the Fly spell, Unearthly Countenance, and
-		// every prose-parsed equivalent). Those arrive as
-		// {type: "bonus", target: "speed:fly"}, so they land in `bonus` rather than
-		// `base`, and this guard used to discard them before `bonus` was ever
-		// added — silently returning 0 for every such feature. Only a
-		// TYPE-SPECIFIC grant counts here, which is what keeps the generic
-		// "+10 speed" case above still correct.
-		if (type !== "walk" && base === 0 && activeSpeedFloor <= 0 && this._getGrantedSpeedFromStates(type) <= 0 && this._getGrantedSpeedFromFeatures(type) <= 0) {
-			return 0;
+		const addBonuses = (list, {inherited = false} = {}) => {
+			const named = this._getSpeedNamedModifierComponents(type);
+			for (const c of named) add(list, "custom", c.name, c.value, "⚙️");
+			add(list, "custom", "Custom Modifier", (this._data.customModifiers.speed?.[type] || 0) - sum(named), "⚙️");
+			add(list, "state", "Active Effects", this.getSpeedBonusFromStates(type, {includeGeneral: !inherited, includeWalkingGrants: false}), "🔮");
+			add(list, "item", "Magic Items", (itemSpeedBonus[type] || 0) + (inherited ? 0 : itemSpeedBonus["*"] || 0), "💎");
+			if (type === "walk") {
+				add(list, "feature", "Unarmored Movement", this.getUnarmoredMovementBonus(), "🧘");
+				add(list, "feature", "Dark Augmentation", this.getDarkAugmentationSpeedBonus(), "🩸");
+				add(list, "feature", "Stalker's Prowess", this.getStalkersProwessSpeedBonus(), "🐺");
+				add(list, "item", "Gemstones", this.getGemstoneSpeedBonus(), "💎");
+				add(list, "item", "Item Materials", this.getMaterialSpeedBonus(), "💎");
+			}
+			if (!inherited) {
+				add(list, "feature", "Adept Speed", this.getAdeptSpeedBonus(), "💨");
+				add(list, "penalty", "Armor STR Penalty", ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(), "⚠️");
+			}
+		};
+		const finish = list => {
+			const typeMultiplier = itemSpeedMultiply[type] || 1;
+			add(list, "item", `Speed Multiplier (×${typeMultiplier})`, sum(list) * (typeMultiplier - 1), "⚡");
+			const beforeShared = sum(list);
+			const sharedMultiplier = itemSpeedMultiply["*"] || 1;
+			add(list, "item", `Speed Multiplier (×${sharedMultiplier})`, sum(list) * (sharedMultiplier - 1), "⚡");
+			const conditionName = conditionMultiplier === 0 ? "Grappled/Restrained"
+				: conditionMultiplier === 1 ? "Rounding"
+					: conditionMultiplier < 1 ? "Slowed" : `Speed Multiplier (×${conditionMultiplier})`;
+			add(list, "condition", conditionName, Math.floor(sum(list) * conditionMultiplier) - sum(list), conditionMultiplier === 0 ? "🔗" : "🐌");
+			add(list, "penalty", "Exhaustion", ignoresSpeedReductions ? 0 : -this._getExhaustionSpeedPenalty(), "😫");
+			add(list, "penalty", "Minimum Speed", Math.max(0, -sum(list)), "🏃");
+			return {total: sum(list), components: list, beforeShared};
+		};
+		const hasIndependentSpeed = type === "walk" || sum(components) > 0
+			|| this._getGrantedSpeedFromStates(type, {includeWalkingGrants: false}) > 0 || this._getGrantedSpeedFromFeatures(type) > 0;
+		let calculation = {total: 0, components: [], beforeShared: 0};
+		if (hasIndependentSpeed) {
+			addBonuses(components);
+			calculation = finish(components);
 		}
-
-		// Apply item speed multiplier (e.g., Boots of Speed x2)
-		const typeMultiplier = (itemSpeedMultiply[type] || 1) * (itemSpeedMultiply["*"] || 1);
-
-		// Armor strength penalty applies to all movement types
-		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
-		const calculated = Math.max(0, Math.floor((base + bonus + armorPenalty) * typeMultiplier * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
-		return Math.max(calculated, activeSpeedFloor);
+		if (walkGrant || finalWalkFloors.length) walkCalculation ||= this._getSpeedCalculation("walk");
+		if (walkGrant) {
+			const inherited = [{type: walkGrant.type, name: `${walkGrant.name} (= walking speed)`, value: walkCalculation.beforeShared, icon: walkGrant.icon}];
+			addBonuses(inherited, {inherited: true});
+			const candidate = finish(inherited);
+			if (!hasIndependentSpeed || candidate.total > calculation.total) calculation = candidate;
+		}
+		for (const floor of finalWalkFloors) {
+			const value = walkCalculation.total * floor.multiplier;
+			if (value > calculation.total) calculation = {total: value, components: [{type: "state", name: `${floor.name} (= walking speed ×${floor.multiplier})`, value, icon: "🔮"}], beforeShared: 0};
+		}
+		if (type === "fly") {
+			const value = this.getGemstoneFlightSpeed();
+			if (value > calculation.total) calculation = {total: value, components: [{type: "item", name: "Gemstone Flight", value, icon: "💎"}], beforeShared: 0};
+		}
+		return calculation;
 	}
 	// #endregion
 
@@ -51174,17 +50972,18 @@ class CharacterSheetState {
 	 * target counts as granting the movement type, so a flat "+10 speed" state
 	 * can still never conjure a fly speed for a character who cannot fly.
 	 *
-	 * Used solely by `getSpeed()` to decide whether the "character must already
-	 * have this movement type" guard applies.
+	 * Used by the shared speed read to guard independent movement candidates.
+	 * Walking-equality grants are resolved separately, not as zero-base candidates.
 	 *
 	 * @param {string} speedType
 	 * @returns {number}
 	 */
-	_getGrantedSpeedFromStates (speedType) {
+	_getGrantedSpeedFromStates (speedType, {includeWalkingGrants = true} = {}) {
 		if (speedType === "walk") return 0;
 		let granted = 0;
 		for (const e of this.getActiveStateEffects()) {
 			if (e.type !== "bonus" || e.target !== `speed:${speedType}`) continue;
+			if (!includeWalkingGrants && e.value === "walking") continue;
 			let value;
 			if (e.value === "walking") value = this.getWalkSpeed();
 			else if (e.abilityMod) value = this.getAbilityMod(e.abilityMod);
@@ -51223,11 +51022,18 @@ class CharacterSheetState {
 		return granted;
 	}
 
-	getSpeedBonusFromStates (speedType = "walk") {
+	getSpeedBonusFromStates (speedType = "walk", {includeGeneral = true, includeWalkingGrants = true} = {}) {
 		const effects = this.getActiveStateEffects();
+		const stanceEffects = this._getActiveStanceEffects();
 		let bonus = 0;
 		for (const e of effects) {
 			if (e.type !== "bonus") continue;
+			// Combat stores both a parsed badge effect and the stance-specific bridge.
+			// Only the matching speed contribution is redundant; other states remain live.
+			if (e.target === "speed" && e.stateTypeId === "combatStance" && e.stateName === this.getActiveStance()
+				&& stanceEffects?.speedBonus === e.value) continue;
+			if (!includeGeneral && e.target === "speed") continue;
+			if (!includeWalkingGrants && e.value === "walking") continue;
 			// Match generic "speed" (applies to all speed types) or specific "speed:walk" etc.
 			if (e.target === "speed" || e.target === `speed:${speedType}`) {
 				if (e.abilityMod) {
@@ -51248,7 +51054,7 @@ class CharacterSheetState {
 
 		// Include combat stance speed bonus (TGTT) — stances grant walking speed only
 		if (speedType === "walk") {
-			bonus += this._getActiveStanceEffects()?.speedBonus || 0;
+			bonus += stanceEffects?.speedBonus || 0;
 		}
 
 		return bonus;

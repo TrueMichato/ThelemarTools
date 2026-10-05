@@ -1854,6 +1854,36 @@ Random roll bonuses and penalties use the parallel dice pipeline:
   `attack:spell`. Stored, temporary, and active-state-granted Combat attacks all
   share the same `_rollAttack` insertion point.
 
+### Movement Read Contract
+
+`_getSpeedCalculation(type)` is the itemized read behind `getWalkSpeed()`,
+`getSpeedByType()`, formatted `getSpeed()`, and `getSpeedBreakdown()`. Signed
+components always sum to the returned total. Its `beforeShared` subtotal is after
+the type-specific item multiplier, before wildcard multipliers, conditions,
+rounding, exhaustion, and zero clamp.
+
+Walking-equality grants (enabled named `equalToWalk`, item `speedEqual`, active
+`typeSpeed.equalToWalk`, and symbolic speed bonuses with `value: "walking"`) inherit
+walking `beforeShared`, add destination-only bonuses, then apply the destination
+item multiplier and shared finishing stages once. Do not inherit final walking
+Speed and reapply general effects, or add destination bonuses after wildcard
+multiplication. With walking 30, Swift Stance +5, climb-only +10, and wildcard x2,
+the result is walking 70/climbing 90; another x0.5 gives 35/45.
+
+Independent intrinsic/static/fixed-active speeds compete only after completing
+their own calculation. Ordinary bonuses cannot create a missing movement type.
+Active `walkMultiplier` and Volant flight (twice walking Speed) remain separate
+final-walking floors; they must not multiply or reduce that finished walking value
+again. General armor and exhaustion reductions are inherited once, respecting
+existing immunity rules.
+
+Only the matching Combat stance badge speed contribution is excluded by
+`getSpeedBonusFromStates()` when the stance bridge supplies that same bonus.
+Unrelated effects remain additive. Regression fixtures must acquire the authored
+XPHB/TGTT Second-Story Work and Rapid Current Swift Stance, including the real
+Combat post-payment activation seam; direct `activateStance()` alone does not
+exercise the badge/bridge duplication. PHB classic has no equal-to-walk climb grant.
+
 ### Concentration Breaking Cascade
 
 When Rage (or any state with `breaksConcentration: true`) activates:
