@@ -32,7 +32,10 @@ describe("Hub portable deployment contract", () => {
 
 	it("builds a separate pinned non-root Node BFF image with safe health checking", () => {
 		expect(dockerfile).toContain("FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e");
-		expect(dockerfile).toContain("libpcre2-8-0=10.42-1+deb12u1");
+		expect(dockerfile).toContain("ARG MIN_PCRE2_VERSION=10.42-1+deb12u1");
+		expect(dockerfile).toContain("apt-get install --yes --no-install-recommends libpcre2-8-0");
+		expect(dockerfile).toContain("dpkg --compare-versions \"$actual_pcre2\" ge \"$MIN_PCRE2_VERSION\"");
+		expect(dockerfile).not.toMatch(/libpcre2-8-0=10\.42-1\+deb12u\d+/);
 		expect(dockerfile).not.toMatch(/apt-get\s+(?:dist-)?upgrade/);
 		expect(dockerfile).toContain("USER 10001:10001");
 		expect(dockerfile).toContain("npm ci --omit=dev --ignore-scripts");

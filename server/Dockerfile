@@ -15,6 +15,7 @@ FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd
 
 ARG VCS_REF=unknown
 ARG VERSION=dev
+ARG MIN_PCRE2_VERSION=10.42-1+deb12u1
 
 LABEL org.opencontainers.image.source="https://github.com/TrueMichato/ThelemarTools" \
 	org.opencontainers.image.revision="${VCS_REF}" \
@@ -25,7 +26,10 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
+	&& apt-get install --yes --no-install-recommends libpcre2-8-0 \
+	&& actual_pcre2="$(dpkg-query -W -f='${Version}' libpcre2-8-0)" \
+	&& { dpkg --compare-versions "$actual_pcre2" ge "$MIN_PCRE2_VERSION" \
+		|| { printf 'libpcre2-8-0 %s is below required minimum %s\n' "$actual_pcre2" "$MIN_PCRE2_VERSION" >&2; exit 1; }; } \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& groupadd --system --gid 10001 hub \
 	&& useradd --system --uid 10001 --gid hub --home-dir /app --shell /usr/sbin/nologin hub \

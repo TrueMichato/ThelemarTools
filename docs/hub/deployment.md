@@ -38,7 +38,10 @@ Startup order:
 
 `server/Dockerfile`:
 
-- pinned Node `24.7.0-bookworm-slim`;
+- digest-pinned Node `24.20.0-bookworm-slim`;
+- install the current Debian security revision of `libpcre2-8-0` with a fail-closed
+  `10.42-1+deb12u1` minimum check, rather than pinning an apt version that disappears when
+  Debian supersedes it; CI independently verifies the runtime version;
 - multi-stage deterministic production-only `npm ci`;
 - configurable `NPM_REGISTRY` build argument, public registry by default;
 - retry policy for transient registry failures;
