@@ -1,0 +1,960 @@
+{
+	"sourceSha256": "af4db4573726f0aa98f2205b574a539bdc98e80223da1eb3312a2cfb8e2688e9",
+	"state": {
+		"abilities": {
+			"str": 21,
+			"dex": 13,
+			"con": 17,
+			"int": 12,
+			"wis": 11,
+			"cha": 8
+		},
+		"abilityBonuses": {
+			"str": 0,
+			"dex": 1,
+			"con": 0,
+			"int": 0,
+			"wis": 0,
+			"cha": 2
+		},
+		"abilityScoreMaximums": {},
+		"classes": [
+			{
+				"name": "Barbarian",
+				"source": "TGTT",
+				"level": 20,
+				"subclass": {
+					"name": "Path of the World Tree",
+					"shortName": "World Tree",
+					"source": "TGTT-2024"
+				},
+				"subclassChoice": null,
+				"casterProgression": null,
+				"spellcastingAbility": null
+			}
+		],
+		"settings": {
+			"enableTgtt": true,
+			"thelemar_asiFeat": true,
+			"enforceAbilityScoreCap": false
+		},
+		"race": {
+			"name": "Dendulra",
+			"source": "TGTT",
+			"ability": [
+				{
+					"cha": 2,
+					"choose": {
+						"from": [
+							"wis",
+							"dex"
+						],
+						"count": 1,
+						"amount": 1
+					}
+				}
+			],
+			"lineage": "VRGR"
+		},
+		"background": {
+			"name": "Baldur's Gate Folk Hero",
+			"source": "BGDIA"
+		},
+		"feats": [
+			{
+				"id": "3c90d470-039b-4582-a3b1-75758c3730e2",
+				"name": "Ashbound Initiate",
+				"source": "FoEQuickstone",
+				"choices": {
+					"skills": [],
+					"languages": [],
+					"tools": [],
+					"ability": "wis",
+					"expertise": [],
+					"spellList": null,
+					"cantrips": [],
+					"spells": [],
+					"optionalFeatures": []
+				},
+				"repeatable": false,
+				"appliedEffects": {
+					"abilityDeltas": {
+						"wis": 1
+					}
+				}
+			},
+			{
+				"id": "4b592936-f5bf-4fcd-868b-93cde917f609",
+				"name": "Boon of Irresistible Offense",
+				"source": "XPHB",
+				"choices": {
+					"skills": [],
+					"languages": [],
+					"tools": [],
+					"ability": "str",
+					"expertise": [],
+					"spellList": null,
+					"cantrips": [],
+					"spells": [],
+					"optionalFeatures": []
+				},
+				"repeatable": false,
+				"appliedEffects": {
+					"abilityDeltas": {
+						"str": 1
+					}
+				}
+			}
+		],
+		"features": [
+			{
+				"id": "5fde0300-8e59-47ff-9065-9e31a02131af",
+				"name": "Primal Champion",
+				"source": "XPHB",
+				"className": "Barbarian",
+				"classSource": "XPHB",
+				"level": 20,
+				"featureType": "Class"
+			}
+		],
+		"characterBase": {
+			"v": 1,
+			"raceUserChoices": {
+				"selectedAbilityChoices": {
+					"Dendulra|TGTT": {
+						"choose_0_0": "dex",
+						"choose_0_0_amount": 1
+					}
+				}
+			},
+			"backgroundUserChoices": {
+				"selectedTools": [
+					{
+						"anyIdx": 0,
+						"tool": "carpenter's tools",
+						"isArtisan": true
+					}
+				]
+			},
+			"decisions": [
+				{
+					"id": "base:race:dendulra-tgtt:entity:slot0@level-0",
+					"semanticKey": "base:race:dendulra-tgtt:entity:slot0",
+					"characterLevel": 0,
+					"className": "Base",
+					"classSource": "",
+					"classLevel": 0,
+					"type": "originRace",
+					"label": "Species",
+					"sourceKey": "base:race",
+					"slot": 0,
+					"required": true,
+					"count": 1,
+					"options": [],
+					"selection": {
+						"name": "Dendulra",
+						"source": "TGTT"
+					},
+					"status": "resolved",
+					"meta": {},
+					"scope": "origin",
+					"parentSemanticKey": null,
+					"rootSemanticKey": "base:race:dendulra-tgtt:entity:slot0",
+					"depth": 0,
+					"provenance": {
+						"ownerType": "race",
+						"ownerUid": "dendulra|tgtt",
+						"acquisitionKey": "base:race:dendulra|tgtt",
+						"selectedGrantKey": "dendulra|tgtt",
+						"grantKind": "entity",
+						"grantKey": "entity",
+						"sourcePath": "race",
+						"occurrence": 0,
+						"pickSlot": 0
+					},
+					"receipt": {
+						"version": 1,
+						"sourceDecisionKey": "base:race:dendulra-tgtt:entity:slot0",
+						"effects": []
+					}
+				},
+				{
+					"id": "base:race:dendulra-tgtt:race-ability-0:slot0@level-0",
+					"semanticKey": "base:race:dendulra-tgtt:race-ability-0:slot0",
+					"characterLevel": 0,
+					"className": "Base",
+					"classSource": "",
+					"classLevel": 0,
+					"type": "nestedAbility",
+					"label": "ability[0]",
+					"sourceKey": "race.ability[0]",
+					"slot": 0,
+					"required": true,
+					"count": 1,
+					"options": [],
+					"selection": "dex",
+					"status": "resolved",
+					"meta": {
+						"descriptorRules": {
+							"amount": 1,
+							"optionSource": {
+								"kind": "explicitList",
+								"values": [
+									"wis",
+									"dex"
+								]
+							}
+						}
+					},
+					"scope": "origin",
+					"parentSemanticKey": "base:race:dendulra-tgtt:entity:slot0",
+					"rootSemanticKey": "base:race:dendulra-tgtt:entity:slot0",
+					"depth": 1,
+					"provenance": {
+						"ownerType": "race",
+						"ownerUid": "dendulra|tgtt",
+						"acquisitionKey": "base:race:dendulra|tgtt",
+						"selectedGrantKey": "dendulra|tgtt",
+						"grantKind": "ability",
+						"grantKey": "race.ability[0]",
+						"sourcePath": "race.ability[0]",
+						"occurrence": 0,
+						"pickSlot": 0
+					},
+					"receipt": {
+						"version": 1,
+						"sourceDecisionKey": "base:race:dendulra-tgtt:race-ability-0:slot0",
+						"effects": [
+							{
+								"type": "abilityDelta",
+								"sourceDecisionKey": "base:race:dendulra-tgtt:race-ability-0:slot0",
+								"ability": "dex",
+								"amount": 1
+							}
+						]
+					}
+				},
+				{
+					"id": "base:background:baldur-s-gate-folk-hero-bgdia:entity:slot0@level-0",
+					"semanticKey": "base:background:baldur-s-gate-folk-hero-bgdia:entity:slot0",
+					"characterLevel": 0,
+					"className": "Base",
+					"classSource": "",
+					"classLevel": 0,
+					"type": "originBackground",
+					"label": "Background",
+					"sourceKey": "base:background",
+					"slot": 0,
+					"required": true,
+					"count": 1,
+					"options": [],
+					"selection": {
+						"name": "Baldur's Gate Folk Hero",
+						"source": "BGDIA"
+					},
+					"status": "resolved",
+					"meta": {},
+					"scope": "origin",
+					"parentSemanticKey": null,
+					"rootSemanticKey": "base:background:baldur-s-gate-folk-hero-bgdia:entity:slot0",
+					"depth": 0,
+					"provenance": {
+						"ownerType": "background",
+						"ownerUid": "baldur's gate folk hero|bgdia",
+						"acquisitionKey": "base:background:baldur's gate folk hero|bgdia",
+						"selectedGrantKey": "baldur's gate folk hero|bgdia",
+						"grantKind": "entity",
+						"grantKey": "entity",
+						"sourcePath": "background",
+						"occurrence": 1,
+						"pickSlot": 0
+					},
+					"receipt": {
+						"version": 1,
+						"sourceDecisionKey": "base:background:baldur-s-gate-folk-hero-bgdia:entity:slot0",
+						"effects": []
+					}
+				}
+			],
+			"ledgerVersion": 3,
+			"manifestVersion": 2,
+			"complete": true
+		},
+		"levelHistory": [
+			{
+				"level": 1,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 1,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 2,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 2,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 3,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 3,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 4,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 4,
+				"choices": {
+					"asi": {
+						"str": 2
+					},
+					"feat": {
+						"name": "Ashbound Initiate",
+						"source": "FoEQuickstone"
+					}
+				},
+				"decisions": [
+					{
+						"id": "barbarian|tgtt:cl4:asi:asi:slot0@level-4",
+						"semanticKey": "barbarian|tgtt:cl4:asi:asi:slot0",
+						"characterLevel": 4,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 4,
+						"type": "asi",
+						"label": "Ability Score Improvement",
+						"sourceKey": "asi",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": {
+							"str": 2
+						},
+						"status": "resolved",
+						"meta": {},
+						"scope": "level",
+						"parentSemanticKey": null,
+						"rootSemanticKey": "barbarian|tgtt:cl4:asi:asi:slot0",
+						"depth": 0,
+						"provenance": null,
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "barbarian|tgtt:cl4:asi:asi:slot0",
+							"effects": [
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "barbarian|tgtt:cl4:asi:asi:slot0",
+									"ability": "str",
+									"amount": 2,
+									"before": 15,
+									"after": 17
+								},
+								{
+									"type": "materialized",
+									"features": [
+										{
+											"id": "7c43cede-7033-4ef6-918f-c1f347276feb",
+											"name": "Ability Score Improvement",
+											"source": "TGTT"
+										}
+									]
+								}
+							]
+						}
+					},
+					{
+						"id": "barbarian|tgtt:cl4:feat:feat:slot0@level-4",
+						"semanticKey": "barbarian|tgtt:cl4:feat:feat:slot0",
+						"characterLevel": 4,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 4,
+						"type": "feat",
+						"label": "Feat",
+						"sourceKey": "feat",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": {
+							"name": "Ashbound Initiate",
+							"source": "FoEQuickstone"
+						},
+						"status": "resolved",
+						"meta": {
+							"improvement": {
+								"kind": "asiAndFeat",
+								"label": "Ability Score Improvement and Feat",
+								"categories": [],
+								"allowsAnyQualifyingFeat": true,
+								"source": "classFeature"
+							}
+						},
+						"scope": "level",
+						"parentSemanticKey": null,
+						"rootSemanticKey": "barbarian|tgtt:cl4:feat:feat:slot0",
+						"depth": 0,
+						"provenance": null,
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "barbarian|tgtt:cl4:feat:feat:slot0",
+							"effects": []
+						}
+					},
+					{
+						"id": "nested:barbarian-tgtt-cl4-feat-feat-slot0:wis:occ0:slot0@level-4",
+						"semanticKey": "nested:barbarian-tgtt-cl4-feat-feat-slot0:wis:occ0:slot0",
+						"characterLevel": 4,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 4,
+						"type": "nestedAbility",
+						"label": "ability[0]",
+						"sourceKey": "Ashbound Initiate.ability[0]",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": "wis",
+						"status": "resolved",
+						"meta": {
+							"descriptorRules": {
+								"amount": 1,
+								"max": 20,
+								"optionSource": {
+									"kind": "explicitList",
+									"values": [
+										"wis",
+										"cha"
+									]
+								},
+								"count": 1,
+								"featAbilityChoice": true,
+								"abilityOption": 0,
+								"abilityChoiceInvalid": false,
+								"selectedValues": "wis"
+							}
+						},
+						"scope": "nested",
+						"parentSemanticKey": "barbarian|tgtt:cl4:feat:feat:slot0",
+						"rootSemanticKey": "barbarian|tgtt:cl4:feat:feat:slot0",
+						"depth": 1,
+						"provenance": {
+							"ownerType": "classFeature",
+							"ownerUid": "ashbound initiate|foequickstone",
+							"acquisitionKey": "feat:ashbound-initiate-foequickstone:cl4:feat:occ0",
+							"selectedGrantKey": "wis",
+							"grantKind": "ability",
+							"grantKey": "Ashbound Initiate.ability[0]",
+							"sourcePath": "Ashbound Initiate.ability[0]",
+							"occurrence": 0,
+							"pickSlot": 0
+						},
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "nested:barbarian-tgtt-cl4-feat-feat-slot0:wis:occ0:slot0",
+							"effects": [
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "nested:barbarian-tgtt-cl4-feat-feat-slot0:wis:occ0:slot0",
+									"ability": "wis",
+									"amount": 1
+								}
+							]
+						}
+					}
+				]
+			},
+			{
+				"level": 5,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 5,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 6,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 6,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 7,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 7,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 8,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 8,
+				"choices": {
+					"asi": {
+						"str": 2
+					}
+				},
+				"decisions": [
+					{
+						"id": "barbarian|tgtt:cl8:asiorfeat:asi-or-feat:slot0@level-8",
+						"semanticKey": "barbarian|tgtt:cl8:asiorfeat:asi-or-feat:slot0",
+						"characterLevel": 8,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 8,
+						"type": "asiOrFeat",
+						"label": "Ability Score Improvement or Feat",
+						"sourceKey": "asi-or-feat",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": {
+							"mode": "asi",
+							"asi": {
+								"str": 2
+							}
+						},
+						"status": "resolved",
+						"meta": {
+							"improvement": {
+								"kind": "asiOrFeat",
+								"label": "Ability Score Improvement or Feat",
+								"categories": [],
+								"allowsAnyQualifyingFeat": true,
+								"source": "classFeature"
+							}
+						},
+						"scope": "level",
+						"parentSemanticKey": null,
+						"rootSemanticKey": "barbarian|tgtt:cl8:asiorfeat:asi-or-feat:slot0",
+						"depth": 0,
+						"provenance": null,
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "barbarian|tgtt:cl8:asiorfeat:asi-or-feat:slot0",
+							"effects": [
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "barbarian|tgtt:cl8:asiorfeat:asi-or-feat:slot0",
+									"ability": "str",
+									"amount": 2,
+									"before": 17,
+									"after": 19
+								},
+								{
+									"type": "materialized",
+									"features": [
+										{
+											"id": "3c4cb1b2-98c1-4b6d-a785-3b641df84bd4",
+											"name": "Ability Score Improvement",
+											"source": "TGTT"
+										}
+									]
+								}
+							]
+						}
+					}
+				]
+			},
+			{
+				"level": 9,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 9,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 10,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 10,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 11,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 11,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 12,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 12,
+				"choices": {
+					"asi": {
+						"str": 1,
+						"con": 1
+					}
+				},
+				"decisions": [
+					{
+						"id": "barbarian|tgtt:cl12:asiorfeat:asi-or-feat:slot0@level-12",
+						"semanticKey": "barbarian|tgtt:cl12:asiorfeat:asi-or-feat:slot0",
+						"characterLevel": 12,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 12,
+						"type": "asiOrFeat",
+						"label": "Ability Score Improvement or Feat",
+						"sourceKey": "asi-or-feat",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": {
+							"mode": "asi",
+							"asi": {
+								"str": 1,
+								"con": 1
+							}
+						},
+						"status": "resolved",
+						"meta": {
+							"improvement": {
+								"kind": "asiOrFeat",
+								"label": "Ability Score Improvement or Feat",
+								"categories": [],
+								"allowsAnyQualifyingFeat": true,
+								"source": "classFeature"
+							}
+						},
+						"scope": "level",
+						"parentSemanticKey": null,
+						"rootSemanticKey": "barbarian|tgtt:cl12:asiorfeat:asi-or-feat:slot0",
+						"depth": 0,
+						"provenance": null,
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "barbarian|tgtt:cl12:asiorfeat:asi-or-feat:slot0",
+							"effects": [
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "barbarian|tgtt:cl12:asiorfeat:asi-or-feat:slot0",
+									"ability": "str",
+									"amount": 1,
+									"before": 19,
+									"after": 20
+								},
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "barbarian|tgtt:cl12:asiorfeat:asi-or-feat:slot0",
+									"ability": "con",
+									"amount": 1,
+									"before": 14,
+									"after": 15
+								},
+								{
+									"type": "materialized",
+									"features": [
+										{
+											"id": "ef72792f-ca5e-4095-9117-e9966f7809ef",
+											"name": "Ability Score Improvement",
+											"source": "TGTT"
+										}
+									]
+								}
+							]
+						}
+					}
+				]
+			},
+			{
+				"level": 13,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 13,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 14,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 14,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 15,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 15,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 16,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 16,
+				"choices": {
+					"asi": {
+						"con": 2
+					}
+				},
+				"decisions": [
+					{
+						"id": "barbarian|tgtt:cl16:asiorfeat:asi-or-feat:slot0@level-16",
+						"semanticKey": "barbarian|tgtt:cl16:asiorfeat:asi-or-feat:slot0",
+						"characterLevel": 16,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 16,
+						"type": "asiOrFeat",
+						"label": "Ability Score Improvement or Feat",
+						"sourceKey": "asi-or-feat",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": {
+							"mode": "asi",
+							"asi": {
+								"con": 2
+							}
+						},
+						"status": "resolved",
+						"meta": {
+							"improvement": {
+								"kind": "asiOrFeat",
+								"label": "Ability Score Improvement or Feat",
+								"categories": [],
+								"allowsAnyQualifyingFeat": true,
+								"source": "classFeature"
+							}
+						},
+						"scope": "level",
+						"parentSemanticKey": null,
+						"rootSemanticKey": "barbarian|tgtt:cl16:asiorfeat:asi-or-feat:slot0",
+						"depth": 0,
+						"provenance": null,
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "barbarian|tgtt:cl16:asiorfeat:asi-or-feat:slot0",
+							"effects": [
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "barbarian|tgtt:cl16:asiorfeat:asi-or-feat:slot0",
+									"ability": "con",
+									"amount": 2,
+									"before": 15,
+									"after": 17
+								},
+								{
+									"type": "materialized",
+									"features": [
+										{
+											"id": "f1834ada-b688-4fc7-bf00-9364646f54c3",
+											"name": "Ability Score Improvement",
+											"source": "TGTT"
+										}
+									]
+								}
+							]
+						}
+					}
+				]
+			},
+			{
+				"level": 17,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 17,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 18,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 18,
+				"choices": {},
+				"decisions": []
+			},
+			{
+				"level": 19,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 19,
+				"choices": {
+					"feat": {
+						"name": "Boon of Irresistible Offense",
+						"source": "XPHB"
+					}
+				},
+				"decisions": [
+					{
+						"id": "barbarian|tgtt:cl19:feat:epic-boon-or-feat:slot0@level-19",
+						"semanticKey": "barbarian|tgtt:cl19:feat:epic-boon-or-feat:slot0",
+						"characterLevel": 19,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 19,
+						"type": "feat",
+						"label": "Epic Boon or Qualifying Feat",
+						"sourceKey": "epic-boon-or-feat",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": {
+							"name": "Boon of Irresistible Offense",
+							"source": "XPHB"
+						},
+						"status": "resolved",
+						"meta": {
+							"improvement": {
+								"kind": "feat",
+								"label": "Epic Boon or Qualifying Feat",
+								"categories": [
+									"EB"
+								],
+								"allowsAnyQualifyingFeat": true,
+								"source": "featProgression"
+							},
+							"legacyAsiInvalid": false
+						},
+						"scope": "level",
+						"parentSemanticKey": null,
+						"rootSemanticKey": "barbarian|tgtt:cl19:feat:epic-boon-or-feat:slot0",
+						"depth": 0,
+						"provenance": null,
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "barbarian|tgtt:cl19:feat:epic-boon-or-feat:slot0",
+							"effects": []
+						}
+					},
+					{
+						"id": "nested:barbarian-tgtt-cl19-feat-epic-boon-or-feat-slot0:str:occ0:slot0@level-19",
+						"semanticKey": "nested:barbarian-tgtt-cl19-feat-epic-boon-or-feat-slot0:str:occ0:slot0",
+						"characterLevel": 19,
+						"className": "Barbarian",
+						"classSource": "TGTT",
+						"classLevel": 19,
+						"type": "nestedAbility",
+						"label": "ability[0]",
+						"sourceKey": "Boon of Irresistible Offense.ability[0]",
+						"slot": 0,
+						"required": true,
+						"count": 1,
+						"options": [],
+						"selection": "str",
+						"status": "resolved",
+						"meta": {
+							"descriptorRules": {
+								"amount": 1,
+								"max": 30,
+								"optionSource": {
+									"kind": "explicitList",
+									"values": [
+										"str",
+										"dex"
+									]
+								},
+								"count": 1,
+								"featAbilityChoice": true,
+								"abilityOption": 0,
+								"abilityChoiceInvalid": false,
+								"selectedValues": "str"
+							}
+						},
+						"scope": "nested",
+						"parentSemanticKey": "barbarian|tgtt:cl19:feat:epic-boon-or-feat:slot0",
+						"rootSemanticKey": "barbarian|tgtt:cl19:feat:epic-boon-or-feat:slot0",
+						"depth": 1,
+						"provenance": {
+							"ownerType": "classFeature",
+							"ownerUid": "boon of irresistible offense|xphb",
+							"acquisitionKey": "feat:boon-of-irresistible-offense-xphb:cl19:epic-boon-or-feat:occ0",
+							"selectedGrantKey": "str",
+							"grantKind": "ability",
+							"grantKey": "Boon of Irresistible Offense.ability[0]",
+							"sourcePath": "Boon of Irresistible Offense.ability[0]",
+							"occurrence": 0,
+							"pickSlot": 0
+						},
+						"receipt": {
+							"version": 1,
+							"sourceDecisionKey": "nested:barbarian-tgtt-cl19-feat-epic-boon-or-feat-slot0:str:occ0:slot0",
+							"effects": [
+								{
+									"type": "abilityDelta",
+									"sourceDecisionKey": "nested:barbarian-tgtt-cl19-feat-epic-boon-or-feat-slot0:str:occ0:slot0",
+									"ability": "str",
+									"amount": 1
+								}
+							]
+						}
+					}
+				]
+			},
+			{
+				"level": 20,
+				"class": {
+					"name": "Barbarian",
+					"source": "TGTT"
+				},
+				"classLevel": 20,
+				"choices": {},
+				"decisions": []
+			}
+		]
+	}
+}

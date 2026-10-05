@@ -49,10 +49,16 @@ against the loaded catalog rather than assuming the referenced class source
 equals the chassis source. Ordinary acquisitions now share `applyClassAsi()`
 and retain actual capped gains, including zero, in existing decision receipts.
 Repeatable feats retain independent source-qualified acquisition owners.
-Score disclosures itemize this evidence without changing score math or
-inventing missing legacy history. The regression gate exercises actual
-Level Up/Quick Build controls, receipt persistence and read-side disclosures,
-not only summary headings or synthetic opportunities.
+Score disclosures itemize this evidence without inventing missing legacy
+history. Builder now observes real creation/origin writes in existing receipt
+metadata; feat recording retains real transitions and writer-supplied caps.
+Unitemized residuals and source-only unknown amounts are distinct from verified
+starting scores and numeric gains. Source-qualified Champion corrects XPHB and
+TGTT's inherited maximum to25 while retaining PHB24 and existing stage order;
+unresolved sources retain visibly provisional compatibility reads. The focused
+regression gate exercises the genuine affected export and actual Builder,
+Level Up/Quick Build controls, receipt persistence and shared disclosures, not
+only summary headings or synthetic opportunities.
 
 ### Respec Progression Workspace
 **Status**: Implemented; continued parity hardening

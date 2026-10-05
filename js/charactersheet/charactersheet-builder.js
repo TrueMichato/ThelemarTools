@@ -770,10 +770,16 @@ class CharacterSheetBuilder {
 			}
 
 			case 4: // Abilities
+				this._abilityAcquisitionEvidence = {
+					creationAbilityScores: {},
+					creationAbilityMethod: this._abilityMethod,
+					originEffects: [],
+				};
 				Parser.ABIL_ABVS.forEach((/** @type {*} */ abl) => {
 					const score = this._abilityScores[abl];
 					if (score != null) {
 						this._state.setAbilityBase(abl, score);
+						this._abilityAcquisitionEvidence.creationAbilityScores[abl] = this._state.getAbilityBase(abl);
 					}
 					// Clear existing racial ability bonuses before re-applying
 					// (Tasha toggle is in this step, so the step-1 bonuses may be stale)
@@ -1260,6 +1266,21 @@ class CharacterSheetBuilder {
 	 */
 	_applyRacialAbilityBonuses () {
 		if (!this._selectedRace) return;
+		const setBonus = (entity, ability, value, extra = {}) => {
+			const before = this._state.getAbilityBonus(ability) || 0;
+			this._state.setAbilityBonus(ability, value);
+			const after = this._state.getAbilityBonus(ability);
+			this._abilityAcquisitionEvidence?.originEffects.push({
+				ownerType: "race",
+				ownerUid: `${entity.name}|${entity.source}`.toLowerCase(),
+				type: "abilityBonusDelta",
+				ability,
+				before,
+				after,
+				amount: after - before,
+				...extra,
+			});
+		};
 
 		if (this._useTashasRules) {
 			Object.entries(this._tashasAbilityBonuses).forEach(([/** @type {*} */ key, /** @type {*} */ value]) => {
@@ -1268,7 +1289,7 @@ class CharacterSheetBuilder {
 				const amount = this._tashasAbilityBonuses[amountKey] || 0;
 				if (amount && Parser.ABIL_ABVS.includes(value)) {
 					const current = this._state.getAbilityBonus(value) || 0;
-					this._state.setAbilityBonus(value, current + amount);
+					setBonus(this._selectedRace, value, current + amount, {customized: true, choiceKey: key});
 				}
 			});
 		} else {
@@ -1278,7 +1299,7 @@ class CharacterSheetBuilder {
 					// Apply fixed ability entries (e.g., cha: 2) — always process these
 					Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
-							this._state.setAbilityBonus(abi, bonus);
+							setBonus(this._selectedRace, abi, bonus, {abilitySetIndex: abiIdx});
 						}
 					});
 					// Apply choose-based entries (e.g., choose 1 from [str, dex, ...])
@@ -1288,7 +1309,7 @@ class CharacterSheetBuilder {
 						Object.entries(choices).forEach(([/** @type {*} */ key, /** @type {*} */ abi]) => {
 							if (!key.startsWith(`choose_${abiIdx}_`) || key.includes("_amount") || !abi) return;
 							const amount = choices[`${key}_amount`] || 1;
-							this._state.setAbilityBonus(abi, (this._state.getAbilityBonus(abi) || 0) + amount);
+							setBonus(this._selectedRace, abi, (this._state.getAbilityBonus(abi) || 0) + amount, {abilitySetIndex: abiIdx, choiceKey: key});
 						});
 					}
 				}
@@ -1301,7 +1322,7 @@ class CharacterSheetBuilder {
 					Object.entries(abiSet).forEach(([/** @type {*} */ abi, /** @type {*} */ bonus]) => {
 						if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
 							const current = this._state.getAbilityBonus(abi);
-							this._state.setAbilityBonus(abi, current + bonus);
+							setBonus(this._selectedSubrace, abi, current + bonus, {abilitySetIndex: abiIdx});
 						}
 					});
 					// Apply choose-based entries
@@ -1312,7 +1333,7 @@ class CharacterSheetBuilder {
 							if (!key.startsWith(`choose_${abiIdx}_`) || key.includes("_amount") || !abi) return;
 							const amount = choices[`${key}_amount`] || 1;
 							const current = this._state.getAbilityBonus(abi);
-							this._state.setAbilityBonus(abi, current + amount);
+							setBonus(this._selectedSubrace, abi, current + amount, {abilitySetIndex: abiIdx, choiceKey: key});
 						});
 					}
 				}
@@ -2165,6 +2186,19 @@ class CharacterSheetBuilder {
 				if (bonus && Parser.ABIL_ABVS.includes(value)) {
 					const current = this._state.getAbilityBonus(value);
 					this._state.setAbilityBonus(value, current + bonus);
+					const after = this._state.getAbilityBonus(value);
+					if (this._selectedBackground) {
+						this._abilityAcquisitionEvidence?.originEffects.push({
+							ownerType: "background",
+							ownerUid: `${this._selectedBackground.name}|${this._selectedBackground.source}`.toLowerCase(),
+							type: "abilityBonusDelta",
+							ability: value,
+							before: current,
+							after,
+							amount: after - current,
+							choiceKey: key,
+						});
+					}
 				}
 			}
 		});
@@ -2584,7 +2618,9 @@ class CharacterSheetBuilder {
 		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
 			page: this._page,
 			state: this._state,
+			abilityAcquisitionEvidence: this._abilityAcquisitionEvidence,
 		});
+		this._abilityAcquisitionEvidence = null;
 
 		// Save the character
 		await this._page.saveCharacter();

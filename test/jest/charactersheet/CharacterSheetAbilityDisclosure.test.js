@@ -2,6 +2,7 @@ import {beforeAll, beforeEach, afterEach, describe, expect, jest, test} from "@j
 import "./setup.js";
 
 let CharacterSheetPage;
+let CharacterSheetPlayMode;
 let elements;
 
 class Element {
@@ -65,6 +66,7 @@ beforeAll(async () => {
 	globalThis.document = {addEventListener: () => {}, querySelector: () => null};
 	await import("../../../js/charactersheet/charactersheet.js");
 	CharacterSheetPage = globalThis.CharacterSheetPage;
+	CharacterSheetPlayMode = (await import("../../../js/charactersheet/charactersheet-playmode.js")).CharacterSheetPlayMode;
 });
 
 beforeEach(() => {
@@ -94,7 +96,7 @@ function bind () {
 		getAbilityScoreBreakdown: jest.fn(() => ({
 			total: 20,
 			components: [
-				{source: "base", label: "Base / earlier adjustments", amount: 20},
+				{source: "base", label: "Unitemized score", amount: 20},
 				{source: "acquisition", label: "ASI - Fighter [PHB] level 4", amount: null},
 				{source: "featAcquisition", label: "Durable [PHB]", amount: 0},
 			],
@@ -216,10 +218,47 @@ describe("ability disclosure at the real binder and formatter", () => {
 	test("formats unknown evidence as source-only, a proven zero as +0, and retains check context", () => {
 		const {page, popover} = bind();
 		const text = page._formatAbilityScoreBreakdown(page._state.getAbilityScoreBreakdown("str"));
-		expect(text).toBe("Base / earlier adjustments: 20\nASI - Fighter [PHB] level 4\nDurable [PHB]: +0\nTotal: 20");
-		expect(popover.children[2].children[1].textContent).toBe("");
-		expect(popover.children[3].children[1].textContent).toBe("+0");
+		expect(text).toContain("Unitemized score: 20\nDurable [PHB] (no increase applied): +0\nTotal: 20\nSources with unrecorded amounts\nASI - Fighter [PHB] level 4 - amount not recorded");
+		const rows = popover.children.filter(child => child.className === "charsheet__score-detail-row");
+		expect(rows.map(row => row.children[1].textContent)).toEqual(["20", "+0"]);
+		expect(popover.children.some(child => child.children[0]?.textContent === "Sources with unrecorded amounts")).toBe(true);
 		expect(popover.children.at(-1).textContent).toContain("STR modifier: +5");
+	});
+
+	test("one formatter supplies Page and Play Mode, including provisional recovery and actual capped grant", () => {
+		const {page, score, popover} = bind();
+		const breakdown = {
+			total: 24,
+			provisional: true,
+			notes: ["Rules source unresolved - correct the source to verify this score."],
+			components: [
+				{source: "base", label: "Unitemized score", amount: 21},
+				{source: "primalChampion", label: "Primal Champion [PHB]", amount: 3, requestedAmount: 4, maximum: 24},
+				{source: "origin", label: "Species: Dendulra [TGTT]", amount: null},
+			],
+		};
+		page._state.getAbilityScoreBreakdown.mockReturnValue(breakdown);
+		page._refreshAbilityScoreDisclosure(score, "str");
+		expect(score.getAttribute("aria-label")).toContain("(provisional)");
+		const rows = popover.children.filter(child => child.className === "charsheet__score-detail-row");
+		expect(rows[1].children[0].textContent).toBe("Primal Champion [PHB] (requested +4; maximum 24)");
+		expect(rows[1].children[1].textContent).toBe("+3");
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = page;
+		playMode._ce = (_tag, className, parent) => {
+			const element = new Element();
+			element.className = className;
+			parent?.append(element);
+			return element;
+		};
+		const row = new Element();
+		playMode._renderAbilityBonusBreakdown(row, breakdown);
+		const wrap = row.children[0];
+		expect(wrap.getAttribute("aria-label")).toBe(page._formatAbilityScoreBreakdown(breakdown));
+		expect(wrap.children.map(child => child.textContent)).toContain("Total (provisional): 24");
+		expect(wrap.children.map(child => child.textContent)).toContain("Sources with unrecorded amounts: Species: Dendulra [TGTT] - amount not recorded");
+		expect(wrap.children.every(child => child.textContent.length > 0)).toBe(true);
+		expect(page._formatAbilityScoreBreakdown(breakdown)).toContain("Settings or review the class in Respec");
 	});
 
 	test("positions the same disclosure within the mobile viewport", () => {

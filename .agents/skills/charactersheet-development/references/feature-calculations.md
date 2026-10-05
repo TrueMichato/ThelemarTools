@@ -20,6 +20,13 @@
 
 `getFeatureCalculations()` in `charactersheet-state.js` is the central method that computes all class-specific mechanics. It returns a flat object with boolean flags and computed values, traversing every class the character has and computing level-gated features.
 
+Primal Champion's boolean eligibility remains compatible, but score grant/cap
+math uses the separate `_getPrimalChampionDescriptor()` to avoid recursion and
+resolve the actual source-qualified inherited feature. PHB grants4/max24,
+XPHB grants4/max25, and TGTT references XPHB. Preserve positive-increase and
+item/static/global-cap/active-state ordering; unresolved source evidence keeps
+compatibility numbers visibly provisional instead of guessing an edition.
+
 ## How It Works
 
 ```javascript

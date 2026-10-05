@@ -4281,27 +4281,80 @@ class CharacterSheetProgression {
 	 * shared by Builder, Level Up, Quick Build, deferred Features, and the spell
 	 * picker so supported new saves do not depend on later Respec inference.
 	 */
-	static syncCanonicalDecisions ({page, state} = {}) {
+	static syncCanonicalDecisions ({page, state, abilityAcquisitionEvidence} = {}) {
 		if (!page || !state) return null;
 		const manifest = CharacterSheetProgression.buildManifest({page, state});
-		CharacterSheetProgression._stampAcquisitionReceipts(manifest, state);
+		CharacterSheetProgression._stampAcquisitionReceipts(manifest, state, abilityAcquisitionEvidence);
 		state.setProgressionManifest?.(manifest);
+		if (abilityAcquisitionEvidence) {
+			const stored = state.getCharacterBase?.().decisions || [];
+			for (const decision of manifest.base?.decisions || []) {
+				if (!decision.meta?.originAbilityObservationVersion) continue;
+				const target = stored.find(candidate => candidate.semanticKey === decision.semanticKey);
+				if (!target) continue;
+				// Normal reconciliation preserves old receipts; only this observed creation transaction replaces them.
+				target.receipt = CharacterSheetProgression._copy(decision.receipt);
+				target.meta = {...target.meta, ...CharacterSheetProgression._copy(decision.meta)};
+			}
+		}
 		return manifest;
 	}
 
-	static getFeatAbilityDecisionEffects (decision, state) {
+	static getFeatAbilityDecisionEffects (decision, state, decisions = [decision]) {
 		if (decision.type !== "nestedAbility" || !decision.meta?.descriptorRules?.featAbilityChoice) return null;
-		const feat = (state.getFeats?.() || []).find(candidate =>
-			candidate.sourceDecisionKey === decision.parentSemanticKey || candidate.id === decision.meta?.featId);
+		const feat = CharacterSheetClassUtils.resolveFeatAcquisitionOwner(decision, decisions, state.getFeats?.() || []);
 		if (!feat?.appliedEffects?.abilityDeltas) return null;
 		const abilities = decision.selection == null ? [] : Array.isArray(decision.selection) ? decision.selection : [decision.selection];
-		return abilities.map(ability => {
-			const amount = Number(feat.appliedEffects.abilityDeltas[ability]) || 0;
-			return {type: "abilityDelta", sourceDecisionKey: decision.semanticKey, ability, amount, before: state.getAbilityBase(ability) - amount};
+		return abilities.filter(ability => Object.hasOwn(feat.appliedEffects.abilityDeltas, ability)
+			&& Number.isFinite(feat.appliedEffects.abilityDeltas[ability])).map(ability => {
+			const amount = feat.appliedEffects.abilityDeltas[ability];
+			const transition = feat.appliedEffects.abilityTransitions?.[ability];
+			const proven = transition && Number.isFinite(transition.before) && Number.isFinite(transition.after)
+				&& transition.amount === amount && transition.after - transition.before === amount;
+			return {
+				type: "abilityDelta",
+				sourceDecisionKey: decision.semanticKey,
+				ability,
+				amount,
+				...(proven ? transition : {}),
+			};
 		});
 	}
 
-	static _stampAcquisitionReceipts (manifest, state) {
+	static _stampAcquisitionReceipts (manifest, state, abilityAcquisitionEvidence) {
+		const freshOrigins = new Map();
+		const roots = (manifest.decisions || []).filter(decision => ["originRace", "originBackground"].includes(decision.type));
+		for (const [index, observation] of (abilityAcquisitionEvidence?.originEffects || []).entries()) {
+			const matchesOwner = decision => decision.provenance?.ownerType === observation.ownerType
+				&& decision.provenance?.ownerUid?.toLowerCase() === observation.ownerUid;
+			const subrace = state.getSubrace?.();
+			const root = roots.find(matchesOwner)
+				|| (observation.ownerType === "race" && subrace
+					&& CharacterSheetProgression.getEntityUid(subrace) === observation.ownerUid
+					? roots.find(decision => decision.type === "originRace") : null);
+			if (!root) continue;
+			const child = observation.choiceKey && !observation.customized
+				? (manifest.decisions || []).find(decision => matchesOwner(decision) && decision.type === "nestedAbility"
+					&& (Array.isArray(decision.selection) ? decision.selection : [decision.selection]).includes(observation.ability)
+					&& (observation.abilitySetIndex == null || decision.provenance?.sourcePath?.endsWith(`ability[${observation.abilitySetIndex}]`)))
+				: null;
+			const effect = {
+				...observation,
+				sourceDecisionKey: `${root.semanticKey}:ability:${index}`,
+			};
+			for (const decision of [root, child].filter(Boolean)) {
+				const effects = freshOrigins.get(decision) || [];
+				effects.push(effect);
+				freshOrigins.set(decision, effects);
+			}
+		}
+		if (abilityAcquisitionEvidence && roots.length) {
+			roots[0].meta = {
+				...roots[0].meta,
+				creationAbilityScores: {...abilityAcquisitionEvidence.creationAbilityScores},
+				creationAbilityMethod: abilityAcquisitionEvidence.creationAbilityMethod,
+			};
+		}
 		const typeMap = {
 			skills: "skills",
 			tools: "tools",
@@ -4329,7 +4382,7 @@ class CharacterSheetProgression {
 			const values = valuesOf(decision.selection);
 			const ownershipType = typeMap[decision.type];
 			if (["nestedAbility", "nestedConfiguration"].includes(decision.type) && values.length) {
-				const featEffects = CharacterSheetProgression.getFeatAbilityDecisionEffects(decision, state);
+				const featEffects = CharacterSheetProgression.getFeatAbilityDecisionEffects(decision, state, manifest.decisions || []);
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
 				effects.push(...(featEffects || values.map(value => ({
 					type: decision.type === "nestedAbility" ? "abilityDelta" : "configuration",
@@ -4411,6 +4464,20 @@ class CharacterSheetProgression {
 			return effects;
 		};
 		for (const decision of manifest.decisions || []) {
+			const freshOrigin = abilityAcquisitionEvidence && ["race", "background"].includes(decision.provenance?.ownerType)
+				&& (roots.includes(decision) || decision.type === "nestedAbility");
+			if (freshOrigin) {
+				if (roots.includes(decision)) decision.meta = {...decision.meta, originAbilityObservationVersion: 1};
+				decision.receipt = {
+					version: 1,
+					sourceDecisionKey: decision.semanticKey,
+					effects: [
+						...(decision.receipt?.effects || []).filter(effect => !["abilityDelta", "abilityBonusDelta"].includes(effect.type)),
+						...(freshOrigins.get(decision) || []),
+					],
+				};
+				continue;
+			}
 			if (decision.selection == null || decision.receipt) continue;
 			if ([
 				CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
