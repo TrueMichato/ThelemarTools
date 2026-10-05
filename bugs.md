@@ -3,13 +3,19 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 66 — Clear source disclosures and walking-derived speeds — ACCEPTANCE PENDING
+_None for the requested Round 66 fixes._
 
-**Implemented locally; not published.** Both child slices and the coordinator's
+## Closed Bugs
+
+### Round 66 — Clear source disclosures and walking-derived speeds — INTEGRATED
+
+**Integration.** Both child slices and the coordinator's
 integration repairs are banked on the bug-fix branch. The latest bounded full
 Jest gate passed **767 suites / 19,768 tests**, with the same 2 suites / 208 tests
 skipped (13 attachment-corpus and 195 real-save cases). Configured JavaScript
 lint, dedicated-driver strict typing and spec collection passed.
+The user authorized push and merge with the native-coverage limitation below
+disclosed; this authorization does not turn the incomplete browser result green.
 
 **S1 — Score disclosures and initiative attribution.** Owns ability-score
 disclosure controls in Manager and Play Mode, their CSS, score provenance
@@ -38,21 +44,19 @@ finishing; higher independent speeds remain distinct. Numeric getters,
 formatted speeds and breakdown sums agree, including an explicitly stored
 walking Speed of zero.
 
-**Remaining acceptance gate.** Native Alert add/remove, compact and Play Mode
+**Retained native-coverage limitation.** Native Alert add/remove, compact and Play Mode
 pin/dismissal/no-unintended-roll controls, and hero keyboard/touch/mobile-night
 disclosure were observed passing. The final bounded Chromium report remains
 **1 passed / 2 failed**: both extended intentional-roll sequences stopped at a
 legitimate Tactical Mind dialog. The dedicated driver now chooses its visible
 "Keep the roll" action, but that revision has not been browser-executed. Final
-four-roll compact/Play Mode confirmation and publication remain pending; no
+four-roll compact/Play Mode confirmation remains unexecuted; no
 additional browser retry or full character-build traversal was performed.
 
 **Preserved pre-existing limitation.** Classic 2014 exhaustion tiers 2 and 5
 still return 35 rather than 17 and 0 in the historical and final speed-reader
 probes. Those genuine reds are retained as session evidence, not counted as
 passing regressions or claimed fixed by this movement slice.
-
-## Closed Bugs
 
 ### Round 65 — ASI acquisition, ability-score sources, and Respec repair
 
