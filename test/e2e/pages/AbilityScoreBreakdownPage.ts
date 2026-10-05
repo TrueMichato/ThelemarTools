@@ -12,6 +12,9 @@ interface ProbeSheet {
 		getInitiative(): number;
 		getProficiencyBonus(): number;
 		getInitiativeBreakdown(): {total: number; components: {name: string; value: number; source?: string}[]};
+		getFeatureCalculations(): {hasTacticalMind?: boolean};
+		getSecondWindUsesRemaining(): number;
+		getSettings(): {skipTacticalMindPrompt?: boolean};
 		toJson(): object;
 	};
 	_rollAbilityCheck(ability: string, event: Event): unknown;
@@ -187,13 +190,30 @@ export class AbilityScoreBreakdownPage {
 		const name = block.locator(surface === "compact" ? ".charsheet__ability-name" : ".pm-ability__name");
 		await name.click();
 		expect(await this.rollCount()).toBe(before + 1);
+		await this._keepTacticalMindRoll();
 		const modifier = block.locator(surface === "compact" ? ".charsheet__ability-mod" : ".pm-ability__mod");
 		await modifier.click();
 		expect(await this.rollCount()).toBe(before + 2);
+		await this._keepTacticalMindRoll();
 		await modifier.press("Enter");
 		expect(await this.rollCount()).toBe(before + 3);
+		await this._keepTacticalMindRoll();
 		await modifier.press("Space");
 		expect(await this.rollCount()).toBe(before + 4);
+		await this._keepTacticalMindRoll();
+	}
+
+	private async _keepTacticalMindRoll (): Promise<void> {
+		const hasOffer = await this.page.evaluate(() => {
+			const state = (globalThis as typeof globalThis & {charSheet: ProbeSheet}).charSheet._state;
+			return !!state.getFeatureCalculations().hasTacticalMind
+				&& state.getSecondWindUsesRemaining() > 0
+				&& !state.getSettings().skipTacticalMindPrompt;
+		});
+		if (!hasOffer) return;
+		const dialog = this.page.getByRole("dialog", {name: "Tactical Mind", exact: true});
+		await dialog.getByRole("button", {name: "Keep the roll", exact: true}).click();
+		await expect(dialog).toHaveCount(0);
 	}
 
 	async verifyAlertInitiative (source: string): Promise<void> {

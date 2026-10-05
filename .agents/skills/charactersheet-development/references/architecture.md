@@ -194,6 +194,9 @@ math. Manager and Play Mode share this projection. Whole-block hover/focus
 (score-summary/result wrappers in hero/edit views) opens one popover, while
 only the existing score button pins/unpins. Native titles within that area
 are removed; card/modifier rolls and independent save/skill controls remain.
+On native popover closing, suppress focus-triggered reopening for the restoration
+microtask only. Close/Escape must remain dismissed when the browser returns focus
+to the score; subsequent intentional focus, hover, and pinning still work.
 
 Feat ability discovery, rendering, completion and mechanics share ClassUtils'
 `getFeatAbilityOptions()`, `resolveFeatAbilityChoice()` and

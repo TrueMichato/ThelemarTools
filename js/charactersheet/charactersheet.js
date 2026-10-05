@@ -5324,6 +5324,7 @@ class CharacterSheetPage {
 		el.setAttribute("aria-controls", popover.id);
 		el.setAttribute("aria-expanded", "false");
 		let pinned = false;
+		let suppressFocusOpen = false;
 		let hideTimer;
 		const cancelHide = () => window.clearTimeout(hideTimer);
 		const show = () => {
@@ -5354,7 +5355,7 @@ class CharacterSheetPage {
 		hoverTarget.addEventListener("pointerleave", e => { if (!popover.contains(e.relatedTarget)) scheduleHide(); });
 		popover.addEventListener("pointerenter", cancelHide);
 		popover.addEventListener("pointerleave", e => { if (!hoverTarget.contains(e.relatedTarget)) scheduleHide(); });
-		hoverTarget.addEventListener("focusin", e => { if (!popover.contains(e.target)) show(); });
+		hoverTarget.addEventListener("focusin", e => { if (!suppressFocusOpen && !popover.contains(e.target)) show(); });
 		hoverTarget.addEventListener("focusout", scheduleHide);
 		hoverTarget.addEventListener("keydown", e => {
 			if (e.key !== "Escape") return;
@@ -5373,6 +5374,12 @@ class CharacterSheetPage {
 			else hide();
 		});
 		popover.addEventListener("click", e => e.stopPropagation());
+		popover.addEventListener("beforetoggle", e => {
+			if (e.newState !== "closed") return;
+			// Native dismissal restores focus before the toggle task runs.
+			suppressFocusOpen = true;
+			queueMicrotask(() => { suppressFocusOpen = false; });
+		});
 		popover.addEventListener("toggle", () => {
 			const isOpen = popover.matches(":popover-open");
 			el.setAttribute("aria-expanded", String(isOpen));

@@ -740,11 +740,7 @@ class CharacterSheetFeatures {
 		}
 		CharacterSheetClassUtils.applyFeatBonuses(this._state, {...feat, sourceDecisionKey}, featChoices);
 		this.render();
-		// Re-render ability-dependent sections on main page
-		this._page._renderAbilityScores?.();
-		this._page._renderAbilitiesDetailed?.();
-		this._page._renderSavingThrows?.();
-		this._page._renderSkills?.();
+		this._refreshFeatDependentSections();
 		// The Features tab is also an acquisition boundary. Persist the
 		// deterministic child ledger before any deferred picker is shown, then
 		// synchronize it again after the picker drains its compatibility queue.
@@ -781,6 +777,14 @@ class CharacterSheetFeatures {
 		});
 		this._page.saveCharacter();
 		return true;
+	}
+
+	_refreshFeatDependentSections () {
+		this._page._renderAbilityScores?.();
+		this._page._renderAbilitiesDetailed?.();
+		this._page._renderSavingThrows?.();
+		this._page._renderSkills?.();
+		this._page._renderCombatStats?.();
 	}
 
 	_formatFeatChoices (choices) {
@@ -2825,6 +2829,7 @@ class CharacterSheetFeatures {
 				e.stopPropagation();
 				this._state.removeFeat(feat.id);
 				this.render();
+				this._refreshFeatDependentSections();
 				this._page.saveCharacter();
 			});
 

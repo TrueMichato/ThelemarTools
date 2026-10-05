@@ -1137,6 +1137,8 @@ getProficiencyBonus() {
 `getSpeedBreakdown(type)` share `_getSpeedCalculation()`. Each breakdown's signed
 component values sum to its exact numeric total; multiplier, rounding, exhaustion,
 and zero-clamp stages remain visible rather than being hidden in a display-only fix.
+An explicitly stored walking Speed of zero remains zero, including walking-equality
+grants. Only a missing walking value falls back to 30 feet.
 
 A named, item, or active-state speed **equal to walking Speed** inherits the walking
 subtotal after walking-specific bonuses and its type-specific item multiplier, but
@@ -1228,6 +1230,9 @@ pins/unpins on click, touch, Enter or Space; card and modifier rolls remain
 separate. Competing native information titles are removed from this area,
 with check-modifier context retained in the same popover. Escape, Close and
 outside interaction dismiss it, and placement stays within the viewport.
+Native dismissal may restore focus into the score block. The binder suppresses
+that restoration's focus-open event for one microtask, without suppressing the
+next intentional hover, focus, or score activation.
 
 ### Armor Class
 

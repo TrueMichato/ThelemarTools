@@ -17,9 +17,9 @@ const REPO_ROOT = resolve(__dirname, "../../..");
  * ancestor's `title` on hover, so the effective span used to show a generic
  * "Effective bonus (with active mods)" hint instead of the row breakdown.
  *
- * Fix: skills / saves / ability-score renderers now pass the full breakdown
- * as `{titleEffective: <breakdown>}` so the effective span carries the same
- * breakdown text as the row/cell.
+ * Skills and saves pass the full breakdown as `{titleEffective: <breakdown>}`.
+ * Ability blocks instead expose it in their shared score disclosure, removing
+ * competing native titles without losing the check breakdown.
  *
  * We keep a byte-faithful replica of the helper pinned to the production
  * source (same pattern as CharacterSheetFormatModEffective.test.js).
@@ -46,14 +46,19 @@ function extractEffectiveTitle (html) {
 describe("Bug #5 — effective modifier hover surfaces the breakdown", () => {
 	const SOURCE = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
 
-	describe("source-pin: the three d20 renderers pass the breakdown to the effective span", () => {
-		it("_renderAbilityScores renders the helper result into modCell and mirrors the tooltip", () => {
+	describe("source-pin: each d20 renderer keeps its full breakdown reachable", () => {
+		it("ability blocks render both modifiers and move their tooltip into the shared disclosure", () => {
 			const m = SOURCE.match(/_renderAbilityScores\s*\(\)\s*\{[\s\S]*?\n\t\}/);
 			expect(m).not.toBeNull();
 			const body = m[0];
-			// The titled helper output must actually be the cell's content (not dead code).
-			expect(body).toMatch(/modCell\.innerHTML\s*=\s*this\._formatModWithEffective\(canonical,\s*effective,\s*\{titleEffective:\s*tooltip\}\)/);
-			expect(body).toMatch(/modCell\.title\s*=\s*tooltip/);
+			expect(body).toMatch(/modCell\.innerHTML\s*=\s*this\._formatModWithEffective\(canonical,\s*effective\)/);
+			expect(body).toMatch(/modCell\.removeAttribute\("title"\)/);
+			expect(body).toMatch(/modCell\.querySelectorAll\("\[title\]"\)[^\n]+removeAttribute\("title"\)/);
+			expect(body).toMatch(/this\._refreshAbilityScoreDisclosure\(/);
+			const disclosure = SOURCE.match(/_refreshAbilityScoreDisclosure\s*\(el,\s*ability\)\s*\{[\s\S]*?\n\t\}/);
+			expect(disclosure).not.toBeNull();
+			expect(disclosure[0]).toMatch(/check\.textContent\s*=\s*`Check modifier\\n\$\{this\._formatD20BreakdownTooltip\(this\._state\.getAbilityCheckBreakdown\(ability\)/);
+			expect(disclosure[0]).toMatch(/popover\.append\(check\)/);
 		});
 
 		it("_renderSavingThrows feeds the titled helper output into the rendered row", () => {

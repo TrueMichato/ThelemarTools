@@ -80,6 +80,14 @@ function activate (state, effects) {
 }
 
 describe("Round66 authored Thief and Swift Stance acquisition", () => {
+	it("preserves explicit zero walking Speed across inherited and independent readers", () => {
+		const state = makeThief();
+		state.setSpeed("walk", 0);
+		assertSpeeds(state, {walk: 0, climb: 0});
+		state.setSpeed("walk", 30);
+		assertSpeeds(state, {walk: 30, climb: 30});
+	});
+
 	it.each(["XPHB", "TGTT"])("direct stance activation inherits a single authored +5 for %s Thief", source => {
 		const state = makeThief(source);
 		expect(swiftStance).toMatchObject({tradition: "Rapid Current", degree: 1, staminaCost: 1, isStance: true});

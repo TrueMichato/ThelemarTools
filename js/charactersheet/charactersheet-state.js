@@ -19668,7 +19668,7 @@ class CharacterSheetState {
 		const add = (list, componentType, name, value, icon) => {
 			if (value !== 0) list.push({type: componentType, name, value, icon});
 		};
-		const base = this._data.speed[type] || (type === "walk" ? 30 : 0);
+		const base = this._data.speed[type] ?? (type === "walk" ? 30 : 0);
 		add(components, "base", type === "walk" ? "Base Speed" : `Base ${type.charAt(0).toUpperCase() + type.slice(1)} Speed`, base, "🏃");
 		const raiseFloor = (value, componentType, name, icon) => {
 			const delta = value - sum(components);

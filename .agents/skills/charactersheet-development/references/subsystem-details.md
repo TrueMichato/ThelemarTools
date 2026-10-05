@@ -1861,6 +1861,8 @@ Random roll bonuses and penalties use the parallel dice pipeline:
 components always sum to the returned total. Its `beforeShared` subtotal is after
 the type-specific item multiplier, before wildcard multipliers, conditions,
 rounding, exhaustion, and zero clamp.
+Use a missing-value fallback for intrinsic walking Speed; an explicit zero must not
+become the default 30 feet or grant that default to an inherited movement type.
 
 Walking-equality grants (enabled named `equalToWalk`, item `speedEqual`, active
 `typeSpeed.equalToWalk`, and symbolic speed bonuses with `value: "walking"`) inherit
@@ -4702,6 +4704,12 @@ Recognizes recharge types: `restLong`, `dawn`, `dusk`, `midnight` (on long rest)
 **Named-modifier attribution in skill breakdowns.** `getSkillBreakdown` (both the normal and the lore-skill branch) itemizes the per-skill custom contribution **per named modifier** instead of emitting one anonymous "Custom Modifier" lump. The shared helper `_getSkillNamedModifierComponents(normalizedSkill)` walks the enabled named modifiers of type `skill:<skill>` / `skill:all`, computes each one's effective value through `_getNamedModifierEffectiveValue(mod)` (the SAME perLevel / proficiency-bonus / flat-value math `_recalculateCustomModifiers` uses, so totals can never drift), and returns one `{name, value}` row per source — e.g. a row literally named `"Magician (Primal Order)"` with value `+3`. A residual generic `"Custom Modifier"` row is emitted **only** when `getSkillCustomMod(skill) − Σ(itemized) ≠ 0`, which preserves the hard invariant `getSkillBreakdown(skill).total === getSkillMod(skill)`. `abilityMod`-based skill modifiers contribute value 0 here (they surface separately as the "Feature Bonus" line via `_getDynamicSkillFeatureBonus`) so they are never double-counted. This is the generic mechanism behind named feature bonuses always showing their source name.
 
 **Named initiative attribution.** `getInitiativeBreakdown()` itemizes the existing enabled, unconditional `initiative`, `check:all` and `d20:all` named effects through `_getInitiativeNamedModifierComponents()` and the existing live-value resolver, then emits only the cached-channel residual as "Custom Modifier." Offset contributions remain visible at a zero net total. Exact feat identity supplies the source even for parser-owned rows without `sourceType`: PHB Alert is +5, XPHB Alert is live PB. This is read-side attribution only, with no new registration, bonus duplication, canonical promotion or conditional-mechanics change.
+
+**Feat-dependent UI refresh.** Features-tab acquisition and the bound feat remove
+button call `_refreshFeatDependentSections()` after mutating state. It preserves
+the score/save/skill refreshes and includes combat stats, keeping Alert's initiative
+value and named tooltip current without a reload. Do not repair stale UI by adding
+another modifier registration or changing the initiative calculation.
 
 **Custom modifier write contract (Phase 6.4).** `_recalculateCustomModifiers` fans a user-entered `d20:all` modifier out into the per-roll buckets that the read side consumes. `cm.abilityChecks[abl]` is set for each of the 6 abilities and is the canonical channel through which `getSkillModWithAbility` picks it up (skills *are* ability checks). The old write path **also** wrote to `cm.skills["_all"]`, which `getSkillCustomMod(skill)` reads — so a single +1 from `d20:all` ended up applied twice on every skill check (once via `abilityChecks`, once via `skills["_all"]`). Phase 6.4 dropped the `skills["_all"]` write from the `d20:all` case. The dedicated `skill:all` parser case (user-typed "+N to skill checks") still writes there and is unchanged — that is the intentional channel for skill-only modifiers. Saves and initiative were always single-channel and unaffected.
 

@@ -456,6 +456,10 @@ and these cached-channel contributions remain effective-only, not canonical.
 Disabled and conditional modifiers do not become unconditional named grants;
 the existing conditional opt-in mechanics are unchanged.
 
+The Features tab calls `_refreshFeatDependentSections()` after both acquisition
+and removal. Besides scores, saves, and skills, it repaints combat stats so the
+initiative value and named tooltip change immediately, without a reload.
+
 ```javascript
 const breakdown = state.getInitiativeBreakdown();
 // {

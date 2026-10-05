@@ -47,13 +47,14 @@ describe("read-only ability score provenance", () => {
 	test("retains best-known origin names when a targeted receipt does not prove an amount", () => {
 		const state = new State();
 		state.setAbilityBonus("str", 2);
-		state._data.characterBase = {v: 1, decisions: [{
-			semanticKey: "origin:background",
-			type: "nestedAbility",
-			label: "Ability increase",
-			provenance: {ownerType: "background", ownerName: "Soldier [XPHB]"},
-			receipt: {effects: [{type: "abilityBonusDelta", ability: "str", amount: 2}]},
-		}]};
+		state._data.characterBase = {v: 1,
+			decisions: [{
+				semanticKey: "origin:background",
+				type: "nestedAbility",
+				label: "Ability increase",
+				provenance: {ownerType: "background", ownerName: "Soldier [XPHB]"},
+				receipt: {effects: [{type: "abilityBonusDelta", ability: "str", amount: 2}]},
+			}]};
 		const before = state.serialize();
 		const breakdown = state.getAbilityScoreBreakdown("str");
 		expect(breakdown.components).toContainEqual({source: "origin", label: "Background: Soldier [XPHB]", amount: null});

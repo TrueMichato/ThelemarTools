@@ -3,7 +3,13 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 66 — Clear source disclosures and walking-derived speeds
+### Round 66 — Clear source disclosures and walking-derived speeds — ACCEPTANCE PENDING
+
+**Implemented locally; not published.** Both child slices and the coordinator's
+integration repairs are banked on the bug-fix branch. The latest bounded full
+Jest gate passed **767 suites / 19,768 tests**, with the same 2 suites / 208 tests
+skipped (13 attachment-corpus and 195 real-save cases). Configured JavaScript
+lint, dedicated-driver strict typing and spec collection passed.
 
 **S1 — Score disclosures and initiative attribution.** Owns ability-score
 disclosure controls in Manager and Play Mode, their CSS, score provenance
@@ -11,26 +17,40 @@ readers, the inventory ability-override source projection, and initiative
 itemization. Historical score receipts and unrelated effect producers remain
 unchanged.
 
-- **Whole-block ability hover (bug 1):** Show one disclosure over the ability
-  block, without overlapping native tooltips. Keep the score button for
-  touch/keyboard pinning and the existing roll controls. Use concise,
-  best-supported source labels, omit unproven amounts, and name the actual
-  bonus-granting items without inventing acquisition history.
-- **Alert attribution (bug 2):** Attribute the existing initiative modifier
-  to Alert, retaining edition-specific amounts, live proficiency scaling,
+- **Whole-block ability hover (bug 1):** One disclosure covers the ability
+  block, without overlapping native tooltips. The score button retains
+  touch/keyboard pinning, separate from the existing roll controls. Concise,
+  best-supported source labels omit unproven amounts and name the actual
+  bonus-granting items without inventing acquisition history. Native dismissal
+  no longer reopens the popover when the browser restores score-button focus.
+- **Alert attribution (bug 2):** The existing initiative modifier is named
+  Alert, retaining edition-specific amounts, live proficiency scaling,
   genuine custom remainders, and the canonical/effective calculation contract.
+  Features-tab acquisition and removal now repaint the initiative value and
+  breakdown immediately, without a reload.
 
 **S2 — Walking-derived movement (bug 3).** Owns movement calculation,
 formatted speed and speed breakdowns, plus speed-specific grant helpers.
-Second-Story Work currently inherits walking speed after its general bonuses,
-then adds those bonuses again. Apply shared effects once while preserving
-type-specific modifiers, higher independent speeds, and classic/2024 rules.
-The getter, displayed speed and breakdown must agree.
+Second-Story Work and other walking-equality grants now share one itemized
+calculation, applying general bonuses and matching stance contributions once.
+Destination-specific additions precede wildcard multipliers and shared
+finishing; higher independent speeds remain distinct. Numeric getters,
+formatted speeds and breakdown sums agree, including an explicitly stored
+walking Speed of zero.
 
-The coordinator owns this ledger and final integration. Shared modifier and
-inventory producers outside the named ownership boundaries require explicit
-coordination. Verification uses focused child checks and one resource-bounded
-integration gate, not another full character-build browser traversal.
+**Remaining acceptance gate.** Native Alert add/remove, compact and Play Mode
+pin/dismissal/no-unintended-roll controls, and hero keyboard/touch/mobile-night
+disclosure were observed passing. The final bounded Chromium report remains
+**1 passed / 2 failed**: both extended intentional-roll sequences stopped at a
+legitimate Tactical Mind dialog. The dedicated driver now chooses its visible
+"Keep the roll" action, but that revision has not been browser-executed. Final
+four-roll compact/Play Mode confirmation and publication remain pending; no
+additional browser retry or full character-build traversal was performed.
+
+**Preserved pre-existing limitation.** Classic 2014 exhaustion tiers 2 and 5
+still return 35 rather than 17 and 0 in the historical and final speed-reader
+probes. Those genuine reds are retained as session evidence, not counted as
+passing regressions or claimed fixed by this movement slice.
 
 ## Closed Bugs
 

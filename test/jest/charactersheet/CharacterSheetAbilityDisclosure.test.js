@@ -56,6 +56,7 @@ class Element {
 		if (!this.open) return;
 		this.emit("beforetoggle", {newState: "closed"});
 		this.open = false;
+		this.restoreFocus?.();
 	}
 }
 
@@ -122,6 +123,7 @@ describe("ability disclosure at the real binder and formatter", () => {
 		expect(popover.open).toBe(true);
 		expect(score.getAttribute("aria-expanded")).toBe("true");
 		popover.hidePopover();
+		jest.runAllTicks();
 		block.emit("focusin", {target: score});
 		expect(popover.open).toBe(true);
 	});
@@ -192,7 +194,7 @@ describe("ability disclosure at the real binder and formatter", () => {
 		expect(popover.open).toBe(false);
 	});
 
-	test("focusing the accessible Close action does not replace it before its click", () => {
+	test.each(["Close", "Escape"])("native focus restoration after %s keeps the disclosure dismissed", action => {
 		const {page, block, score, popover} = bind();
 		score.emit("click");
 		const close = popover.children[0].children[1];
@@ -200,10 +202,15 @@ describe("ability disclosure at the real binder and formatter", () => {
 		block.emit("focusin", {target: close});
 		expect(page._state.getAbilityScoreBreakdown).toHaveBeenCalledTimes(refreshes);
 		expect(close.getAttribute("aria-label")).toBe("Close Strength score breakdown");
-		close.emit("click");
+		popover.restoreFocus = () => block.emit("focusin", {target: score});
+		if (action === "Close") close.emit("click");
+		else block.emit("keydown", {key: "Escape"});
 		popover.emit("toggle");
 		expect(popover.open).toBe(false);
 		expect(score.getAttribute("aria-expanded")).toBe("false");
+		jest.runAllTicks();
+		block.emit("focusin", {target: score});
+		expect(popover.open).toBe(true);
 	});
 
 	test("formats unknown evidence as source-only, a proven zero as +0, and retains check context", () => {
