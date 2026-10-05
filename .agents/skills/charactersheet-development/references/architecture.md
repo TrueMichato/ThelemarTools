@@ -185,8 +185,15 @@ Score provenance is not roll-modifier math. `getAbilityScoreBreakdown()` reads
 existing receipts and each exact feat wrapper's applied deltas, separates
 acquisitions, and reconciles numeric components to the current score without
 mutating history. An own numeric zero is evidence; an empty map is not.
-Unknown gains remain `null`, and the manual/unknown residual is not a guessed
-creation score. Manager and Play Mode score disclosures share this projection.
+Unproven gains remain `null` and render as best-known source-only rows; proven
+capped zero renders `+0`. The "Base / earlier adjustments" residual is not a
+guessed creation score. Optional item-source metadata comes from inventory's
+existing eligibility/precedence pass: name actual additive contributors and
+only an effective static winner, without rescanning inventory or changing
+math. Manager and Play Mode share this projection. Whole-block hover/focus
+(score-summary/result wrappers in hero/edit views) opens one popover, while
+only the existing score button pins/unpins. Native titles within that area
+are removed; card/modifier rolls and independent save/skill controls remain.
 
 Feat ability discovery, rendering, completion and mechanics share ClassUtils'
 `getFeatAbilityOptions()`, `resolveFeatAbilityChoice()` and

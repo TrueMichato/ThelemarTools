@@ -5121,7 +5121,7 @@ class CharacterSheetPage {
 			const score = this._state.getAbilityScore(abl);
 			const mod = this._formatMod(this._state.getAbilityMod(abl));
 			const ability = e_({outer: `
-				<div class="charsheet__ability" data-ability="${abl}" title="Click to roll ${Parser.attAbvToFull(abl)} (Shift=Adv, Ctrl=Dis)">
+				<div class="charsheet__ability" data-ability="${abl}">
 					<div class="charsheet__ability-name">${abl.toUpperCase()}</div>
 					<button type="button" class="charsheet__ability-score charsheet__score-disclosure" id="charsheet-ability-${abl}-score">${score}</button>
 					<div class="charsheet__ability-mod" id="charsheet-ability-${abl}-mod">${mod}</div>
@@ -5131,7 +5131,7 @@ class CharacterSheetPage {
 
 			ability.addEventListener("click", (e) => this._rollAbilityCheck(abl, e));
 			this._bindActivate(ability.querySelector(".charsheet__ability-mod"), {label: `Roll ${Parser.attAbvToFull(abl)} check`});
-			this._bindAbilityScoreDisclosure(ability.querySelector(".charsheet__ability-score"), abl);
+			this._bindAbilityScoreDisclosure(ability.querySelector(".charsheet__ability-score"), abl, {hoverTarget: ability, includeCheckBreakdown: true});
 			container.append(ability);
 		});
 
@@ -5223,12 +5223,9 @@ class CharacterSheetPage {
 			(/** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-score`))).textContent = score;
 			this._refreshAbilityScoreDisclosure(document.getElementById(`charsheet-ability-${abl}-score`), abl);
 			const modCell = /** @type {*} */ (document.getElementById(`charsheet-ability-${abl}-mod`));
-			const tooltip = this._formatD20BreakdownTooltip(breakdown);
-			// Pass the breakdown as the effective span's tooltip so hovering the
-			// effective (+N) value shows the SAME breakdown as the canonical value
-			// (the inner span title would otherwise override the cell's title).
-			modCell.innerHTML = this._formatModWithEffective(canonical, effective, {titleEffective: tooltip});
-			modCell.title = tooltip;
+			modCell.innerHTML = this._formatModWithEffective(canonical, effective);
+			modCell.removeAttribute("title");
+			modCell.querySelectorAll("[title]").forEach(el => el.removeAttribute("title"));
 
 			// Ability-damage drain badge (manual model). Shows the pre-drain → current score,
 			// the magnitude, and a strong warning when a physical stat is fully drained.
@@ -5241,8 +5238,8 @@ class CharacterSheetPage {
 					const isPhysical = abl === "str" || abl === "con";
 					drainEl.hidden = false;
 					drainEl.className = `charsheet__ability-drain${atZero ? " charsheet__ability-drain--zero" : ""}`;
-					const badgeHtml = `<span class="charsheet__ability-drain-badge" title="${abl.toUpperCase()} ${preDrain} → ${score} (−${drain} ability damage)">🩸 −${drain}</span>`;
-					const warnHtml = atZero && isPhysical ? `<span class="charsheet__ability-drain-warn" title="${Parser.attAbvToFull(abl)} is 0 — the character is severely incapacitated (this does not automatically kill them)">⚠️ ${abl.toUpperCase()} 0</span>` : "";
+					const badgeHtml = `<span class="charsheet__ability-drain-badge" aria-label="${abl.toUpperCase()} ${preDrain} → ${score} (−${drain} ability damage)">🩸 −${drain}</span>`;
+					const warnHtml = atZero && isPhysical ? `<span class="charsheet__ability-drain-warn" aria-label="${Parser.attAbvToFull(abl)} is 0 — the character is severely incapacitated (this does not automatically kill them)">⚠️ ${abl.toUpperCase()} 0</span>` : "";
 					drainEl.innerHTML = `${badgeHtml}${warnHtml}`;
 				} else {
 					drainEl.hidden = true;
@@ -5262,7 +5259,7 @@ class CharacterSheetPage {
 
 	_formatAbilityScoreBreakdown (breakdown) {
 		return [
-			...breakdown.components.map(c => `${c.label}: ${c.amount == null ? "applied amount unknown" : `${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}`}${c.isReplacement ? " (replacement)" : ""}`),
+			...breakdown.components.map(c => c.amount == null ? c.label : `${c.label}: ${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}${c.isReplacement ? " (replacement)" : ""}`),
 			`Total: ${breakdown.total}`,
 		].join("\n");
 	}
@@ -5270,21 +5267,30 @@ class CharacterSheetPage {
 	_refreshAbilityScoreDisclosure (el, ability) {
 		if (!el) return;
 		const breakdown = this._state.getAbilityScoreBreakdown(ability);
-		el.title = this._formatAbilityScoreBreakdown(breakdown);
-		el.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score ${breakdown.total}; show score breakdown`);
+		el.removeAttribute("title");
+		el.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score ${breakdown.total}; pin or unpin score breakdown`);
 		const popover = document.getElementById(el.getAttribute("aria-controls"));
 		if (!popover) return;
 		popover.replaceChildren();
+		const header = document.createElement("div");
+		header.className = "charsheet__score-detail-heading";
 		const heading = document.createElement("strong");
 		heading.textContent = `${Parser.attAbvToFull(ability)} score`;
-		popover.append(heading);
+		const close = document.createElement("button");
+		close.type = "button";
+		close.className = "charsheet__score-disclosure";
+		close.textContent = "Close";
+		close.setAttribute("aria-label", `Close ${Parser.attAbvToFull(ability)} score breakdown`);
+		close.addEventListener("click", () => popover.hidePopover());
+		header.append(heading, close);
+		popover.append(header);
 		breakdown.components.forEach(c => {
 			const row = document.createElement("div");
 			row.className = "charsheet__score-detail-row";
 			const label = document.createElement("span");
 			label.textContent = c.label;
 			const value = document.createElement("span");
-			value.textContent = c.amount == null ? "Applied amount unknown" : `${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}${c.isReplacement ? " (replacement)" : ""}`;
+			value.textContent = c.amount == null ? "" : `${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}${c.isReplacement ? " (replacement)" : ""}`;
 			row.append(label, value);
 			popover.append(row);
 		});
@@ -5292,17 +5298,29 @@ class CharacterSheetPage {
 		total.className = "charsheet__score-detail-total";
 		total.textContent = `Total: ${breakdown.total}`;
 		popover.append(total);
+		if (popover.dataset.includeCheckBreakdown === "true") {
+			const check = document.createElement("div");
+			check.className = "charsheet__score-detail-check";
+			check.textContent = `Check modifier\n${this._formatD20BreakdownTooltip(this._state.getAbilityCheckBreakdown(ability), {trailingLines: ["Click the block or modifier to roll (Shift=Adv, Ctrl=Dis)."]})}`;
+			popover.append(check);
+		}
 	}
 
-	_bindAbilityScoreDisclosure (el, ability) {
-		if (!el) return;
+	_bindAbilityScoreDisclosure (el, ability, {hoverTarget = el?.parentElement, includeCheckBreakdown = false} = {}) {
+		if (!el || !hoverTarget) return;
 		const popover = document.createElement("div");
 		popover.id = `charsheet-score-detail-${CryptUtil.uid()}`;
 		popover.className = "charsheet__score-detail";
 		popover.setAttribute("popover", "auto");
 		popover.setAttribute("role", "region");
 		popover.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score breakdown`);
-		el.parentElement.append(popover);
+		popover.dataset.includeCheckBreakdown = String(includeCheckBreakdown);
+		hoverTarget.append(popover);
+		hoverTarget.removeAttribute("title");
+		hoverTarget.querySelectorAll("[title], [data-tooltip]").forEach(target => {
+			target.removeAttribute("title");
+			target.removeAttribute("data-tooltip");
+		});
 		el.setAttribute("aria-controls", popover.id);
 		el.setAttribute("aria-expanded", "false");
 		let pinned = false;
@@ -5312,7 +5330,7 @@ class CharacterSheetPage {
 			cancelHide();
 			this._refreshAbilityScoreDisclosure(el, ability);
 			popover.showPopover();
-			const rect = el.getBoundingClientRect();
+			const rect = hoverTarget.getBoundingClientRect();
 			const width = document.documentElement.clientWidth;
 			const height = window.innerHeight;
 			popover.style.left = `${Math.max(8, Math.min(rect.left, width - popover.offsetWidth - 8))}px`;
@@ -5329,15 +5347,21 @@ class CharacterSheetPage {
 		const scheduleHide = () => {
 			cancelHide();
 			hideTimer = window.setTimeout(() => {
-				if (document.activeElement !== el) hide();
+				if (!hoverTarget.contains(document.activeElement) && !popover.contains(document.activeElement)) hide();
 			}, 150);
 		};
-		el.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") show(); });
-		el.addEventListener("pointerleave", e => { if (!popover.contains(e.relatedTarget)) scheduleHide(); });
+		hoverTarget.addEventListener("pointerenter", e => { if (e.pointerType === "mouse") show(); });
+		hoverTarget.addEventListener("pointerleave", e => { if (!popover.contains(e.relatedTarget)) scheduleHide(); });
 		popover.addEventListener("pointerenter", cancelHide);
-		popover.addEventListener("pointerleave", e => { if (!el.contains(e.relatedTarget)) scheduleHide(); });
-		el.addEventListener("focus", show);
-		el.addEventListener("blur", hide);
+		popover.addEventListener("pointerleave", e => { if (!hoverTarget.contains(e.relatedTarget)) scheduleHide(); });
+		hoverTarget.addEventListener("focusin", e => { if (!popover.contains(e.target)) show(); });
+		hoverTarget.addEventListener("focusout", scheduleHide);
+		hoverTarget.addEventListener("keydown", e => {
+			if (e.key !== "Escape") return;
+			e.stopPropagation();
+			pinned = false;
+			hide();
+		});
 		el.addEventListener("keydown", e => {
 			e.stopPropagation();
 			if (e.key === "Escape") { pinned = false; hide(); }
@@ -9323,6 +9347,7 @@ class CharacterSheetPage {
 
 			const card = e_({outer: `
 				<div class="charsheet__ability-hero-card" data-ability="${abl}" style="--ability-color: ${abilityColors[abl]}">
+					<div class="charsheet__ability-score-summary">
 					<div class="charsheet__ability-hero-header">
 						<span class="charsheet__ability-hero-icon">${abilityIcons[abl]}</span>
 						<div class="charsheet__ability-hero-names">
@@ -9337,6 +9362,7 @@ class CharacterSheetPage {
 					<div class="charsheet__ability-hero-breakdown">
 						<span class="charsheet__ability-hero-base">Base ${base}</span>
 						${bonus !== 0 ? `<span class="charsheet__ability-hero-bonus">${bonus >= 0 ? "+" : ""}${bonus} bonus</span>` : ""}
+					</div>
 					</div>
 					<div class="charsheet__ability-hero-save">
 						<span class="charsheet__ability-save-prof ${isProficient ? "active" : ""}">${isProficient ? "●" : "○"}</span>
@@ -9371,7 +9397,7 @@ class CharacterSheetPage {
 				</div>
 			`});
 
-			this._bindAbilityScoreDisclosure(card.querySelector(".charsheet__ability-hero-total"), abl);
+			this._bindAbilityScoreDisclosure(card.querySelector(".charsheet__ability-hero-total"), abl, {hoverTarget: card.querySelector(".charsheet__ability-score-summary")});
 			// Click handlers - pass event for shift/ctrl (advantage/disadvantage)
 			card.querySelector(".charsheet__ability-roll-check").addEventListener("click", (e) => {
 				e.stopPropagation();
@@ -26830,7 +26856,7 @@ class CharacterSheetPage {
 			const modEl = row.querySelector(".ability-mod");
 			const decBtn = row.querySelector(".ability-dec");
 			const incBtn = row.querySelector(".ability-inc");
-			this._bindAbilityScoreDisclosure(totalEl, abl);
+			this._bindAbilityScoreDisclosure(totalEl, abl, {hoverTarget: row.querySelector(".charsheet__edit-ability-result")});
 
 			const updateDisplay = () => {
 				const curBase = this._state.getAbilityBase(abl);
@@ -26842,7 +26868,7 @@ class CharacterSheetPage {
 
 				const breakdown = this._state.getAbilityScoreBreakdown(abl);
 				breakdownEl.textContent = this._formatAbilityScoreBreakdown(breakdown).split("\n").join(" | ");
-				breakdownEl.title = this._formatAbilityScoreBreakdown(breakdown);
+				breakdownEl.removeAttribute("title");
 
 				totalEl.textContent = curTotal;
 				this._refreshAbilityScoreDisclosure(totalEl, abl);

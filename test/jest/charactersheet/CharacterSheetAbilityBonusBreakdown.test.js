@@ -67,6 +67,22 @@ describe("getAbilityBonusBreakdown", () => {
 		expect(findBy(bd.contributions, "feat")).toMatchObject({label: "Feat / Feature", amount: 2});
 	});
 
+	it("itemizes opposing producer contributions without changing the numeric bonus contract", () => {
+		state.setItemAbilityOverrides({
+			bonus: {wis: 0},
+			sources: {bonus: {wis: [{name: "Wise Charm", amount: 2}, {name: "Cursed Charm", amount: -2}]}},
+		});
+		const before = state.serialize();
+		const bd = state.getAbilityBonusBreakdown("wis");
+		expect(bd.contributions).toEqual([
+			{source: "item", label: "Wise Charm", amount: 2},
+			{source: "item", label: "Cursed Charm", amount: -2},
+		]);
+		expect(sumAmounts(bd.contributions)).toBe(bd.bonus);
+		expect(bd.bonus).toBe(0);
+		expect(state.serialize()).toBe(before);
+	});
+
 	it("attributes an item static override ('set score to X') as its own entry", () => {
 		state.setAbilityBase("str", 10);
 		state._data.itemAbilityOverrides = {static: {str: 19}}; // Gauntlets of Ogre Power style

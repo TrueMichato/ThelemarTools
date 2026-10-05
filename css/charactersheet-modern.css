@@ -2161,6 +2161,21 @@ body[data-theme] {
 	overflow-wrap: anywhere;
 }
 
+.charsheet__score-detail-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-md);
+}
+
+.charsheet__score-detail-check {
+	margin-top: var(--cs-space-md);
+	padding-top: var(--cs-space-sm);
+	border-top: 1px solid var(--cs-border);
+	white-space: pre-line;
+	overflow-wrap: anywhere;
+}
+
 .charsheet__score-detail-row > :last-child {
 	max-width: 10rem;
 	text-align: right;

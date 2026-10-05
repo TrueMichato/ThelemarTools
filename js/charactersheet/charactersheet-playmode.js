@@ -1038,7 +1038,7 @@ export class CharacterSheetPlayMode {
 			const elScore = this._ce("button", "pm-ability__score charsheet__score-disclosure", row);
 			elScore.type = "button";
 			elScore.textContent = score;
-			this._page._bindAbilityScoreDisclosure(elScore, abl);
+			this._page._bindAbilityScoreDisclosure(elScore, abl, {hoverTarget: row, includeCheckBreakdown: true});
 			const elMod = this._ce("span", "pm-ability__mod", row);
 			elMod.textContent = this._fmtMod(mod);
 
@@ -6378,7 +6378,7 @@ export class CharacterSheetPlayMode {
 	_renderAbilityBonusBreakdown (row, breakdown) {
 		const contributions = breakdown.components || breakdown.contributions;
 		const wrap = this._ce("span", "pm-edit-abilities__bonus", row);
-		const format = c => `${c.label}: ${c.amount == null ? "applied amount unknown" : c.source === "base" ? c.amount : this._fmtMod(c.amount)}${c.isReplacement ? " (replacement)" : ""}`;
+		const format = c => c.amount == null ? c.label : `${c.label}: ${c.source === "base" ? c.amount : this._fmtMod(c.amount)}${c.isReplacement ? " (replacement)" : ""}`;
 		const readable = contributions
 			.map(format)
 			.join(", ");

@@ -19,6 +19,7 @@ test("real ordinary ASIs disclose separate actual gains and reconcile the capped
 	await charSheet.setStateSetting("thelemar_asiFeat", false);
 	await levelUpTo(page, 3, {subclassName: "Champion", subclassSource: "PHB'24"});
 	const probe = new AbilityScoreBreakdownPage(page);
+	await probe.verifyServedWorktree();
 	const before = await probe.evidence("str");
 	await levelUpTo(page, 4, {subclassName: "Champion", subclassSource: "PHB'24"});
 	const first = await probe.evidence("str");
@@ -71,6 +72,22 @@ test("a real fixed feat acquired at the cap displays its own +0 source and retai
 	await probe.close("compact", "con");
 	await charSheet.reloadCharacterSheet();
 	expect((await probe.evidence("con")).breakdown).toEqual(evidence.breakdown);
+	await probe.verifyServedWorktree();
+	await charSheet.switchToTab(charSheet.tabFeatures);
+	await probe.addFixedFeat("Alert", "PHB'24");
+	await charSheet.switchToTab(charSheet.tabOverview);
+	await probe.verifyAlertInitiative("XPHB");
+	const before = await probe.evidence("str");
+	await probe.startRollSpy();
+	await probe.verifyPinControls("compact", "str");
+	expect(await probe.rollCount()).toBe(0);
+	expect((await probe.evidence("str")).json).toEqual(before.json);
+	await probe.verifyBlockAndModifierRolls("compact", "str");
+	await charSheet.enterPlayMode();
+	await probe.startRollSpy();
+	await probe.verifyPinControls("play", "str");
+	expect(await probe.rollCount()).toBe(0);
+	await probe.verifyBlockAndModifierRolls("play", "str");
 });
 
 test("real repeated scalar/split feat gains, capped gain, score hover/focus/touch, rerender and reload", async ({page}, testInfo) => {
