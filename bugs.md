@@ -3,7 +3,28 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None for the requested Round 66 fixes._
+### Round 67 — Fresh ability-score provenance and feature caps
+
+One owner for the score projection, its actual acquisition receipts, the shared
+disclosure formatter, and the directly coupled Primal Champion cap calculation.
+
+- Internal choice paths such as `ability[0]` and raw species UIDs must not appear
+  as source labels. Resolve actual entity names and selected improvement actions.
+- Fresh species/background and feat gains need evidence-backed attribution;
+  nested mirrors must not add a second placeholder for an already-listed gain.
+  Preserve legitimate paired TGTT ordinary ASI and feat acquisitions.
+- Unknown historical amounts are not zero. Keep best-known sources without
+  blank arithmetic rows, preserve proved capped `+0`, and distinguish a recorded
+  starting score from a residual that includes unrecorded earlier changes.
+- Primal Champion must use its actual referenced feature: PHB has a maximum of
+  24, XPHB 25, and TGTT Barbarian references XPHB. The current score and breakdown
+  readers hard-code 24, reducing the reported Strength gain to 3 instead of 4.
+
+Use the supplied native character export to verify its exact creation and
+level-history receipts, alongside a real fresh acquisition-boundary reproduction
+and explicit expected rows/totals for the reported Strength, Dexterity,
+Constitution, Wisdom and Charisma cases. Parent owns this ledger and integration;
+unrelated movement, initiative, exhaustion and progression redesign are excluded.
 
 ## Closed Bugs
 
