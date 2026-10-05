@@ -16,6 +16,7 @@ interface ProbeSheet {
 	};
 	_rollAbilityCheck(ability: string, event: Event): unknown;
 	abilityDisclosureRollCount?: number;
+	abilityDisclosureOriginalRoll?: ProbeSheet["_rollAbilityCheck"];
 	renderCharacter(): void;
 }
 
@@ -53,10 +54,12 @@ export class AbilityScoreBreakdownPage {
 		await this.page.evaluate(() => {
 			const cs = (globalThis as typeof globalThis & {charSheet: ProbeSheet}).charSheet;
 			cs.abilityDisclosureRollCount = 0;
-			const original = cs._rollAbilityCheck.bind(cs);
+			if (cs.abilityDisclosureOriginalRoll) return;
+			const original = cs._rollAbilityCheck;
+			cs.abilityDisclosureOriginalRoll = original;
 			cs._rollAbilityCheck = (ability, event) => {
 				cs.abilityDisclosureRollCount = (cs.abilityDisclosureRollCount || 0) + 1;
-				return original(ability, event);
+				return original.call(cs, ability, event);
 			};
 		});
 	}
