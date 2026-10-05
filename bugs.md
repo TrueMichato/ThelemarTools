@@ -3,7 +3,34 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 66 — Clear source disclosures and walking-derived speeds
+
+**S1 — Score disclosures and initiative attribution.** Owns ability-score
+disclosure controls in Manager and Play Mode, their CSS, score provenance
+readers, the inventory ability-override source projection, and initiative
+itemization. Historical score receipts and unrelated effect producers remain
+unchanged.
+
+- **Whole-block ability hover (bug 1):** Show one disclosure over the ability
+  block, without overlapping native tooltips. Keep the score button for
+  touch/keyboard pinning and the existing roll controls. Use concise,
+  best-supported source labels, omit unproven amounts, and name the actual
+  bonus-granting items without inventing acquisition history.
+- **Alert attribution (bug 2):** Attribute the existing initiative modifier
+  to Alert, retaining edition-specific amounts, live proficiency scaling,
+  genuine custom remainders, and the canonical/effective calculation contract.
+
+**S2 — Walking-derived movement (bug 3).** Owns movement calculation,
+formatted speed and speed breakdowns, plus speed-specific grant helpers.
+Second-Story Work currently inherits walking speed after its general bonuses,
+then adds those bonuses again. Apply shared effects once while preserving
+type-specific modifiers, higher independent speeds, and classic/2024 rules.
+The getter, displayed speed and breakdown must agree.
+
+The coordinator owns this ledger and final integration. Shared modifier and
+inventory producers outside the named ownership boundaries require explicit
+coordination. Verification uses focused child checks and one resource-bounded
+integration gate, not another full character-build browser traversal.
 
 ## Closed Bugs
 
