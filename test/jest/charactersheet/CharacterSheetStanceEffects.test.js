@@ -83,7 +83,7 @@ const SWIFT_STANCE = {
 	name: "Swift Stance",
 	source: "TGTT",
 	_entityType: "combatMethod",
-	tradition: "Tempered Iron",
+	tradition: "Rapid Current",
 	degree: 1,
 	staminaCost: 1,
 	optionalFeatureTypes: ["CTM:1"],

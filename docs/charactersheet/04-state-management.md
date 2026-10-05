@@ -1131,6 +1131,36 @@ getProficiencyBonus() {
 | 13-16 | +5                |
 | 17-20 | +6                |
 
+### Speed
+
+`getWalkSpeed()`, `getSpeedByType(type)`, formatted `getSpeed()`, and
+`getSpeedBreakdown(type)` share `_getSpeedCalculation()`. Each breakdown's signed
+component values sum to its exact numeric total; multiplier, rounding, exhaustion,
+and zero-clamp stages remain visible rather than being hidden in a display-only fix.
+
+A named, item, or active-state speed **equal to walking Speed** inherits the walking
+subtotal after walking-specific bonuses and its type-specific item multiplier, but
+before wildcard multipliers, conditions, rounding, and exhaustion. It adds the
+destination's own bonuses, then applies the destination multiplier, wildcard
+multiplier, conditions, floor, exhaustion, and zero clamp once. General bonuses,
+armor penalties, gemstones, materials, and other walking contributions are not
+added again. Thus a 30-foot XPHB/TGTT Thief using the authored +5-foot Swift Stance
+has walking/climbing speeds of 35/35, not 35/40. Adding a climb-only +10 and wildcard
+doubling produces 70/90; subsequently halving movement produces 35/45.
+
+Intrinsic, static-item, and fixed active speeds remain independent candidates with
+their own applicable bonuses. Compare the completed candidates, preserving the
+higher result. A bonus alone does not grant a missing movement type. Explicit active
+`walkMultiplier` floors and Volant gemstone flight (twice walking Speed) instead
+use final walking Speed without another general modifier pass. Disabled or removed
+grants disappear from every read surface; no new persisted movement fields are
+introduced.
+
+Combat's stance badge and stance bridge can describe the same speed bonus.
+`getSpeedBonusFromStates()` omits only the matching badge contribution while keeping
+the bridge's walking bonus and all unrelated effects. PHB classic Second-Story Work
+does not acquire the XPHB climb mechanic.
+
 ### Ability Scores & Modifiers
 
 `getAbilityBase(ability)` reads `_data.abilities`: ordinary ASIs and feat
