@@ -921,7 +921,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.find(entry => entry.item?.name === RICH_CATALOG_ITEM.name).quantity).toBe(2);
 	});
 
-	test("serializes competing player stash requests and returns a stable insufficient code", async () => {
+	test("atomically terminalizes competing stash requests made insufficient by the winning approval", async () => {
 		const seeded = await pSeedPartyItem({name: `${prefix} requested ration`, quantity: 3});
 		const [sourceRequest, targetRequest] = await Promise.all([
 			store.pProposeTransfer({
@@ -963,9 +963,17 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			transferId: targetRequest.transfer.id,
 			decision: "accept",
 			idempotencyKey: `${prefix}-approve-target-contention`,
-		})).rejects.toMatchObject({code: "TRANSFER_INSUFFICIENT"});
+		})).rejects.toMatchObject({code: "TRANSFER_NOT_FOUND"});
 		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
-			.find(transfer => transfer.id === targetRequest.transfer.id).status).toBe("proposed");
+			.find(transfer => transfer.id === targetRequest.transfer.id)).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
+		expect((await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === targetRequest.transfer.id)).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
 		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
 			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(1);
 
@@ -979,6 +987,117 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
 			idempotencyKey: `${prefix}-peer-stash-request`,
 		})).rejects.toMatchObject({code: "FORBIDDEN"});
+	});
+
+	test("keeps affordable requests pending and terminalizes only losers after a DM direct stash move", async () => {
+		const seeded = await pSeedPartyItem({name: `${prefix} direct contention`, quantity: 3});
+		const request = async (quantity, key) => store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: sourceCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity}]},
+			idempotencyKey: `${prefix}-${key}`,
+		});
+		const affordable = await request(1, "direct-affordable");
+		const insufficient = await request(3, "direct-insufficient");
+		const direct = await store.pProposeTransfer({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: targetCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-dm-direct-contention`,
+		});
+		expect(direct.transfer.status).toBe("committed");
+		const transfers = await store.pListTransfers({accountId: dm.id, campaignId: campaign.id});
+		expect(transfers.find(transfer => transfer.id === affordable.transfer.id).status).toBe("proposed");
+		expect(transfers.find(transfer => transfer.id === insufficient.transfer.id)).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(2);
+	});
+
+	test("terminalizes an unfunded stash request when an atomic DM award consumes its source", async () => {
+		const seeded = await pSeedPartyItem({name: `${prefix} award contention`, quantity: 2});
+		const request = await store.pProposeTransfer({
+			accountId: sourceOwner.id,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: sourceCharacter.id,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 2}]},
+			idempotencyKey: `${prefix}-award-contender`,
+		});
+		await store.pAwardItems({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			source: {kind: "party_inventory", entryId: seeded.entry.id},
+			targetCharacterIds: [targetCharacter.id],
+			quantity: 1,
+			idempotencyKey: `${prefix}-award-winner`,
+		});
+		expect((await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.find(transfer => transfer.id === request.transfer.id)).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.find(entry => entry.id === seeded.entry.id).quantity).toBe(1);
+	});
+
+	test("two concurrent approvals commit one winner and cancel the other exactly once", async () => {
+		const seeded = await pSeedPartyItem({name: `${prefix} concurrent contention`, quantity: 1});
+		const request = (accountId, characterId, key) => store.pProposeTransfer({
+			accountId,
+			campaignId: campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: seeded.party.id,
+			targetKind: "character",
+			targetId: characterId,
+			payload: {items: [{entryId: seeded.entry.id, quantity: 1}]},
+			idempotencyKey: `${prefix}-${key}`,
+		});
+		const [first, second] = await Promise.all([
+			request(sourceOwner.id, sourceCharacter.id, "concurrent-first"),
+			request(targetOwner.id, targetCharacter.id, "concurrent-second"),
+		]);
+		const outcomes = await Promise.allSettled([first, second].map((proposal, index) =>
+			store.pResolveTransfer({
+				accountId: dm.id,
+				campaignId: campaign.id,
+				transferId: proposal.transfer.id,
+				decision: "accept",
+				idempotencyKey: `${prefix}-concurrent-approve-${index}`,
+			})));
+		expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+		expect(outcomes.filter(result => result.status === "rejected")).toHaveLength(1);
+		expect(outcomes.find(result => result.status === "rejected").reason).toMatchObject({code: "TRANSFER_NOT_FOUND"});
+		const transfers = (await store.pListTransfers({accountId: dm.id, campaignId: campaign.id}))
+			.filter(transfer => [first.transfer.id, second.transfer.id].includes(transfer.id));
+		expect(transfers.map(transfer => transfer.status).sort()).toEqual(["cancelled", "committed"]);
+		expect(transfers.find(transfer => transfer.status === "cancelled").payload.cancellationReason)
+			.toBe("source_insufficient");
+		const loserId = transfers.find(transfer => transfer.status === "cancelled").id;
+		const audits = await pool.query(`
+			SELECT count(*)::int AS count
+			FROM hub.audit_entries
+			WHERE campaign_id = $1 AND target_id = $2 AND action = 'transfer.cancelled'
+		`, [campaign.id, loserId]);
+		expect(audits.rows[0].count).toBe(1);
+		const cancellations = (await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id}))
+			.filter(event => event.type === "transfer.cancelled" && event.aggregateId === loserId);
+		expect(cancellations).toHaveLength(1);
+		expect(cancellations[0].payload.reason).toBe("source_insufficient");
+		expect((await store.pGetPartyInventory({accountId: dm.id, campaignId: campaign.id}))
+			.inventory.some(entry => entry.id === seeded.entry.id)).toBe(false);
 	});
 
 	test("fails stale or linked transfers atomically and restores a rejection exactly once", async () => {

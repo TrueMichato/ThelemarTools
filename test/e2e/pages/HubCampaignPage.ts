@@ -2721,6 +2721,18 @@ export class HubCampaignPage {
 		await expect(transfers).toHaveCount(transferCount - 1);
 	}
 
+	async approveStashRequestAndExpectCompetingRequestCleared ({
+		campaignId, expectedText,
+	}: {campaignId: string; expectedText: string[]}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		await expect(transfers).toHaveCount(2);
+		const winner = transfers.first();
+		for (const text of expectedText) await expect(winner).toContainText(text);
+		await winner.getByRole("button", {name: "Approve", exact: true}).click();
+		await expect(transfers).toHaveCount(0);
+	}
+
 	async resolveFirstPendingTransferAfterCommittedRefreshFailure ({
 		campaignId,
 		expectedText,
@@ -2865,6 +2877,24 @@ export class HubCampaignPage {
 		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/party-inventory`);
 		expect(response.ok()).toBe(true);
 		return (await response.json()).partyInventory;
+	}
+
+	async moveCharacterItemToPartyViaApi ({
+		campaignId, characterId, entryId, quantity,
+	}: {campaignId: string; characterId: string; entryId: string; quantity: number}): Promise<void> {
+		const party = await this.getPartyInventory(campaignId);
+		const response = await this.page.request.post(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers`, {
+			headers: await this.getMutationHeaders(),
+			data: {
+				sourceKind: "character",
+				sourceId: characterId,
+				targetKind: "party_inventory",
+				targetId: party.id,
+				payload: {items: [{entryId, quantity}]},
+			},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+		expect((await response.json()).transfer.status).toBe("committed");
 	}
 
 	async expectStaleCharacterUrlCanonicalized ({

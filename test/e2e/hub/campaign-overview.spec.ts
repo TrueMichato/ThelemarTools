@@ -1036,6 +1036,16 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 		await expect(disclosure).toHaveAttribute("open", "");
 		await expect(body).toBeVisible();
 		await expect(body).toContainText("Server-authorized profile shared with players");
+		await summary.focus();
+		const previousDisclosure = await disclosure.elementHandle();
+		await owner.logRolls({campaignId, characterId: character.id, count: 1});
+		await expect.poll(() => viewer.page.evaluate(
+			previous => !previous.isConnected,
+			previousDisclosure,
+		), {timeout: 15_000}).toBe(true);
+		await expect(disclosure).toHaveAttribute("open", "");
+		await expect(summary).toBeFocused();
+		await expect(body).toContainText("Server-authorized profile shared with players");
 
 		const initialPolicy = await owner.getProjectionPolicy(character.id);
 		const hiddenIdentityPolicy = {version: 1, preset: "private", overrides: {hp: {mode: "share"}}};
@@ -1045,6 +1055,7 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 			policy: hiddenIdentityPolicy,
 		});
 		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero");
+		await expect(viewer.page.locator("#campaign-party-roster details.hub-shared-profile[open]")).toHaveCount(0);
 
 		let markActionsRefreshStarted = () => {};
 		const actionsRefreshStarted = new Promise<void>(resolve => {

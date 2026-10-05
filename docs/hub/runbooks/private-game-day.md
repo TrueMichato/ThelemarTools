@@ -220,8 +220,12 @@ correct, activity is readable, and retries do not duplicate the award.
 3. DM reviews the human-readable source, item, quantities, and destination, then accepts.
 4. Player A uses **Request** on the stash from Aster's Character Sheet. Before approval, verify the stash and
    character balances are unchanged; then DM uses **Approve** in the Campaign Hub.
-5. Create two requests that together exceed the remaining stack. Approve one, record
-   `TRANSFER_INSUFFICIENT` for the stale second approval, then decline it.
+5. Create two requests that together exceed the remaining stack. On deployed r11e, approve one, record
+   `TRANSFER_INSUFFICIENT` for the stale second approval, then decline it. On a later release containing
+   the unshipped GD-FIND-009 correction, instead require the losing request to become terminal
+   `cancelled` with `source_insufficient` immediately when the winner commits—without sending a
+   second approval or manual decline. The losing player must see an unavailable notice and the DM
+   inbox must clear.
 6. Player A creates a bounded deposit of 1 CP; DM rejects it. Player A creates another of 1 SP and uses
    **Cancel** before the DM resolves it.
 7. DM moves part of the accepted party stack to Bryn and confirms the move completes immediately under DM

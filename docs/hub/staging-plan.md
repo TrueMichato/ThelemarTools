@@ -1,20 +1,23 @@
 # Campaign Hub staging plan
 
-> **Status:** r11d deployed and operationally verified; V1-G1 complete; physical rerun **NO-GO**
-> **Last reviewed:** 2026-10-01
+> **Status:** r11e deployed with Campaign A-only targeting canary; V1-G1 complete; physical rerun **NO-GO**
+> **Last reviewed:** 2026-10-04
 > **Owner:** Campaign Hub maintainers
 
 The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r10 findings, focused
 correction release, and physical re-entry gate. Earlier r7 drills below are historical evidence, not a
 claim that r7 is still deployed or that the r10 findings have been resolved. The 2026-09-29 r11
 promotion was interrupted after traffic changed; its compatible application rollback restored exact
-r10 with no schema migration. Genuine-provenance r11b, r11c, and r11d tags were subsequently promoted;
-r11d passed runtime/static checks and its newest encrypted prerelease backup matched off-machine.
-Its monitor timer failed once during cutover but a genuine later timer run succeeded and cleared the
-failed-unit state without resetting it. Targeting remains disabled. The r11b P1 return advanced the
-canonical revision without an edit; r11c stopped on a false client-side history warning; r11d's first
-physical Open Local leg again advanced canonical revision (23 -> 24) on a derived-modifier PATCH.
-Further retest is blocked pending a client correction.
+r10 with no schema migration. Genuine-provenance r11b through r11e tags were subsequently promoted.
+R11e passed runtime/static checks and matching off-machine encrypted backup; its approved same-tag
+redeploy enabled only Campaign A's narrow targeting canary, with post-cutover readiness/rollout and
+newest off-machine backup equality verified. The r11b P1 return advanced canonical revision without
+an edit; r11c stopped on a false history warning; r11d's first Open Local leg advanced revision
+(23 -> 24) on a derived-modifier PATCH. On r11e, physical Campaign -> Local -> Return and
+Back/Forward reload caused no lease/write and held revision stable, but actual BFCache restoration and
+fresh-tab no-lease evidence remain unproven. The separate Campaign A physical targeting canary
+passed participant-reported PHB/XPHB accept, XPHB reject/cancel, self-target, and picker privacy;
+natural expiry was not physically tested. Private-launch GO is still blocked by other findings.
 
 ## Objectives
 
@@ -28,9 +31,10 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- The independently verified deployed release is annotated `hub-staging-2026-10-01-r11d` at
-  `d26b0bf3f938b5cf6e687628b1823d06f11644b5`, with migrations `0001`-`0009`;
-  Phase 6G is complete. Recheck live identity before the next promotion.
+- The independently verified deployed source is annotated `hub-staging-2026-10-01-r11e` at
+  `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f`, with migrations `0001`-`0009`.
+  Its same-tag Campaign A-only targeting configuration is live; Phase 6G is complete.
+  Recheck live identity/capability before the next scenario or promotion.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup
   passed on 2026-09-12.

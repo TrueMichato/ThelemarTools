@@ -29,6 +29,7 @@ import {
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
 	isDirectTransferAuthority,
+	isTransferRequestInsufficient,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
@@ -6774,6 +6775,13 @@ export class PostgresHubStore {
 					aggregateRevision: partyInventoryResponse.revision,
 					payload: {},
 				});
+				await this._pCancelInsufficientStashRequests({
+					client,
+					campaignId,
+					partyInventoryId: party.id,
+					container: stagedPartyContainer,
+					actorAccountId: accountId,
+				});
 			}
 			await this._pSaveReceipt({
 				client,
@@ -7036,7 +7044,13 @@ export class PostgresHubStore {
 			const source = await this._pGetTransferContainer({client, campaignId: transfer.campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId});
 			await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
 		}
-		await client.query(`UPDATE hub.transfers SET status = 'cancelled', updated_at = now() WHERE id = $1`, [transfer.id]);
+		await client.query(`
+			UPDATE hub.transfers
+			SET status = 'cancelled',
+				payload = payload || jsonb_build_object('cancellationReason', $2::text),
+				updated_at = now()
+			WHERE id = $1
+		`, [transfer.id, reason]);
 		await this._pAppendEvent({
 			client,
 			campaignId: transfer.campaignId,
@@ -7054,6 +7068,41 @@ export class PostgresHubStore {
 				targetId: transfer.targetId,
 			},
 		});
+	}
+
+	async _pCancelInsufficientStashRequests ({
+		client,
+		campaignId,
+		partyInventoryId,
+		container,
+		actorAccountId,
+		excludeTransferId = null,
+	}) {
+		const pending = await client.query(`
+			SELECT * FROM hub.transfers
+			WHERE campaign_id = $1 AND source_party_inventory_id = $2
+				AND status = 'proposed' AND ($3::uuid IS NULL OR id <> $3::uuid)
+			ORDER BY id FOR UPDATE
+		`, [campaignId, partyInventoryId, excludeTransferId]);
+		for (const row of this._getTransferRowsForLifecycleCancellation(pending.rows)) {
+			const transfer = this._getTransfer(row);
+			if (!isTransferRequestInsufficient({container, request: transfer.payload.request})) continue;
+			await this._pCancelTransferForLifecycle({
+				client,
+				row,
+				actorAccountId,
+				reason: "source_insufficient",
+			});
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId,
+				action: "transfer.cancelled",
+				targetType: "transfer",
+				targetId: transfer.id,
+				details: {reason: "source_insufficient"},
+			});
+		}
 	}
 
 	_getTransferRowsForLifecycleCancellation (rows) {
@@ -7504,6 +7553,16 @@ export class PostgresHubStore {
 				visibleAccountIds: [...new Set([accountId, target.ownerAccountId].filter(Boolean))],
 				payload: {sourceKind, sourceId, targetKind, targetId},
 			});
+			if (isDirectAuthority && sourceKind === "party_inventory") {
+				await this._pCancelInsufficientStashRequests({
+					client,
+					campaignId,
+					partyInventoryId: sourceId,
+					container: prepared.container,
+					actorAccountId: accountId,
+					excludeTransferId: transferId,
+				});
+			}
 			const response = await this._pProjectTransferResponseForViewer({
 				client,
 				response: {transfer},
@@ -7550,6 +7609,7 @@ export class PostgresHubStore {
 					: isDm);
 			if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
 			let resolvedPayload = {...transfer.payload, _actorCommandId: transfer.actorCommandId};
+			let remainingStash = null;
 			if (transfer.status === "proposed") {
 				if (decision === "accept") {
 					const source = await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
@@ -7567,6 +7627,7 @@ export class PostgresHubStore {
 					}
 					await source.pWrite(removed.container);
 					await target.pWrite(after);
+					if (transfer.sourceKind === "party_inventory") remainingStash = removed.container;
 					resolvedPayload = {...transfer.payload, escrow: removed.escrow, _actorCommandId: transfer.actorCommandId};
 				}
 			} else {
@@ -7610,6 +7671,16 @@ export class PostgresHubStore {
 					targetId: transfer.targetId,
 				},
 			});
+			if (remainingStash) {
+				await this._pCancelInsufficientStashRequests({
+					client,
+					campaignId,
+					partyInventoryId: transfer.sourceId,
+					container: remainingStash,
+					actorAccountId: accountId,
+					excludeTransferId: transfer.id,
+				});
+			}
 			const response = await this._pProjectTransferResponseForViewer({
 				client,
 				response: {transfer: transferNxt},

@@ -66,6 +66,7 @@ const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
 const pendingIdentityLinks = new Map();
 const pendingIdentityUnlinks = new Map();
+const profileDisclosureCharacterIds = new WeakMap();
 let campaignAuthorizationErrorHandler = null;
 
 function getAwardDraftStorageKey ({accountId, campaignId}) {
@@ -2886,6 +2887,18 @@ function renderCharacterList ({campaignId, characters, session, isDm}) {
 function renderPartyRoster ({campaignId, characters, members, session, isDm, roster = null}) {
 	const list = document.getElementById("campaign-party-roster");
 	if (!list) return;
+	const openCharacterNames = new Map([...list.querySelectorAll("details.hub-shared-profile[open]")]
+		.map(details => [
+			profileDisclosureCharacterIds.get(details),
+			details.querySelector(".hub-data-row__name")?.textContent,
+		])
+		.filter(([characterId, name]) => characterId && name));
+	const focusedDetails = document.activeElement?.closest?.("details.hub-shared-profile");
+	const focusedCharacterId = focusedDetails && list.contains(focusedDetails)
+		? profileDisclosureCharacterIds.get(focusedDetails)
+		: null;
+	const focusedCharacterName = focusedDetails?.querySelector(".hub-data-row__name")?.textContent;
+	const nextDetailsByCharacterId = new Map();
 	setCount({id: "campaign-party-count", count: characters.length});
 	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
 	list.replaceChildren(...characters.map(character => {
@@ -2926,6 +2939,11 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 
 		const details = document.createElement("details");
 		details.className = "hub-shared-profile";
+		if (characterId) {
+			profileDisclosureCharacterIds.set(details, characterId);
+			details.open = openCharacterNames.get(characterId) === getCharacterName(character);
+			nextDetailsByCharacterId.set(characterId, details);
+		}
 		details.append(row);
 		const profile = document.createElement("div");
 		profile.className = "hub-shared-profile__body";
@@ -2953,6 +2971,10 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 		details.append(profile);
 		return details;
 	}));
+	if (focusedCharacterId && focusedCharacterName === nextDetailsByCharacterId.get(focusedCharacterId)
+		?.querySelector(".hub-data-row__name")?.textContent) {
+		nextDetailsByCharacterId.get(focusedCharacterId)?.querySelector("summary")?.focus({preventScroll: true});
+	}
 }
 
 function renderRecentActivity ({

@@ -364,9 +364,14 @@ reservation exists. Other character-source commands remove the requested value i
 the source exactly once. A player party-source command is allowed only when the destination is that player's own
 character. It stores a server-derived metadata preview and normalized request as `proposed` but does not debit or
 reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically removes its current canonical
-metadata and writes it to the character; concurrent depletion returns `TRANSFER_INSUFFICIENT` without changing
-either container or terminalizing the request. Reusing an idempotency key with the same command replays its stored
-result rather than repeating either mutation.
+metadata and writes it to the character. On the current unshipped GD-FIND-009 candidate, any same-stash
+`proposed` requests made definitively insufficient by that debit become terminal `cancelled` with bounded
+`payload.cancellationReason: "source_insufficient"` in the same transaction, with a targeted event and audit
+per loser. The same check follows direct DM stash moves and stash-backed awards; still-affordable requests
+remain proposed. No escrow exists for a proposed loser, so nothing is restored; a later attempt to approve
+one returns `TRANSFER_NOT_FOUND`. A newly requested unfunded transfer still fails with
+`TRANSFER_INSUFFICIENT` without committing a row. This candidate is not deployed in r11e.
+Reusing an idempotency key with the same command replays its stored result rather than repeating either mutation.
 Transfer mutation responses and their replay receipts use the same viewer projection as the transfer collection:
 DM/co-DM viewers receive the full authority record, while non-DM viewers receive only owned character endpoint
 IDs and their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed. A

@@ -14,6 +14,7 @@ import {
 	HubTransferResolutionDrafts,
 	isTransferOutcomeUncertain,
 	pResolveTransferFromDraft,
+	pResolveTransferAndRefresh,
 } from "../hub/hub-api-client.js";
 
 const DM_ROLES = new Set(["dm", "co_dm"]);
@@ -236,6 +237,14 @@ export class CharacterSheetPartyInventory {
 			&& typeof repository?.pReconcileAuthoritativeCharacter === "function";
 		this._active = null;
 		this._root = null;
+		this._incomingRoot = null;
+		this._incomingTransfers = [];
+		this._incomingStatuses = new Map();
+		this._incomingError = null;
+		this._incomingOutcomeWarning = null;
+		this._incomingUnconfirmed = null;
+		this._incomingBusyTransferId = null;
+		this._incomingButtonRefs = new WeakMap();
 		this._partyInventory = null;
 		this._role = null;
 		this._recipients = [];
@@ -258,6 +267,7 @@ export class CharacterSheetPartyInventory {
 		this._refreshPromise = null;
 		this._manualRefreshPromise = null;
 		this._partyFetchToken = null;
+		this._projectionVisibilityEpoch = 0;
 		this._scheduledRefresh = false;
 		this._activationRetryTimer = null;
 		this._seenEventKeys = new Set();
@@ -276,11 +286,11 @@ export class CharacterSheetPartyInventory {
 			this._realtime.on("inventoryTransfer", event => this._onInventoryTransfer(event)),
 			this._realtime.on("projectionInvalidated", () => {
 				if (this._active?.isActivationPending) void this._pActivate(this._active);
-				else this._scheduleRefresh({party: true});
+				else this._onVisibilityChanged();
 			}),
 			this._realtime.on("membershipChanged", () => {
 				if (this._active?.isActivationPending) void this._pActivate(this._active);
-				else this._scheduleRefresh({party: true});
+				else this._onVisibilityChanged();
 			}),
 			this._realtime.on("connectionState", state => this._onConnectionState(state)),
 		);
@@ -388,6 +398,14 @@ export class CharacterSheetPartyInventory {
 		}
 		this._root?.remove();
 		this._root = null;
+		this._incomingRoot?.remove();
+		this._incomingRoot = null;
+		this._incomingTransfers = [];
+		this._incomingStatuses.clear();
+		this._incomingError = null;
+		this._incomingOutcomeWarning = null;
+		this._incomingUnconfirmed = null;
+		this._incomingBusyTransferId = null;
 	}
 
 	_clearActivationRetry () {
@@ -437,6 +455,21 @@ export class CharacterSheetPartyInventory {
 			},
 		});
 		equipmentSection.insertAdjacentElement("afterend", this._root);
+		const campaignBanner = document.getElementById("charsheet-hub-effects");
+		if (campaignBanner) {
+			this._incomingRoot = createElement("section", {
+				className: "charsheet__incoming-transfers",
+				attrs: {
+					"aria-label": "Incoming inventory transfers",
+					"aria-live": "polite",
+					"data-charsheet-incoming-transfers": "",
+					role: "region",
+					hidden: true,
+					tabindex: -1,
+				},
+			});
+			campaignBanner.insertAdjacentElement("afterend", this._incomingRoot);
+		}
 	}
 
 	_ensureStylesheet () {
@@ -513,7 +546,7 @@ export class CharacterSheetPartyInventory {
 			if (!button) {
 				button = createElement("button", {
 					className: "ve-btn ve-btn-xs ve-btn-default charsheet__item-party-move",
-					text: "Share",
+					text: "Share...",
 					attrs: {type: "button"},
 				});
 				actions.append(button);
@@ -580,9 +613,14 @@ export class CharacterSheetPartyInventory {
 			pendingResolution: null,
 		};
 		this._error = null;
-		this._announcement = "";
+		this._announcement = "Choose quantity and destination below. No item has moved yet.";
 		this._render();
 		if (this._root) this._decorateCharacterInventory();
+		if (kind === "character" && returnToken) {
+			const quantity = this._root?.querySelector("[data-party-inventory-focus=\"quantity\"]");
+			quantity?.focus({preventScroll: true});
+			quantity?.scrollIntoView({block: "center"});
+		}
 		return true;
 	}
 
@@ -605,7 +643,8 @@ export class CharacterSheetPartyInventory {
 		if (this._seenEventKeys.size > MAX_SEEN_EVENT_KEYS) this._seenEventKeys.delete(this._seenEventKeys.values().next().value);
 		this._scheduleRefresh({
 			character: event.isCurrentCharacterAffected === true,
-			party: event.isPartyInventoryAffected === true,
+			party: event.isPartyInventoryAffected === true
+				|| (event.isCurrentCharacterAffected === true && event.type?.startsWith("transfer.")),
 		});
 	}
 
@@ -622,6 +661,16 @@ export class CharacterSheetPartyInventory {
 		}
 		if (state?.state === "live") this._scheduleRefresh({party: true});
 		else if (["reconnecting", "unavailable"].includes(state?.state)) this._render();
+	}
+
+	_onVisibilityChanged () {
+		if (!this._active?.isOwner) return;
+		this._projectionVisibilityEpoch++;
+		this._partyFetchToken = null;
+		this._incomingTransfers = [];
+		this._incomingError = "Rechecking incoming transfer visibility...";
+		this._render();
+		this._scheduleRefresh({party: true});
 	}
 
 	_scheduleRefresh ({character = false, party = false} = {}) {
@@ -679,18 +728,37 @@ export class CharacterSheetPartyInventory {
 		}
 	}
 
+	async _pRefreshAfterTransfer ({active, visibilityEpoch}) {
+		this._refreshFlags.character = true;
+		this._refreshFlags.party = true;
+		let isRefreshed = await this._pDrainRefresh();
+		if (!isRefreshed
+			&& this._isCurrent(active)
+			&& active.isOwner
+			&& this._hasTransferAuthority()
+			&& this._projectionVisibilityEpoch !== visibilityEpoch
+			&& !this._partyError
+			&& !this._reconcileError) {
+			this._refreshFlags.character = true;
+			this._refreshFlags.party = true;
+			isRefreshed = await this._pDrainRefresh();
+		}
+		return isRefreshed;
+	}
+
 	async _pRefreshParty (active = this._active) {
 		if (!this._isCurrent(active) || !active?.isOwner) return false;
 		const fetchToken = Symbol("party-inventory-fetch");
 		this._partyFetchToken = fetchToken;
 		this._isLoading = true;
 		this._render();
-		const [partyResult, snapshotResult] = await Promise.allSettled([
+		const [partyResult, snapshotResult, transfersResult] = await Promise.allSettled([
 			this._api.pGetPartyInventory({campaignId: this._campaignId}),
 			this._api.pGetCampaignSnapshot({campaignId: this._campaignId}),
+			Promise.resolve().then(() => this._api.pListTransfers({campaignId: this._campaignId})),
 		]);
 		if (!this._isCurrent(active) || this._partyFetchToken !== fetchToken) return false;
-		const accessError = [partyResult, snapshotResult]
+		const accessError = [partyResult, snapshotResult, transfersResult]
 			.find(result => result.status === "rejected" && TERMINAL_ACCESS_ERROR_CODES.has(result.reason?.code));
 		if (accessError) {
 			this.detach();
@@ -723,15 +791,54 @@ export class CharacterSheetPartyInventory {
 			});
 			this._rebuildRecipientTokens();
 		}
+		const isTransferListValid = transfersResult.status === "fulfilled"
+			&& Array.isArray(transfersResult.value)
+			&& transfersResult.value.every(transfer => transfer && typeof transfer.id === "string"
+				&& typeof transfer.status === "string");
+		if (isTransferListValid && partyResult.status === "fulfilled" && snapshot) {
+			const incoming = transfersResult.value.filter(transfer =>
+				transfer.targetKind === "character" && transfer.targetId === active.characterId);
+			const autoCancelled = incoming.filter(transfer =>
+				transfer.status === "cancelled"
+				&& transfer.payload?.cancellationReason === "source_insufficient"
+				&& this._incomingStatuses.get(transfer.id) === "proposed");
+			this._incomingStatuses = new Map(incoming.map(transfer => [transfer.id, transfer.status]));
+			this._incomingTransfers = incoming.filter(transfer => transfer.status === "reserved");
+			this._incomingError = null;
+			let isDraftAutoCancelled = false;
+			if (!this._isSubmitting && this._draft?.kind === "party_inventory" && this._draft.transfer?.status === "proposed") {
+				const current = transfersResult.value.find(transfer => transfer.id === this._draft.transfer.id);
+				if (current?.status === "cancelled" && current.payload?.cancellationReason === "source_insufficient") {
+					this._draft = null;
+					this._error = null;
+					isDraftAutoCancelled = true;
+				}
+			}
+			if (autoCancelled.length || isDraftAutoCancelled) {
+				const count = Math.max(autoCancelled.length, 1);
+				this._refreshNotice = count === 1
+					? "Your stash request is no longer available after another transfer used its contents. Nothing moved to this character."
+					: `${count} stash requests are no longer available after another transfer used their contents. Nothing moved to this character.`;
+				this._announcement = this._refreshNotice;
+				this._fnToast?.({type: "warning", content: this._refreshNotice});
+			}
+		} else {
+			this._incomingTransfers = [];
+			this._incomingStatuses.clear();
+			this._incomingError = "Incoming transfer status could not be verified. Refresh before responding.";
+		}
 		this._partyError = partyResult.status === "rejected"
 			? getErrorMessage(partyResult.reason)
 			: snapshotResult.status === "rejected"
 				? getErrorMessage(snapshotResult.reason)
-				: null;
+				: transfersResult.status === "rejected"
+					? getErrorMessage(transfersResult.reason)
+					: isTransferListValid ? null : "The incoming transfer response is invalid. Refresh before responding.";
 		this._isLoading = false;
 		this._render();
 		this._decorateCharacterInventory();
-		return partyResult.status === "fulfilled" && snapshotResult.status === "fulfilled";
+		return partyResult.status === "fulfilled" && snapshotResult.status === "fulfilled"
+			&& isTransferListValid;
 	}
 
 	_pManualRefresh ({errorSource = null} = {}) {
@@ -767,8 +874,19 @@ export class CharacterSheetPartyInventory {
 					this._error = null;
 				}
 			}
-			this._refreshNotice = isSuccessful ? "Party stash refreshed." : "";
-			if (isSuccessful) this._announce(this._refreshNotice);
+			let isIncomingConfirmed = false;
+			if (isSuccessful && this._incomingUnconfirmed) {
+				const {transferId, decision} = this._incomingUnconfirmed;
+				isIncomingConfirmed = this._confirmIncomingOutcome({transferId, decision, isRecovered: true});
+				if (!isIncomingConfirmed && this._incomingStatuses.get(transferId) !== "reserved") {
+					this._incomingUnconfirmed = null;
+					this._incomingOutcomeWarning = "The transfer has a different or unavailable final status. Inspect the latest balances before acting again.";
+				}
+			}
+			this._refreshNotice = isSuccessful
+				? isIncomingConfirmed ? "Transfer outcome confirmed from latest balances." : "Party stash refreshed."
+				: "";
+			if (isSuccessful && !isIncomingConfirmed) this._announce(this._refreshNotice);
 			this._render();
 			return isSuccessful;
 		})().finally(() => {
@@ -864,7 +982,181 @@ export class CharacterSheetPartyInventory {
 			text: this._announcement,
 			attrs: {"aria-live": "polite", "aria-atomic": "true", "data-party-inventory-live": ""},
 		}));
+		this._renderIncomingTransfers();
 		this._restoreFocus(focus);
+	}
+
+	_renderIncomingTransfers () {
+		const root = this._incomingRoot;
+		if (!root) return;
+		const focusedRef = root.contains(document.activeElement)
+			? this._incomingButtonRefs.get(document.activeElement)
+			: null;
+		const nextButtons = new Map();
+		root.replaceChildren();
+		root.hidden = !this._incomingTransfers.length && !this._incomingError
+			&& !this._incomingOutcomeWarning && !this._incomingUnconfirmed;
+		if (root.hidden) return;
+		root.setAttribute("aria-busy", this._incomingBusyTransferId ? "true" : "false");
+		const title = createElement("h4", {text: "Incoming inventory transfers"});
+		root.append(title);
+		if (this._incomingOutcomeWarning) {
+			root.append(createElement("p", {text: this._incomingOutcomeWarning, attrs: {role: "alert"}}));
+		}
+		if (this._incomingError) {
+			if (this._incomingError !== this._incomingOutcomeWarning) {
+				root.append(createElement("p", {text: this._incomingError, attrs: {role: "alert"}}));
+			}
+		}
+		if (this._incomingError || this._incomingUnconfirmed) {
+			const refresh = createElement("button", {
+				className: "ve-btn ve-btn-xs ve-btn-default",
+				text: "Refresh transfer status",
+				attrs: {type: "button", disabled: this._isLoading},
+			});
+			refresh.addEventListener("click", () => void this._pManualRefresh({errorSource: "party"}));
+			root.append(refresh);
+		}
+		if (this._incomingOutcomeWarning && !this._incomingUnconfirmed && !this._incomingTransfers.length) {
+			const dismiss = createElement("button", {
+				className: "ve-btn ve-btn-xs ve-btn-default",
+				text: "Dismiss status",
+				attrs: {type: "button"},
+			});
+			dismiss.addEventListener("click", () => {
+				this._incomingOutcomeWarning = null;
+				this._render();
+			});
+			root.append(dismiss);
+		}
+		for (const transfer of this._incomingTransfers) {
+			const row = createElement("div", {className: "charsheet__incoming-transfer"});
+			const escrow = transfer.payload?.escrow;
+			const items = escrow?.items?.map(entry =>
+				`${entry.quantity} × ${entry.item?.name || "item"}${entry.item?.source ? ` · ${entry.item.source}` : ""}`) || [];
+			const currency = CURRENCY_TYPES.filter(type => Number(escrow?.currency?.[type]) > 0)
+				.map(type => `${escrow.currency[type]} ${type.toUpperCase()}`);
+			const contents = [...items, ...currency].join(" + ");
+			const source = transfer.sourceDisplaySnapshot?.displayName || "A campaign character";
+			row.append(createElement("p", {
+				text: contents
+					? `${source} offers ${contents}. Nothing enters your inventory until you accept.`
+					: "An incoming transfer has no verifiable item details. Open the Campaign Hub inbox before responding.",
+			}));
+			if (contents && !this._incomingError) {
+				const controls = createElement("div", {className: "charsheet__incoming-transfer-actions"});
+				const existing = this._transferResolutionDrafts.get({campaignId: this._campaignId, transferId: transfer.id});
+				for (const [decision, label] of [["accept", "Accept"], ["reject", "Reject"]]) {
+					if (existing && existing.decision !== decision) continue;
+					const button = createElement("button", {
+						className: decision === "accept" ? "ve-btn ve-btn-primary" : "ve-btn ve-btn-default",
+						text: existing ? `Retry ${label.toLowerCase()}` : label,
+						attrs: {
+							type: "button",
+							"aria-label": `${existing ? "Retry " : ""}${label} transfer`,
+							disabled: !!this._incomingBusyTransferId || !this._hasTransferAuthority()
+								|| (existing && !this._transferResolutionDrafts.isReplayable(existing)),
+						},
+					});
+					button.addEventListener("click", () => void this._pResolveIncomingTransfer({
+						transferId: transfer.id,
+						decision,
+					}));
+					const ref = `${transfer.id}:${decision}`;
+					this._incomingButtonRefs.set(button, ref);
+					nextButtons.set(ref, button);
+					controls.append(button);
+				}
+				row.append(controls);
+			}
+			root.append(row);
+		}
+		if (focusedRef) {
+			const next = nextButtons.get(focusedRef);
+			if (next && !next.disabled) next.focus({preventScroll: true});
+			else root.focus({preventScroll: true});
+		}
+	}
+
+	_confirmIncomingOutcome ({transferId, decision, isRecovered = false}) {
+		if (this._incomingStatuses.get(transferId) !== (decision === "accept" ? "committed" : "rejected")) return false;
+		this._incomingError = null;
+		this._incomingOutcomeWarning = null;
+		this._incomingUnconfirmed = null;
+		const message = isRecovered
+			? `Transfer ${decision === "accept" ? "accepted" : "rejected"}; latest balances confirmed after refresh.`
+			: decision === "accept" ? "Transfer accepted." : "Transfer rejected.";
+		this._fnToast?.({type: "success", content: message});
+		this._announce(message);
+		return true;
+	}
+
+	async _pResolveIncomingTransfer ({transferId, decision}) {
+		const active = this._active;
+		const isCurrent = () => this._isCurrent(active) && active.isOwner && this._hasTransferAuthority();
+		if (!isCurrent()
+			|| this._incomingBusyTransferId || this._incomingError
+			|| !this._incomingTransfers.some(transfer => transfer.id === transferId)) return false;
+		const existing = this._transferResolutionDrafts.get({campaignId: this._campaignId, transferId});
+		if (existing && existing.decision !== decision) return false;
+		this._incomingBusyTransferId = transferId;
+		this._render();
+		try {
+			const outcome = await pResolveTransferAndRefresh({
+				pResolve: () => pResolveTransferFromDraft({
+					drafts: this._transferResolutionDrafts,
+					campaignId: this._campaignId,
+					transferId,
+					decision,
+					pGetRulesVersionId: async () => {
+						const context = await this._api.pGetCampaignContext({campaignId: this._campaignId});
+						if (!isCurrent()) throw Object.assign(new Error("Character access changed."), {code: "FORBIDDEN"});
+						return context.rulesVersion?.id || null;
+					},
+					pResolve: request => {
+						if (!isCurrent()) throw Object.assign(new Error("Character access changed."), {code: "FORBIDDEN"});
+						return this._api.pResolveTransfer(request);
+					},
+				}),
+				pRefresh: async () => {
+					if (!isCurrent()) return false;
+					this._refreshFlags.character = true;
+					this._refreshFlags.party = true;
+					return this._pDrainRefresh();
+				},
+			});
+			if (!this._isCurrent(active)) return false;
+			const expectedStatus = decision === "accept" ? "committed" : "rejected";
+			const isResolved = ["resolved_refreshed", "resolution_failed_refreshed"].includes(outcome.state);
+			let isRefreshCurrent = outcome.refreshResult === true;
+			if (isResolved && (!isRefreshCurrent || this._incomingStatuses.get(transferId) !== expectedStatus)) {
+				this._refreshFlags.character = true;
+				this._refreshFlags.party = true;
+				isRefreshCurrent = await this._pDrainRefresh();
+				if (!this._isCurrent(active)) return false;
+			}
+			if (isResolved && isRefreshCurrent && this._incomingStatuses.get(transferId) === expectedStatus) {
+				this._confirmIncomingOutcome({
+					transferId,
+					decision,
+					isRecovered: outcome.state === "resolution_failed_refreshed",
+				});
+				return true;
+			}
+			this._incomingError = outcome.state === "resolution_failed_refreshed"
+				? getErrorMessage(outcome.resolutionError)
+				: outcome.state === "resolved_refresh_failed"
+					? "The decision was sent, but its latest status could not be loaded. Refresh before responding again."
+					: "Transfer outcome is not confirmed. Refresh its status before retrying the same decision.";
+			this._incomingOutcomeWarning = this._incomingError;
+			this._incomingUnconfirmed = {transferId, decision};
+			return false;
+		} finally {
+			if (this._isCurrent(active)) {
+				this._incomingBusyTransferId = null;
+				this._render();
+			}
+		}
 	}
 
 	_renderHeader () {
@@ -1441,6 +1733,7 @@ export class CharacterSheetPartyInventory {
 		if (this._isSubmitting || !this._draft || !this._isCurrent()) return false;
 		const active = this._active;
 		const draft = this._draft;
+		const visibilityEpoch = this._projectionVisibilityEpoch;
 		if (!draft.transfer) {
 			if (draft.proposalRequest) {
 				if (Date.now() >= draft.proposalReplayUntil) {
@@ -1550,9 +1843,9 @@ export class CharacterSheetPartyInventory {
 				if (!isTransferOutcomeUncertain(error)) draft.pendingResolution = null;
 				throw error;
 			}
-			this._refreshFlags.character = true;
-			this._refreshFlags.party = true;
-			if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+			if (!await this._pRefreshAfterTransfer({active, visibilityEpoch})) {
+				throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			const message = draft.transfer.status === "proposed"
 				? "Request cancelled. The party stash was unchanged."
@@ -1580,6 +1873,7 @@ export class CharacterSheetPartyInventory {
 		if (this._isSubmitting || !this._draft || !this._isCurrent()) return false;
 		const active = this._active;
 		const draft = this._draft;
+		const visibilityEpoch = this._projectionVisibilityEpoch;
 		if (!this._hasTransferAuthority() && draft.transfer && !draft.needsStatusCheck && !draft.pendingResolution && !this._getPendingAcceptance(draft)) {
 			draft.needsStatusCheck = true;
 		}
@@ -1669,9 +1963,9 @@ export class CharacterSheetPartyInventory {
 					};
 					const message = messages[transfer.status];
 					if (!message) throw Object.assign(new Error("Transfer is no longer pending"), {code: "TRANSFER_NOT_FOUND"});
-					this._refreshFlags.character = true;
-					this._refreshFlags.party = true;
-					if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+					if (!await this._pRefreshAfterTransfer({active, visibilityEpoch})) {
+						throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+					}
 					if (!this._isCurrent(active) || this._draft !== draft) return false;
 					this._isSubmitting = false;
 					this._closeDraft();
@@ -1822,9 +2116,9 @@ export class CharacterSheetPartyInventory {
 				draft.transfer = resolved.transfer;
 			}
 
-			this._refreshFlags.character = true;
-			this._refreshFlags.party = true;
-			if (!await this._pDrainRefresh()) throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+			if (!await this._pRefreshAfterTransfer({active, visibilityEpoch})) {
+				throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
+			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			const terminalMessages = {
 				committed: "Transfer complete. Both inventories are up to date.",

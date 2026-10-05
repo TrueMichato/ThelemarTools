@@ -1,4 +1,5 @@
 import {expect, test, type BrowserContext} from "@playwright/test";
+import pg from "pg";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
 import {HubCharacterSheetPartyInventoryPage} from "../pages/HubCharacterSheetPartyInventoryPage";
 
@@ -211,18 +212,40 @@ test.describe("device-scoped active campaign context", () => {
 	});
 
 	test("keeps campaign and Local authority reversible without cross-writing canonical truth", async ({browser}) => {
-		test.setTimeout(240_000);
+		test.setTimeout(300_000);
+		const databaseUrl = process.env.HUB_TEST_POSTGRES_URL;
+		if (!databaseUrl) throw new Error("HUB_TEST_POSTGRES_URL is required for route-write evidence.");
+		if (!["localhost", "127.0.0.1"].includes(new URL(contextOptions.baseURL).hostname)
+			|| new URL(databaseUrl).hostname !== "127.0.0.1") {
+			throw new Error("Route-write evidence requires the disposable loopback Hub and PostgreSQL stack.");
+		}
+		const pool = new pg.Pool({connectionString: databaseUrl});
 		const context = await browser.newContext(contextOptions);
+		const dmContext = await browser.newContext(contextOptions);
+		const peerContext = await browser.newContext(contextOptions);
 		try {
 			const hub = new HubCampaignPage(await context.newPage());
+			const dm = new HubCampaignPage(await dmContext.newPage());
+			const peer = new HubCampaignPage(await peerContext.newPage());
 			await hub.signInSynthetic({providerSubject: "authority-owner", displayName: "Authority Owner", secret: secret!});
-			const campaignId = await hub.createCampaign("Authority Routing E2E");
+			await dm.signInSynthetic({providerSubject: "authority-route-dm", displayName: "Authority DM", secret: secret!});
+			await peer.signInSynthetic({providerSubject: "authority-route-peer", displayName: "Authority Peer", secret: secret!});
+			const campaignId = await dm.createCampaign("Authority Routing E2E");
+			await hub.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+			await peer.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
 			const character = await hub.createCharacter({
 				campaignId,
 				name: "Canonical Route Hero",
 				className: "Sorcerer",
 				subclass: {name: "Draconic Bloodline", source: "PHB", shortName: "Draconic"},
 			});
+			const sharing = await hub.getProjectionPolicy(character.id);
+			await hub.setProjectionPolicy({
+				characterId: character.id,
+				expectedProjectionRevision: sharing.projectionRevision,
+				policy: {version: 1, preset: "private", overrides: {}},
+			});
+			expect((await peer.getCharacterProjection(character.id)).data).toEqual({});
 
 			// Deliberately reuse the canonical Hub id in the local repository. Repository authority,
 			// not id uniqueness, must keep the two documents isolated.
@@ -243,7 +266,7 @@ test.describe("device-scoped active campaign context", () => {
 
 			await hub.gotoCampaign(campaignId);
 			await hub.waitForSelectedCampaign(campaignId);
-			await hub.applyDamage({campaignId, characterName: "Canonical Route Hero", amount: 1});
+			await dm.applyDamage({campaignId, characterName: "Canonical Route Hero", amount: 1});
 			const afterEffect = await hub.getCharacter(character.id);
 			expect(afterEffect.revision).toBeGreaterThan(character.revision);
 
@@ -328,6 +351,11 @@ test.describe("device-scoped active campaign context", () => {
 			);
 			const canonicalAfterOverview = await hub.getCharacter(character.id);
 			expect(overviewAcceptedRevision).toBe(canonicalAfterOverview.revision);
+			await dm.gotoCampaign(campaignId);
+			await dm.page.locator("#campaign-character-list .hub-data-row", {hasText: "Canonical Route Hero"}).click();
+			await dm.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
+			await expect(dm.page.locator("#charsheet-campaign")).toContainText("Read-only DM view");
+			expect((await dm.getCharacter(character.id)).revision).toBe(canonicalAfterOverview.revision);
 			await expect.poll(
 				() => ordinary.page.evaluate(
 					id => (window as any).charSheet?._characterRepository?._accepted?.get(id)?.revision ?? null,
@@ -335,13 +363,32 @@ test.describe("device-scoped active campaign context", () => {
 				),
 				{timeout: 30_000},
 			).toBe(canonicalAfterOverview.revision);
+			const ownerAccountId = (await hub.getSession()).account.id;
+			const getRouteEvidence = async () => {
+				const result = await pool.query(`
+					SELECT c.revision::text AS revision, c.lease_epoch::text AS lease_epoch,
+						(SELECT count(*)::text FROM hub.command_receipts
+							WHERE actor_account_id = $2 AND command_type = 'character.patch') AS patch_receipts,
+						(SELECT count(*)::text FROM hub.domain_events
+							WHERE campaign_id = $3 AND aggregate_id = $1 AND event_type = 'character.patched') AS patch_events,
+						(SELECT count(*)::text FROM hub.domain_events
+							WHERE campaign_id = $3 AND event_type = 'character.projection.invalidated') AS invalidations
+					FROM hub.characters c WHERE c.id = $1 AND c.campaign_id = $3
+				`, [character.id, ownerAccountId, campaignId]);
+				expect(result.rowCount).toBe(1);
+				return result.rows[0];
+			};
+			const routeEvidenceBefore = await getRouteEvidence();
+			expect(Number(routeEvidenceBefore.lease_epoch)).toBeGreaterThan(0);
+			expect(Number(routeEvidenceBefore.patch_receipts)).toBeGreaterThan(0);
+			expect(Number(routeEvidenceBefore.patch_events)).toBeGreaterThan(0);
+			expect(Number(routeEvidenceBefore.invalidations)).toBeGreaterThan(0);
 			// The explicit authority transition saves the current campaign document, fences its
 			// callbacks, and carries an exact route back without putting the Hub id in local `id`.
 			const bfcacheToken = await ordinary.page.evaluate(() => {
 				(window as any).__authorityBfcacheToken = crypto.randomUUID();
 				return (window as any).__authorityBfcacheToken;
 			});
-			const routePatchPaths: string[] = [];
 			let routePatchCount = 0;
 			let routeLeaseCount = 0;
 			const onRouteRequest = request => {
@@ -357,10 +404,8 @@ test.describe("device-scoped active campaign context", () => {
 					|| new URL(request.url()).pathname !== `/api/characters/${character.id}`
 				) return;
 				routePatchCount++;
-				const body = request.postDataJSON();
-				routePatchPaths.push(...(body.patches || []).map((patch: {path: string}) => patch.path.split("/")[1]));
 			};
-			ordinary.page.on("request", onRouteRequest);
+			for (const observed of [context, dmContext, peerContext]) observed.on("request", onRouteRequest);
 			await ordinary.page.locator("#charsheet-campaign a", {hasText: "Open Local mode"}).click();
 			await ordinary.page.waitForURL(url =>
 				url.searchParams.get("local") === "1"
@@ -370,10 +415,13 @@ test.describe("device-scoped active campaign context", () => {
 			expect(new URL(ordinary.page.url()).searchParams.get("id")).toBeNull();
 			await ordinary.page.waitForFunction(() => !!(window as any).charSheet, undefined, {timeout: 60_000});
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
-			expect(routePatchPaths).toEqual([]);
+			await expect(ordinary.page.getByText("Campaign effect history is no longer available", {exact: false})).toHaveCount(0);
 			expect(routePatchCount).toBe(0);
 			expect(routeLeaseCount).toBe(0);
 			expect((await hub.getCharacter(character.id)).revision).toBe(canonicalAfterOverview.revision);
+			expect((await dm.getCharacter(character.id)).revision).toBe(canonicalAfterOverview.revision);
+			expect((await peer.getCharacterProjection(character.id)).data).toEqual({});
+			expect(await getRouteEvidence()).toEqual(routeEvidenceBefore);
 
 			await ordinary.page.goBack();
 			await ordinary.page.waitForURL(url =>
@@ -400,13 +448,10 @@ test.describe("device-scoped active campaign context", () => {
 			await expect(ordinary.page.locator("#charsheet-campaign")).toContainText("Local authority");
 			const canonicalAtLocalEntry = await hub.getCharacter(character.id);
 			expect(canonicalAtLocalEntry.data.name).toBe("Canonical Route Hero");
-			ordinary.page.off("request", onRouteRequest);
-			expect({revision: canonicalAtLocalEntry.revision, routePatchPaths}).toEqual({
-				revision: canonicalAfterOverview.revision,
-				routePatchPaths: [],
-			});
+			expect(canonicalAtLocalEntry.revision).toBe(canonicalAfterOverview.revision);
 			expect(routePatchCount).toBe(0);
 			expect(routeLeaseCount).toBe(0);
+			expect(await getRouteEvidence()).toEqual(routeEvidenceBefore);
 
 			await ordinary.page.locator("#charsheet-sel-character").selectOption(character.id);
 			await expect(ordinary.page.locator("#charsheet-ipt-name")).toHaveValue("Local Collision Hero");
@@ -462,8 +507,16 @@ test.describe("device-scoped active campaign context", () => {
 			expect(canonicalAfterReturn.revision).toBe(canonicalAfterLocalWrite.revision);
 			expect(canonicalAfterReturn.revision).toBe(canonicalAfterOverview.revision);
 			expect(returnedAcceptedRevision).toBe(canonicalAfterReturn.revision);
+			expect((await dm.getCharacter(character.id)).revision).toBe(canonicalAfterReturn.revision);
+			expect((await peer.getCharacterProjection(character.id)).data).toEqual({});
+			expect(await getRouteEvidence()).toEqual(routeEvidenceBefore);
+			expect(routePatchCount).toBe(0);
+			expect(routeLeaseCount).toBe(0);
 		} finally {
 			await pCloseContext(context);
+			await pCloseContext(dmContext);
+			await pCloseContext(peerContext);
+			await pool.end();
 		}
 	});
 

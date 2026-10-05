@@ -26,6 +26,30 @@
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 | Content policy | `HubCampaignContentGating.test.js`, `HubRulesPolicyPostgres.test.js`, Character Sheet content/teardown tests | Canonical aliases, campaign brew, editions/species variants, grandfathering, imports/direct writes/grants/awards/transfers, stale pins, rollback, privacy, and memory/PostgreSQL parity |
 
+The Campaign/Local route journey in `active-campaign-context.spec.ts` uses separate owner, DM, and peer
+browser profiles on the disposable HTTPS/PostgreSQL stack. After an applied campaign effect and an ordinary
+owner edit, it records a positive PostgreSQL baseline for revision, lease epoch, PATCH receipts/events, and
+projection invalidations. It then requires exact equality after Open Local, BFCache/Back, and Return, alongside
+zero new lease/PATCH requests across all three profiles, matching owner/DM revisions, and an unchanged private
+peer projection. It requires the runner's disposable loopback Hub and `HUB_TEST_POSTGRES_URL` endpoints and
+fails closed if they are missing or remote. Never point the stack runner or synthetic-auth browser at Oracle.
+This evidence does not replace the physical real-OAuth/device first-leg check against the actual deployed
+service worker and loaded Character Sheet assets.
+
+`character-sheet-party-inventory.spec.ts` also exercises the recipient's open-sheet transfer inbox:
+server-scoped offer visibility, immediate concealment before a delayed projection refetch, anonymous source
+fallback after sharing narrows, reject/accept without Hub navigation, reload recovery, a committed response
+lost in transit followed by authoritative status confirmation without repeating the mutation, and absence of
+campaign/character IDs from rendered notices. Focused Character Sheet tests pin uncertain-response
+idempotency, invalid transfer responses, and character-access fencing. These tests use synthetic accounts
+and a disposable stack; they do not authorize live inventory transfers.
+
+The competing-stash browser journey and Memory/PostgreSQL tests require one conserved winner, immediately
+terminal insufficient losers, no extra restoration for non-escrowed requests, one `source_insufficient`
+event/audit per loser, stale-request disappearance from the DM inbox, and a losing-player Sheet notice.
+They also cover concurrent approvals, direct DM stash debits, stash-backed awards, and preservation of
+still-affordable requests. The source change remains unshipped until exact-head review/release.
+
 ## Current commands
 
 ```bash

@@ -14,6 +14,29 @@
 - the host is dedicated to the Hub, and the rendered Compose model contains only the named Hub services;
 - at least 4 GiB free on the release filesystem and 1 GiB on the backup filesystem.
 
+## Prepare the tag on the local machine
+
+Before requesting approval to create a release tag, check the local checkout against the actual remote head
+and check the effective tagger (repository-local Git identity overrides the global identity):
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+git ls-remote --heads origin refs/heads/multiplayer-hub
+git config --show-origin --get user.name
+git config --show-origin --get user.email
+git ls-remote --tags origin 'refs/tags/<proposed-tag>*'
+```
+
+Stop if the intended commit is not the reviewed remote head, the tag name is occupied, or the effective
+identity is a test placeholder. Do not tag from a stale or dirty checkout or discard existing edits to make
+it clean. Use a separate clean worktree detached at the exact reviewed commit, or safely fast-forward the
+checkout only after checking that no local edits or untracked paths overlap incoming files. Obtain explicit
+approval for the exact new tag and commit; never move an existing tag or force-push it. After pushing, verify
+that the remote tag object is annotated and its peeled commit is the approved SHA with
+`git ls-remote --tags origin 'refs/tags/<proposed-tag>' 'refs/tags/<proposed-tag>^{}'`.
+Tagging does not authorize a shared-host dry run or promotion.
+
 ## Procedure
 
 ### First initialized release only

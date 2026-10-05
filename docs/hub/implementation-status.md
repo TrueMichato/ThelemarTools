@@ -1,22 +1,28 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-10-01
+> **Last updated:** 2026-10-04
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-The last independently verified private invite-only release is `hub-staging-2026-10-01-r11d` at
-`d26b0bf3f938b5cf6e687628b1823d06f11644b5` on the reused, Hub-only Oracle Always Free ARM
+The last independently verified private invite-only release is `hub-staging-2026-10-01-r11e` at
+`cf9b09f1a8df99e47167528aa37aa2cdfe766e9f` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
-PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11d post-release
+PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11e post-release
 verification. Phase 6G deployment and V1-G1 host-operations evidence are complete. The 2026-09-28 r10
 physical rerun returned **NO-GO** for a P1 Character Sheet context divergence and disabled player targeting;
 r11b fixed the route identity but its physical return advanced the canonical revision without an edit. R11c
 stopped safely on a false campaign-effect history save block on Open Local; no canonical write occurred.
 R11d deployed the coverage correction, but its first physical Campaign -> Local leg acquired a lease and
 persisted a derived-modifier repair, advancing the canonical revision from 23 to 24 without an edit.
-A source correction for late modifier reapplication and JSON-wire normalization is under validation and
-not deployed; targeting remains disabled. The private-launch verdict is still NO-GO. See the
+R11e deployed late-modifier identity and JSON-wire normalization; physical Campaign -> Local -> Return and
+Back/Forward reload had zero server-side writes/leases and stable revision. BFCache restoration remains
+unobserved; a fresh-tab no-lease check exceeded its window, with the gap accepted to continue testing.
+An approved same-tag r11e redeploy enabled only Campaign A's narrow Cure Wounds targeting canary;
+independent rollout, health, and release-time off-machine backup checks passed. Separate real-profile
+participant reports cover XPHB reject/cancel/accept, PHB accept, self-target accept, and picker privacy;
+natural expiry was automated-only and no character/operation database payload was inspected.
+The private-launch verdict is still NO-GO. See the
 [prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
@@ -121,6 +127,27 @@ disclosure. The same merge fences historical role replay against current authori
 bootstrap/event parity, closes archived mutation paths in both stores, and reads PostgreSQL cursor/snapshot authority
 from one transactionally consistent view.
 
+An unshipped GD-FIND-003 correction preserves an expanded peer shared-profile disclosure and keyboard focus
+across ordinary realtime roster refetches. Authorization invalidation still clears the roster before a new
+projection is shown. This local change is **not** part of the deployed r11e image or physical evidence.
+
+An unshipped GD-FIND-006 Character Sheet improvement makes inventory **Share...** reveal the next
+Quantity/Destination step by focusing and scrolling to its composer. A live announcement explains that
+nothing has moved until confirmation; Cancel restores focus to Share. This does not alter transfer authority
+or the deployed r11e inventory experience.
+
+An unshipped GD-FIND-007 correction adds an owner-only incoming transfer notice and Accept/Reject controls
+to the open Character Sheet, backed by the existing authorization-scoped transfer list and resolution API.
+The notice refetches on realtime/reconnect, fails closed on incomplete transfer status, conceals stale
+source details before projection/membership revalidation, and fences decisions when the sheet detaches.
+The deployed r11e Sheet does not yet include this recipient workflow.
+
+An unshipped GD-FIND-009 correction cancels pending stash requests that become definitively unfundable
+when another request, direct DM stash move, or stash-backed award consumes the source. Memory/PostgreSQL
+authority records one bounded cancellation reason, audit and audience-scoped event per loser in the
+winning transaction; affordable requests remain pending. Open losing-player Sheets announce the terminal
+outcome instead of leaving an actionable stale draft. This candidate is not deployed on r11e.
+
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
   escrow/action cleanup, and seven-day deletion request/cancel/purge with blocked-id reporting.
@@ -167,10 +194,12 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-10-01-r11d` at `d26b0bf3f938b5cf6e687628b1823d06f11644b5` is the last verified
-Oracle identity. Genuine daily timer and recovery evidence remain recorded; the independent r11d
-post-release check passed with a matching encrypted off-machine backup. The physical r11d retest's NO-GO
-is not overturned by deployment alone. The [backlog](game-day-backlog.md) owns the re-entry work.
+`hub-staging-2026-10-01-r11e` at `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f` is the last verified
+Oracle source identity. Genuine daily timer and recovery evidence remain recorded; the approved
+Campaign A-only same-tag configuration redeploy passed independent rollout checks and its release-time
+encrypted off-machine backup matched Oracle. A bounded later host check passed after the participant-reported
+physical canary; the next scenario requires a fresh backup comparison. Tested physical paths do not
+reverse the private-launch NO-GO. The [backlog](game-day-backlog.md) owns the re-entry work.
 
 ## Implemented
 

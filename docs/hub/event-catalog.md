@@ -60,7 +60,7 @@
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
 | `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; direct-authority proposals emit this without a preceding `transfer.reserved`, and affected owners refetch authoritative state |
 | `transfer.rejected` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Source restored; affected owners refetch authoritative state |
-| `transfer.cancelled` | transfer | explicit actor+target owner | lifecycle reason plus privacy-reduced endpoints | Source restored; affected owners refetch authoritative state |
+| `transfer.cancelled` | transfer | explicit actor+target owner | bounded lifecycle or `source_insufficient` reason plus privacy-reduced endpoints | Reserved escrow is restored on lifecycle cancellation; an unfunded competing proposed stash request is terminalized without touching the stash (unshipped GD-FIND-009 candidate). Affected owners refetch authoritative state |
 
 Legacy pre-v3 `action.*` records may remain as history, but migration 0005 terminalizes arbitrary pending
 structured effects and the protocol-v3 API cannot apply them.

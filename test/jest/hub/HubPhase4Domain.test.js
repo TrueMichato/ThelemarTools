@@ -821,8 +821,17 @@ describe("Phase 4 actions, grants, and transfers", () => {
 			headers: headers(dm),
 			payload: {decision: "accept"},
 		});
-		expect(staleApproval.statusCode).toBe(409);
-		expect(staleApproval.json().error).toBe("TRANSFER_INSUFFICIENT");
+		expect(staleApproval.statusCode).toBe(404);
+		expect(staleApproval.json().error).toBe("TRANSFER_NOT_FOUND");
+		const loser = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === requestB.json().transfer.id);
+		expect(loser).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
 	});
 
 	it("returns escrow to the source when a transfer is rejected", async () => {

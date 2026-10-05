@@ -235,6 +235,41 @@ export class HubCharacterSheetPartyInventoryPage {
 		await this.root().getByRole("button", {name: "Cancel"}).click();
 	}
 
+	async expectShareOpensVisibleComposer ({itemName}: {itemName: string}): Promise<void> {
+		const itemRow = this.page.locator("#charsheet-inventory-list .charsheet__item", {
+			has: this.page.locator(".charsheet__item-name", {hasText: itemName}),
+		}).first();
+		const share = itemRow.getByRole("button", {name: `Share ${itemName} with the party`});
+		await share.click();
+		const composer = this.root().getByRole("form", {name: "Confirm inventory transfer"});
+		const quantity = composer.getByLabel("Quantity");
+		await expect(quantity).toBeFocused();
+		const box = await quantity.boundingBox();
+		const viewport = this.page.viewportSize();
+		expect(box).not.toBeNull();
+		expect(viewport).not.toBeNull();
+		expect(box!.y).toBeGreaterThanOrEqual(0);
+		expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+		await expect(this.root().locator("[data-party-inventory-live]")).toContainText("No item has moved");
+		await composer.getByRole("button", {name: "Cancel"}).click();
+		await expect(share).toBeFocused();
+	}
+
+	async expectIncomingTransfer ({itemName, senderName}: {itemName: string; senderName: string}): Promise<void> {
+		const notice = this.page.locator("[data-charsheet-incoming-transfers]");
+		await expect(notice).toBeVisible({timeout: 20_000});
+		await expect(notice).toContainText(itemName);
+		await expect(notice).toContainText(senderName);
+		await expect(notice.getByRole("button", {name: "Accept transfer"})).toBeVisible();
+		await expect(notice.getByRole("button", {name: "Reject transfer"})).toBeVisible();
+	}
+
+	async resolveIncomingTransfer ({decision}: {decision: "Accept" | "Reject"}): Promise<void> {
+		const notice = this.page.locator("[data-charsheet-incoming-transfers]");
+		await notice.getByRole("button", {name: `${decision} transfer`}).click();
+		await expect(notice).toBeHidden({timeout: 20_000});
+	}
+
 	async shareCharacterItem ({
 		itemName,
 		quantity,
