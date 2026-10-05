@@ -8109,21 +8109,34 @@ class CharacterSheetInventory {
 	 * Collect ability score overrides from equipped/attuned items
 	 * Handles: ability.static (set score to X), direct bonuses (ability.str = +2), ability.choose
 	 * @param {Array} items - All inventory items
-	 * @returns {object} { static: {str: 19, ...}, bonus: {con: 2, ...} }
+	 * @returns {object} Numeric static/bonus maps with their contributing item sources, or null.
 	 */
 	_getItemAbilityOverrides (items) {
 		const staticOverrides = {}; // "Set score to X" (take highest per ability)
 		const bonuses = {}; // Additive bonuses (stack)
+		const sources = {static: {}, bonus: {}};
+		const setStatic = (item, ab, value) => {
+			const previous = staticOverrides[ab] || 0;
+			staticOverrides[ab] = Math.max(previous, value);
+			if (staticOverrides[ab] > previous) {
+				sources.static[ab] = {itemId: item.id, name: item.name, source: item.source, value: staticOverrides[ab]};
+			}
+		};
 
 		for (const item of items) {
 			if (!item.equipped) continue;
 			if (item.requiresAttunement && !item.attuned) continue;
+			const itemBonuses = {};
+			const addBonus = (ab, amount) => {
+				bonuses[ab] = (bonuses[ab] || 0) + amount;
+				itemBonuses[ab] = (itemBonuses[ab] || 0) + amount;
+			};
 
 			if (item.ability) {
 				// Handle static overrides: ability.static = {str: 19}
 				if (item.ability.static) {
 					for (const [ab, value] of Object.entries(item.ability.static)) {
-						staticOverrides[ab] = Math.max(staticOverrides[ab] || 0, value);
+						setStatic(item, ab, value);
 					}
 				}
 
@@ -8132,12 +8145,12 @@ class CharacterSheetInventory {
 				const abilityKeys = ["str", "dex", "con", "int", "wis", "cha"];
 				for (const ab of abilityKeys) {
 					if (item.ability[ab] && typeof item.ability[ab] === "number") {
-						bonuses[ab] = (bonuses[ab] || 0) + item.ability[ab];
+						addBonus(ab, item.ability[ab]);
 					}
 				}
 				for (const choice of item.selectedAbilityChoices || []) {
 					if (!abilityKeys.includes(choice.ability) || !Number.isFinite(Number(choice.amount))) continue;
-					bonuses[choice.ability] = (bonuses[choice.ability] || 0) + Number(choice.amount);
+					addBonus(choice.ability, Number(choice.amount));
 				}
 			}
 
@@ -8145,16 +8158,20 @@ class CharacterSheetInventory {
 			const prose = this._parseItemEffectProse(item);
 			for (const [ab, value] of Object.entries(prose.ability.static)) {
 				if (item.ability?.static?.[ab] != null) continue; // structured wins
-				staticOverrides[ab] = Math.max(staticOverrides[ab] || 0, value);
+				setStatic(item, ab, value);
 			}
 			for (const [ab, value] of Object.entries(prose.ability.bonus)) {
 				if (item.ability?.[ab] != null) continue; // structured wins
-				bonuses[ab] = (bonuses[ab] || 0) + value;
+				addBonus(ab, value);
+			}
+			for (const [ab, amount] of Object.entries(itemBonuses)) {
+				if (!amount) continue;
+				(sources.bonus[ab] ||= []).push({itemId: item.id, name: item.name, source: item.source, amount});
 			}
 		}
 
 		const hasAny = Object.keys(staticOverrides).length > 0 || Object.keys(bonuses).length > 0;
-		return hasAny ? {static: staticOverrides, bonus: bonuses} : null;
+		return hasAny ? {static: staticOverrides, bonus: bonuses, sources} : null;
 	}
 
 	/**

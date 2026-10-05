@@ -13620,14 +13620,23 @@ class CharacterSheetState {
 			running = after;
 		}
 
-		// Item additive bonus (e.g. Belt of Giant Strength) — added after Primal Champion.
-		push("item", "Item", itemBonus);
+		// Source identities come from the same inventory pass as the numeric maps.
+		const itemSources = this._data.itemAbilityOverrides?.sources;
+		let attributedItemBonus = 0;
+		for (const item of itemSources?.bonus?.[ability] || []) {
+			if (!item.name || !Number.isFinite(item.amount)) continue;
+			push("item", item.name, item.amount);
+			attributedItemBonus += item.amount;
+		}
+		push("item", "Item", itemBonus - attributedItemBonus);
 		running += itemBonus;
 
 		// Item static override ("score becomes X" — only if higher).
 		const itemStatic = this._data.itemAbilityOverrides?.static?.[ability];
 		if (itemStatic && itemStatic > running) {
-			push("itemStatic", "Item (set score)", itemStatic - running);
+			const item = itemSources?.static?.[ability];
+			const label = item?.name && item.value === itemStatic ? `${item.name} (set score)` : "Item (set score)";
+			push("itemStatic", label, itemStatic - running);
 			running = itemStatic;
 		}
 
@@ -13678,15 +13687,18 @@ class CharacterSheetState {
 	getAbilityScoreBreakdown (ability) {
 		const breakdown = this.getAbilityBonusBreakdown(ability);
 		const acquisitions = this._getAbilityAcquisitionComponents(ability);
+		const originSources = this._getAbilityAcquisitionComponents(ability, "abilityBonusDelta")
+			.filter(component => component.amount == null || component.amount === 0);
 		const attributed = acquisitions.reduce((sum, c) => sum + (c.amount || 0), 0);
 		return {
 			ability,
 			total: breakdown.total,
 			components: [
-				{source: "base", label: "Unallocated base (manual / unknown history)", amount: breakdown.base - attributed},
+				{source: "base", label: "Base / earlier adjustments", amount: breakdown.base - attributed},
 				...acquisitions,
-				...breakdown.contributions.map(c => c.source === "racial" && c.label === "Racial"
-					? {...c, label: "Species / background / manual (unattributed)"}
+				...originSources,
+				...breakdown.contributions.map(c => c.source === "racial" && ["Racial", "Species / background / manual (unattributed)"].includes(c.label)
+					? {...c, label: "Origin / manual adjustments"}
 					: c),
 			],
 		};
@@ -13704,7 +13716,7 @@ class CharacterSheetState {
 		const context = (decision, entry) => {
 			const owner = decision?.provenance;
 			if (owner?.ownerType === "race" || owner?.ownerType === "background") {
-				return `${owner.ownerType === "race" ? "Species" : "Background"}: ${owner.ownerName || owner.ownerUid || "unknown"}`;
+				return `${owner.ownerType === "race" ? "Species" : "Background"}${owner.ownerName || owner.ownerUid ? `: ${owner.ownerName || owner.ownerUid}` : ""}`;
 			}
 			const cls = decision?.className || entry?.class?.name;
 			const src = decision?.classSource || entry?.class?.source;
@@ -13712,7 +13724,7 @@ class CharacterSheetState {
 			const characterLevel = decision?.characterLevel || entry?.level;
 			return cls && cls !== "Base" && cls !== "Unknown"
 				? `${cls}${src ? ` [${src}]` : ""}${level ? ` level ${level}` : ""}${characterLevel && characterLevel !== level ? ` (character level ${characterLevel})` : ""}`
-				: "unplaced acquisition";
+				: "";
 		};
 		const push = (key, source, label, amount) => {
 			if (seen.has(key)) return;
@@ -13755,12 +13767,16 @@ class CharacterSheetState {
 				const decision = decisions.find(d =>
 					(feat.sourceDecisionKey && d.semanticKey === feat.sourceDecisionKey)
 					|| (d.meta?.featId && d.meta.featId === feat.id));
+				const entry = history.find(h => (h.decisions || []).includes(decision));
+				const placement = context(decision, entry);
+				const sameFeats = feats.filter(other => other.name === feat.name && other.source === feat.source);
+				const repeat = !placement && sameFeats.length > 1 ? ` #${sameFeats.indexOf(feat) + 1}` : "";
 				const actualNestedEffects = [...nestedEffects.values()].filter(effect => Number.isFinite(effect.amount) && Number.isFinite(effect.before));
 				const ownDelta = Object.hasOwn(deltas || {}, ability) ? deltas[ability] : null;
 				const amount = Number.isFinite(ownDelta) ? ownDelta
 					: actualNestedEffects.length ? actualNestedEffects.reduce((sum, effect) => sum + effect.amount, 0) : null;
 				push(`feat:${feat.id || index}`, "featAcquisition",
-					`${feat.name}${feat.source ? ` [${feat.source}]` : ""} - ${context(decision)}; acquisition ${index + 1}`,
+					`${feat.name}${feat.source ? ` [${feat.source}]` : ""}${repeat}${placement ? ` - ${placement}` : ""}`,
 					Number.isFinite(amount) ? amount : null);
 			});
 		}
@@ -13770,18 +13786,24 @@ class CharacterSheetState {
 				effect.type === effectType && effect.ability === ability);
 			const effects = recordedEffects.filter(effect => Number.isFinite(effect.amount) && Number.isFinite(effect.before));
 			const entry = history.find(h => (h.decisions || []).includes(decision));
-			const label = `${decision.label || "Ability Score Improvement"} - ${context(decision, entry)}`;
+			const placement = context(decision, entry);
+			const isOrigin = effectType === "abilityBonusDelta" && /^(Species|Background)(:|$)/.test(placement);
+			const label = isOrigin ? placement : `${decision.label || "Ability Score Improvement"}${placement ? ` - ${placement}` : ""}`;
 			// One mechanical effect may be mirrored on parent and nested receipts.
 			effects.forEach(effect => push(
 				`${effect.sourceDecisionKey || decision.semanticKey || index}:${effectType}:${ability}`,
 				effectType === "abilityBonusDelta" ? "origin" : "acquisition",
 				label, effect.amount));
-			if (effectType !== "abilityDelta" || effects.length) return;
+			if (effects.length) return;
+			if (effectType === "abilityBonusDelta") {
+				if (recordedEffects.length) push(`${decision.semanticKey || index}:${effectType}:${ability}`, "origin", label, null);
+				return;
+			}
 			const allocation = decision.type === "asi" ? decision.selection
 				: decision.type === "asiOrFeat" && decision.selection?.mode === "asi" ? decision.selection.asi : null;
 			if (allocation && Object.hasOwn(allocation, ability)) {
 				push(`${decision.semanticKey || index}:${effectType}:${ability}`, "acquisition",
-					`${label} (recorded ${ability.toUpperCase()} +${allocation[ability]})`, null);
+					label, null);
 			} else if (recordedEffects.length) {
 				push(`${decision.semanticKey || index}:${effectType}:${ability}`, "acquisition", label, null);
 			}
@@ -18169,8 +18191,15 @@ class CharacterSheetState {
 		const dexMod = this.getAbilityMod("dex");
 		if (dexMod !== 0) components.push({type: "ability", name: "DEX modifier", value: dexMod, icon: "🎯", isCanonical: true});
 
-		const custom = this._data.customModifiers.initiative || 0;
-		if (custom !== 0) components.push({type: "custom", name: "Custom Modifier", value: custom, icon: "⚙️", isCanonical: false});
+		const named = this._getInitiativeNamedModifierComponents();
+		named.forEach(component => components.push({
+			...component,
+			type: component.sourceType === "feat" ? "feat" : "custom",
+			icon: component.sourceType === "feat" ? "⚡" : "⚙️",
+			isCanonical: false,
+		}));
+		const residual = (this._data.customModifiers.initiative || 0) - named.reduce((sum, component) => sum + component.value, 0);
+		if (residual !== 0) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
 
 		if (this.hasJackOfAllTrades()) {
 			const halfProf = Math.floor(this.getProficiencyBonus() / 2);
@@ -70819,6 +70848,26 @@ class CharacterSheetState {
 		this._unresolvedModifierWarnings.add(key);
 		// eslint-disable-next-line no-console
 		console.warn(`[CharSheet State] Named modifier "${mod.name || "?"}" (${mod.type}) has an unresolvable value ${JSON.stringify(mod.value)}; treating as 0.`);
+	}
+
+	_getInitiativeNamedModifierComponents () {
+		const out = [];
+		for (const mod of this._data.namedModifiers || []) {
+			if (!mod.enabled || mod.conditional || !["initiative", "check:all", "d20:all"].includes(mod.type)) continue;
+			const value = this._getNamedModifierEffectiveValue(mod);
+			if (!value) continue;
+			const feat = this._data.feats?.find(feature => feature.id === mod.sourceFeatureId);
+			const sourceType = mod.sourceType || (feat ? "feat" : null);
+			const owner = feat || this._data.features?.find(feature => feature.id === mod.sourceFeatureId);
+			out.push({
+				name: mod.name || "Custom Modifier",
+				value,
+				...(mod.sourceFeatureId ? {sourceFeatureId: mod.sourceFeatureId} : {}),
+				...(sourceType ? {sourceType} : {}),
+				...(owner?.source ? {source: owner.source} : {}),
+			});
+		}
+		return out;
 	}
 
 	/**

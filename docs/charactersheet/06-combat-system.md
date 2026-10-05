@@ -441,6 +441,21 @@ modifiers, named feature bonuses, and equipped item-material bonuses.
 `getInitiativeBreakdown()` separates the intrinsic (`canonical`) portion from the
 situational effective total and applies exhaustion only to that effective total.
 
+Existing enabled, unconditional named modifiers in the cached initiative
+channel are itemized through `_getInitiativeNamedModifierComponents()` using
+the same live-value resolver as the producer. This includes `initiative`,
+`check:all` and `d20:all`; their sum is subtracted from the cached channel to
+leave only a genuine residual **Custom Modifier** row. Opposing named rows
+remain visible even when their net contribution is zero.
+
+Alert therefore names its existing bonus accurately: **PHB Alert adds +5**;
+**XPHB Alert adds the current proficiency bonus**. Exact feat ownership is
+resolved from the existing source-feature ID, including older parser-owned
+rows without `sourceType`. No effect is registered again or added twice,
+and these cached-channel contributions remain effective-only, not canonical.
+Disabled and conditional modifiers do not become unconditional named grants;
+the existing conditional opt-in mechanics are unchanged.
+
 ```javascript
 const breakdown = state.getInitiativeBreakdown();
 // {

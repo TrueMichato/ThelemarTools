@@ -1157,10 +1157,21 @@ effects are deduplicated by source decision key and ability. A finite numeric
 own-target feat delta takes precedence over nested decision mirrors, including
 an explicit `0`. A missing or nonfinite target instead uses proven linked
 nested receipts; an empty or unrelated delta map never proves zero. Without
-either numeric source, an evidenced target has an unknown applied amount. A
+either numeric source, an evidenced target keeps a `null` applied amount. A
 capped fixed-target feat whose target was not saved cannot be attributed.
-Source/owner/level labels and acquisition ordinals distinguish repeated feats.
-Exact origin bonus receipts distinguish species and background contributions.
+Best-known source/owner/level labels distinguish repeated feats; unplaced
+repeats use local instance numbers only when necessary. Exact origin receipts
+distinguish species and background contributions, even when a targeted receipt
+supports the source but not an amount.
+
+Item attribution comes from the inventory's existing
+`_getItemAbilityOverrides()` eligibility pass, not another inventory scan.
+Its optional `sources` metadata preserves item ID, display name, source and
+the signed additive contribution or winning static value alongside the
+unchanged aggregate maps. Only equipped, appropriately attuned contributors
+are named; a losing or ineffective static override is not credited. Legacy
+aggregate-only payloads retain generic item labels. Item rows, residuals and
+cap stages still reconcile to the same score.
 
 New ordinary acquisitions use `CharacterSheetClassUtils.applyClassAsi()`.
 Level Up and Quick Build persist its existing version-1 decision receipt,
@@ -1171,13 +1182,22 @@ an own targeted zero, including fixed abilities capped at acquisition.
 Respec observes replacement boundaries and reverses only actual recorded
 deltas; it does not subtract an authored +2 when the original gain was +1 or 0.
 
-An evidenced ordinary ASI without an actual capped receipt is still listed,
-with its recorded allocation and a `null` amount (**applied amount unknown**).
-Unrecorded creation rolls, manual adjustments and unknown legacy gains remain
-in **Unallocated base (manual / unknown history)**. This residual is arithmetic
+An evidenced ordinary ASI or feat without an actual capped receipt is still
+listed by its best-known source, with a `null` amount internally and no
+unproven allocation printed as a gain. Proven capped zeros remain visible as
+**+0**. Unrecorded creation rolls, manual adjustments and legacy gains remain
+in **Base / earlier adjustments**. This residual is arithmetic
 reconciliation, not proof of a starting score. No parallel ability ledger or
 new persisted fields are introduced. The score disclosure re-reads this
 projection on render/open, including after reload and Respec.
+
+Overview and Play Mode open one accessible disclosure on whole-block hover
+or focus. Hero and edit views use their score-summary/result wrappers, not
+independent save, skill or editor controls. Only the existing score button
+pins/unpins on click, touch, Enter or Space; card and modifier rolls remain
+separate. Competing native information titles are removed from this area,
+with check-modifier context retained in the same popover. Escape, Close and
+outside interaction dismiss it, and placement stays within the viewport.
 
 ### Armor Class
 
