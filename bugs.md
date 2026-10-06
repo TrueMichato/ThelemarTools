@@ -3,30 +3,52 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 67 — Fresh ability-score provenance and feature caps
-
-One owner for the score projection, its actual acquisition receipts, the shared
-disclosure formatter, and the directly coupled Primal Champion cap calculation.
-
-- Internal choice paths such as `ability[0]` and raw species UIDs must not appear
-  as source labels. Resolve actual entity names and selected improvement actions.
-- Fresh species/background and feat gains need evidence-backed attribution;
-  nested mirrors must not add a second placeholder for an already-listed gain.
-  Preserve legitimate paired TGTT ordinary ASI and feat acquisitions.
-- Unknown historical amounts are not zero. Keep best-known sources without
-  blank arithmetic rows, preserve proved capped `+0`, and distinguish a recorded
-  starting score from a residual that includes unrecorded earlier changes.
-- Primal Champion must use its actual referenced feature: PHB has a maximum of
-  24, XPHB 25, and TGTT Barbarian references XPHB. The current score and breakdown
-  readers hard-code 24, reducing the reported Strength gain to 3 instead of 4.
-
-Use the supplied native character export to verify its exact creation and
-level-history receipts, alongside a real fresh acquisition-boundary reproduction
-and explicit expected rows/totals for the reported Strength, Dexterity,
-Constitution, Wisdom and Charisma cases. Parent owns this ledger and integration;
-unrelated movement, initiative, exhaustion and progression redesign are excluded.
+_None for the requested Round 67 fixes._
 
 ## Closed Bugs
+
+### Round 67 — Clear score history and source-qualified caps — INTEGRATED
+
+**Integration.** The single score-owner branch and its plain-language follow-up
+are integrated without rewriting either child commit. Shared source resolution
+and metadata recording cover the actual export and real Builder, Quick Build
+and Level Up boundaries; unrelated movement, initiative and exhaustion are
+unchanged.
+
+- **Source labels and duplicate rows:** Internal `ability[0]` paths and species
+  UIDs no longer appear as display names. Exact feat ownership places Ashbound's
+  Wisdom increase at Barbarian 4 and the Boon's Strength increase at 19, without
+  duplicate nested placeholders. Legitimate paired TGTT ASI and feat gains stay
+  separate, and actual ASIs use the full Ability Score Improvement label.
+- **Truthful history:** Fresh creation/origin writes record observed values in
+  their actual channels, including fixed species grants. The existing export's
+  missing origin transitions are not invented or rewritten: Dexterity remains
+  saved score 13 plus bonus 1, and Charisma 8 plus bonus 2. Unknown source amounts
+  appear outside arithmetic rows; proven zero stays numeric. Shared disclosures
+  distinguish a verified Starting score from Score before recorded increases
+  and Saved bonus (history incomplete).
+- **Feature caps:** Primal Champion uses its verified source: PHB maximum 24,
+  XPHB maximum 25, and TGTT's inherited XPHB maximum 25. The supplied character
+  now has Strength 25 and Constitution 21; Dexterity 14, Wisdom 11, Charisma 10
+  and Intelligence 12 are preserved. Genuinely unresolved sources keep existing
+  numbers visibly provisional, without blocking rolls or selecting an edition.
+  Existing item/static/global-cap/active-state/Wild Shape ordering is preserved.
+
+**Validation.** ESLint and configured Stylelint passed. The complete 770-suite
+manifest is covered: **768 suites / 19,794 tests passed**, with the same
+2 exporter suites / 208 corpus-dependent cases skipped and no failures.
+The original isolated gate hit its 600-second limit after 287 successful suites;
+only the remaining 483 files were continued, completing in 289 seconds.
+Completed suites were not rerun, and the original timeout remains recorded as
+exit 124 rather than relabelled green. Test counts are reconciled from captured
+successful reports and the continuation's completed Jest JSON.
+
+**Retained limits.** No browser, layout, shared-preview or deployed-site
+certification was performed. The genuine export verifies Ashbound's identity,
+applied amount and placement; its external authored entity remains unavailable,
+so no complete Ashbound wizard replay is claimed. Fresh feat mechanics instead
+use a separately labelled real Resilient control. Missing historical amounts
+remain explicitly unknown.
 
 ### Round 66 — Clear source disclosures and walking-derived speeds — INTEGRATED
 
