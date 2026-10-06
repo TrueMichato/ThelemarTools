@@ -251,8 +251,10 @@ separate.
 Each evidenced ASI and feat acquisition has its own source/owner/level row.
 Actual capped receipts can show `+0` with evidenced requested/max context.
 Unknown amounts appear under **Sources with unrecorded amounts**, not in the
-arithmetic list. **Unitemized score/bonus** is honest residual history;
-**Starting score** requires an observed creation snapshot that still reconciles
+arithmetic list. **Score before recorded increases** is the current stored
+base minus verified increases, not a proved original allocation.
+**Saved bonus (history incomplete)** identifies a live bonus with incomplete
+history. **Starting score** requires an observed creation snapshot that still reconciles
 with the applied acquisitions. Unplaced feats retain proven own deltas but say
 **level unrecorded**. Page's `_getAbilityScoreDisclosureRows()` supplies the same
 numeric rows, source notes, cap explanations and provisional-source recovery to

@@ -145,6 +145,9 @@ mirror is source-only. Same-instance writer controls verify contiguous merges
 and reject combined cap context for missing requests, differing maxima or
 discontinuous observations. Disclosure tests reject blank arithmetic amounts and
 exercise the actual Page/Play Mode formatter and Close/Escape restoration.
+Copy controls pass the real State projection through the shared UI formatter,
+require the approved residual labels and explanatory note for either incomplete
+history channel, and retain Starting score only for proven creation evidence.
 
 Origin-spell tests must fulfill the actual pending slots and assert authored
 counts, casting ability, recharge and uses. Preserve an independent same-UID

@@ -1244,9 +1244,11 @@ unproven allocation printed as a gain. Proven capped zeros remain visible as
 **+0**, with actual requested/max context when available or **no increase
 applied** when its cause is not recorded. Unknowns appear separately under
 **Sources with unrecorded amounts**, not blank arithmetic rows. Unrecorded
-creation rolls, manual adjustments and legacy gains remain in **Unitemized
-score**; unmatched live origin bonuses remain **Unitemized bonus**. These are
-arithmetic residuals, not proof of a starting score. **Starting score** requires
+creation rolls, manual adjustments and legacy gains remain in **Score before
+recorded increases**: the current stored base minus verified increases, not a
+proved original allocation. Unmatched live origin bonuses remain **Saved bonus
+(history incomplete)**. The explanatory note remains visible when either
+incomplete-history row appears. **Starting score** requires
 the observed creation snapshot plus all proven base acquisitions to match the
 stored base, with no unknown acquisition. Evidence stays in existing
 decision/applied-effect metadata, not a parallel ability ledger. The score

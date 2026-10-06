@@ -13708,11 +13708,11 @@ class CharacterSheetState {
 			total: breakdown.total,
 			...(provisional ? {provisional: true, notes: [champion.diagnostic]} : {}),
 			components: [
-				{source: "base", label: provenCreation ? "Starting score" : "Unitemized score", amount: residual},
+				{source: "base", label: provenCreation ? "Starting score" : "Score before recorded increases", amount: residual},
 				...acquisitions,
 				...originSources,
 				...breakdown.contributions.map(c => c.source === "racial" && ["Racial", "Species / background / manual (unattributed)"].includes(c.label)
-					? {...c, label: "Unitemized bonus"}
+					? {...c, label: "Saved bonus (history incomplete)"}
 					: c),
 			],
 		};

@@ -5271,8 +5271,8 @@ class CharacterSheetPage {
 		const sources = components.filter(component => component.amount == null)
 			.map(component => `${component.label} - amount not recorded`);
 		const notes = [...(breakdown.notes || [])];
-		if (components.some(component => ["Unitemized score", "Unitemized bonus"].includes(component.label))) {
-			notes.push("Unitemized values include adjustments without recorded sources or amounts; they are not a verified starting allocation.");
+		if (components.some(component => ["Score before recorded increases", "Saved bonus (history incomplete)"].includes(component.label))) {
+			notes.push("Score before recorded increases is the current stored score minus verified increases, not a proven original allocation. Saved bonuses may include adjustments without recorded sources or amounts.");
 		}
 		if (breakdown.provisional) {
 			notes.push("Load the correct source in Settings or review the class in Respec. Restore a known-good export or rebuild if its source cannot be verified.");

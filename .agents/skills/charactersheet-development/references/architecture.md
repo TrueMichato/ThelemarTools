@@ -187,7 +187,10 @@ acquisitions, and reconciles numeric components to the current score without
 mutating history. An own numeric zero is evidence; an empty map is not.
 Unproven gains remain `null` and render separately under Sources with unrecorded
 amounts; proven zero renders `+0`, with evidenced cap context when available.
-Unitemized score/bonus is not a guessed creation allocation. Starting score
+Score before recorded increases is the current stored base minus verified
+increases, not a proved original allocation. Saved bonus (history incomplete)
+identifies an unattributed live bonus. The shared incomplete-history note is
+visible for either label. Starting score
 requires Builder's actual creation snapshot to reconcile with every proven
 base acquisition. Builder passes ephemeral actual origin observations to
 canonical sync; fixed/chosen/Tasha/subrace/background writes become

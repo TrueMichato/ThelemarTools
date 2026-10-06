@@ -98,7 +98,7 @@ describe("Round 67 genuine fresh export", () => {
 			const breakdown = state.getAbilityScoreBreakdown(ability);
 			expect(numeric(breakdown).map(row => row.amount)).toEqual(amounts);
 			expect(amountSum(numeric(breakdown))).toBe(breakdown.total);
-			expect(breakdown.components[0].label).toBe("Unitemized score");
+			expect(breakdown.components[0].label).toBe("Score before recorded increases");
 			expect(breakdown.components.map(row => row.label).join(" ")).not.toMatch(/ability\[|dendulra\|tgtt|or Feat/);
 		}
 		expect(state.getAbilityBase("dex")).toBe(13);
@@ -144,7 +144,7 @@ describe("Round 67 actual creation and progression writers", () => {
 		const serialized = state.serialize();
 		expect(State.deserialize(serialized).getAbilityScoreBreakdown("dex")).toEqual(state.getAbilityScoreBreakdown("dex"));
 		state.setAbilityBase("dex", 17);
-		expect(state.getAbilityScoreBreakdown("dex").components[0].label).toBe("Unitemized score");
+		expect(state.getAbilityScoreBreakdown("dex").components[0].label).toBe("Score before recorded increases");
 	});
 
 	test("the real background writer owns an eligible distribution, not species defaults", async () => {

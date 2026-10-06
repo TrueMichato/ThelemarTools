@@ -52,8 +52,9 @@ Repeatable feats retain independent source-qualified acquisition owners.
 Score disclosures itemize this evidence without inventing missing legacy
 history. Builder now observes real creation/origin writes in existing receipt
 metadata; feat recording retains real transitions and writer-supplied caps.
-Unitemized residuals and source-only unknown amounts are distinct from verified
-starting scores and numeric gains. Source-qualified Champion corrects XPHB and
+Score before recorded increases, Saved bonus (history incomplete), and
+source-only unknown amounts are distinct from verified starting scores and
+numeric gains. Source-qualified Champion corrects XPHB and
 TGTT's inherited maximum to25 while retaining PHB24 and existing stage order;
 unresolved sources retain visibly provisional compatibility reads. The focused
 regression gate exercises the genuine affected export and actual Builder,
