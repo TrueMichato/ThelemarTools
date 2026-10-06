@@ -1036,6 +1036,38 @@ class CharacterSheetClassUtils {
 		return Math.max(current, Math.min(cap, current + amount));
 	}
 
+	static resolveFeatAcquisitionOwner (decision, decisions, feats) {
+		const byKey = new Map(decisions.filter(it => it.semanticKey).map(it => [it.semanticKey, it]));
+		const normalize = value => String(value || "").toLowerCase();
+		const selectionOf = it => ["feat", "asiOrFeat"].includes(it.type)
+			? it.selection?.feat || it.selection : null;
+		const matchesProvenance = feat => decision.provenance?.ownerType !== "feat" || !decision.provenance.ownerUid
+			|| normalize(decision.provenance.ownerUid) === normalize(`${feat.name}|${feat.source}`);
+		const visited = new Set();
+		for (let current = decision; current && !visited.has(current); current = byKey.get(current.parentSemanticKey)) {
+			visited.add(current);
+			const direct = feats.filter(feat =>
+				(feat.sourceDecisionKey && feat.sourceDecisionKey === current.semanticKey)
+				|| (current.parentSemanticKey && !byKey.has(current.parentSemanticKey) && feat.sourceDecisionKey === current.parentSemanticKey)
+				|| (current.meta?.featId && current.meta.featId === feat.id)
+				|| current.receipt?.effects?.some(effect => effect.feats?.some(ref => ref.id === feat.id)));
+			if (direct.length === 1) return matchesProvenance(direct[0]) ? direct[0] : null;
+			if (direct.length > 1) return null;
+			const selected = selectionOf(current);
+			if (!selected?.name || !selected.source) continue;
+			const matches = feats.filter(feat => normalize(feat.name) === normalize(selected.name)
+				&& normalize(feat.source) === normalize(selected.source));
+			if (matches.length !== 1 || !matchesProvenance(matches[0])) continue;
+			const placements = new Set(decisions.filter(it => {
+				const choice = selectionOf(it);
+				return normalize(choice?.name) === normalize(selected.name)
+					&& normalize(choice?.source) === normalize(selected.source);
+			}).map(it => it.semanticKey || it.id || it));
+			if (placements.size === 1) return matches[0];
+		}
+		return null;
+	}
+
 	// ==========================================
 	// Overview Display: Speed & Senses
 	// ==========================================
@@ -8697,9 +8729,10 @@ class CharacterSheetClassUtils {
 			});
 		}
 
+		const abilityMaximum = abilityChoice.option?.max || 20;
 		for (const [ability, amount] of Object.entries(abilityChoice.increases)) {
 			const current = state.getAbilityBase(ability);
-			state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, abilityChoice.option?.max || 20));
+			state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(current, amount, abilityMaximum));
 		}
 
 		// Apply saving-throw proficiencies (e.g., Resilient — tied to the chosen ability)
@@ -8821,6 +8854,8 @@ class CharacterSheetClassUtils {
 		if (state.recordFeatAppliedEffectsSince) {
 			state.recordFeatAppliedEffectsSince(feat.name, feat.source, before, storedFeat?.id, {
 				abilityTargets: Object.keys(abilityChoice.increases),
+				abilityIncreases: abilityChoice.increases,
+				abilityMaximum,
 			});
 			return;
 		}

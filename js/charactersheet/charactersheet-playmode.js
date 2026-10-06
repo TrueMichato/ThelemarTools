@@ -6319,7 +6319,7 @@ export class CharacterSheetPlayMode {
 		this._setIconLabel(titleEl, "strength", " Edit Ability Scores");
 
 		const subtitle = this._ce("div", "pm-modal__subtitle", panel);
-		subtitle.textContent = "Edit base scores — these already include any ASIs you've taken. Racial, item, and feature bonuses are shown separately and added on top.";
+		subtitle.textContent = "Edit stored scores, which include applied ASIs and feat increases. Species/background, item, and ongoing feature bonuses are added separately.";
 
 		const inputs = {};
 		ABILITIES.forEach(abl => {
@@ -6335,6 +6335,7 @@ export class CharacterSheetPlayMode {
 			input.min = "1";
 			input.max = "30";
 			input.value = baseScore;
+			input.setAttribute("aria-label", `${ABILITY_NAMES[abl]} stored score`);
 			inputs[abl] = input;
 
 			this._renderAbilityBonusBreakdown(row, breakdown);
@@ -6376,19 +6377,22 @@ export class CharacterSheetPlayMode {
 	 * legacy bonus breakdowns.
 	 */
 	_renderAbilityBonusBreakdown (row, breakdown) {
-		const contributions = breakdown.components || breakdown.contributions;
+		const disclosure = this._page._getAbilityScoreDisclosureRows(breakdown);
 		const wrap = this._ce("span", "pm-edit-abilities__bonus", row);
-		const format = c => c.amount == null ? c.label : `${c.label}: ${c.source === "base" ? c.amount : this._fmtMod(c.amount)}${c.isReplacement ? " (replacement)" : ""}`;
-		const readable = contributions
-			.map(format)
-			.join(", ");
-		wrap.setAttribute("aria-label", `${readable}, total ${breakdown.total}`);
-		contributions.forEach(c => {
+		wrap.setAttribute("aria-label", this._page._formatAbilityScoreBreakdown(breakdown));
+		disclosure.rows.forEach(component => {
 			const token = this._ce("span", "pm-edit-abilities__bonus-src", wrap);
-			token.textContent = format(c);
+			token.textContent = component.text;
 		});
 		const total = this._ce("span", "pm-edit-abilities__bonus-total", wrap);
-		total.textContent = `→ ${breakdown.total}`;
+		total.textContent = disclosure.total;
+		if (disclosure.sources.length) {
+			const sources = this._ce("span", "pm-edit-abilities__bonus-src", wrap);
+			sources.textContent = `Sources with unrecorded amounts: ${disclosure.sources.join("; ")}`;
+		}
+		disclosure.notes.forEach(note => {
+			this._ce("span", "pm-edit-abilities__bonus-src", wrap).textContent = note;
+		});
 	}
 
 	// ─── Phase D2: Add Custom Skill Modal ───────────────────────

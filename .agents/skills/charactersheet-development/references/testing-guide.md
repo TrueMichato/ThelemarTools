@@ -132,6 +132,23 @@ reload and Respec reversal. Final totals alone cannot detect ordinary/paired
 cap-order errors. Temporarily remove the real persistence/write call and
 require the primary assertion to fail before trusting the gate.
 
+`CharacterSheetAbilityScoreFreshAcquisition` drives actual Builder apply/finish,
+QuickBuild apply and LevelUp apply with real catalogs/State/Progression; only
+UI/persistence plumbing is stubbed. Its supplied-export reduction records the
+original SHA256 and separately verifies Ashbound/Boon instance ownership.
+The fresh WIS control is real PHB Resilient, not fabricated Ashbound data.
+Assert origin base/bonus channels and every row/value independently of sums,
+save/reload and read-only history, source-qualified Champion maxima,
+above-cap positive grants, and writer-supplied feat max30 vs20/capped-zero
+metadata. An ambiguous repeat keeps its finite own delta while its unresolved
+mirror is source-only. Same-instance writer controls verify contiguous merges
+and reject combined cap context for missing requests, differing maxima or
+discontinuous observations. Disclosure tests reject blank arithmetic amounts and
+exercise the actual Page/Play Mode formatter and Close/Escape restoration.
+Copy controls pass the real State projection through the shared UI formatter,
+require the approved residual labels and explanatory note for either incomplete
+history channel, and retain Starting score only for proven creation evidence.
+
 Origin-spell tests must fulfill the actual pending slots and assert authored
 counts, casting ability, recharge and uses. Preserve an independent same-UID
 copy's original ID and remaining uses through reselection, reload and removal.

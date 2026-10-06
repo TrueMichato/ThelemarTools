@@ -185,9 +185,22 @@ Score provenance is not roll-modifier math. `getAbilityScoreBreakdown()` reads
 existing receipts and each exact feat wrapper's applied deltas, separates
 acquisitions, and reconciles numeric components to the current score without
 mutating history. An own numeric zero is evidence; an empty map is not.
-Unproven gains remain `null` and render as best-known source-only rows; proven
-capped zero renders `+0`. The "Base / earlier adjustments" residual is not a
-guessed creation score. Optional item-source metadata comes from inventory's
+Unproven gains remain `null` and render separately under Sources with unrecorded
+amounts; proven zero renders `+0`, with evidenced cap context when available.
+Score before recorded increases is the current stored base minus verified
+increases, not a proved original allocation. Saved bonus (history incomplete)
+identifies an unattributed live bonus. The shared incomplete-history note is
+visible for either label. Starting score
+requires Builder's actual creation snapshot to reconcile with every proven
+base acquisition. Builder passes ephemeral actual origin observations to
+canonical sync; fixed/chosen/Tasha/subrace/background writes become
+`abilityBonusDelta` effects in existing origin receipts. Observed root receipts
+cover the current allocation and supersede retained child mirrors only for the
+read-side projection. Feat transitions capture actual before/after and the
+writer-supplied request/maximum, never final-score subtraction. Shared exact
+owner resolution permits unique unkeyed parent matches but never guesses a
+repeat's level; independently proven own amounts remain numeric when placement
+is unrecorded. Optional item-source metadata comes from inventory's
 existing eligibility/precedence pass: name actual additive contributors and
 only an effective static winner, without rescanning inventory or changing
 math. Manager and Play Mode share this projection. Whole-block hover/focus
@@ -197,6 +210,14 @@ are removed; card/modifier rolls and independent save/skill controls remain.
 On native popover closing, suppress focus-triggered reopening for the restoration
 microtask only. Close/Escape must remain dismissed when the browser returns focus
 to the score; subsequent intentional focus, hover, and pinning still work.
+
+The score, bonus breakdown and effective maximum share
+`_getPrimalChampionDescriptor()`: exact PHB24, XPHB25, and TGTT's inherited
+XPHB25. Positive cap-off grants never lower an already-over-cap score; cap-on
+preserves the raw +4/item/static/global-clamp/active-state/damage order.
+Unresolved source evidence retains provisional compatibility numbers and
+recovery guidance, never an inferred edition. This does not recurse through
+`getFeatureCalculations()`.
 
 Feat ability discovery, rendering, completion and mechanics share ClassUtils'
 `getFeatAbilityOptions()`, `resolveFeatAbilityChoice()` and

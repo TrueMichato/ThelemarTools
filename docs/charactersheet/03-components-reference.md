@@ -231,7 +231,7 @@ getAbilityScore(ability)  // e.g., getAbilityScore("str")
 getAbilityMod(ability)
 
 // Read-only score provenance; null amounts mean applied gains are unknown.
-getAbilityScoreBreakdown(ability) // {ability, total, components}
+getAbilityScoreBreakdown(ability) // {ability, total, components, provisional?, notes?}
 
 // Set components
 setAbilityBase(ability, value)
@@ -244,13 +244,23 @@ Hover the **score** (not the check modifier), focus it with the keyboard, or
 tap it to inspect the same breakdown in Manager's compact grid, ability hero
 cards, and Play Mode. Enter/Space pins the detail; Escape dismisses it.
 Check and Save actions remain separate. The Edit Ability Scores dialog shows
-the same detail, while its input still edits the raw base, including acquired
-increases.
+the same detail, while its **stored score** input still edits the mutable base,
+including acquired ASI/feat increases; live origin/item/feature bonuses are
+separate.
 
 Each evidenced ASI and feat acquisition has its own source/owner/level row.
-Actual capped receipts can show `+0`; legacy ASIs show their recorded choice
-with **applied amount unknown**. The unallocated base is explicitly manual /
-unknown history, not a reconstructed creation score.
+Actual capped receipts can show `+0` with evidenced requested/max context.
+Unknown amounts appear under **Sources with unrecorded amounts**, not in the
+arithmetic list. **Score before recorded increases** is the current stored
+base minus verified increases, not a proved original allocation.
+**Saved bonus (history incomplete)** identifies a live bonus with incomplete
+history. **Starting score** requires an observed creation snapshot that still reconciles
+with the applied acquisitions. Unplaced feats retain proven own deltas but say
+**level unrecorded**. Page's `_getAbilityScoreDisclosureRows()` supplies the same
+numeric rows, source notes, cap explanations and provisional-source recovery to
+Manager, hero/edit disclosures and Play Mode. PHB Champion uses max24; the
+XPHB feature (also inherited by TGTT) uses max25. A genuinely unresolved source
+keeps compatibility reads/rolls available with a visibly provisional total.
 
 #### Computed Values
 

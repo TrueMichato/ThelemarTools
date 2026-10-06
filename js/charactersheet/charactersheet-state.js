@@ -13411,13 +13411,13 @@ class CharacterSheetState {
 
 		const enforceCap = !!this._data.settings?.enforceAbilityScoreCap;
 
-		// Primal Champion (Barbarian 20): +4 STR and CON.
-		// When the cap is enforced, apply the raw +4 and let getAbilityScoreMax() handle the
-		// ceiling (≥24 for Primal Champion, higher if a feature/item further raises the cap).
-		// When the cap is NOT enforced there is no later clamp, so preserve the legacy max-24
-		// behavior of the natural Primal Champion score.
-		if ((ability === "str" || ability === "con") && this._hasPrimalChampion()) {
-			computed = enforceCap ? computed + 4 : Math.min(computed + 4, 24);
+		if (ability === "str" || ability === "con") {
+			const champion = this._getPrimalChampionDescriptor();
+			if (champion.eligible) {
+				computed = enforceCap ? computed + champion.requestedAmount
+					: champion.resolved ? CharacterSheetClassUtils.capAbilityIncrease(computed, champion.requestedAmount, champion.maximum)
+						: Math.min(computed + champion.requestedAmount, 24);
+			}
 		}
 
 		// Apply item ability bonuses (e.g., Belt of Dwarvenkind +2 CON)
@@ -13571,7 +13571,7 @@ class CharacterSheetState {
 		const total = this.getAbilityScore(ability);
 		const contributions = [];
 		const push = (source, label, amount, extra) => {
-			if (amount || extra?.isReplacement) contributions.push({source, label, amount, ...(extra || {})});
+			if (amount || extra?.isReplacement || extra?.requestedAmount != null) contributions.push({source, label, amount, ...(extra || {})});
 		};
 
 		// Wild Shape replaces physical stats (STR/DEX/CON) entirely with the beast's
@@ -13611,13 +13611,18 @@ class CharacterSheetState {
 		// actual delta (honest even when caps/overrides interact).
 		let running = base + racial + feature + direct;
 
-		// Primal Champion (Barbarian 20): +4 STR/CON, clamped to 24 when the cap is
-		// not enforced (matches getAbilityScore — applied BEFORE the item bonus).
-		if ((ability === "str" || ability === "con") && this._hasPrimalChampion?.()) {
-			const enforceCap = !!this._data.settings?.enforceAbilityScoreCap;
-			const after = enforceCap ? running + 4 : Math.min(running + 4, 24);
-			push("primalChampion", "Primal Champion", after - running);
-			running = after;
+		if (ability === "str" || ability === "con") {
+			const champion = this._getPrimalChampionDescriptor();
+			if (champion.eligible) {
+				const after = this._data.settings?.enforceAbilityScoreCap ? running + champion.requestedAmount
+					: champion.resolved ? CharacterSheetClassUtils.capAbilityIncrease(running, champion.requestedAmount, champion.maximum)
+						: Math.min(running + champion.requestedAmount, 24);
+				push("primalChampion", `Primal Champion${champion.source ? ` [${champion.source}]` : ""}`, after - running, {
+					requestedAmount: champion.requestedAmount,
+					...(champion.resolved ? {maximum: champion.maximum} : {provisional: true}),
+				});
+				running = after;
+			}
 		}
 
 		// Source identities come from the same inventory pass as the numeric maps.
@@ -13690,15 +13695,24 @@ class CharacterSheetState {
 		const originSources = this._getAbilityAcquisitionComponents(ability, "abilityBonusDelta")
 			.filter(component => component.amount == null || component.amount === 0);
 		const attributed = acquisitions.reduce((sum, c) => sum + (c.amount || 0), 0);
+		const residual = breakdown.base - attributed;
+		const creation = (this._data.characterBase?.decisions || [])
+			.map(decision => decision.meta?.creationAbilityScores?.[ability]).filter(Number.isFinite);
+		const provenCreation = creation.length === 1 && creation[0] === residual
+			&& acquisitions.every(component => Number.isFinite(component.amount));
+		const champion = ["str", "con"].includes(ability) ? this._getPrimalChampionDescriptor() : null;
+		const provisional = !!(champion?.eligible && !champion.resolved
+			&& !breakdown.contributions.some(component => component.source === "wildShape"));
 		return {
 			ability,
 			total: breakdown.total,
+			...(provisional ? {provisional: true, notes: [champion.diagnostic]} : {}),
 			components: [
-				{source: "base", label: "Base / earlier adjustments", amount: breakdown.base - attributed},
+				{source: "base", label: provenCreation ? "Starting score" : "Score before recorded increases", amount: residual},
 				...acquisitions,
 				...originSources,
 				...breakdown.contributions.map(c => c.source === "racial" && ["Racial", "Species / background / manual (unattributed)"].includes(c.label)
-					? {...c, label: "Origin / manual adjustments"}
+					? {...c, label: "Saved bonus (history incomplete)"}
 					: c),
 			],
 		};
@@ -13713,10 +13727,16 @@ class CharacterSheetState {
 		const byKey = new Map(decisions.filter(d => d.semanticKey).map(d => [d.semanticKey, d]));
 		const components = [];
 		const seen = new Set();
+		const order = new WeakMap();
 		const context = (decision, entry) => {
 			const owner = decision?.provenance;
 			if (owner?.ownerType === "race" || owner?.ownerType === "background") {
-				return `${owner.ownerType === "race" ? "Species" : "Background"}${owner.ownerName || owner.ownerUid ? `: ${owner.ownerName || owner.ownerUid}` : ""}`;
+				const [uidName, uidSource] = String(owner.ownerUid || "").split("|");
+				const entity = [this._data.race, this._data.subrace, this._data.background]
+					.find(it => it && `${it.name}|${it.source}`.toLowerCase() === String(owner.ownerUid).toLowerCase());
+				const name = entity?.name || owner.ownerName?.split("|")[0] || uidName;
+				const source = entity?.source || uidSource;
+				return `${owner.ownerType === "race" ? "Species" : "Background"}${name ? `: ${name}` : ""}${source ? ` [${source}]` : ""}`;
 			}
 			const cls = decision?.className || entry?.class?.name;
 			const src = decision?.classSource || entry?.class?.source;
@@ -13726,24 +13746,19 @@ class CharacterSheetState {
 				? `${cls}${src ? ` [${src}]` : ""}${level ? ` level ${level}` : ""}${characterLevel && characterLevel !== level ? ` (character level ${characterLevel})` : ""}`
 				: "";
 		};
-		const push = (key, source, label, amount) => {
+		const push = (key, source, label, amount, level = Infinity, extra = {}) => {
 			if (seen.has(key)) return;
 			seen.add(key);
-			components.push({source, label, amount});
+			const component = {source, label, amount, ...extra};
+			order.set(component, level);
+			components.push(component);
 		};
 		const feats = this._data.feats || [];
-		const featOwner = decision => {
-			const visited = new Set();
-			for (let current = decision; current && !visited.has(current); current = byKey.get(current.parentSemanticKey)) {
-				visited.add(current);
-				const feat = feats.find(f =>
-					(f.sourceDecisionKey && f.sourceDecisionKey === current.semanticKey)
-					|| (current.meta?.featId && current.meta.featId === f.id)
-					|| current.receipt?.effects?.some(effect => effect.feats?.some(ref => ref.id === f.id)));
-				if (feat) return feat;
-			}
-			return null;
-		};
+		const observedOriginOwners = new Set(decisions
+			.filter(decision => ["originRace", "originBackground"].includes(decision.type)
+				&& decision.meta?.originAbilityObservationVersion === 1 && decision.provenance?.ownerUid)
+			.map(decision => decision.provenance.ownerUid.toLowerCase()));
+		const featOwner = decision => CharacterSheetClassUtils.resolveFeatAcquisitionOwner(decision, decisions, feats);
 		if (effectType === "abilityDelta") {
 			feats.forEach((feat, index) => {
 				const deltas = feat.appliedEffects?.abilityDeltas;
@@ -13764,9 +13779,7 @@ class CharacterSheetState {
 					|| nestedEffects.size > 0
 					|| feat.ability?.some(grant => Object.hasOwn(grant, ability));
 				if (!Object.hasOwn(deltas || {}, ability) && !isChosen) return;
-				const decision = decisions.find(d =>
-					(feat.sourceDecisionKey && d.semanticKey === feat.sourceDecisionKey)
-					|| (d.meta?.featId && d.meta.featId === feat.id));
+				const decision = decisions.find(d => featOwner(d) === feat && d.type !== "nestedAbility");
 				const entry = history.find(h => (h.decisions || []).includes(decision));
 				const placement = context(decision, entry);
 				const sameFeats = feats.filter(other => other.name === feat.name && other.source === feat.source);
@@ -13775,25 +13788,52 @@ class CharacterSheetState {
 				const ownDelta = Object.hasOwn(deltas || {}, ability) ? deltas[ability] : null;
 				const amount = Number.isFinite(ownDelta) ? ownDelta
 					: actualNestedEffects.length ? actualNestedEffects.reduce((sum, effect) => sum + effect.amount, 0) : null;
+				const transition = feat.appliedEffects?.abilityTransitions?.[ability];
+				const capContext = transition && transition.amount === amount && transition.after - transition.before === amount
+					&& Number.isFinite(transition.before) && Number.isFinite(transition.after) && Number.isFinite(transition.requestedAmount)
+					&& Number.isFinite(transition.maximum)
+					? {requestedAmount: transition.requestedAmount, maximum: transition.maximum} : {};
 				push(`feat:${feat.id || index}`, "featAcquisition",
-					`${feat.name}${feat.source ? ` [${feat.source}]` : ""}${repeat}${placement ? ` - ${placement}` : ""}`,
-					Number.isFinite(amount) ? amount : null);
+					`${feat.name}${feat.source ? ` [${feat.source}]` : ""}${repeat}${placement ? ` - ${placement}` : " (level unrecorded)"}`,
+					Number.isFinite(amount) ? amount : null, decision?.characterLevel || entry?.level || Infinity, capContext);
 			});
 		}
 		decisions.forEach((decision, index) => {
 			if (effectType === "abilityDelta" && featOwner(decision)) return;
+			const isOriginOwner = ["race", "background"].includes(decision.provenance?.ownerType);
+			if (effectType === "abilityDelta" && isOriginOwner) return;
+			if (effectType === "abilityBonusDelta" && isOriginOwner
+				&& !decision.meta?.originAbilityObservationVersion && observedOriginOwners.has(decision.provenance.ownerUid?.toLowerCase())) return;
+			let unplacedFeatMirror = false;
+			if (effectType === "abilityDelta") {
+				const visited = new Set();
+				for (let current = decision; current && !visited.has(current); current = byKey.get(current.parentSemanticKey)) {
+					visited.add(current);
+					if (!["feat", "asiOrFeat"].includes(current.type)) continue;
+					const selection = current.selection?.feat || current.selection;
+					const matches = feats.filter(feat => feat.name?.toLowerCase() === selection?.name?.toLowerCase()
+						&& feat.source?.toLowerCase() === selection?.source?.toLowerCase());
+					if (matches.length) unplacedFeatMirror = true;
+				}
+			}
 			const recordedEffects = (decision.receipt?.effects || []).filter(effect =>
-				effect.type === effectType && effect.ability === ability);
-			const effects = recordedEffects.filter(effect => Number.isFinite(effect.amount) && Number.isFinite(effect.before));
+				(effect.type === effectType || (effectType === "abilityBonusDelta" && isOriginOwner && effect.type === "abilityDelta"))
+				&& effect.ability === ability);
+			const effects = unplacedFeatMirror ? [] : recordedEffects.filter(effect =>
+				effect.type === effectType && Number.isFinite(effect.amount) && Number.isFinite(effect.before));
 			const entry = history.find(h => (h.decisions || []).includes(decision));
 			const placement = context(decision, entry);
 			const isOrigin = effectType === "abilityBonusDelta" && /^(Species|Background)(:|$)/.test(placement);
-			const label = isOrigin ? placement : `${decision.label || "Ability Score Improvement"}${placement ? ` - ${placement}` : ""}`;
+			const friendlyLabel = ["asi", "asiOrFeat"].includes(decision.type) ? "Ability Score Improvement"
+				: /^ability\[\d+\]$/i.test(decision.label || "") ? "Ability increase" : decision.label || "Ability Score Improvement";
+			const label = isOrigin ? placement : `${friendlyLabel}${placement ? ` - ${placement}` : ""}`;
 			// One mechanical effect may be mirrored on parent and nested receipts.
 			effects.forEach(effect => push(
 				`${effect.sourceDecisionKey || decision.semanticKey || index}:${effectType}:${ability}`,
 				effectType === "abilityBonusDelta" ? "origin" : "acquisition",
-				label, effect.amount));
+				isOrigin && effect.ownerUid ? context({provenance: effect}, entry) : label,
+				effect.amount, decision.characterLevel || entry?.level || 0,
+				Number.isFinite(effect.requestedAmount) ? {requestedAmount: effect.requestedAmount, maximum: effect.maximum} : {}));
 			if (effects.length) return;
 			if (effectType === "abilityBonusDelta") {
 				if (recordedEffects.length) push(`${decision.semanticKey || index}:${effectType}:${ability}`, "origin", label, null);
@@ -13808,7 +13848,22 @@ class CharacterSheetState {
 				push(`${decision.semanticKey || index}:${effectType}:${ability}`, "acquisition", label, null);
 			}
 		});
-		return components;
+		if (effectType === "abilityBonusDelta" && this._data.abilityBonuses?.[ability]
+			&& !components.some(component => component.source === "origin")) {
+			const choices = this._data.characterBase?.raceUserChoices || {};
+			for (const entity of [this._data.race, this._data.subrace].filter(Boolean)) {
+				const uid = `${entity.name}|${entity.source}`;
+				const grants = entity.ability || [];
+				const selectedIndex = choices.selectedAbilitySetIdx?.[uid];
+				const grant = grants.length === 1 ? grants[0] : grants[selectedIndex];
+				const reassigned = choices.useTashasRules;
+				const chosen = Object.entries(reassigned ? choices.tashasAbilityBonuses || {}
+					: choices.selectedAbilityChoices?.[uid] || {}).some(([key, value]) => !key.includes("_amount") && value === ability);
+				if (!(reassigned ? chosen : Object.hasOwn(grant || {}, ability) || chosen)) continue;
+				push(`origin:${uid}:${ability}`, "origin", `Species: ${entity.name} [${entity.source}]`, null, 0);
+			}
+		}
+		return components.sort((a, b) => order.get(a) - order.get(b) || (a.source === "featAcquisition") - (b.source === "featAcquisition"));
 	}
 
 	/**
@@ -14197,9 +14252,9 @@ class CharacterSheetState {
 
 		let setCandidate = DEFAULT_MAX;
 
-		// Primal Champion auto-raises STR/CON cap to 24
-		if ((ability === "str" || ability === "con") && this._hasPrimalChampion()) {
-			setCandidate = Math.max(setCandidate, 24);
+		if (ability === "str" || ability === "con") {
+			const champion = this._getPrimalChampionDescriptor();
+			if (champion.eligible) setCandidate = Math.max(setCandidate, champion.resolved ? champion.maximum : 24);
 		}
 
 		// Manual imperative override (setAbilityScoreMaximum)
@@ -16545,6 +16600,74 @@ class CharacterSheetState {
 
 	_hasPrimalChampion () {
 		return this._data.classes.some(cls => cls.name?.toLowerCase() === "barbarian" && cls.level >= 20);
+	}
+
+	_getPrimalChampionDescriptor () {
+		const eligible = this._hasPrimalChampion();
+		const unresolved = {
+			eligible,
+			resolved: false,
+			requestedAmount: 4,
+			maximum: null,
+			source: null,
+			featureUid: null,
+			diagnostic: "Rules source unresolved - correct the source to verify this score.",
+		};
+		if (!eligible) return unresolved;
+		const normalize = value => String(value || "").toLowerCase();
+		const candidates = new Map();
+		let unknown = false;
+		const add = feature => {
+			if (normalize(feature.name) !== "primal champion" || normalize(feature.className) !== "barbarian" || Number(feature.level) !== 20) return;
+			const definitions = (this._classFeatureCatalog || []).filter(it =>
+				normalize(CharacterSheetClassUtils.getFeatureUid(it)) === normalize(CharacterSheetClassUtils.getFeatureUid(feature)));
+			if (new Set(definitions.map(it => JSON.stringify(it.entries || []))).size > 1) {
+				unknown = true;
+				return;
+			}
+			feature = definitions[0] || feature;
+			const source = normalize(feature.source);
+			const classSource = normalize(feature.classSource || feature.source);
+			if (!["phb", "xphb"].includes(source) || classSource !== source) {
+				unknown = true;
+				return;
+			}
+			const canonical = {...feature, className: "Barbarian", classSource: source.toUpperCase(), source: source.toUpperCase(), level: 20};
+			candidates.set(normalize(CharacterSheetClassUtils.getFeatureUid(canonical)), {
+				source: canonical.source, featureUid: CharacterSheetClassUtils.getFeatureUid(canonical), maximum: source === "phb" ? 24 : 25,
+			});
+		};
+		const addRef = (ref, cls) => {
+			const value = typeof ref === "string" ? ref : ref?.classFeature;
+			if (value && typeof value === "object") return addRef(value, cls);
+			if (!value) {
+				if (normalize(ref?.name) !== "primal champion" || Number(ref.level) !== 20) return false;
+				add({...ref, className: ref.className || cls.name, classSource: ref.classSource || cls.source, source: ref.source || ref.classSource || cls.source});
+				return true;
+			}
+			const [name, className, classSource, level, source] = value.split("|");
+			if (normalize(name) !== "primal champion" || normalize(className) !== "barbarian" || Number(level) !== 20) return false;
+			if (![4, 5].includes(value.split("|").length)) {
+				unknown = true;
+				return true;
+			}
+			add({name, className, classSource: classSource || cls.source, level, source: source || classSource || cls.source});
+			return true;
+		};
+		for (const feature of this._data.features || []) add(feature);
+		for (const cls of this._data.classes.filter(it => normalize(it.name) === "barbarian" && it.level >= 20)) {
+			const fullClasses = (this._classCatalog || []).filter(it => normalize(it.name) === "barbarian"
+				&& (cls.source ? normalize(it.source) === normalize(cls.source)
+					: !candidates.size || [...candidates.values()].some(candidate => normalize(candidate.source) === normalize(it.source))));
+			const refs = [...(cls.classFeatures || []), ...fullClasses.flatMap(it => it.classFeatures || [])];
+			let found = false;
+			for (const ref of refs) found = addRef(ref, cls) || found;
+			if (!found && ["phb", "xphb"].includes(normalize(cls.source))) {
+				add({name: "Primal Champion", className: "Barbarian", classSource: cls.source, source: cls.source, level: 20});
+			}
+		}
+		if (unknown || candidates.size !== 1) return unresolved;
+		return {...unresolved, ...candidates.values().next().value, resolved: true, diagnostic: null};
 	}
 
 	// #endregion
@@ -63325,9 +63448,34 @@ class CharacterSheetState {
 				? {before: mergedSkills[skill].before, after: values.after}
 				: values;
 		}
+		const abilityTransitions = {...(existing.abilityTransitions || {})};
+		for (const [ability, transition] of Object.entries(effects?.abilityTransitions || {})) {
+			const prior = abilityTransitions[ability];
+			if (prior && prior.after === transition.before) {
+				const merged = {
+					...transition,
+					before: prior.before,
+					amount: prior.amount + transition.amount,
+				};
+				if (Number.isFinite(prior.requestedAmount) && Number.isFinite(transition.requestedAmount)
+					&& prior.maximum === transition.maximum && Number.isFinite(transition.maximum)) {
+					merged.requestedAmount = prior.requestedAmount + transition.requestedAmount;
+				} else {
+					delete merged.requestedAmount;
+					delete merged.maximum;
+				}
+				abilityTransitions[ability] = merged;
+			} else if (!Object.hasOwn(existing.abilityDeltas || {}, ability)) {
+				abilityTransitions[ability] = transition;
+			} else {
+				delete abilityTransitions[ability];
+			}
+		}
 		feat.appliedEffects = {
 			...existing,
 			...effects,
+			...(Object.hasOwn(existing, "abilityTransitions") || Object.hasOwn(effects || {}, "abilityTransitions")
+				? {abilityTransitions} : {}),
 			abilityDeltas: Object.fromEntries(new Set([
 				...Object.keys(existing.abilityDeltas || {}),
 				...Object.keys(effects?.abilityDeltas || {}),
@@ -63381,7 +63529,7 @@ class CharacterSheetState {
 		};
 	}
 
-	recordFeatAppliedEffectsSince (featName, featSource, before, featId = null, {abilityTargets = []} = {}) {
+	recordFeatAppliedEffectsSince (featName, featSource, before, featId = null, {abilityTargets = [], abilityIncreases = {}, abilityMaximum} = {}) {
 		if (!before) return false;
 		const abilityAbbreviations = globalThis.Parser?.ABIL_ABVS || ["str", "dex", "con", "int", "wis", "cha"];
 		const getSpellUid = spell => `${String(spell?.name || "").toLowerCase()}|${String(spell?.source || "").toLowerCase()}`;
@@ -63401,8 +63549,22 @@ class CharacterSheetState {
 		const innateSpellsAdded = (this.getInnateSpells() || [])
 			.filter(spell => !before.innateSpells?.has(getSpellUid(spell)))
 			.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
+		const abilityTransitions = {};
+		for (const ability of abilityAbbreviations) {
+			const previous = before.abilities?.[ability];
+			const after = this.getAbilityBase(ability);
+			if (!Number.isFinite(previous) || !Number.isFinite(after) || (previous === after && !abilityTargets.includes(ability))) continue;
+			const requestedAmount = abilityIncreases[ability];
+			abilityTransitions[ability] = {
+				before: previous,
+				after,
+				amount: after - previous,
+				...(Number.isFinite(requestedAmount) && Number.isFinite(abilityMaximum) ? {requestedAmount, maximum: abilityMaximum} : {}),
+			};
+		}
 
 		return this.recordFeatAppliedEffects(featName, featSource, {
+			abilityTransitions,
 			abilityDeltas: Object.fromEntries(abilityAbbreviations
 				.map(ability => [ability, (Number(this.getAbilityBase(ability)) || 0) - (Number(before.abilities?.[ability]) || 0)])
 				.filter(([ability, delta]) => delta !== 0 || abilityTargets.includes(ability))),

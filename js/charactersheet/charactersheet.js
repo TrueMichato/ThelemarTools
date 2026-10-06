@@ -5257,18 +5257,45 @@ class CharacterSheetPage {
 		this._renderAbilityDamageAffordance();
 	}
 
+	_getAbilityScoreDisclosureRows (breakdown) {
+		const components = breakdown.components || breakdown.contributions || [];
+		const rows = components.filter(component => Number.isFinite(component.amount)).map(component => {
+			const value = `${component.source === "base" ? "" : component.amount >= 0 ? "+" : ""}${component.amount}${component.isReplacement ? " (replacement)" : ""}`;
+			const context = component.amount === 0 && component.source !== "base" ? "no increase applied" : "";
+			const capped = Number.isFinite(component.requestedAmount) && Number.isFinite(component.maximum)
+				&& component.amount < component.requestedAmount;
+			const detail = capped ? `requested +${component.requestedAmount}; maximum ${component.maximum}` : context;
+			const label = `${component.label}${detail ? ` (${detail})` : ""}`;
+			return {label, value, text: `${label}: ${value}`};
+		});
+		const sources = components.filter(component => component.amount == null)
+			.map(component => `${component.label} - amount not recorded`);
+		const notes = [...(breakdown.notes || [])];
+		if (components.some(component => ["Score before recorded increases", "Saved bonus (history incomplete)"].includes(component.label))) {
+			notes.push("Score before recorded increases is the current stored score minus verified increases, not a proven original allocation. Saved bonuses may include adjustments without recorded sources or amounts.");
+		}
+		if (breakdown.provisional) {
+			notes.push("Load the correct source in Settings or review the class in Respec. Restore a known-good export or rebuild if its source cannot be verified.");
+		}
+		return {rows, sources, notes, total: `Total${breakdown.provisional ? " (provisional)" : ""}: ${breakdown.total}`};
+	}
+
 	_formatAbilityScoreBreakdown (breakdown) {
+		const disclosure = this._getAbilityScoreDisclosureRows(breakdown);
 		return [
-			...breakdown.components.map(c => c.amount == null ? c.label : `${c.label}: ${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}${c.isReplacement ? " (replacement)" : ""}`),
-			`Total: ${breakdown.total}`,
+			...disclosure.rows.map(row => row.text),
+			disclosure.total,
+			...(disclosure.sources.length ? ["Sources with unrecorded amounts", ...disclosure.sources] : []),
+			...disclosure.notes,
 		].join("\n");
 	}
 
 	_refreshAbilityScoreDisclosure (el, ability) {
 		if (!el) return;
 		const breakdown = this._state.getAbilityScoreBreakdown(ability);
+		const disclosure = this._getAbilityScoreDisclosureRows(breakdown);
 		el.removeAttribute("title");
-		el.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score ${breakdown.total}; pin or unpin score breakdown`);
+		el.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} score ${breakdown.total}${breakdown.provisional ? " (provisional)" : ""}; pin or unpin score breakdown`);
 		const popover = document.getElementById(el.getAttribute("aria-controls"));
 		if (!popover) return;
 		popover.replaceChildren();
@@ -5284,20 +5311,39 @@ class CharacterSheetPage {
 		close.addEventListener("click", () => popover.hidePopover());
 		header.append(heading, close);
 		popover.append(header);
-		breakdown.components.forEach(c => {
+		disclosure.rows.forEach(component => {
 			const row = document.createElement("div");
 			row.className = "charsheet__score-detail-row";
 			const label = document.createElement("span");
-			label.textContent = c.label;
+			label.textContent = component.label;
 			const value = document.createElement("span");
-			value.textContent = c.amount == null ? "" : `${c.source === "base" ? "" : c.amount >= 0 ? "+" : ""}${c.amount}${c.isReplacement ? " (replacement)" : ""}`;
+			value.textContent = component.value;
 			row.append(label, value);
 			popover.append(row);
 		});
 		const total = document.createElement("div");
 		total.className = "charsheet__score-detail-total";
-		total.textContent = `Total: ${breakdown.total}`;
+		total.textContent = disclosure.total;
 		popover.append(total);
+		if (disclosure.sources.length) {
+			const sources = document.createElement("div");
+			sources.className = "charsheet__score-detail-check";
+			const title = document.createElement("strong");
+			title.textContent = "Sources with unrecorded amounts";
+			sources.append(title);
+			disclosure.sources.forEach(source => {
+				const note = document.createElement("div");
+				note.textContent = source;
+				sources.append(note);
+			});
+			popover.append(sources);
+		}
+		if (disclosure.notes.length) {
+			const notes = document.createElement("div");
+			notes.className = "charsheet__score-detail-check";
+			notes.textContent = disclosure.notes.join("\n");
+			popover.append(notes);
+		}
 		if (popover.dataset.includeCheckBreakdown === "true") {
 			const check = document.createElement("div");
 			check.className = "charsheet__score-detail-check";
@@ -26826,6 +26872,7 @@ class CharacterSheetPage {
 			},
 		});
 
+		modalInner.append(e_({tag: "p", clazz: "ve-muted ve-small", txt: "Edit stored scores, which include applied ASIs and feat increases. Species/background, item, and ongoing feature bonuses are added separately."}));
 		const itemOverrides = this._state.getItemAbilityOverrides?.() || {};
 
 		Parser.ABIL_ABVS.forEach(abl => {
@@ -26846,7 +26893,7 @@ class CharacterSheetPage {
 					</div>
 					<div class="charsheet__edit-ability-stepper">
 						<button class="ve-btn ve-btn-default ve-btn-xs ability-dec" type="button" aria-label="Decrease ${ablFull}" title="Decrease ${ablFull}">−</button>
-						<input type="number" class="ve-form-control ability-input" value="${base}" min="1" max="30" aria-label="${ablFull} base score">
+						<input type="number" class="ve-form-control ability-input" value="${base}" min="1" max="30" aria-label="${ablFull} stored score">
 						<button class="ve-btn ve-btn-default ve-btn-xs ability-inc" type="button" aria-label="Increase ${ablFull}" title="Increase ${ablFull}">+</button>
 					</div>
 					<div class="ve-muted ve-small charsheet__edit-ability-breakdown ability-breakdown"></div>

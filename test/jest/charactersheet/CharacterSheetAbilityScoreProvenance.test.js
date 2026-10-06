@@ -117,7 +117,7 @@ describe("read-only ability score provenance", () => {
 		const before = state.serialize();
 		const breakdown = state.getAbilityScoreBreakdown("con");
 		expect(breakdown.components.filter(component => component.source === "featAcquisition"))
-			.toEqual([{source: "featAcquisition", label: "Durable [PHB]", amount: 0}]);
+			.toEqual([{source: "featAcquisition", label: "Durable [PHB] (level unrecorded)", amount: 0, requestedAmount: 1, maximum: 20}]);
 		expect(breakdown.components[0].amount).toBe(20);
 		expect(sum(breakdown.components)).toBe(20);
 		expect(state.serialize()).toBe(before);
@@ -135,7 +135,7 @@ describe("read-only ability score provenance", () => {
 			{source: "acquisition", label: "Ability Score Improvement - Fighter [PHB] level 4", amount: null},
 			{source: "acquisition", label: "Ability Score Improvement - Fighter [PHB] level 8", amount: null},
 		]);
-		expect(breakdown.components[0]).toEqual({source: "base", label: "Base / earlier adjustments", amount: 20});
+		expect(breakdown.components[0]).toEqual({source: "base", label: "Score before recorded increases", amount: 20});
 		expect(sum(breakdown.components)).toBe(breakdown.total);
 	});
 
@@ -161,10 +161,10 @@ describe("read-only ability score provenance", () => {
 			]});
 		const breakdown = state.getAbilityScoreBreakdown("str");
 		const rows = breakdown.components.filter(c => c.source === "featAcquisition");
-		expect(rows.map(c => c.amount)).toEqual([2, 0]);
+		expect(rows.map(c => c.amount)).toEqual([0, 2]);
 		expect(rows.map(c => c.label)).toEqual([
-			"Ability Score Improvement [XPHB] #1",
 			"Ability Score Improvement [XPHB] - Fighter [PHB] level 8",
+			"Ability Score Improvement [XPHB] #1 (level unrecorded)",
 		]);
 		expect(breakdown.components[0].amount).toBe(18);
 		expect(state.getAbilityScoreBreakdown("dex").components.filter(c => c.source === "featAcquisition").map(c => c.amount)).toEqual([1]);
@@ -251,11 +251,11 @@ describe("read-only ability score provenance", () => {
 		acquireFeat(state, {ability: "str"}, "first");
 		state.setAbilityBase("str", 17);
 		const breakdown = state.getAbilityScoreBreakdown("str");
-		expect(breakdown.components[0]).toMatchObject({amount: 15, label: "Base / earlier adjustments"});
+		expect(breakdown.components[0]).toMatchObject({amount: 15, label: "Score before recorded increases"});
 		expect(sum(breakdown.components)).toBe(17);
 		const legacy = new State();
 		legacy.setAbilityBase("str", 17);
-		expect(legacy.getAbilityScoreBreakdown("str").components).toEqual([{source: "base", label: "Base / earlier adjustments", amount: 17}]);
+		expect(legacy.getAbilityScoreBreakdown("str").components).toEqual([{source: "base", label: "Score before recorded increases", amount: 17}]);
 	});
 
 	test("does not count a feat's nested receipt twice and labels its exact owner/level", () => {
@@ -352,7 +352,7 @@ describe("read-only ability score provenance", () => {
 		expect(breakdown.components.slice(1).map(c => [c.label, c.amount])).toEqual([
 			["Species: Dwarf [PHB]", 2],
 			["Background: Soldier [XPHB]", 1],
-			["Origin / manual adjustments", 1],
+			["Saved bonus (history incomplete)", 1],
 		]);
 		expect(sum(breakdown.components)).toBe(14);
 	});

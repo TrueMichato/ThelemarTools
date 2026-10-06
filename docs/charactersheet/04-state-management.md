@@ -1177,7 +1177,8 @@ Two **read-only** breakdown contracts serve distinct consumers:
 - `getAbilityBonusBreakdown(ability)` preserves
   `{ability, base, total, bonus, contributions}`. Numeric contributions sum
   to `total - base`; ASIs/feat acquisitions are not counted as bonuses again.
-- `getAbilityScoreBreakdown(ability)` returns `{ability, total, components}`.
+- `getAbilityScoreBreakdown(ability)` returns `{ability, total, components}`,
+  with optional `provisional` and `notes` for an unresolved rules source.
   It itemizes each acquisition, then the live bonus/override/cap/damage stages.
   All numeric components sum to the exact current score.
 
@@ -1192,9 +1193,24 @@ nested receipts; an empty or unrelated delta map never proves zero. Without
 either numeric source, an evidenced target keeps a `null` applied amount. A
 capped fixed-target feat whose target was not saved cannot be attributed.
 Best-known source/owner/level labels distinguish repeated feats; unplaced
-repeats use local instance numbers only when necessary. Exact origin receipts
+repeats use local instance numbers only when necessary and explicitly say
+**level unrecorded**. Their independently proven own amounts stay numeric;
+an ambiguous parent/mirror stays source-only. Exact IDs/decision keys take
+precedence; an unkeyed instance requires a unique exact name/source parent and
+consistent child provenance. Exact origin receipts
 distinguish species and background contributions, even when a targeted receipt
 supports the source but not an amount.
+
+Builder observes actual creation-step writes, including fixed/chosen species,
+subrace, Tasha reassignment and eligible background grants. It passes ephemeral
+observations to the existing canonical receipt assembler; origin effects use
+`abilityBonusDelta`, never mutable-base `abilityDelta`. The existing origin
+entity decision retains `meta.creationAbilityScores`/`creationAbilityMethod`
+and `originAbilityObservationVersion: 1`. That observed root receipt covers the
+current origin allocation; retained older child mirrors do not add it again.
+Only an explicitly observed creation transaction replaces its origin receipts,
+preserving unrelated effects. Read/reload/sync without observations does not
+upgrade historical wrong-channel or amount-only evidence.
 
 Item attribution comes from the inventory's existing
 `_getItemAbilityOverrides()` eligibility pass, not another inventory scan.
@@ -1210,18 +1226,45 @@ Level Up and Quick Build persist its existing version-1 decision receipt,
 including source-qualified owner, actual capped base-score `before`, `after`
 and `amount`, and materialized tracking-feature identity. Replay preserves that
 receipt rather than applying the gain again. The feat writer likewise retains
-an own targeted zero, including fixed abilities capped at acquisition.
+an own targeted zero, including fixed
+abilities capped at acquisition. `appliedEffects.abilityTransitions` retains
+actual before/after/amount and the request/maximum supplied by the same
+`applyFeatBonuses()` write, rather than re-resolving a lean wrapper. Progression
+never reconstructs a historical before from the final score minus a gain.
+Same-instance transitions merge only across contiguous observations; merged
+request/max context requires known requests and the same known maximum.
+Discontinuous observations retain own applied deltas without a synthetic
+combined transition or cap explanation.
 Respec observes replacement boundaries and reverses only actual recorded
 deltas; it does not subtract an authored +2 when the original gain was +1 or 0.
 
 An evidenced ordinary ASI or feat without an actual capped receipt is still
 listed by its best-known source, with a `null` amount internally and no
 unproven allocation printed as a gain. Proven capped zeros remain visible as
-**+0**. Unrecorded creation rolls, manual adjustments and legacy gains remain
-in **Base / earlier adjustments**. This residual is arithmetic
-reconciliation, not proof of a starting score. No parallel ability ledger or
-new persisted fields are introduced. The score disclosure re-reads this
+**+0**, with actual requested/max context when available or **no increase
+applied** when its cause is not recorded. Unknowns appear separately under
+**Sources with unrecorded amounts**, not blank arithmetic rows. Unrecorded
+creation rolls, manual adjustments and legacy gains remain in **Score before
+recorded increases**: the current stored base minus verified increases, not a
+proved original allocation. Unmatched live origin bonuses remain **Saved bonus
+(history incomplete)**. The explanatory note remains visible when either
+incomplete-history row appears. **Starting score** requires
+the observed creation snapshot plus all proven base acquisitions to match the
+stored base, with no unknown acquisition. Evidence stays in existing
+decision/applied-effect metadata, not a parallel ability ledger. The score
+disclosure re-reads this
 projection on render/open, including after reload and Respec.
+
+Primal Champion uses one source-qualified descriptor for the score, bonus
+breakdown and effective maximum: PHB +4/max24; XPHB +4/max25; TGTT's authored
+XPHB reference +4/max25. With global enforcement off, the positive-increase
+helper never lowers an already-over-maximum score. With enforcement on,
+preserve the raw feature +4, then items/static overrides, then the separate
+global clamp (manual/effect maximums, hard ceiling30), followed by active bonuses
+and damage. A genuine unresolved/conflicting source retains compatibility
+numbers but marks the total **provisional**, never certifying the old24
+candidate as a resolved rule. Load its source in Settings, review the class in
+Respec, or restore/rebuild from known-good source evidence.
 
 Overview and Play Mode open one accessible disclosure on whole-block hover
 or focus. Hero and edit views use their score-summary/result wrappers, not

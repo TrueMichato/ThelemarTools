@@ -111,7 +111,7 @@ describe("getAbilityBonusBreakdown", () => {
 		expect(bd.total).toBe(24); // 20 + 4, clamped to 24
 		expect(sumAmounts(bd.contributions)).toBe(bd.bonus);
 		expect(bd.contributions).toEqual([
-			{source: "primalChampion", label: "Primal Champion", amount: 4},
+			{source: "primalChampion", label: "Primal Champion", amount: 4, requestedAmount: 4, provisional: true},
 		]);
 		expect(findBy(bd.contributions, "other")).toBeUndefined();
 	});
