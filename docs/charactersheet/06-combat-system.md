@@ -456,9 +456,34 @@ and these cached-channel contributions remain effective-only, not canonical.
 Disabled and conditional modifiers do not become unconditional named grants;
 the existing conditional opt-in mechanics are unchanged.
 
+Temporal Awareness adds the **current Intelligence modifier once**, including
+zero or negative modifiers. Rakish Audacity similarly adds the current Charisma
+modifier once. Both are intrinsic live bonuses, not additional cached custom
+modifiers. Their exact catalog owners suppress only the duplicate parsed or
+registry initiative effect; other effects and same-named homebrew remain intact.
+Dread Ambusher remains an independent live Wisdom bonus.
+
+Class-effect reconciliation removes old ability-derived copies only when their
+exact source-feature ID, catalog identity, and generated signature prove ownership.
+Historical full ability names such as `intelligence` are recognized alongside
+`int`. Numeric or owner-less legacy amounts are not assumed to be copies: they
+remain effective adjustments, with an actionable console warning when their
+generated history is ambiguous. Such retained rows may still need manual review.
+
+`customModifiers.initiativeAdjustment` preserves the initiative-only raw scalar
+remainder across reconciliation and saved reloads. The existing
+`setCustomModifier("initiative", value)` API still sets the cached-channel total;
+its adjustment is that total minus the current enabled named contributions.
+Old saves retain their stored total's unassigned remainder without inventing a
+feature owner. A nonzero legacy remainder beside proven generated copies may
+represent a user adjustment or a stale ability cache; the migration warns rather
+than guessing which it was. Other custom-modifier channels are unchanged.
+
 The Features tab calls `_refreshFeatDependentSections()` after both acquisition
 and removal. Besides scores, saves, and skills, it repaints combat stats so the
 initiative value and named tooltip change immediately, without a reload.
+Closing the stored-score editor also repaints initiative so live INT/CHA changes
+update the card and breakdown immediately.
 
 ```javascript
 const breakdown = state.getInitiativeBreakdown();
@@ -474,6 +499,14 @@ The Overview initiative card formats this breakdown into the same native hover
 tooltip used by skill rows. The tooltip lists every named contribution, any
 roll-time bonus dice, the effective total, and the intrinsic total when those
 two values differ. Clicking the card still rolls initiative.
+
+Regression coverage uses real catalog acquisition, two save/load/reconcile
+cycles, score changes, exact removal, down-level and subclass Respec. Both actual
+roll handlers must contribute the effective breakdown total, applying exhaustion
+once. `initiative-feature-ownership.spec.ts` verifies the real PHB Chronurgy
+Builder/LevelUp path, displayed value and tooltip, ability edits, actual roll
+control and two persisted browser reloads. The existing TGTT Chronurgy matrix's
+skipped, minimum-only Temporal Awareness probe does **not** certify this fix.
 
 > **Note:** Buff *dice* bonuses such as **Gift of Alacrity** (`1d8` initiative) are
 > **not** added here as a flat number. Because they are a random die they can't

@@ -26859,6 +26859,7 @@ class CharacterSheetPage {
 				this._renderSavingThrows();
 				this._renderSkills();
 				this._renderResources();
+				this._renderInitiativeStat();
 				// Ability-derived class DCs (e.g. Illrigger Interdict / Charm Enemy =
 				// 8 + prof + CHA) are computed live at render but live on the Features
 				// summary and the Combat-tab interdict/conduit panels, which this modal
