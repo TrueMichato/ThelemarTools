@@ -3,33 +3,66 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 68 — Character lifecycle, Temporal Awareness, and tablet planning
-
-**S1 — Character lifecycle.** Owns character management and persistence in
-`charactersheet.js`, lifecycle regression tests, and focused lifecycle docs.
-Deleting a character, selecting Create New, or leaving an untouched creation
-screen must not manufacture a saved blank character. Investigate normal and
-bulk deletion, queued writes, failed saves, and deleted-character rescue mirrors
-without discarding intentional drafts or existing saved characters.
-
-**S2 — Temporal Awareness.** Owns initiative feature producers, consumers,
-feature-owned modifier reconciliation and migrations in
-`charactersheet-state.js`, initiative regression tests, and focused mechanic docs.
-Verify the actual authored feature and eliminate duplicate generated INT
-contributions while keeping one live bonus, genuine custom additions, and
-save/load, repeated reconciliation, feature removal, and Respec behavior.
-
-**S3 — Tablet support plan only.** Whole-site scope, Character Sheet first.
-Inventory mouse/keyboard-only interactions and propose explicit touch-reachable
-alternatives, capability-aware behavior for hybrid devices, and staged acceptance
-checks. No tablet implementation or product-code changes in this round.
-
-**Ownership.** Only the coordinator edits `bugs.md`. S1 and S2 must coordinate
-before crossing their Page/State boundaries or editing shared documentation.
-S3 is read-only for repository files; character-management recommendations remain
-provisional until S1's lifecycle fix is integrated.
+_None for the requested Round 68 fixes. Tablet implementation remains unstarted._
 
 ## Closed Bugs
+
+### Round 68 — Character lifecycle and single-owned initiative — INTEGRATED
+
+**Character lifecycle.** Displaying Create New is not the writer. Automatic
+save-before-leaving admitted untouched reset drafts, and the dropdown's
+no-argument refresh read the current State rather than the saved roster.
+Pristine drafts now stay unsaved; edited, unnamed, partial and explicitly saved
+defaults-only characters remain valid. Normal and bulk deletion share
+exact-target roster transactions, preserve survivors and confirmation-time
+selection changes, and prevent stale saves or rescue mirrors from restoring a
+deleted ID. Failed save/import/duplicate/spawn preservation remains retryable
+without false success feedback. Narrow Export and pre-spawn callers use the same
+lifecycle contract.
+
+**Temporal Awareness.** Real PHB/EGW Chronurgy acquisition generated a stored
+INT initiative modifier in addition to its live bonus: DEX +2 and INT +3 became
++8 instead of +5. Source-qualified producer suppression and proven-copy cleanup
+leave one live bonus, including zero and negative INT. The same verified
+Rakish Audacity registry conflict is fixed; Dread Ambusher is unchanged.
+Initiative-only explicit adjustments survive reconciliation, unrelated/manual
+rows remain, and ability editing repaints the initiative card. Breakdown and
+actual rolls agree across save/reload and exhaustion rules.
+
+**Tablet plan only.** A persistent session artifact covers the whole site,
+Character Sheet first. The user-directed refinement prioritizes seamless play:
+direct primary actions, compact inline frequent choices, rare-action overflow,
+and dialogs only for genuine decisions or existing safeguards. The plan measures
+taps and interruptions as well as reachability; it does not implement tablet UI
+or certify physical-device behavior.
+
+**Integration and gates.** Both child commits are preserved with `--no-ff`.
+The one-line ability-modal repaint and Page lifecycle changes merged cleanly;
+their shared-file regions do not overlap. Full ESLint and configured Stylelint
+passed. Full Jest passed **770 suites / 19,851 tests**, with **2 existing corpus
+suites / 208 cases skipped**, no failures and no primary expected-failure probes
+(361.915 seconds). Counts agree between the completed stdout and Jest JSON.
+The integrated Chromium regression passed **1/1**, using real Builder/Level Up,
+exact initiative/card/source checks, actual rolls and two persisted reloads.
+Native lifecycle evidence additionally covers New/select/reload, normal and
+typed-confirmation bulk deletion, survivor HP/temp HP/notes, deleted URLs,
+confirmation-time switching, Web Locks save/delete ordering, and save failure/retry.
+Import dialog and delayed-load cases are Jest coverage, not native certification.
+
+**Approved maintenance.** Baseline CraftingDataFreshness failed after restoring
+its gitignored source cache. With user approval, a separate generation-only
+commit reordered `name` and `source` in 36 statblock objects; deep comparison
+confirmed every parsed value unchanged. The full freshness gate then passed.
+
+**Retained limits.** No actual affected initiative export was supplied. The
+historical full-name parser triple-copy case is a labelled reconstruction, not
+attributed to that save. Ambiguous historical modifiers/remainders are retained
+with actionable warnings rather than guessed away. The existing skipped/minimum-
+only TGTT Chronurgy probe is not fix evidence; the browser regression is real
+PHB/EGW, not exhaustive TGTT, tablet, Safari or deployed-site coverage. Compact
+deletion evidence remains until explicit site-storage clearing; Web Locks provide
+cross-tab serialization, while the fallback is in-process only. The unrelated
+main checkout is not modified.
 
 ### Round 67 — Clear score history and source-qualified caps — INTEGRATED
 
