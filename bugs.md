@@ -3,7 +3,31 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None for the requested Round 67 fixes._
+### Round 68 — Character lifecycle, Temporal Awareness, and tablet planning
+
+**S1 — Character lifecycle.** Owns character management and persistence in
+`charactersheet.js`, lifecycle regression tests, and focused lifecycle docs.
+Deleting a character, selecting Create New, or leaving an untouched creation
+screen must not manufacture a saved blank character. Investigate normal and
+bulk deletion, queued writes, failed saves, and deleted-character rescue mirrors
+without discarding intentional drafts or existing saved characters.
+
+**S2 — Temporal Awareness.** Owns initiative feature producers, consumers,
+feature-owned modifier reconciliation and migrations in
+`charactersheet-state.js`, initiative regression tests, and focused mechanic docs.
+Verify the actual authored feature and eliminate duplicate generated INT
+contributions while keeping one live bonus, genuine custom additions, and
+save/load, repeated reconciliation, feature removal, and Respec behavior.
+
+**S3 — Tablet support plan only.** Whole-site scope, Character Sheet first.
+Inventory mouse/keyboard-only interactions and propose explicit touch-reachable
+alternatives, capability-aware behavior for hybrid devices, and staged acceptance
+checks. No tablet implementation or product-code changes in this round.
+
+**Ownership.** Only the coordinator edits `bugs.md`. S1 and S2 must coordinate
+before crossing their Page/State boundaries or editing shared documentation.
+S3 is read-only for repository files; character-management recommendations remain
+provisional until S1's lifecycle fix is integrated.
 
 ## Closed Bugs
 
