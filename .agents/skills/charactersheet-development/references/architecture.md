@@ -256,6 +256,52 @@ User action → Module event handler → state.setX() → module.render() → pa
 
 No reactive system — renders are explicit. Related modules re-render together (e.g., adding a feature triggers combat + features re-render).
 
+### Page-owned character lifecycle
+
+New/no-character initialization and unresolved URL IDs open a pristine,
+ID-bearing draft. Page tracks its normalized reset/render snapshot in memory;
+only automatic preservation paths (New/switch/unload and pre-duplicate,
+import or spawn) may skip that unchanged draft.
+All normal mutation saves and explicit `saveCharacter()` requests remain real
+writes, including unnamed, partial and defaults-only characters. The saved
+dropdown comes from `_savedCharacters`, never State's current-only
+`getAllCharacters()`. Builder reset reuses `resetSelections()` and its existing
+step render. Blank drafts clear the URL's `id`.
+
+`_pWithCharacterStorageLock()` serializes Page roster reads/writes using the
+`charsheet-characters` Web Lock and a shared in-process fallback. Inside the
+lock, every save rereads the roster and checks deletion evidence before inserting
+an absent ID. Capture the intended character and snapshot before any await.
+Ordered `_savedAt` plus unique `_saveRevision` identify persistence snapshots;
+mirror cleanup compares the complete saved snapshot and never clears a newer
+queued rescue. Save-before-leaving rechecks concurrent edits before switching
+and stops with feedback if the character keeps changing.
+
+Normal/bulk deletion use `_pDeleteCharacters()` with the confirmed exact ID set
+and a fresh locked roster. Compact `charsheet-deleted__<id>` markers are staged
+before canonical removal; staging/canonical failure rolls them back without
+removing existing rescues. Marker plus absent canonical row prevents
+resurrection; marker plus surviving row is an interrupted deletion and does not
+invalidate that character. Markers are intentionally retained until explicit
+site-storage clearing, without a TTL that could unblock a stale open tab.
+Queue cleanup failure after deletion is an explicit partial outcome.
+
+Navigation generations start before save awaits. New/reset, import/duplicate
+and committed deletion invalidate older loads. Load stages transfers into an
+isolated State, then rechecks identity/deletion and the canonical/mirror snapshot
+under the roster lock before publication; changed records are reread with a
+bounded retry. Never hold this lock across a modal or a nested save. Failed
+saves keep the sheet/selection and block navigation. Export/Import callers check
+Page's false result before closing a dialog or announcing success.
+
+The Spawner's pre-build preservation uses `_pSaveBeforeLeavingCharacter()` and
+aborts on failure; its Builder/final saves remain explicit. Failed duplicates
+render the copy before persistence so the visible sheet matches the retryable
+State. `addCharacter()` assigns the committed new ID to an isolated imported
+State even if navigation prevents activation. Export checks that exact ID before
+its final save and retains it for a failed-save retry within the same dialog,
+without re-adding the import or saving an unrelated selection.
+
 ### Cross-Page Entity Transfers
 
 The Items and Spells pages never rewrite a saved character document directly.

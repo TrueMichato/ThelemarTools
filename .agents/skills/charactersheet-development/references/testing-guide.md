@@ -44,6 +44,42 @@ Use the repository script rather than plain `npx jest`; the script supplies the
 ES-module runtime required by these tests. Prefer `--runInBand` for focused
 Character Sheet gates so modal/global mocks do not race.
 
+### Character management and persistence gate
+
+```bash
+npm run test:unit -- \
+  test/jest/charactersheet/CharacterSheetCharacterLifecycle.test.js \
+  test/jest/charactersheet/CharacterSheetManageCharacters.test.js \
+  test/jest/charactersheet/CharacterSheetPersistenceBackend.test.js \
+  test/jest/charactersheet/CharacterSheetTransferController.test.js \
+  --runInBand --no-coverage
+```
+
+Import the real Page prototype and State; do not copy a character-management
+handler into a test or mock new-character creation to null. Use independent
+sync/async stores and deferred production I/O to expose queued-write, load,
+confirmation-switch and rescue-cleanup races. Assert actual roster payloads,
+selection/URL, survivor HP/notes and the newest mirror, not only helper calls.
+The original lifecycle failed real-boundary draft admission, normal/bulk
+deletion, deleted-mirror recovery and in-flight-save controls before the fix.
+
+Keep controls for valid unnamed/partial/defaults-only explicit saves and healthy
+mirror-only recovery. Exercise marker-stage/canonical-write failures, exact
+rollback, malformed roster errors, no-switch-on-save-failure and accurate
+post-delete cleanup errors. Import/Save feedback tests drive the real Export
+dialog callback with a DOM adapter installed before module import: failure
+must retain the JSON/dialog, avoid success or misleading Invalid JSON, and not
+duplicate Page's storage error. Genuine invalid JSON remains a separate control.
+Native smoke checks use a fresh local port and a real spawned survivor; do not
+claim unexecuted browser flows as coverage.
+
+Spawner-entry controls use the real orchestration and Page persistence boundary
+while substituting only wizard-content creation: pristine preservation must not
+admit a predecessor, edited drafts must persist, and failure must abort before
+Builder runs. Also cover the duplicate failure/render/Save retry, import retry
+after an admitted import's final save fails, and an import finishing after New;
+assert exact IDs and roster cardinality so retries cannot silently add copies.
+
 ### Getting a character to test against
 
 Do not hand-build characters for manual testing or bug repro. Spawn them:

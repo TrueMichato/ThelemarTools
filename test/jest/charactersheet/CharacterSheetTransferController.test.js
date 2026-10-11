@@ -5,6 +5,7 @@ const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 
 let CharacterSheetPage;
 let CharacterSheetState;
+let restoreSyncStorage;
 
 const getDeferred = () => {
 	let resolve;
@@ -26,6 +27,18 @@ beforeAll(async () => {
 	CharacterSheetState = (await import(`${REPO_ROOT}js/charactersheet/charactersheet-state.js`)).CharacterSheetState;
 	CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
 });
+
+beforeEach(() => {
+	const methods = ["syncGet", "syncSet", "syncRemove"];
+	const originals = methods.map(method => globalThis.StorageUtil[method]);
+	const sync = new Map();
+	globalThis.StorageUtil.syncGet = key => sync.get(key) ?? null;
+	globalThis.StorageUtil.syncSet = (key, value) => sync.set(key, value);
+	globalThis.StorageUtil.syncRemove = key => sync.delete(key);
+	restoreSyncStorage = () => methods.forEach((method, i) => { globalThis.StorageUtil[method] = originals[i]; });
+});
+
+afterEach(() => restoreSyncStorage());
 
 describe("CharacterSheetPage transfer controller", () => {
 	it("loads a character with no repairs or new transfers without using the obsolete item-only result", async () => {

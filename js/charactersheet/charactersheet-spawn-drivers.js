@@ -303,7 +303,7 @@ class CharacterSheetSpawner {
 		const prompts = new CharacterSheetSpawnPrompts({page: this._page, picker, report, spec});
 		prompts.install();
 		try {
-			if (this._page._currentCharacterId) await this._page.saveCharacter();
+			if (!await this._page._pSaveBeforeLeavingCharacter()) throw new Error("The previous character could not be saved; spawning was stopped");
 			this._page._createNewCharacter();
 			if (this._page._selCharacter) this._page._selCharacter.value = "";
 
