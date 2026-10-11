@@ -6,6 +6,63 @@ This document provides an in-depth exploration of `CharacterSheetState`, the hea
 
 `CharacterSheetState` is the largest module in the character sheet system (~16,315 lines). It serves as both the **data store** and **calculation engine** for all character mechanics.
 
+## Character drafts, roster persistence, and deletion
+
+The Page controller owns character identity and the saved roster; State owns the
+character's content. Opening **Create New Character** creates an unsaved draft,
+not a saved-list entry. Merely displaying the dropdown never creates a record.
+An untouched draft is discarded when you choose New or switch characters and is
+not mirrored on unload. An edited draft is saved before leaving. Explicit Save
+and ordinary mutation handlers remain valid even for unnamed, incomplete, or
+defaults-only characters; there is no name/class-content validity filter.
+Existing saved characters are never retroactively treated as empty drafts.
+
+`charsheet-characters` is the canonical IndexedDB roster. The dropdown uses the
+Page's canonical roster cache, not State's `getAllCharacters()` singleton. All
+Page roster writers share the `charsheet-characters` Web Lock, with an in-process
+fallback where Web Locks are unavailable. Saves capture their target and payload
+before awaiting; each locked write rereads the current roster so a queued save,
+import, or bulk confirmation cannot erase a newer survivor.
+
+Recent edits have a synchronous per-character rescue mirror
+(`charsheet-active-mirror__<id>`). Page persistence metadata `_savedAt` is ordered
+and `_saveRevision` is unique per snapshot. A successful write clears only the
+matching mirror, not a newer queued edit. New/switch/load generations invalidate
+older asynchronous character loads; load-time transfers stay isolated until the
+selected character can still be safely activated.
+
+Normal and bulk deletion share one exact-ID transaction. Confirmation targets
+the originally requested IDs, even if the active selection changes meanwhile.
+Deletion of the active target opens a pristine draft and removes the URL's `id`;
+deletion of an inactive target preserves the current survivor. Bulk deletion
+rereads the roster after confirmation rather than writing its dialog snapshot.
+
+Before removing canonical rows, deletion stages compact localStorage evidence
+at `charsheet-deleted__<id>`. A marker **and an absent canonical row** block
+mirror-only recovery and stale-tab/queued-write resurrection. A still-present
+canonical row means an interrupted or failed deletion, not an invalid character.
+Failed staging rolls back every marker from that attempt; a failed canonical
+write retains the character and its rescue. Markers contain no character payload
+and are retained until site storage is explicitly cleared: automatic expiry could
+allow an old, still-open tab to resurrect a deleted ID. If evidence cannot be
+stored, deletion stops rather than weakening this guarantee. Same-origin
+cross-tab serialization requires Web Locks; the fallback serializes only Page
+instances in the same JavaScript context.
+
+Save failures block navigation, keep the current sheet available, and show
+retry/export guidance. Import dialogs remain open with the entered JSON; explicit
+Save/Import never show success after Page returns failure. If transfer-queue
+cleanup fails **after** canonical deletion, the message states that the characters
+were deleted but cleanup failed. Reloading is safe because deletion evidence
+still blocks recovery.
+
+A failed duplicate remains the visible copy, with a rescue-capable URL and an
+ordinary Save retry; the original row is retained. If a new import is admitted
+but its final repair save fails, retrying that open import dialog updates the
+same exact imported ID rather than appending another copy. An import committed
+after another navigation remains saved but inactive and does not auto-save the
+unrelated new selection.
+
 ## Core Data Structure (`_data`)
 
 All character information is stored in a private `_data` object. Understanding this structure is essential for working with the state.

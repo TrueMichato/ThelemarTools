@@ -64,10 +64,11 @@ function installBackend (backend) {
 // methods bound from the prototype. Avoids instantiating the DOM-heavy controller.
 function makeHost ({state} = {}) {
 	const proto = CharacterSheetPage.prototype;
-	const host = {
+	const host = Object.assign(Object.create(proto), {
 		_currentCharacterId: null,
 		_state: state || {toJson: () => ({})},
 		_updateSaveIndicator () {},
+		_setCharacterUrl () {},
 		// bound real methods under test
 		_getActiveMirrorKey: proto._getActiveMirrorKey,
 		_writeActiveCharacterMirror: proto._writeActiveCharacterMirror,
@@ -76,7 +77,7 @@ function makeHost ({state} = {}) {
 		_reconcilePersistedCharacter: proto._reconcilePersistedCharacter,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
 		_pAcknowledgeItemTransfers: proto._pAcknowledgeItemTransfers,
-	};
+	});
 	return host;
 }
 

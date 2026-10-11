@@ -51,17 +51,25 @@ class CharacterSheetExport {
 		const data = CharacterSheetExport._getCharacterImportData(rawData);
 		let importedState = this._state;
 
-		if (replaceExisting) {
+		const isRetryingImport = this._pendingImportedCharacterId
+			&& this._pendingImportedCharacterId === this._page._currentCharacterId;
+		if (replaceExisting || isRetryingImport) {
+			this._page._beginCharacterNavigation?.();
 			if (this._state.fromJSON(data) === false) throw new Error("Unable to load character data");
+			if (this._page._currentCharacterId) this._state.setId(this._page._currentCharacterId);
 		} else {
 			const StateClass = this._state.constructor;
 			importedState = new StateClass();
 			if (importedState.fromJSON(data) === false) throw new Error("Unable to load character data");
-			await this._page.addCharacter(importedState);
+			const added = await this._page.addCharacter(importedState);
+			if (added === false) return null;
+			if (added === true && this._page._currentCharacterId !== importedState.getId()) return importedState;
+			this._pendingImportedCharacterId = this._page._currentCharacterId;
 		}
 
 		this._page.renderCharacter();
-		await this._page.saveCharacter();
+		if (await this._page.saveCharacter() === false) return null;
+		this._pendingImportedCharacterId = null;
 		return importedState;
 	}
 
@@ -204,6 +212,7 @@ class CharacterSheetExport {
 	}
 
 	async _showImportDialog () {
+		this._pendingImportedCharacterId = null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📥 Import Character",
 			isMinHeight0: true,
@@ -282,7 +291,7 @@ class CharacterSheetExport {
 
 				try {
 					const data = CharacterSheetExport._getCharacterImportData(JSON.parse(jsonStr));
-					await this._importCharacterData(data, {replaceExisting});
+					if (!await this._importCharacterData(data, {replaceExisting})) return;
 
 					doClose(true);
 					JqueryUtil.doToast({type: "success", content: `Imported ${data.name || "character"} successfully!`});
@@ -969,7 +978,7 @@ class CharacterSheetExport {
 
 	async _saveCharacter () {
 		try {
-			await this._page.saveCharacter();
+			if (await this._page.saveCharacter() === false) return;
 			JqueryUtil.doToast({type: "success", content: "Character saved!"});
 		} catch (err) {
 			// eslint-disable-next-line no-console

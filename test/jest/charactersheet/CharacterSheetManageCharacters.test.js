@@ -3,6 +3,19 @@ import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+let CharacterSheetPage;
+let restoreBackend = () => {};
+
+beforeAll(async () => {
+	globalThis.window = {
+		addEventListener: () => {},
+		location: new URL("http://test/charactersheet.html"),
+		history: {replaceState: () => {}},
+	};
+	globalThis.document = {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
+	({CharacterSheetPage} = await import("../../../js/charactersheet/charactersheet.js"));
+});
+afterEach(() => restoreBackend());
 
 // Mock escapeQuotes if not present
 if (!String.prototype.escapeQuotes) {
@@ -11,16 +24,10 @@ if (!String.prototype.escapeQuotes) {
 	};
 }
 
-/**
- * Creates a minimal mock of CharacterSheetPage with just the methods
- * needed to test _onManageCharacters().
- */
 function createMockController (characters = []) {
 	const storedCharacters = [...characters];
-
-	// Mock StorageUtil with pGet/pSet (used by _onManageCharacters)
-	globalThis.StorageUtil = {
-		...globalThis.StorageUtil,
+	const sync = new Map();
+	const replacements = {
 		pGet: jest.fn(async (key) => {
 			if (key === "charsheet-characters") return [...storedCharacters];
 			return null;
@@ -33,114 +40,31 @@ function createMockController (characters = []) {
 		}),
 		pGetForPage: jest.fn(async () => null),
 		pSetForPage: jest.fn(async () => {}),
+		syncGet: key => sync.get(key) ?? null,
+		syncSet: (key, value) => sync.set(key, value),
+		syncRemove: key => sync.delete(key),
+	};
+	const methods = Object.keys(replacements);
+	const originals = methods.map(method => StorageUtil[method]);
+	Object.assign(StorageUtil, replacements);
+	const originalToast = JqueryUtil.doToast;
+	const inputMethods = ["pGetUserMultipleChoice", "pGetUserBoolean", "pGetUserString"];
+	const originalInputs = inputMethods.map(method => InputUiUtil[method]);
+	JqueryUtil.doToast = jest.fn();
+	inputMethods.forEach(method => { InputUiUtil[method] = jest.fn(async () => null); });
+	restoreBackend = () => {
+		methods.forEach((method, i) => { StorageUtil[method] = originals[i]; });
+		inputMethods.forEach((method, i) => { InputUiUtil[method] = originalInputs[i]; });
+		JqueryUtil.doToast = originalToast;
 	};
 
-	// Mock JqueryUtil.doToast
-	globalThis.JqueryUtil = {
-		doToast: jest.fn(),
-	};
-
-	// Mock InputUiUtil (overridden per test)
-	globalThis.InputUiUtil = {
-		pGetUserMultipleChoice: jest.fn(async () => null),
-		pGetUserBoolean: jest.fn(async () => false),
-		pGetUserString: jest.fn(async () => null),
-	};
-
-	const state = new CharacterSheetState();
-
-	// Build a lightweight controller with mock methods for dependencies
-	const controller = {
-		_state: state,
-		_currentCharacterId: characters[0]?.id || null,
-		_selCharacter: {value: ""},
-		_createNewCharacter: jest.fn(() => {
-			controller._currentCharacterId = null;
-		}),
-		_pLoadCharacters: jest.fn(async () => {}),
-		_saveCurrentCharacter: jest.fn(async () => {}),
-	};
-
-	// Import the actual method — we do this by reading the source pattern from charactersheet.js.
-	// Since the module is DOM-dependent, we re-implement the method binding via a direct copy.
-	// The method is async and uses: StorageUtil, InputUiUtil, JqueryUtil, this._currentCharacterId,
-	// this._createNewCharacter, this._pLoadCharacters, this._selCharacter
-	controller._onManageCharacters = async function () {
-		const characters = await StorageUtil.pGet("charsheet-characters") || [];
-
-		if (characters.length === 0) {
-			JqueryUtil.doToast({type: "warning", content: "No saved characters to manage."});
-			return;
-		}
-
-		const fnGetLabel = (char) => {
-			const name = char.name || "Unnamed Character";
-			const totalLevel = char.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 0;
-			const classNames = char.classes?.map(c => c.name).join("/") || "";
-			const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
-			return classInfo ? `${name} — ${classInfo}` : name;
-		};
-
-		const selected = await InputUiUtil.pGetUserMultipleChoice({
-			title: "Bulk Delete Characters",
-			values: characters,
-			fnDisplay: (char) => fnGetLabel(char),
-			isResolveItems: true,
-			min: 1,
-			max: characters.length,
-			htmlDescription: `<div class="ve-flex-col"><p><b class="veapp__msg-warning">Select characters to permanently delete.</b></p><p>This action <b>cannot be undone</b>.</p></div>`,
-		});
-
-		if (!selected?.length) return;
-
-		const selectedNames = selected.map(c => `<li>${fnGetLabel(c).escapeQuotes()}</li>`).join("");
-		const countText = selected.length === 1 ? "1 character" : `${selected.length} characters`;
-
-		const isConfirmed = await InputUiUtil.pGetUserBoolean({
-			title: "Confirm Bulk Delete",
-			htmlDescription: `<div class="ve-flex-col">
-				<div class="alert alert-danger mb-3">
-					<b>You are about to permanently delete ${countText}:</b>
-					<ul class="mt-2 mb-0">${selectedNames}</ul>
-				</div>
-				<p><b>This action cannot be undone.</b></p>
-			</div>`,
-			textYes: `Delete ${countText}`,
-			textNo: "Cancel",
-		});
-
-		if (!isConfirmed) return;
-
-		if (selected.length >= 3) {
-			const typed = await InputUiUtil.pGetUserString({
-				title: "Final Confirmation",
-				htmlDescription: `<div class="ve-flex-col">
-					<div class="alert alert-danger mb-2">
-						<b>You are about to permanently delete ${countText}.</b>
-					</div>
-					<p>Type <b>DELETE</b> to confirm.</p>
-				</div>`,
-				fnIsValid: (val) => val?.trim() === "DELETE",
-			});
-
-			if (typed?.trim() !== "DELETE") return;
-		}
-
-		const selectedIds = new Set(selected.map(c => c.id));
-		const remaining = characters.filter(c => !selectedIds.has(c.id));
-		await StorageUtil.pSet("charsheet-characters", remaining);
-
-		if (this._currentCharacterId && selectedIds.has(this._currentCharacterId)) {
-			this._createNewCharacter();
-		}
-
-		await this._pLoadCharacters();
-		if (!this._currentCharacterId || selectedIds.has(this._currentCharacterId)) {
-			this._selCharacter.value = "";
-		}
-
-		JqueryUtil.doToast({type: "success", content: `Deleted ${countText}.`});
-	};
+	const controller = new CharacterSheetPage();
+	controller._state = new CharacterSheetState();
+	controller._currentCharacterId = characters[0]?.id || null;
+	controller._selCharacter = {value: "", innerHTML: "", insertAdjacentHTML: jest.fn()};
+	controller._renderCharacter = jest.fn();
+	jest.spyOn(controller, "_createNewCharacter");
+	jest.spyOn(controller, "_pLoadCharacters");
 
 	return {controller, storedCharacters};
 }
@@ -309,7 +233,7 @@ describe("CharacterSheetManageCharacters", () => {
 
 			expect(controller._createNewCharacter).toHaveBeenCalled();
 			expect(storedCharacters).toHaveLength(0);
-			expect(controller._pLoadCharacters).toHaveBeenCalled();
+			expect(controller._selCharacter.value).toBe("");
 		});
 
 		it("should pass correct labels with class info to the selection modal", async () => {
