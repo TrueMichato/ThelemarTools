@@ -66,6 +66,30 @@ These prefixes are used consistently and should be followed:
 | `{feature}Count` | `number` | `experimentalElixirCount: 2`, `metamagicCount: 2` |
 | `{feature}Die` | `string` | `bardicInspirationDie: "d8"`, `superioritybDie: "d10"` |
 
+## Live Initiative Grant Ownership
+
+`LIVE_INITIATIVE_GRANTS` identifies the exact catalog owners of Temporal
+Awareness (INT) and Rakish Audacity (CHA). `_getFeatureInitiativeBonuses()` is their
+single live producer: never also register their matching ability-derived
+initiative effect through `_processFeatureModifiers()` or stored registry effects.
+Keep unrelated effects and same-name features from other sources.
+
+Only generated signatures with the exact feature owner can be removed from old
+saves. Full/abbreviated ability names are equivalent for that signature, not proof
+of ownership themselves. Retain ambiguous numeric/unowned rows and disclose the
+remaining ambiguity; never infer ownership from a matching name or amount.
+`customModifiers.initiativeAdjustment` separately retains the scalar remainder
+while named effects are rebuilt. Other custom channels do not use this ledger.
+
+Test the actual catalog acquisition boundary, not a class-only fixture. Require
+at least two saved reload/reconciliation cycles, positive/zero/negative ability
+changes, manual same-name rows and scalar remainders, removal/Respec/down-level,
+and canonical/effective/actual-roll agreement under exhaustion. Lean saves without
+catalog features retain their source-qualified class-derived fallback.
+`CharacterSheetInitiativeFeatureOwnership.test.js` and the dedicated browser
+regression are the focused coverage; the TGTT Chronurgy matrix's skipped
+minimum-only probe is not evidence against duplicate bonuses.
+
 ## EFA/TCE Artificer Source Separation
 
 Artificer rules are source-qualified. Treat an `Artificer|EFA` class entry as a

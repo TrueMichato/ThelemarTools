@@ -5841,6 +5841,7 @@ class CharacterSheetState {
 			customModifiers: {
 				ac: 0,
 				initiative: 0,
+				initiativeAdjustment: 0,
 				speed: {walk: 0, fly: 0, swim: 0, climb: 0, burrow: 0}, // Movement type bonuses
 				savingThrows: {}, // {str: 2, dex: 1, ...}
 				skills: {}, // {athletics: 2, stealth: -1, ...}
@@ -6169,6 +6170,16 @@ class CharacterSheetState {
 		// Ensure nested customModifiers objects exist
 		this._data.customModifiers.speed = {...this._getDefaultState().customModifiers.speed, ...this._data.customModifiers.speed};
 		this._data.customModifiers.senses = {...this._getDefaultState().customModifiers.senses, ...this._data.customModifiers.senses};
+		if (!Object.hasOwn(data.customModifiers || {}, "initiativeAdjustment")) {
+			// Retain the old scalar remainder, without guessing a historical feature owner.
+			this._data.customModifiers.initiativeAdjustment = (this._data.customModifiers.initiative || 0)
+				- this._getNamedInitiativeTotal();
+			if (this._data.customModifiers.initiativeAdjustment
+				&& (this._data.namedModifiers || []).some(mod => this._isGeneratedLiveInitiativeModifier(mod))) {
+				// eslint-disable-next-line no-console
+				console.warn(`[CharSheet State] Preserving legacy initiative remainder ${this._data.customModifiers.initiativeAdjustment}: a user adjustment cannot be distinguished from a stale ability cache. Review the Custom Modifier contribution if needed.`);
+			}
+		}
 		this._migrateAdventurersAtlasState();
 		this._migrateCartographerMappingMagicState();
 
@@ -19882,6 +19893,84 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Initiative
+	static LIVE_INITIATIVE_GRANTS = Object.freeze([
+		Object.freeze({
+			ownerUid: "Temporal Awareness|Wizard|PHB|Chronurgy|EGW|2|EGW",
+			ability: "int",
+			abilityName: "intelligence",
+			flag: "hasTemporalAwareness",
+			bonus: "temporalAwarenessBonus",
+			subclassNames: Object.freeze(["Chronurgy", "Chronurgy Magic"]),
+		}),
+		Object.freeze({
+			ownerUid: "Rakish Audacity|Rogue|PHB|Swashbuckler|XGE|3|XGE",
+			ability: "cha",
+			abilityName: "charisma",
+			flag: "hasRakishAudacity",
+			bonus: "initiativeBonus",
+			subclassNames: Object.freeze(["Swashbuckler"]),
+		}),
+	]);
+
+	_getLiveInitiativeGrant (feature) {
+		const uid = CharacterSheetState.getSourceAwareFeatureUid(feature).toLowerCase();
+		return CharacterSheetState.LIVE_INITIATIVE_GRANTS.find(grant => grant.ownerUid.toLowerCase() === uid);
+	}
+
+	_isLiveInitiativeCopy (feature, effect) {
+		const grant = this._getLiveInitiativeGrant(feature);
+		if (!grant || !effect || effect.conditional || effect.condition
+			|| effect.perLevel || effect.proficiencyBonus
+			|| effect.advantage || effect.disadvantage || effect.bonusDie) return false;
+		if (effect.type === "initiativeBonus") return effect.value === grant.ability;
+		return effect.type === "initiative"
+			&& effect.value === 0
+			&& [grant.ability, grant.abilityName].includes(String(effect.abilityMod || "").toLowerCase());
+	}
+
+	_isGeneratedLiveInitiativeModifier (mod) {
+		if (mod.type !== "initiative" || (mod.sourceType && mod.sourceType !== "classFeature")) return false;
+		const owner = mod.sourceFeatureId && this._data.features?.find(feature => feature.id === mod.sourceFeatureId);
+		return !!owner && mod.name === owner.name && mod.note === `From ${owner.name}`
+			&& this._isLiveInitiativeCopy(owner, mod);
+	}
+
+	_isAmbiguousLiveInitiativeModifier (mod) {
+		if (mod.type !== "initiative" || this._isGeneratedLiveInitiativeModifier(mod)) return false;
+		const owner = mod.sourceFeatureId && this._data.features?.find(feature => feature.id === mod.sourceFeatureId);
+		return !!(owner && this._getLiveInitiativeGrant(owner))
+			|| (mod.sourceType === "classFeature"
+				&& CharacterSheetState.LIVE_INITIATIVE_GRANTS.some(grant => grant.ownerUid.split("|")[0] === mod.name));
+	}
+
+	_hasLiveInitiativeGrant (grant) {
+		const [, className, classSource, , subclassSource, level] = grant.ownerUid.split("|");
+		const matchesSubclass = feature => feature.className === className
+			&& feature.classSource === classSource
+			&& feature.subclassSource === subclassSource
+			&& grant.subclassNames.includes(feature.subclassShortName || feature.subclassName);
+		const stored = (this._data.features || []).filter(matchesSubclass);
+		// Lean saves can omit catalog features. Once acquired content exists, removal
+		// of this exact feature must revoke its grant rather than fall back to its name.
+		if (stored.length && !stored.some(feature => this._getLiveInitiativeGrant(feature) === grant)) return false;
+		return (this._data.classes || []).some(cls => {
+			if (cls.name !== className || !cls.subclass) return false;
+			if (!grant.subclassNames.includes(cls.subclass.shortName || cls.subclass.name)) return false;
+			const isCanonical = cls.source === classSource && cls.subclass.source === subclassSource;
+			const is2024Adapter = cls.source === "XPHB" && cls.subclass.source === subclassSource;
+			const isTgttAdapter = cls.source === "TGTT" && cls.subclass.source === "TGTT-2014";
+			return (isCanonical || is2024Adapter || isTgttAdapter)
+				&& cls.level >= (is2024Adapter ? 3 : Number(level));
+		});
+	}
+
+	_getNamedInitiativeTotal () {
+		return (this._data.namedModifiers || []).reduce((total, mod) => {
+			if (!mod.enabled || !["initiative", "check:all", "d20:all"].includes(mod.type)) return total;
+			return total + this._getNamedModifierEffectiveValue(mod);
+		}, 0);
+	}
+
 	/**
 	 * Aggregate passive initiative bonuses derived from feature calculations.
 	 * Live-derived (not frozen via auto-effects/customModifiers) so ability
@@ -19893,19 +19982,15 @@ class CharacterSheetState {
 		const calc = this.getFeatureCalculations();
 		const bonuses = [];
 
-		// Chronurgy Wizard L2 — Temporal Awareness: +INT mod to initiative
-		if (calc.hasTemporalAwareness && calc.temporalAwarenessBonus) {
-			bonuses.push({name: "Temporal Awareness", value: calc.temporalAwarenessBonus});
+		for (const grant of CharacterSheetState.LIVE_INITIATIVE_GRANTS) {
+			if (calc[grant.flag] && this._hasLiveInitiativeGrant(grant)) {
+				bonuses.push({name: grant.ownerUid.split("|")[0], value: calc[grant.bonus]});
+			}
 		}
 
 		// Gloom Stalker Ranger L3 — Dread Ambusher: +WIS mod to initiative
 		if (calc.hasDreadAmbusher && calc.dreadAmbusherInitiativeBonus) {
 			bonuses.push({name: "Dread Ambusher", value: calc.dreadAmbusherInitiativeBonus});
-		}
-
-		// Swashbuckler Rogue L3 — Rakish Audacity: +CHA mod to initiative
-		if (calc.hasRakishAudacity && calc.initiativeBonus) {
-			bonuses.push({name: "Rakish Audacity", value: calc.initiativeBonus});
 		}
 
 		// NOTE: XPHB Champion Fighter L3 — Remarkable Athlete grants ADVANTAGE on
@@ -37083,6 +37168,7 @@ class CharacterSheetState {
 				// Try to get effects from the registry by feature name
 				const registryEffects = FeatureEffectRegistry.getStoredFeatureEffects(feature)
 					.filter(effect => this._isFeatureEffectOwnerActive(feature, effect.ownerUid))
+					.filter(effect => !this._isLiveInitiativeCopy(feature, effect))
 					.map(({ownerUid, ...effect}) => effect);
 				if (registryEffects.length > 0) {
 					// Effects that opt in with `__editionAware` need the FEATURE's own source
@@ -37108,7 +37194,8 @@ class CharacterSheetState {
 
 				// Metadata-first fallback: allow feature/effect definitions from source data
 				// without requiring explicit registry entries.
-				const metadataEffects = this._getMetadataFeatureEffects(feature);
+				const metadataEffects = this._getMetadataFeatureEffects(feature)
+					.filter(effect => !this._isLiveInitiativeCopy(feature, effect));
 				if (metadataEffects.length > 0) {
 					effects.push(...metadataEffects);
 					processedFeatures.add(feature.name.toLowerCase());
@@ -39514,8 +39601,18 @@ class CharacterSheetState {
 		// an active feature; preserve them for Respec to warn about rather than
 		// silently losing their effect when class features are recalculated.
 		this._data.namedModifiers = this._data.namedModifiers.filter(
-			m => m.sourceType !== "classFeature" || this._isUnattributedTgttBarbarianSpecialtySkillBonus(m),
+			m => !this._isGeneratedLiveInitiativeModifier(m)
+				&& (m.sourceType !== "classFeature"
+					|| this._isUnattributedTgttBarbarianSpecialtySkillBonus(m)
+					|| this._isAmbiguousLiveInitiativeModifier(m)),
 		);
+		for (const mod of this._data.namedModifiers.filter(mod => this._isAmbiguousLiveInitiativeModifier(mod))) {
+			if (this._ambiguousInitiativeWarnings?.has(mod.id)) continue;
+			this._ambiguousInitiativeWarnings ||= new Set();
+			this._ambiguousInitiativeWarnings.add(mod.id);
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet State] Retaining initiative modifier "${mod.name}" (${mod.id}): its historical generated amount cannot be proven. Review it in Modifiers if initiative is still inflated.`);
+		}
 		this._recalculateCustomModifiers();
 
 		// Clear special property arrays
@@ -62633,6 +62730,7 @@ class CharacterSheetState {
 			|| feature.featureType === "Race" || feature.featureType === "Racial";
 
 		modifiers.forEach(mod => {
+			if (this._isLiveInitiativeCopy(feature, mod)) return;
 			// ===================
 			// Handle Proficiency Grants
 			// ===================
@@ -63347,7 +63445,9 @@ class CharacterSheetState {
 			}
 			// Remove associated modifiers by owner; legacy callers may also clear orphaned name matches.
 			this.removeModifiersByFeature(feature.id);
-			if (!preserveUnattributedModifiers && !hasAnotherFeatureWithName) this.removeModifiersByName(feature.name);
+			if (!preserveUnattributedModifiers && !hasAnotherFeatureWithName) {
+				this.removeModifiersByName(feature.name, {preserveInitiative: !!this._getLiveInitiativeGrant(feature)});
+			}
 			for (const state of [...(this._data.activeStates || [])]) {
 				if (hasFeatureId && state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
 			}
@@ -70685,10 +70785,10 @@ class CharacterSheetState {
 	 * Remove all named modifiers by source name (catches orphaned modifiers without sourceFeatureId)
 	 * @param {string} name - The modifier name (typically the feature/specialty name)
 	 */
-	removeModifiersByName (name) {
+	removeModifiersByName (name, {preserveInitiative = false} = {}) {
 		if (!name) return;
 		const hadModifiers = this._data.namedModifiers.some(m => m.name === name);
-		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.name !== name);
+		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.name !== name || (preserveInitiative && m.type === "initiative"));
 		if (hadModifiers) {
 			this._recalculateCustomModifiers();
 		}
@@ -70916,7 +71016,7 @@ class CharacterSheetState {
 		// Reset totals
 		const cm = this._data.customModifiers;
 		cm.ac = 0;
-		cm.initiative = 0;
+		cm.initiative = cm.initiativeAdjustment || 0;
 		cm.speed = {walk: 0, fly: 0, swim: 0, climb: 0, burrow: 0};
 		cm.attackBonus = 0;
 		cm.damageBonus = 0;
@@ -71190,7 +71290,10 @@ class CharacterSheetState {
 	 * @param {number} value - The value to set
 	 */
 	setCustomModifier (type, value) {
-		if (type in this._data.customModifiers) {
+		if (type === "initiative") {
+			this._data.customModifiers.initiativeAdjustment = value - this._getNamedInitiativeTotal();
+			this._data.customModifiers.initiative = value;
+		} else if (type in this._data.customModifiers) {
 			this._data.customModifiers[type] = value;
 		} else if (type.startsWith("save:")) {
 			const abl = type.split(":")[1];
