@@ -1083,6 +1083,257 @@ describe("A4 reconnect authorized-context barrier on real consumers", () => {
 	});
 });
 
+describe("A4 late fenced-evidence recovery handoff", () => {
+	it("hands off a stale queued receipt after the save settles and context installation has no canonical demand", async () => {
+		const h = await pMakeAuthorityHarness();
+		h.host._hubAuthoritativeReconcileRequest = null;
+		h.host._onHubCampaignContextChanged = CharacterSheetPage.prototype._onHubCampaignContextChanged.bind(h.host);
+		const {release, save} = await pBlockSave(h);
+		const deliveryStarted = makeDeferred();
+		const deliveryRelease = makeDeferred();
+		const priorDelivery = h.repository.pEnqueueRealtimeDelivery({
+			characterId: "character-1",
+			fnDeliver: async () => { deliveryStarted.resolve(); await deliveryRelease.promise; },
+		});
+		const event = makeMultiEvent();
+		const http = h.deliverHttp(event);
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		release.resolve();
+		await save;
+		await deliveryStarted.promise;
+		h.api.state.character.operationWatermark = 20;
+		expect(h.repository.getPendingRecovery("character-1")).toBeNull();
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		h.api.pListEventPage.mockClear();
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 20, hasMore: false}});
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		expect(h.host._isHubOperationAuthorityReady()).toBe(true);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		deliveryRelease.resolve();
+		await priorDelivery;
+		expect(await http).toBe(false);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pListEventPage).toHaveBeenCalledTimes(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.repository.isSaveBlocked("character-1")).toBe(false);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		h.api.pPatchCharacter.mockImplementationOnce(async input => {
+			h.api.state.character = {...makeCharacterDocument(applyJsonPatch(h.api.state.character.data, input.patches), 4), operationWatermark: 20};
+			return {character: h.api.state.character};
+		});
+		h.state.setName("Save B after late evidence");
+		await expect(h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}})).resolves.toMatchObject({hp: {current: 9}});
+		expect(h.api.pPatchCharacter).toHaveBeenCalledTimes(2);
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["context-before-delivery", "context-after-delivery"])("automatically clears semantic save blocks and permits a future save with %s", async order => {
+		const h = await pMakeAuthorityHarness();
+		h.host._onHubCampaignContextChanged = CharacterSheetPage.prototype._onHubCampaignContextChanged.bind(h.host);
+		const started = makeDeferred();
+		const release = makeDeferred();
+		const event = makeMultiEvent();
+		h.api.pPatchCharacter.mockImplementationOnce(async input => {
+			started.resolve();
+			await release.promise;
+			const saved = {...makeCharacterDocument(applyJsonPatch(h.api.state.character.data, input.patches), 2), operationWatermark: 0};
+			h.api.state.character = {...makeCharacterDocument({...saved.data, hp: {...saved.data.hp, current: 9}}, 3), operationWatermark: 20};
+			return {character: saved};
+		});
+		h.state.setName("Save A");
+		const save = h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}});
+		await started.promise;
+		h.api.pListEventPage.mockClear();
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 20, hasMore: false}});
+		const http = h.deliverHttp(event);
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		if (order === "context-before-delivery") {
+			h.contextGate.resolve(h.context);
+			await pFlush();
+			expect(h.host._hubContext).toBe(h.context);
+			expect(h.host._isHubOperationAuthorityReady()).toBe(true);
+			expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		}
+		release.resolve();
+		await save;
+		expect(await http).toBe(false);
+		if (order === "context-after-delivery") {
+			await pFlush();
+			expect(h.repository.hasPendingResync("character-1")).toBe(true);
+			expect(h.api.pListEventPage).not.toHaveBeenCalled();
+			expect(h.notice).not.toHaveBeenCalled();
+			h.contextGate.resolve(h.context);
+		}
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.repository._accepted.get("character-1").revision).toBe(3);
+		expect(h.api.pPatchCharacter).toHaveBeenCalledTimes(1);
+		h.api.pPatchCharacter.mockImplementationOnce(async input => {
+			h.api.state.character = {...makeCharacterDocument(applyJsonPatch(h.api.state.character.data, input.patches), 4), operationWatermark: 20};
+			return {character: h.api.state.character};
+		});
+		h.state.setName("Save B after recovered effect");
+		await expect(h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}})).resolves.toMatchObject({id: "character-1", hp: {current: 9}});
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.repository._saveBlocks.has("character-1")).toBe(false);
+		expect(h.api.pListEventPage).toHaveBeenCalledTimes(1);
+		expect(h.api.pPatchCharacter).toHaveBeenCalledTimes(2);
+		expect(h.api.state.character.data.name).toBe("Save B after recovered effect");
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each([false, true])("coalesces repeated stale HTTP arrivals (websocket copies: %s) into one mixed-leg history read and clears the save block", async withSocketCopies => {
+		const h = await pMakeAuthorityHarness();
+		h.host._onHubCampaignContextChanged = CharacterSheetPage.prototype._onHubCampaignContextChanged.bind(h.host);
+		const events = [
+			makeMultiEvent({revision: 3, legId: "first"}),
+			makeMultiEvent({revision: 4, sequence: 21, legId: "second"}),
+			makeMultiEvent({revision: null, sequence: 22, legId: "noop"}),
+		];
+		events[2].payload.changed = false;
+		events[2].payload.resultingCharacterRevision = null;
+		const started = makeDeferred();
+		const release = makeDeferred();
+		h.api.pPatchCharacter.mockImplementationOnce(async input => {
+			started.resolve();
+			await release.promise;
+			const saved = {...makeCharacterDocument(applyJsonPatch(h.api.state.character.data, input.patches), 2), operationWatermark: 0};
+			h.api.state.character = {...makeCharacterDocument({...saved.data, hp: {...saved.data.hp, current: 13}}, 4), operationWatermark: 21};
+			return {character: saved};
+		});
+		h.state.setName("Save A");
+		const save = h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}});
+		await started.promise;
+		h.api.pListEventPage.mockClear();
+		h.api.pListEventPage.mockResolvedValue({events, replay: {scannedThroughSequence: 22, hasMore: false}});
+		const http = events.flatMap(event => [h.deliverHttp(event), h.deliverHttp(event)]);
+		if (withSocketCopies) for (const event of events) h.clients[0].emit("event", event);
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		release.resolve();
+		await save;
+		expect(await Promise.all(http)).toEqual([false, false, false, false, false, false]);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pListEventPage).toHaveBeenCalledTimes(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.repository._saveBlocks.has("character-1")).toBe(false);
+		expect(h.repository._accepted.get("character-1").revision).toBe(4);
+		expect(h.state.toJson().hp.current).toBe(13);
+		expect(h.state.toJson().name).toBe("Save A");
+		expect(h.adopted.mock.calls.map(([character]) => character.hp.current)).toEqual(withSocketCopies ? [9, 13] : [13]);
+		expect(h.repository._getAppliedIds("character-1").operationLegs.has("review-operation/target/noop")).toBe(true);
+		expect(h.repository._revisionlessCoverage.get(h.repository._getRevisionlessCoverageKey("character-1")).has("review-operation/target/noop")).toBe(true);
+		expect(h.api.pPatchCharacter).toHaveBeenCalledTimes(1);
+		h.api.pPatchCharacter.mockImplementationOnce(async input => {
+			h.api.state.character = {...makeCharacterDocument(applyJsonPatch(h.api.state.character.data, input.patches), 5), operationWatermark: 21};
+			return {character: h.api.state.character};
+		});
+		h.state.setName("Save B");
+		await expect(h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}})).resolves.toMatchObject({hp: {current: 13}});
+		expect(h.api.pPatchCharacter).toHaveBeenCalledTimes(2);
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["archive", "access-loss", "account", "campaign", "access", "repository", "character"])("does not hand off queued old HTTP evidence after %s scope loss", async ending => {
+		const h = await pMakeAuthorityHarness();
+		h.host._hubActiveCampaign.accountId = "account-1";
+		h.host._onHubCampaignContextChanged = CharacterSheetPage.prototype._onHubCampaignContextChanged.bind(h.host);
+		const {release, save} = await pBlockSave(h);
+		const http = h.deliverHttp(makeMultiEvent());
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		h.api.pListEventPage.mockClear();
+		if (ending === "archive") h.clients[0].emit("event", makeAuthorityEvent("campaign.archived"));
+		if (ending === "access-loss") h.clients[0].emit("state", {state: "access_lost"});
+		if (ending === "account") h.host._hubActiveCampaign.accountId = "replacement-account";
+		if (ending === "campaign") h.host._hubCampaignId = "replacement-campaign";
+		if (ending === "access") h.host._currentCharacterAccess = "dm_readonly";
+		if (ending === "repository") h.host._characterRepository = {hasPendingResync: () => false};
+		if (ending === "character") {
+			h.host._endCurrentHubCharacterAccess({characterId: "character-1"});
+			h.host._currentCharacterId = "replacement-character";
+		}
+		release.resolve();
+		await save;
+		expect(await http).toBe(false);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pListEventPage).not.toHaveBeenCalled();
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.focus).not.toHaveBeenCalled();
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("fences an already-scheduled recovery microtask after terminal teardown", async () => {
+		const h = await pMakeAuthorityHarness();
+		h.repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: "queued-event", sequence: 20, ...makeMultiEvent().payload,
+			}});
+		expect(h.host._scheduleHubRealtimeResync({characterId: "character-1"})).toBe(true);
+		h.host._endCurrentHubCharacterAccess({characterId: "character-1"});
+		await pFlush();
+		expect(h.api.pListEventPage).not.toHaveBeenCalled();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.host._currentCharacterId).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("does not let a stale scheduled scope suppress new authorized recovery after reopen", async () => {
+		const h = await pMakeAuthorityHarness();
+		h.host._pRunHubRealtimeResync = jest.fn();
+		const oldGeneration = h.host._characterLoadGeneration;
+		h.host._scheduleHubRealtimeResync({characterId: "character-1"});
+		h.host._concealHubPrivateCharacter = CharacterSheetPage.prototype._concealHubPrivateCharacter.bind(h.host);
+		h.host._endCurrentHubCharacterAccess({characterId: "character-1"});
+		expect(h.host._characterLoadGeneration).toBe(oldGeneration + 1);
+		Object.assign(h.host, {
+			_currentCharacterId: "character-1",
+			_currentCharacterAccess: "owner",
+			_isHubCharacter: true,
+			_hubContext: h.context,
+			_isHubContextUnavailable: false,
+			_isHubContextRevalidationRequired: false,
+			_isHubOperationAuthorityPending: false,
+			_hubRulesRefreshBlocked: false,
+		});
+		h.host._scheduleHubRealtimeResync({characterId: "character-1"});
+		await pFlush();
+		expect(h.host._pRunHubRealtimeResync).toHaveBeenCalledTimes(1);
+		expect(h.host._pRunHubRealtimeResync).toHaveBeenCalledWith({characterId: "character-1"});
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+});
+
 describe("A4 immediate authority invalidation on real queued consumers", () => {
 	it.each(["campaign.archived", "rules.activated", "character.projection.invalidated"].flatMap(type => ["http-first", "event-first"].map(order => [type, order])))("fences %s before %s delivery behind save A and recovers only under fresh authority", async (type, order) => {
 		const h = await pMakeAuthorityHarness();

@@ -122,6 +122,10 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Reconnect tokens are not authorization: canonical/HTTP/WS/resync delivery and
 │   recovery reads wait for installed context and overlays, not transport "live".
 │   Retain exact coverage and unfinished resync on ordinary transport loss.
+│   Fenced evidence arriving after context installation automatically schedules
+│   same-scope semantic recovery. Coalesce the latest scheduled scope and recheck
+│   readiness; an old microtask cannot suppress new authorized demand. Canonical
+│   catch-up waits for semantic pending/save-block clearance, not just matching HP.
 │   Durable/no-op staging and live adoption roll back before coverage can commit.
 │   Document adoption still uses only the repository queue; scoped authoritative
 │   refresh restores consent controls, and suspended effects cannot publish notices.

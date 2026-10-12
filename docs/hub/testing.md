@@ -84,6 +84,15 @@ actual-call-site mutations remove the installed-context barrier, allow early rec
 unfinished semantic recovery on reconnect; all must fail. `CharacterSheetRepositorySeam.test.js` captures the
 real canonical request shape and binds the real scope/readiness helpers for its terminal-concealment regression.
 Run both affected-regression selector lists in `.github/workflows/hub.yml`, not just the focused A4 subset.
+Late fenced-evidence regressions install authorized context and overlays either before or after a queued HTTP
+receipt drains behind a real save. Newly retained exact evidence hands off to the existing ordered semantic
+resync automatically; a visually current canonical document is not proof that recovery completed. Assert one
+authorized history read, cleared pending evidence/save block, and a successful subsequent real save without
+double application or an extra effect PATCH. Repeated HTTP copies, WebSocket-first delivery, distinct changed
+legs and revisionless no-ops exercise coalescing. Canonical catch-up waits behind pending semantic recovery so
+it cannot preempt exact-leg reconciliation. Terminal/character/account/campaign/access/repository loss must
+not hand off old work; a stale scheduled scope must not suppress a new authorized request. Remove the actual
+fenced-status scheduling call to prove the liveness regression fails, then restore it.
 The replay floor includes every existing ordinary/conflict/durable track. An unknown sequence cannot be silently
 filtered out in favor of a newer live watermark: bounded authorized replay starts at zero so an older unseen changed
 leg is not excluded. A separate exclusive-cursor regression and actual history-floor mutation cover this recovery

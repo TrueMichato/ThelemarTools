@@ -83,6 +83,22 @@ const _advanceCharacterDocumentGeneration = page => {
 	page._characterDocumentGeneration = (page._characterDocumentGeneration || 0) + 1;
 	CharacterSheetModal.closeDocumentInvalidatedCharacterScopePortals({sheet: page});
 };
+const _getHubOperationScope = (page, characterId = page._currentCharacterId) => ({
+	characterId,
+	generation: page._characterLoadGeneration,
+	campaignId: page._hubCampaignId,
+	accountId: page._hubActiveCampaign?.accountId ?? null,
+	accessMode: page._currentCharacterAccess,
+	repository: page._characterRepository,
+});
+const _isHubOperationScopeCurrent = (page, scope) => (
+	scope.characterId === page._currentCharacterId
+	&& scope.generation === page._characterLoadGeneration
+	&& scope.campaignId === page._hubCampaignId
+	&& scope.accountId === (page._hubActiveCampaign?.accountId ?? null)
+	&& scope.accessMode === page._currentCharacterAccess
+	&& scope.repository === page._characterRepository
+);
 
 /**
  * Character Sheet - Main Controller
@@ -1096,10 +1112,12 @@ class CharacterSheetPage {
 
 	_onHubSemanticOperation (event) {
 		if (!this._currentCharacterId) return false;
+		const scope = _getHubOperationScope(this);
 		const authorityGeneration = event.authorityGeneration ?? (this._hubOperationAuthorityGeneration ?? 0);
 		const contextGeneration = this._hubContextGeneration;
 		const realtimeGeneration = this._hubRealtimeGeneration;
 		const fnIsCurrent = () => !event.isAuthorityStale && this._isHubOperationAuthorityReady()
+			&& _isHubOperationScopeCurrent(this, scope)
 			&& contextGeneration === this._hubContextGeneration && realtimeGeneration === this._hubRealtimeGeneration
 			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0);
 		if (fnIsCurrent() && !event.isAuthoritativeResult) this._peerTargeting?.onRealtimeOperation(event);
@@ -1133,6 +1151,9 @@ class CharacterSheetPage {
 
 		switch (result?.status) {
 			case "fenced":
+				if (_isHubOperationScopeCurrent(this, scope) && repository.hasPendingResync?.(characterId)) {
+					this._scheduleHubRealtimeResync({characterId});
+				}
 				return false;
 			case "applied":
 				// Rendering runs after the transaction committed; a paint failure must not roll back state that
@@ -1190,12 +1211,17 @@ class CharacterSheetPage {
 	 * repository's mutation queue from a task already running on it would deadlock.
 	 */
 	_scheduleHubRealtimeResync ({characterId}) {
+		if (characterId !== this._currentCharacterId) return false;
 		if (!this._isHubOperationAuthorityReady()) return false;
+		this._hubRealtimeResyncRequest = _getHubOperationScope(this, characterId);
 		if (this._isHubResyncScheduled) return false;
 		this._isHubResyncScheduled = true;
 		queueMicrotask(() => {
 			this._isHubResyncScheduled = false;
-			void this._pRunHubRealtimeResync({characterId});
+			const scope = this._hubRealtimeResyncRequest;
+			this._hubRealtimeResyncRequest = null;
+			if (!_isHubOperationScopeCurrent(this, scope) || !this._isHubOperationAuthorityReady()) return;
+			void this._pRunHubRealtimeResync({characterId: scope.characterId});
 		});
 		return true;
 	}
@@ -1234,12 +1260,11 @@ class CharacterSheetPage {
 		const roleGeneration = this._hubRoleRosterGeneration;
 		const campaignId = this._hubCampaignId;
 		const authorityGeneration = this._hubOperationAuthorityGeneration ?? 0;
+		const scope = _getHubOperationScope(this, characterId);
 		return repository.pEnqueueRealtimeDelivery({
 			characterId,
 			fnDeliver: () => {
-				const isScopeCurrent = characterId === this._currentCharacterId
-					&& campaignId === this._hubCampaignId && repository === this._characterRepository;
-				if (!isScopeCurrent) return false;
+				if (!_isHubOperationScopeCurrent(this, scope)) return false;
 				const isAuthorityStale = (
 					characterId !== this._currentCharacterId
 					|| generation !== this._characterLoadGeneration
@@ -1284,6 +1309,7 @@ class CharacterSheetPage {
 	async _pRunHubRealtimeResync ({characterId}) {
 		const repository = this._characterRepository;
 		if (typeof repository?.pRunPendingResync !== "function") return false;
+		const scope = _getHubOperationScope(this, characterId);
 		const generation = this._characterLoadGeneration;
 		const realtimeGeneration = this._hubRealtimeGeneration;
 		const contextGeneration = this._hubContextGeneration;
@@ -1291,6 +1317,7 @@ class CharacterSheetPage {
 		const campaignId = this._hubCampaignId;
 		const authorityGeneration = this._hubOperationAuthorityGeneration ?? 0;
 		const isCurrent = () => this._currentCharacterId === characterId
+			&& _isHubOperationScopeCurrent(this, scope)
 			&& this._characterLoadGeneration === generation && this._hubRealtimeGeneration === realtimeGeneration
 			&& this._hubContextGeneration === contextGeneration && this._hubRoleRosterGeneration === roleGeneration
 			&& this._hubCampaignId === campaignId && this._isHubOperationAuthorityReady()
@@ -1303,7 +1330,7 @@ class CharacterSheetPage {
 		}).catch(error => ({status: "failed", error}));
 		if (!isCurrent()) {
 			if (
-				this._currentCharacterId === characterId && this._isHubOperationAuthorityReady()
+				_isHubOperationScopeCurrent(this, scope) && this._isHubOperationAuthorityReady()
 				&& this._characterRepository?.hasPendingResync?.(characterId)
 			) this._scheduleHubRealtimeResync({characterId});
 			return false;
@@ -1314,6 +1341,11 @@ class CharacterSheetPage {
 				this._updateSaveIndicator("saved");
 				for (const appliedEffect of result.appliedEffects || []) {
 					this._hubEffects?.onApplied(appliedEffect);
+				}
+				if (this._hubAuthoritativeReconcileRequest) {
+					if (this._isHubAuthoritativeReconcileScopeCurrent(this._hubAuthoritativeReconcileRequest)) {
+						this._scheduleHubAuthoritativeReconcile({characterId});
+					} else this._hubAuthoritativeReconcileRequest = null;
 				}
 				return true;
 			case "history_unavailable":
@@ -1342,17 +1374,16 @@ class CharacterSheetPage {
 	_scheduleHubAuthoritativeReconcile ({characterId}) {
 		if (!characterId || characterId !== this._currentCharacterId) return false;
 		this._hubAuthoritativeReconcileRequest = {
-			characterId,
-			generation: this._characterLoadGeneration,
+			..._getHubOperationScope(this, characterId),
 			realtimeGeneration: this._hubRealtimeGeneration,
 			authorityGeneration: this._hubOperationAuthorityGeneration ?? 0,
 			contextGeneration: this._hubContextGeneration,
-			campaignId: this._hubCampaignId,
-			accountId: this._hubActiveCampaign?.accountId ?? null,
-			accessMode: this._currentCharacterAccess,
-			repository: this._characterRepository,
 		};
 		if (!this._isHubOperationAuthorityReady()) return false;
+		if (this._characterRepository?.hasPendingResync?.(characterId)) {
+			this._scheduleHubRealtimeResync({characterId});
+			return false;
+		}
 		if (this._hubAuthoritativeReconcilePromise || this._isHubAuthoritativeReconcileScheduled) return true;
 		this._isHubAuthoritativeReconcileScheduled = true;
 		queueMicrotask(() => {
@@ -1389,12 +1420,7 @@ class CharacterSheetPage {
 	}
 
 	_isHubAuthoritativeReconcileScopeCurrent (request) {
-		return request.characterId === this._currentCharacterId
-			&& request.generation === this._characterLoadGeneration
-			&& request.campaignId === this._hubCampaignId
-			&& request.accountId === (this._hubActiveCampaign?.accountId ?? null)
-			&& request.accessMode === this._currentCharacterAccess
-			&& request.repository === this._characterRepository;
+		return _isHubOperationScopeCurrent(this, request);
 	}
 
 	async _pDrainHubAuthoritativeReconcile () {
@@ -1409,6 +1435,7 @@ class CharacterSheetPage {
 			if (this._hubAuthoritativeReconcileRequest !== request) continue;
 			if (this._isHubAuthoritativeReconcileScopeCurrent(request)
 				&& (!this._isHubOperationAuthorityReady()
+					|| request.repository?.hasPendingResync?.(request.characterId)
 					|| request.authorityGeneration !== (this._hubOperationAuthorityGeneration ?? 0)
 					|| request.contextGeneration !== this._hubContextGeneration
 					|| request.realtimeGeneration !== this._hubRealtimeGeneration)) break;
@@ -1424,6 +1451,7 @@ class CharacterSheetPage {
 			this._isHubAuthoritativeReconcileScopeCurrent(request)
 			&& request.realtimeGeneration === this._hubRealtimeGeneration
 			&& this._isHubOperationAuthorityReady()
+			&& !repository.hasPendingResync?.(characterId)
 			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0)
 			&& contextGeneration === this._hubContextGeneration
 		);

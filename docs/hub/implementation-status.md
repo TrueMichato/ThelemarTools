@@ -21,7 +21,10 @@ tokens after context recovery. Terminal teardown or character/account/campaign/a
 that demand; suspended drains do not spin. A shared installed-context barrier also prevents fresh-generation reconnect retries,
 HTTP/WebSocket/resync delivery and recovery-storage reads from proceeding while authorization is pending.
 Ordinary transport loss retains exact recovery evidence; terminal teardown remains destructive to scoped
-coverage and demand. This is local held work awaiting exact-delta independent A4 review, not deployed or
+coverage and demand. A fenced receipt retained after context installation also schedules existing semantic
+recovery automatically in the same recoverable scope; pending evidence and its save block must clear before
+the next save. Canonical catch-up waits behind that recovery, and scheduled scopes coalesce without letting
+an old task suppress new authorized work. This is local held work awaiting exact-delta independent A4 review, not deployed or
 enabled product. Production multi-spell descriptors remain absent until A5; singular Cure Wounds and local casting
 are unchanged. Disposable browser fixtures alone inject the existing reviewed Shared Restoration template.
 

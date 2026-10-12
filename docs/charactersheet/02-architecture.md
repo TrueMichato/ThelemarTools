@@ -359,6 +359,12 @@ Canonical scheduling/drain/attempt guards and HTTP/WebSocket/resync adoption/sta
 Installing the authorized context and overlays opens it before recovery resumes. Ordinary transport loss retains
 exact coverage and unfinished resync evidence; terminal teardown still clears them. Recovery-storage reads are
 also deferred until context installation so they cannot expose uncommitted staged command snapshots.
+When a queued stale receipt first retains exact evidence after authorization is already installed, its fenced
+result schedules the existing semantic resync instead of waiting for another invalidation. Recovery captures
+character-load/account/campaign/access/repository scope as well as fresh attempt tokens; the microtask coalesces
+the latest authorized scope and rechecks readiness. Canonical demand waits while semantic evidence is pending,
+then resumes after exact-leg recovery clears the save block. Matching HP/revision alone does not prove this
+handoff completed: the next ordinary save must work without another effect application or PATCH.
 Fresh owner loads discard only an unprovable, settled submit cache after teardown; genuine durable drafts retain
 their exact command-backed snapshot coverage. Recovery replay includes all existing tracks and starts at zero if
 any track's sequence is unknown, rather than excluding an earlier changed leg behind a newer watermark.
