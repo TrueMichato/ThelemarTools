@@ -1,11 +1,194 @@
 import fs from "node:fs";
-import {spawnSync} from "node:child_process";
-import os from "node:os";
+import {spawn} from "node:child_process";
+import crypto from "node:crypto";
 import path from "node:path";
 import {HUB_PROTOCOL_VERSION} from "../../../server/src/app.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "../../../server/src/migration-version.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+const root = new URL("../../../", import.meta.url);
+
+const isProcessAlive = pid => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		if (error.code !== "ESRCH") throw error;
+		return false;
+	}
+};
+
+async function probeRunnerTimeout ({mode, signal = null, childTimeoutMs = 500, totalTimeoutMs = 5_000, cleanupTimeoutMs = 5_000}) {
+	const dir = path.join(root.pathname, "test", `.hub-e2e-timeout-${crypto.randomUUID()}`);
+	const binDir = path.join(dir, "bin");
+	const pidFile = path.join(dir, "children.jsonl");
+	fs.mkdirSync(binDir, {recursive: true});
+	fs.writeFileSync(path.join(binDir, "docker"), `#!/bin/sh
+if [ "$1 $2" = "network ls" ]; then
+  ${mode === "required" ? `printf '{"pid":%s,"args":["network","ls"]}\\n' "$$" >> "${pidFile}"\n  exec /bin/sleep 30` : mode === "cleanup" ? "exit 1" : mode === "success" ? "exit 0" : `exec "${process.execPath}" "${path.join(dir, "blocking.mjs")}" "$@"`}
+fi
+if [ "$1" = "rm" ] && [ -f "${path.join(dir, "pids.txt")}" ]; then
+  while read pid; do
+    if kill -0 "$pid" 2>/dev/null; then printf '%s\\n' "$pid" >> "${path.join(dir, "alive-before-cleanup.txt")}"; fi
+  done < "${path.join(dir, "pids.txt")}"
+fi
+if [ "$1" = "rm" ] && { [ "${mode}" = "cleanup" ] || [ "${mode}" = "total-cleanup" ]; }; then
+  exec "${process.execPath}" "${path.join(dir, "blocking.mjs")}" "$@"
+fi
+printf '%s\\n' "$*" >> "${path.join(dir, "commands.txt")}"
+if [ "$1" = "inspect" ]; then printf 'running healthy\\n'; fi
+if [ "$1" = "exec" ]; then printf '{"authProviders":[{"slug":"github","status":"available"},{"slug":"discord","status":"available"},{"slug":"google","status":"available"}]}\\n'; fi
+exit 0
+`, {mode: 0o755});
+	fs.writeFileSync(path.join(dir, "blocking.mjs"), `
+import fs from "node:fs";
+import {spawn} from "node:child_process";
+const args = process.argv.slice(2);
+process.on("SIGTERM", () => ${mode === "descendants" ? "process.exit(0)" : "{}"});
+process.on("SIGINT", () => {});
+fs.appendFileSync(${JSON.stringify(pidFile)}, JSON.stringify({pid: process.pid, args}) + "\\n");
+fs.appendFileSync(${JSON.stringify(path.join(dir, "pids.txt"))}, process.pid + "\\n");
+${mode === "descendants" ? `spawn(process.execPath, [${JSON.stringify(path.join(dir, "descendant.mjs"))}], {stdio: "inherit", env: {...process.env, HUB_PROBE_GROUP_PID: process.pid}});` : ""}
+setInterval(() => {}, 1000);
+`);
+	fs.writeFileSync(path.join(dir, "descendant.mjs"), `
+import fs from "node:fs";
+process.on("SIGTERM", () => {});
+process.on("SIGINT", () => {});
+fs.appendFileSync(${JSON.stringify(pidFile)}, JSON.stringify({pid: process.pid, groupPid: Number(process.env.HUB_PROBE_GROUP_PID), args: ["descendant"]}) + "\\n");
+fs.appendFileSync(${JSON.stringify(path.join(dir, "pids.txt"))}, process.pid + "\\n");
+setInterval(() => {}, 1000);
+`);
+	fs.writeFileSync(path.join(dir, "success-preload.mjs"), `
+import childProcess from "node:child_process";
+import https from "node:https";
+import {EventEmitter} from "node:events";
+import {syncBuiltinESMExports} from "node:module";
+const spawn = childProcess.spawn;
+childProcess.spawn = (command, args, options) => {
+  if (command === "npx" || (command === "node" && args.includes("./node_modules/jest/bin/jest.js"))) return spawn("/usr/bin/true", [], options);
+  return spawn(command, args, options);
+};
+https.get = (url, options, callback) => {
+  const request = new EventEmitter();
+  request.setTimeout = () => request;
+  queueMicrotask(() => callback({statusCode: 200, resume () {}}));
+  return request;
+};
+syncBuiltinESMExports();
+`);
+	const getChildren = () => fs.existsSync(pidFile)
+		? fs.readFileSync(pidFile, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))
+		: [];
+	const killOwnedChildren = () => {
+		for (const {pid, groupPid} of getChildren()) {
+			try {
+				process.kill(process.platform === "win32" ? pid : -(groupPid || pid), "SIGKILL");
+			} catch (error) {
+				if (error.code !== "ESRCH") throw error;
+			}
+		}
+	};
+	let runner;
+	let runnerClosed = false;
+	let watchdog;
+	let signalPoll;
+	try {
+		runner = spawn(process.execPath, [
+			...mode === "success" ? ["--import", path.join(dir, "success-preload.mjs")] : [],
+			"server/scripts/run-hub-e2e.mjs",
+		], {
+			cwd: root,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: {
+				...process.env,
+				NODE_ENV: "test",
+				PATH: `${path.dirname(process.execPath)}:${binDir}:${process.env.PATH}`,
+				HUB_E2E_ALLOW_SHORT_TIMEOUTS: "true",
+				HUB_E2E_CHILD_TIMEOUT_MS: `${childTimeoutMs}`,
+				HUB_E2E_TIMEOUT_MS: `${totalTimeoutMs}`,
+				HUB_E2E_CLEANUP_TIMEOUT_MS: `${cleanupTimeoutMs}`,
+				HUB_E2E_TERMINATION_GRACE_MS: "100",
+			},
+		});
+		let stdout = "";
+		let stderr = "";
+		let watchdogTriggered = false;
+		runner.stdout.on("data", chunk => stdout += chunk);
+		runner.stderr.on("data", chunk => stderr += chunk);
+		if (signal) {
+			signalPoll = setInterval(() => {
+				if (getChildren().length < (mode === "descendants" ? 2 : 1)) return;
+				clearInterval(signalPoll);
+				runner.kill(signal);
+			}, 10);
+		}
+		const result = await new Promise((resolve, reject) => {
+			runner.once("error", reject);
+			runner.once("close", (status, signal) => {
+				runnerClosed = true;
+				clearTimeout(watchdog);
+				resolve({status, signal});
+			});
+			watchdog = setTimeout(() => {
+				watchdogTriggered = true;
+				killOwnedChildren();
+				runner.kill("SIGKILL");
+			}, 4_000);
+		});
+		const children = getChildren();
+		return {
+			...result,
+			stdout,
+			stderr,
+			watchdogTriggered,
+			children,
+			survivingPids: children.filter(({pid}) => isProcessAlive(pid)).map(({pid}) => pid),
+			aliveBeforeCleanup: fs.existsSync(path.join(dir, "alive-before-cleanup.txt"))
+				? fs.readFileSync(path.join(dir, "alive-before-cleanup.txt"), "utf8").trim().split("\n").map(Number)
+				: [],
+			diagnostics: stdout.split("\n").flatMap(line => {
+				try {
+					return [JSON.parse(line)];
+				} catch {
+					return [];
+				}
+			}),
+			commands: fs.existsSync(path.join(dir, "commands.txt"))
+				? fs.readFileSync(path.join(dir, "commands.txt"), "utf8").trim().split("\n").map(line => line.split(" "))
+				: [],
+		};
+	} finally {
+		clearTimeout(watchdog);
+		clearInterval(signalPoll);
+		killOwnedChildren();
+		if (runner && !runnerClosed) {
+			const closed = new Promise(resolve => runner.once("close", resolve));
+			runner.kill("SIGKILL");
+			await closed;
+		}
+
+		for (let attempt = 0; attempt < 100 && getChildren().some(({pid}) => isProcessAlive(pid)); attempt++) {
+			await new Promise(resolve => setTimeout(resolve, 10));
+		}
+		const survivors = getChildren().filter(({pid}) => isProcessAlive(pid));
+		fs.rmSync(dir, {recursive: true, force: true});
+		expect(survivors).toEqual([]);
+	}
+}
+
+function expectRunnerExit (result, status = 124) {
+	if (result.status !== status || result.watchdogTriggered) {
+		throw new Error(`Runner expected exit ${status} without the test watchdog; got status=${result.status} signal=${result.signal} watchdog=${result.watchdogTriggered}.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+	}
+}
+
+function expectRunnerCleanup (result, isComplete) {
+	const count = result.diagnostics.filter(value => value.type === "hub_e2e_cleanup_complete").length;
+	if (count !== (isComplete ? 1 : 0)) {
+		throw new Error(`Runner cleanup-complete count expected ${isComplete ? 1 : 0}; got ${count}.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+	}
+}
 
 describe("Hub CI and real-stack test contract", () => {
 	const workflow = read(".github/workflows/hub.yml");
@@ -132,78 +315,108 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(() => assertTimeoutContract({workflowSource: workflow, runnerSource: withoutChildTimeout})).toThrow();
 	});
 
-	it("exits 124 after a required child timeout, structured evidence, and cleanup", () => {
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-e2e-timeout-"));
-		const binDir = path.join(dir, "bin");
-		fs.mkdirSync(binDir);
-		fs.writeFileSync(path.join(binDir, "docker"), `#!/bin/sh
-if [ "$1 $2" = "network ls" ]; then
-  sleep 30
-fi
-exit 0
-`, {mode: 0o755});
+	it("exits 124 after the existing 50 ms required child timeout, structured evidence, and cleanup", async () => {
+		const result = await probeRunnerTimeout({mode: "required", childTimeoutMs: 50});
+		expectRunnerExit(result);
+		const diagnostic = result.diagnostics.find(value => value?.type === "hub_e2e_timeout");
+		expect(diagnostic).toMatchObject({
+			type: "hub_e2e_timeout",
+			scope: "child",
+			timeoutMs: 50,
+			phase: "environment",
+			spec: "loopback ports and isolated Docker network",
+			process: "docker network ls --format {{.ID}}",
+			artifactPaths: [
+				"playwright-report/",
+				"test-results/hub-playwright-results.json",
+				"test-results/hub-playwright-output/",
+			],
+		});
+		expect(diagnostic.runId).toMatch(/^\d+-[0-9a-f]{8}$/);
+		expect(diagnostic.projectName).toBe(`hub-e2e-${diagnostic.runId}`);
+		expect(result.stderr).toContain("Campaign Hub E2E timeout:");
+		expect(result.stderr).toContain("phase=environment");
+		expect(result.stderr).toContain("evidence=playwright-report/");
+		const cleanupEvidence = result.diagnostics.find(value => value?.type === "hub_e2e_cleanup_complete");
+		expectRunnerCleanup(result, true);
+		expect(cleanupEvidence).toEqual({
+			type: "hub_e2e_cleanup_complete",
+			runId: diagnostic.runId,
+			projectName: diagnostic.projectName,
+		});
+	});
 
-		try {
-			const result = spawnSync(process.execPath, ["server/scripts/run-hub-e2e.mjs"], {
-				cwd: new URL("../../../", import.meta.url),
-				encoding: "utf8",
-				timeout: 10_000,
-				env: {
-					...process.env,
-					NODE_ENV: "test",
-					PATH: `${binDir}:${process.env.PATH}`,
-					HUB_E2E_ALLOW_SHORT_TIMEOUTS: "true",
-					HUB_E2E_CHILD_TIMEOUT_MS: "50",
-					HUB_E2E_TIMEOUT_MS: "5000",
-				},
-			});
+	it("bounds a SIGTERM-ignoring required child timeout and awaits real termination before cleanup", async () => {
+		const result = await probeRunnerTimeout({mode: "child"});
+		expectRunnerExit(result);
+		expect(result.children).toHaveLength(1);
+		expect(result.survivingPids).toEqual([]);
+		expect(result.aliveBeforeCleanup).toEqual([]);
+		expect(result.diagnostics.find(value => value.type === "hub_e2e_timeout")).toMatchObject({scope: "child", timeoutMs: 500, phase: "environment"});
+		expectRunnerCleanup(result, true);
+	});
 
-			expect(result.error).toBeUndefined();
-			expect(result.status).toBe(124);
-			const diagnostic = result.stdout.split("\n")
-				.map(line => {
-					try {
-						return JSON.parse(line);
-					} catch {
-						return null;
-					}
-				})
-				.find(value => value?.type === "hub_e2e_timeout");
-			expect(diagnostic).toMatchObject({
-				type: "hub_e2e_timeout",
-				scope: "child",
-				timeoutMs: 50,
-				phase: "environment",
-				spec: "loopback ports and isolated Docker network",
-				process: "docker network ls --format {{.ID}}",
-				artifactPaths: [
-					"playwright-report/",
-					"test-results/hub-playwright-results.json",
-					"test-results/hub-playwright-output/",
-				],
-			});
-			expect(diagnostic.runId).toMatch(/^\d+-[0-9a-f]{8}$/);
-			expect(diagnostic.projectName).toBe(`hub-e2e-${diagnostic.runId}`);
-			expect(result.stderr).toContain("Campaign Hub E2E timeout:");
-			expect(result.stderr).toContain("phase=environment");
-			expect(result.stderr).toContain("evidence=playwright-report/");
-			const cleanupEvidence = result.stdout.split("\n")
-				.map(line => {
-					try {
-						return JSON.parse(line);
-					} catch {
-						return null;
-					}
-				})
-				.find(value => value?.type === "hub_e2e_cleanup_complete");
-			expect(cleanupEvidence).toEqual({
-				type: "hub_e2e_cleanup_complete",
-				runId: diagnostic.runId,
-				projectName: diagnostic.projectName,
-			});
-		} finally {
-			fs.rmSync(dir, {recursive: true, force: true});
-		}
+	it("awaits a SIGTERM-ignoring child on total timeout before isolated cleanup and exit 124", async () => {
+		const result = await probeRunnerTimeout({mode: "total", childTimeoutMs: 5_000, totalTimeoutMs: 500});
+		expectRunnerExit(result);
+		expect(result.children).toHaveLength(1);
+		expect(result.survivingPids).toEqual([]);
+		expect(result.aliveBeforeCleanup).toEqual([]);
+		expect(result.diagnostics.find(value => value.type === "hub_e2e_timeout")).toMatchObject({scope: "total", timeoutMs: 500, phase: "environment"});
+		expectRunnerCleanup(result, true);
+		expect(result.commands.find(args => args.includes("down"))).toEqual([
+			"compose", "--project-name", result.diagnostics[0].projectName,
+			"-f", "compose.hub.yml", "-f", "compose.hub.test.yml",
+			"down", "-v", "--remove-orphans", "--rmi", "local",
+		]);
+	});
+
+	it("kills an ignoring descendant even after its process-group leader exits on SIGTERM", async () => {
+		const result = await probeRunnerTimeout({mode: "descendants", signal: "SIGTERM", childTimeoutMs: 5_000});
+		expectRunnerExit(result, 143);
+		expect(result.children).toHaveLength(2);
+		expect(result.children[1].groupPid).toBe(result.children[0].pid);
+		expect(result.survivingPids).toEqual([]);
+		expect(result.aliveBeforeCleanup).toEqual([]);
+		expectRunnerCleanup(result, true);
+	});
+
+	it.each([["SIGINT", 130], ["SIGTERM", 143]])("awaits ignoring children and preserves %s exit %s", async (signal, status) => {
+		const result = await probeRunnerTimeout({mode: "child", signal, childTimeoutMs: 5_000});
+		expectRunnerExit(result, status);
+		expect(result.children).toHaveLength(1);
+		expect(result.survivingPids).toEqual([]);
+		expect(result.aliveBeforeCleanup).toEqual([]);
+		expect(result.diagnostics.some(value => value.type === "hub_e2e_timeout")).toBe(false);
+		expectRunnerCleanup(result, true);
+	});
+
+	it("preserves normal success, restart checks, and exactly-once isolated cleanup with only mocked infrastructure", async () => {
+		const result = await probeRunnerTimeout({mode: "success", childTimeoutMs: 5_000});
+		expectRunnerExit(result, 0);
+		expect(result.diagnostics.some(value => value.type === "hub_e2e_timeout")).toBe(false);
+		expect(result.commands.filter(args => args.includes("restart")).map(args => args.at(-1))).toEqual(["bff", "db"]);
+		expect(result.commands.filter(args => args.includes("down"))).toHaveLength(1);
+		expectRunnerCleanup(result, true);
+	});
+
+	it.each([
+		["normal finally", "cleanup", 5_000],
+		["total timeout", "total-cleanup", 500],
+	])("bounds SIGTERM-ignoring cleanup after %s without false completion", async (name, mode, totalTimeoutMs) => {
+		const result = await probeRunnerTimeout({mode, childTimeoutMs: 5_000, totalTimeoutMs, cleanupTimeoutMs: 300});
+		expectRunnerExit(result);
+		expect(result.children).toHaveLength(name === "normal finally" ? 1 : 2);
+		expect(result.children.at(-1).args[0]).toBe("rm");
+		expect(result.survivingPids).toEqual([]);
+		const diagnostic = result.diagnostics.find(value => value.type === "hub_e2e_timeout" && value.scope === "cleanup");
+		expect(diagnostic).toMatchObject({
+			scope: "cleanup",
+			timeoutMs: 300,
+			phase: "cleanup",
+			process: `docker rm --force ${diagnostic.projectName}-production-smoke`,
+		});
+		expectRunnerCleanup(result, false);
 	});
 
 	it("scans each Hub credential class for hard-coded assignments", () => {

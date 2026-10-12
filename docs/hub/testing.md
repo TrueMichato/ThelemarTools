@@ -201,9 +201,27 @@ The real-stack runner has a 45-minute child-process timeout and total watchdog, 
 timeout, and a 60-minute job timeout. Normal local/CI runs take roughly 6-10 minutes; the margins allow cold image
 pulls/builds and slower shared runners without approaching GitHub's broad default ceiling. A timeout prints a
 structured stdout diagnostic plus a bounded stderr summary containing the run/project identity, active phase,
-requested spec scope, sanitized active command, and Playwright artifact paths. The watchdog terminates the active
-child process group, runs isolated Compose/image cleanup, and exits 124; the outer budgets bound a stuck child,
-runner, or cleanup even if the inner diagnostic path fails.
+requested spec scope, sanitized active command (including cleanup commands), and Playwright artifact paths.
+Child and total timeouts send SIGTERM to each exact owned child process group, escalate to SIGKILL after
+five seconds, and await termination before isolated Compose/image cleanup or exit 124. A leader exiting on
+SIGTERM does not cancel escalation while descendants remain in its group. SIGINT/SIGTERM shutdown uses the
+same awaited escalation while preserving exit codes 130/143.
+
+Cleanup has its own one-minute deadline, including cleanup children, rather than inheriting the ordinary
+child's 45-minute budget. It remains bounded after normal completion, errors, signals, or total timeout.
+The total watchdog remains armed until cleanup settles. Interrupted or timed-out cleanup exits unsuccessfully
+and never emits `hub_e2e_cleanup_complete`; remaining isolated Docker resources require manual inspection by
+the recorded project/image identity, not broad Docker cleanup. `HUB_E2E_CLEANUP_TIMEOUT_MS` accepts 60,000
+through 300,000 ms, and `HUB_E2E_TERMINATION_GRACE_MS` accepts 100 through 10,000 ms. Shorter deadlines are
+accepted only with both `NODE_ENV=test` and `HUB_E2E_ALLOW_SHORT_TIMEOUTS=true`. These controls do not increase
+CI or Playwright timeouts; outer step/job budgets remain the final safeguard.
+
+`HubCiContract.test.js` invokes the actual runner with mocked Docker and real SIGTERM-ignoring Node processes.
+It verifies required-child timeout, total timeout, stalled cleanup after both ordinary failure and total
+timeout, a surviving descendant after its leader exits, signal exit codes, and normal successful restart/cleanup.
+Exact PID checks require termination before cleanup begins and before runner exit; fixtures clean up only their
+owned process groups. The existing 50 ms required-child timeout remains covered, and wrong-exit assertions
+include captured stdout/stderr. These are local harness proofs, not real-Docker, database, or deployment evidence.
 
 On 2026-09-21, run `35600079625` was cancelled after a timezone misread made a roughly two-minute live Playwright
 step appear three hours old. Terminal logs showed PostgreSQL parity had completed and Playwright was active; the
