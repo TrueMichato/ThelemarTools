@@ -113,8 +113,14 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   character, then serializes ephemeral callbacks behind repository saves.
 │   It never mutates CharacterSheetState or fetches/replaces the owner document.
 │   Held A4 adds immediate targeting-authority concealment before queued delivery,
-│   including other candidate projection changes. Document adoption still uses only
-│   the repository queue; scoped authoritative refresh restores consent controls.
+│   including other candidate projection changes. A synchronous authority epoch fences
+│   already-queued HTTP/realtime/resync/canonical adoption, not just visible controls.
+│   Stale exact evidence and canonical demand survive for fresh authorized recovery.
+│   Durable/no-op staging and live adoption roll back before coverage can commit.
+│   Document adoption still uses only the repository queue; scoped authoritative
+│   refresh restores consent controls, and suspended effects cannot publish notices.
+│   Fresh owner loads remove settled submit ghost tracks after teardown; pending
+│   drafts restore exact coverage from their durable commands, never from guesses.
 │
 ├── CharacterSheetHubEffects (charactersheet-hub-effects.js)
 │   Lifecycle-scoped, owner-only pending-effect approvals and post-adoption notices.

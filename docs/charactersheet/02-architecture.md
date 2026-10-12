@@ -342,6 +342,14 @@ are auto-approved only for this new workflow, not singular Cure Wounds. Account-
 owned identity through fresh `owner_truth.targetRef` equality and open the corresponding shared Sheet route before
 consent. HTTP receipts and realtime legs use only the existing repository delivery queue for adoption.
 Projection/rules/lifecycle invalidations synchronously conceal targeting and close its picker, even behind a save.
+The coordinator stamps queued semantic envelopes with an authority epoch; its immediate invalidation advances the
+page context fence and pauses HTTP, realtime, pending-resync and canonical adoption until fresh authorized context.
+Stale applied evidence remains in the existing ordered resync queue without committing coverage or watermark.
+Durable command/no-op staging rolls back if authority changes at adoption; suspended effects cannot publish notices.
+Canonical projection demand is retained for the fresh context instead of being silently dropped.
+Fresh owner loads discard only an unprovable, settled submit cache after teardown; genuine durable drafts retain
+their exact command-backed snapshot coverage. Recovery replay includes all existing tracks and starts at zero if
+any track's sequence is unknown, rather than excluding an earlier changed leg behind a newer watermark.
 Revisionless no-op legs add exact coverage to every ordinary/conflict/durable track, with no sheet adoption/redraw,
 save, or canonical watermark advance. The actor-scoped tab-session no-op journal is bounded to 256 leg identities.
 

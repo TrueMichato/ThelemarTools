@@ -47,6 +47,9 @@ remains null: the test server appends the existing reviewed A3 Shared Restoratio
 and the page object injects its closed descriptor into the existing source controller. The fixture uses the store's
 existing 60-second collection-TTL injection; production advertises/retains the normal contract. Expiry readiness
 is read from the authority, never inferred from a browser timer. Both Sheet entry paths use the same controllers.
+The second owner's already-open Sheet must adopt the first finalization through realtime, and the twin owner's
+already-open Sheet must adopt the expiry subset. API reads and reopening a Sheet are not substitutes for those
+cross-user DOM assertions.
 Run `npm run test:hub:e2e:stack -- shared-sheet-multi-target.spec.ts`; the runner owns uniquely named loopback
 containers/ports and cleans up that stack. No fixture authorizes live enrollment or replaces physical acceptance.
 
@@ -54,6 +57,25 @@ Fragile A4 guards are checked by temporary mutations at actual call sites: accep
 revisionless no-op, replacing exact fresh owner-character equality with mere reference existence, and replacing
 synchronous targeting concealment with refresh-only delivery. Each must fail its behavioral assertions before
 restoring the real code; comments and snapshot-string mutations are not substitutes.
+
+The authority-fence regression uses the actual page handler, coordinator, repository and incoming/source controllers.
+With a real save blocked, HTTP-first and event-first results wait in the repository queue while `campaign.archived`,
+`rules.activated` or `character.projection.invalidated` arrives through the coordinator. It asserts zero stale
+adoption, coverage, watermark, redraw, notice and focus without manually advancing a page generation. Queued resync
+and canonical reads are also fenced; canonical/history awaits and mixed changed/no-op batches exercise two durable
+commands at storage/journal/adoption boundaries. Fresh authorized context recovers retained exact evidence once;
+terminal archive conceals instead. A separate continuation check preserves canonical projection demand and accepts
+future current-authority deliveries. Actual-call-site mutations remove the synchronous fence or post-staging guards,
+and must make those behavioral assertions fail before restoration.
+The replay floor includes every existing ordinary/conflict/durable track. An unknown sequence cannot be silently
+filtered out in favor of a newer live watermark: bounded authorized replay starts at zero so an older unseen changed
+leg is not excluded. A separate exclusive-cursor regression and actual history-floor mutation cover this recovery
+hazard without guessing an application or weakening the open-Sheet browser check.
+Returning to a previously opened owner Sheet also distinguishes settled submit caches from durable drafts.
+Teardown clears coverage; a settled cached submit must not survive a fresh canonical load as an unknown ghost
+track and permanently block the next applied leg. Two failed durable commands instead restore their exact
+snapshot coverage from persisted command evidence, retain both bases/snapshots and preserve the user's HP edits.
+The teardown/load regressions exercise both cases without inventing coverage for an unknown legacy draft.
 
 `character-sheet-party-inventory.spec.ts` also exercises the recipient's open-sheet transfer inbox:
 server-scoped offer visibility, immediate concealment before a delayed projection refetch, anonymous source

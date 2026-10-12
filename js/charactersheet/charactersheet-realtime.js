@@ -63,6 +63,7 @@ export class CharacterSheetRealtimeCoordinator {
 		this._fnOnListenerError = fnOnListenerError;
 		this._listeners = new Map();
 		this._generation = 0;
+		this._authorityGeneration = 0;
 		this._active = null;
 		this._isAccessLost = false;
 	}
@@ -74,6 +75,10 @@ export class CharacterSheetRealtimeCoordinator {
 		listeners.add(listener);
 		this._listeners.set(type, listeners);
 		return () => listeners.delete(listener);
+	}
+
+	getAuthorityGeneration () {
+		return this._authorityGeneration;
 	}
 
 	_emit (type, value, {isThrowOnError = false} = {}) {
@@ -319,7 +324,7 @@ export class CharacterSheetRealtimeCoordinator {
 			|| _CHARACTER_TEARDOWN_EVENT_TYPES.has(event.type)
 		) {
 			// Conceal consent/picker metadata immediately, even while the document queue is behind a save.
-			this._emit("targetingInvalidated", {campaignId: this._campaignId, type: event.type});
+			this._emit("targetingInvalidated", {campaignId: this._campaignId, type: event.type, authorityGeneration: ++this._authorityGeneration});
 		}
 		const isViewerDemotedFromDm = isViewerRoleChange
 			&& active.isAuthorityBaselineValid
@@ -595,6 +600,7 @@ export class CharacterSheetRealtimeCoordinator {
 	}
 
 	_enqueue (active, {type, value}) {
+		if (type === "semanticOperation") value = {...value, authorityGeneration: this._authorityGeneration};
 		void this._repository.pEnqueueRealtimeDelivery({
 			characterId: active.characterId,
 			fnDeliver: () => {

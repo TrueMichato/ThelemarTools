@@ -70,7 +70,8 @@ test("shared sheet collects per-character consent, finalizes one subset, and rec
 		expect((await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(1);
 		expect((await owner.getCharacter(twin1.id)).data.hp.current).toBe(7);
 		expect((await owner.getCharacter(twin2.id)).data.hp.current).toBe(5);
-		await expect.poll(async () => (await secondOwner.getCharacter(peerCharacter.id)).data.hp.current).toBe(7);
+		await secondOwner.expectCharacterSheetHp(7);
+		expect((await secondOwner.getCharacter(peerCharacter.id)).data.hp.current).toBe(7);
 		const privacy = await source.getMultiTargetDetail({campaignId, operationId: operation.operationId});
 		expect(privacy.targets.every(target => !target.result)).toBe(true);
 		const dmView = await dm.getMultiTargetDetail({campaignId, operationId: operation.operationId});
@@ -80,6 +81,7 @@ test("shared sheet collects per-character consent, finalizes one subset, and rec
 		await source.waitForCharacterRealtimeLive();
 		await owner.selectCharacterOnSheet({characterId: twin1.id, name: "Twin"});
 		await owner.expectCharacterSheetHp(7);
+		await owner.waitForCharacterRealtimeLive();
 		await source.openBareCharacterSheetDefault(campaignId);
 		await source.selectCharacterOnSheet({characterId: sourceCharacter.id, name: "Aster"});
 		await source.prepareReviewedMultiTargetSpellFixture();
@@ -94,6 +96,7 @@ test("shared sheet collects per-character consent, finalizes one subset, and rec
 		await source.finalizeMultiTargetSubset({operationId: expiring.operationId, invitationIds: [expiryInvitation.invitationId]});
 		expect((await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(0);
 		expect((await owner.getCharacter(twin1.id)).data.hp.current).toBe(11);
+		await owner.expectCharacterSheetHp(11);
 		await dm.removeMember({campaignId, displayName: "Twins owner"});
 		await owner.expectPrivateCharacterConcealed();
 	} finally {

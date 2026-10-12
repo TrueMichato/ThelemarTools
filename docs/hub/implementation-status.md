@@ -12,7 +12,11 @@ migration, or protocol changes. Exact retries acknowledge original command recei
 recovery establishes current workflow state. Exact opaque owned identity gates consent and canonical current
 character identity gates queued adoption. All-track reconciliation includes distinct target/combined legs and
 durable bounded revisionless no-op coverage. Authorization/projection invalidation conceals controls and closes
-pickers before queued work completes. This is local held work awaiting independent A4 review, not deployed or
+pickers before queued work completes. The bounded A4 review remediation also advances a synchronous authority epoch:
+old queued HTTP/realtime/resync/canonical work cannot adopt, commit coverage or publish a success notice. Unapplied
+exact evidence and canonical projection demand wait for fresh authorized context; staged durable commands/no-op
+coverage roll back together if authority changes during adoption. This is local held work awaiting exact-delta
+independent A4 review, not deployed or
 enabled product. Production multi-spell descriptors remain absent until A5; singular Cure Wounds and local casting
 are unchanged. Disposable browser fixtures alone inject the existing reviewed Shared Restoration template.
 

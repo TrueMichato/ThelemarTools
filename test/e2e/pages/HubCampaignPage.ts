@@ -20,6 +20,23 @@ type MultiTargetView = {
 };
 
 type MultiTargetSheetFixtureHost = Window & {charSheet?: {
+	_currentCharacterId?: string;
+	_isHubOperationAuthorityPending?: boolean;
+	_hubOperationAuthorityGeneration?: number;
+	_hubRulesRefreshBlocked?: boolean;
+	_isHubContextRefreshing?: boolean;
+	_characterRepository?: {
+		hasPendingResync: (characterId: string) => boolean;
+		getSaveBlock: (characterId: string) => unknown;
+		_buildReconciliationTracks: (options: {canonicalId: string}) => Record<string, {coverage: {revision: number | null; acceptedSequence: number | null}}>;
+		_getCoverageBook: (characterId: string) => {live: {revision: number | null; acceptedSequence: number | null}};
+		_getResyncFloorSequence: (characterId: string) => number;
+		_pendingResync: Map<string, Array<{sequence?: number; resultingCharacterRevision?: number | null; changed?: boolean}>>;
+	};
+	_hubRealtime?: {
+		getAuthorityGeneration: () => number;
+		_active?: {client?: {getConnectionState: () => {state: string}}};
+	};
 	_pRefreshHubRules: () => Promise<boolean>;
 	_peerTargeting?: {
 		_hasMultiCapability: () => boolean;
@@ -1745,7 +1762,29 @@ export class HubCampaignPage {
 	}
 
 	async expectCharacterSheetHp (hp: number): Promise<void> {
-		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(String(hp));
+		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(String(hp)).catch(async error => {
+			const diagnostics = await this.page.evaluate(() => {
+				const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+				const characterId = sheet?._currentCharacterId;
+				return {
+					characterId,
+					pendingAuthority: sheet?._isHubOperationAuthorityPending,
+					authorityGeneration: sheet?._hubOperationAuthorityGeneration,
+					coordinatorAuthorityGeneration: sheet?._hubRealtime?.getAuthorityGeneration(),
+					rulesRefreshBlocked: sheet?._hubRulesRefreshBlocked,
+					contextRefreshing: sheet?._isHubContextRefreshing,
+					connection: sheet?._hubRealtime?._active?.client?.getConnectionState(),
+					pendingResync: characterId && sheet?._characterRepository?.hasPendingResync(characterId),
+					saveBlock: characterId && sheet?._characterRepository?.getSaveBlock(characterId),
+					liveCoverage: characterId && sheet?._characterRepository?._getCoverageBook(characterId).live,
+					trackCoverage: characterId && Object.fromEntries(Object.entries(sheet?._characterRepository?._buildReconciliationTracks({canonicalId: characterId}) || {}).map(([name, track]) => [name, track.coverage])),
+					historyFloor: characterId && sheet?._characterRepository?._getResyncFloorSequence(characterId),
+					pendingLegs: characterId && sheet?._characterRepository?._pendingResync.get(characterId)?.map(({sequence, resultingCharacterRevision, changed}) => ({sequence, resultingCharacterRevision, changed})),
+				};
+			});
+			console.error("Open Sheet convergence failed:", JSON.stringify(diagnostics));
+			throw error;
+		});
 	}
 
 	async openCharacterSheetFromCampaign ({campaignId, characterId, name}: {campaignId: string; characterId: string; name: string}): Promise<void> {

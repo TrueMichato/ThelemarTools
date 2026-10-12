@@ -365,14 +365,26 @@ export class HubHttpCharacterRepository {
 			? this._failedWrites.get(canonicalId) || this.getPendingRecovery(canonicalId)
 			: null;
 		if (recovery) {
-			this._failedWrites.set(canonicalId, recovery);
+			const latestCommand = this._getRecoveryCommandQueueEntry(canonicalId)?.queue?.at(-1);
+			const recoveredSnapshot = latestCommand?.submittedSnapshot || recovery;
+			this._failedWrites.set(canonicalId, {...structuredClone(recoveredSnapshot), id: canonicalId});
+			if (latestCommand) {
+				book.failedWrite = this._cloneTrackCoverage(latestCommand.submittedSnapshotCoverage);
+				this._latestSubmitted.set(canonicalId, structuredClone(recoveredSnapshot));
+				book.latestSubmitted = this._cloneTrackCoverage(latestCommand.submittedSnapshotCoverage);
+			}
 			this._clearObsoleteCharacterAliasState(canonicalId);
 			// The document handed back is an older draft, not the canonical truth just stored above, so the live
 			// track keeps its own (possibly unknown) coverage instead of inheriting the fetched revision.
 			book.live = this._cloneTrackCoverage(book.failedWrite);
-			return {...structuredClone(recovery), id: canonicalId};
+			return {...structuredClone(recoveredSnapshot), id: canonicalId};
 		}
 		this._clearObsoleteCharacterAliasState(canonicalId);
+		// Teardown forgets track coverage, but a settled submit cache is not a recoverable draft.
+		if (access === CHARACTER_ACCESS_MODES.OWNER && !Number.isInteger(book.latestSubmitted.revision)
+			&& !this._getRecoveryCommandQueueEntry(canonicalId)?.queue?.length) {
+			this._latestSubmitted.delete(canonicalId);
+		}
 		book.live = createCoverage({
 			revision: character.revision,
 			acceptedSequence: this._getOperationWatermark(canonicalId, character),
@@ -428,6 +440,7 @@ export class HubHttpCharacterRepository {
 		return this._pRunMutation(async () => {
 			if (!fnIsCurrent()) return {status: "fenced"};
 			await this._pEnsureSession();
+			if (!fnIsCurrent()) return {status: "fenced"};
 			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
 			this._assertCharacterScope(canonical);
 			if (!fnIsCurrent()) return {status: "fenced"};
@@ -435,6 +448,14 @@ export class HubHttpCharacterRepository {
 			const accepted = this._accepted.get(canonicalId);
 			if (!accepted) return {status: "unavailable"};
 			if (canonical.revision < accepted.revision) return {status: "stale"};
+			const conflictsBefore = [this._conflicts, this._liveConflicts].map(store => structuredClone(store.get(canonicalId)));
+			const abortFenced = () => {
+				[this._conflicts, this._liveConflicts].forEach((store, index) => {
+					if (conflictsBefore[index]) store.set(canonicalId, conflictsBefore[index]);
+					else store.delete(canonicalId);
+				});
+				return {status: "fenced"};
+			};
 
 			this._rebaseConflictForAuthoritative({
 				store: this._conflicts,
@@ -502,6 +523,7 @@ export class HubHttpCharacterRepository {
 			}
 
 			const recoveryQueueNxt = this._getRecoveryQueueFromAuthoritativeRebase({canonicalId, canonical, staged});
+			if (!fnIsCurrent()) return abortFenced();
 			let stagedRecoveryQueue = null;
 			if (recoveryQueueNxt) {
 				try {
@@ -510,6 +532,7 @@ export class HubHttpCharacterRepository {
 						queue: recoveryQueueNxt,
 					});
 				} catch (error) {
+					if (!fnIsCurrent()) return abortFenced();
 					this._setSaveBlock(canonicalId, {
 						reason: "recovery_storage_failed",
 						code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
@@ -517,6 +540,10 @@ export class HubHttpCharacterRepository {
 					});
 					return {status: "failed", error: {code: error.code, message: error.message}};
 				}
+			}
+			if (!fnIsCurrent()) {
+				this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+				return abortFenced();
 			}
 
 			if (conflicts.length) {
@@ -552,6 +579,7 @@ export class HubHttpCharacterRepository {
 					fnAdoptLive(structuredClone(staged.live));
 				} catch (error) {
 					this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+					if (!fnIsCurrent()) return abortFenced();
 					return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
 				}
 			}
@@ -1110,14 +1138,33 @@ export class HubHttpCharacterRepository {
 		sequence = null,
 		liveData,
 		fnAdoptLive = null,
+		fnIsCurrent = () => true,
 	}) {
 		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const defer = () => {
+			this._queuePendingResync({canonicalId,
+				envelope: {
+					eventId,
+					sequence,
+					leg,
+					legId,
+					changed,
+					operationLegKey,
+					operationId: operationId || operation?.operationId,
+					operation,
+					sourceCost,
+					resultingCharacterRevision,
+				}});
+			return {status: "fenced"};
+		};
+		if (!fnIsCurrent()) return defer();
 		const {events: appliedEventIds, operationLegs: appliedOperationLegIds} = this._getAppliedIds(canonicalId);
 		let tracks;
 		try {
 			tracks = this._buildReconciliationTracks({canonicalId, liveData});
 		} catch (error) {
+			if (!fnIsCurrent()) return defer();
 			const detail = {code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE", message: error.message || "Campaign effect coverage could not be read. Saving is paused."};
 			this._setSaveBlock(canonicalId, {reason: "recovery_storage_failed", ...detail});
 			return {status: RECONCILE_STATUS.BLOCKED, error: detail};
@@ -1136,6 +1183,7 @@ export class HubHttpCharacterRepository {
 			appliedEventIds,
 			appliedOperationLegIds,
 		});
+		if (!fnIsCurrent()) return defer();
 
 		if (plan.status === RECONCILE_STATUS.RESYNC_REQUIRED) {
 			this._queuePendingResync({
@@ -1194,8 +1242,14 @@ export class HubHttpCharacterRepository {
 				revisionless = this._stageRevisionlessCoverage({characterId: canonicalId, operationLegKey: plan.operationLegKey});
 			} catch (error) {
 				this._rollbackStagedRecoveryCommandQueue(durable);
+				if (!fnIsCurrent()) return defer();
 				this._setSaveBlock(canonicalId, {reason: "recovery_storage_failed", code: error.code, message: error.message});
 				return {status: RECONCILE_STATUS.BLOCKED, error: {code: error.code, message: error.message}};
+			}
+			if (!fnIsCurrent()) {
+				this._rollbackStagedRecoveryCommandQueue(durable);
+				this._rollbackRevisionlessCoverage(revisionless);
+				return defer();
 			}
 			if (durable) this._commitStagedRecoveryCommandQueue(durable);
 			this._revisionlessCoverage.set(revisionless.key, revisionless.ids);
@@ -1229,12 +1283,17 @@ export class HubHttpCharacterRepository {
 					queue: recoveryQueueNxt,
 				});
 			} catch (error) {
+				if (!fnIsCurrent()) return defer();
 				this._setSaveBlock(canonicalId, {
 					reason: "recovery_storage_failed",
 					code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
 					message: error.message || `Cloud character recovery storage failed.`,
 				});
 				return {status: RECONCILE_STATUS.BLOCKED, error: {code: error.code, message: error.message}, decisions: plan.decisions};
+			}
+			if (!fnIsCurrent()) {
+				this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+				return defer();
 			}
 		}
 
@@ -1244,6 +1303,7 @@ export class HubHttpCharacterRepository {
 				fnAdoptLive(structuredClone(plan.staged.live));
 			} catch (error) {
 				this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+				if (!fnIsCurrent()) return defer();
 				return {status: RECONCILE_STATUS.BLOCKED, error: {code: "LIVE_ADOPTION_FAILED", message: error?.message || `Live state could not be updated.`}, decisions: plan.decisions};
 			}
 		}
@@ -1556,6 +1616,7 @@ export class HubHttpCharacterRepository {
 					liveData: fnGetLiveData ? fnGetLiveData() : undefined,
 				});
 				const plan = this._planResyncBatch({canonicalId, working, ordered});
+				if (!fnIsCurrent()) return {status: "fenced"};
 				if (plan.status !== "planned") {
 					this._setSaveBlock(canonicalId, {
 						reason: "resync_unavailable",
@@ -1577,12 +1638,18 @@ export class HubHttpCharacterRepository {
 						if (revisionlessKeys.length) stagedRevisionlessCoverage = this._stageRevisionlessCoverage({characterId: canonicalId, operationLegKeys: revisionlessKeys});
 					} catch (error) {
 						this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+						if (!fnIsCurrent()) return {status: "fenced"};
 						this._setSaveBlock(canonicalId, {
 							reason: "recovery_storage_failed",
 							code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
 							message: error.message || `Cloud character recovery storage failed.`,
 						});
 						return {status: "failed", error: {code: error.code, message: error.message}};
+					}
+					if (!fnIsCurrent()) {
+						this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+						this._rollbackRevisionlessCoverage(stagedRevisionlessCoverage);
+						return {status: "fenced"};
 					}
 				}
 
@@ -1594,6 +1661,7 @@ export class HubHttpCharacterRepository {
 					} catch (error) {
 						this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
 						this._rollbackRevisionlessCoverage(stagedRevisionlessCoverage);
+						if (!fnIsCurrent()) return {status: "fenced"};
 						// Nothing has been committed yet, so a retry replays the identical batch.
 						return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
 					}
@@ -1816,9 +1884,10 @@ export class HubHttpCharacterRepository {
 
 	_getResyncFloorSequence (canonicalId) {
 		const book = this._getCoverageBook(canonicalId);
-		const sequences = [book.live, book.latestSubmitted, book.recoveredBase, book.failedWrite]
-			.map(coverage => coverage?.acceptedSequence)
-			.filter(Number.isInteger);
+		const tracks = this._buildReconciliationTracks({canonicalId});
+		const sequences = [book.live, ...Object.values(tracks).map(track => track.coverage)]
+			.map(coverage => coverage?.acceptedSequence);
+		if (sequences.some(sequence => !Number.isInteger(sequence))) return 0;
 		return sequences.length ? Math.max(0, Math.min(...sequences)) : 0;
 	}
 

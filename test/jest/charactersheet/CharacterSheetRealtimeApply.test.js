@@ -3,6 +3,10 @@ import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
+import {CharacterSheetHubEffects} from "../../../js/charactersheet/charactersheet-hub-effects.js";
+import {CharacterSheetPeerTargeting} from "../../../js/charactersheet/charactersheet-peer-targeting.js";
+import {getMultiTargetOperationsCapability} from "../../../js/hub/hub-multi-target-operations.js";
+import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
 import {applyJsonPatch} from "../../../js/hub/hub-json-patch.js";
@@ -266,6 +270,389 @@ beforeAll(async () => {
 	globalThis.window ||= {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
 	globalThis.document ||= {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
 	CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
+});
+
+const makeMultiEvent = ({revision = 3, sequence = 20, legId = "review-leg"} = {}) => {
+	const event = makeAppliedEvent({id: `event-${legId}`, operationId: "review-operation", revision, sequence, kind: "hp.heal", args: {amount: 4}});
+	event.type = "character.multi_operation.target_applied";
+	Object.assign(event.payload, {operationId: "review-operation", leg: "target", legId, changed: true});
+	return event;
+};
+const makeAuthorityEvent = type => ({
+	id: `authority-${type}`,
+	campaignId: "campaign-1",
+	sequence: 30,
+	type,
+	aggregateType: type === "rules.activated" ? "rules_version" : type === "campaign.archived" ? "campaign" : "character",
+	aggregateId: type === "rules.activated" ? "rules-2" : type === "campaign.archived" ? "campaign-1" : "character-1",
+	aggregateRevision: null,
+	payload: {},
+});
+const pMakeAuthorityHarness = async () => {
+	globalThis.window.removeEventListener ||= jest.fn();
+	globalThis.document.removeEventListener ||= jest.fn();
+	const harness = await pMakeHarness({seed: {hp: {current: 5, max: 44, temp: 0}}});
+	const {host, api, state} = harness;
+	const contextGate = makeDeferred();
+	const context = {
+		membership: {role: "player"},
+		capabilities: {multiTargetOperations: getMultiTargetOperationsCapability({enabled: true})},
+		rulesVersion: {id: "rules-2", version: 2, schemaVersion: 1, catalogVersion: 1, rules: createDefaultCampaignRulesPolicy()},
+	};
+	Object.assign(host, {
+		_isHubCharacter: true,
+		_hubContextGeneration: 0,
+		_hubRulesRefreshGeneration: 0,
+		_hubRoleRosterGeneration: 0,
+		_hubContext: context,
+		_hubCampaignContext: {context, pRefresh: jest.fn(() => contextGate.promise)},
+		_concealHubPrivateCharacter: jest.fn(() => { host._currentCharacterId = null; state.reset(); }),
+		isCurrentCharacterReadOnly: () => false,
+		_hubApi: api,
+	});
+	for (const method of ["_pRefreshHubRules", "_clearHubRules", "_applyHubContext", "_fenceHubGeneration", "_detachHubRealtimeClient", "_detachHubProjections", "_endCurrentHubCharacterAccess", "_teardownHubRules"]) {
+		host[method] = CharacterSheetPage.prototype[method].bind(host);
+	}
+	Object.assign(api, {
+		pListCharacterPendingActions: jest.fn(async () => []),
+		pListMultiTargetInbox: jest.fn(async () => ({invitations: [], nextCursor: null})),
+		pListCampaignCharacterProjections: jest.fn(async () => ({projections: [], roster: []})),
+		pListCharacterOutgoingActions: jest.fn(async () => []),
+		pListMultiTargetOutgoing: jest.fn(async () => ({operations: [], nextCursor: null})),
+	});
+	host._hubEffects = new CharacterSheetHubEffects({
+		campaignId: "campaign-1",
+		api,
+		root: globalThis.e_({tag: "div"}),
+		fnGetCharacterId: () => host._currentCharacterId,
+		fnIsOwner: () => host._currentCharacterId === "character-1",
+		fnGetMultiTargetCapability: () => context.capabilities.multiTargetOperations,
+		fnGetAuthorityVersion: () => host._hubContextGeneration,
+		fnOnAuthoritativeApproval: result => host._onHubAuthoritativeApproval(result),
+		fnSetTimeout: jest.fn(),
+		fnClearTimeout: jest.fn(),
+	});
+	host._peerTargeting = new CharacterSheetPeerTargeting({
+		campaignId: "campaign-1",
+		api,
+		root: globalThis.e_({tag: "div"}),
+		fnGetCharacterId: () => host._currentCharacterId,
+		fnIsOwner: () => host._currentCharacterId === "character-1",
+		fnGetRulesVersionId: () => null,
+		fnGetCapability: () => null,
+		fnGetMultiTargetCapability: () => context.capabilities.multiTargetOperations,
+		fnGetAuthorityVersion: () => host._hubContextGeneration,
+	});
+	host._hubEffects.init();
+	host._peerTargeting.init();
+	host._hubEffects.activate({characterId: "character-1"});
+	host._peerTargeting.activate({characterId: "character-1", membershipRole: "player"});
+	await pFlush();
+	const adopted = jest.spyOn(host, "_adoptHubLiveCharacterData");
+	const notice = jest.spyOn(host._hubEffects, "_addNotice");
+	const focus = jest.spyOn(host._hubEffects, "_focusMultiInvitation");
+	const deliverHttp = event => host._onHubAuthoritativeApproval({
+		actionId: event.payload.operationId,
+		characterId: "character-1",
+		eventId: event.id,
+		sequence: event.sequence,
+		operation: event.payload.operation,
+		leg: "target",
+		legId: event.payload.legId,
+		resultingCharacterRevision: event.aggregateRevision,
+		changed: event.payload.changed,
+	});
+	return {...harness, contextGate, context, adopted, notice, focus, deliverHttp, effects: host._hubEffects, targeting: host._peerTargeting};
+};
+const pBlockSave = async ({host, api, repository, state}) => {
+	const started = makeDeferred();
+	const release = makeDeferred();
+	api.pPatchCharacter.mockImplementationOnce(async input => {
+		started.resolve();
+		await release.promise;
+		const saved = makeCharacterDocument(applyJsonPatch(api.state.character.data, input.patches), 2);
+		api.state.character = makeCharacterDocument({...saved.data, hp: {...saved.data.hp, current: 9}}, 3);
+		return {character: saved};
+	});
+	state.setName("Save A");
+	const save = repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+	await started.promise;
+	host._renderCount = 0;
+	return {release, save};
+};
+
+describe("A4 immediate authority invalidation on real queued consumers", () => {
+	it.each(["campaign.archived", "rules.activated", "character.projection.invalidated"].flatMap(type => ["http-first", "event-first"].map(order => [type, order])))("fences %s before %s delivery behind save A and recovers only under fresh authority", async (type, order) => {
+		const h = await pMakeAuthorityHarness();
+		const {release, save} = await pBlockSave(h);
+		const event = makeMultiEvent();
+		let http;
+		if (order === "http-first") http = h.deliverHttp(event);
+		h.clients[0].emit("event", event);
+		if (order === "event-first") http = h.deliverHttp(event);
+		h.clients[0].emit("event", makeAuthorityEvent(type));
+		expect(h.effects._isCapabilityRevoked).toBe(true);
+		expect(h.targeting._isSuspended).toBe(true);
+		release.resolve();
+		await save;
+		expect(await http).toBe(false);
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.host._renderCount).toBe(0);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.toasts).toEqual([]);
+		expect(h.focus).not.toHaveBeenCalled();
+		expect(h.repository._getAppliedIds("character-1").operationLegs.has("review-operation/target/review-leg")).toBe(false);
+		expect(h.repository._realtimeCursors.get("character-1")?.operationWatermark).not.toBe(20);
+		if (type === "campaign.archived") {
+			expect(h.host._concealHubPrivateCharacter).toHaveBeenCalledTimes(1);
+			expect(h.host._currentCharacterId).toBeNull();
+		} else {
+			expect(h.state.toJson().hp.current).toBe(5);
+			expect(h.repository.hasPendingResync("character-1")).toBe(true);
+			h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 30, hasMore: false}});
+			h.contextGate.resolve(h.context);
+			await pFlush();
+			await pFlush();
+			expect(h.state.toJson().hp.current).toBe(9);
+			expect(h.adopted).toHaveBeenCalledTimes(1);
+			expect(h.notice).toHaveBeenCalledTimes(1);
+			await h.deliverHttp(event);
+			expect(h.adopted).toHaveBeenCalledTimes(1);
+			expect(h.notice).toHaveBeenCalledTimes(1);
+		}
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["campaign.archived", "rules.activated", "character.projection.invalidated"])("fences a queued resync behind save A on actual %s arrival without committing its leg", async type => {
+		const h = await pMakeAuthorityHarness();
+		const {release, save} = await pBlockSave(h);
+		const event = makeMultiEvent();
+		h.repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: event.id,
+				sequence: event.sequence,
+				leg: "target",
+				legId: "review-leg",
+				operationId: "review-operation",
+				operation: event.payload.operation,
+				resultingCharacterRevision: 3,
+			}});
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 30, hasMore: false}});
+		const pending = h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		h.clients[0].emit("event", makeAuthorityEvent(type));
+		release.resolve();
+		await save;
+		expect(await pending).toBe(false);
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.host._renderCount).toBe(0);
+		expect(h.toasts).toEqual([]);
+		expect(h.repository._getAppliedIds("character-1").operationLegs.has("review-operation/target/review-leg")).toBe(false);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["campaign.archived", "rules.activated", "character.projection.invalidated"])("fences canonical adoption already awaiting its authorized read on actual %s arrival", async type => {
+		const h = await pMakeAuthorityHarness();
+		const read = makeDeferred();
+		const started = makeDeferred();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._scheduleHubAuthoritativeReconcile({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("event", makeAuthorityEvent(type));
+		read.resolve(makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2));
+		await pFlush();
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.host._renderCount).toBe(0);
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["canonical", "history"])("fences pending resync during its %s await and retains exact evidence for fresh recovery", async phase => {
+		const h = await pMakeAuthorityHarness();
+		const event = makeMultiEvent({revision: 2});
+		h.repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: event.id, sequence: event.sequence, ...event.payload, resultingCharacterRevision: 2,
+			}});
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 20, hasMore: false}});
+		const read = makeDeferred();
+		const started = makeDeferred();
+		const method = phase === "canonical" ? "pGetCharacter" : "pListEventPage";
+		const original = h.api[method].getMockImplementation();
+		h.api[method].mockImplementationOnce(async input => {
+			started.resolve();
+			await read.promise;
+			return original(input);
+		});
+		const resync = h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("event", makeAuthorityEvent("character.projection.invalidated"));
+		read.resolve();
+		await resync;
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(true);
+		expect(h.notice).not.toHaveBeenCalled();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("retains canonical projection demand and accepts a future current-authority leg after refresh", async () => {
+		const h = await pMakeAuthorityHarness();
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.clients[0].emit("event", makeAuthorityEvent("character.projection.invalidated"));
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.effects.onApplied({operation: makeMultiEvent({revision: 2}).payload.operation, legId: "stale"})).toBe(false);
+		expect(h.notice).not.toHaveBeenCalled();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.host._renderCount).toBe(2);
+		expect(h.notice).not.toHaveBeenCalled();
+		const event = makeMultiEvent({revision: 3, sequence: 40, legId: "fresh"});
+		expect(await h.deliverHttp(event)).toBe(true);
+		expect(h.state.toJson().hp.current).toBe(13);
+		expect(h.adopted).toHaveBeenCalledTimes(2);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["durable", "journal", "adopt"])("rolls back mixed resync, every durable command and coverage when actual authority changes at %s boundary", async phase => {
+		const h = await pMakeAuthorityHarness();
+		h.api.pPatchCharacter.mockRejectedValue(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+		for (const name of ["edit A", "edit B"]) {
+			h.state.setName(name);
+			await expect(h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+		}
+		const documentsBefore = JSON.stringify(h.repository._recoveryCommandQueues.get("character-1"));
+		const journalKey = h.repository._getRevisionlessCoverageKey("character-1");
+		const events = [makeMultiEvent({revision: 2, sequence: 20, legId: "first"}), makeMultiEvent({revision: 3, sequence: 21, legId: "second"}), makeMultiEvent({revision: null, sequence: 22, legId: "noop"})];
+		events[2].payload.changed = false;
+		events[2].payload.resultingCharacterRevision = null;
+		h.api.pListEventPage.mockResolvedValue({events, replay: {scannedThroughSequence: 22, hasMore: false}});
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 13, max: 44, temp: 0}}, 3);
+		h.repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: events[1].id, sequence: events[1].sequence, ...events[1].payload, resultingCharacterRevision: 3,
+			}});
+		const method = phase === "durable" ? "_stageRecoveryCommandQueue" : phase === "journal" ? "_stageRevisionlessCoverage" : "_reconcileClassFeatures";
+		const target = phase === "adopt" ? h.host : h.repository;
+		const original = target[method].bind(target);
+		const boundary = jest.spyOn(target, method).mockImplementationOnce(input => {
+			const result = original(input);
+			h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+			return result;
+		});
+		await h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		expect(h.state.toJson().hp.current).toBe(5);
+		expect(h.state.toJson().name).toBe("edit B");
+		expect(JSON.stringify(h.repository._recoveryCommandQueues.get("character-1"))).toBe(documentsBefore);
+		expect(h.repository._recoveryStorage.getItem(journalKey)).toBeNull();
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(h.repository._getCoverageBook("character-1").acceptedOperationLegIds.toArray()).toEqual([]);
+		expect(h.repository.hasPendingResync("character-1")).toBe(true);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.host._renderCount).toBe(0);
+		if (phase !== "adopt") expect(h.adopted).not.toHaveBeenCalled();
+		boundary.mockRestore();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.repository.getSaveBlock("character-1")).toBeNull();
+		expect(h.state.toJson().hp.current).toBe(13);
+		expect(h.state.toJson().name).toBe("edit B");
+		expect(h.notice).toHaveBeenCalledTimes(3);
+		for (const command of h.repository._recoveryCommandQueues.get("character-1")) {
+			for (const field of ["submittedBaseCoverage", "submittedSnapshotCoverage"]) {
+				expect(command[field].appliedOperationLegIds.has("review-operation/target/noop")).toBe(true);
+				expect(command[field].revision).toBe(3);
+			}
+		}
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("rolls back a revisionless-only resync journal when actual authority changes after staging", async () => {
+		const h = await pMakeAuthorityHarness();
+		const event = makeMultiEvent({revision: null, legId: "noop-only"});
+		event.payload.changed = false;
+		event.payload.resultingCharacterRevision = null;
+		h.repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: event.id, sequence: event.sequence, ...event.payload, resultingCharacterRevision: null,
+			}});
+		const original = h.repository._stageRevisionlessCoverage.bind(h.repository);
+		const boundary = jest.spyOn(h.repository, "_stageRevisionlessCoverage").mockImplementationOnce(input => {
+			const staged = original(input);
+			h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+			return staged;
+		});
+		await h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		expect(h.repository._recoveryStorage.getItem(h.repository._getRevisionlessCoverageKey("character-1"))).toBeNull();
+		expect(h.repository._getAppliedIds("character-1").operationLegs.has("review-operation/target/noop-only")).toBe(false);
+		expect(h.repository.hasPendingResync("character-1")).toBe(true);
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.notice).not.toHaveBeenCalled();
+		boundary.mockRestore();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.repository._getAppliedIds("character-1").operationLegs.has("review-operation/target/noop-only")).toBe(true);
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.state.toJson().hp.current).toBe(5);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("recovers retained HTTP evidence when fresh context finishes before the old queued callback drains", async () => {
+		const h = await pMakeAuthorityHarness();
+		const {release, save} = await pBlockSave(h);
+		const event = makeMultiEvent();
+		const http = h.deliverHttp(event);
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 30, hasMore: false}});
+		h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+		const contextRefresh = h.host._pRefreshHubRules({isUseLatest: true});
+		h.contextGate.resolve(h.context);
+		await contextRefresh;
+		expect(h.host._isHubOperationAuthorityPending).toBe(false);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.adopted).not.toHaveBeenCalled();
+		release.resolve();
+		await save;
+		expect(await http).toBe(false);
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
 });
 
 describe("Reviewed multi-target deliveries on the real sheet/repository queue", () => {

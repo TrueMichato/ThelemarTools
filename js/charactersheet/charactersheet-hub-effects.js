@@ -275,6 +275,7 @@ export class CharacterSheetHubEffects {
 		const coverageKey = legId ? `${operation?.operationId}/${legId}` : operation?.operationId;
 		if (
 			!operation?.operationId
+			|| this._isCapabilityRevoked
 			|| operation.targetCharacterId !== this._characterId
 			|| this._seenAppliedOperationIds.has(coverageKey)
 		) return false;

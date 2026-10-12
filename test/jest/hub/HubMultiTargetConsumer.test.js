@@ -219,4 +219,98 @@ describe("Reviewed multi-target consumer contract", () => {
 		expect([...storage.rows]).toEqual(storageBefore);
 		expect(repository._getCoverageBook("character-1").acceptedOperationLegIds.has("multi-1/target/noop")).toBe(false);
 	});
+
+	it("replays below a known live watermark when an older submitted track has no sequence coverage", async () => {
+		const events = [envelope({legId: "older", revision: 2, sequence: 20}), envelope({legId: "current", revision: 3, sequence: 50})];
+		const api = {
+			pGetCharacter: jest.fn(async () => ({id: "character-1", campaignId: "campaign-1", revision: 3, data: {...data(), hp: {current: 13, max: 20}}})),
+			pListEventPage: jest.fn(async ({afterSequence}) => ({
+				events: events.filter(event => event.sequence > afterSequence),
+				replay: {scannedThroughSequence: 50, hasMore: false},
+			})),
+		};
+		const repository = makeRepository({api});
+		const current = {...data(), hp: {current: 9, max: 20}};
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 2, data: current, operationWatermark: 40});
+		const book = repository._getCoverageBook("character-1");
+		book.live = createCoverage({revision: 2, acceptedSequence: 40});
+		book.latestSubmitted = createCoverage({revision: 1, acceptedSequence: null});
+		repository._latestSubmitted.set("character-1", data());
+		repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: "event-current", sequence: 50, leg: "target", legId: "current", operation: operation(), resultingCharacterRevision: 3,
+			}});
+		const adopt = jest.fn();
+		expect(await repository.pRunPendingResync({characterId: "character-1", fnGetLiveData: () => current, fnAdoptLive: adopt})).toMatchObject({status: "recovered"});
+		expect(api.pListEventPage).toHaveBeenCalledWith({campaignId: "campaign-1", afterSequence: 0, limit: 200});
+		expect(adopt).toHaveBeenCalledTimes(1);
+		expect(adopt.mock.calls[0][0].hp.current).toBe(13);
+		expect(repository._latestSubmitted.get("character-1").hp.current).toBe(13);
+	});
+
+	it("does not retain an unprovable settled submit after real teardown and a fresh owner document load", async () => {
+		let canonical = {id: "character-1", campaignId: "campaign-1", revision: 1, data: data()};
+		const api = {
+			pGetCharacter: jest.fn(async () => structuredClone(canonical)),
+			pAcquireCharacterLease: jest.fn(async () => ({epoch: 1})),
+			pPatchCharacter: jest.fn(async () => {
+				canonical = {...canonical, revision: 2, data: {...data(), name: "saved edit"}};
+				return {character: canonical};
+			}),
+		};
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		await repository.pUpsert({character: {...data(), name: "saved edit", id: "character-1"}});
+		expect(repository._latestSubmitted.has("character-1")).toBe(true);
+		repository.clearRealtimeReconciliation({characterId: "character-1"});
+		canonical = {...canonical, revision: 3, data: {...canonical.data, hp: {current: 9, max: 20}}};
+		const live = await repository.pGet({characterId: "character-1"});
+		const adopt = jest.fn();
+		expect(repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "target",
+			legId: "after-return",
+			operation: operation(),
+			resultingCharacterRevision: 4,
+			eventId: "after-return-event",
+			sequence: 50,
+			liveData: live,
+			fnAdoptLive: adopt,
+		})).toMatchObject({status: "applied"});
+		expect(adopt).toHaveBeenCalledTimes(1);
+		expect(adopt.mock.calls[0][0].hp.current).toBe(13);
+		expect(repository._latestSubmitted.has("character-1")).toBe(false);
+	});
+
+	it("rehydrates exact unsettled submit coverage from both durable commands after teardown instead of discarding a draft", async () => {
+		const api = {
+			pGetCharacter: jest.fn(async () => ({id: "character-1", campaignId: "campaign-1", revision: 1, data: data()})),
+			pAcquireCharacterLease: jest.fn(async () => ({epoch: 1})),
+			pPatchCharacter: jest.fn(async () => { throw Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}); }),
+		};
+		const repository = makeRepository({api});
+		await repository.pGet({characterId: "character-1"});
+		for (const current of [4, 3]) {
+			await expect(repository.pUpsert({character: {...data(), id: "character-1", hp: {current, max: 20}}})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+		}
+		repository.clearRealtimeReconciliation({characterId: "character-1"});
+		const live = await repository.pGet({characterId: "character-1"});
+		expect(live.hp.current).toBe(3);
+		expect(repository._recoveryCommandQueues.get("character-1")).toHaveLength(2);
+		expect(repository._getCoverageBook("character-1").latestSubmitted.revision).toBe(1);
+		const adopt = jest.fn();
+		expect(repository.applyRealtimeOperation({
+			characterId: "character-1",
+			leg: "target",
+			legId: "after-draft-return",
+			operation: operation(),
+			resultingCharacterRevision: 2,
+			eventId: "after-draft-return-event",
+			sequence: 50,
+			liveData: live,
+			fnAdoptLive: adopt,
+		})).toMatchObject({status: "applied"});
+		expect(adopt.mock.calls[0][0].hp.current).toBe(7);
+		expect(repository._recoveryCommandQueues.get("character-1").map(command => [command.submittedBase.hp.current, command.submittedSnapshot.hp.current])).toEqual([[9, 8], [8, 7]]);
+	});
 });

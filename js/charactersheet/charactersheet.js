@@ -478,8 +478,13 @@ class CharacterSheetPage {
 	_initHubRealtimeListeners () {
 		if (!this._hubRealtime || this._isHubRealtimeListenersBound) return false;
 		this._isHubRealtimeListenersBound = true;
+		this._hubOperationAuthorityGeneration = this._hubRealtime.getAuthorityGeneration?.() ?? 0;
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
-		this._hubRealtime.on("targetingInvalidated", () => {
+		this._hubRealtime.on("targetingInvalidated", event => {
+			this._hubOperationAuthorityGeneration = event.authorityGeneration;
+			this._hubContextGeneration = (this._hubContextGeneration ?? 0) + 1;
+			this._isHubOperationAuthorityPending = true;
+			this._isHubContextRevalidationRequired = true;
 			this._peerTargeting?.suspend();
 			this._hubEffects?.suspend();
 		});
@@ -905,6 +910,7 @@ class CharacterSheetPage {
 		const overlay = _getHubRulesOverlay(context);
 		if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
 		this._hubContext = context;
+		this._isHubOperationAuthorityPending = false;
 		this._isHubContextUnavailable = false;
 		this._isHubContextRevalidationRequired = false;
 		this._hubRulesRefreshBlocked = false;
@@ -922,6 +928,9 @@ class CharacterSheetPage {
 		else this._hubEffects?.deactivate();
 		if (this._characterRepository?.hasPendingResync?.(this._currentCharacterId)) {
 			this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
+		}
+		if (this._hubAuthoritativeReconcileRequest) {
+			this._scheduleHubAuthoritativeReconcile({characterId: this._hubAuthoritativeReconcileRequest.characterId});
 		}
 	}
 
@@ -1046,11 +1055,13 @@ class CharacterSheetPage {
 	 * Adopt `F = E(L)` using the same path a post-save rebase uses. Throwing is intentional: it tells the
 	 * repository to abort its commit so accepted/base tracks never advance past live state.
 	 */
-	_adoptHubLiveCharacterData (liveNext) {
+	_adoptHubLiveCharacterData (liveNext, {fnIsCurrent = () => true} = {}) {
 		const liveBefore = this._state.toJson();
 		try {
+			if (!fnIsCurrent()) throw Object.assign(new Error("Campaign effect authority changed."), {code: "OPERATION_AUTHORITY_STALE"});
 			this._state.loadFromJson({...liveNext, id: this._currentCharacterId});
 			this._reconcileClassFeatures();
+			if (!fnIsCurrent()) throw Object.assign(new Error("Campaign effect authority changed."), {code: "OPERATION_AUTHORITY_STALE"});
 			_advanceCharacterDocumentGeneration(this);
 		} catch (error) {
 			try {
@@ -1069,9 +1080,13 @@ class CharacterSheetPage {
 
 	_onHubSemanticOperation (event) {
 		if (!this._currentCharacterId) return false;
-		if (!event.isAuthoritativeResult) this._peerTargeting?.onRealtimeOperation(event);
+		const authorityGeneration = event.authorityGeneration ?? (this._hubOperationAuthorityGeneration ?? 0);
+		const fnIsCurrent = () => !event.isAuthorityStale && !this._isHubOperationAuthorityPending
+			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0);
+		if (fnIsCurrent() && !event.isAuthoritativeResult) this._peerTargeting?.onRealtimeOperation(event);
 		const characterId = event.characterId || event.targetCharacterId;
 		if (event?.status !== "applied") {
+			if (!fnIsCurrent()) return false;
 			if (event.targetCharacterId != null && event.targetCharacterId !== this._currentCharacterId) return false;
 			return this._hubEffects?.onRealtimeOperation(event) || false;
 		}
@@ -1093,10 +1108,13 @@ class CharacterSheetPage {
 			eventId: event.eventId,
 			sequence: event.sequence,
 			liveData: this._getHubLiveCharacterData(),
-			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+			fnIsCurrent,
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext, {fnIsCurrent}),
 		});
 
 		switch (result?.status) {
+			case "fenced":
+				return false;
 			case "applied":
 				// Rendering runs after the transaction committed; a paint failure must not roll back state that
 				// is already coherent.
@@ -1195,17 +1213,22 @@ class CharacterSheetPage {
 		const contextGeneration = this._hubContextGeneration;
 		const roleGeneration = this._hubRoleRosterGeneration;
 		const campaignId = this._hubCampaignId;
+		const authorityGeneration = this._hubOperationAuthorityGeneration ?? 0;
 		return repository.pEnqueueRealtimeDelivery({
 			characterId,
 			fnDeliver: () => {
-				if (
+				const isScopeCurrent = characterId === this._currentCharacterId
+					&& campaignId === this._hubCampaignId && repository === this._characterRepository;
+				if (!isScopeCurrent) return false;
+				const isAuthorityStale = (
 					characterId !== this._currentCharacterId
 					|| generation !== this._characterLoadGeneration
 					|| realtimeGeneration !== this._hubRealtimeGeneration
 					|| contextGeneration !== this._hubContextGeneration
 					|| roleGeneration !== this._hubRoleRosterGeneration
 					|| campaignId !== this._hubCampaignId
-				) return false;
+					|| authorityGeneration !== (this._hubOperationAuthorityGeneration ?? 0)
+				);
 				return this._onHubSemanticOperation({
 					eventId,
 					campaignId: this._hubCampaignId,
@@ -1221,6 +1244,8 @@ class CharacterSheetPage {
 					targetCharacterId: characterId,
 					status: "applied",
 					isAuthoritativeResult: true,
+					authorityGeneration,
+					isAuthorityStale,
 					leg,
 					legId,
 					operationLegKey,
@@ -1244,20 +1269,23 @@ class CharacterSheetPage {
 		const contextGeneration = this._hubContextGeneration;
 		const roleGeneration = this._hubRoleRosterGeneration;
 		const campaignId = this._hubCampaignId;
+		const authorityGeneration = this._hubOperationAuthorityGeneration ?? 0;
 		const isCurrent = () => this._currentCharacterId === characterId
 			&& this._characterLoadGeneration === generation && this._hubRealtimeGeneration === realtimeGeneration
 			&& this._hubContextGeneration === contextGeneration && this._hubRoleRosterGeneration === roleGeneration
-			&& this._hubCampaignId === campaignId;
+			&& this._hubCampaignId === campaignId && !this._isHubOperationAuthorityPending
+			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0);
 		const result = await repository.pRunPendingResync({
 			characterId,
 			fnGetLiveData: () => this._getHubLiveCharacterData(),
-			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext, {fnIsCurrent: isCurrent}),
 			fnIsCurrent: isCurrent,
 		}).catch(error => ({status: "failed", error}));
 		if (!isCurrent()) {
 			if (
 				this._currentCharacterId === characterId && this._hubContext
 				&& !this._hubRulesRefreshBlocked && !this._isHubContextRefreshing
+				&& !this._isHubOperationAuthorityPending
 				&& this._characterRepository?.hasPendingResync?.(characterId)
 			) this._scheduleHubRealtimeResync({characterId});
 			return false;
@@ -1299,7 +1327,9 @@ class CharacterSheetPage {
 			characterId,
 			generation: this._characterLoadGeneration,
 			realtimeGeneration: this._hubRealtimeGeneration,
+			authorityGeneration: this._hubOperationAuthorityGeneration ?? 0,
 		};
+		if (this._isHubOperationAuthorityPending) return false;
 		if (this._hubAuthoritativeReconcilePromise || this._isHubAuthoritativeReconcileScheduled) return true;
 		this._isHubAuthoritativeReconcileScheduled = true;
 		queueMicrotask(() => {
@@ -1332,25 +1362,27 @@ class CharacterSheetPage {
 	}
 
 	async _pDrainHubAuthoritativeReconcile () {
-		while (this._hubAuthoritativeReconcileRequest) {
+		while (this._hubAuthoritativeReconcileRequest && !this._isHubOperationAuthorityPending) {
 			const request = this._hubAuthoritativeReconcileRequest;
 			this._hubAuthoritativeReconcileRequest = null;
 			await this._pRunHubAuthoritativeReconcile(request);
 		}
 	}
 
-	async _pRunHubAuthoritativeReconcile ({characterId, generation, realtimeGeneration}) {
+	async _pRunHubAuthoritativeReconcile ({characterId, generation, realtimeGeneration, authorityGeneration = this._hubOperationAuthorityGeneration ?? 0}) {
 		const repository = this._characterRepository;
 		if (typeof repository?.pReconcileAuthoritativeCharacter !== "function") return false;
 		const fnIsCurrent = () => (
 			this._currentCharacterId === characterId
 			&& this._characterLoadGeneration === generation
 			&& this._hubRealtimeGeneration === realtimeGeneration
+			&& !this._isHubOperationAuthorityPending
+			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0)
 		);
 		const result = await repository.pReconcileAuthoritativeCharacter({
 			characterId,
 			fnGetLiveData: () => this._getHubLiveCharacterData(),
-			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
+			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext, {fnIsCurrent}),
 			fnIsCurrent,
 			isPreserveLocalOnConflict: true,
 		}).catch(error => ({status: "failed", error}));
