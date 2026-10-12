@@ -67,6 +67,14 @@ commands at storage/journal/adoption boundaries. Fresh authorized context recove
 terminal archive conceals instead. A separate continuation check preserves canonical projection demand and accepts
 future current-authority deliveries. Actual-call-site mutations remove the synchronous fence or post-staging guards,
 and must make those behavioral assertions fail before restoration.
+The interrupted-canonical-demand regression holds a real canonical read, delivers rules activation through the
+coordinator, and resumes authorized context without supplying another demand or advancing test-only generations.
+The old read cannot adopt; a fresh read must automatically catch up exactly once. The executing request remains
+retained until completion, and its completion cannot clear a newer coalesced request. Repeated rules/projection
+interruptions, durable-stage/adoption rollback, a real switch away and back, scope loss, and persisted BFCache
+resume cover the continuation. Authority-unavailable drains stop instead of spinning; account/campaign/access
+changes and terminal teardown discard the old demand rather than revive it. Actual drain-site mutations that
+clear demand before the await or erase a newer request must fail these behavioral checks.
 The replay floor includes every existing ordinary/conflict/durable track. An unknown sequence cannot be silently
 filtered out in favor of a newer live watermark: bounded authorized replay starts at zero so an older unseen changed
 leg is not excluded. A separate exclusive-cursor regression and actual history-floor mutation cover this recovery

@@ -246,6 +246,7 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 		"_pRunHubRealtimeResync",
 		"_onHubProjectionInvalidated",
 		"_scheduleHubAuthoritativeReconcile",
+		"_isHubAuthoritativeReconcileScopeCurrent",
 		"_pDrainHubAuthoritativeReconcile",
 		"_pRunHubAuthoritativeReconcile",
 		"_pResolveHubCharacterConflict",
@@ -380,6 +381,383 @@ const pBlockSave = async ({host, api, repository, state}) => {
 	host._renderCount = 0;
 	return {release, save};
 };
+
+describe("A4 interrupted canonical demand recovery on real authority arrival", () => {
+	it("automatically replaces a rules-fenced canonical read after authorized context resumes, without a new demand", async () => {
+		const h = await pMakeAuthorityHarness();
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.state.toJson().hp.current).toBe(5);
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.focus).not.toHaveBeenCalled();
+		expect(h.host._renderCount).toBe(0);
+		expect(h.toasts).toEqual([]);
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.repository._accepted.get("character-1").revision).toBe(2);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.notice).not.toHaveBeenCalled();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("coalesces newer projection demands received during an interrupted read without overwriting them", async () => {
+		const h = await pMakeAuthorityHarness();
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		const original = h.host._hubAuthoritativeReconcileRequest;
+		h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		const newer = h.host._hubAuthoritativeReconcileRequest;
+		expect(newer).not.toBe(original);
+		expect(newer.authorityGeneration).toBe(h.coordinator.getAuthorityGeneration());
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		expect(h.host._hubAuthoritativeReconcileRequest).toBe(newer);
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.adopted).not.toHaveBeenCalled();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("repeats rules and projection interruptions with fresh automatic catch-up and no authority-unavailable spin", async () => {
+		const h = await pMakeAuthorityHarness();
+		h.api.pGetCharacter.mockClear();
+		for (const [i, type] of ["rules.activated", "character.projection.invalidated"].entries()) {
+			const started = makeDeferred();
+			const read = makeDeferred();
+			const context = makeDeferred();
+			const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9 + i * 4, max: 44, temp: 0}}, 2 + i);
+			h.api.state.character = truth;
+			h.host._hubCampaignContext.pRefresh.mockImplementation(() => context.promise);
+			h.api.pGetCharacter.mockImplementationOnce(async () => {
+				started.resolve();
+				return read.promise;
+			});
+			h.host._onHubProjectionInvalidated({characterId: "character-1"});
+			await started.promise;
+			h.clients[0].emit("event", {...makeAuthorityEvent(type), id: `cycle-${i}`, sequence: 30 + i});
+			read.resolve(truth);
+			await h.host._hubAuthoritativeReconcilePromise;
+			await pFlush();
+			await pFlush();
+			expect(h.api.pGetCharacter).toHaveBeenCalledTimes(i * 2 + 1);
+			expect(h.adopted).toHaveBeenCalledTimes(i);
+			expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+			context.resolve(h.context);
+			await pFlush();
+			await pFlush();
+			expect(h.api.pGetCharacter).toHaveBeenCalledTimes(i * 2 + 2);
+			expect(h.adopted).toHaveBeenCalledTimes(i + 1);
+			expect(h.state.toJson().hp.current).toBe(9 + i * 4);
+			expect(h.repository._accepted.get("character-1").revision).toBe(2 + i);
+			expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+			expect(h.notice).not.toHaveBeenCalled();
+			expect(h.toasts).toEqual([]);
+		}
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("keeps one demand through a second invalidation of its automatic replacement read", async () => {
+		const h = await pMakeAuthorityHarness();
+		const firstStarted = makeDeferred();
+		const secondStarted = makeDeferred();
+		const firstRead = makeDeferred();
+		const secondRead = makeDeferred();
+		const secondContext = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter
+			.mockImplementationOnce(async () => { firstStarted.resolve(); return firstRead.promise; })
+			.mockImplementationOnce(async () => { secondStarted.resolve(); return secondRead.promise; });
+		h.host._hubCampaignContext.pRefresh
+			.mockImplementationOnce(() => h.contextGate.promise)
+			.mockImplementationOnce(() => secondContext.promise);
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await firstStarted.promise;
+		h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+		firstRead.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		h.contextGate.resolve(h.context);
+		await secondStarted.promise;
+		h.clients[0].emit("event", {...makeAuthorityEvent("rules.activated"), id: "second-rules", sequence: 31});
+		secondRead.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+		secondContext.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(3);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.repository._accepted.get("character-1").revision).toBe(2);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.notice).not.toHaveBeenCalled();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("refreshes attempt tokens after reconnect without dropping recoverable same-scope demand", async () => {
+		const h = await pMakeAuthorityHarness();
+		h.host._onHubCampaignContextChanged = CharacterSheetPage.prototype._onHubCampaignContextChanged.bind(h.host);
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("state", {state: "reconnecting"});
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+		h.clients[0].emit("state", {state: "live"});
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["durable", "adopt"])("retains canonical demand and rolls back both command tracks when real rules arrive during %s", async phase => {
+		const h = await pMakeAuthorityHarness();
+		h.api.pPatchCharacter.mockRejectedValue(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+		for (const name of ["edit A", "edit B"]) {
+			h.state.setName(name);
+			await expect(h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+		}
+		const commandsBefore = JSON.stringify(h.repository._recoveryCommandQueues.get("character-1"));
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		const target = phase === "durable" ? h.repository : h.host;
+		const method = phase === "durable" ? "_stageRecoveryCommandQueue" : "_reconcileClassFeatures";
+		const original = target[method].bind(target);
+		const boundary = jest.spyOn(target, method).mockImplementationOnce(input => {
+			const result = original(input);
+			h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+			return result;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(5);
+		expect(h.state.toJson().name).toBe("edit B");
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(JSON.stringify(h.repository._recoveryCommandQueues.get("character-1"))).toBe(commandsBefore);
+		expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+		expect(h.host._renderCount).toBe(0);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.toasts).toEqual([]);
+		if (phase === "durable") expect(h.adopted).not.toHaveBeenCalled();
+		boundary.mockRestore();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.state.toJson().name).toBe("edit B");
+		expect(h.repository._accepted.get("character-1").revision).toBe(2);
+		const recovered = h.repository._recoveryCommandQueues.get("character-1");
+		expect(recovered).toHaveLength(3);
+		expect(recovered.slice(0, 2).map(command => command.commandKeys)).toEqual(JSON.parse(commandsBefore).map(command => command.commandKeys));
+		expect(recovered.map(command => [command.submittedBase.hp.current, command.submittedSnapshot.hp.current])).toEqual([[9, 9], [9, 9], [9, 9]]);
+		expect(h.api.pPatchCharacter).toHaveBeenCalledTimes(3);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["archive", "access-loss", "account", "signout", "campaign", "access-mode", "repository", "teardown"])("does not revive an interrupted canonical demand after %s ends its captured scope", async loss => {
+		const h = await pMakeAuthorityHarness();
+		h.host._hubActiveCampaign.accountId = "account-1";
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("event", makeAuthorityEvent(loss === "archive" ? "campaign.archived" : "rules.activated"));
+		if (loss === "access-loss") h.clients[0].emit("state", {state: "access_lost"});
+		if (loss === "account") h.host._hubActiveCampaign.accountId = "replacement-account";
+		if (loss === "signout") h.host._hubActiveCampaign.accountId = null;
+		if (loss === "campaign") h.host._hubCampaignId = "replacement-campaign";
+		if (loss === "access-mode") h.host._currentCharacterAccess = "dm_readonly";
+		if (loss === "repository") h.host._characterRepository = {accessKind: "hub"};
+		if (loss === "teardown") h.host._endCurrentHubCharacterAccess({characterId: "character-1"});
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.focus).not.toHaveBeenCalled();
+		expect(h.toasts).toEqual([]);
+		if (["archive", "teardown"].includes(loss)) expect(h.host._currentCharacterId).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("does not revive a held read across a real character load, even when that character is selected again", async () => {
+		const h = await pMakeAuthorityHarness();
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+		const previousLocation = window.location;
+		const previousHistory = window.history;
+		window.location = new URL("http://test/charactersheet.html?hubCampaign=campaign-1");
+		window.history = {replaceState: jest.fn()};
+		Object.assign(h.host, {
+			_pLoadCharacter: CharacterSheetPage.prototype._pLoadCharacter.bind(h.host),
+			_detachHubRealtime: CharacterSheetPage.prototype._detachHubRealtime.bind(h.host),
+			_reconcilePersistedCharacter: CharacterSheetPage.prototype._reconcilePersistedCharacter.bind(h.host),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_attachHubRealtime: ({characterId}) => h.coordinator.attach({characterId}),
+		});
+		try {
+			h.api.pGetCharacter.mockImplementationOnce(async () => ({...h.api.state.character, id: "character-2"}));
+			await h.host._pLoadCharacter("character-2");
+			expect(h.host._currentCharacterId).toBe("character-2");
+			await h.host._pLoadCharacter("character-1");
+			expect(h.host._currentCharacterId).toBe("character-1");
+			const readsBeforeRelease = h.api.pGetCharacter.mock.calls.length;
+			read.resolve(truth);
+			await h.host._hubAuthoritativeReconcilePromise;
+			h.contextGate.resolve(h.context);
+			await pFlush();
+			await pFlush();
+			expect(h.api.pGetCharacter).toHaveBeenCalledTimes(readsBeforeRelease);
+			expect(h.adopted).not.toHaveBeenCalled();
+			expect(h.state.toJson().hp.current).toBe(5);
+			expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+			expect(h.notice).not.toHaveBeenCalled();
+		} finally {
+			window.location = previousLocation;
+			window.history = previousHistory;
+			h.effects.destroy();
+			h.targeting.destroy();
+		}
+	});
+
+	it("retains an authority-fenced demand across persisted pagehide/pageshow without treating BFCache as teardown", async () => {
+		const h = await pMakeAuthorityHarness();
+		const listeners = new Map();
+		const originalAdd = window.addEventListener;
+		window.addEventListener = (name, listener) => listeners.set(name, listener);
+		try {
+			CharacterSheetPage.prototype._initHubRealtimeTeardown.call(h.host);
+		} finally {
+			window.addEventListener = originalAdd;
+		}
+		Object.assign(h.host._hubActiveCampaign, {
+			activeCampaignId: "campaign-1",
+			suspend: jest.fn(),
+			pResume: jest.fn(async () => {}),
+		});
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("event", makeAuthorityEvent("rules.activated"));
+		listeners.get("pagehide")({persisted: true});
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+		listeners.get("pageshow")({persisted: true});
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.host._hubActiveCampaign.pResume).toHaveBeenCalledTimes(1);
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+});
 
 describe("A4 immediate authority invalidation on real queued consumers", () => {
 	it.each(["campaign.archived", "rules.activated", "character.projection.invalidated"].flatMap(type => ["http-first", "event-first"].map(order => [type, order])))("fences %s before %s delivery behind save A and recovers only under fresh authority", async (type, order) => {

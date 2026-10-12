@@ -15,7 +15,10 @@ durable bounded revisionless no-op coverage. Authorization/projection invalidati
 pickers before queued work completes. The bounded A4 review remediation also advances a synchronous authority epoch:
 old queued HTTP/realtime/resync/canonical work cannot adopt, commit coverage or publish a success notice. Unapplied
 exact evidence and canonical projection demand wait for fresh authorized context; staged durable commands/no-op
-coverage roll back together if authority changes during adoption. This is local held work awaiting exact-delta
+coverage roll back together if authority changes during adoption. An interrupted canonical read keeps its
+unfinished scheduling demand, coalesces newer invalidations, and automatically retries with fresh authority
+tokens after context recovery. Terminal teardown or character/account/campaign/access-scope changes discard
+that demand; suspended drains do not spin. This is local held work awaiting exact-delta
 independent A4 review, not deployed or
 enabled product. Production multi-spell descriptors remain absent until A5; singular Cure Wounds and local casting
 are unchanged. Disposable browser fixtures alone inject the existing reviewed Shared Restoration template.

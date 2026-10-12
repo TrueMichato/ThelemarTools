@@ -378,6 +378,7 @@ class CharacterSheetPage {
 	/** `teardown-generation`: fence in-flight realtime work. */
 	_fenceHubGeneration () {
 		this._hubRealtimeGeneration++;
+		this._hubAuthoritativeReconcileRequest = null;
 		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
 		this._rollHistory?.onHubConnectionState?.({state: "suspended"});
@@ -447,6 +448,7 @@ class CharacterSheetPage {
 	}
 
 	_teardownHubRules () {
+		this._hubAuthoritativeReconcileRequest = null;
 		this._hubContextGeneration++;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -930,7 +932,9 @@ class CharacterSheetPage {
 			this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
 		}
 		if (this._hubAuthoritativeReconcileRequest) {
-			this._scheduleHubAuthoritativeReconcile({characterId: this._hubAuthoritativeReconcileRequest.characterId});
+			if (this._isHubAuthoritativeReconcileScopeCurrent(this._hubAuthoritativeReconcileRequest)) {
+				this._scheduleHubAuthoritativeReconcile({characterId: this._hubAuthoritativeReconcileRequest.characterId});
+			} else this._hubAuthoritativeReconcileRequest = null;
 		}
 	}
 
@@ -1328,8 +1332,13 @@ class CharacterSheetPage {
 			generation: this._characterLoadGeneration,
 			realtimeGeneration: this._hubRealtimeGeneration,
 			authorityGeneration: this._hubOperationAuthorityGeneration ?? 0,
+			contextGeneration: this._hubContextGeneration,
+			campaignId: this._hubCampaignId,
+			accountId: this._hubActiveCampaign?.accountId ?? null,
+			accessMode: this._currentCharacterAccess,
+			repository: this._characterRepository,
 		};
-		if (this._isHubOperationAuthorityPending) return false;
+		if (this._isHubOperationAuthorityPending || this._hubRulesRefreshBlocked || this._isHubContextUnavailable) return false;
 		if (this._hubAuthoritativeReconcilePromise || this._isHubAuthoritativeReconcileScheduled) return true;
 		this._isHubAuthoritativeReconcileScheduled = true;
 		queueMicrotask(() => {
@@ -1352,32 +1361,59 @@ class CharacterSheetPage {
 						this._hubAuthoritativeReconcilePromise = null;
 					}
 					if (this._hubAuthoritativeReconcileRequest) {
-						this._scheduleHubAuthoritativeReconcile({
-							characterId: this._hubAuthoritativeReconcileRequest.characterId,
-						});
+						if (this._isHubAuthoritativeReconcileScopeCurrent(this._hubAuthoritativeReconcileRequest)) {
+							if (!this._isHubOperationAuthorityPending && !this._hubRulesRefreshBlocked && !this._isHubContextUnavailable) {
+								this._scheduleHubAuthoritativeReconcile({
+									characterId: this._hubAuthoritativeReconcileRequest.characterId,
+								});
+							}
+						} else this._hubAuthoritativeReconcileRequest = null;
 					}
 				});
 		});
 		return true;
 	}
 
+	_isHubAuthoritativeReconcileScopeCurrent (request) {
+		return request.characterId === this._currentCharacterId
+			&& request.generation === this._characterLoadGeneration
+			&& request.campaignId === this._hubCampaignId
+			&& request.accountId === (this._hubActiveCampaign?.accountId ?? null)
+			&& request.accessMode === this._currentCharacterAccess
+			&& request.repository === this._characterRepository;
+	}
+
 	async _pDrainHubAuthoritativeReconcile () {
-		while (this._hubAuthoritativeReconcileRequest && !this._isHubOperationAuthorityPending) {
+		while (this._hubAuthoritativeReconcileRequest && !this._isHubOperationAuthorityPending
+			&& !this._hubRulesRefreshBlocked && !this._isHubContextUnavailable) {
 			const request = this._hubAuthoritativeReconcileRequest;
-			this._hubAuthoritativeReconcileRequest = null;
+			if (!this._isHubAuthoritativeReconcileScopeCurrent(request)) {
+				this._hubAuthoritativeReconcileRequest = null;
+				continue;
+			}
+			// Fresh context must still see unfinished demand; newer requests own the slot.
 			await this._pRunHubAuthoritativeReconcile(request);
+			if (this._hubAuthoritativeReconcileRequest !== request) continue;
+			if (this._isHubAuthoritativeReconcileScopeCurrent(request)
+				&& (this._isHubOperationAuthorityPending || this._hubRulesRefreshBlocked || this._isHubContextUnavailable
+					|| request.authorityGeneration !== (this._hubOperationAuthorityGeneration ?? 0)
+					|| request.contextGeneration !== this._hubContextGeneration
+					|| request.realtimeGeneration !== this._hubRealtimeGeneration)) break;
+			this._hubAuthoritativeReconcileRequest = null;
 		}
 	}
 
-	async _pRunHubAuthoritativeReconcile ({characterId, generation, realtimeGeneration, authorityGeneration = this._hubOperationAuthorityGeneration ?? 0}) {
+	async _pRunHubAuthoritativeReconcile (request) {
+		const {characterId, authorityGeneration, contextGeneration} = request;
 		const repository = this._characterRepository;
 		if (typeof repository?.pReconcileAuthoritativeCharacter !== "function") return false;
 		const fnIsCurrent = () => (
-			this._currentCharacterId === characterId
-			&& this._characterLoadGeneration === generation
-			&& this._hubRealtimeGeneration === realtimeGeneration
+			this._isHubAuthoritativeReconcileScopeCurrent(request)
+			&& request.realtimeGeneration === this._hubRealtimeGeneration
 			&& !this._isHubOperationAuthorityPending
+			&& !this._hubRulesRefreshBlocked && !this._isHubContextUnavailable
 			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0)
+			&& contextGeneration === this._hubContextGeneration
 		);
 		const result = await repository.pReconcileAuthoritativeCharacter({
 			characterId,

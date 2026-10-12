@@ -346,7 +346,13 @@ The coordinator stamps queued semantic envelopes with an authority epoch; its im
 page context fence and pauses HTTP, realtime, pending-resync and canonical adoption until fresh authorized context.
 Stale applied evidence remains in the existing ordered resync queue without committing coverage or watermark.
 Durable command/no-op staging rolls back if authority changes at adoption; suspended effects cannot publish notices.
-Canonical projection demand is retained for the fresh context instead of being silently dropped.
+Canonical projection demand remains in the request slot during the canonical await, not just while queued.
+An authority-fenced read leaves it unfinished; fresh authorized context recaptures authority/context tokens and
+automatically retries. Old completion cannot erase a newer coalesced demand. The original character-load,
+account, campaign, access and repository scope must still match; terminal teardown clears demand.
+Recoverable reconnect refreshes attempt tokens rather than treating the realtime generation as terminal scope loss.
+Unavailable-authority drains stop instead of spinning, while recoverable same-scope BFCache suspension is not
+terminal teardown.
 Fresh owner loads discard only an unprovable, settled submit cache after teardown; genuine durable drafts retain
 their exact command-backed snapshot coverage. Recovery replay includes all existing tracks and starts at zero if
 any track's sequence is unknown, rather than excluding an earlier changed leg behind a newer watermark.

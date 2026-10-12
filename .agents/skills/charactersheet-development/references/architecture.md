@@ -116,6 +116,9 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   including other candidate projection changes. A synchronous authority epoch fences
 │   already-queued HTTP/realtime/resync/canonical adoption, not just visible controls.
 │   Stale exact evidence and canonical demand survive for fresh authorized recovery.
+│   Keep canonical demand during its await; authority-fenced reads automatically retry
+│   with fresh tokens after context recovery. Old completion cannot clear a newer
+│   request. Terminal/scope changes discard demand; unavailable drains do not spin.
 │   Durable/no-op staging and live adoption roll back before coverage can commit.
 │   Document adoption still uses only the repository queue; scoped authoritative
 │   refresh restores consent controls, and suspended effects cannot publish notices.
