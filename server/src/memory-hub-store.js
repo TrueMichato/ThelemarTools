@@ -104,6 +104,7 @@ import {
 	getMultiTargetTargetResult,
 	isMultiTargetLiveStatus,
 	isMultiTargetResponseTerminal,
+	projectMultiTargetStoredCommandResponse,
 	MULTI_TARGET_COLLECTION_TTL_MS,
 	MULTI_TARGET_INBOX_MODE_PENDING,
 	MULTI_TARGET_INBOX_MODE_RECOVERY,
@@ -4751,14 +4752,7 @@ export class MemoryHubStore {
 			accountId,
 			role: membership.role,
 		});
-		const projected = copy(response);
-		projected.operation = currentOperation;
-		if (projected.invitation?.invitationId) {
-			projected.invitation = currentOperation.targets.find(target =>
-				target.invitationId === projected.invitation.invitationId,
-			);
-		}
-		return projected;
+		return projectMultiTargetStoredCommandResponse({response, currentOperation});
 	}
 
 	_refreshMultiTargetReadiness ({operation, actorAccountId = null}) {

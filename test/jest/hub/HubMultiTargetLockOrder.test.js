@@ -44,4 +44,26 @@ describe("multi-target PostgreSQL lock-order canaries", () => {
 		expect(characterLock).toBeGreaterThan(membershipLock);
 		expect(method).not.toMatch(/FROM hub\.campaigns[\s\S]*FOR (?:NO KEY )?UPDATE|FOR SHARE OF campaign/);
 	});
+
+	it("does not lock multi-target command rows before campaign lifecycle authority", () => {
+		for (const [name, nextName] of [
+			["pCreateMultiTargetOperation", "pRespondMultiTargetInvitation"],
+			["pRespondMultiTargetInvitation", "pFinalizeMultiTargetOperation"],
+			["pFinalizeMultiTargetOperation", "pCancelMultiTargetOperation"],
+			["pCancelMultiTargetOperation", "pListMultiTargetInbox"],
+		]) {
+			const method = getMethodSource(name, nextName);
+			expect(method).toContain("isLockRow: false");
+		}
+	});
+
+	it("locks retained-history campaigns before parent rows and aggregate deletion", () => {
+		const method = getMethodSource("pCleanupMultiTargetHistory", "_pExpireSemanticOperations");
+		const campaignLock = method.indexOf("pg_advisory_xact_lock(hashtextextended($1, 6))");
+		const parentLock = method.indexOf("FOR UPDATE", campaignLock);
+		const commandDelete = method.indexOf("DELETE FROM hub.semantic_operation_commands", parentLock);
+		expect(campaignLock).toBeGreaterThanOrEqual(0);
+		expect(parentLock).toBeGreaterThan(campaignLock);
+		expect(commandDelete).toBeGreaterThan(parentLock);
+	});
 });

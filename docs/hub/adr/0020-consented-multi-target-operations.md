@@ -529,10 +529,12 @@ Immutable proposal snapshots remain internal audit/history facts. Viewer DTOs an
 derive the displayed target label from current authorization and lifecycle state: owner/DM canonical identity,
 currently shared peer identity for the source, or the neutral `Campaign character unavailable`. Hiding identity
 or losing lifecycle authority therefore cannot replay the old canonical proposal name.
-Exact command replay preserves the stored command, event, receipt, and leg identities, but replaces the stored
-operation/result body with the full current authorized participant/DM view, including current target labels,
-own-leg target refs, and result privacy. Withdrawn support authority receives not-found. The stored receipt is
-not rewritten and a replay is not treated as a new command.
+Exact command replay preserves the stored command, event, receipt, leg, and historical command-outcome body.
+Current participation/DM authority controls whether replay is allowed and which stored fields remain visible;
+current target presentation, own-leg target refs, and action capabilities replace only their privacy/authority
+counterparts. A later response, deselection, finalization, cancellation, or expiry never masquerades as the
+earlier command's outcome. Withdrawn support authority receives not-found. The stored receipt is not rewritten
+and a replay is not treated as a new command.
 
 PostgreSQL participant reads and command-replay projection take the campaign seed-6 advisory lock in shared mode
 before current membership and ascending character shares. Workflow, lifecycle, and finalization writers take the
@@ -541,6 +543,12 @@ hold a character row and append a campaign event without waiting on that advisor
 campaign row lock, so the cycle `policy character -> campaign row`, `detail membership -> character`, `removal
 campaign row -> membership` is broken without hiding `40P01`. Detail re-reads parent, targets, finalization,
 capabilities, events, and results inside that one linearized transaction.
+Multi-target retries hold the command seed-9 advisory but do not lock the semantic-command row before entering
+campaign authority; account purge can therefore take the exclusive campaign advisory and delete retained command
+rows without a command-row/campaign-advisory cycle. Ninety-day retention cleanup also takes the exclusive
+campaign advisory before rechecking and locking the parent, then deletes finalization, targets, commands, and
+parent in order. A detail reader therefore returns one complete pre-delete aggregate or not-found after deletion,
+never a hybrid.
 
 Rollout order: A1/A2 foundations, A3 migration/server with capability off, protocol-6 A4 clients, A5 templates,
 Memory/PostgreSQL and real-stack proof, one allowlisted campaign/template canary, then measured expansion.

@@ -213,6 +213,49 @@ export function getMultiTargetTargetResult (target) {
 	};
 }
 
+export function projectMultiTargetStoredCommandResponse ({response, currentOperation}) {
+	const projected = structuredClone(response);
+	const storedOperation = projected?.operation;
+	if (!storedOperation || !currentOperation) return projected;
+
+	const allowedOperationKeys = new Set(
+		Object.entries(currentOperation)
+			.filter(([, value]) => value !== undefined)
+			.map(([key]) => key),
+	);
+	for (const key of Object.keys(storedOperation)) {
+		if (!allowedOperationKeys.has(key)) delete storedOperation[key];
+	}
+	storedOperation.presentation = structuredClone(currentOperation.presentation);
+	storedOperation.capabilities = structuredClone(currentOperation.capabilities);
+
+	const currentTargetsByInvitationId = new Map(
+		currentOperation.targets.map(target => [target.invitationId, target]),
+	);
+	storedOperation.targets = storedOperation.targets
+		.filter(target => currentTargetsByInvitationId.has(target.invitationId))
+		.map(target => {
+			const currentTarget = currentTargetsByInvitationId.get(target.invitationId);
+			const out = structuredClone(target);
+			out.presentation = structuredClone(currentTarget.presentation);
+			out.capabilities = structuredClone(currentTarget.capabilities);
+			if (currentTarget.targetRef) out.targetRef = currentTarget.targetRef;
+			else delete out.targetRef;
+			if (!currentTarget.result) delete out.result;
+			return out;
+		});
+
+	if (storedOperation.finalization && !currentOperation.finalization?.selectedInvitationIds) {
+		delete storedOperation.finalization.selectedInvitationIds;
+	}
+	if (projected.invitation?.invitationId) {
+		projected.invitation = storedOperation.targets.find(target =>
+			target.invitationId === projected.invitation.invitationId,
+		);
+	}
+	return projected;
+}
+
 export {
 	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
 	MULTI_TARGET_OPERATIONS_MAX_TARGETS,

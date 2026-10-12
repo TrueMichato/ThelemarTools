@@ -364,6 +364,13 @@ replay and stored receipts/events/revisions remain unchanged. Controlled real Po
 that a privacy write, detail read, and member removal complete without `40P01`; an empty-selection finalization
 cannot interleave between detail parent, target, and finalization reads. A call-site mutation removing current
 replay participation authorization is killed by the demotion regression.
+Historical replay tests approve then deselect a target and propose then finalize/cancel/expire, proving exact
+retry returns the original stored command outcome rather than later workflow state while current labels, refs,
+capabilities, and audience fences still apply. Runtime-role PostgreSQL races exact target response replay against
+source-account purge and detail against retention cleanup in both reader-first and writer-first order. They
+require no `40P01`, unchanged durable command evidence, and either one coherent pre-delete aggregate or stable
+not-found. Call-site mutants restore later-outcome substitution, the pre-campaign command-row lock, and cleanup
+without the campaign advisory; all must be killed.
 
 A separate A3 PostgreSQL source-account-cap test seeds one source account with four live collections, then races
 proposals in two different campaigns for slot five under the seed-10 source-account lock. It must produce exactly

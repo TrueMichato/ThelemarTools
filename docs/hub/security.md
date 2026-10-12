@@ -158,14 +158,18 @@ exhaustion is an explicit 503, not hidden missing history. This capability is de
   never restore a hidden canonical name. Inbox/outgoing membership reads are transactionally fenced against
   concurrent access loss.
 - Exact command replay is reauthorized against current operation participation or current DM/co-DM authority and
-  replaces the full stored operation/result body with the current audience-shaped view without changing the
-  receipt, command, event, or leg identities. Withdrawn authority receives not-found rather than a stale
-  privileged response.
+  reprojects the stored historical command outcome through the current audience/privacy mask without changing
+  the receipt, command, event, or leg identities. Later workflow commands never replace the original outcome.
+  Withdrawn authority receives not-found rather than a stale privileged response.
 - PostgreSQL participant reads and replay projection acquire the seed-6 campaign advisory lock in shared mode
   before current membership and ascending character shares. Workflow/lifecycle writers use the exclusive form;
   privacy writes do not need it to append their campaign event. Readers hold no campaign row lock. This both
   linearizes parent/targets/finalization detail and breaks the character-policy/detail/member-removal lock cycle
   without catching or retrying deadlocks as success.
+- Multi-target retries use the seed-9 command advisory without taking the semantic-command row lock before
+  campaign authority. Account purge and bounded terminal-history cleanup take the seed-6 campaign advisory
+  exclusively before deleting command or aggregate rows. This prevents command-row/campaign-advisory inversion
+  and makes detail versus retention deletion linearize to a complete aggregate or not-found.
 - Multi-target proposal caps which cross campaign tenants for the same account use a dedicated seed-10 quota
   advisory-lock namespace. Proposal creation locks the source account and all distinct target-owner accounts in
   ascending UUID order before campaign authority, so two campaigns cannot race past the global

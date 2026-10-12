@@ -102,6 +102,7 @@ import {
 	getMultiTargetSourceAudience,
 	getMultiTargetTargetResult,
 	isMultiTargetLiveStatus,
+	projectMultiTargetStoredCommandResponse,
 	MULTI_TARGET_COLLECTION_TTL_MS,
 	MULTI_TARGET_INBOX_MODE_PENDING,
 	MULTI_TARGET_INBOX_MODE_RECOVERY,
@@ -5498,7 +5499,7 @@ export class PostgresHubStore {
 		`, [outboxId, claimToken, `${error}`.slice(0, 2000)]);
 	}
 
-	async _pLockSemanticCommand ({client, accountId, commandId, idempotencyKey}) {
+	async _pLockSemanticCommand ({client, accountId, commandId, idempotencyKey, isLockRow = true}) {
 		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
 		if (normalized.key !== commandId) {
 			throw new HubStoreError("IDEMPOTENCY_KEY_REUSED", `Command and idempotency identities differ.`, {status: 409});
@@ -5508,7 +5509,7 @@ export class PostgresHubStore {
 			SELECT actor_account_id, request_hash, response
 			FROM hub.semantic_operation_commands
 			WHERE command_id = $1
-			FOR UPDATE
+			${isLockRow ? "FOR UPDATE" : ""}
 		`, [commandId]);
 		if (!prior.rowCount) return null;
 		if (prior.rows[0].actor_account_id !== accountId || prior.rows[0].request_hash !== normalized.requestHash) {
@@ -5880,14 +5881,7 @@ export class PostgresHubStore {
 			accountId,
 			role: membership.role,
 		});
-		const projected = structuredClone(response);
-		projected.operation = currentOperation;
-		if (projected.invitation?.invitationId) {
-			projected.invitation = currentOperation.targets.find(target =>
-				target.invitationId === projected.invitation.invitationId,
-			);
-		}
-		return projected;
+		return projectMultiTargetStoredCommandResponse({response, currentOperation});
 	}
 
 	async _pGetMultiTargetTargets ({
@@ -6535,6 +6529,7 @@ export class PostgresHubStore {
 				accountId: args.accountId,
 				commandId: args.commandId,
 				idempotencyKey: args.idempotencyKey,
+				isLockRow: false,
 			});
 			await this._pAssertSemanticSession({
 				client,
@@ -6962,6 +6957,7 @@ export class PostgresHubStore {
 				accountId: args.accountId,
 				commandId: args.commandId,
 				idempotencyKey: args.idempotencyKey,
+				isLockRow: false,
 			});
 			await this._pAssertSemanticSession({
 				client,
@@ -7168,6 +7164,7 @@ export class PostgresHubStore {
 				accountId: args.accountId,
 				commandId: args.commandId,
 				idempotencyKey: args.idempotencyKey,
+				isLockRow: false,
 			});
 			await this._pAssertSemanticSession({
 				client,
@@ -7887,6 +7884,7 @@ export class PostgresHubStore {
 				accountId: args.accountId,
 				commandId: args.commandId,
 				idempotencyKey: args.idempotencyKey,
+				isLockRow: false,
 			});
 			await this._pAssertSemanticSession({
 				client,
@@ -8525,45 +8523,88 @@ export class PostgresHubStore {
 
 	async pCleanupMultiTargetHistory ({limit = MULTI_TARGET_PAGE_LIMIT} = {}) {
 		const client = await this._pool.connect();
+		const cappedLimit = Math.min(limit, MULTI_TARGET_PAGE_LIMIT);
+		const attemptedOperationIds = [];
+		let deleted = 0;
 		try {
-			await client.query("BEGIN");
-			const due = await client.query(`
-				SELECT operation.id
-				FROM hub.semantic_operations operation
-				WHERE operation.target_set_version = 1
-					AND operation.status IN ('applied', 'cancelled', 'expired', 'failed')
-					AND operation.resolved_at <= now() - interval '90 days'
-					AND NOT EXISTS (
-						SELECT 1
-						FROM hub.domain_events event
-						JOIN hub.outbox_entries outbox ON outbox.event_id = event.id
-						WHERE (
-							event.aggregate_id = operation.id
-							OR event.payload->>'operationId' = operation.id::text
-							OR EXISTS (
+			while (attemptedOperationIds.length < cappedLimit) {
+				await client.query("BEGIN");
+				try {
+					const candidate = await client.query(`
+						SELECT operation.campaign_id, operation.id
+						FROM hub.semantic_operations operation
+						WHERE operation.target_set_version = 1
+							AND operation.status IN ('applied', 'cancelled', 'expired', 'failed')
+							AND operation.resolved_at <= now() - interval '90 days'
+							AND NOT (operation.id = ANY($1::uuid[]))
+							AND NOT EXISTS (
 								SELECT 1
-								FROM hub.semantic_operation_commands command
-								WHERE command.operation_id = operation.id
-									AND event.id = ANY(command.event_ids)
+								FROM hub.domain_events event
+								JOIN hub.outbox_entries outbox ON outbox.event_id = event.id
+								WHERE (
+									event.aggregate_id = operation.id
+									OR event.payload->>'operationId' = operation.id::text
+									OR EXISTS (
+										SELECT 1
+										FROM hub.semantic_operation_commands command
+										WHERE command.operation_id = operation.id
+											AND event.id = ANY(command.event_ids)
+									)
+								)
+									AND outbox.status <> 'published'
 							)
-						)
-							AND outbox.status <> 'published'
-					)
-				ORDER BY operation.resolved_at, operation.id
-				LIMIT $1
-				FOR UPDATE SKIP LOCKED
-			`, [Math.min(limit, MULTI_TARGET_PAGE_LIMIT)]);
-			for (const row of due.rows) {
-				await client.query(`DELETE FROM hub.semantic_operation_finalizations WHERE operation_id = $1`, [row.id]);
-				await client.query(`DELETE FROM hub.semantic_operation_targets WHERE operation_id = $1`, [row.id]);
-				await client.query(`DELETE FROM hub.semantic_operation_commands WHERE operation_id = $1`, [row.id]);
-				await client.query(`DELETE FROM hub.semantic_operations WHERE id = $1`, [row.id]);
+						ORDER BY operation.resolved_at, operation.id
+						LIMIT 1
+					`, [attemptedOperationIds]);
+					if (!candidate.rowCount) {
+						await client.query("ROLLBACK");
+						break;
+					}
+					const {campaign_id: campaignId, id: operationId} = candidate.rows[0];
+					attemptedOperationIds.push(operationId);
+					await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+					const due = await client.query(`
+						SELECT operation.id
+						FROM hub.semantic_operations operation
+						WHERE operation.id = $1
+							AND operation.campaign_id = $2
+							AND operation.target_set_version = 1
+							AND operation.status IN ('applied', 'cancelled', 'expired', 'failed')
+							AND operation.resolved_at <= now() - interval '90 days'
+							AND NOT EXISTS (
+								SELECT 1
+								FROM hub.domain_events event
+								JOIN hub.outbox_entries outbox ON outbox.event_id = event.id
+								WHERE (
+									event.aggregate_id = operation.id
+									OR event.payload->>'operationId' = operation.id::text
+									OR EXISTS (
+										SELECT 1
+										FROM hub.semantic_operation_commands command
+										WHERE command.operation_id = operation.id
+											AND event.id = ANY(command.event_ids)
+									)
+								)
+									AND outbox.status <> 'published'
+							)
+						FOR UPDATE
+					`, [operationId, campaignId]);
+					if (!due.rowCount) {
+						await client.query("COMMIT");
+						continue;
+					}
+					await client.query(`DELETE FROM hub.semantic_operation_finalizations WHERE operation_id = $1`, [operationId]);
+					await client.query(`DELETE FROM hub.semantic_operation_targets WHERE operation_id = $1`, [operationId]);
+					await client.query(`DELETE FROM hub.semantic_operation_commands WHERE operation_id = $1`, [operationId]);
+					await client.query(`DELETE FROM hub.semantic_operations WHERE id = $1`, [operationId]);
+					await client.query("COMMIT");
+					deleted++;
+				} catch (error) {
+					await client.query("ROLLBACK");
+					throw error;
+				}
 			}
-			await client.query("COMMIT");
-			return {deleted: due.rowCount};
-		} catch (error) {
-			await client.query("ROLLBACK");
-			throw error;
+			return {deleted};
 		} finally {
 			client.release();
 		}

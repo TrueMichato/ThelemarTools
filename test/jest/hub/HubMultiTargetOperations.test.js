@@ -675,7 +675,7 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		expect(sourceArchived.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 	});
 
-	it.each(["hidden", "archived"])("reprojects exact proposal replay after target identity becomes %s", async lifecycle => {
+	it.each(["hidden", "archived", "ref-rotated"])("reprojects exact proposal replay after target identity becomes %s", async lifecycle => {
 		const ctx = await pFixture();
 		const commandId = crypto.randomUUID();
 		const proposed = await ctx.pPropose({
@@ -691,12 +691,14 @@ describe("Campaign Hub multi-target Memory authority", () => {
 				expectedProjectionRevision: ctx.targetA.projectionRevision,
 				idempotencyKey: crypto.randomUUID(),
 			});
-		} else {
+		} else if (lifecycle === "archived") {
 			await ctx.store.pArchiveCharacter({
 				accountId: ctx.targetOwner.account.id,
 				characterId: ctx.targetA.id,
 				idempotencyKey: crypto.randomUUID(),
 			});
+		} else {
+			ctx.store._characters.get(ctx.targetA.id).targetRef = crypto.randomUUID();
 		}
 		const replay = await ctx.pPropose({
 			targetRefs: [ctx.targetA.targetRef],
@@ -704,8 +706,134 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		});
 		expect(replay.eventIds).toEqual(proposed.eventIds);
 		expect(replay.operation.operationId).toBe(proposed.operation.operationId);
+		expect(replay.operation.status).toBe("collecting_responses");
+		expect(replay.operation.finalization).toBeNull();
+		expect(replay.operation).not.toHaveProperty("sourceResult");
 		expect(replay.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 		expect(replay.operation.targets[0]).not.toHaveProperty("targetRef");
+	});
+
+	it("replays the original proposal and approval outcomes after later selection", async () => {
+		const ctx = await pFixture();
+		const proposalCommandId = crypto.randomUUID();
+		const proposed = await ctx.pPropose({commandId: proposalCommandId});
+		const [deselected, selected] = proposed.operation.targets;
+		const approvalCommandId = crypto.randomUUID();
+		const approved = await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: deselected.invitationId,
+			commandId: approvalCommandId,
+		});
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: selected.invitationId,
+		});
+		await ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: [selected.invitationId],
+		});
+		const proposalReplay = await ctx.pPropose({commandId: proposalCommandId});
+		expect(proposalReplay.eventIds).toEqual(proposed.eventIds);
+		expect(proposalReplay.operation).toMatchObject({
+			status: "collecting_responses",
+			finalization: null,
+			targets: [
+				expect.objectContaining({status: "pending"}),
+				expect.objectContaining({status: "pending"}),
+			],
+		});
+		expect(proposalReplay.operation).not.toHaveProperty("sourceResult");
+		const approvalReplay = await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: deselected.invitationId,
+			commandId: approvalCommandId,
+		});
+		expect(approvalReplay.eventIds).toEqual(approved.eventIds);
+		expect(approvalReplay.invitation.status).toBe("approved");
+		expect(approvalReplay.operation).toMatchObject({
+			status: "collecting_responses",
+			finalization: null,
+			targets: [
+				expect.objectContaining({invitationId: deselected.invitationId, status: "approved"}),
+				expect.objectContaining({invitationId: selected.invitationId, status: "pending"}),
+			],
+		});
+		expect(approvalReplay.operation).not.toHaveProperty("sourceResult");
+	});
+
+	it.each(["cancelled", "expired"])("keeps proposal replay historical after the operation is %s", async terminalState => {
+		const ctx = await pFixture();
+		const commandId = crypto.randomUUID();
+		const proposed = await ctx.pPropose({commandId});
+		if (terminalState === "cancelled") {
+			await ctx.pCancel({operationId: proposed.operation.operationId});
+		} else {
+			ctx.setNow("2026-09-21T10:02:00.000Z");
+			await ctx.store.pExpireMultiTargetOperations();
+		}
+		const replay = await ctx.pPropose({commandId});
+		expect(replay.eventIds).toEqual(proposed.eventIds);
+		expect(replay.operation).toMatchObject({
+			status: "collecting_responses",
+			finalization: null,
+		});
+		expect(replay.operation).not.toHaveProperty("sourceResult");
+	});
+
+	it("replays stored finalize and cancel outcomes with current presentation", async () => {
+		const finalizedCtx = await pFixture();
+		const proposed = await finalizedCtx.pPropose();
+		for (const target of proposed.operation.targets) {
+			await finalizedCtx.pRespond({
+				operationId: proposed.operation.operationId,
+				invitationId: target.invitationId,
+			});
+		}
+		const finalizeCommandId = crypto.randomUUID();
+		const finalized = await finalizedCtx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: [proposed.operation.targets[0].invitationId],
+			commandId: finalizeCommandId,
+		});
+		await finalizedCtx.store.pSetProjectionPolicy({
+			accountId: finalizedCtx.targetOwner.account.id,
+			characterId: finalizedCtx.targetA.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: finalizedCtx.store._characters.get(finalizedCtx.targetA.id).projectionRevision,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const finalizeReplay = await finalizedCtx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: [proposed.operation.targets[0].invitationId],
+			commandId: finalizeCommandId,
+		});
+		expect(finalizeReplay.eventIds).toEqual(finalized.eventIds);
+		expect(finalizeReplay.operation).toMatchObject({
+			status: "applied",
+			finalization: {status: "applied"},
+			sourceResult: expect.objectContaining({appliedEventId: expect.any(String)}),
+		});
+		expect(finalizeReplay.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+
+		const cancelledCtx = await pFixture();
+		const cancelProposal = await cancelledCtx.pPropose();
+		const cancelCommandId = crypto.randomUUID();
+		const cancelled = await cancelledCtx.pCancel({
+			operationId: cancelProposal.operation.operationId,
+			commandId: cancelCommandId,
+		});
+		await cancelledCtx.store.pArchiveCharacter({
+			accountId: cancelledCtx.targetOwner.account.id,
+			characterId: cancelledCtx.targetA.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const cancelReplay = await cancelledCtx.pCancel({
+			operationId: cancelProposal.operation.operationId,
+			commandId: cancelCommandId,
+		});
+		expect(cancelReplay.eventIds).toEqual(cancelled.eventIds);
+		expect(cancelReplay.operation.status).toBe("cancelled");
+		expect(cancelReplay.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 	});
 
 	it("denies exact response and cancel replay after co-DM authority is withdrawn", async () => {
@@ -797,6 +925,48 @@ describe("Campaign Hub multi-target Memory authority", () => {
 			commands: ctx.store._semanticOperationCommands.size,
 			revision: ctx.store._characters.get(ctx.targetB.id).revision,
 		}).toEqual(evidenceBefore);
+		const participantCtx = await pFixture();
+		const participantMembership = await participantCtx.store.pGetMembership({
+			accountId: participantCtx.other.account.id,
+			campaignId: participantCtx.campaign.id,
+		});
+		const pSetParticipantRole = role => participantCtx.store.pChangeMemberRole({
+			accountId: participantCtx.dm.account.id,
+			campaignId: participantCtx.campaign.id,
+			membershipId: participantMembership.id,
+			role,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const participantProposal = await participantCtx.pPropose({
+			targetRefs: [participantCtx.otherTarget.targetRef, participantCtx.targetA.targetRef],
+		});
+		const ownedInvitation = participantProposal.operation.targets.find(target =>
+			target.presentation.targetName === "Other target");
+		await pSetParticipantRole("co_dm");
+		const participantCommandId = crypto.randomUUID();
+		const participantResponse = await pReplayViaHttp({
+			ctx: participantCtx,
+			actor: participantCtx.other,
+			url: `/api/campaigns/${participantCtx.campaign.id}/multi-target-operations/${participantProposal.operation.operationId}/invitations/${ownedInvitation.invitationId}/respond`,
+			commandId: participantCommandId,
+			payload: {contractVersion: 1, commandId: participantCommandId, decision: "reject"},
+		});
+		expect(participantResponse.statusCode).toBe(200);
+		await pSetParticipantRole("player");
+		const participantReplay = await pReplayViaHttp({
+			ctx: participantCtx,
+			actor: participantCtx.other,
+			url: `/api/campaigns/${participantCtx.campaign.id}/multi-target-operations/${participantProposal.operation.operationId}/invitations/${ownedInvitation.invitationId}/respond`,
+			commandId: participantCommandId,
+			payload: {contractVersion: 1, commandId: participantCommandId, decision: "reject"},
+		});
+		expect(participantReplay.statusCode).toBe(200);
+		expect(participantReplay.json().operation.targets).toEqual([
+			expect.objectContaining({invitationId: ownedInvitation.invitationId, status: "rejected"}),
+		]);
+		expect(participantReplay.json().operation).not.toHaveProperty("candidateCount");
+		expect(participantReplay.json().operation).not.toHaveProperty("counts");
+		expect(participantReplay.json().operation).not.toHaveProperty("sourceCharacterId");
 		const cancelCtx = await pFixture();
 		const cancelMembership = await cancelCtx.store.pGetMembership({
 			accountId: cancelCtx.other.account.id,

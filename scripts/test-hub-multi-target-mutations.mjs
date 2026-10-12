@@ -198,9 +198,9 @@ const MUTATIONS = [
 	},
 	{
 		name: "proposal-replay-current-shaping-omitted",
-		file: "server/src/memory-hub-store.js",
-		from: "const projected = copy(response);",
-		to: "return response;\n\t\tconst projected = copy(response);",
+		file: "server/src/multi-target-operation-authority.js",
+		from: "out.presentation = structuredClone(currentTarget.presentation);",
+		to: "void currentTarget.presentation;",
 		pattern: "reprojects exact proposal replay",
 	},
 	{
@@ -218,6 +218,29 @@ const MUTATIONS = [
 		replaceLast: true,
 		test: "test/jest/hub/HubMultiTargetLockOrder.test.js",
 		pattern: "takes the shared campaign advisory",
+	},
+	{
+		name: "replay-substitutes-later-operation-outcome",
+		file: "server/src/multi-target-operation-authority.js",
+		from: "const storedOperation = projected?.operation;",
+		to: "projected.operation = structuredClone(currentOperation);\n\tconst storedOperation = projected?.operation;",
+		pattern: "replays the original proposal and approval outcomes",
+	},
+	{
+		name: "multi-replay-command-row-lock-restored",
+		file: "server/src/postgres-hub-store.js",
+		from: "isLockRow: false,",
+		to: "isLockRow: true,",
+		test: "test/jest/hub/HubMultiTargetLockOrder.test.js",
+		pattern: "does not lock multi-target command rows",
+	},
+	{
+		name: "cleanup-campaign-advisory-omitted",
+		file: "server/src/postgres-hub-store.js",
+		from: "const {campaign_id: campaignId, id: operationId} = candidate.rows[0];\n\t\t\t\t\tattemptedOperationIds.push(operationId);\n\t\t\t\t\tawait client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);",
+		to: "const {campaign_id: campaignId, id: operationId} = candidate.rows[0];\n\t\t\t\t\tattemptedOperationIds.push(operationId);",
+		test: "test/jest/hub/HubMultiTargetLockOrder.test.js",
+		pattern: "locks retained-history campaigns",
 	},
 ];
 
