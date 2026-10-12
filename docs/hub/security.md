@@ -157,9 +157,15 @@ exhaustion is an explicit 503, not hidden missing history. This capability is de
   do not receive it. Current sharing/lifecycle truth re-shapes proposal labels and replay; immutable snapshots
   never restore a hidden canonical name. Inbox/outgoing membership reads are transactionally fenced against
   concurrent access loss.
-- Exact command replay is authorization-shaped at read time without changing the stored receipt or command
-  identity. PostgreSQL detail reads avoid campaign/parent write locks and acquire current membership before
-  character shares, preventing privacy-policy/campaign-event deadlocks while preserving current output.
+- Exact command replay is reauthorized against current operation participation or current DM/co-DM authority and
+  replaces the full stored operation/result body with the current audience-shaped view without changing the
+  receipt, command, event, or leg identities. Withdrawn authority receives not-found rather than a stale
+  privileged response.
+- PostgreSQL participant reads and replay projection acquire the seed-6 campaign advisory lock in shared mode
+  before current membership and ascending character shares. Workflow/lifecycle writers use the exclusive form;
+  privacy writes do not need it to append their campaign event. Readers hold no campaign row lock. This both
+  linearizes parent/targets/finalization detail and breaks the character-policy/detail/member-removal lock cycle
+  without catching or retrying deadlocks as success.
 - Multi-target proposal caps which cross campaign tenants for the same account use a dedicated seed-10 quota
   advisory-lock namespace. Proposal creation locks the source account and all distinct target-owner accounts in
   ascending UUID order before campaign authority, so two campaigns cannot race past the global

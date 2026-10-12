@@ -5840,6 +5840,7 @@ export class PostgresHubStore {
 	}
 
 	async _pProjectMultiTargetCommandResponse ({client, response, accountId, campaignId}) {
+		await client.query(`SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))`, [campaignId]);
 		const membership = await this._pGetMembershipForShare({
 			client,
 			accountId,
@@ -5862,36 +5863,30 @@ export class PostgresHubStore {
 			isIncludeLegEventSequence: true,
 			isLockCurrentCharacters: true,
 		});
-		const targetsByInvitationId = new Map(targets.map(target => [target.invitationId, target]));
-		const projectTarget = stored => {
-			if (!stored?.invitationId) return stored;
-			const target = targetsByInvitationId.get(stored.invitationId);
-			if (!target) return stored;
-			const targetRef = getMultiTargetOwnedTargetRef({
-				operation,
-				target,
-				currentCharacter: target.currentCharacter,
-				accountId,
-			});
-			const projected = {
-				...structuredClone(stored),
-				presentation: getMultiTargetInvitationPresentation({
-					operation,
-					target,
-					currentCharacter: target.currentCharacter,
-					accountId,
-					role: membership.role,
-				}),
-			};
-			if (targetRef) projected.targetRef = targetRef;
-			else delete projected.targetRef;
-			return projected;
-		};
-		const projected = structuredClone(response);
-		if (Array.isArray(projected.operation?.targets)) {
-			projected.operation.targets = projected.operation.targets.map(projectTarget);
+		const isParticipant = operation.originActorAccountId === accountId
+			|| targets.some(target => target.targetOwnerAccountIdAtProposal === accountId);
+		if (!isParticipant && !["dm", "co_dm"].includes(membership.role)) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
 		}
-		if (projected.invitation) projected.invitation = projectTarget(projected.invitation);
+		const finalization = await this._pGetMultiTargetFinalization({
+			client,
+			operationId,
+			isIncludeSourceEventSequence: true,
+		});
+		const currentOperation = this._getMultiTargetOperationView({
+			operation,
+			targets,
+			finalization,
+			accountId,
+			role: membership.role,
+		});
+		const projected = structuredClone(response);
+		projected.operation = currentOperation;
+		if (projected.invitation?.invitationId) {
+			projected.invitation = currentOperation.targets.find(target =>
+				target.invitationId === projected.invitation.invitationId,
+			);
+		}
 		return projected;
 	}
 
@@ -8069,7 +8064,8 @@ export class PostgresHubStore {
 		await this.pExpireMultiTargetOperations({limit: MULTI_TARGET_PAGE_LIMIT});
 		const client = await this._pool.connect();
 		try {
-			await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+			await client.query("BEGIN");
+			await client.query(`SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))`, [campaignId]);
 			const membership = await this._pGetMembershipForShare({
 				client,
 				accountId,
@@ -8294,7 +8290,8 @@ export class PostgresHubStore {
 		await this.pExpireMultiTargetOperations({limit: MULTI_TARGET_PAGE_LIMIT});
 		const client = await this._pool.connect();
 		try {
-			await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+			await client.query("BEGIN");
+			await client.query(`SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))`, [campaignId]);
 			const membership = await this._pGetMembershipForShare({
 				client,
 				accountId,
@@ -8366,6 +8363,7 @@ export class PostgresHubStore {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
+			await client.query(`SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))`, [campaignId]);
 			const membership = await this._pGetMembershipForShare({
 				client,
 				accountId,

@@ -203,6 +203,22 @@ const MUTATIONS = [
 		to: "return response;\n\t\tconst projected = copy(response);",
 		pattern: "reprojects exact proposal replay",
 	},
+	{
+		name: "command-replay-current-authority-omitted",
+		file: "server/src/memory-hub-store.js",
+		from: "if (!isParticipant && ![\"dm\", \"co_dm\"].includes(membership.role)) {",
+		to: "if (false && !isParticipant && ![\"dm\", \"co_dm\"].includes(membership.role)) {",
+		pattern: "denies exact response and cancel replay",
+	},
+	{
+		name: "detail-shared-campaign-advisory-omitted",
+		file: "server/src/postgres-hub-store.js",
+		from: "await client.query(`SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))`, [campaignId]);",
+		to: "void campaignId;",
+		replaceLast: true,
+		test: "test/jest/hub/HubMultiTargetLockOrder.test.js",
+		pattern: "takes the shared campaign advisory",
+	},
 ];
 
 async function copyTree (root) {

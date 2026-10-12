@@ -358,9 +358,12 @@ Migration 0013 tests reproduce the prior real archive rollback, retain a live pa
 candidate plus an approved peer leg, reject source-owned pending/peer-approved and peer auto-approved states,
 and kill a real-call-site mutation which restores the old live-parent equivalence.
 Exact-replay tests hide or archive a target after proposal, then prove the same command/event/operation identities
-return with current neutral presentation. A controlled real PostgreSQL policy/detail interleaving holds the
-target-character lock, starts detail, resumes policy, and requires both legitimate requests to complete without
-`40P01` or stale canonical-name output.
+return with current neutral presentation. Demoted co-DM response/cancel exact retries are denied in Memory and
+runtime-role PostgreSQL while current source, target-owner, and DM participants retain their audience-shaped
+replay and stored receipts/events/revisions remain unchanged. Controlled real PostgreSQL interleavings prove
+that a privacy write, detail read, and member removal complete without `40P01`; an empty-selection finalization
+cannot interleave between detail parent, target, and finalization reads. A call-site mutation removing current
+replay participation authorization is killed by the demotion regression.
 
 A separate A3 PostgreSQL source-account-cap test seeds one source account with four live collections, then races
 proposals in two different campaigns for slot five under the seed-10 source-account lock. It must produce exactly

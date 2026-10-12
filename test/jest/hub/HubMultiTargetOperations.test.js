@@ -708,6 +708,138 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		expect(replay.operation.targets[0]).not.toHaveProperty("targetRef");
 	});
 
+	it("denies exact response and cancel replay after co-DM authority is withdrawn", async () => {
+		const pReplayViaHttp = async ({ctx, actor, url, commandId, payload}) => {
+			const app = await createHubApp({
+				store: ctx.store,
+				oauthProvider: {
+					getAuthorizationUrl: () => "https://example.invalid",
+					pExchangeCode: async () => actor.account,
+				},
+				config: {
+					appOrigin: "https://tools.example",
+					cookieSecret: "x".repeat(32),
+					csrfSecret: "y".repeat(32),
+				},
+			});
+			try {
+				const cookie = `__Host-hub_session=${app.signCookie(actor.token)}`;
+				const session = (await app.inject({
+					method: "GET",
+					url: "/api/session",
+					headers: {cookie},
+				})).json();
+				return app.inject({
+					method: "POST",
+					url,
+					headers: {
+						cookie,
+						origin: "https://tools.example",
+						"x-csrf-token": session.csrfToken,
+						"x-hub-protocol-version": "6",
+						"idempotency-key": commandId,
+					},
+					payload,
+				});
+			} finally {
+				await app.close();
+			}
+		};
+		const ctx = await pFixture();
+		const membership = await ctx.store.pGetMembership({
+			accountId: ctx.other.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		const pSetRole = role => ctx.store.pChangeMemberRole({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			role,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await pSetRole("co_dm");
+		const proposed = await ctx.pPropose();
+		const [rejected, selected] = proposed.operation.targets;
+		const responseCommandId = crypto.randomUUID();
+		const initialResponse = await pReplayViaHttp({
+			ctx,
+			actor: ctx.other,
+			url: `/api/campaigns/${ctx.campaign.id}/multi-target-operations/${proposed.operation.operationId}/invitations/${rejected.invitationId}/respond`,
+			commandId: responseCommandId,
+			payload: {contractVersion: 1, commandId: responseCommandId, decision: "reject"},
+		});
+		expect(initialResponse.statusCode).toBe(200);
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: selected.invitationId,
+		});
+		await ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: [selected.invitationId],
+		});
+		await pSetRole("player");
+		const evidenceBefore = {
+			events: ctx.store._events.length,
+			commands: ctx.store._semanticOperationCommands.size,
+			revision: ctx.store._characters.get(ctx.targetB.id).revision,
+		};
+		const responseReplay = await pReplayViaHttp({
+			ctx,
+			actor: ctx.other,
+			url: `/api/campaigns/${ctx.campaign.id}/multi-target-operations/${proposed.operation.operationId}/invitations/${rejected.invitationId}/respond`,
+			commandId: responseCommandId,
+			payload: {contractVersion: 1, commandId: responseCommandId, decision: "reject"},
+		});
+		expect(responseReplay.statusCode).toBe(404);
+		expect(responseReplay.json()).toMatchObject({error: "ACTION_NOT_FOUND"});
+		expect({
+			events: ctx.store._events.length,
+			commands: ctx.store._semanticOperationCommands.size,
+			revision: ctx.store._characters.get(ctx.targetB.id).revision,
+		}).toEqual(evidenceBefore);
+		const cancelCtx = await pFixture();
+		const cancelMembership = await cancelCtx.store.pGetMembership({
+			accountId: cancelCtx.other.account.id,
+			campaignId: cancelCtx.campaign.id,
+		});
+		const pSetCancelRole = role => cancelCtx.store.pChangeMemberRole({
+			accountId: cancelCtx.dm.account.id,
+			campaignId: cancelCtx.campaign.id,
+			membershipId: cancelMembership.id,
+			role,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await pSetCancelRole("co_dm");
+		const cancelledProposal = await cancelCtx.pPropose();
+		const cancelCommandId = crypto.randomUUID();
+		const initialCancel = await pReplayViaHttp({
+			ctx: cancelCtx,
+			actor: cancelCtx.other,
+			url: `/api/campaigns/${cancelCtx.campaign.id}/multi-target-operations/${cancelledProposal.operation.operationId}/cancel`,
+			commandId: cancelCommandId,
+			payload: {contractVersion: 1, commandId: cancelCommandId},
+		});
+		expect(initialCancel.statusCode).toBe(200);
+		await pSetCancelRole("player");
+		const cancelEvidenceBefore = {
+			events: cancelCtx.store._events.length,
+			commands: cancelCtx.store._semanticOperationCommands.size,
+		};
+		const cancelReplay = await pReplayViaHttp({
+			ctx: cancelCtx,
+			actor: cancelCtx.other,
+			url: `/api/campaigns/${cancelCtx.campaign.id}/multi-target-operations/${cancelledProposal.operation.operationId}/cancel`,
+			commandId: cancelCommandId,
+			payload: {contractVersion: 1, commandId: cancelCommandId},
+		});
+		expect(cancelReplay.statusCode).toBe(404);
+		expect(cancelReplay.json()).toMatchObject({error: "ACTION_NOT_FOUND"});
+		expect({
+			events: cancelCtx.store._events.length,
+			commands: cancelCtx.store._semanticOperationCommands.size,
+		}).toEqual(cancelEvidenceBefore);
+	});
+
 	it("persists an immediately-ready proposal event in the command receipt", async () => {
 		const ctx = await pFixture();
 		const commandId = crypto.randomUUID();

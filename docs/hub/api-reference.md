@@ -46,9 +46,10 @@ The server hashes method, route, params, query, and body (excluding `baseRevisio
 the hash with the per-account receipt. Reusing one key for a different logical request returns
 `IDEMPOTENCY_KEY_REUSED`. Excluding revision/epoch lets the same logical mutation retry after safe rebase or
 lease refresh without becoming a different command.
-Multi-target exact replay keeps the stored command/result/event identities but reprojects target labels and the
-owner-only target ref under current sharing/lifecycle authority. It neither mutates the receipt nor creates a
-new command.
+Multi-target exact replay keeps the stored command/event/receipt/leg identities, reauthorizes current
+operation participation or DM/co-DM authority, and returns the full operation/result in the viewer's current
+audience shape. Withdrawn authority receives not-found, matching detail. Replay neither mutates the receipt nor
+creates a new command.
 
 ### Responses
 

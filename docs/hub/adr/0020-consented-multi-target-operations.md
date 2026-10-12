@@ -201,9 +201,12 @@ effects, and document safety under locks. Source/cost/policy/template invalidity
 character mutation. Target authority invalidity rejects only that finalization attempt; it is never a partial
 apply.
 
-Exact response/finalization replay returns the same identities and result. Command reuse with another actor,
-invitation, decision, order, or subset returns `IDEMPOTENCY_KEY_REUSED`. A different finalization command after a
-terminal parent returns its authorization-shaped terminal outcome without mutation.
+Exact response/finalization replay preserves the stored command, event, receipt, and leg identities, but returns
+the operation/result only after current participant-or-DM authorization and full current-audience shaping.
+Withdrawn co-DM authority or member loss returns the same not-found contract as a fresh detail read; it never
+re-executes or mutates the stored receipt. Command reuse with another actor, invitation, decision, order, or
+subset returns `IDEMPOTENCY_KEY_REUSED`. A different finalization command after a terminal parent returns its
+authorization-shaped terminal outcome without mutation.
 
 ### Privacy-preserving permitted target no-op
 
@@ -526,13 +529,18 @@ Immutable proposal snapshots remain internal audit/history facts. Viewer DTOs an
 derive the displayed target label from current authorization and lifecycle state: owner/DM canonical identity,
 currently shared peer identity for the source, or the neutral `Campaign character unavailable`. Hiding identity
 or losing lifecycle authority therefore cannot replay the old canonical proposal name.
-Exact command replay preserves the stored operation, command, event, receipt, and leg identities, but reprojects
-viewer-sensitive target labels and own-leg target refs under current authorization; the stored receipt is not
-rewritten and a replay is not treated as a new command.
+Exact command replay preserves the stored command, event, receipt, and leg identities, but replaces the stored
+operation/result body with the full current authorized participant/DM view, including current target labels,
+own-leg target refs, and result privacy. Withdrawn support authority receives not-found. The stored receipt is
+not rewritten and a replay is not treated as a new command.
 
-PostgreSQL detail reads follow membership then character lock order and do not acquire the campaign/parent write
-locks used by lifecycle mutations. This prevents the character-policy-write/campaign-event cycle while retaining
-one coherent current-authority result after any in-flight policy write completes.
+PostgreSQL participant reads and command-replay projection take the campaign seed-6 advisory lock in shared mode
+before current membership and ascending character shares. Workflow, lifecycle, and finalization writers take the
+same advisory lock exclusively, so a detail aggregate cannot straddle a transition. Privacy-policy writes may
+hold a character row and append a campaign event without waiting on that advisory namespace; readers hold no
+campaign row lock, so the cycle `policy character -> campaign row`, `detail membership -> character`, `removal
+campaign row -> membership` is broken without hiding `40P01`. Detail re-reads parent, targets, finalization,
+capabilities, events, and results inside that one linearized transaction.
 
 Rollout order: A1/A2 foundations, A3 migration/server with capability off, protocol-6 A4 clients, A5 templates,
 Memory/PostgreSQL and real-stack proof, one allowlisted campaign/template canary, then measured expansion.

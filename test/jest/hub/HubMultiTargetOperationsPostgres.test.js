@@ -185,8 +185,14 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 				idempotencyKey: getIdempotency(commandId, request),
 			});
 		};
-		const pRespond = async ({operationId, invitationId, actor = targetOwners[0], commandId = crypto.randomUUID()}) => {
-			const request = {contractVersion: 1, commandId, operationId, invitationId, decision: "approve"};
+		const pRespond = async ({
+			operationId,
+			invitationId,
+			actor = targetOwners[0],
+			decision = "approve",
+			commandId = crypto.randomUUID(),
+		}) => {
+			const request = {contractVersion: 1, commandId, operationId, invitationId, decision};
 			return store.pRespondMultiTargetInvitation({
 				accountId: actor.account.id,
 				sessionId: actor.session.id,
@@ -430,6 +436,161 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 		expect(replay.operation.operationId).toBe(proposed.operation.operationId);
 		expect(replay.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 		expect(replay.operation.targets[0]).not.toHaveProperty("targetRef");
+	});
+
+	test("denies exact response and cancel replay after co-DM authority is withdrawn", async () => {
+		const pReplayViaHttp = async ({actor, campaignId, url, commandId, payload}) => {
+			const app = await createHubApp({
+				store,
+				oauthProvider: {
+					getAuthorizationUrl: () => "https://example.invalid",
+					pExchangeCode: async () => actor.account,
+				},
+				config: {
+					appOrigin: "https://tools.example",
+					cookieSecret: "x".repeat(32),
+					csrfSecret: "y".repeat(32),
+				},
+			});
+			try {
+				const cookie = `__Host-hub_session=${app.signCookie(actor.token)}`;
+				const session = (await app.inject({
+					method: "GET",
+					url: "/api/session",
+					headers: {cookie},
+				})).json();
+				return app.inject({
+					method: "POST",
+					url: `/api/campaigns/${campaignId}${url}`,
+					headers: {
+						cookie,
+						origin: "https://tools.example",
+						"x-csrf-token": session.csrfToken,
+						"x-hub-protocol-version": "6",
+						"idempotency-key": commandId,
+					},
+					payload,
+				});
+			} finally {
+				await app.close();
+			}
+		};
+		const ctx = await pFixture({targetCount: 2});
+		const observer = await pActor("Multi PG replay observer");
+		const membership = await pJoin({
+			dm: ctx.dm,
+			campaign: ctx.campaign,
+			actor: observer,
+			role: "co_dm",
+		});
+		const pSetRole = role => store.pChangeMemberRole({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			role,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const proposed = await ctx.pPropose();
+		const [rejected, selected] = proposed.operation.targets;
+		const responseCommandId = crypto.randomUUID();
+		const initialResponse = await pReplayViaHttp({
+			actor: observer,
+			campaignId: ctx.campaign.id,
+			url: `/multi-target-operations/${proposed.operation.operationId}/invitations/${rejected.invitationId}/respond`,
+			commandId: responseCommandId,
+			payload: {contractVersion: 1, commandId: responseCommandId, decision: "reject"},
+		});
+		expect(initialResponse.statusCode).toBe(200);
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: selected.invitationId,
+		});
+		await ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: [selected.invitationId],
+		});
+		await pSetRole("player");
+		const evidenceBefore = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events
+					WHERE campaign_id = $1) AS events,
+				(SELECT count(*)::integer FROM hub.semantic_operation_commands
+					WHERE operation_id = $2) AS commands,
+				(SELECT revision::integer FROM hub.characters WHERE id = $3) AS revision
+		`, [ctx.campaign.id, proposed.operation.operationId, ctx.targets[1].id]);
+		const responseReplay = await pReplayViaHttp({
+			actor: observer,
+			campaignId: ctx.campaign.id,
+			url: `/multi-target-operations/${proposed.operation.operationId}/invitations/${rejected.invitationId}/respond`,
+			commandId: responseCommandId,
+			payload: {contractVersion: 1, commandId: responseCommandId, decision: "reject"},
+		});
+		expect(responseReplay.statusCode).toBe(404);
+		expect(responseReplay.json()).toMatchObject({error: "ACTION_NOT_FOUND"});
+		const responseEvidenceAfter = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events
+					WHERE campaign_id = $1) AS events,
+				(SELECT count(*)::integer FROM hub.semantic_operation_commands
+					WHERE operation_id = $2) AS commands,
+				(SELECT revision::integer FROM hub.characters WHERE id = $3) AS revision
+		`, [ctx.campaign.id, proposed.operation.operationId, ctx.targets[1].id]);
+		expect(responseEvidenceAfter.rows[0]).toEqual(evidenceBefore.rows[0]);
+		const cancelCtx = await pFixture({targetCount: 1});
+		const cancelObserver = await pActor("Multi PG cancel replay observer");
+		const cancelMembership = await pJoin({
+			dm: cancelCtx.dm,
+			campaign: cancelCtx.campaign,
+			actor: cancelObserver,
+			role: "co_dm",
+		});
+		const pSetCancelRole = role => store.pChangeMemberRole({
+			accountId: cancelCtx.dm.account.id,
+			campaignId: cancelCtx.campaign.id,
+			membershipId: cancelMembership.id,
+			role,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const cancelledProposal = await cancelCtx.pPropose();
+		const cancelCommandId = crypto.randomUUID();
+		const cancelRequest = {
+			contractVersion: 1,
+			commandId: cancelCommandId,
+			operationId: cancelledProposal.operation.operationId,
+		};
+		const initialCancel = await pReplayViaHttp({
+			actor: cancelObserver,
+			campaignId: cancelCtx.campaign.id,
+			url: `/multi-target-operations/${cancelledProposal.operation.operationId}/cancel`,
+			commandId: cancelCommandId,
+			payload: cancelRequest,
+		});
+		expect(initialCancel.statusCode).toBe(200);
+		await pSetCancelRole("player");
+		const cancelEvidenceBefore = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events
+					WHERE campaign_id = $1) AS events,
+				(SELECT count(*)::integer FROM hub.semantic_operation_commands
+					WHERE operation_id = $2) AS commands
+		`, [cancelCtx.campaign.id, cancelledProposal.operation.operationId]);
+		const cancelReplay = await pReplayViaHttp({
+			actor: cancelObserver,
+			campaignId: cancelCtx.campaign.id,
+			url: `/multi-target-operations/${cancelledProposal.operation.operationId}/cancel`,
+			commandId: cancelCommandId,
+			payload: cancelRequest,
+		});
+		expect(cancelReplay.statusCode).toBe(404);
+		expect(cancelReplay.json()).toMatchObject({error: "ACTION_NOT_FOUND"});
+		const cancelEvidenceAfter = await pool.query(`
+			SELECT
+				(SELECT count(*)::integer FROM hub.domain_events
+					WHERE campaign_id = $1) AS events,
+				(SELECT count(*)::integer FROM hub.semantic_operation_commands
+					WHERE operation_id = $2) AS commands
+		`, [cancelCtx.campaign.id, cancelledProposal.operation.operationId]);
+		expect(cancelEvidenceAfter.rows[0]).toEqual(cancelEvidenceBefore.rows[0]);
 	});
 
 	test("recovers own responded and terminal invitations without weakening pending fairness", async () => {
@@ -1027,6 +1188,176 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 		await expect(policyPromise).resolves.toBeDefined();
 		const detail = await detailPromise;
 		expect(detail.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+	});
+
+	test("avoids the privacy-detail-member-removal lock cycle", async () => {
+		const ctx = await pFixture({targetCount: 1});
+		const proposed = await ctx.pPropose();
+		const sourceMembership = await store.pGetMembership({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		let resolveCharacterLock;
+		const characterLockReached = new Promise(resolve => resolveCharacterLock = resolve);
+		let resumePolicy;
+		const policyResume = new Promise(resolve => resumePolicy = resolve);
+		let isPaused = false;
+		const policyPool = {
+			on: (...args) => pool.on(...args),
+			query: (...args) => pool.query(...args),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: async (query, ...args) => {
+						const sql = typeof query === "string" ? query : query?.text || "";
+						const result = await client.query(query, ...args);
+						if (
+							!isPaused
+							&& sql.includes("FROM hub.characters")
+							&& sql.includes("owner_account_id = $2 FOR UPDATE")
+						) {
+							isPaused = true;
+							resolveCharacterLock();
+							await policyResume;
+						}
+						return result;
+					},
+					release: () => client.release(),
+				};
+			},
+		};
+		const policyStore = new PostgresHubStore({
+			pool: policyPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		let resolveDetailCharacterRead;
+		const detailCharacterReadReached = new Promise(resolve => resolveDetailCharacterRead = resolve);
+		let isDetailReadObserved = false;
+		const detailPool = {
+			on: (...args) => pool.on(...args),
+			query: (...args) => pool.query(...args),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: (query, ...args) => {
+						const sql = typeof query === "string" ? query : query?.text || "";
+						if (
+							!isDetailReadObserved
+							&& sql.includes("WHERE id = ANY($1::uuid[])")
+							&& sql.includes("FOR SHARE")
+						) {
+							isDetailReadObserved = true;
+							resolveDetailCharacterRead();
+						}
+						return client.query(query, ...args);
+					},
+					release: () => client.release(),
+				};
+			},
+		};
+		const detailStore = new PostgresHubStore({
+			pool: detailPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		const policyPromise = policyStore.pSetProjectionPolicy({
+			accountId: ctx.targetOwners[0].account.id,
+			characterId: ctx.targets[0].id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: ctx.targets[0].projectionRevision,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await characterLockReached;
+		const detailPromise = detailStore.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		await detailCharacterReadReached;
+		let isRemovalSettled = false;
+		const removalPromise = store.pRemoveMember({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: sourceMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		}).finally(() => isRemovalSettled = true);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(isRemovalSettled).toBe(false);
+		resumePolicy();
+		await expect(policyPromise).resolves.toBeDefined();
+		const detail = await detailPromise;
+		expect(detail.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		await expect(removalPromise).resolves.toMatchObject({
+			removedAccountId: ctx.sourceOwner.account.id,
+		});
+	});
+
+	test("returns one coherent detail snapshot across concurrent empty finalization", async () => {
+		const ctx = await pFixture({targetCount: 1});
+		const proposed = await ctx.pPropose();
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: proposed.operation.targets[0].invitationId,
+		});
+		let resolveParentRead;
+		const parentReadReached = new Promise(resolve => resolveParentRead = resolve);
+		let resumeDetail;
+		const detailResume = new Promise(resolve => resumeDetail = resolve);
+		let parentReadCount = 0;
+		const barrierPool = {
+			on: (...args) => pool.on(...args),
+			query: (...args) => pool.query(...args),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: async (query, ...args) => {
+						const sql = typeof query === "string" ? query : query?.text || "";
+						const result = await client.query(query, ...args);
+						if (
+							sql.includes("FROM hub.semantic_operations")
+							&& sql.includes("WHERE campaign_id = $1 AND id = $2")
+							&& sql.includes("target_set_version = 1")
+							&& ++parentReadCount === 2
+						) {
+							resolveParentRead();
+							await detailResume;
+						}
+						return result;
+					},
+					release: () => client.release(),
+				};
+			},
+		};
+		const barrierStore = new PostgresHubStore({
+			pool: barrierPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		const detailPromise = barrierStore.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		await parentReadReached;
+		let isFinalizeSettled = false;
+		const finalizePromise = ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: [],
+		}).finally(() => isFinalizeSettled = true);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(isFinalizeSettled).toBe(false);
+		resumeDetail();
+		const detail = await detailPromise;
+		expect(detail.operation).toMatchObject({
+			status: "awaiting_source_selection",
+			finalization: null,
+			capabilities: {canFinalize: true, canCancel: true},
+			targets: [expect.objectContaining({status: "approved"})],
+		});
+		await expect(finalizePromise).resolves.toMatchObject({
+			operation: {status: "cancelled"},
+		});
 	});
 
 	test("fails protocols 3/4/5 and duplicate targets without workflow evidence", async () => {

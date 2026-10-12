@@ -4740,40 +4740,24 @@ export class MemoryHubStore {
 		if (!operation || operation.campaignId !== campaignId || operation.targetSetVersion !== 1) {
 			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
 		}
-		const targetsByInvitationId = new Map(
-			this._getMultiTargetTargets(operation.id)
-				.map(target => [target.invitationId, target]),
-		);
-		const projectTarget = stored => {
-			if (!stored?.invitationId) return stored;
-			const target = targetsByInvitationId.get(stored.invitationId);
-			if (!target) return stored;
-			const currentCharacter = this._characters.get(target.targetCharacterId) || null;
-			const targetRef = getMultiTargetOwnedTargetRef({
-				operation,
-				target,
-				currentCharacter,
-				accountId,
-			});
-			const projected = {
-				...copy(stored),
-				presentation: getMultiTargetInvitationPresentation({
-					operation,
-					target,
-					currentCharacter,
-					accountId,
-					role: membership.role,
-				}),
-			};
-			if (targetRef) projected.targetRef = targetRef;
-			else delete projected.targetRef;
-			return projected;
-		};
-		const projected = copy(response);
-		if (Array.isArray(projected.operation?.targets)) {
-			projected.operation.targets = projected.operation.targets.map(projectTarget);
+		const targets = this._getMultiTargetTargets(operation.id);
+		const isParticipant = operation.originActorAccountId === accountId
+			|| targets.some(target => target.targetOwnerAccountIdAtProposal === accountId);
+		if (!isParticipant && !["dm", "co_dm"].includes(membership.role)) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
 		}
-		if (projected.invitation) projected.invitation = projectTarget(projected.invitation);
+		const currentOperation = this._getMultiTargetOperationView({
+			operation,
+			accountId,
+			role: membership.role,
+		});
+		const projected = copy(response);
+		projected.operation = currentOperation;
+		if (projected.invitation?.invitationId) {
+			projected.invitation = currentOperation.targets.find(target =>
+				target.invitationId === projected.invitation.invitationId,
+			);
+		}
 		return projected;
 	}
 

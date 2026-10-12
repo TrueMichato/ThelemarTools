@@ -6,8 +6,8 @@ const source = fs.readFileSync(
 );
 
 function getMethodSource (name, nextName) {
-	const start = source.indexOf(`async ${name}`);
-	const end = source.indexOf(`async ${nextName}`, start + 1);
+	const start = source.indexOf(`async ${name} (`);
+	const end = source.indexOf(`async ${nextName} (`, start + 1);
 	expect(start).toBeGreaterThanOrEqual(0);
 	expect(end).toBeGreaterThan(start);
 	return source.slice(start, end);
@@ -32,5 +32,16 @@ describe("multi-target PostgreSQL lock-order canaries", () => {
 		expect(parentQuery).toBeGreaterThan(campaignTryLock);
 		expect(parentSkipLocked).toBeGreaterThan(campaignTryLock);
 		expect(childLock).toBeGreaterThan(parentSkipLocked);
+	});
+
+	it("takes the shared campaign advisory before detail membership and character shares", () => {
+		const method = getMethodSource("pGetMultiTargetOperation", "pExpireMultiTargetOperations");
+		const campaignLock = method.indexOf("pg_advisory_xact_lock_shared(hashtextextended($1, 6))");
+		const membershipLock = method.indexOf("_pGetMembershipForShare");
+		const characterLock = method.indexOf("FOR SHARE");
+		expect(campaignLock).toBeGreaterThanOrEqual(0);
+		expect(membershipLock).toBeGreaterThan(campaignLock);
+		expect(characterLock).toBeGreaterThan(membershipLock);
+		expect(method).not.toMatch(/FROM hub\.campaigns[\s\S]*FOR (?:NO KEY )?UPDATE|FOR SHARE OF campaign/);
 	});
 });
