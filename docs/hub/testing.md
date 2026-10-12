@@ -75,6 +75,15 @@ interruptions, durable-stage/adoption rollback, a real switch away and back, sco
 resume cover the continuation. Authority-unavailable drains stop instead of spinning; account/campaign/access
 changes and terminal teardown discard the old demand rather than revive it. Actual drain-site mutations that
 clear demand before the await or erase a newer request must fail these behavioral checks.
+Reconnect regressions exercise both orderings of the old canonical read versus transport `live` while the real
+page context refresh remains held. Before authorized context installation there must be no adoption, accepted
+revision/coverage advance, redraw, effect notice or focus; afterward there is one automatic catch-up. Fresh
+HTTP/WebSocket/resync deliveries, repeated reconnect/newer demands, late or failed context responses, terminal
+loss, and durable/journal/adoption rollback use the same real-page/controller/repository harness. Temporary
+actual-call-site mutations remove the installed-context barrier, allow early recovery-storage reads, or clear
+unfinished semantic recovery on reconnect; all must fail. `CharacterSheetRepositorySeam.test.js` captures the
+real canonical request shape and binds the real scope/readiness helpers for its terminal-concealment regression.
+Run both affected-regression selector lists in `.github/workflows/hub.yml`, not just the focused A4 subset.
 The replay floor includes every existing ordinary/conflict/durable track. An unknown sequence cannot be silently
 filtered out in favor of a newer live watermark: bounded authorized replay starts at zero so an older unseen changed
 leg is not excluded. A separate exclusive-cursor regression and actual history-floor mutation cover this recovery

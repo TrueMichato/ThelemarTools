@@ -721,6 +721,7 @@ class CharacterSheetPage {
 		if (
 			state?.state === "live"
 			&& this._currentCharacterId
+			&& this._isHubOperationAuthorityReady()
 			&& this._characterRepository.getPendingRecovery?.(this._currentCharacterId)
 		) this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 		if (state?.state === "access_lost") {
@@ -762,7 +763,7 @@ class CharacterSheetPage {
 		this._hubContextGeneration++;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
-		this._characterRepository?.clearRealtimeReconciliation?.({characterId: this._currentCharacterId});
+		// Exact coverage and unfinished recovery survive transport loss; terminal teardown clears them.
 		this._isHubContextRevalidationRequired = true;
 		this._clearHubRules?.({
 			isUnavailable: true,
@@ -912,16 +913,18 @@ class CharacterSheetPage {
 		const overlay = _getHubRulesOverlay(context);
 		if (context?.rulesVersion && !overlay) throw new Error(`Campaign rules are incompatible.`);
 		this._hubContext = context;
-		this._isHubOperationAuthorityPending = false;
-		this._isHubContextUnavailable = false;
-		this._isHubContextRevalidationRequired = false;
-		this._hubRulesRefreshBlocked = false;
-		this._hubRulesPendingVersionId = null;
 		this._state.setCampaignSettingsOverlay(overlay);
 		this._state.setCarryAuthorityContext({
 			rulesVersionId: context?.rulesVersion?.id ?? null,
 			brewBundleHash: context?.brewBundle?.contentHash ?? null,
 		});
+		// Installed context, not fresh transport/attempt tokens, opens the delivery barrier.
+		this._isHubContextRefreshing = false;
+		this._isHubOperationAuthorityPending = false;
+		this._isHubContextUnavailable = false;
+		this._isHubContextRevalidationRequired = false;
+		this._hubRulesRefreshBlocked = false;
+		this._hubRulesPendingVersionId = null;
 		this._peerTargeting?.activate({
 			characterId: this._currentCharacterId,
 			membershipRole: context?.membership?.role,
@@ -935,6 +938,8 @@ class CharacterSheetPage {
 			if (this._isHubAuthoritativeReconcileScopeCurrent(this._hubAuthoritativeReconcileRequest)) {
 				this._scheduleHubAuthoritativeReconcile({characterId: this._hubAuthoritativeReconcileRequest.characterId});
 			} else this._hubAuthoritativeReconcileRequest = null;
+		} else if (this._currentCharacterId && this._characterRepository?.getPendingRecovery?.(this._currentCharacterId)) {
+			this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
 		}
 	}
 
@@ -1082,10 +1087,20 @@ class CharacterSheetPage {
 		}
 	}
 
+	_isHubOperationAuthorityReady () {
+		return !!this._hubContext
+			&& !this._isHubContextRefreshing && !this._isHubContextUnavailable
+			&& !this._isHubContextRevalidationRequired
+			&& !this._isHubOperationAuthorityPending && !this._hubRulesRefreshBlocked;
+	}
+
 	_onHubSemanticOperation (event) {
 		if (!this._currentCharacterId) return false;
 		const authorityGeneration = event.authorityGeneration ?? (this._hubOperationAuthorityGeneration ?? 0);
-		const fnIsCurrent = () => !event.isAuthorityStale && !this._isHubOperationAuthorityPending
+		const contextGeneration = this._hubContextGeneration;
+		const realtimeGeneration = this._hubRealtimeGeneration;
+		const fnIsCurrent = () => !event.isAuthorityStale && this._isHubOperationAuthorityReady()
+			&& contextGeneration === this._hubContextGeneration && realtimeGeneration === this._hubRealtimeGeneration
 			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0);
 		if (fnIsCurrent() && !event.isAuthoritativeResult) this._peerTargeting?.onRealtimeOperation(event);
 		const characterId = event.characterId || event.targetCharacterId;
@@ -1175,6 +1190,7 @@ class CharacterSheetPage {
 	 * repository's mutation queue from a task already running on it would deadlock.
 	 */
 	_scheduleHubRealtimeResync ({characterId}) {
+		if (!this._isHubOperationAuthorityReady()) return false;
 		if (this._isHubResyncScheduled) return false;
 		this._isHubResyncScheduled = true;
 		queueMicrotask(() => {
@@ -1277,7 +1293,7 @@ class CharacterSheetPage {
 		const isCurrent = () => this._currentCharacterId === characterId
 			&& this._characterLoadGeneration === generation && this._hubRealtimeGeneration === realtimeGeneration
 			&& this._hubContextGeneration === contextGeneration && this._hubRoleRosterGeneration === roleGeneration
-			&& this._hubCampaignId === campaignId && !this._isHubOperationAuthorityPending
+			&& this._hubCampaignId === campaignId && this._isHubOperationAuthorityReady()
 			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0);
 		const result = await repository.pRunPendingResync({
 			characterId,
@@ -1287,9 +1303,7 @@ class CharacterSheetPage {
 		}).catch(error => ({status: "failed", error}));
 		if (!isCurrent()) {
 			if (
-				this._currentCharacterId === characterId && this._hubContext
-				&& !this._hubRulesRefreshBlocked && !this._isHubContextRefreshing
-				&& !this._isHubOperationAuthorityPending
+				this._currentCharacterId === characterId && this._isHubOperationAuthorityReady()
 				&& this._characterRepository?.hasPendingResync?.(characterId)
 			) this._scheduleHubRealtimeResync({characterId});
 			return false;
@@ -1338,7 +1352,7 @@ class CharacterSheetPage {
 			accessMode: this._currentCharacterAccess,
 			repository: this._characterRepository,
 		};
-		if (this._isHubOperationAuthorityPending || this._hubRulesRefreshBlocked || this._isHubContextUnavailable) return false;
+		if (!this._isHubOperationAuthorityReady()) return false;
 		if (this._hubAuthoritativeReconcilePromise || this._isHubAuthoritativeReconcileScheduled) return true;
 		this._isHubAuthoritativeReconcileScheduled = true;
 		queueMicrotask(() => {
@@ -1362,7 +1376,7 @@ class CharacterSheetPage {
 					}
 					if (this._hubAuthoritativeReconcileRequest) {
 						if (this._isHubAuthoritativeReconcileScopeCurrent(this._hubAuthoritativeReconcileRequest)) {
-							if (!this._isHubOperationAuthorityPending && !this._hubRulesRefreshBlocked && !this._isHubContextUnavailable) {
+							if (this._isHubOperationAuthorityReady()) {
 								this._scheduleHubAuthoritativeReconcile({
 									characterId: this._hubAuthoritativeReconcileRequest.characterId,
 								});
@@ -1384,8 +1398,7 @@ class CharacterSheetPage {
 	}
 
 	async _pDrainHubAuthoritativeReconcile () {
-		while (this._hubAuthoritativeReconcileRequest && !this._isHubOperationAuthorityPending
-			&& !this._hubRulesRefreshBlocked && !this._isHubContextUnavailable) {
+		while (this._hubAuthoritativeReconcileRequest && this._isHubOperationAuthorityReady()) {
 			const request = this._hubAuthoritativeReconcileRequest;
 			if (!this._isHubAuthoritativeReconcileScopeCurrent(request)) {
 				this._hubAuthoritativeReconcileRequest = null;
@@ -1395,7 +1408,7 @@ class CharacterSheetPage {
 			await this._pRunHubAuthoritativeReconcile(request);
 			if (this._hubAuthoritativeReconcileRequest !== request) continue;
 			if (this._isHubAuthoritativeReconcileScopeCurrent(request)
-				&& (this._isHubOperationAuthorityPending || this._hubRulesRefreshBlocked || this._isHubContextUnavailable
+				&& (!this._isHubOperationAuthorityReady()
 					|| request.authorityGeneration !== (this._hubOperationAuthorityGeneration ?? 0)
 					|| request.contextGeneration !== this._hubContextGeneration
 					|| request.realtimeGeneration !== this._hubRealtimeGeneration)) break;
@@ -1410,8 +1423,7 @@ class CharacterSheetPage {
 		const fnIsCurrent = () => (
 			this._isHubAuthoritativeReconcileScopeCurrent(request)
 			&& request.realtimeGeneration === this._hubRealtimeGeneration
-			&& !this._isHubOperationAuthorityPending
-			&& !this._hubRulesRefreshBlocked && !this._isHubContextUnavailable
+			&& this._isHubOperationAuthorityReady()
 			&& authorityGeneration === (this._hubOperationAuthorityGeneration ?? 0)
 			&& contextGeneration === this._hubContextGeneration
 		);

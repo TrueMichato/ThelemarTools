@@ -120,8 +120,9 @@ const makeSessionStorage = () => {
 
 const makeDeferred = () => {
 	let resolve;
-	const promise = new Promise(res => { resolve = res; });
-	return {promise, resolve};
+	let reject;
+	const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+	return {promise, resolve, reject};
 };
 
 const makeCharacterDocument = (data, revision = 1) => ({id: "character-1", campaignId: "campaign-1", revision, data});
@@ -209,6 +210,7 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 		_hubEffects: hubEffects,
 		_peerTargeting: peerTargeting,
 		_hubCampaignId: "campaign-1",
+		_hubContext: {membership: {role: "player"}},
 		_hubActiveCampaign: {pHandleAccessLoss: jest.fn(async () => {})},
 		_teardownHubRules: jest.fn(),
 		_currentCharacterId: "character-1",
@@ -239,6 +241,7 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 		"_pDrainHubReadOnlyRefresh",
 		"_pRunHubReadOnlyRefresh",
 		"_onHubSemanticOperation",
+		"_isHubOperationAuthorityReady",
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
 		"_scheduleHubRealtimeResync",
@@ -754,6 +757,327 @@ describe("A4 interrupted canonical demand recovery on real authority arrival", (
 		expect(h.state.toJson().hp.current).toBe(9);
 		expect(h.adopted).toHaveBeenCalledTimes(1);
 		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+});
+
+describe("A4 reconnect authorized-context barrier on real consumers", () => {
+	const pMakeReconnectHarness = async () => {
+		const h = await pMakeAuthorityHarness();
+		h.host._onHubCampaignContextChanged = CharacterSheetPage.prototype._onHubCampaignContextChanged.bind(h.host);
+		h.host._handleTerminalCharacterCampaignAccessError = CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError.bind(h.host);
+		return h;
+	};
+	const expectPendingAuthority = (h, revision = 1) => {
+		expect(h.host._hubContext).toBeNull();
+		expect(h.host._isHubContextRefreshing).toBe(true);
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.repository._accepted.get("character-1").revision).toBe(revision);
+		expect(h.state.toJson().hp.current).toBe(5);
+		expect(h.host._renderCount).toBe(0);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.focus).not.toHaveBeenCalled();
+		expect(h.repository._getAppliedIds("character-1").operationLegs.has("review-operation/target/review-leg")).toBe(false);
+		expect(h.repository._coverage.get("character-1")?.live.revision).not.toBe(revision + 1);
+		expect(h.repository._realtimeCursors.get("character-1")?.operationWatermark).not.toBe(20);
+	};
+
+	it.each(["live-before-read-finishes", "read-finishes-before-live"])("requires installed authorized context for canonical retry when %s", async order => {
+		const h = await pMakeReconnectHarness();
+		const started = makeDeferred();
+		const read = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("state", {state: "reconnecting"});
+		if (order === "live-before-read-finishes") h.clients[0].emit("state", {state: "live"});
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+		if (order === "read-finishes-before-live") h.clients[0].emit("state", {state: "live"});
+		await pFlush();
+		expectPendingAuthority(h);
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+		expect(h.toasts).toEqual([]);
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.repository._accepted.get("character-1").revision).toBe(2);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["http", "websocket", "resync"])("fences fresh-generation %s delivery until reconnect context is installed", async kind => {
+		const h = await pMakeReconnectHarness();
+		const {release, save} = await pBlockSave(h);
+		const event = makeMultiEvent();
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 20, hasMore: false}});
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		let delivered;
+		if (kind === "http") delivered = h.deliverHttp(event);
+		else if (kind === "websocket") h.clients[0].emit("event", event);
+		else {
+			h.repository._queuePendingResync({canonicalId: "character-1",
+				envelope: {
+					eventId: event.id, sequence: event.sequence, ...event.payload,
+				}});
+			delivered = h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		}
+		release.resolve();
+		await save;
+		if (delivered) expect(await delivered).toBe(false);
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 3);
+		await pFlush();
+		expectPendingAuthority(h, 2);
+		expect(h.repository.hasPendingResync("character-1")).toBe(true);
+		expect(h.toasts).toEqual([]);
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.repository._accepted.get("character-1").revision).toBe(3);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("retains in-flight semantic recovery through reconnect until authorized context is installed", async () => {
+		const h = await pMakeReconnectHarness();
+		const event = makeMultiEvent({revision: 2});
+		const read = makeDeferred();
+		const started = makeDeferred();
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.pListEventPage.mockResolvedValue({events: [event], replay: {scannedThroughSequence: 20, hasMore: false}});
+		h.repository._queuePendingResync({canonicalId: "character-1",
+			envelope: {
+				eventId: event.id, sequence: event.sequence, ...event.payload,
+			}});
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			await read.promise;
+			return h.api.state.character;
+		});
+		const pending = h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		await started.promise;
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		read.resolve();
+		expect(await pending).toBe(false);
+		await pFlush();
+		expectPendingAuthority(h);
+		expect(h.repository.hasPendingResync("character-1")).toBe(true);
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.repository._accepted.get("character-1").revision).toBe(2);
+		expect(h.notice).toHaveBeenCalledTimes(1);
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("coalesces newer demand across repeated reconnects and ignores the older late context", async () => {
+		const h = await pMakeReconnectHarness();
+		const read = makeDeferred();
+		const started = makeDeferred();
+		const latestContext = makeDeferred();
+		const truth = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.state.character = truth;
+		h.api.pGetCharacter.mockClear();
+		h.api.pGetCharacter.mockImplementationOnce(async () => {
+			started.resolve();
+			return read.promise;
+		});
+		h.host._hubCampaignContext.pRefresh
+			.mockImplementationOnce(() => h.contextGate.promise)
+			.mockImplementationOnce(() => latestContext.promise);
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		await started.promise;
+		for (let i = 0; i < 2; ++i) {
+			h.clients[0].emit("state", {state: "reconnecting"});
+			h.clients[0].emit("state", {state: "live"});
+			h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		}
+		const newer = h.host._hubAuthoritativeReconcileRequest;
+		read.resolve(truth);
+		await h.host._hubAuthoritativeReconcilePromise;
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expectPendingAuthority(h);
+		expect(h.host._hubAuthoritativeReconcileRequest === newer).toBe(true);
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.effects._isCapabilityRevoked).toBe(true);
+		expect(h.targeting._isSuspended).toBe(true);
+		latestContext.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(2);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("retains canonical demand without retrying when authorized context fails, then resumes after a successful reconnect", async () => {
+		const h = await pMakeReconnectHarness();
+		const nextContext = makeDeferred();
+		h.host._hubCampaignContext.pRefresh
+			.mockImplementationOnce(() => h.contextGate.promise)
+			.mockImplementationOnce(() => nextContext.promise);
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.pGetCharacter.mockClear();
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		h.contextGate.reject(new Error("context offline"));
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).not.toHaveBeenCalled();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(h.host._isHubContextUnavailable).toBe(true);
+		expect(h.host._hubAuthoritativeReconcileRequest).not.toBeNull();
+		expect(h.toasts).toHaveLength(1);
+		expect(h.toasts[0].type).toBe("danger");
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		await pFlush();
+		expectPendingAuthority(h);
+		expect(h.api.pGetCharacter).not.toHaveBeenCalled();
+		nextContext.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.api.pGetCharacter).toHaveBeenCalledTimes(1);
+		expect(h.adopted).toHaveBeenCalledTimes(1);
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.toasts).toHaveLength(1);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it("conceals terminal context failure instead of retrying unfinished canonical demand", async () => {
+		const h = await pMakeReconnectHarness();
+		h.api.pGetCharacter.mockClear();
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		h.contextGate.reject(Object.assign(new Error("forbidden"), {code: "FORBIDDEN", status: 403}));
+		await pFlush();
+		await pFlush();
+		expect(h.host._concealHubPrivateCharacter).toHaveBeenCalledTimes(1);
+		expect(h.host._currentCharacterId).toBeNull();
+		expect(h.host._hubContext).toBeNull();
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.api.pGetCharacter).not.toHaveBeenCalled();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.toasts).toEqual([]);
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each(["archive", "access-loss"])("does not install late reconnect context after %s", async ending => {
+		const h = await pMakeReconnectHarness();
+		h.api.pGetCharacter.mockClear();
+		h.clients[0].emit("state", {state: "reconnecting"});
+		h.clients[0].emit("state", {state: "live"});
+		h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		if (ending === "archive") h.clients[0].emit("event", makeAuthorityEvent("campaign.archived"));
+		else h.clients[0].emit("state", {state: "access_lost"});
+		await pFlush();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.host._hubContext).toBeNull();
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.api.pGetCharacter).not.toHaveBeenCalled();
+		expect(h.adopted).not.toHaveBeenCalled();
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.focus).not.toHaveBeenCalled();
+		expect(h.host._renderCount).toBe(0);
+		if (ending === "archive") expect(h.host._currentCharacterId).toBeNull();
+		h.effects.destroy();
+		h.targeting.destroy();
+	});
+
+	it.each([["canonical", "durable"], ["canonical", "adopt"], ["resync", "durable"], ["resync", "journal"], ["resync", "adopt"]])("rolls back %s at %s when reconnect starts a pending context refresh", async (kind, phase) => {
+		const h = await pMakeReconnectHarness();
+		h.api.pPatchCharacter.mockRejectedValue(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+		for (const name of ["edit A", "edit B"]) {
+			h.state.setName(name);
+			await expect(h.repository.pUpsert({character: {...h.state.toJson(), id: "character-1"}})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+		}
+		const before = JSON.stringify(h.repository._recoveryCommandQueues.get("character-1"));
+		const journalKey = h.repository._getRevisionlessCoverageKey("character-1");
+		const event = makeMultiEvent({revision: 2});
+		const noop = makeMultiEvent({revision: null, sequence: 21, legId: "noop"});
+		noop.payload.changed = false;
+		noop.payload.resultingCharacterRevision = null;
+		h.api.state.character = makeCharacterDocument({...h.api.state.character.data, hp: {current: 9, max: 44, temp: 0}}, 2);
+		h.api.pListEventPage.mockResolvedValue({events: [event, noop], replay: {scannedThroughSequence: 21, hasMore: false}});
+		if (kind === "resync") {
+			h.repository._queuePendingResync({canonicalId: "character-1",
+				envelope: {
+					eventId: event.id, sequence: event.sequence, ...event.payload,
+				}});
+		}
+		const target = phase === "adopt" ? h.host : h.repository;
+		const method = phase === "adopt" ? "_reconcileClassFeatures" : phase === "journal" ? "_stageRevisionlessCoverage" : "_stageRecoveryCommandQueue";
+		const original = target[method].bind(target);
+		const boundary = jest.spyOn(target, method).mockImplementationOnce(input => {
+			const result = original(input);
+			h.clients[0].emit("state", {state: "reconnecting"});
+			h.clients[0].emit("state", {state: "live"});
+			return result;
+		});
+		if (kind === "canonical") h.host._onHubProjectionInvalidated({characterId: "character-1"});
+		else await h.host._pRunHubRealtimeResync({characterId: "character-1"});
+		await pFlush();
+		await pFlush();
+		expect(h.host._hubContext).toBeNull();
+		expect(h.host._isHubContextRefreshing).toBe(true);
+		expect(h.state.toJson().hp.current).toBe(5);
+		expect(h.state.toJson().name).toBe("edit B");
+		expect(h.repository._accepted.get("character-1").revision).toBe(1);
+		expect(JSON.stringify(h.repository._recoveryCommandQueues.get("character-1"))).toBe(before);
+		expect(h.repository._recoveryStorage.getItem(journalKey)).toBeNull();
+		expect(h.host._renderCount).toBe(0);
+		expect(h.notice).not.toHaveBeenCalled();
+		expect(h.toasts).toEqual([]);
+		if (phase !== "adopt") expect(h.adopted).not.toHaveBeenCalled();
+		boundary.mockRestore();
+		h.contextGate.resolve(h.context);
+		await pFlush();
+		await pFlush();
+		expect(h.state.toJson().hp.current).toBe(9);
+		expect(h.state.toJson().name).toBe("edit B");
+		expect(h.repository._accepted.get("character-1").revision).toBe(2);
+		const commands = h.repository._recoveryCommandQueues.get("character-1");
+		expect(commands.slice(0, 2).map(command => command.commandKeys)).toEqual(JSON.parse(before).map(command => command.commandKeys));
+		expect(commands.every(command => command.submittedBase.hp.current === 9 && command.submittedSnapshot.hp.current === 9)).toBe(true);
+		expect(h.host._hubAuthoritativeReconcileRequest).toBeNull();
+		expect(h.repository.hasPendingResync("character-1")).toBe(false);
 		h.effects.destroy();
 		h.targeting.destroy();
 	});

@@ -3169,6 +3169,11 @@ describe("Character Sheet repository seam", () => {
 			_currentCharacterId: "character-a",
 			_characterLoadGeneration: 4,
 			_hubRealtimeGeneration: 7,
+			_hubContextGeneration: 2,
+			_hubOperationAuthorityGeneration: 3,
+			_hubCampaignId: "campaign-a",
+			_currentCharacterAccess: "owner",
+			_hubContext: {membership: {role: "player"}},
 			_isHubCharacter: true,
 			_characterRepository: {
 				pReconcileAuthoritativeCharacter: jest.fn(async () => { throw authError; }),
@@ -3177,21 +3182,30 @@ describe("Character Sheet repository seam", () => {
 			_getHubLiveCharacterData: jest.fn(),
 			_adoptHubLiveCharacterData: jest.fn(),
 			_updateSaveIndicator: jest.fn(),
-			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_endCurrentHubCharacterAccess: jest.fn(CharacterSheetPage.prototype._endCurrentHubCharacterAccess),
+			_fenceHubGeneration: CharacterSheetPage.prototype._fenceHubGeneration,
+			_detachHubRealtimeClient: jest.fn(),
+			_detachHubProjections: jest.fn(),
+			_concealHubPrivateCharacter: jest.fn(),
+			_teardownHubRules: jest.fn(),
 			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+			_isHubAuthoritativeReconcileScopeCurrent: CharacterSheetPage.prototype._isHubAuthoritativeReconcileScopeCurrent,
+			_isHubOperationAuthorityReady: CharacterSheetPage.prototype._isHubOperationAuthorityReady,
+			_hubAuthoritativeReconcilePromise: Promise.resolve(),
 		};
 
-		await expect(CharacterSheetPage.prototype._pRunHubAuthoritativeReconcile.call(host, {
-			characterId: "character-a",
-			generation: 4,
-			realtimeGeneration: 7,
-		})).resolves.toBe(false);
+		CharacterSheetPage.prototype._scheduleHubAuthoritativeReconcile.call(host, {characterId: "character-a"});
+		await expect(CharacterSheetPage.prototype._pRunHubAuthoritativeReconcile.call(host, host._hubAuthoritativeReconcileRequest)).resolves.toBe(false);
 		await Promise.resolve();
 
 		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
 			characterId: "character-a",
 			accessEndCause: "campaign",
 		});
+		expect(host._concealHubPrivateCharacter).toHaveBeenCalledTimes(1);
+		expect(host._detachHubRealtimeClient).toHaveBeenCalledTimes(1);
+		expect(host._detachHubProjections).toHaveBeenCalledTimes(1);
+		expect(host._hubAuthoritativeReconcileRequest).toBeNull();
 		expect(host._updateSaveIndicator).not.toHaveBeenCalled();
 	});
 
@@ -3200,6 +3214,7 @@ describe("Character Sheet repository seam", () => {
 		const host = {
 			_currentCharacterId: "character-a",
 			_characterLoadGeneration: 4,
+			_hubContext: {membership: {role: "player"}},
 			_isHubCharacter: true,
 			_characterRepository: {
 				pRunPendingResync: jest.fn(async () => { throw authError; }),
@@ -3210,6 +3225,7 @@ describe("Character Sheet repository seam", () => {
 			_updateSaveIndicator: jest.fn(),
 			_endCurrentHubCharacterAccess: jest.fn(() => true),
 			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+			_isHubOperationAuthorityReady: CharacterSheetPage.prototype._isHubOperationAuthorityReady,
 		};
 
 		await expect(CharacterSheetPage.prototype._pRunHubRealtimeResync.call(host, {

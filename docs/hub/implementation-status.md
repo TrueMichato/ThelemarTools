@@ -18,8 +18,10 @@ exact evidence and canonical projection demand wait for fresh authorized context
 coverage roll back together if authority changes during adoption. An interrupted canonical read keeps its
 unfinished scheduling demand, coalesces newer invalidations, and automatically retries with fresh authority
 tokens after context recovery. Terminal teardown or character/account/campaign/access-scope changes discard
-that demand; suspended drains do not spin. This is local held work awaiting exact-delta
-independent A4 review, not deployed or
+that demand; suspended drains do not spin. A shared installed-context barrier also prevents fresh-generation reconnect retries,
+HTTP/WebSocket/resync delivery and recovery-storage reads from proceeding while authorization is pending.
+Ordinary transport loss retains exact recovery evidence; terminal teardown remains destructive to scoped
+coverage and demand. This is local held work awaiting exact-delta independent A4 review, not deployed or
 enabled product. Production multi-spell descriptors remain absent until A5; singular Cure Wounds and local casting
 are unchanged. Disposable browser fixtures alone inject the existing reviewed Shared Restoration template.
 

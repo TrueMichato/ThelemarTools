@@ -353,6 +353,12 @@ account, campaign, access and repository scope must still match; terminal teardo
 Recoverable reconnect refreshes attempt tokens rather than treating the realtime generation as terminal scope loss.
 Unavailable-authority drains stop instead of spinning, while recoverable same-scope BFCache suspension is not
 terminal teardown.
+Fresh reconnect generations are not authorization. The shared operation-authority readiness barrier requires
+an installed context and no pending refresh/revalidation, unavailable policy, or authority/rules hold.
+Canonical scheduling/drain/attempt guards and HTTP/WebSocket/resync adoption/staging all use that barrier.
+Installing the authorized context and overlays opens it before recovery resumes. Ordinary transport loss retains
+exact coverage and unfinished resync evidence; terminal teardown still clears them. Recovery-storage reads are
+also deferred until context installation so they cannot expose uncommitted staged command snapshots.
 Fresh owner loads discard only an unprovable, settled submit cache after teardown; genuine durable drafts retain
 their exact command-backed snapshot coverage. Recovery replay includes all existing tracks and starts at zero if
 any track's sequence is unknown, rather than excluding an earlier changed leg behind a newer watermark.

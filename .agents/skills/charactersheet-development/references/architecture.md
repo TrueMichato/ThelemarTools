@@ -119,6 +119,9 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Keep canonical demand during its await; authority-fenced reads automatically retry
 │   with fresh tokens after context recovery. Old completion cannot clear a newer
 │   request. Terminal/scope changes discard demand; unavailable drains do not spin.
+│   Reconnect tokens are not authorization: canonical/HTTP/WS/resync delivery and
+│   recovery reads wait for installed context and overlays, not transport "live".
+│   Retain exact coverage and unfinished resync on ordinary transport loss.
 │   Durable/no-op staging and live adoption roll back before coverage can commit.
 │   Document adoption still uses only the repository queue; scoped authoritative
 │   refresh restores consent controls, and suspended effects cannot publish notices.
