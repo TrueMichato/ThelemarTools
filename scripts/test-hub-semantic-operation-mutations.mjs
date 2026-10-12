@@ -95,6 +95,14 @@ const MUTATIONS = [
 		test: "test/jest/charactersheet/CharacterSheetRealtimeApply.test.js",
 		pattern: "deduplicates an approval response when its socket edge wins the race",
 	},
+	{
+		name: "omit-post-commit-authorization-teardown",
+		file: "js/hub/hub-page.js",
+		from: "if (campaignAuthorizationErrorHandler?.(refreshError)) return;",
+		to: "",
+		test: "test/jest/hub/HubDmEffectSubmission.test.js",
+		pattern: "fences private campaign data",
+	},
 ];
 
 async function copyTree (root) {

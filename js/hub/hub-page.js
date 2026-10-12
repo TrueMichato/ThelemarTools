@@ -4095,6 +4095,7 @@ async function pInitCampaignForms ({
 				});
 			} catch (refreshError) {
 				if (!fnIsCurrent()) return;
+				if (campaignAuthorizationErrorHandler?.(refreshError)) return;
 				setFormStatus({
 					formId,
 					message: `${statusMessage} Pending requests could not be refreshed; use Refresh to retry the read.`,
