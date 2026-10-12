@@ -1,7 +1,7 @@
 # Campaign Hub security model
 
 > **Status:** Implemented private-V1 controls; managed deployment review pending
-> **Last verified:** 2026-09-20
+> **Last updated:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 ## Trust boundaries
@@ -11,7 +11,7 @@
 - PostgreSQL is canonical; client snapshots never overwrite state without revision and fencing checks.
 - Campaign homebrew is DM-authored but still untrusted content.
 
-### Owner Roll History candidate
+### Owner Roll History
 
 The protocol-5 `character.roll_history.v1` read requires current active membership/account and ownership
 of the campaign-bound character. Peer visibility and DM inspection do not grant access. Existing event
@@ -21,7 +21,9 @@ Only the actor sees new-event command correlation, and selected detail fields ar
 PostgreSQL projection before transmission to the application. Recovery is scoped to account, campaign,
 and character; access loss conceals history, clears scoped recovery, and fences delayed responses.
 No history read writes a document, lease, receipt, audit, event, or outbox row. Statement/lock budget
-exhaustion is an explicit 503, not hidden missing history. This is source work, not deployed evidence.
+exhaustion is an explicit 503, not hidden missing history. This capability is deployed in r11f at
+`4578c8671a7b05066fb9a19411cb8a31cdd753ef`; publication/deployment evidence is recorded in
+[the testing guide](testing.md#r11f-publication-and-deployment-evidence), separately from physical acceptance.
 
 ## Controls implemented
 

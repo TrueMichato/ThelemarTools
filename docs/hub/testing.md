@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-20
+> **Last updated:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -50,7 +50,8 @@ The competing-stash browser journey and Memory/PostgreSQL tests require one cons
 terminal insufficient losers, no extra restoration for non-escrowed requests, one `source_insufficient`
 event/audit per loser, stale-request disappearance from the DM inbox, and a losing-player Sheet notice.
 They also cover concurrent approvals, direct DM stash debits, stash-backed awards, and preservation of
-still-affordable requests. The source change remains unshipped until exact-head review/release.
+still-affordable requests. These source corrections are now delivered in r11f; the automated evidence
+does not replace physical acceptance, which is explicitly waived for this bounded correction release.
 
 The owner-history candidate's four-context journey uses two devices for one owner, a DM, and a peer.
 It logs actual Sheet rolls, loses committed POST responses with and without live socket confirmation,
@@ -110,6 +111,30 @@ restores `display: list-item` and closed/open native marker styles. The focused 
 passed all 77 PostgreSQL checks and all four browser journeys; the final desktop/mobile day/night captures
 show the native markers. These follow-up checks are source
 verification, not a repeated physical game day or an r11f deployment.
+
+### R11f publication and deployment evidence
+
+The final correction source `4578c8671a7b05066fb9a19411cb8a31cdd753ef` passed all four jobs in
+[exact-source CI 38223244640](https://github.com/TrueMichato/ThelemarTools/actions/runs/38223244640).
+Its canonical browser artifact records 54 expected journeys, zero flaky, unexpected or skipped cases.
+Annotated `hub-staging-2026-10-12-r11f` has tag object
+`33a9a3722c16aa5230b2f3b332304014b3b58cce` and peels to that exact source.
+
+The separately approved shared-host dry run restored r11e source and all five old mutable image tags.
+The first promotion stopped at an incorrect human confirmation, before traffic/schema mutation;
+independent checks proved the old healthy source/images remained intact. A separately approved retry
+received the human's full confirmation and completed at 2026-10-12T10:53:06Z.
+Independent post-release checks verified exact source/BFF revision/pinned images, one BFF, unchanged
+configuration, protocol 5/Roll History capability, migrations `0001`-`0009`, runtime `hub_runtime` without
+`hub_owner` membership, readiness, metrics authorization/age bounds, WebSocket rejection and TLS.
+All 14 changed browser JS/CSS/HTML files match reviewed Git, container and public hashes; generated
+worker/injector hashes match container/public responses. The static image has no OCI revision label,
+and served-asset equality is not a survey of preexisting browser caches.
+The newest encrypted prerelease archive matches the trusted off-machine copy by filename, size and SHA-256.
+Detailed redacted evidence remains private, mode 0600.
+
+Another physical game day is waived for r11f, not reported as a measured PASS or private-launch GO.
+The held Wave A stack, draft #289, remaining design decisions and campaign-enrollment limits are unchanged.
 
 ## Current commands
 

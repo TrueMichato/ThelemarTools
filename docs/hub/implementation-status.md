@@ -1,14 +1,14 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-10-04
+> **Last updated:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-The last independently verified private invite-only release is `hub-staging-2026-10-01-r11e` at
-`cf9b09f1a8df99e47167528aa37aa2cdfe766e9f` on the reused, Hub-only Oracle Always Free ARM
+The last independently verified private invite-only release is `hub-staging-2026-10-12-r11f` at
+`4578c8671a7b05066fb9a19411cb8a31cdd753ef` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
-PostgreSQL, static site, BFF, API, WebSocket, and deployed service-worker checks passed r11e post-release
+PostgreSQL, static site, BFF, API, WebSocket, and served service-worker checks passed r11f post-release
 verification. Phase 6G deployment and V1-G1 host-operations evidence are complete. The 2026-09-28 r10
 physical rerun returned **NO-GO** for a P1 Character Sheet context divergence and disabled player targeting;
 r11b fixed the route identity but its physical return advanced the canonical revision without an edit. R11c
@@ -25,12 +25,13 @@ natural expiry was automated-only and no character/operation database payload wa
 The private-launch verdict is still NO-GO. See the
 [prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
-The next **source candidate under verification**, not a deployed release, combines GD-FIND-003/006/007/009
+The **deployed r11f correction bundle** combines GD-FIND-003/006/007/009
 with GD-FIND-013: owner-only latest-200 Roll History over existing events, live cross-device/reload
 convergence, exact attempted-command recovery, and explicit offline/unconfirmed states. It adds
 `character.roll_history.v1` without changing protocol 5 or migrations `0001`-`0009`. The migration-free
 query has explicit 5s statement/2s lock budgets; sparse finite load evidence does not prove unbounded
-growth. Exact candidate review, publication/release approval, and physical rechecks remain separate.
+growth. Exact-source review/CI, immutable tagging, approved dry run, human-confirmed promotion and
+independent runtime/static/off-machine backup verification are complete; physical retest is waived.
 Draft sharing #289 and held Wave A are excluded.
 Independent correction review found and cleared a Roll History authorization fence: co-DM demotion
 conceals formerly authorized DM-only rows before refetch and rejects delayed old-role reads while
@@ -39,13 +40,17 @@ race. The subsequent local correction keeps account actions disabled until their
 settles account rendering before enabling them, and preserves deletion-callback focus. Permanent
 slow-read and service-error browser probes cover the fix; see
 [candidate validation evidence](testing.md#source-candidate-validation-residual).
-The decision owner has requested an r11f correction release and waived another physical game-day
-retest for that release. The correction bundle is published as
-`661b138ea91c3ad4e99b73439a6bac7eaca554b8`, with all four jobs green in exact-source CI `38217301747`.
+The decision owner requested r11f and waived another physical game-day retest for that release.
+The initial correction bundle was published as `661b138ea91c3ad4e99b73439a6bac7eaca554b8`;
+the complete follow-up is `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, with all four jobs green
+in exact-source CI `38223244640`.
 The r11f follow-up additionally corrects GD-FIND-004/005: explicit-local Create/Open/Import choices
 separate from cloud copy, and nested basic/advanced/field/preview sharing disclosures retaining drafts,
 open states and focus across parent rerender. Both Sheet entry paths preserve saved policy and peer
-projection until explicit Save. Final-candidate publication/CI, tagging and deployment remain separate;
+projection until explicit Save. R11f promotion completed at 2026-10-12T10:53:06Z; the annotated tag,
+actual BFF revision and pinned images match the reviewed source, all 14 changed served browser assets
+match Git/container/public hashes, and the prerelease encrypted archive matches the trusted second machine.
+Existing configuration and Campaign A-only targeting remain unchanged;
 design requests002/008/010/011, draft #289 and held Wave A remain outside the bundle.
 This is not private-launch GO.
 
@@ -54,8 +59,8 @@ migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6
 and Phase 6G Oracle deployment are complete.
 
 The original 59 planned implementation todos in the coordinating program are complete. That historical
-closeout does not close the new physical findings: the r10 rerun needs remediation, a new physical run, and
-an explicit private-launch GO/NO-GO.
+closeout does not silently close the physical findings. R11f correction delivery is complete under the
+physical-retest waiver; an explicit private-launch GO/NO-GO remains separate from continued engineering.
 
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and

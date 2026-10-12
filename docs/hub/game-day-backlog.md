@@ -12,14 +12,14 @@ identifiers, provider subjects, tokens, or private evidence into Git.
 
 ## Current boundary
 
-- **Deployed:** genuine-provenance `hub-staging-2026-10-01-r11e`, annotated tag object
-  `677bf0a7a48d95d628accee793df9b873e6e86ab` at
-  `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f`, protocol 5, migrations `0001`-`0009`.
+- **Deployed:** genuine-provenance `hub-staging-2026-10-12-r11f`, annotated tag object
+  `33a9a3722c16aa5230b2f3b332304014b3b58cce` at
+  `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, protocol 5, migrations `0001`-`0009`.
   Exact-head CI, the authorized dry run, human-confirmed promotion, independent runtime/static checks,
-  healthy monitoring, and matching release-time off-machine encrypted backup passed. An approved same-tag
-  redeploy subsequently enabled the narrow Cure Wounds canary for Campaign A only; independent rollout
-  and release-time backup checks passed. Tested physical targeting paths passed as described below;
-  this is not private-launch acceptance.
+  healthy monitoring, and matching release-time off-machine encrypted backup passed. Roll History is
+  advertised as `character.roll_history.v1`; existing Campaign A-only Cure Wounds configuration is
+  unchanged. Earlier physical targeting paths are described below; another physical game day is waived
+  for r11f engineering continuation, not reported as private-launch acceptance.
 - **Physical result:** final **NO-GO** at 2026-09-28T20:02:31Z. GD-FIND-014 is a confirmed P1
   refresh-persistent local/campaign Character Sheet divergence. GD-FIND-012 records that the
   campaign's player-targeting rollout was disabled. Several scenarios lack participant/device evidence.
@@ -166,14 +166,16 @@ are retained under the waiver. Local candidate evidence passed 1,642 Hub tests, 
 tests, 77 PostgreSQL checks, and 52 browser journeys. These totals describe the verified local overlay,
 not a deployed r11f.
 
-The follow-up r11f candidate also corrects GD-FIND-004/005 without changing authority: the Campaign
+The follow-up r11f source also corrects GD-FIND-004/005 without changing authority: the Campaign
 manifest offers explicit-local Create, Open and Import routes, and the shared Sheet sharing UI has
 basic, advanced, per-field and saved-preview disclosures. Unsaved values, open states and keyboard focus
 survive rerender; toggling or editing a draft does not save policy or change the peer projection.
 The complete disposable stack passed 77 PostgreSQL checks and 54 browser journeys. A subsequent
 visual inspection caught Bootstrap's global `summary { display: block }` suppressing native disclosure
 markers; a red-first browser assertion now requires native closed/open markers, restored by scoped CSS.
-Publication and exact-head CI for this follow-up remain separate from the earlier commit's evidence.
+The complete follow-up was published as `4578c8671a7b05066fb9a19411cb8a31cdd753ef`.
+Its exact-source CI `38223244640` passed all four jobs and 54 browser journeys with no flaky,
+unexpected or skipped cases, separately from the earlier commit's evidence.
 
 GD-FIND-002/008/010/011's privacy/custody/DM-authority/content-publication decisions remain in the
 continuation plan; do not report every backlog row as solved. Draft #289's outer disclosure and held
@@ -181,11 +183,18 @@ Wave A remain excluded, with no protocol change, no migration after 0009, and no
 enrollment. The P3 follow-up supersedes the initial conservative scope exclusion after the decision
 owner requested continued autonomous completion; it does not lift gameplay holds or invent authority.
 
-Current target identity is the proposed `hub-staging-2026-10-12-r11f`. It is not tagged or deployed merely
-because it is named here. Fresh read-only inspection at 2026-10-12T07:10:45Z still found clean r11e source
-`cf9b09f1a8df99e47167528aa37aa2cdfe766e9f`, healthy Hub services, one BFF, no active release process/lock,
-and a successful current monitor. Final-candidate CI, exact-tag approval, shared-host dry run,
-human-confirmed promotion and post-release verification remain separate required evidence.
+R11f is now tagged and deployed. Its annotated tag object is
+`33a9a3722c16aa5230b2f3b332304014b3b58cce`, peeled source
+`4578c8671a7b05066fb9a19411cb8a31cdd753ef`. The separately approved shared-host dry run restored
+r11e source and all five old mutable image tags. The first promotion stopped on a mismatched human
+confirmation before traffic/schema mutation; independent checks verified healthy restored r11e.
+The separately approved, human-confirmed retry completed at 2026-10-12T10:53:06Z with no migration.
+Independent post-release checks verified exact source/pinned images, one BFF, actual least-privilege
+runtime role, protocol/capability, operational bounds, all 14 changed served browser assets and generated
+worker consistency. The new encrypted prerelease archive matches the trusted off-machine copy.
+Detailed redacted evidence remains private; served hashes do not prove preexisting browser cache state.
+Correction delivery is complete. Continue held Wave A engineering without inferring a hold lift,
+private-launch GO or another campaign's enrollment.
 
 ## Prioritized findings
 
@@ -200,18 +209,18 @@ finding.
 |---|---|---|---|
 | P1 | **GD-FIND-014** | R11e's physical Campaign -> Local -> Return and Back/Forward reload each passed bounded no-lease/no-PATCH/stable-revision checks. A fresh owner tab made no canonical write, but the >51-hour observer delay leaves no-lease unproven; the decision owner accepted this gap for continued testing, not as a measured PASS. Actual BFCache restoration was not observed. | Preserve the core route PASS without claiming full closure. BFCache, the missing fresh-tab lease evidence, and the exact historical offline two-device sequence remain unproven; any new divergence restores a hard stop. |
 | P2 | **GD-FIND-012** | The absent selector was a disabled rollout, not a missing spell template. Exact Campaign A-only enrollment and real-profile physical XPHB reject/cancel/accept, PHB accept, self-target accept, and picker privacy now pass by participant report; no early cost or duplicate effect observed. | Record the narrow capability as exercised, not broad targeting. Natural expiry remains automated-only and PHB reject/cancel were not repeated physically; decide whether that residual evidence is acceptable before any private-launch GO. Other campaigns remain disabled. |
-| P2, source fix not deployed | **GD-FIND-003** | A disposable multi-user browser test reproduced the shared-profile disclosure closing when an ordinary realtime roll triggered an authorized roster refetch: `renderPartyRoster` replaced the open `<details>` node and lost its state/focus. A local correction keeps the same authorized character's disclosure open and summary focused on ordinary refresh; hiding identity closes it. Local full Hub Jest (1,629) and disposable PostgreSQL/browser stack (62/49) passed after the integrated P2 changes. | Reviewed exact-head CI/release and physical recheck are still required; do not label the r11e browser fixed. **Overview UX**. |
-| P2, source fix not deployed | **GD-FIND-006** | Inventory **Share** began a second step in a lower sheet panel without moving focus, scrolling to, or announcing it. A local correction labels Share as a multi-step action, moves focus and viewport to Quantity, and announces that no item has moved. Cancel returns focus to Share; red-first browser evidence, affected Sheet Jest (202), full Hub Jest (1,629), and disposable PostgreSQL/browser stack (62/49) passed. | Reviewed exact-head CI/release and physical recheck remain; no asset loss was reported. **B0/B2**. |
-| P2, source fix not deployed | **GD-FIND-007** | Recipients previously had to visit Campaign Hub to discover and resolve a player transfer. A local Sheet correction adds an owner-scoped notice near the sheet header with item/source summary and inline Accept/Reject through the existing server-authorized transfer API. Pending state arrives live and survives reload; identity concealment removes old details before refetch, lost responses use one bounded authoritative retry/read before claiming a terminal outcome, and access loss fences late actions. Red-first browser evidence, affected Sheet Jest (202), full Hub Jest (1,629), and disposable PostgreSQL/browser stack (62/49) passed after integration. | Exact-head review/CI/release and physical recipient confirmation remain; the r11e Sheet still lacks these controls. **B1/B2**. |
-| P2, source fix not deployed | **GD-FIND-009** | After one of two requests for the same stash item was approved, the losing request stayed visibly pending for manual rejection. The local candidate now atomically cancels only definitively insufficient proposed losers on an approved/direct stash debit or stash-backed award, preserving affordable requests and adding `source_insufficient` reason/event/audit. The losing player's open Sheet announces the outcome and the DM inbox clears without manual rejection. Red-first Memory/PostgreSQL and multi-user browser tests pass, including concurrent approvals; integrated full Hub Jest (1,629), affected Sheet Jest (202), and disposable PostgreSQL/browser stack (62/49) pass. R11e still has the old behavior. | Reviewed exact-head CI/release and physical contention/reconnect confirmation remain; verify conservation, event audience and no duplicate asset. **B4**. |
-| P2, source candidate under verification | **GD-FIND-013** | Confirmed continuation contract: latest 200 own authorized rolls for the current character owner, live across devices and after reload. The candidate reads existing domain events with a protocol-5 capability, bounded detail, exact-command lost-response recovery, and explicit device-only offline states; it does not acquire an editor lease or PATCH the character. | Bundle with GD-FIND-003/006/007/009; exact candidate review/release and physical owner-device/audience/reconnect recheck remain. No migration/index; finite sparse-load evidence is not unbounded-growth proof. R11e retains the old behavior. **Roll-history UX**. |
-| P3, source fix not deployed | **GD-FIND-004** | The manifest now offers Create local character, Open local sheet and Import character JSON separately from Add cloud copy. All three routes force explicit local authority and delegate to existing Sheet flows; the multi-user journey observes zero character writes and an unchanged DM snapshot. | Final-candidate publication/CI and r11f release; physical retest waived, not measured PASS. **Character entry UX**. |
-| P3, source fix not deployed | **GD-FIND-005** | Shared sharing controls now separate Basic sharing, closed-by-default Advanced field overrides, individual field disclosures and Saved player preview. Keyboard close/reopen and parent rerender retain draft values, open state and focus on both campaign and ordinary entry; saved policy and the full peer projection remain unchanged until Save. PR #289 remains a separate outer-disclosure draft. | Final-candidate publication/CI and r11f release; phone/desktop day/night artifacts and native-marker regression cover presentation. Physical retest waived, not measured PASS. **Sharing UX**. |
+| P2, deployed r11f | **GD-FIND-003** | A disposable multi-user browser test reproduced the shared-profile disclosure closing when an ordinary realtime roll triggered an authorized roster refetch: `renderPartyRoster` replaced the open `<details>` node and lost its state/focus. The correction keeps the same authorized character's disclosure open and summary focused on ordinary refresh; hiding identity closes it. Local full Hub Jest (1,629) and disposable PostgreSQL/browser stack (62/49) passed after the integrated P2 changes. | Exact-source CI/release complete; physical recheck waived, not measured PASS. **Overview UX**. |
+| P2, deployed r11f | **GD-FIND-006** | Inventory **Share** began a second step in a lower sheet panel without moving focus, scrolling to, or announcing it. The correction labels Share as a multi-step action, moves focus and viewport to Quantity, and announces that no item has moved. Cancel returns focus to Share; red-first browser evidence, affected Sheet Jest (202), full Hub Jest (1,629), and disposable PostgreSQL/browser stack (62/49) passed. | Exact-source CI/release complete; physical recheck waived, not measured PASS. No asset loss was reported. **B0/B2**. |
+| P2, deployed r11f | **GD-FIND-007** | Recipients previously had to visit Campaign Hub to discover and resolve a player transfer. The Sheet correction adds an owner-scoped notice near the sheet header with item/source summary and inline Accept/Reject through the existing server-authorized transfer API. Pending state arrives live and survives reload; identity concealment removes old details before refetch, lost responses use one bounded authoritative retry/read before claiming a terminal outcome, and access loss fences late actions. Red-first browser evidence, affected Sheet Jest (202), full Hub Jest (1,629), and disposable PostgreSQL/browser stack (62/49) passed after integration. | Exact-source CI/release complete; physical recipient recheck waived, not measured PASS. **B1/B2**. |
+| P2, deployed r11f | **GD-FIND-009** | After one of two requests for the same stash item was approved, the losing request stayed visibly pending for manual rejection. The correction atomically cancels only definitively insufficient proposed losers on an approved/direct stash debit or stash-backed award, preserving affordable requests and adding `source_insufficient` reason/event/audit. The losing player's open Sheet announces the outcome and the DM inbox clears without manual rejection. Red-first Memory/PostgreSQL and multi-user browser tests pass, including concurrent approvals; integrated full Hub Jest (1,629), affected Sheet Jest (202), and disposable PostgreSQL/browser stack (62/49) pass. | Exact-source CI/release complete; physical contention/reconnect recheck waived, not measured PASS. Preserve conservation, event audience and no duplicate asset. **B4**. |
+| P2, deployed r11f | **GD-FIND-013** | Confirmed continuation contract: latest 200 own authorized rolls for the current character owner, live across devices and after reload. The implementation reads existing domain events with a protocol-5 capability, bounded detail, exact-command lost-response recovery, and explicit device-only offline states; it does not acquire an editor lease or PATCH the character. | Bundled with GD-FIND-003/006/007/009; exact-source CI/release complete and capability advertised. Physical owner-device/audience/reconnect recheck waived. No migration/index; finite sparse-load evidence is not unbounded-growth proof. **Roll-history UX**. |
+| P3, deployed r11f | **GD-FIND-004** | The manifest now offers Create local character, Open local sheet and Import character JSON separately from Add cloud copy. All three routes force explicit local authority and delegate to existing Sheet flows; the multi-user journey observes zero character writes and an unchanged DM snapshot. | Exact-source CI/release complete; physical retest waived, not measured PASS. **Character entry UX**. |
+| P3, deployed r11f | **GD-FIND-005** | Shared sharing controls now separate Basic sharing, closed-by-default Advanced field overrides, individual field disclosures and Saved player preview. Keyboard close/reopen and parent rerender retain draft values, open state and focus on both campaign and ordinary entry; saved policy and the full peer projection remain unchanged until Save. PR #289 remains a separate outer-disclosure draft. | Exact-source CI/release complete; phone/desktop day/night artifacts and native-marker regression cover presentation. Physical retest waived, not measured PASS. **Sharing UX**. |
 | Design | **GD-FIND-002** | DM requested bounded provider/account-source context; peer sharing should be optional and default hidden. | Decide which account facts, roles, consent and audience are allowed; test absence of provider subjects and hidden details from peer/network projections. **Privacy decision**. |
 | Design | **GD-FIND-008** | Participants want fewer routine stash approvals, transparent withdrawals and shared-weight handling. | Decide custody, concurrent debit/approval, carry ownership, activity and notifications before changing inventory authority. **B0/B3 decision; ADR if authority changes**. |
 | Design | **GD-FIND-010** | DM requested direct player-sheet editing/transfers with player notification; current arbitrary edit authority is intentionally limited. | Choose explicit typed, auditable DM operations and recipient notices; do not bypass owner leases or grant arbitrary writes. **Wave A/B authority decision**. |
 | Design | **GD-FIND-011** | A condition installed only as personal/site homebrew was unavailable in campaign authority, as designed. | If desired, design an explicit reviewed publish/select-to-campaign flow; never silently import personal brew. **Content-publication decision**. |
-| Resolved at r11e verification; recheck each operation | **GD-FIND-001** | R11e's prerelease archive and the newer 2026-10-04 scheduled archive matched the trusted second machine by filename, size, and SHA-256 after separately authorized pulls. The off-machine copy fell behind between checks and blocked a scenario until refreshed. | Preserve bounded release/backup evidence; recheck newest host/off-machine copy and restore age before each later scenario or promotion. **Operations**. |
+| Resolved at r11f verification; recheck each operation | **GD-FIND-001** | R11f's prerelease encrypted archive matched the trusted second machine by filename, size and SHA-256 after a separately authorized pull. Earlier r11e copies matched at their checks but later fell behind and blocked further operations until refreshed. | Preserve bounded release/backup evidence; recheck newest host/off-machine copy and restore age before each later scenario or promotion. **Operations**. |
 
 The 2026-09-13 game-day findings are historical, not silently closed by this list. R10 reproduced earlier
 entry-path finding #3 and rollout finding #18; its P1 is a *separate convergence-class recurrence*
@@ -231,12 +240,13 @@ remain untested or insufficiently evidenced unless the private report explicitly
    Sheet campaign test and campaign-context browser spec with normal descendant commits, no history rewrite.
    Rerun route/convergence and, if included, disclosure/projection-privacy journeys on the *integrated*
    head, plus full Hub, affected Character Sheet, relevant mutation and real-stack gates. The nested
-   GD-FIND-005 nested correction is now in the separate r11f follow-up candidate; it does not require #289.
+   GD-FIND-005 nested correction is deployed in the separate r11f follow-up; it does not require #289.
 3. **Keep release identity separate from game-day acceptance.** The r11b, r11c, r11d and r11e corrections were
    deployed from reviewed, immutable annotated tags; the initial r11 attempt rolled back and is not
    a deployment, and its tag remains immutable and unused. R11e's runtime and backup evidence passed
    and its bounded physical core-route checks found no writes; later BFCache and fresh-tab lease evidence
-   remain incomplete as described above. Every *future*
+   remain incomplete as described above. R11f correction delivery is complete under the explicit
+   physical-retest waiver. Every *future*
    promotion still requires its own immutable tag, fresh operational preflight, dry run, human-confirmed
    `deploy/hub/release.sh` invocation, and post-release checks. Do not treat a merge or this document as
    authorization for another release.
@@ -244,7 +254,8 @@ remain untested or insufficiently evidenced unless the private report explicitly
    separate campaign-ID-gated rollout. Check its current exact release and rules prerequisites; use
    [peer source-cost rollout](runbooks/peer-source-cost-rollout.md) for a separately authorized, exact-campaign
    preflight and enablement. The presence of code or a deployed image does not enroll a campaign.
-5. **Repeat the physical gate.** On the actual release and devices, rerun GD-R10-03/06/10 plus incomplete
+5. **Keep private-launch acceptance separate.** R11f's physical retest is waived for engineering
+   continuation. Before a future private-launch decision, on the actual release and devices, rerun GD-R10-03/06/10 plus incomplete
    GD-R10-01/02/04/07/08/09/11/12 checks, including roles/devices/browsers, privacy, inventory contention,
    offline convergence, and the previously reported P2 findings. Record each result or explicit skip and
    refresh operational preflight. Only the decision owner can replace the final NO-GO with a new GO.
@@ -257,7 +268,8 @@ before any promotion. Do not bundle the entire stack into the focused r10 correc
 
 ## Forward delivery sequence
 
-The r10 backlog is the immediate re-entry work. Approved gameplay development remains a separate sequence,
+R11f correction delivery is complete; refreshing the held Wave A stack is the next engineering milestone.
+Approved gameplay development remains a separate sequence,
 not a claim that these features have reached the live campaign:
 
 | Wave | Planned scope | Prerequisite / proof |

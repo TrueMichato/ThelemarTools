@@ -1,7 +1,7 @@
 # Campaign Hub staging plan
 
-> **Status:** r11e deployed with Campaign A-only targeting canary; V1-G1 complete; physical rerun **NO-GO**
-> **Last reviewed:** 2026-10-04
+> **Status:** r11f deployed; Campaign A-only targeting unchanged; physical retest waived; private launch **NO-GO**
+> **Last reviewed:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r10 findings, focused
@@ -19,6 +19,13 @@ fresh-tab no-lease evidence remain unproven. The separate Campaign A physical ta
 passed participant-reported PHB/XPHB accept, XPHB reject/cancel, self-target, and picker privacy;
 natural expiry was not physically tested. Private-launch GO is still blocked by other findings.
 
+R11f subsequently deployed the reviewed game-day correction bundle, including owner Roll History and
+the direct-local/nested-sharing follow-up, at `4578c8671a7b05066fb9a19411cb8a31cdd753ef`.
+The approved dry run, human-confirmed promotion and independent runtime/static/recovery checks passed;
+the new encrypted prerelease backup matches the trusted second machine. No migration or campaign
+enrollment changed. The decision owner waived another physical game day for this bounded release,
+not the historical evidence gaps, private-launch decision or held gameplay scope.
+
 ## Objectives
 
 Staging must prove the provider-portable contract with real HTTPS, GitHub OAuth, PostgreSQL, WebSockets,
@@ -31,9 +38,9 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- The independently verified deployed source is annotated `hub-staging-2026-10-01-r11e` at
-  `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f`, with migrations `0001`-`0009`.
-  Its same-tag Campaign A-only targeting configuration is live; Phase 6G is complete.
+- The independently verified deployed source is annotated `hub-staging-2026-10-12-r11f` at
+  `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, with protocol 5, `character.roll_history.v1`
+  and migrations `0001`-`0009`. Existing Campaign A-only targeting is unchanged; Phase 6G is complete.
   Recheck live identity/capability before the next scenario or promotion.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup
@@ -45,9 +52,9 @@ environment and must not use copied production characters.
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
   campaign operation page, and human-readable interaction controls are deployed and pass Oracle smoke checks.
-- The [living roadmap](roadmap.md) gates private-pilot expansion on a new physical
-  [one-DM/two-player game day](runbooks/private-game-day.md) after the r10 NO-GO remediation,
-  with an explicit new go/no-go.
+- The [living roadmap](roadmap.md) retains an explicit private-launch decision before pilot expansion.
+  R11f's physical [game-day](runbooks/private-game-day.md) retest is waived for engineering continuation,
+  without relabeling historical gaps as PASS or lifting gameplay holds.
 
 ## Environment requirements
 

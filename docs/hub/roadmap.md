@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-10-01
+> **Last reviewed:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -29,7 +29,7 @@ rather than inferring deployment or enablement from merged code.
 | Status | Milestone | Evidence or remaining decision |
 |---|---|---|
 | **shipped** | Private invite-only Hub implementation through Phase 6F | Server, browser, Character Sheet, DM Screen, lifecycle, migration, operations, CI, and real-stack evidence are summarized in [implementation status](implementation-status.md) |
-| **shipped** | Phase 6G Oracle deployment | Annotated `hub-staging-2026-10-01-r11e` at `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f` passed independent runtime/static/backup checks with migrations `0001`-`0009`; its same-tag Campaign A-only targeting rollout passed separately. Deployment is not physical game-day acceptance. |
+| **shipped** | Phase 6G Oracle deployment | Annotated `hub-staging-2026-10-12-r11f` at `4578c8671a7b05066fb9a19411cb8a31cdd753ef` passed independent runtime/static/off-machine backup checks, protocol 5 and migrations `0001`-`0009`. Existing Campaign A-only targeting is unchanged. Physical retest is waived, not a private-launch GO. |
 | **shipped** | V2-T0 release automation and live promotion | [PR #219](https://github.com/TrueMichato/ThelemarTools/pull/219) implemented the release path; the r7 dry-run/promotion, immutable evidence, image preservation, and non-disruptive rollback prerequisites were proven on Oracle |
 | **shipped** | V2-T1 legible activity history | [PR #218](https://github.com/TrueMichato/ThelemarTools/pull/218) merged semantic titles, privacy-safe display-name snapshots, historical fallback, and lifecycle coverage |
 | **shipped** | Coordinated implementation closeout | All 59 planned implementation todos are complete. [PR #241](https://github.com/TrueMichato/ThelemarTools/pull/241) merged carry/encumbrance enforcement as `de5acaabfa6cc64ce804bb43b94b74ccf3bc2714`; [PR #242](https://github.com/TrueMichato/ThelemarTools/pull/242) integrated source/species/edition content enforcement as `168d6e9ac36c11e2c938f21a4324b803f3f2fb61`; [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/243) merged the role-adaptive Campaign Overview and authority hardening as `b8d31d3416b934cc9275b859b5932db050005351` |
@@ -39,6 +39,7 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | V1 external Oracle host-operations proof | Manual and genuine scheduled maintenance/backup, five-minute external monitoring, off-machine backup, authenticated isolated restore, RPO/RTO, exact-r6 rollback, exact-r7 return, cleanup, and zero-disruption identity checks passed by 2026-09-13 |
 | **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
 | **active** | r10 game-day remediation | R11e deployed late-reapply/JSON-wire corrections; physical Campaign -> Local -> Return and Back/Forward reload made no lease/write, but actual BFCache was not observed and fresh-tab lease evidence expired (gap accepted to continue testing). Campaign A-only Cure Wounds targeting is enabled; participant-reported XPHB/PHB consent and self-target canaries passed, natural expiry remained automated-only. Private-launch NO-GO remains; [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) is a separate draft. |
+| **shipped** | R11f correction delivery | GD-FIND-003/004/005/006/007/009/013 and account-action startup/supply-chain corrections are committed, published, tagged and deployed. The decision owner's physical-retest waiver permits engineering continuation, not private-pilot expansion or gameplay hold lift. |
 | **next** | Wave A gameplay delivery | Stacked draft PRs [#285](https://github.com/TrueMichato/ThelemarTools/pull/285)-[#288](https://github.com/TrueMichato/ThelemarTools/pull/288) remain held/unmerged. A4/A5, inventory Wave B, and rules Wave D follow the [delivery plan](game-day-backlog.md). |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
@@ -47,30 +48,32 @@ rather than inferring deployment or enablement from merged code.
 | **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
-The last independently verified Oracle source is annotated release `hub-staging-2026-10-01-r11e` at
-`cf9b09f1a8df99e47167528aa37aa2cdfe766e9f`; the Campaign A-only same-tag redeploy and tested
-physical targeting paths passed, but private launch remains NO-GO. Draft PRs and later repository changes are not
+The last independently verified Oracle source is annotated release `hub-staging-2026-10-12-r11f` at
+`4578c8671a7b05066fb9a19411cb8a31cdd753ef`; the existing Campaign A-only targeting configuration
+is unchanged, and private launch remains NO-GO. Draft PRs and later repository changes are not
 target-environment evidence until separately reviewed, merged, tagged, approved, and promoted.
 
 ## V1 launch closeout
 
-The next correction candidate bundles existing GD-FIND-003/006/007/009 source fixes with GD-FIND-013
+The deployed r11f correction bundle includes GD-FIND-003/006/007/009 source fixes with GD-FIND-013
 owner-only retained Roll History (latest 200 own authorized rolls, live across devices and after reload).
-It is under verification and not deployed. It uses existing domain events, protocol 5, and no migration;
+It uses existing domain events, protocol 5, and no migration;
 query/lock budgets fail explicitly, and finite load tests do not establish unbounded-growth performance.
-Candidate review and Git publication are separate from immutable tagging, shared-host dry run,
-human-confirmed promotion, physical recheck, and the decision owner's GO/NO-GO. Held Wave A engineering
+Exact-source CI, Git publication, immutable tagging, approved shared-host dry run, human-confirmed
+promotion and independent post-release/off-machine backup checks are complete. Physical retest is
+waived for r11f, while the decision owner's private-launch GO/NO-GO remains separate. Held Wave A engineering
 may continue, but its integration/release/enablement holds are unchanged.
 On 2026-10-12 the decision owner requested the correction release as r11f and waived another physical
 game-day retest before continuing engineering. That changes the physical recheck requirement for this
 bounded release, not its automated/operational safeguards, the measured historical evidence, a
 private-launch GO, or the separately held design/gameplay scope. The r11f follow-up now also corrects
 GD-FIND-004/005's explicit-local entry and nested sharing UX without changing authority; it does not
-integrate draft #289's outer disclosure. Final-candidate publication/CI and deployment remain required. See the
+integrate draft #289's outer disclosure. The verified release completed at 2026-10-12T10:53:06Z. See the
 [r11f release preparation](game-day-backlog.md#r11f-correction-release-preparation--2026-10-12).
 
 Phase 6G and V1-G1 are complete. The 2026-09-28 r10 physical game day returned **NO-GO**. The remaining launch
-gate is remediation followed by a new observed physical run and explicit private-launch GO/NO-GO. This rollout
+gate retains an explicit private-launch GO/NO-GO and unresolved design/evidence decisions; the r11f
+correction-release physical retest is waived. This rollout
 gate proceeds in parallel with V2 engineering and gates expansion of the private pilot, not implementation
 or merging of independently safe V2 work; the current held Wave A stack retains its separate delivery hold.
 
