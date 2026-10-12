@@ -30,6 +30,7 @@ import {
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
 	isDirectTransferAuthority,
+	isTransferRequestInsufficient,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
@@ -93,20 +94,26 @@ import {
 	assertUniqueSelection,
 	createMultiTargetOperationsGate,
 	getMultiTargetCursor,
+	getMultiTargetInvitationPresentation,
 	getMultiTargetLegAudience,
 	getMultiTargetOperationSummary,
 	getMultiTargetOperationsCampaignCapability,
 	getMultiTargetSourceAudience,
+	getMultiTargetTargetResult,
 	isMultiTargetLiveStatus,
 	MULTI_TARGET_COLLECTION_TTL_MS,
+	MULTI_TARGET_INBOX_MODE_PENDING,
+	MULTI_TARGET_INBOX_MODE_RECOVERY,
 	MULTI_TARGET_OPERATION_TTL_MS,
 	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
 	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
 	MULTI_TARGET_PAGE_LIMIT,
+	MULTI_TARGET_TERMINAL_RETENTION_DAYS,
 	parseMultiTargetCursor,
 } from "./multi-target-operation-authority.js";
 import {pCheckMultiTargetOperationsCampaignReadiness} from "./multi-target-operation-rollout.js";
 import {canViewEvent} from "./projections.js";
+import {HUB_ROLL_HISTORY_CONTRACT_VERSION, projectRollHistoryEvent} from "../../js/hub/hub-roll-history.js";
 import {
 	getAccountDisplayName,
 	normalizeExternalIdentity,
@@ -5182,6 +5189,77 @@ export class PostgresHubStore {
 			: redactEventActor(event);
 	}
 
+	async pListCharacterRollHistory ({accountId, campaignId, characterId, beforeSequence = null, limit = 200, commandId = null}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query("SET LOCAL statement_timeout = '5s'");
+			await client.query("SET LOCAL lock_timeout = '2s'");
+			await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))", [campaignId]);
+			const campaign = await client.query("SELECT next_event_sequence FROM hub.campaigns WHERE id = $1 AND status <> 'deleting' FOR SHARE", [campaignId]);
+			if (!campaign.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", "Campaign is unavailable.", {status: 404});
+			const highWaterSequence = Number(campaign.rows[0].next_event_sequence) - 1;
+			const membership = await this._pGetMembershipForShare({client, accountId, campaignId});
+			const character = await client.query(`
+				SELECT c.id FROM hub.characters c
+				WHERE c.id = $1 AND c.campaign_id = $2 AND c.owner_account_id = $3
+					AND EXISTS (SELECT 1 FROM hub.accounts a WHERE a.id = $3 AND a.status = 'active')
+				FOR SHARE
+			`, [characterId, campaignId, accountId]);
+			if (!character.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", "Character is unavailable.", {status: 404});
+			const visibilities = ["all_members", "actor_and_dm", ...(membership.role === "dm" || membership.role === "co_dm" ? ["dm_only", "explicit_accounts"] : [])];
+			const result = await client.query(`
+				SELECT id, campaign_id, sequence, actor_account_id, aggregate_id, visibility, created_at,
+					jsonb_build_object(
+						'formula', left(payload->>'formula', 200),
+						'total', payload->'total',
+						'context', left(payload->>'context', 100),
+						'actorCommandId', left(payload->>'actorCommandId', 200),
+						'detail', jsonb_build_object(
+							'title', left(payload->'detail'->>'title', 200),
+							'breakdown', left(payload->'detail'->>'breakdown', 200),
+							'resultClass', left(payload->'detail'->>'resultClass', 100),
+							'resultNote', left(payload->'detail'->>'resultNote', 200)
+						)
+					) AS payload
+				FROM hub.domain_events
+				WHERE campaign_id = $1 AND actor_account_id = $2 AND aggregate_type = 'character'
+					AND aggregate_id = $3 AND event_type = 'roll.logged'
+					AND (visibility = ANY($4::text[]) OR (visibility = 'explicit_accounts' AND $2 = ANY(visible_account_ids)))
+					AND sequence <= $6
+					${beforeSequence == null ? "" : "AND sequence < $7"}
+					${commandId == null ? "" : `AND payload->>'actorCommandId' = $${beforeSequence == null ? 7 : 8}`}
+				ORDER BY sequence DESC LIMIT $5
+			`, [campaignId, accountId, characterId, visibilities, limit + 1, highWaterSequence, ...(beforeSequence == null ? [] : [beforeSequence]), ...(commandId == null ? [] : [commandId])]);
+			const events = result.rows.slice(0, limit).reverse().map(row => projectRollHistoryEvent({
+				id: row.id,
+				campaignId: row.campaign_id,
+				sequence: Number(row.sequence),
+				actorAccountId: row.actor_account_id,
+				aggregateId: row.aggregate_id,
+				visibility: row.visibility,
+				payload: row.payload,
+				createdAt: row.created_at,
+			}));
+			await client.query("COMMIT");
+			return {
+				contractVersion: HUB_ROLL_HISTORY_CONTRACT_VERSION,
+				highWaterSequence,
+				events,
+				history: {
+					scannedBackThroughSequence: events[0]?.sequence ?? beforeSequence ?? 1,
+					hasMore: result.rows.length > limit,
+				},
+			};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			if (["57014", "55P03"].includes(error.code)) throw new HubStoreError("ROLL_HISTORY_UNAVAILABLE", "Roll history could not be read within its resource budget.", {status: 503});
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
@@ -5207,7 +5285,7 @@ export class PostgresHubStore {
 				aggregateType: characterId ? "character" : "campaign",
 				aggregateId: characterId || campaignId,
 				visibility,
-				payload,
+				payload: {...payload, actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key},
 			});
 			const events = await client.query(`SELECT * FROM hub.domain_events WHERE campaign_id = $1 ORDER BY sequence DESC LIMIT 1`, [campaignId]);
 			const row = events.rows[0];
@@ -5586,10 +5664,7 @@ export class PostgresHubStore {
 			.map(target => ({
 				invitationId: target.invitationId,
 				status: target.responseState,
-				presentation: {
-					targetName: target.targetDisplaySnapshot?.identity?.name || "Campaign character",
-					effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
-				},
+				presentation: getMultiTargetInvitationPresentation({operation, target}),
 				capabilities: {
 					canApprove: target.responseState === "pending"
 						&& target.targetOwnerAccountIdAtProposal === accountId,
@@ -5597,16 +5672,7 @@ export class PostgresHubStore {
 						&& (target.targetOwnerAccountIdAtProposal === accountId || isDm),
 				},
 				...((isDm || target.targetOwnerAccountIdAtProposal === accountId) && target.selectionState === "applied"
-					? {
-						result: {
-							changed: target.changed,
-							resultingCharacterRevision: target.resultingCharacterRevision,
-							legId: target.legId,
-							legKind: target.legKind,
-							appliedEventId: target.legEventId,
-							operation: structuredClone(target.operation),
-						},
-					}
+					? {result: getMultiTargetTargetResult(target)}
 					: {}),
 			}));
 		const summary = getMultiTargetOperationSummary({
@@ -5633,6 +5699,9 @@ export class PostgresHubStore {
 						resultingSourceCharacterRevision: operation.resultingSourceCharacterRevision,
 						appliedEventId: operation.sourceCostEventId,
 						legKind: sourceTarget ? "combined" : "source",
+						operationLegKey: `${operation.id}/${sourceTarget ? "combined" : "source"}`,
+						eventSequence: finalization?.sourceLegEventSequence,
+						operationWatermark: finalization?.sourceLegEventSequence,
 						...(sourceTarget
 							? {
 								legId: sourceTarget.legId,
@@ -5654,26 +5723,49 @@ export class PostgresHubStore {
 		};
 	}
 
-	async _pGetMultiTargetTargets ({client, operationId, isForUpdate = false, isSkipLocked = false}) {
+	async _pGetMultiTargetTargets ({
+		client,
+		operationId,
+		isForUpdate = false,
+		isSkipLocked = false,
+		isIncludeLegEventSequence = false,
+	}) {
+		const eventSelect = isIncludeLegEventSequence ? ", event.sequence AS leg_event_sequence" : "";
+		const eventJoin = isIncludeLegEventSequence
+			? "LEFT JOIN hub.domain_events event ON event.id = target.leg_event_id AND event.campaign_id = target.campaign_id"
+			: "";
 		const result = await client.query(`
-			SELECT *
-			FROM hub.semantic_operation_targets
-			WHERE operation_id = $1
-			ORDER BY operation_id, target_character_id
-			${isForUpdate ? `FOR UPDATE${isSkipLocked ? " SKIP LOCKED" : ""}` : ""}
+			SELECT target.*${eventSelect}
+			FROM hub.semantic_operation_targets target
+			${eventJoin}
+			WHERE target.operation_id = $1
+			ORDER BY target.operation_id, target.target_character_id
+			${isForUpdate ? `FOR UPDATE OF target${isSkipLocked ? " SKIP LOCKED" : ""}` : ""}
 		`, [operationId]);
 		return result.rows
-			.map(row => this._getMultiTargetTarget(row))
+			.map(row => ({
+				...this._getMultiTargetTarget(row),
+				legEventSequence: row.leg_event_sequence == null ? null : Number(row.leg_event_sequence),
+			}))
 			.sort((left, right) => left.ordinal - right.ordinal);
 	}
 
-	async _pGetMultiTargetFinalization ({client, operationId}) {
+	async _pGetMultiTargetFinalization ({client, operationId, isIncludeSourceEventSequence = false}) {
+		const eventSelect = isIncludeSourceEventSequence ? ", event.sequence AS source_event_sequence" : "";
+		const eventJoin = isIncludeSourceEventSequence
+			? "LEFT JOIN hub.domain_events event ON event.id = finalization.source_event_id AND event.campaign_id = finalization.campaign_id"
+			: "";
 		const result = await client.query(`
-			SELECT *
-			FROM hub.semantic_operation_finalizations
-			WHERE operation_id = $1
+			SELECT finalization.*${eventSelect}
+			FROM hub.semantic_operation_finalizations finalization
+			${eventJoin}
+			WHERE finalization.operation_id = $1
 		`, [operationId]);
-		return this._getMultiTargetFinalization(result.rows[0]);
+		const finalization = this._getMultiTargetFinalization(result.rows[0]);
+		if (finalization && result.rows[0]?.source_event_sequence != null) {
+			finalization.sourceLegEventSequence = Number(result.rows[0].source_event_sequence);
+		}
+		return finalization;
 	}
 
 	_injectTestMultiTargetFault ({stage, operation, details = null}) {
@@ -6571,6 +6663,13 @@ export class PostgresHubStore {
 						status: responseState,
 						effectDisplaySnapshot: operation.effectDisplaySnapshot,
 						targetDisplaySnapshot: derivedTarget.targetDisplaySnapshot,
+						presentation: getMultiTargetInvitationPresentation({
+							operation,
+							target: {
+								targetDisplaySnapshot: derivedTarget.targetDisplaySnapshot,
+								operation: derivedTarget.operation,
+							},
+						}),
 						collectionClosesAt: operation.collectionClosesAt,
 					},
 				});
@@ -6712,6 +6811,7 @@ export class PostgresHubStore {
 				client,
 				operationId: operation.id,
 				isForUpdate: true,
+				isIncludeLegEventSequence: true,
 			});
 			const target = targets.find(it => it.invitationId === args.invitationId);
 			if (!target) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
@@ -6742,7 +6842,11 @@ export class PostgresHubStore {
 				throw new HubStoreError("OPERATION_FORBIDDEN", `Only the target owner may approve.`, {status: 403});
 			}
 			if (target.responseState !== "pending") {
-				const finalization = await this._pGetMultiTargetFinalization({client, operationId: operation.id});
+				const finalization = await this._pGetMultiTargetFinalization({
+					client,
+					operationId: operation.id,
+					isIncludeSourceEventSequence: true,
+				});
 				const operationView = this._getMultiTargetOperationView({
 					operation,
 					targets,
@@ -6933,6 +7037,7 @@ export class PostgresHubStore {
 					const finalization = await this._pGetMultiTargetFinalization({
 						client,
 						operationId: operation.id,
+						isIncludeSourceEventSequence: true,
 					});
 					const response = {
 						operation: this._getMultiTargetOperationView({
@@ -7306,6 +7411,7 @@ export class PostgresHubStore {
 						}),
 						payload: {
 							operationId: operation.id,
+							operationLegKey: `${operation.id}/${sourceIsSelected ? "combined" : "source"}`,
 							_sourceOwnerAccountId: args.accountId,
 							_targetOwnerAccountId: source.ownerAccountId,
 							leg: sourceIsSelected ? "combined" : "source",
@@ -7414,6 +7520,7 @@ export class PostgresHubStore {
 						result.target.legId = result.legId;
 						result.target.legKind = isCombined ? "combined" : "target";
 						result.target.legEventId = event.id;
+						result.target.legEventSequence = event.sequence;
 						await client.query(`
 							UPDATE hub.semantic_operation_targets
 							SET selection_state = 'applied',
@@ -7508,6 +7615,7 @@ export class PostgresHubStore {
 						resultStatus: "applied",
 						result: {status: "applied"},
 						sourceLegEventId: sourceEvent.id,
+						sourceLegEventSequence: sourceEvent.sequence,
 					};
 				}
 			}
@@ -7742,61 +7850,190 @@ export class PostgresHubStore {
 		campaignId,
 		cursor = null,
 		limit = MULTI_TARGET_PAGE_LIMIT,
+		mode = MULTI_TARGET_INBOX_MODE_PENDING,
 	}) {
-		const after = parseMultiTargetCursor(cursor, 3);
+		if (![MULTI_TARGET_INBOX_MODE_PENDING, MULTI_TARGET_INBOX_MODE_RECOVERY].includes(mode)) {
+			throw new HubStoreError("INVALID_REQUEST", `The inbox mode is invalid.`, {status: 400});
+		}
+		const after = parseMultiTargetCursor(
+			cursor,
+			mode === MULTI_TARGET_INBOX_MODE_PENDING ? 3 : 4,
+		);
 		await this.pExpireMultiTargetOperations({limit: MULTI_TARGET_PAGE_LIMIT});
 		const membership = await this.pGetMembership({accountId, campaignId});
 		if (!membership || !["dm", "co_dm", "player"].includes(membership.role)) {
 			throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 		}
 		const pageLimit = Math.min(limit, MULTI_TARGET_PAGE_LIMIT);
-		const result = await this._pool.query(`
-			SELECT target.*, operation.expires_at, operation.effect_display_snapshot
-			FROM hub.semantic_operation_targets target
-			JOIN hub.semantic_operations operation ON operation.id = target.operation_id
-			WHERE target.campaign_id = $1
-				AND target.response_state = 'pending'
-				AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
-				AND ($2::boolean OR target.target_owner_account_id_at_proposal = $3)
-				AND (
-					$4::timestamptz IS NULL
-					OR (target.collection_closes_at, target.operation_id, target.target_character_id)
-						> ($4::timestamptz, $5::uuid, $6::uuid)
-				)
-			ORDER BY target.collection_closes_at, target.operation_id, target.target_character_id
-			LIMIT $7
-		`, [
-			campaignId,
-			["dm", "co_dm"].includes(membership.role),
-			accountId,
-			after?.[0] || null,
-			after?.[1] || null,
-			after?.[2] || null,
-			pageLimit + 1,
-		]);
+		const result = mode === MULTI_TARGET_INBOX_MODE_PENDING
+			? await this._pool.query(`
+				SELECT target.*, operation.expires_at, operation.effect_display_snapshot,
+					operation.source_display_snapshot, operation.updated_at AS operation_updated_at,
+					operation.status AS operation_status, event.sequence AS leg_event_sequence
+				FROM hub.semantic_operation_targets target
+				JOIN hub.semantic_operations operation ON operation.id = target.operation_id
+				LEFT JOIN hub.domain_events event
+					ON event.id = target.leg_event_id AND event.campaign_id = target.campaign_id
+				WHERE target.campaign_id = $1
+					AND target.response_state = 'pending'
+					AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+					AND ($2::boolean OR target.target_owner_account_id_at_proposal = $3)
+					AND (
+						$4::timestamptz IS NULL
+						OR (target.collection_closes_at, target.operation_id, target.target_character_id)
+							> ($4::timestamptz, $5::uuid, $6::uuid)
+					)
+				ORDER BY target.collection_closes_at, target.operation_id, target.target_character_id
+				LIMIT $7
+			`, [
+				campaignId,
+				["dm", "co_dm"].includes(membership.role),
+				accountId,
+				after?.[0] || null,
+				after?.[1] || null,
+				after?.[2] || null,
+				pageLimit + 1,
+			])
+			: await this._pool.query(`
+				SELECT target.*, operation.expires_at, operation.effect_display_snapshot,
+					operation.source_display_snapshot, operation.updated_at AS operation_updated_at,
+					operation.status AS operation_status,
+					event.sequence AS leg_event_sequence,
+					CASE
+						WHEN target.response_state = 'pending'
+							AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+						THEN 'pending'
+						ELSE 'recent'
+					END AS recovery_bucket,
+					COALESCE(target.updated_at, target.responded_at, operation.updated_at) AS recovery_at
+				FROM hub.semantic_operation_targets target
+				JOIN hub.semantic_operations operation ON operation.id = target.operation_id
+				LEFT JOIN hub.domain_events event
+					ON event.id = target.leg_event_id AND event.campaign_id = target.campaign_id
+				WHERE target.campaign_id = $1
+					AND ($2::boolean OR target.target_owner_account_id_at_proposal = $3)
+					AND (
+						(
+							target.response_state = 'pending'
+							AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+						)
+						OR (
+							target.response_state <> 'pending'
+							AND (
+								operation.status IN ('collecting_responses', 'awaiting_source_selection')
+								OR operation.resolved_at >= now() - ($4::integer * interval '1 day')
+							)
+						)
+					)
+					AND (
+						$5::text IS NULL
+						OR (
+							$5::text = 'pending'
+							AND (
+								NOT (
+									target.response_state = 'pending'
+									AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+								)
+								OR (target.collection_closes_at, target.operation_id, target.target_character_id)
+									> ($6::timestamptz, $7::uuid, $8::uuid)
+							)
+						)
+						OR (
+							$5::text = 'recent'
+							AND NOT (
+								target.response_state = 'pending'
+								AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+							)
+							AND (
+								COALESCE(target.updated_at, target.responded_at, operation.updated_at) < $6::timestamptz
+								OR (
+									COALESCE(target.updated_at, target.responded_at, operation.updated_at) = $6::timestamptz
+									AND (target.operation_id, target.target_character_id) > ($7::uuid, $8::uuid)
+								)
+							)
+						)
+					)
+				ORDER BY
+					CASE
+						WHEN target.response_state = 'pending'
+							AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+						THEN 0
+						ELSE 1
+					END,
+					CASE
+						WHEN target.response_state = 'pending'
+							AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+						THEN target.collection_closes_at
+					END ASC,
+					CASE
+						WHEN NOT (
+							target.response_state = 'pending'
+							AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+						)
+						THEN COALESCE(target.updated_at, target.responded_at, operation.updated_at)
+					END DESC,
+					target.operation_id,
+					target.target_character_id
+				LIMIT $9
+			`, [
+				campaignId,
+				["dm", "co_dm"].includes(membership.role),
+				accountId,
+				MULTI_TARGET_TERMINAL_RETENTION_DAYS,
+				after?.[0] || null,
+				after?.[1] || null,
+				after?.[2] || null,
+				after?.[3] || null,
+				pageLimit + 1,
+			]);
 		const rows = result.rows.slice(0, pageLimit);
 		return {
-			invitations: rows.map(row => ({
-				operationId: row.operation_id,
-				invitationId: row.invitation_id,
-				status: row.response_state,
-				collectionClosesAt: row.collection_closes_at,
-				expiresAt: row.expires_at,
-				presentation: {
-					targetName: row.target_display_snapshot?.identity?.name || "Campaign character",
-					effectLabel: row.effect_display_snapshot?.label || "Campaign effect",
-				},
-				capabilities: {
-					canApprove: row.target_owner_account_id_at_proposal === accountId,
-					canReject: true,
-				},
-			})),
+			invitations: rows.map(row => {
+				const target = {
+					...this._getMultiTargetTarget(row),
+					legEventSequence: row.leg_event_sequence == null ? null : Number(row.leg_event_sequence),
+				};
+				return {
+					operationId: row.operation_id,
+					operationStatus: row.operation_status,
+					invitationId: row.invitation_id,
+					status: row.response_state,
+					collectionClosesAt: row.collection_closes_at,
+					expiresAt: row.expires_at,
+					presentation: getMultiTargetInvitationPresentation({
+						operation: {
+							id: row.operation_id,
+							sourceDisplaySnapshot: row.source_display_snapshot,
+							effectDisplaySnapshot: row.effect_display_snapshot,
+							expiresAt: row.expires_at,
+						},
+						target,
+					}),
+					capabilities: {
+						canApprove: row.response_state === "pending"
+							&& row.target_owner_account_id_at_proposal === accountId,
+						canReject: row.response_state === "pending",
+					},
+					...(target.selectionState === "applied"
+						? {result: getMultiTargetTargetResult(target)}
+						: {}),
+				};
+			}),
 			nextCursor: result.rows.length > pageLimit && rows.length
-				? getMultiTargetCursor([
-					rows.at(-1).collection_closes_at.toISOString(),
-					rows.at(-1).operation_id,
-					rows.at(-1).target_character_id,
-				])
+				? getMultiTargetCursor(mode === MULTI_TARGET_INBOX_MODE_PENDING
+					? [
+						rows.at(-1).collection_closes_at.toISOString(),
+						rows.at(-1).operation_id,
+						rows.at(-1).target_character_id,
+					]
+					: [
+						rows.at(-1).recovery_bucket,
+						(rows.at(-1).recovery_bucket === MULTI_TARGET_INBOX_MODE_PENDING
+							? rows.at(-1).collection_closes_at
+							: rows.at(-1).recovery_at).toISOString(),
+						rows.at(-1).operation_id,
+						rows.at(-1).target_character_id,
+					])
 				: null,
 		};
 	}
@@ -7838,8 +8075,16 @@ export class PostgresHubStore {
 		const operations = [];
 		for (const row of rows) {
 			const operation = this._getSemanticOperation(row);
-			const targets = await this._pGetMultiTargetTargets({client: this._pool, operationId: operation.id});
-			const finalization = await this._pGetMultiTargetFinalization({client: this._pool, operationId: operation.id});
+			const targets = await this._pGetMultiTargetTargets({
+				client: this._pool,
+				operationId: operation.id,
+				isIncludeLegEventSequence: true,
+			});
+			const finalization = await this._pGetMultiTargetFinalization({
+				client: this._pool,
+				operationId: operation.id,
+				isIncludeSourceEventSequence: true,
+			});
 			operations.push(this._getMultiTargetOperationView({
 				operation,
 				targets,
@@ -7873,7 +8118,12 @@ export class PostgresHubStore {
 			`, [campaignId, operationId]);
 			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
 			const operation = this._getSemanticOperation(operationResult.rows[0]);
-			const targets = await this._pGetMultiTargetTargets({client, operationId, isForUpdate: true});
+			const targets = await this._pGetMultiTargetTargets({
+				client,
+				operationId,
+				isForUpdate: true,
+				isIncludeLegEventSequence: true,
+			});
 			const memberships = await this._pLockSemanticMemberships({
 				client,
 				campaignId,
@@ -7893,7 +8143,11 @@ export class PostgresHubStore {
 				|| (!isParticipant && !["dm", "co_dm"].includes(membership.role))
 			) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
 			await this._pTerminalizeElapsedMultiTarget({client, operation, targets});
-			const finalization = await this._pGetMultiTargetFinalization({client, operationId});
+			const finalization = await this._pGetMultiTargetFinalization({
+				client,
+				operationId,
+				isIncludeSourceEventSequence: true,
+			});
 			const response = {
 				operation: this._getMultiTargetOperationView({
 					operation,
@@ -9070,6 +9324,13 @@ export class PostgresHubStore {
 					aggregateRevision: partyInventoryResponse.revision,
 					payload: {},
 				});
+				await this._pCancelInsufficientStashRequests({
+					client,
+					campaignId,
+					partyInventoryId: party.id,
+					container: stagedPartyContainer,
+					actorAccountId: accountId,
+				});
 			}
 			await this._pSaveReceipt({
 				client,
@@ -9332,7 +9593,13 @@ export class PostgresHubStore {
 			const source = await this._pGetTransferContainer({client, campaignId: transfer.campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId});
 			await source.pWrite(addTransferPayload({container: source.container, escrow: transfer.payload.escrow, isRestore: true}));
 		}
-		await client.query(`UPDATE hub.transfers SET status = 'cancelled', updated_at = now() WHERE id = $1`, [transfer.id]);
+		await client.query(`
+			UPDATE hub.transfers
+			SET status = 'cancelled',
+				payload = payload || jsonb_build_object('cancellationReason', $2::text),
+				updated_at = now()
+			WHERE id = $1
+		`, [transfer.id, reason]);
 		await this._pAppendEvent({
 			client,
 			campaignId: transfer.campaignId,
@@ -9350,6 +9617,41 @@ export class PostgresHubStore {
 				targetId: transfer.targetId,
 			},
 		});
+	}
+
+	async _pCancelInsufficientStashRequests ({
+		client,
+		campaignId,
+		partyInventoryId,
+		container,
+		actorAccountId,
+		excludeTransferId = null,
+	}) {
+		const pending = await client.query(`
+			SELECT * FROM hub.transfers
+			WHERE campaign_id = $1 AND source_party_inventory_id = $2
+				AND status = 'proposed' AND ($3::uuid IS NULL OR id <> $3::uuid)
+			ORDER BY id FOR UPDATE
+		`, [campaignId, partyInventoryId, excludeTransferId]);
+		for (const row of this._getTransferRowsForLifecycleCancellation(pending.rows)) {
+			const transfer = this._getTransfer(row);
+			if (!isTransferRequestInsufficient({container, request: transfer.payload.request})) continue;
+			await this._pCancelTransferForLifecycle({
+				client,
+				row,
+				actorAccountId,
+				reason: "source_insufficient",
+			});
+			await this._pAppendAudit({
+				client,
+				campaignId,
+				actorAccountId,
+				action: "transfer.cancelled",
+				targetType: "transfer",
+				targetId: transfer.id,
+				details: {reason: "source_insufficient"},
+			});
+		}
 	}
 
 	_getTransferRowsForLifecycleCancellation (rows) {
@@ -10103,6 +10405,16 @@ export class PostgresHubStore {
 				visibleAccountIds: [...new Set([accountId, target.ownerAccountId].filter(Boolean))],
 				payload: {sourceKind, sourceId, targetKind, targetId},
 			});
+			if (isDirectAuthority && sourceKind === "party_inventory") {
+				await this._pCancelInsufficientStashRequests({
+					client,
+					campaignId,
+					partyInventoryId: sourceId,
+					container: prepared.container,
+					actorAccountId: accountId,
+					excludeTransferId: transferId,
+				});
+			}
 			const response = await this._pProjectTransferResponseForViewer({
 				client,
 				response: {transfer},
@@ -10149,6 +10461,7 @@ export class PostgresHubStore {
 					: isDm);
 			if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
 			let resolvedPayload = {...transfer.payload, _actorCommandId: transfer.actorCommandId};
+			let remainingStash = null;
 			if (transfer.status === "proposed") {
 				if (decision === "accept") {
 					const source = await this._pGetTransferContainer({client, campaignId, kind: transfer.sourceKind, id: transfer.sourceId, actorAccountId: accountId});
@@ -10166,6 +10479,7 @@ export class PostgresHubStore {
 					}
 					await source.pWrite(removed.container);
 					await target.pWrite(after);
+					if (transfer.sourceKind === "party_inventory") remainingStash = removed.container;
 					resolvedPayload = {...transfer.payload, escrow: removed.escrow, _actorCommandId: transfer.actorCommandId};
 				}
 			} else {
@@ -10209,6 +10523,16 @@ export class PostgresHubStore {
 					targetId: transfer.targetId,
 				},
 			});
+			if (remainingStash) {
+				await this._pCancelInsufficientStashRequests({
+					client,
+					campaignId,
+					partyInventoryId: transfer.sourceId,
+					container: remainingStash,
+					actorAccountId: accountId,
+					excludeTransferId: transfer.id,
+				});
+			}
 			const response = await this._pProjectTransferResponseForViewer({
 				client,
 				response: {transfer: transferNxt},
@@ -10848,8 +11172,16 @@ export class PostgresHubStore {
 				const records = [];
 				for (const row of parentResult.rows) {
 					const operation = this._getSemanticOperation(row);
-					const targets = await this._pGetMultiTargetTargets({client, operationId: operation.id});
-					const finalization = await this._pGetMultiTargetFinalization({client, operationId: operation.id});
+					const targets = await this._pGetMultiTargetTargets({
+						client,
+						operationId: operation.id,
+						isIncludeLegEventSequence: true,
+					});
+					const finalization = await this._pGetMultiTargetFinalization({
+						client,
+						operationId: operation.id,
+						isIncludeSourceEventSequence: true,
+					});
 					const membership = membershipsByCampaign.get(operation.campaignId);
 					records.push(this._getMultiTargetOperationView({
 						operation,

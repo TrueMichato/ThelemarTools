@@ -6,6 +6,7 @@ import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation
 import {HubStoreError} from "./hub-store-error.js";
 import {normalizeCharacterPatchActivity} from "./hub-spell-activity.js";
 import {canViewEvent} from "./projections.js";
+import {HUB_ROLL_HISTORY_CONTRACT_VERSION, isOwnCharacterRoll, projectRollHistoryEvent} from "../../js/hub/hub-roll-history.js";
 import {
 	computePeerProfile,
 	getDefaultProjectionPolicy,
@@ -30,6 +31,7 @@ import {
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
 	isDirectTransferAuthority,
+	isTransferRequestInsufficient,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
@@ -93,17 +95,22 @@ import {
 	assertUniqueSelection,
 	createMultiTargetOperationsGate,
 	getMultiTargetCursor,
+	getMultiTargetInvitationPresentation,
 	getMultiTargetLegAudience,
 	getMultiTargetOperationSummary,
 	getMultiTargetOperationsCampaignCapability,
 	getMultiTargetSourceAudience,
+	getMultiTargetTargetResult,
 	isMultiTargetLiveStatus,
 	isMultiTargetResponseTerminal,
 	MULTI_TARGET_COLLECTION_TTL_MS,
+	MULTI_TARGET_INBOX_MODE_PENDING,
+	MULTI_TARGET_INBOX_MODE_RECOVERY,
 	MULTI_TARGET_OPERATION_TTL_MS,
 	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
 	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
 	MULTI_TARGET_PAGE_LIMIT,
+	MULTI_TARGET_TERMINAL_RETENTION_DAYS,
 	parseMultiTargetCursor,
 } from "./multi-target-operation-authority.js";
 import {
@@ -2063,6 +2070,7 @@ export class MemoryHubStore {
 		for (const {transfer, restore, targetOwnerAccountId} of prepared) {
 			if (restore) this._setTransferContainer({...restore, actorAccountId});
 			transfer.status = "cancelled";
+			transfer.payload = {...transfer.payload, cancellationReason: reason};
 			transfer.resolvedAt = this._fnNow().toISOString();
 			this._appendEvent({
 				campaignId: transfer.campaignId,
@@ -2094,6 +2102,31 @@ export class MemoryHubStore {
 
 	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
 		this._cancelTransferBatchForLifecycle({transfers: [transfer], actorAccountId, reason});
+	}
+
+	_cancelInsufficientStashRequests ({campaignId, partyInventoryId, container, actorAccountId, excludeTransferId = null}) {
+		const insufficient = [...this._transfers.values()]
+			.filter(transfer => transfer.campaignId === campaignId
+				&& transfer.id !== excludeTransferId
+				&& transfer.status === "proposed"
+				&& transfer.sourceKind === "party_inventory"
+				&& transfer.sourceId === partyInventoryId
+				&& isTransferRequestInsufficient({container, request: transfer.payload.request}));
+		this._cancelTransferBatchForLifecycle({
+			transfers: insufficient,
+			actorAccountId,
+			reason: "source_insufficient",
+		});
+		for (const transfer of insufficient) {
+			this._appendAudit({
+				campaignId,
+				actorAccountId,
+				action: "transfer.cancelled",
+				targetType: "transfer",
+				targetId: transfer.id,
+				details: {reason: "source_insufficient"},
+			});
+		}
 	}
 
 	_cancelTransfersForLifecycle ({campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
@@ -3557,6 +3590,38 @@ export class MemoryHubStore {
 			: redactEventActor(event);
 	}
 
+	async pListCharacterRollHistory ({accountId, campaignId, characterId, beforeSequence = null, limit = 200, commandId = null}) {
+		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const character = this._characters.get(characterId);
+		if (
+			this._accounts.get(accountId)?.status !== "active"
+			|| !character
+			|| character.ownerAccountId !== accountId
+			|| character.campaignId !== campaignId
+		) throw new HubStoreError("CHARACTER_NOT_FOUND", "Character is unavailable.", {status: 404});
+		const events = [];
+		const scope = {accountId, campaignId, characterId};
+		const campaignEvents = this._getCampaignEvents(campaignId);
+		for (let index = campaignEvents.length - 1; index >= 0; --index) {
+			const event = campaignEvents[index];
+			if (beforeSequence != null && event.sequence >= beforeSequence) continue;
+			if (!isOwnCharacterRoll(event, scope) || !canViewEvent({event, accountId, role: membership.role})) continue;
+			if (commandId != null && event.payload.actorCommandId !== commandId) continue;
+			events.push(projectRollHistoryEvent(event));
+			if (events.length > limit) break;
+		}
+		const selected = events.slice(0, limit).reverse();
+		return {
+			contractVersion: HUB_ROLL_HISTORY_CONTRACT_VERSION,
+			highWaterSequence: this._getCampaignLastSequence(campaignId),
+			events: selected,
+			history: {
+				scannedBackThroughSequence: selected[0]?.sequence ?? beforeSequence ?? 1,
+				hasMore: events.length > limit,
+			},
+		};
+	}
+
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
@@ -3576,7 +3641,7 @@ export class MemoryHubStore {
 			aggregateType: characterId ? "character" : "campaign",
 			aggregateId: characterId || campaignId,
 			visibility,
-			payload,
+			payload: {...payload, actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key},
 		});
 		return this._setReceipt({accountId, idempotencyKey, response: {event}});
 	}
@@ -4551,10 +4616,7 @@ export class MemoryHubStore {
 			.map(target => ({
 				invitationId: target.invitationId,
 				status: target.responseState,
-				presentation: {
-					targetName: target.targetDisplaySnapshot?.identity?.name || "Campaign character",
-					effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
-				},
+				presentation: getMultiTargetInvitationPresentation({operation, target}),
 				capabilities: {
 					canApprove: target.responseState === "pending"
 						&& target.targetOwnerAccountIdAtProposal === accountId,
@@ -4562,16 +4624,7 @@ export class MemoryHubStore {
 						&& (target.targetOwnerAccountIdAtProposal === accountId || isDm),
 				},
 				...((isDm || target.targetOwnerAccountIdAtProposal === accountId) && target.selectionState === "applied"
-					? {
-						result: {
-							changed: target.changed,
-							resultingCharacterRevision: target.resultingCharacterRevision,
-							legId: target.legId,
-							legKind: target.legKind,
-							appliedEventId: target.legEventId,
-							operation: copy(target.operation),
-						},
-					}
+					? {result: getMultiTargetTargetResult(target)}
 					: {}),
 			}));
 		const summary = getMultiTargetOperationSummary({
@@ -4598,6 +4651,9 @@ export class MemoryHubStore {
 						resultingSourceCharacterRevision: operation.resultingSourceCharacterRevision,
 						appliedEventId: operation.sourceCostEventId,
 						legKind: sourceTarget ? "combined" : "source",
+						operationLegKey: `${operation.id}/${sourceTarget ? "combined" : "source"}`,
+						eventSequence: this._semanticOperationFinalizations.get(operation.id)?.sourceLegEventSequence,
+						operationWatermark: this._semanticOperationFinalizations.get(operation.id)?.sourceLegEventSequence,
 						...(sourceTarget
 							? {
 								legId: sourceTarget.legId,
@@ -5031,6 +5087,9 @@ export class MemoryHubStore {
 				legId: null,
 				legKind: null,
 				legEventId: null,
+				legEventSequence: null,
+				createdAt: now.toISOString(),
+				updatedAt: now.toISOString(),
 			};
 			this._semanticOperationTargets.set(this._getMultiTargetKey(row), row);
 			const invitationEvent = this._appendEvent({
@@ -5051,6 +5110,7 @@ export class MemoryHubStore {
 					status: row.responseState,
 					effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
 					targetDisplaySnapshot: copy(row.targetDisplaySnapshot),
+					presentation: getMultiTargetInvitationPresentation({operation, target: row}),
 					collectionClosesAt: operation.collectionClosesAt,
 				},
 			});
@@ -5174,6 +5234,7 @@ export class MemoryHubStore {
 		target.responseActorAccountId = accountId;
 		target.responseCommandId = commandId;
 		target.respondedAt = this._fnNow().toISOString();
+		target.updatedAt = target.respondedAt;
 		const responseEvent = this._appendEvent({
 			campaignId,
 			actorAccountId: accountId,
@@ -5567,6 +5628,7 @@ export class MemoryHubStore {
 					}),
 					payload: {
 						operationId,
+						operationLegKey: `${operationId}/${sourceIsSelected ? "combined" : "source"}`,
 						_sourceOwnerAccountId: accountId,
 						_targetOwnerAccountId: source.ownerAccountId,
 						leg: sourceIsSelected ? "combined" : "source",
@@ -5626,6 +5688,8 @@ export class MemoryHubStore {
 						target.legId = combinedLegId;
 						target.legKind = "combined";
 						target.legEventId = sourceEvent.id;
+						target.legEventSequence = sourceEvent.sequence;
+						target.updatedAt = now.toISOString();
 						continue;
 					}
 					const event = this._appendEvent({
@@ -5658,6 +5722,8 @@ export class MemoryHubStore {
 					target.legId = event.payload.legId;
 					target.legKind = event.payload.leg;
 					target.legEventId = event.id;
+					target.legEventSequence = event.sequence;
+					target.updatedAt = now.toISOString();
 					if (changed) character.operationWatermark = event.sequence;
 					eventIds.push(event.id);
 					this._injectTestMultiTargetFault({
@@ -5717,6 +5783,7 @@ export class MemoryHubStore {
 					selectedInvitationIds: orderedSelection,
 					resultStatus: "applied",
 					sourceLegEventId: sourceEvent.id,
+					sourceLegEventSequence: sourceEvent.sequence,
 					createdAt: now.toISOString(),
 				});
 			}
@@ -5833,7 +5900,11 @@ export class MemoryHubStore {
 		campaignId,
 		cursor = null,
 		limit = MULTI_TARGET_PAGE_LIMIT,
+		mode = MULTI_TARGET_INBOX_MODE_PENDING,
 	}) {
+		if (![MULTI_TARGET_INBOX_MODE_PENDING, MULTI_TARGET_INBOX_MODE_RECOVERY].includes(mode)) {
+			throw new HubStoreError("INVALID_REQUEST", `The inbox mode is invalid.`, {status: 400});
+		}
 		const membership = this._getMembership({
 			accountId,
 			campaignId,
@@ -5841,44 +5912,107 @@ export class MemoryHubStore {
 			isRequireActiveCampaign: false,
 		});
 		await this.pExpireMultiTargetOperations({campaignId, limit: MULTI_TARGET_PAGE_LIMIT});
-		const after = parseMultiTargetCursor(cursor, 3);
+		const after = parseMultiTargetCursor(
+			cursor,
+			mode === MULTI_TARGET_INBOX_MODE_PENDING ? 3 : 4,
+		);
+		const terminalCutoff = new Date(
+			this._fnNow().getTime() - MULTI_TARGET_TERMINAL_RETENTION_DAYS * 86_400_000,
+		);
+		const getRecoveryParts = ({target, operation}) => {
+			if (target.responseState === "pending" && isMultiTargetLiveStatus(operation.status)) {
+				return [
+					MULTI_TARGET_INBOX_MODE_PENDING,
+					operation.collectionClosesAt,
+					operation.id,
+					target.targetCharacterId,
+				];
+			}
+			return [
+				"recent",
+				target.updatedAt || target.respondedAt || operation.updatedAt,
+				operation.id,
+				target.targetCharacterId,
+			];
+		};
+		const compareRecovery = (left, right) => {
+			const leftParts = getRecoveryParts(left);
+			const rightParts = getRecoveryParts(right);
+			if (leftParts[0] !== rightParts[0]) {
+				return leftParts[0] === MULTI_TARGET_INBOX_MODE_PENDING ? -1 : 1;
+			}
+			if (leftParts[1] !== rightParts[1]) {
+				return leftParts[0] === MULTI_TARGET_INBOX_MODE_PENDING
+					? leftParts[1].localeCompare(rightParts[1])
+					: rightParts[1].localeCompare(leftParts[1]);
+			}
+			return leftParts[2].localeCompare(rightParts[2]) || leftParts[3].localeCompare(rightParts[3]);
+		};
+		const isAfterRecoveryCursor = row => {
+			if (!after) return true;
+			const parts = getRecoveryParts(row);
+			if (after[0] === MULTI_TARGET_INBOX_MODE_PENDING) {
+				if (parts[0] !== MULTI_TARGET_INBOX_MODE_PENDING) return true;
+				return parts.slice(1).join("\u0000") > after.slice(1).join("\u0000");
+			}
+			if (parts[0] === MULTI_TARGET_INBOX_MODE_PENDING) return false;
+			if (parts[1] !== after[1]) return parts[1] < after[1];
+			return parts.slice(2).join("\u0000") > after.slice(2).join("\u0000");
+		};
 		const rows = [...this._semanticOperationTargets.values()]
 			.filter(target => target.campaignId === campaignId)
 			.filter(target => ["dm", "co_dm"].includes(membership.role)
 				|| target.targetOwnerAccountIdAtProposal === accountId)
-			.filter(target => target.responseState === "pending")
 			.map(target => ({target, operation: this._semanticOperations.get(target.operationId)}))
-			.filter(({operation}) => operation && isMultiTargetLiveStatus(operation.status))
-			.sort((left, right) => (
-				left.operation.collectionClosesAt.localeCompare(right.operation.collectionClosesAt)
-				|| left.operation.id.localeCompare(right.operation.id)
-				|| left.target.targetCharacterId.localeCompare(right.target.targetCharacterId)
-			))
-			.filter(({target, operation}) => !after || [
-				operation.collectionClosesAt,
-				operation.id,
-				target.targetCharacterId,
-			].join("\u0000") > after.join("\u0000"));
+			.filter(({target, operation}) => {
+				if (!operation) return false;
+				if (mode === MULTI_TARGET_INBOX_MODE_PENDING) {
+					return target.responseState === "pending" && isMultiTargetLiveStatus(operation.status);
+				}
+				return isMultiTargetLiveStatus(operation.status)
+					|| (operation.resolvedAt && new Date(operation.resolvedAt) >= terminalCutoff);
+			})
+			.sort(mode === MULTI_TARGET_INBOX_MODE_PENDING
+				? (left, right) => (
+					left.operation.collectionClosesAt.localeCompare(right.operation.collectionClosesAt)
+					|| left.operation.id.localeCompare(right.operation.id)
+					|| left.target.targetCharacterId.localeCompare(right.target.targetCharacterId)
+				)
+				: compareRecovery)
+			.filter(row => mode === MULTI_TARGET_INBOX_MODE_PENDING
+				? !after || [
+					row.operation.collectionClosesAt,
+					row.operation.id,
+					row.target.targetCharacterId,
+				].join("\u0000") > after.join("\u0000")
+				: isAfterRecoveryCursor(row));
 		const page = rows.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
 		return {
 			invitations: page.map(({target, operation}) => ({
 				operationId: operation.id,
+				operationStatus: operation.status,
 				invitationId: target.invitationId,
 				status: target.responseState,
 				collectionClosesAt: operation.collectionClosesAt,
 				expiresAt: operation.expiresAt,
-				presentation: {
-					targetName: target.targetDisplaySnapshot?.identity?.name || "Campaign character",
-					effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
+				presentation: getMultiTargetInvitationPresentation({operation, target}),
+				capabilities: {
+					canApprove: target.responseState === "pending"
+						&& target.targetOwnerAccountIdAtProposal === accountId,
+					canReject: target.responseState === "pending",
 				},
-				capabilities: {canApprove: target.targetOwnerAccountIdAtProposal === accountId, canReject: true},
+				...(target.selectionState === "applied"
+					? {result: getMultiTargetTargetResult(target)}
+					: {}),
 			})),
 			nextCursor: rows.length > page.length && page.length
-				? getMultiTargetCursor([
-					page.at(-1).operation.collectionClosesAt,
-					page.at(-1).operation.id,
-					page.at(-1).target.targetCharacterId,
-				])
+				? getMultiTargetCursor(mode === MULTI_TARGET_INBOX_MODE_PENDING
+					? [
+						page.at(-1).operation.collectionClosesAt,
+						page.at(-1).operation.id,
+						page.at(-1).target.targetCharacterId,
+					]
+					: getRecoveryParts(page.at(-1)))
 				: null,
 		};
 	}
@@ -6384,6 +6518,12 @@ export class MemoryHubStore {
 				aggregateRevision: stagedPartyInventory.revision,
 				payload: {},
 			});
+			this._cancelInsufficientStashRequests({
+				campaignId,
+				partyInventoryId: stagedPartyInventory.id,
+				container: stagedPartyInventory,
+				actorAccountId: accountId,
+			});
 		}
 		return this._setReceipt({accountId, idempotencyKey: commandIdempotencyKey, response});
 	}
@@ -6565,6 +6705,15 @@ export class MemoryHubStore {
 			visibleAccountIds: [...new Set([accountId, target._character?.ownerAccountId].filter(Boolean))],
 			payload: {sourceKind, sourceId, targetKind, targetId},
 		});
+		if (isDirectAuthority && sourceKind === "party_inventory") {
+			this._cancelInsufficientStashRequests({
+				campaignId,
+				partyInventoryId: sourceId,
+				container: prepared.container,
+				actorAccountId: accountId,
+				excludeTransferId: transfer.id,
+			});
+		}
 		const response = this._projectTransferResponseForViewer({
 			response: {transfer},
 			accountId,
@@ -6602,6 +6751,7 @@ export class MemoryHubStore {
 				? target._character.ownerAccountId === accountId || isDm
 				: isDm);
 		if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
+		let remainingStash = null;
 		if (transfer.status === "proposed") {
 			if (decision === "accept") {
 				const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
@@ -6619,6 +6769,7 @@ export class MemoryHubStore {
 				}
 				this._setTransferContainer({holder: source, container: removed.container, actorAccountId: accountId});
 				this._setTransferContainer({holder: target, container: after, actorAccountId: accountId});
+				if (transfer.sourceKind === "party_inventory") remainingStash = removed.container;
 				transfer.payload = {...transfer.payload, escrow: removed.escrow};
 			}
 		} else {
@@ -6663,6 +6814,15 @@ export class MemoryHubStore {
 				targetId: transfer.targetId,
 			},
 		});
+		if (remainingStash) {
+			this._cancelInsufficientStashRequests({
+				campaignId,
+				partyInventoryId: transfer.sourceId,
+				container: remainingStash,
+				actorAccountId: accountId,
+				excludeTransferId: transfer.id,
+			});
+		}
 		const response = this._projectTransferResponseForViewer({
 			response: {transfer},
 			accountId,

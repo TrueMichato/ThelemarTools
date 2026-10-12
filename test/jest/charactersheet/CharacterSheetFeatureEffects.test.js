@@ -27,6 +27,44 @@ beforeEach(() => {
 	state.setAbilityBase("cha", 14);
 });
 
+test("reapplying unchanged class effects after load preserves modifier identity", () => {
+	const effects = [
+		{type: "saveBonus", source: "Synthetic Resolve", ability: "con", value: 2},
+		{type: "acBonus", source: "Synthetic Guard", value: 1},
+		{type: "initiativeBonus", source: "Synthetic Reflexes", value: 2},
+	];
+	state.getFeatureCalculations = () => ({_effects: effects});
+	state.applyClassFeatureEffects();
+	const original = state.toJson().namedModifiers.filter(mod => mod.sourceType === "classFeature");
+	expect(original).toHaveLength(3);
+
+	const reloaded = new CharacterSheetState();
+	reloaded.getFeatureCalculations = () => ({_effects: effects});
+	reloaded.loadFromJson(state.toJson());
+	reloaded.applyClassFeatureEffects();
+	expect(reloaded.toJson().namedModifiers.filter(mod => mod.sourceType === "classFeature")).toEqual(original);
+
+	effects[0] = {...effects[0], value: 3};
+	reloaded.applyClassFeatureEffects();
+	const changed = reloaded.toJson().namedModifiers.filter(mod => mod.sourceType === "classFeature");
+	expect(changed).toHaveLength(3);
+	expect(changed[0].value).toBe(3);
+	expect(changed[0].id).not.toBe(original[0].id);
+	expect(changed.slice(1)).toEqual(original.slice(1));
+});
+
+test("a real subclass's managed effects retain identity through reload and late reconcile", () => {
+	state.addClass({name: "Sorcerer", source: "PHB", level: 1});
+	state.setSubclass("Sorcerer", {name: "Draconic Bloodline", source: "PHB"});
+	const original = state.toJson().namedModifiers.filter(mod => mod.sourceType === "classFeature");
+	expect(original.length).toBeGreaterThan(0);
+
+	const reloaded = new CharacterSheetState();
+	reloaded.loadFromJson(state.toJson());
+	reloaded.applyClassFeatureEffects();
+	expect(reloaded.toJson().namedModifiers.filter(mod => mod.sourceType === "classFeature")).toEqual(original);
+});
+
 // =============================================================================
 // MONK FEATURE EFFECTS
 // =============================================================================

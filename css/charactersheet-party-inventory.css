@@ -1,5 +1,38 @@
 /* Campaign-only party stash extension. Loaded by CharacterSheetPartyInventory after owner verification. */
 
+.charsheet__incoming-transfers {
+	margin: var(--cs-space-md) 0;
+	padding: var(--cs-space-md);
+	background: var(--cs-bg-elevated);
+	border: 1px solid var(--cs-border-control);
+	border-radius: var(--cs-radius-md);
+}
+
+.charsheet__incoming-transfers h4 {
+	margin: 0 0 var(--cs-space-sm);
+	color: var(--cs-text-primary);
+	font-size: var(--cs-text-base);
+}
+
+.charsheet__incoming-transfer {
+	padding: var(--cs-space-sm) 0;
+	border-top: 1px solid var(--cs-border);
+}
+
+.charsheet__incoming-transfer p {
+	max-width: 65ch;
+	margin: 0;
+	overflow-wrap: anywhere;
+	color: var(--cs-text-primary);
+}
+
+.charsheet__incoming-transfer-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm);
+	margin-top: var(--cs-space-sm);
+}
+
 .charsheet__party-inventory {
 	position: relative;
 	overflow: hidden;

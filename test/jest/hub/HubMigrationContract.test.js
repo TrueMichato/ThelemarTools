@@ -12,6 +12,7 @@ const inviteAdmissionSql = fs.readFileSync(new URL("../../../server/migrations/0
 const accountEntitlementsSql = fs.readFileSync(new URL("../../../server/migrations/0009_account_entitlements.sql", import.meta.url), "utf8");
 const sourceCostBindingIdentitySql = fs.readFileSync(new URL("../../../server/migrations/0010_source_cost_binding_identity.sql", import.meta.url), "utf8");
 const multiTargetOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0011_multi_target_semantic_operations.sql", import.meta.url), "utf8");
+const multiTargetParticipantRecoverySql = fs.readFileSync(new URL("../../../server/migrations/0012_multi_target_participant_recovery.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
 const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
@@ -324,6 +325,14 @@ describe("campaign hub first migration contract", () => {
 		expect(multiTargetOperationsSql).not.toMatch(/REFERENCES hub\.semantic_operations\(id\)[\s\S]*semantic_multi_target_usage/);
 	});
 
+	it("adds bounded target-owner participant recovery in migration 0012 without changing authority", () => {
+		expect(multiTargetParticipantRecoverySql).toContain("semantic_operation_targets_owner_recovery_idx");
+		expect(multiTargetParticipantRecoverySql).toContain("target_owner_account_id_at_proposal");
+		expect(multiTargetParticipantRecoverySql).toContain("updated_at DESC");
+		expect(multiTargetParticipantRecoverySql).toContain("WHERE response_state <> 'pending'");
+		expect(multiTargetParticipantRecoverySql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|ALTER TABLE|CREATE TABLE)\b/);
+	});
+
 	it("classifies every immutable migration for release rollback compatibility", () => {
 		expect(Object.keys(migrationPolicy.migrations).sort()).toEqual(migrationVersions);
 		expect(migrationPolicy.migrations["0007"]).toMatchObject({
@@ -343,6 +352,10 @@ describe("campaign hub first migration contract", () => {
 			previousAppCompatible: true,
 		});
 		expect(migrationPolicy.migrations["0011"].notes).toMatch(/schema-before-use only/i);
+		expect(migrationPolicy.migrations["0012"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
 		expect(migrationPolicy.migrations["0011"].notes).toMatch(/usage marker/i);
 	});
 });

@@ -1,4 +1,5 @@
 import {HubStoreError} from "./hub-store-error.js";
+import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
 import {
 	getMultiTargetOperationsCapability,
 	MULTI_TARGET_OPERATION_LIVE_STATUSES,
@@ -15,6 +16,8 @@ export const MULTI_TARGET_COLLECTION_TTL_MS = MULTI_TARGET_OPERATIONS_COLLECTION
 export const MULTI_TARGET_OPERATION_TTL_MS = MULTI_TARGET_OPERATIONS_TTL_SECONDS * 1_000;
 export const MULTI_TARGET_TERMINAL_RETENTION_DAYS = 90;
 export const MULTI_TARGET_PAGE_LIMIT = 100;
+export const MULTI_TARGET_INBOX_MODE_PENDING = "pending";
+export const MULTI_TARGET_INBOX_MODE_RECOVERY = "recovery";
 
 export function createMultiTargetOperationsGate (setting = false) {
 	if (typeof setting === "function") return campaignId => setting(campaignId) === true;
@@ -131,6 +134,47 @@ export function getMultiTargetOperationSummary ({
 			canFinalize: canFinalize && operation.status === "awaiting_source_selection",
 			canCancel: canCancel && isMultiTargetLiveStatus(operation.status),
 		},
+	};
+}
+
+const getBoundedLabel = (value, fallback, maxLength = 120) => {
+	if (typeof value !== "string") return fallback;
+	const normalized = value.trim().replace(/\s+/g, " ");
+	return normalized ? normalized.slice(0, maxLength) : fallback;
+};
+
+export function getMultiTargetInvitationPresentation ({operation, target}) {
+	const effectPresentation = getPendingEffectPresentation({
+		operationId: operation.id,
+		status: "proposed",
+		sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
+		effectDisplaySnapshot: operation.effectDisplaySnapshot,
+		effectOutcomeLabel: operation.effectDisplaySnapshot?.outcomeLabel,
+		operationKind: target.operation?.kind,
+		operationArguments: target.operation?.arguments,
+		expiresAt: operation.expiresAt,
+	})?.presentation;
+	return {
+		targetName: getBoundedLabel(target.targetDisplaySnapshot?.identity?.name, "Campaign character"),
+		sourceName: effectPresentation?.sourceName || "A party member",
+		effectLabel: effectPresentation?.effectLabel || "Campaign effect",
+		outcomeLabel: effectPresentation?.outcomeLabel || "Review campaign effect",
+	};
+}
+
+export function getMultiTargetTargetResult (target) {
+	if (target.selectionState !== "applied") return null;
+	return {
+		changed: target.changed,
+		resultingCharacterRevision: target.resultingCharacterRevision,
+		legId: target.legId,
+		legKind: target.legKind,
+		appliedEventId: target.legEventId,
+		eventSequence: target.legEventSequence,
+		...(target.resultingCharacterRevision != null
+			? {operationWatermark: target.legEventSequence}
+			: {}),
+		operation: structuredClone(target.operation),
 	};
 }
 

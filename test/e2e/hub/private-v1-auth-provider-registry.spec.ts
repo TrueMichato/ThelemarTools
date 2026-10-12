@@ -17,6 +17,32 @@ async function getAccountSessions (page: Page) {
 	}>;
 }
 
+async function pPostCampaignWithRateBudget (page: Page, name: string) {
+	const idempotencyKey = crypto.randomUUID();
+	const pPost = () => page.evaluate(async ({name, idempotencyKey}) => {
+		const session = await fetch("/api/session").then(response => response.json());
+		const response = await fetch("/api/campaigns", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-csrf-token": session.csrfToken,
+				"x-hub-protocol-version": "6",
+				"idempotency-key": idempotencyKey,
+			},
+			body: JSON.stringify({name}),
+		});
+		return {status: response.status, body: await response.json(), retryAfter: response.headers.get("retry-after")};
+	}, {name, idempotencyKey});
+	const first = await pPost();
+	if (first.status !== 429) return first;
+	const seconds = Number(first.retryAfter);
+	if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60) {
+		throw new Error(`Campaign creation returned an invalid Retry-After value: ${first.retryAfter || "<missing>"}.`);
+	}
+	await page.waitForTimeout(seconds * 1_000 + 250);
+	return pPost();
+}
+
 function expectSingleSessionRotation ({
 	before,
 	after,
@@ -125,41 +151,15 @@ test("operator reauthentication grants and revokes campaign creation through the
 
 		await targetPage.goto("/hub.html");
 		await expect(targetPage.locator("#hub-create-form")).toBeVisible();
-		const created = await targetPage.evaluate(async () => {
-			const session = await fetch("/api/session").then(response => response.json());
-			const response = await fetch("/api/campaigns", {
-				method: "POST",
-				headers: {
-					"content-type": "application/json",
-					"x-csrf-token": session.csrfToken,
-					"x-hub-protocol-version": "6",
-					"idempotency-key": crypto.randomUUID(),
-				},
-				body: JSON.stringify({name: "Entitled Campaign"}),
-			});
-			return {status: response.status, body: await response.json()};
-		});
+		const created = await pPostCampaignWithRateBudget(targetPage, "Entitled Campaign");
 		expect(created.status).toBe(201);
 		expect(created.body.campaign.name).toBe("Entitled Campaign");
 
 		await targetRow.getByRole("button", {name: "Revoke creator"}).click();
 		await expect(targetRow.getByRole("button", {name: "Grant creator"})).toBeVisible();
 
-		const denied = await targetPage.evaluate(async () => {
-			const session = await fetch("/api/session").then(response => response.json());
-			const response = await fetch("/api/campaigns", {
-				method: "POST",
-				headers: {
-					"content-type": "application/json",
-					"x-csrf-token": session.csrfToken,
-					"x-hub-protocol-version": "6",
-					"idempotency-key": crypto.randomUUID(),
-				},
-				body: JSON.stringify({name: "Denied Campaign"}),
-			});
-			return {status: response.status, body: await response.json()};
-		});
-		expect(denied).toEqual({
+		const denied = await pPostCampaignWithRateBudget(targetPage, "Denied Campaign");
+		expect({status: denied.status, body: denied.body}).toEqual({
 			status: 403,
 			body: {error: "CAMPAIGN_CREATE_NOT_ENTITLED"},
 		});
@@ -204,6 +204,30 @@ for (const provider of providers.filter(({slug}) => slug !== "google")) {
 		await page.waitForURL(/\/hub\.html$/);
 		await expect(page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
 		expect((await page.request.get("/api/session")).json()).resolves.toEqual({signedIn: false});
+	});
+}
+
+for (const isUnavailable of [false, true]) {
+	test(`account actions wait for their handlers while device rendering is ${isUnavailable ? "unavailable" : "delayed"}`, async ({page}) => {
+		const hub = new HubCampaignPage(page);
+		const rendering = await hub.holdAccountSessionRendering({isUnavailable});
+		try {
+			await page.goto("/hub.html");
+			await page.getByRole("link", {name: "Sign in with Discord"}).click();
+			await page.waitForURL(/\/hub\.html$/);
+			await rendering.blocked;
+			await hub.expectAccountActionsInitializing();
+			await expect(page.locator("#hub-account-reauth")).toBeHidden();
+			page.on("dialog", dialog => dialog.accept("DELETE"));
+			rendering.release();
+			await hub.expectAccountActionsReady();
+			if (isUnavailable) await hub.expectAccountInitializationError();
+			await page.getByRole("button", {name: "Delete account", exact: true}).click();
+			await expect(page.locator("#hub-account-reauth")).toBeVisible();
+			await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toBeVisible();
+		} finally {
+			await rendering.dispose();
+		}
 	});
 }
 

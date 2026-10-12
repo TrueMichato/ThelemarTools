@@ -66,7 +66,7 @@ export async function pCheckMultiTargetOperationsCampaignReadiness ({queryable, 
 		SELECT EXISTS (
 			SELECT 1
 			FROM hub.schema_migrations
-			WHERE version = '0011'
+			WHERE version = '0012'
 		) AS migration_ready,
 		to_regclass('hub.semantic_operation_targets') IS NOT NULL AS targets_ready,
 		to_regclass('hub.semantic_operation_finalizations') IS NOT NULL AS finalizations_ready,
@@ -82,7 +82,7 @@ export async function pCheckMultiTargetOperationsCampaignReadiness ({queryable, 
 	if (!Object.values(migration.rows[0] || {}).every(Boolean)) {
 		throw new MultiTargetOperationsRolloutError(
 			"SCHEMA_NOT_READY",
-			"Migration 0011 multi-target schema is not ready.",
+			"Migration 0012 multi-target participant recovery is not ready.",
 		);
 	}
 	const {rows} = await queryable.query(`
@@ -110,6 +110,6 @@ export async function pCheckMultiTargetOperationsCampaignReadiness ({queryable, 
 	return {
 		configuredCampaignCount: campaignIds.length,
 		readyCampaignCount: campaignIds.length,
-		migrationVersion: "0011",
+		migrationVersion: "0012",
 	};
 }

@@ -24,8 +24,8 @@ const MUTATIONS = [
 	{
 		name: "target-audience-candidate-count-leak",
 		file: "server/src/memory-hub-store.js",
-		from: "targetDisplaySnapshot: copy(row.targetDisplaySnapshot),\n\t\t\t\t\tcollectionClosesAt: operation.collectionClosesAt,",
-		to: "targetDisplaySnapshot: copy(row.targetDisplaySnapshot),\n\t\t\t\t\tcandidateCount: targets.length,\n\t\t\t\t\tcollectionClosesAt: operation.collectionClosesAt,",
+		from: "targetDisplaySnapshot: copy(row.targetDisplaySnapshot),\n\t\t\t\t\tpresentation: getMultiTargetInvitationPresentation({operation, target: row}),\n\t\t\t\t\tcollectionClosesAt: operation.collectionClosesAt,",
+		to: "targetDisplaySnapshot: copy(row.targetDisplaySnapshot),\n\t\t\t\t\tpresentation: getMultiTargetInvitationPresentation({operation, target: row}),\n\t\t\t\t\tcandidateCount: targets.length,\n\t\t\t\t\tcollectionClosesAt: operation.collectionClosesAt,",
 		pattern: "does not reveal co-target",
 	},
 	{
@@ -139,6 +139,41 @@ const MUTATIONS = [
 		from: "const eventIds = [...elapsedEventIds];",
 		to: "const eventIds = [];",
 		pattern: "inline expiry and readiness events",
+	},
+	{
+		name: "responded-invitation-omitted-from-recovery",
+		file: "server/src/memory-hub-store.js",
+		from: "return isMultiTargetLiveStatus(operation.status)\n\t\t\t\t\t|| (operation.resolvedAt && new Date(operation.resolvedAt) >= terminalCutoff);",
+		to: "return target.responseState === \"pending\" && isMultiTargetLiveStatus(operation.status);",
+		pattern: "keeps two invitations",
+	},
+	{
+		name: "invitation-safe-presentation-omitted",
+		file: "server/src/memory-hub-store.js",
+		from: "presentation: getMultiTargetInvitationPresentation({operation, target}),",
+		to: "presentation: {targetName: target.targetDisplaySnapshot?.identity?.name || \"Campaign character\", effectLabel: operation.effectDisplaySnapshot?.label || \"Campaign effect\"},",
+		pattern: "keeps two invitations",
+	},
+	{
+		name: "source-operation-leg-key-omitted",
+		file: "server/src/memory-hub-store.js",
+		from: "operationLegKey: `$" + "{operationId}/$" + "{sourceIsSelected ? \"combined\" : \"source\"}`,",
+		to: "operationLegKey: null,",
+		pattern: "keeps two invitations",
+	},
+	{
+		name: "source-result-event-sequence-omitted",
+		file: "server/src/memory-hub-store.js",
+		from: "eventSequence: this._semanticOperationFinalizations.get(operation.id)?.sourceLegEventSequence,",
+		to: "eventSequence: null,",
+		pattern: "keeps two invitations",
+	},
+	{
+		name: "target-no-op-event-sequence-omitted",
+		file: "server/src/multi-target-operation-authority.js",
+		from: "eventSequence: target.legEventSequence,",
+		to: "eventSequence: null,",
+		pattern: "permits a reviewed target no-op",
 	},
 ];
 

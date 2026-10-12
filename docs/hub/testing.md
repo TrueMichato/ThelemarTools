@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-21
+> **Last updated:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -14,18 +14,128 @@
 | BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js`, `HubSemanticOperations.test.js` | Auth, campaigns, characters, content, semantic operation roles/replay/privacy/lifecycle, realtime actions |
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
+| Owner Roll History | `HubRollHistory.test.js`, `HubRollLogAdapter.test.js`, `CharacterSheetHubRollHistory.test.js`, `owner-roll-history.spec.ts` | Owner-only pre-limit reads, actor-only correlation, 200-event retention, cursors, exact retry/reload recovery, lost responses, multi-device convergence, lifecycle fences, no character write/lease, phone layout |
+| Game-day entry/sharing UX | `CharacterSheetLocalEntry.test.js`, `HubCharacterSheetAuthorityRoutes.test.js`, `game-day-ux.spec.ts`, existing projection-policy/privacy suites | Explicit-local Create/Open/Import controller delegation and guards, zero campaign writes, nested native disclosures, draft/open-state/focus preservation through rerender on both entry paths, unchanged saved policy and full peer profile, phone/desktop day/night |
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, `CharacterSheetHubTeardown.test.js`, `CharacterSheetCampaign.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, archive/move/demotion concealment, character-scoped sharing refresh, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
-| Multi-target Wave A0 design contract | `HubMultiTargetOperationAdr.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0011 decision, fixed-set/response/finalization/leg constraints, hazards, audiences, fairness, A1-A5 handoff, and read-only PostgreSQL positive/negative set-shaping reasoning; no production behavior claim |
+| Multi-target Wave A0/A3 contract | `HubMultiTargetOperationAdr.test.js`, `HubMultiTargetOperations*.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0011 authority after A2's migration 0010, additive migration-0012 owner-recovery index, fixed-set/response/finalization/leg constraints, participant recovery, privacy, event sequence, hazards, fairness, and A1-A5 handoff |
 | Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
 | Account entitlements/reauthentication | entitlement and multi-provider suites | Provider/account/session binding, five-minute commit-time freshness, creator enforcement, operator hiding/idempotency/concurrency, last-operator lifecycle protection, migration backfill/reconciliation, export redaction, and memory/PostgreSQL parity |
 | Account identity lifecycle | `HubMultiProviderIdentity`, `HubAuthServer`, `HubApiClient`, provider operations/config, PostgreSQL parity, `test-hub-account-identity-mutations.mjs`, real-stack provider journey | Bounded own-identity listing, no account creation during link, cross-account conflict, transaction replay, display-name stability, commit-time freshness, provider disable, different-identity unlink, last/retention protection, concurrent/idempotent unlink, session/lease/socket rotation, fresh CSRF, purge/export/deletion-grace behavior |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 | Content policy | `HubCampaignContentGating.test.js`, `HubRulesPolicyPostgres.test.js`, Character Sheet content/teardown tests | Canonical aliases, campaign brew, editions/species variants, grandfathering, imports/direct writes/grants/awards/transfers, stale pins, rollback, privacy, and memory/PostgreSQL parity |
+
+The Campaign/Local route journey in `active-campaign-context.spec.ts` uses separate owner, DM, and peer
+browser profiles on the disposable HTTPS/PostgreSQL stack. After an applied campaign effect and an ordinary
+owner edit, it records a positive PostgreSQL baseline for revision, lease epoch, PATCH receipts/events, and
+projection invalidations. It then requires exact equality after Open Local, BFCache/Back, and Return, alongside
+zero new lease/PATCH requests across all three profiles, matching owner/DM revisions, and an unchanged private
+peer projection. It requires the runner's disposable loopback Hub and `HUB_TEST_POSTGRES_URL` endpoints and
+fails closed if they are missing or remote. Never point the stack runner or synthetic-auth browser at Oracle.
+This evidence does not replace the physical real-OAuth/device first-leg check against the actual deployed
+service worker and loaded Character Sheet assets.
+
+`character-sheet-party-inventory.spec.ts` also exercises the recipient's open-sheet transfer inbox:
+server-scoped offer visibility, immediate concealment before a delayed projection refetch, anonymous source
+fallback after sharing narrows, reject/accept without Hub navigation, reload recovery, a committed response
+lost in transit followed by authoritative status confirmation without repeating the mutation, and absence of
+campaign/character IDs from rendered notices. Focused Character Sheet tests pin uncertain-response
+idempotency, invalid transfer responses, and character-access fencing. These tests use synthetic accounts
+and a disposable stack; they do not authorize live inventory transfers.
+
+The competing-stash browser journey and Memory/PostgreSQL tests require one conserved winner, immediately
+terminal insufficient losers, no extra restoration for non-escrowed requests, one `source_insufficient`
+event/audit per loser, stale-request disappearance from the DM inbox, and a losing-player Sheet notice.
+They also cover concurrent approvals, direct DM stash debits, stash-backed awards, and preservation of
+still-affordable requests. These source corrections are now delivered in r11f; the automated evidence
+does not replace physical acceptance, which is explicitly waived for this bounded correction release.
+
+The owner-history candidate's four-context journey uses two devices for one owner, a DM, and a peer.
+It logs actual Sheet rolls, loses committed POST responses with and without live socket confirmation,
+recovers across reload without another POST, and catches up after another device rolls while it is offline.
+Device-only offline rolls never auto-submit. An uncommitted transport failure replays the exact request
+through keyboard activation, preserving focus as the pending row becomes authoritative.
+The journey excludes DM-authored rolls, rejects DM/peer history reads, and observes
+character-write/lease traffic separately from roll POSTs. Its raw API fixture's ordinary missing-feature
+repair is setup; after a positive database write/lease baseline, clean reopen and all history interactions
+must leave revision, lease epoch, PATCH receipts/events and projection invalidations unchanged.
+Desktop/mobile day/night captures and Escape/closed-panel keyboard checks cover the presentation seam.
+Role-change coverage demotes an owner from co-DM to player and removes their own formerly visible
+DM-only roll on both devices. Sheet regressions hold an old-role read across demotion, fail its
+replacement, and require concealment with attempted commands preserved; overlapping socket arrivals
+are refilled under current authority.
+PostgreSQL tests place 100,000 newer unrelated
+events ahead of 205 own rolls, require exact latest-200 IDs, less than five seconds and one megabyte,
+and print both the measurement and the no-index/unbounded-growth caveat. Contention tests interleave
+duplicate-key writes with reads and force explicit authority-lock timeout. These are disposable local
+checks, not Oracle load evidence or physical acceptance.
+
+### Source-candidate validation residual
+
+The correction candidate's initial full stack passed 77 PostgreSQL checks and 49 of 50 browser
+journeys; the ordinary-account deletion journey did not reveal reauthentication after its first click.
+The unchanged focused provider suite then passed 8/8. A diagnostic against the unchanged Hub index
+confirmed a baseline readiness defect: while account-session rendering is delayed, Delete account is
+visible and enabled before its click handler is bound; an early click does nothing, and the same action
+works once binding completes. This reproduces the failure shape, not the uncaptured timing of that run.
+After the independent Roll History role-change remediation, the complete unrelaxed stack passed all
+77 PostgreSQL checks and 50 browser journeys. That historical green run did not fix the baseline
+readiness defect; no auth code, assertion timeout, retry, or skip was changed for those results.
+
+The subsequent source correction disables Delete account and Sign out other devices synchronously
+before Hub-index initialization awaits. Both controls enable only after their handlers are bound and
+all account renderers settle, including failures; reauthentication callback focus is restored afterward.
+The permanent provider-registry journey holds the real account-session read and requires disabled
+controls before release, then working deletion reauthentication afterward. Its unavailable-service leg
+also requires the explicit service error rather than a silently dead control. The delayed leg failed on
+the old enabled button before the fix, and both legs now pass with the full provider lifecycle.
+These probes add no automatic mutation retries, skips, or assertion-timeout increases.
+The corrected full disposable stack passed 77 PostgreSQL checks and all 52 browser journeys;
+the focused provider suite passed all 10, including both deterministic startup cases.
+
+The subsequent GD-FIND-004/005 follow-up passed the full disposable stack: 77 PostgreSQL checks and
+54 browser journeys. An earlier accelerated 13-case subset exhausted the unchanged shared-IP
+campaign-creation quota (10 POSTs/minute), producing a 429 in the existing overview journey.
+The unchanged overview passed in a fresh four-case stack, then the full suite passed without changing
+limits, retries, skips or timeouts. The new sharing probe initially compared a raw API seed with a
+post-load profile; normal missing-feature repair changed the document during setup. It now measures
+after load repairs settle and explicitly selects the character from the ordinary entry's roster.
+The full saved-policy and peer-profile equality assertions remain intact.
+
+Desktop/mobile day/night inspection then found native markers suppressed by Bootstrap's global summary
+display reset. The real-browser affordance assertion failed with `display: block`; scoped sharing CSS
+restores `display: list-item` and closed/open native marker styles. The focused four-journey stack then
+passed all 77 PostgreSQL checks and all four browser journeys; the final desktop/mobile day/night captures
+show the native markers. These follow-up checks are source
+verification, not a repeated physical game day or an r11f deployment.
+
+### R11f publication and deployment evidence
+
+The final correction source `4578c8671a7b05066fb9a19411cb8a31cdd753ef` passed all four jobs in
+[exact-source CI 38223244640](https://github.com/TrueMichato/ThelemarTools/actions/runs/38223244640).
+Its canonical browser artifact records 54 expected journeys, zero flaky, unexpected or skipped cases.
+Annotated `hub-staging-2026-10-12-r11f` has tag object
+`33a9a3722c16aa5230b2f3b332304014b3b58cce` and peels to that exact source.
+
+The separately approved shared-host dry run restored r11e source and all five old mutable image tags.
+The first promotion stopped at an incorrect human confirmation, before traffic/schema mutation;
+independent checks proved the old healthy source/images remained intact. A separately approved retry
+received the human's full confirmation and completed at 2026-10-12T10:53:06Z.
+Independent post-release checks verified exact source/BFF revision/pinned images, one BFF, unchanged
+configuration, protocol 5/Roll History capability, migrations `0001`-`0009`, runtime `hub_runtime` without
+`hub_owner` membership, readiness, metrics authorization/age bounds, WebSocket rejection and TLS.
+All 14 changed browser JS/CSS/HTML files match reviewed Git, container and public hashes; generated
+worker/injector hashes match container/public responses. The static image has no OCI revision label,
+and served-asset equality is not a survey of preexisting browser caches.
+The newest encrypted prerelease archive matches the trusted off-machine copy by filename, size and SHA-256.
+Detailed redacted evidence remains private, mode 0600.
+
+Another physical game day is waived for r11f, not reported as a measured PASS or private-launch GO.
+The held Wave A stack, draft #289, remaining design decisions and campaign-enrollment limits are unchanged.
 
 ## Current commands
 
@@ -75,7 +185,7 @@ npm run test:hub:e2e:stack
 ```
 
 The disposable stack exposes PostgreSQL only on a random loopback port for the duration of the run. Before
-browser journeys, it executes the semantic-operation, inventory, provider-identity, and rules-policy PostgreSQL
+browser journeys, it executes the semantic-operation, inventory, provider-identity, entitlement, rules-policy, and owner-history PostgreSQL
 suites against the migrated runtime role. The production-image provider smoke container is removed immediately
 after its metadata check so its independent outbox dispatcher cannot consume events intended for the
 socket-serving test BFF. The rules-policy parity suite proves the exact memory/PostgreSQL
@@ -91,9 +201,43 @@ The real-stack runner has a 45-minute child-process timeout and total watchdog, 
 timeout, and a 60-minute job timeout. Normal local/CI runs take roughly 6-10 minutes; the margins allow cold image
 pulls/builds and slower shared runners without approaching GitHub's broad default ceiling. A timeout prints a
 structured stdout diagnostic plus a bounded stderr summary containing the run/project identity, active phase,
-requested spec scope, sanitized active command, and Playwright artifact paths. The watchdog terminates the active
-child process group, runs isolated Compose/image cleanup, and exits 124; the outer budgets bound a stuck child,
-runner, or cleanup even if the inner diagnostic path fails.
+requested spec scope, sanitized active command (including cleanup commands), and Playwright artifact paths.
+Child and total timeouts send SIGTERM to each exact owned child process group, escalate to SIGKILL after
+five seconds, and await termination before isolated Compose/image cleanup or exit 124. A leader exiting on
+SIGTERM does not cancel escalation while descendants remain in its group. SIGINT/SIGTERM shutdown uses the
+same awaited escalation while preserving exit codes 130/143.
+
+Cleanup has its own one-minute deadline, including cleanup children, rather than inheriting the ordinary
+child's 45-minute budget. It remains bounded after normal completion, errors, signals, or total timeout.
+The total watchdog remains armed until cleanup settles. Interrupted or timed-out cleanup exits unsuccessfully
+and never emits `hub_e2e_cleanup_complete`; remaining isolated Docker resources require manual inspection by
+the recorded project/image identity, not broad Docker cleanup. `HUB_E2E_CLEANUP_TIMEOUT_MS` accepts 60,000
+through 300,000 ms, and `HUB_E2E_TERMINATION_GRACE_MS` accepts 100 through 10,000 ms. Shorter deadlines are
+accepted only with both `NODE_ENV=test` and `HUB_E2E_ALLOW_SHORT_TIMEOUTS=true`. These controls do not increase
+CI or Playwright timeouts; outer step/job budgets remain the final safeguard.
+
+`HubCiContract.test.js` invokes the actual runner with mocked Docker and real SIGTERM-ignoring Node processes.
+It verifies required-child timeout, total timeout, stalled cleanup after both ordinary failure and total
+timeout, a surviving descendant after its leader exits, signal exit codes, and normal successful restart/cleanup.
+Exact PID checks require termination before cleanup begins and before runner exit; fixtures clean up only their
+owned process groups. The existing 50 ms required-child timeout remains covered, and wrong-exit assertions
+include captured stdout/stderr. These are local harness proofs, not real-Docker, database, or deployment evidence.
+
+Resistance probes use a test-only Node preload at the real `spawn` call site. It tracks the actual owned PID,
+releases an initialization gate, sends a nonce-bound signal challenge, and requires an acknowledgement written
+by that child's signal handler plus a live-PID check before returning the real child to the runner's unchanged
+timer call site (500 ms in the ready-child timeout probe). SIGTERM challenges the ignoring children; SIGINT
+challenges the descendant's leader, which intentionally exits on the later measured SIGTERM. Assertions
+require both challenge acknowledgements and the later measured signal receipts, not just PID presence.
+Signal tests likewise wait for acknowledged resistance before interrupting the runner.
+
+This seam deliberately separates startup scheduling from ready-child termination; it is not evidence about
+Node boot speed. A separate real-runner probe withholds the initialization gate, deterministically reproducing
+the former fixture's missing handler/PID records while independently tracking exactly one spawned child.
+That child must still terminate under the unchanged 500 ms deadline with no resistance claim or survivors.
+The unpreloaded 50 ms probe remains unchanged. Total and cleanup watchdogs keep their original wall-clock
+budgets across the readiness seam; cleanup completion is determined by actual runner output, never readiness.
+All probes retain the four-second external hard bound, and the handshake has a shorter three-second bound.
 
 On 2026-09-21, run `35600079625` was cancelled after a timezone misread made a roughly two-minute live Playwright
 step appear three hours old. Terminal logs showed PostgreSQL parity had completed and Playwright was active; the
@@ -161,7 +305,10 @@ and no projection invalidation for heal-at-max, add-existing-condition, remove-a
 restore-full-slot. Character Sheet tests assert per-track no-op transforms, zero redundant live adoption/render,
 one accessible notice, HTTP-plus-realtime dedupe, reverse-delivery resync, save interleavings, and
 character/access/document-generation fencing.
-`scripts/test-hub-semantic-operation-mutations.mjs` plants nineteen defects at the real role, write/event ordering,
+`HubDmEffectSubmission.test.js` executes the shipped submit listener and authorization dispatcher: a committed
+effect followed by a terminal authorization failure conceals campaign data and stops live updates, without
+retrying the mutation. Transient refresh failures preserve committed success; stale responses cannot publish.
+`scripts/test-hub-semantic-operation-mutations.mjs` plants twenty defects at the real role, write/event ordering,
 idempotency, invalidation, coverage, document-track, post-await fence, and duplicate-delivery call sites. The
 gate must demonstrate that every mutant is killed before the unmodified result is accepted.
 
@@ -197,10 +344,13 @@ finalization/collection-expiry, maintenance expiry without readers, source-cost 
 protocol-3/4/5 fail-closed mutation/read/WebSocket/resync/replay with protocol-6 success, allowed full-HP and
 cross-target audience privacy canaries, opposing UUID and opposite-parent-discovery deadlock probes, fault
 injection after every target/event/receipt, Memory/PostgreSQL parity, transactional live-cap winners, churn/429,
-oldest-pending pagination without starvation, 90-day bounded cleanup, bridge-release rollback, and true pre-0011
-usage-marker-absent preflight. It must also race cross-campaign proposals at the same target-owner cap under
+oldest-pending pagination without starvation, 90-day bounded cleanup, A3-aware bridge rollback, and true pre-0011
+usage-marker-absent preflight for migration 0011. It must also race cross-campaign proposals at the same target-owner cap under
 opposite account-discovery order, proving one seed-10 winner, one loser, and no deadlock; marker tests cover
 first-use insert, cleanup persistence, backup/restore, role grants, and rollback fencing.
+Participant-recovery coverage keeps default pending fairness, pages only the viewer's own live/recent legs,
+proves the migration 0012 index in a real runtime-role query plan, and verifies target no-op event sequences
+without inventing canonical watermarks.
 
 A separate A3 PostgreSQL source-account-cap test seeds one source account with four live collections, then races
 proposals in two different campaigns for slot five under the seed-10 source-account lock. It must produce exactly
@@ -463,6 +613,13 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
 - Moved-character browser coverage opens the old campaign URL and proves it canonicalizes before campaign
   context activation. Journey Tracker regressions prove linked campaign participants and their activity/slot
   references remain ephemeral.
+- GD-FIND-014 authority-routing coverage opens the same character from ordinary Character Sheet navigation and
+  Campaign Overview, proves both repository instances accept the same canonical id and revision, then enters
+  explicit Local mode with a deliberately colliding local id. Local writes leave the canonical revision/data
+  unchanged; refresh and a new tab retain an exact validated return link; returning restores the canonical
+  owner document. A parallel DM journey proves the same round trip returns to `dm_readonly` truth and emits no
+  canonical write. Unit seams separately hold queued saves before navigation, reject refused recovery, rewrite a
+  temporary id after canonical adoption, and fence realtime/recovery callbacks before leaving.
 - Transfer acceptance refreshes canonical character documents, shared inventory, balances, source/target/item
   pickers, and the inbox together; the lifecycle journey proves the accepted item is immediately selectable
   from party inventory without reloading. Transfer authority coverage exercises player-to-own/peer/DM-owned and

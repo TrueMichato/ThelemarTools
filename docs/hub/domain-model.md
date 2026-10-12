@@ -4,7 +4,7 @@
 > **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0011. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0012. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 
@@ -50,6 +50,7 @@ security boundary.
 | `semantic_operation_finalizations` | One exact ordered source finalization per multi-target parent | unique parent/command; bounded ordered invitation fingerprint; normalized child selection remains authority | applied/cancelled/failed exact replay |
 | `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, expanded multi-target command types, response invitation identity, response/event ids | one-target and protocol-6 multi-target command replay active |
 | `semantic_multi_target_usage` | Irreversible schema-use high-water marker | singleton; no history FK; runtime `SELECT, INSERT` only; backup `SELECT`; normal cleanup never deletes it | inserted transactionally on first accepted proposal; fences true pre-0011 rollback permanently |
+| `semantic_operation_targets_owner_recovery_idx` | Partial target-owner participant-recovery index (migration 0012) | existing migration-0011 columns only; non-pending rows ordered by campaign/owner/update/id | supports bounded fresh-device recovery; stores no new authority or history |
 | `transfers` | Asset-transfer workflow | exactly one source and target container, status, escrow/request payload | direct authority is created as committed; approval-bound escrow is reserved -> committed/rejected/cancelled; player stash withdrawal is proposed -> committed/rejected/cancelled |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |
@@ -204,7 +205,7 @@ stateDiagram-v2
   [*] --> proposed: player requests party item; stash unchanged
   proposed --> committed: DM approves; source and target change atomically
   proposed --> rejected: DM declines or requester cancels; stash unchanged
-  proposed --> cancelled: lifecycle cancellation; stash unchanged
+  proposed --> cancelled: lifecycle or competing stash debit; stash unchanged for this request
   [*] --> committed: server-authorized DM/co-DM or same-owner move
   [*] --> reserved: source moved to escrow
   reserved --> committed: target accepts
@@ -216,7 +217,12 @@ stateDiagram-v2
 `proposed` is persisted only for a player request from party inventory to that player's own character. The
 request stores normalized quantities and a server-derived preview, but the shared source remains untouched
 until a DM/co-DM accepts. Acceptance locks both participants, rechecks the live source, and transfers the
-fresh canonical escrow in one transaction; `TRANSFER_INSUFFICIENT` leaves the request proposed. `accepted`
+fresh canonical escrow in one transaction. The unshipped GD-FIND-009 correction also terminalizes other
+`proposed` requests from the same stash when the resulting source cannot fund them, with a
+`source_insufficient` cancellation reason and one targeted event per loser; direct DM stash moves and
+stash-backed awards use the same invariant. Requests that remain affordable stay proposed. An already
+terminal loser rejects a later approval as `TRANSFER_NOT_FOUND`, while an initially unfunded new request
+still fails `TRANSFER_INSUFFICIENT` without committing. `accepted`
 remains an unused schema state. The direct path has no `reserved` state visible to a recipient: authority is
 derived from trusted membership role and target ownership, and the initial idempotent proposal either commits
 both containers or changes neither.

@@ -3,15 +3,15 @@ import crypto from "node:crypto";
 import https from "node:https";
 import net from "node:net";
 
-function getBoundedTimeoutMs ({environmentName, fallbackMs, maximumMs}) {
+function getBoundedTimeoutMs ({environmentName, fallbackMs, maximumMs, minimumMs = 60_000}) {
 	const value = process.env[environmentName]?.trim();
 	if (!value) return fallbackMs;
 	const parsed = Number(value);
-	const minimumMs = process.env.NODE_ENV === "test" && process.env.HUB_E2E_ALLOW_SHORT_TIMEOUTS === "true"
+	const effectiveMinimumMs = process.env.NODE_ENV === "test" && process.env.HUB_E2E_ALLOW_SHORT_TIMEOUTS === "true"
 		? 10
-		: 60_000;
-	if (!Number.isSafeInteger(parsed) || parsed < minimumMs || parsed > maximumMs) {
-		throw new Error(`${environmentName} must be a whole number from ${minimumMs} through ${maximumMs}.`);
+		: minimumMs;
+	if (!Number.isSafeInteger(parsed) || parsed < effectiveMinimumMs || parsed > maximumMs) {
+		throw new Error(`${environmentName} must be a whole number from ${effectiveMinimumMs} through ${maximumMs}.`);
 	}
 	return parsed;
 }
@@ -40,6 +40,17 @@ const childTimeoutMs = getBoundedTimeoutMs({
 	environmentName: "HUB_E2E_CHILD_TIMEOUT_MS",
 	fallbackMs: 45 * 60 * 1_000,
 	maximumMs: 45 * 60 * 1_000,
+});
+const cleanupTimeoutMs = getBoundedTimeoutMs({
+	environmentName: "HUB_E2E_CLEANUP_TIMEOUT_MS",
+	fallbackMs: 60_000,
+	maximumMs: 5 * 60 * 1_000,
+});
+const terminationGraceMs = getBoundedTimeoutMs({
+	environmentName: "HUB_E2E_TERMINATION_GRACE_MS",
+	fallbackMs: 5_000,
+	maximumMs: 10_000,
+	minimumMs: 100,
 });
 const artifactPaths = [
 	"playwright-report/",
@@ -79,6 +90,8 @@ let activeSpec = "runner bootstrap";
 let activeProcess = null;
 let isStopping = false;
 let cleanupPromise = null;
+let isCleanupTimedOut = false;
+const ownedChildren = new Map();
 
 function setActivePhase (phase, spec = phase) {
 	activePhase = phase;
@@ -121,44 +134,104 @@ function stopChild (child, signal) {
 	}
 }
 
+function pTerminateChild (child, signal = "SIGTERM") {
+	const owned = ownedChildren.get(child);
+	if (!owned || !child.pid) return Promise.resolve();
+	if (owned.terminationPromise) return owned.terminationPromise;
+	owned.terminationPromise = new Promise((resolve, reject) => {
+		const escalation = setTimeout(() => {
+			try {
+				stopChild(child, "SIGKILL");
+				owned.pClosed.then(resolve);
+			} catch (error) {
+				reject(error);
+			}
+		}, terminationGraceMs);
+		owned.pClosed.then(() => {
+			try {
+				// A closed leader can leave descendants in its owned process group.
+				if (process.platform !== "win32") {
+					process.kill(-child.pid, 0);
+					return;
+				}
+			} catch (error) {
+				if (error.code !== "ESRCH") {
+					clearTimeout(escalation);
+					reject(error);
+					return;
+				}
+			}
+			clearTimeout(escalation);
+			resolve();
+		});
+		try {
+			stopChild(child, signal);
+		} catch (error) {
+			clearTimeout(escalation);
+			reject(error);
+		}
+	});
+	return owned.terminationPromise;
+}
+
+async function pTerminateOwnedChildren (signal) {
+	await Promise.all([...ownedChildren.keys()].map(child => pTerminateChild(child, signal)));
+}
+
 function pRun (command, args, {isAllowFailure = false, isCapture = false, isCleanup = false} = {}) {
 	if (isStopping && !isCleanup) return Promise.reject(new Error(`Campaign Hub E2E run is stopping.`));
+	if (isCleanupTimedOut) return Promise.reject(new HubE2eTimeoutError(`Campaign Hub E2E cleanup deadline elapsed.`));
 	return new Promise((resolve, reject) => {
 		const child = spawn(command, args, {
 			env,
 			stdio: isCapture ? ["ignore", "pipe", "pipe"] : "inherit",
 			detached: process.platform !== "win32",
 		});
-		if (!isCleanup) {
-			activeChild = child;
-			activeProcess = sanitizeProcessDescription([command, ...args].join(" ")).slice(0, 500);
-		}
+		const owned = {};
+		owned.pClosed = new Promise(resolve => owned.resolveClosed = resolve);
+		ownedChildren.set(child, owned);
+		activeChild = child;
+		activeProcess = sanitizeProcessDescription([command, ...args].join(" ")).slice(0, 500);
 		let stdout = "";
 		let stderr = "";
 		let isTimedOut = false;
-		const childTimeout = setTimeout(() => {
+		const childTimeout = isCleanup && cleanupPromise ? null : setTimeout(() => {
 			isTimedOut = true;
 			writeTimeoutDiagnostic({scope: "child", timeoutMs: childTimeoutMs});
-			stopChild(child, "SIGTERM");
+			void pTerminateChild(child).catch(reject);
 		}, childTimeoutMs);
-		childTimeout.unref();
+		childTimeout?.unref();
 		child.stdout?.on("data", chunk => stdout += chunk);
 		child.stderr?.on("data", chunk => stderr += chunk);
 		child.once("error", error => {
 			clearTimeout(childTimeout);
 			reject(error);
 		});
-		child.once("close", (status, signal) => {
+		child.once("close", async (status, signal) => {
 			clearTimeout(childTimeout);
+			owned.resolveClosed();
+			try {
+				await owned.terminationPromise;
+			} catch (error) {
+				reject(error);
+				return;
+			} finally {
+				ownedChildren.delete(child);
+			}
 			if (activeChild === child) {
 				activeChild = null;
 				activeProcess = null;
 			}
 			const exitStatus = status ?? 1;
-			if (isTimedOut) {
-				const error = new HubE2eTimeoutError(`${command} exceeded its ${childTimeoutMs} ms child timeout during ${activePhase}.`);
-				if (!isAllowFailure) return reject(error);
+			if (isTimedOut || isCleanupTimedOut) {
+				const error = new HubE2eTimeoutError(isCleanupTimedOut
+					? `Campaign Hub E2E exceeded its ${cleanupTimeoutMs} ms cleanup deadline.`
+					: `${command} exceeded its ${childTimeoutMs} ms child timeout during ${activePhase}.`);
+				if (!isAllowFailure || isCleanup) return reject(error);
 				return resolve({status: 124, stdout: stdout.trim()});
+			}
+			if (isCleanup && owned.terminationPromise) {
+				return reject(new HubE2eTimeoutError(`Campaign Hub E2E cleanup was interrupted before completion.`));
 			}
 			if (!isAllowFailure && exitStatus !== 0) {
 				return reject(new Error(`${command} exited with status ${exitStatus}${signal ? ` (${signal})` : ""}${stderr.trim() ? `: ${stderr.trim()}` : ""}.`));
@@ -313,36 +386,52 @@ async function pRemoveProductionSmoke () {
 function cleanup () {
 	if (cleanupPromise) return cleanupPromise;
 	cleanupPromise = (async () => {
-		await pRemoveProductionSmoke();
-		await run("docker", [...composeArgs, "down", "-v", "--remove-orphans", "--rmi", "local"], {isAllowFailure: true, isCleanup: true});
-		await run("docker", ["image", "rm", "--force", testBffImage], {isAllowFailure: true, isCleanup: true});
-		if (!externalBaseImage) {
-			await run("docker", ["image", "rm", "--force", baseImage], {isAllowFailure: true, isCleanup: true});
+		await pTerminateOwnedChildren();
+		setActivePhase("cleanup", "isolated Compose, image, network, and volume cleanup");
+		const cleanupTimeout = setTimeout(() => {
+			isCleanupTimedOut = true;
+			writeTimeoutDiagnostic({scope: "cleanup", timeoutMs: cleanupTimeoutMs});
+			void pTerminateOwnedChildren().catch(error => process.stderr.write(`${sanitizeProcessDescription(error.message)}\n`));
+		}, cleanupTimeoutMs);
+		try {
+			await pRemoveProductionSmoke();
+			await run("docker", [...composeArgs, "down", "-v", "--remove-orphans", "--rmi", "local"], {isAllowFailure: true, isCleanup: true});
+			await run("docker", ["image", "rm", "--force", testBffImage], {isAllowFailure: true, isCleanup: true});
+			if (!externalBaseImage) {
+				await run("docker", ["image", "rm", "--force", baseImage], {isAllowFailure: true, isCleanup: true});
+			}
+			process.stdout.write(`${JSON.stringify({type: "hub_e2e_cleanup_complete", runId, projectName})}\n`);
+		} finally {
+			clearTimeout(cleanupTimeout);
 		}
-		process.stdout.write(`${JSON.stringify({type: "hub_e2e_cleanup_complete", runId, projectName})}\n`);
 	})();
 	return cleanupPromise;
 }
 
-function stopActiveChild (signal) {
-	stopChild(activeChild, signal);
+async function pStopRun (signal) {
+	isStopping = true;
+	try {
+		await pTerminateOwnedChildren(signal);
+		await cleanup();
+	} catch (error) {
+		process.stderr.write(`${sanitizeProcessDescription(error.message)}\n`);
+	} finally {
+		clearTimeout(totalTimeout);
+	}
 }
 
 for (const [signal, exitCode] of [["SIGINT", 130], ["SIGTERM", 143]]) {
 	process.once(signal, () => {
-		isStopping = true;
-		stopActiveChild(signal);
-		void cleanup().finally(() => process.exit(exitCode));
+		if (isStopping) return;
+		void pStopRun(signal).finally(() => process.exit(exitCode));
 	});
 }
 
 const totalTimeout = setTimeout(() => {
 	if (isStopping) return;
-	isStopping = true;
 	writeTimeoutDiagnostic({scope: "total", timeoutMs: totalTimeoutMs});
 	process.stderr.write(`Campaign Hub E2E exceeded its ${totalTimeoutMs} ms total timeout; terminating the active child and cleaning up.\n`);
-	stopActiveChild("SIGTERM");
-	void cleanup().finally(() => process.exit(124));
+	void pStopRun("SIGTERM").finally(() => process.exit(124));
 }, totalTimeoutMs);
 totalTimeout.unref();
 
@@ -439,6 +528,7 @@ try {
 		"test/jest/hub/HubMultiProviderIdentityPostgres.test.js",
 		"test/jest/hub/HubAccountEntitlementsPostgres.test.js",
 		"test/jest/hub/HubRulesPolicyPostgres.test.js",
+		"test/jest/hub/HubRollHistory.test.js",
 		"--runInBand",
 		"--no-coverage",
 		"--forceExit",
@@ -465,17 +555,24 @@ try {
 	if (exitCode !== 0) await run("docker", [...composeArgs, "logs", "--tail=200"], {isAllowFailure: true});
 } catch (error) {
 	if (!isStopping) {
-		await run("docker", [...composeArgs, "ps", "--all"], {isAllowFailure: true});
-		await run("docker", [...composeArgs, "logs", "--tail=200"], {isAllowFailure: true});
-		if (error instanceof HubE2eTimeoutError) {
-			exitCode = error.exitCode;
-		} else {
-			throw error;
+		exitCode = error instanceof HubE2eTimeoutError ? error.exitCode : 1;
+		try {
+			await run("docker", [...composeArgs, "ps", "--all"], {isAllowFailure: true});
+			await run("docker", [...composeArgs, "logs", "--tail=200"], {isAllowFailure: true});
+		} catch (diagnosticError) {
+			if (diagnosticError instanceof HubE2eTimeoutError) exitCode = diagnosticError.exitCode;
+			process.stderr.write(`${sanitizeProcessDescription(diagnosticError.message)}\n`);
 		}
+		if (!(error instanceof HubE2eTimeoutError)) process.stderr.write(`${sanitizeProcessDescription(error.stack || error.message)}\n`);
 	}
 } finally {
-	clearTimeout(totalTimeout);
-	setActivePhase("cleanup", "isolated Compose, image, network, and volume cleanup");
-	await cleanup();
+	try {
+		await cleanup();
+	} catch (error) {
+		exitCode = error instanceof HubE2eTimeoutError ? error.exitCode : 1;
+		process.stderr.write(`${sanitizeProcessDescription(error.message)}\n`);
+	} finally {
+		clearTimeout(totalTimeout);
+	}
 }
 if (!isStopping) process.exit(exitCode);

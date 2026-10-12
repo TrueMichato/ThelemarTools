@@ -1,4 +1,4 @@
-import {isCanonicalProjection} from "./hub-character-view.js";
+import {getCanonicalCharacterWithOperationWatermark, isCanonicalProjection} from "./hub-character-view.js";
 import {HUB_PROTOCOL_VERSION} from "./hub-capabilities.js";
 
 export class HubApiError extends Error {
@@ -553,6 +553,13 @@ export class HubApiClient {
 		});
 	}
 
+	async pListCharacterRollHistory ({campaignId, characterId, beforeSequence = null, commandId = null, limit = 200, signal = null}) {
+		const query = new URLSearchParams({limit: `${limit}`});
+		if (beforeSequence != null) query.set("beforeSequence", `${beforeSequence}`);
+		if (commandId != null) query.set("commandId", commandId);
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/characters/${encodeURIComponent(characterId)}/roll-history?${query}`, {signal});
+	}
+
 	async pCreateCampaign ({name, idempotencyKey}) {
 		return this._pRequest("/api/campaigns", {
 			method: "POST",
@@ -612,7 +619,7 @@ export class HubApiClient {
 		if (!isCanonicalProjection(projection)) {
 			throw new HubApiError({code: "CHARACTER_PROJECTION_SCOPED", status: 403});
 		}
-		return projection.character;
+		return getCanonicalCharacterWithOperationWatermark(projection);
 	}
 
 	async pListCampaignCharacterProjections ({campaignId}) {
@@ -904,9 +911,10 @@ export class HubApiClient {
 		);
 	}
 
-	async pListMultiTargetInbox ({campaignId, cursor = null, limit = 100}) {
+	async pListMultiTargetInbox ({campaignId, cursor = null, limit = 100, mode = "pending"}) {
 		const query = new URLSearchParams({limit: `${limit}`});
 		if (cursor) query.set("cursor", cursor);
+		if (mode !== "pending") query.set("mode", mode);
 		return this._pRequest(
 			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/inbox?${query}`,
 		);

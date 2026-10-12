@@ -16,6 +16,43 @@ function getResponse ({status = 200, body = {}} = {}) {
 }
 
 describe("hub API client", () => {
+	it("reads owner history with only the backward cursor and exact-command filter, forwarding cancellation", async () => {
+		const api = new HubApiClient();
+		const calls = [];
+		api._pRequest = async (...args) => { calls.push(args); return {events: []}; };
+		const abort = new AbortController();
+		await api.pListCharacterRollHistory({campaignId: "campaign/1", characterId: "character/1", limit: 3, beforeSequence: 42, commandId: "command", signal: abort.signal});
+		expect(calls).toEqual([[
+			"/api/campaigns/campaign%2F1/characters/character%2F1/roll-history?limit=3&beforeSequence=42&commandId=command",
+			{signal: abort.signal},
+		]]);
+		await api.pListCharacterRollHistory({campaignId: "campaign", characterId: "character"});
+		expect(calls[1]).toEqual(["/api/campaigns/campaign/characters/character/roll-history?limit=200", {signal: null}]);
+	});
+
+	it("retains the authorized operation watermark when reading canonical truth", async () => {
+		const api = new HubApiClient();
+		api._pRequest = async () => ({
+			projection: {
+				kind: "owner_truth",
+				operationWatermark: 375,
+				character: {id: "character-1", revision: 23, data: {name: "Mira"}},
+			},
+		});
+		await expect(api.pGetCharacter({characterId: "character-1"})).resolves.toEqual({
+			id: "character-1",
+			revision: 23,
+			operationWatermark: 375,
+			data: {name: "Mira"},
+		});
+		api._pRequest = async () => ({projection: {kind: "peer_profile", operationWatermark: 375}});
+		await expect(api.pGetCharacter({characterId: "character-1"}))
+			.rejects.toMatchObject({code: "CHARACTER_PROJECTION_SCOPED"});
+		api._pRequest = async () => ({projection: {kind: "owner_truth", operationWatermark: 375}});
+		await expect(api.pGetCharacter({characterId: "character-1"}))
+			.rejects.toThrow("Canonical character data is unavailable.");
+	});
+
 	it("serializes transfer refreshes in invocation order and releases the queue after failure", async () => {
 		const queue = new HubTransferRefreshQueue();
 		const order = [];
@@ -315,7 +352,7 @@ describe("hub API client", () => {
 			operationId: "operation-2",
 			idempotencyKey: "cancel-1",
 		});
-		await client.pListMultiTargetInbox({campaignId: "campaign-1", cursor: "cursor-1", limit: 25});
+		await client.pListMultiTargetInbox({campaignId: "campaign-1", cursor: "cursor-1", limit: 25, mode: "recovery"});
 		await client.pListMultiTargetOutgoing({campaignId: "campaign-1"});
 		await client.pGetMultiTargetOperation({campaignId: "campaign-1", operationId: "operation-1"});
 
@@ -324,7 +361,7 @@ describe("hub API client", () => {
 			"/api/campaigns/campaign-1/multi-target-operations/operation-1/invitations/invitation-1/respond",
 			"/api/campaigns/campaign-1/multi-target-operations/operation-1/finalize",
 			"/api/campaigns/campaign-1/multi-target-operations/operation-2/cancel",
-			"/api/campaigns/campaign-1/multi-target-operations/inbox?limit=25&cursor=cursor-1",
+			"/api/campaigns/campaign-1/multi-target-operations/inbox?limit=25&cursor=cursor-1&mode=recovery",
 			"/api/campaigns/campaign-1/multi-target-operations/outgoing?limit=100",
 			"/api/campaigns/campaign-1/multi-target-operations/operation-1",
 		]);

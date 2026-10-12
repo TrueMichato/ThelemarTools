@@ -194,4 +194,33 @@ describe("campaign authorization matrix", () => {
 		});
 		expect(create.statusCode).toBe(403);
 	});
+
+	it("gates personal history on current protocol and ownership without lease, revision, or event writes", async () => {
+		const dm = await signIn(identities.dmA);
+		const campaignA = await campaign(dm, "Retained rolls");
+		const invite = (await app.inject({method: "POST", url: `/api/campaigns/${campaignA.id}/invites`, headers: headers(dm), payload: {role: "player"}})).json();
+		const player = await signIn(identities.player);
+		expect(player.capabilities).toContain("character.roll_history.v1");
+		await app.inject({method: "POST", url: "/api/invites/redeem", headers: headers(player), payload: {token: invite.token}});
+		const character = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(player),
+			payload: {clientImportId: "retained-roll", campaignId: campaignA.id, schemaVersion: 1, data: {name: "Owner"}},
+		})).json().character;
+		const url = `/api/campaigns/${campaignA.id}/characters/${character.id}/roll-history`;
+		const currentHeaders = {...readHeaders(player), "x-hub-protocol-version": "6"};
+		expect((await app.inject({method: "GET", url})).statusCode).toBe(401);
+		expect((await app.inject({method: "GET", url, headers: readHeaders(player)})).statusCode).toBe(426);
+		expect((await app.inject({method: "GET", url, headers: {...currentHeaders, "x-hub-protocol-version": "5"}})).statusCode).toBe(426);
+		expect((await app.inject({method: "GET", url, headers: {...currentHeaders, cookie: dm.cookie}})).statusCode).toBe(404);
+		for (const query of ["limit=201", "beforeSequence=0", "commandId=not-a-uuid", "afterSequence=0"]) {
+			expect((await app.inject({method: "GET", url: `${url}?${query}`, headers: currentHeaders})).statusCode).toBe(400);
+		}
+		const before = JSON.stringify({events: store._events, receipts: [...store._commandReceipts], leases: [...store._characterLeases], characters: [...store._characters]});
+		const response = await app.inject({method: "GET", url, headers: currentHeaders});
+		expect(response.statusCode).toBe(200);
+		expect(response.json()).toMatchObject({contractVersion: 1, events: [], history: {hasMore: false}});
+		expect(JSON.stringify({events: store._events, receipts: [...store._commandReceipts], leases: [...store._characterLeases], characters: [...store._characters]})).toBe(before);
+	});
 });

@@ -5,7 +5,7 @@ const adr = fs.readFileSync(
 	new URL("../../../docs/hub/adr/0020-consented-multi-target-operations.md", import.meta.url),
 	"utf8",
 );
-const normalizedAdr = adr.replace(/\s+/g, " ");
+const normalizedAdr = adr.replace(/^>\s?/gm, "").replace(/\s+/g, " ");
 const proofSql = fs.readFileSync(
 	new URL("../../fixtures/hub/adr-0020-multi-target-set-shaping.sql", import.meta.url),
 	"utf8",
@@ -15,6 +15,10 @@ const eventCatalog = fs.readFileSync(new URL("../../../docs/hub/event-catalog.md
 const security = fs.readFileSync(new URL("../../../docs/hub/security.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const migrations = fs.readFileSync(new URL("../../../docs/hub/migrations.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const testing = fs.readFileSync(new URL("../../../docs/hub/testing.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const readme = fs.readFileSync(new URL("../../../docs/hub/README.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const roadmap = fs.readFileSync(new URL("../../../docs/hub/roadmap.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const implementationStatus = fs.readFileSync(new URL("../../../docs/hub/implementation-status.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const traceability = fs.readFileSync(new URL("../../../docs/hub/traceability.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
 
 describe("Campaign Hub multi-target operation ADR contract", () => {
@@ -28,6 +32,10 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr).toContain("capability remains default-off");
 		expect(normalizedAdr).toContain("Character Sheet proposal/response/finalization UI");
 		expect(normalizedAdr).toContain("draft/game-day hold remains in force");
+		expect(normalizedAdr).toContain("`0010_source_cost_binding_identity.sql`");
+		expect(normalizedAdr).toContain("Local draft refresh and held implementation may proceed.");
+		expect(normalizedAdr).toContain("the separate integration, release, and capability-enablement holds remain");
+		expect(normalizedAdr).toContain("the waiver is not permission to integrate this stack or enable multi-target operations");
 	});
 
 	it("fixes the target set and separates consent from one atomic finalization", () => {
@@ -59,8 +67,10 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr.indexOf("quota advisory locks (seed 10)")).toBeLessThan(normalizedAdr.indexOf("campaign advisory lock (seed 6)"));
 	});
 
-	it("requires normalized migration 0011 tables and concrete constraints", () => {
+	it("requires normalized migration 0011 after A2 reserves migration 0010 and additive recovery migration 0012", () => {
 		expect(normalizedAdr).toContain("Migration `0011_multi_target_semantic_operations.sql` is implemented");
+		expect(normalizedAdr).toContain("A2 owns the immediately preceding immutable migration `0010_source_cost_binding_identity.sql`");
+		expect(normalizedAdr).toContain("`0012_multi_target_participant_recovery.sql`");
 		expect(normalizedAdr).toContain("`hub.semantic_operation_targets`");
 		expect(normalizedAdr).toContain("`semantic_operation_finalizations`");
 		expect(normalizedAdr).toContain("`hub.semantic_multi_target_usage`");
@@ -80,6 +90,42 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr).toContain("no foreign key to semantic-operation or campaign history");
 		expect(normalizedAdr).toContain("`ON CONFLICT DO NOTHING`");
 		expect(normalizedAdr).toContain("Normal cleanup never deletes or rewrites `hub.semantic_multi_target_usage`");
+	});
+
+	it("pins the scarce migration ancestry across every Wave A record", () => {
+		for (const record of [
+			normalizedAdr,
+			migrations,
+			readme,
+			roadmap,
+			implementationStatus,
+			testing,
+			traceability,
+		]) {
+			expect(record).toMatch(/\bmigration 0010\b/i);
+			expect(record).toMatch(/\bmigration 0011\b/i);
+		}
+		for (const record of [
+			normalizedAdr,
+			migrations,
+			roadmap,
+			implementationStatus,
+			testing,
+		]) expect(record).toMatch(/\bmigration 0012\b/i);
+		expect(eventCatalog).toContain("events are implemented by both stores behind the default-off capability");
+		expect(security).toContain("Migration 0010 is reserved for A2 source-cost binding identity");
+		expect(security).toContain("migration 0011 and protocol 6 are required");
+		for (const record of [
+			normalizedAdr,
+			migrations,
+			readme,
+			roadmap,
+			implementationStatus,
+			testing,
+			traceability,
+			eventCatalog,
+			security,
+		]) expect(record).not.toContain("0010_multi_target_semantic_operations.sql");
 	});
 
 	it("pins lock, event, privacy, reconciliation, and rollback ordering", () => {
@@ -113,12 +159,13 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 			"usage marker is absent",
 			"After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`",
 			"operational rollback to a true pre-0011 binary is permanently forbidden",
-			"bridge/r10+ release",
+			"A3-aware bridge release",
 			"current parent/child counts are diagnostic only",
 			"separately reviewed destructive history/event/outbox/recovery export-and-purge procedure",
 			"Deleting the usage marker is the final irreversible step",
 		]) expect(normalizedAdr).toContain(anchor);
 		expect(migrations).toContain("true pre-0011 rollback is blocked whenever the marker exists");
+		expect(migrations).toContain("`0010_source_cost_binding_identity.sql`");
 	});
 
 	it("serializes global cross-campaign quotas before campaign authority", () => {

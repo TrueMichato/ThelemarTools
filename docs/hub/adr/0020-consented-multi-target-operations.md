@@ -16,7 +16,12 @@ Status: Accepted; Wave A3 server state machine implemented default-off, rollout 
 > Memory/PostgreSQL authority, capability advertisement, events, lifecycle/expiry/cleanup, quota locks,
 > participant DTOs, and server-level tests. The capability remains default-off and exactly enrolled. Full
 > Character Sheet proposal/response/finalization UI and production healing templates remain A4/A5 scope. The
-> draft/game-day hold remains in force until the coordinator records the physical game-day GO/NO-GO.
+> draft/game-day hold remains in force; integration requires a separate hold-lift decision.
+
+> **Continuation boundary (2026-10-12):** R11f correction delivery is complete and its physical retest was
+> waived. Local draft refresh and held implementation may proceed. The recorded private-launch NO-GO
+> and the separate integration, release, and capability-enablement holds remain; the waiver is not
+> permission to integrate this stack or enable multi-target operations.
 
 In short, this contract extends ADR 0012 and extends ADR 0016 while superseding only the narrow rules stated
 above. Its additive schema and server authority are implemented; production templates, client UX, enablement,
@@ -106,7 +111,8 @@ Deferred:
 | `invitationId` | Opaque, globally unique target-leg address; one owner may own several legs |
 | `responseCommandId` | Actor/body/invitation/decision-bound target response |
 | `finalizationCommandId` | Actor/body/ordered-subset-bound source finalization |
-| `legId` | Stable persisted mutation/reconciliation identity for one unique character |
+| `legId` | Stable persisted UUID mutation identity for a selected target/combined child leg |
+| `operationLegKey` | Deterministic reconciliation identity `operationId/source`, `operationId/target`, or `operationId/combined`; source-only legs use this key without inventing a child UUID |
 | `eventId` | Stable domain-event/outbox identity |
 
 The response route and command address `invitationId`, never only `operationId` or account id. Parent identity is
@@ -323,6 +329,11 @@ Target events carry operation id, invitation id, leg id, normalized target opera
 changed, and a bounded changed flag visible only to that target owner/DM. Source projections remove the changed
 flag and target state. Unrelated users receive no workflow event.
 
+Source-only cost events carry the deterministic `operationId/source` operation-leg key rather than a fabricated
+child-leg UUID. Authorized applied results also carry the already allocated event sequence; changed character
+legs may expose that same value as their canonical operation watermark, while a revisionless allowed no-op
+exposes the event sequence without claiming a character watermark.
+
 Reconciliation applies durable legs:
 
 ```text
@@ -339,7 +350,10 @@ arrival order.
 
 ### Schema decision: additive migration 0011 is required
 
-Migration `0011_multi_target_semantic_operations.sql` is implemented by the A3 migration/operations slice. The normalized target table is
+Migration `0011_multi_target_semantic_operations.sql` is implemented by the A3 migration/operations slice.
+A2 owns the immediately preceding
+immutable migration `0010_source_cost_binding_identity.sql` for shared/PostgreSQL resource-binding identity and
+ABA correctness. The normalized target table is
 `hub.semantic_operation_targets`; do not store target/response/selection arrays in JSON.
 
 Migration 0011 also creates singleton `hub.semantic_multi_target_usage`:
@@ -442,8 +456,8 @@ reads legacy rows, ignores additive tables/nullable columns, and never creates `
 
 After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`, operational rollback to a
 true pre-0011 binary is permanently forbidden even if all parent/child history has been cleaned. The normal
-rollback target must be a bridge/r10+ release which understands `target_set_version`, child history, projection
-filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0011 rollback preflight requires the
+rollback target must be an A3-aware bridge release which understands `target_set_version`, child history,
+projection filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0011 rollback preflight requires the
 usage marker to be absent; current parent/child counts are diagnostic only and cannot clear a present marker.
 
 Returning to a true pre-0011 binary after data creation requires a separately reviewed destructive
@@ -489,6 +503,12 @@ Planned routes:
 - `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/finalize`;
 - bounded participant detail/inbox/outgoing reads.
 
+The target-participant inbox keeps its default oldest-pending mode. An explicit recovery mode returns pending
+legs first, followed by only that viewer's responded live or retained terminal legs, capped at 100 with an
+exclusive cursor and the existing 90-day workflow retention. Migration 0012,
+`0012_multi_target_participant_recovery.sql` adds only the partial target-owner recovery index required by that
+bounded query; it changes no authority, audience, protocol, capability, retention, or rollback-marker semantics.
+
 Rollout order: A1/A2 foundations, A3 migration/server with capability off, protocol-6 A4 clients, A5 templates,
 Memory/PostgreSQL and real-stack proof, one allowlisted campaign/template canary, then measured expansion.
 Disabling stops creation; response/reject/cancel/expiry/read remain available. Finalization after deliberate
@@ -507,7 +527,7 @@ pre-0011 target is blocked whenever the usage marker exists, regardless of curre
 |---|---|---|
 | **A1 — DM typed effects** | Existing six-operation immediate DM/co-DM lane completed in the Wave A1 descendant implementation | No prose; pure fixtures; route/Memory/PostgreSQL parity; replay/no-op/privacy/reconciliation coverage; held pending physical game-day GO/NO-GO |
 | **A2 — source-cost authority** | Generalized deterministic one-time cost/ABA authority | No reservation; shared Memory/PostgreSQL parity |
-| **A3 — server state machine** | Migration/operations substrate implemented; protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, and locks remain held runtime work | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
+| **A3 — server state machine** | Migration 0011 after A2's migration 0010, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, and locks implemented default-off in the held draft | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
 | **A4 — Character Sheet UX and reconciliation** | Proposal, invitation response, exact-subset finalization, per-leg recovery | Same-owner/two-target and source-as-target UX; dirty/in-flight/reconnect/access-loss coverage |
 | **A5 — Healing Word and Mass Healing Word templates** | First reviewed production templates | PHB/XPHB semantics and explicit `allowTargetNoOp=true` privacy evidence |
 

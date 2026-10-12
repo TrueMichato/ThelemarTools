@@ -260,6 +260,7 @@ list or route through it.
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
 | `POST /api/campaigns/:campaignId/rolls` | Active-member mutation; character owner or DM when character supplied | characterId?, formula <=200, numeric total, context <=100, visibility, detail | Durable `roll.logged` event; activity uses a bounded semantic `detail.title` and selected detail fields |
+| `GET /api/campaigns/:campaignId/characters/:characterId/roll-history` | Current protocol 6, active account/member, current character owner only; DM inspection denied | `limit` 1-200 (default 200), exclusive `beforeSequence` positive safe integer, optional UUID `commandId`; unknown queries rejected | Contract v1, stable `highWaterSequence`, ascending authorized own roll events, backward history cursor and `hasMore`; no character write or lease |
 | `GET /api/campaigns/:campaignId/actions` | Active member | none | Proposed semantic operations visible to DM/co-DM, proposer, or target owner; protocol 3 omits cost-bearing rows |
 | `GET /api/campaigns/:campaignId/characters/:characterId/pending-actions` | Active owner of that character | none | Privacy-safe approval cards; protocol-4 cost-bearing cards include `contractVersion:1`, while protocol 3 preserves only legacy cost-free cards |
 | `GET /api/campaigns/:campaignId/characters/:characterId/outgoing-actions` | Active source owner; protocol 4 | none | Bounded source-side status/cancel/recovery summaries for cost-bearing requests |
@@ -271,6 +272,32 @@ list or route through it.
 
 Every semantic command uses a UUID `commandId` equal to `Idempotency-Key`. Exact retries return the stored
 operation and event ids; any actor/body reuse returns `IDEMPOTENCY_KEY_REUSED`.
+
+### Owner Roll History (source candidate, not deployed)
+
+`character.roll_history.v1` is advertised in meta/session. This read selects from existing domain events,
+not a second roll ledger: campaign, current owned character, actor, event type, and historical audience
+are filtered **before** the latest-200 limit. DM-authored rolls about the character are not the owner's
+personal rolls. Archive/move/detachment that removes the campaign binding makes the old scope unavailable.
+The response is `{contractVersion:1,highWaterSequence,events,history:{scannedBackThroughSequence,hasMore}}`;
+the oldest selected sequence is the exclusive cursor for older results. This is separate from forward
+campaign replay's raw scanned cursor.
+
+Projection keeps only formula (200), context (100), total, actor-only command correlation (200), and
+detail title/breakdown/resultNote (200 each) plus resultClass (100). Arbitrary legacy detail is excluded.
+The PostgreSQL read uses shared authority locks, a five-second statement and two-second lock budget;
+budget exhaustion returns `ROLL_HISTORY_UNAVAILABLE` (503), never a successful empty history. This candidate
+adds no migration/index: finite sparse-history tests do not establish unbounded campaign-growth performance.
+These are per-statement/per-lock budgets, not an end-to-end HTTP or connection-pool wait deadline.
+
+The Sheet persists each exact attempted request/key and 23-hour retry deadline in
+account/campaign/character-scoped session storage before POST. Reload never resends automatically.
+An uncertain send first queries its exact actor command ID; a matching payload confirms it, and only
+a complete empty result while live and before the deadline permits the same key/body to be retried.
+Expired, failed, mismatched, or incomplete reconciliation remains unconfirmed. Legacy events without a
+command ID are displayable but cannot prove an uncertain command absent. Offline entries are device-only,
+not queued cloud writes. Roll History does not PATCH the character, acquire its editor lease, or support
+campaign Clear; changing the future-roll audience remains an ordinary owner setting write.
 
 The Campaign Overview condition action uses the canonical site condition catalog plus the active campaign brew
 catalog. The submitted operation always carries the selected `name` and `source`; there is no free-form source
@@ -369,7 +396,7 @@ capability is default-off and has no production template or Character Sheet UI i
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/invitations/:invitationId/respond` | Current pinned target owner for that invitation; DM/co-DM reject only | command id and `approve` or `reject` | One immutable terminal leg response; exact replay returns the same response/event ids |
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/finalize` | Current source owner | command id and exact ordered unique selected invitation ids; empty list means cancel | Empty list cancels with no character mutation; non-empty approved/current subset commits one source cost and all selected legs atomically |
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/cancel` | Current source owner or DM/co-DM | contract/command id | Cancels from either live collection state, terminalizes each live leg in proposal order, consumes no cost, and writes no character |
-| `GET /api/campaigns/:campaignId/multi-target-operations/inbox` | Current target participant or DM/co-DM | optional oldest-pending cursor and limit <=100 | Each target owner receives only their own invitations; DM/co-DM receive the bounded management projection |
+| `GET /api/campaigns/:campaignId/multi-target-operations/inbox` | Current target participant or DM/co-DM | optional cursor, limit <=100, and `mode=pending|recovery` | Default `pending` preserves oldest-pending fairness. `recovery` returns pending first, then only the viewer's responded live/recent retained legs; target owners never receive co-target identity/count/decision |
 | `GET /api/campaigns/:campaignId/multi-target-operations/outgoing` | Current source participant or DM/co-DM | optional bounded cursor and limit <=100 | Source sees authorized labels, aggregate coarse status, and no per-target applicability result |
 | `GET /api/campaigns/:campaignId/multi-target-operations/:operationId` | Current participant or DM/co-DM | operation id | Viewer-shaped detail; unrelated users receive `ACTION_NOT_FOUND` |
 
@@ -383,9 +410,10 @@ target revision/invalidation while consuming the single cost; source-visible out
 and replay; protocol 6 is the first successful version. All successful responses are `Cache-Control: no-store`.
 Without that reviewed flag, target inapplicability follows ADR 0016: finalization commits terminal `failed`,
 consumes no cost, mutates no character, and leaves approved legs approved/unselected with no synthetic decline.
-Applied source/DM detail carries the closed source cost, source/combined leg identity/event/revision, and the
+Applied source/DM detail carries the closed source cost, deterministic source/combined operation-leg key,
+event identity/sequence/revision, and the
 combined target operation only when the source is itself selected. Each target owner receives the normalized
-operation plus their own leg/event/revision/changed result needed for missed-event recovery; source views of
+operation plus their own leg/event sequence/revision/changed result needed for missed-event recovery; source views of
 other target legs omit changed, revision, and canonical target character id.
 
 Transactional capacity limits are 3 live collections/source character, 5/source account, 50/campaign,
@@ -394,6 +422,9 @@ and 20 pending invitations/target owner. Route limits are propose 10/minute/acco
 `429 RATE_LIMITED`. Inbox pages contain at most 100 rows and use an exclusive
 `collectionClosesAt + operationId + targetCharacterId` cursor ordered oldest-pending-first so continuous new
 traffic cannot starve an older invitation.
+Recovery mode keeps that pending prefix, then orders the viewer's own non-pending live/recent legs by target-row
+update time descending with operation/character tie-breakers. Migration 0012 adds the partial owner-recovery
+index over existing migration-0011 columns; no new workflow data is stored.
 
 The source-account and target-owner limits are global across campaigns. Proposal creation serializes them with a
 dedicated seed-10 quota advisory lock for the source account and every distinct target-owner account, acquired
@@ -424,9 +455,14 @@ reservation exists. Other character-source commands remove the requested value i
 the source exactly once. A player party-source command is allowed only when the destination is that player's own
 character. It stores a server-derived metadata preview and normalized request as `proposed` but does not debit or
 reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically removes its current canonical
-metadata and writes it to the character; concurrent depletion returns `TRANSFER_INSUFFICIENT` without changing
-either container or terminalizing the request. Reusing an idempotency key with the same command replays its stored
-result rather than repeating either mutation.
+metadata and writes it to the character. On the current unshipped GD-FIND-009 candidate, any same-stash
+`proposed` requests made definitively insufficient by that debit become terminal `cancelled` with bounded
+`payload.cancellationReason: "source_insufficient"` in the same transaction, with a targeted event and audit
+per loser. The same check follows direct DM stash moves and stash-backed awards; still-affordable requests
+remain proposed. No escrow exists for a proposed loser, so nothing is restored; a later attempt to approve
+one returns `TRANSFER_NOT_FOUND`. A newly requested unfunded transfer still fails with
+`TRANSFER_INSUFFICIENT` without committing a row. This candidate is not deployed in r11e.
+Reusing an idempotency key with the same command replays its stored result rather than repeating either mutation.
 Transfer mutation responses and their replay receipts use the same viewer projection as the transfer collection:
 DM/co-DM viewers receive the full authority record, while non-DM viewers receive only owned character endpoint
 IDs and their own actor attribution; party-inventory IDs and foreign actor attribution remain concealed. A

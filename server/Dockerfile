@@ -15,6 +15,8 @@ FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd
 
 ARG VCS_REF=unknown
 ARG VERSION=dev
+ARG MIN_PCRE2_VERSION=10.42-1+deb12u1
+ARG MIN_PERL_BASE_VERSION=5.36.0-7+deb12u4
 
 LABEL org.opencontainers.image.source="https://github.com/TrueMichato/ThelemarTools" \
 	org.opencontainers.image.revision="${VCS_REF}" \
@@ -25,7 +27,13 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install --yes --no-install-recommends libpcre2-8-0=10.42-1+deb12u1 \
+	&& apt-get install --yes --no-install-recommends libpcre2-8-0 perl-base \
+	&& actual_pcre2="$(dpkg-query -W -f='${Version}' libpcre2-8-0)" \
+	&& { dpkg --compare-versions "$actual_pcre2" ge "$MIN_PCRE2_VERSION" \
+		|| { printf 'libpcre2-8-0 %s is below required minimum %s\n' "$actual_pcre2" "$MIN_PCRE2_VERSION" >&2; exit 1; }; } \
+	&& actual_perl="$(dpkg-query -W -f='${Version}' perl-base)" \
+	&& { dpkg --compare-versions "$actual_perl" ge "$MIN_PERL_BASE_VERSION" \
+		|| { printf 'perl-base %s is below required minimum %s\n' "$actual_perl" "$MIN_PERL_BASE_VERSION" >&2; exit 1; }; } \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& groupadd --system --gid 10001 hub \
 	&& useradd --system --uid 10001 --gid hub --home-dir /app --shell /usr/sbin/nologin hub \
@@ -53,6 +61,7 @@ COPY --chown=hub:hub js/hub/hub-effect-presentation.js ./js/hub/hub-effect-prese
 COPY --chown=hub:hub js/hub/hub-inventory-contract.js ./js/hub/hub-inventory-contract.js
 COPY --chown=hub:hub js/hub/hub-inventory-equivalence.js ./js/hub/hub-inventory-equivalence.js
 COPY --chown=hub:hub js/hub/hub-multi-target-operations.js ./js/hub/hub-multi-target-operations.js
+COPY --chown=hub:hub js/hub/hub-roll-history.js ./js/hub/hub-roll-history.js
 COPY --chown=hub:hub js/hub/hub-semantic-hp.js ./js/hub/hub-semantic-hp.js
 COPY --chown=hub:hub js/hub/hub-semantic-operations.js ./js/hub/hub-semantic-operations.js
 COPY --chown=hub:hub js/hub/hub-source-costs.js ./js/hub/hub-source-costs.js

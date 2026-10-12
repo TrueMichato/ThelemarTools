@@ -383,10 +383,20 @@ describe("Campaign Hub multi-target Memory authority", () => {
 			});
 			expect(finalized.statusCode).toBe(200);
 			expect(finalized.json().operation.status).toBe("applied");
-			const [inbox, outgoing, detail] = await Promise.all([
+			const [inbox, recoveryInbox, invalidInbox, outgoing, detail] = await Promise.all([
 				app.inject({
 					method: "GET",
 					url: `/api/campaigns/${ctx.campaign.id}/multi-target-operations/inbox`,
+					headers: {cookie: targetSession.cookie, "x-hub-protocol-version": "6"},
+				}),
+				app.inject({
+					method: "GET",
+					url: `/api/campaigns/${ctx.campaign.id}/multi-target-operations/inbox?mode=recovery`,
+					headers: {cookie: targetSession.cookie, "x-hub-protocol-version": "6"},
+				}),
+				app.inject({
+					method: "GET",
+					url: `/api/campaigns/${ctx.campaign.id}/multi-target-operations/inbox?mode=all`,
 					headers: {cookie: targetSession.cookie, "x-hub-protocol-version": "6"},
 				}),
 				app.inject({
@@ -401,6 +411,16 @@ describe("Campaign Hub multi-target Memory authority", () => {
 				}),
 			]);
 			expect([inbox.statusCode, outgoing.statusCode, detail.statusCode]).toEqual([200, 200, 200]);
+			expect(inbox.json().invitations).toEqual([]);
+			expect(recoveryInbox.statusCode).toBe(200);
+			expect(recoveryInbox.json().invitations).toEqual([
+				expect.objectContaining({
+					operationId: operation.operationId,
+					operationStatus: "applied",
+					invitationId,
+				}),
+			]);
+			expect(invalidInbox.statusCode).toBe(400);
 			expect(outgoing.json().operations[0].operationId).toBe(operation.operationId);
 		} finally {
 			await app.close();
@@ -425,8 +445,42 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		const invitations = proposed.operation.targets.map(target => target.invitationId);
 		expect(new Set(invitations).size).toBe(2);
 		expect(ctx.store._semanticMultiTargetUsage).toMatchObject({firstOperationId: operationId});
+		expect(proposed.operation.targets[0].presentation).toEqual({
+			targetName: "Target A",
+			sourceName: "Source",
+			effectLabel: "Shared Restoration",
+			outcomeLabel: "Healing",
+		});
+		const requestedEvent = (await ctx.store.pListVisibleEvents({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+		})).find(event =>
+			event.type === "character.multi_operation.target_requested"
+			&& event.payload.invitationId === invitations[0]);
+		expect(requestedEvent.payload.presentation).toEqual(proposed.operation.targets[0].presentation);
 
 		await ctx.pRespond({operationId, invitationId: invitations[0]});
+		const defaultInbox = await ctx.store.pListMultiTargetInbox({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		expect(defaultInbox.invitations.map(invitation => invitation.invitationId)).toEqual([invitations[1]]);
+		const recoveryInbox = await ctx.store.pListMultiTargetInbox({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+			mode: "recovery",
+		});
+		expect(recoveryInbox.invitations.map(invitation => invitation.invitationId)).toEqual([
+			invitations[1],
+			invitations[0],
+		]);
+		expect(recoveryInbox.invitations).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				operationId,
+				operationStatus: "collecting_responses",
+				presentation: proposed.operation.targets[0].presentation,
+			}),
+		]));
 		const second = await ctx.pRespond({operationId, invitationId: invitations[1]});
 		expect(second.operation.status).toBe("awaiting_source_selection");
 
@@ -453,6 +507,52 @@ describe("Campaign Hub multi-target Memory authority", () => {
 			"character.multi_operation.finalized",
 			"character.projection.invalidated",
 		]);
+		expect(finalEvents[0].payload.operationLegKey).toBe(`${operationId}/source`);
+		expect(finalized.operation.sourceResult).toMatchObject({
+			operationLegKey: `${operationId}/source`,
+			eventSequence: finalEvents[0].sequence,
+			operationWatermark: finalEvents[0].sequence,
+		});
+		const sourceDetail = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId,
+		});
+		expect(sourceDetail.operation.sourceResult).toEqual(finalized.operation.sourceResult);
+		const ownerDetail = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId,
+		});
+		expect(ownerDetail.operation.targets.map(target => target.result)).toEqual([
+			expect.objectContaining({
+				eventSequence: finalEvents[1].sequence,
+				operationWatermark: finalEvents[1].sequence,
+			}),
+			expect.objectContaining({
+				eventSequence: finalEvents[2].sequence,
+				operationWatermark: finalEvents[2].sequence,
+			}),
+		]);
+		const terminalRecovery = await ctx.store.pListMultiTargetInbox({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+			mode: "recovery",
+		});
+		expect(terminalRecovery.invitations).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				operationId,
+				operationStatus: "applied",
+				invitationId: invitations[0],
+				result: expect.objectContaining({eventSequence: finalEvents[1].sequence}),
+			}),
+			expect.objectContaining({
+				operationId,
+				operationStatus: "applied",
+				invitationId: invitations[1],
+				result: expect.objectContaining({eventSequence: finalEvents[2].sequence}),
+			}),
+		]));
 		expect(finalEvents.at(-1).payload).toEqual({});
 	});
 
@@ -693,6 +793,23 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		});
 		expect(finalized.operation.targets[0].result).toBeUndefined();
 		expect(ctx.store._characters.get(ctx.otherTarget.id).revision).toBe(revisionBefore);
+		const targetDetail = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.other.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(targetDetail.operation.targets[0].result).toMatchObject({
+			changed: false,
+			resultingCharacterRevision: null,
+			eventSequence: expect.any(Number),
+		});
+		expect(targetDetail.operation.targets[0].result).not.toHaveProperty("operationWatermark");
+		const recoveredNoOp = await ctx.store.pListMultiTargetInbox({
+			accountId: ctx.other.account.id,
+			campaignId: ctx.campaign.id,
+			mode: "recovery",
+		});
+		expect(recoveredNoOp.invitations[0].result).toEqual(targetDetail.operation.targets[0].result);
 		const sourceEvents = await ctx.store.pListVisibleEvents({
 			accountId: ctx.sourceOwner.account.id,
 			campaignId: ctx.campaign.id,
@@ -1179,6 +1296,11 @@ describe("Campaign Hub multi-target Memory authority", () => {
 			if (event?.type !== "character.projection.invalidated") entry.status = "published";
 		}
 		ctx.setNow("2026-09-21T10:00:00.000Z");
+		expect((await ctx.store.pListMultiTargetInbox({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+			mode: "recovery",
+		})).invitations).toEqual([]);
 		await expect(ctx.store.pCleanupMultiTargetHistory()).resolves.toEqual({deleted: 0});
 		for (const entry of ctx.store._outbox) entry.status = "published";
 		await expect(ctx.store.pCleanupMultiTargetHistory()).resolves.toEqual({deleted: 1});

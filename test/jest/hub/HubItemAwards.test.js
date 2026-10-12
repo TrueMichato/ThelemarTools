@@ -1152,6 +1152,16 @@ describe("Campaign Hub item award domain", () => {
 			quantity: 7,
 			...entryMetadata,
 		});
+		const contender = await ctx.store.pProposeTransfer({
+			accountId: ctx.accounts.playerB.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: party.id,
+			targetKind: "character",
+			targetId: ctx.characterB.id,
+			payload: {items: [{entryId, quantity: 5}]},
+			idempotencyKey: "stash-award-contender",
+		});
 		const eventCount = ctx.store.getDomainEvents().length;
 		const result = await ctx.store.pAwardItems({
 			accountId: ctx.accounts.coDm.id,
@@ -1189,7 +1199,16 @@ describe("Campaign Hub item award domain", () => {
 			"item.granted",
 			"character.projection.invalidated",
 			"party_inventory.invalidated",
+			"transfer.cancelled",
 		]);
+		expect(awardEvents.at(-1).payload.reason).toBe("source_insufficient");
+		expect((await ctx.store.pListTransfers({
+			accountId: ctx.accounts.playerB.id,
+			campaignId: ctx.campaign.id,
+		})).find(transfer => transfer.id === contender.transfer.id)).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
 		for (const event of awardEvents.filter(event => event.type === "item.granted")) {
 			expect(event.payload.entry.item).toEqual({
 				name: "Silvered Arrow",
@@ -1218,6 +1237,61 @@ describe("Campaign Hub item award domain", () => {
 		expect(ctx.store._partyInventories.get(ctx.campaign.id)).toEqual(beforeParty);
 		expect(ctx.store.getAuditEntries()).toHaveLength(auditCount);
 		expect(ctx.store.getDomainEvents()).toHaveLength(eventsAfterSuccess);
+	});
+
+	it("auto-cancels a stale stash request after a direct DM move and replays without duplicate cancellation", async () => {
+		const ctx = await pCreateStoreFixture();
+		const party = await ctx.store.pGetPartyInventory({accountId: ctx.accounts.dm.id, campaignId: ctx.campaign.id});
+		const donor = await ctx.pCreateCharacter(ctx.accounts.dm, "DM donor", [{
+			id: "stash-seed",
+			item: {name: "Supplies", source: "PHB"},
+			quantity: 2,
+		}]);
+		await ctx.store.pProposeTransfer({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "character",
+			sourceId: donor.id,
+			targetKind: "party_inventory",
+			targetId: party.id,
+			payload: {items: [{entryId: "stash-seed", quantity: 2}]},
+			idempotencyKey: "dm-seed-stash",
+		});
+		const stashEntry = (await ctx.store.pGetPartyInventory({accountId: ctx.accounts.dm.id, campaignId: ctx.campaign.id})).inventory[0];
+		const contender = await ctx.store.pProposeTransfer({
+			accountId: ctx.accounts.playerA.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: party.id,
+			targetKind: "character",
+			targetId: ctx.characterA.id,
+			payload: {items: [{entryId: stashEntry.id, quantity: 2}]},
+			idempotencyKey: "dm-move-contender",
+		});
+		const direct = {
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+			sourceKind: "party_inventory",
+			sourceId: party.id,
+			targetKind: "character",
+			targetId: ctx.characterB.id,
+			payload: {items: [{entryId: stashEntry.id, quantity: 1}]},
+			idempotencyKey: "dm-move-winner",
+		};
+		const first = await ctx.store.pProposeTransfer(direct);
+		const eventsAfter = ctx.store.getDomainEvents().length;
+		const replay = await ctx.store.pProposeTransfer(direct);
+		expect(replay).toEqual(first);
+		expect(ctx.store.getDomainEvents()).toHaveLength(eventsAfter);
+		expect((await ctx.store.pListTransfers({
+			accountId: ctx.accounts.playerA.id,
+			campaignId: ctx.campaign.id,
+		})).find(transfer => transfer.id === contender.transfer.id)).toMatchObject({
+			status: "cancelled",
+			payload: {cancellationReason: "source_insufficient"},
+		});
+		expect((await ctx.store.pGetPartyInventory({accountId: ctx.accounts.dm.id, campaignId: ctx.campaign.id}))
+			.inventory[0].quantity).toBe(1);
 	});
 
 	it("keeps multiple restored escrow stacks beside their metadata-diverged same-ID source rows", async () => {

@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through schema-before-use multi-target migration 0011
+> **Status:** Implemented through additive multi-target participant-recovery migration 0012
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -108,6 +108,8 @@ Current migrations:
 - 0011 additive ADR 0020 parent extensions, normalized target/finalization history, expanded command identities,
   retention-safe constraints/indexes, and the irreversible FK-independent multi-target usage marker. This
   migration does not add runtime routes, stores, protocol 6, capability advertisement, or enablement.
+- 0012 additive partial target-owner recovery index over existing migration-0011 columns. It stores no new
+  authority/history and changes no protocol, capability, audience, retention, or rollback-marker semantics.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
@@ -139,16 +141,20 @@ Migration-level guards freeze the live parent and candidate membership: proposal
 live parents/candidates cannot be deleted, and no candidate can be inserted after `candidate_count` is complete.
 Terminal 90-day cleanup and purge may still delete history in the explicit parent-first cleanup transaction.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0011, grants the
-runtime role, boots the production image against required version 0011, and runs semantic role/replay/
+Protocol v3 never resolves those legacy bodies. Migration 0012 adds only a partial target-owner recovery index
+over existing migration-0011 columns; it changes no runtime authority, protocol, capability, retention, or
+rollback marker semantics. The disposable PostgreSQL stack applies 0001-0012, grants the
+runtime role, boots the production image against required version 0012, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
-ADR 0020's additive `0011_multi_target_semantic_operations.sql` and migration-policy entry are now checked in.
+A2's immutable migration 0010 (`0010_source_cost_binding_identity.sql`) precedes ADR 0020's additive
+`0011_multi_target_semantic_operations.sql`; A3's bounded participant recovery adds
+`0012_multi_target_participant_recovery.sql`. All three migrations and policy entries are checked in.
 The policy phase is `expand` and `previousAppCompatible: true` describes only schema-before-use: a true pre-0011
 binary is operationally compatible only while the singleton `hub.semantic_multi_target_usage` marker is absent
 and normalized history counts remain zero. The first
 accepted proposal inserts that marker transactionally; it has no FK to cleanable history and normal retention
-never deletes it. Once present, normal rollback must target a bridge/r10+ binary which understands
+never deletes it. Once present, normal rollback must target an A3-aware bridge binary which understands
 `target_set_version`, normalized target history, expiry, retention, purge cleanup, and the marker. A true
 pre-0011 rollback is blocked whenever the marker exists, regardless of current parent/child counts; destructive
 history/event/outbox/recovery export and purge, with marker deletion last, requires separate review and is not

@@ -52,7 +52,7 @@
 | `character.archived` | character | all_members | empty/default | Character preserved for owner |
 | `brew.activated` | brew bundle version | all_members | version | Context consumers refetch/activate |
 | `rules.activated` | rules version | all_members | version id/number; schema/catalog version and `publish`/`rollback` operation when emitted by policy management | Context consumers refetch/activate; policy body, parameters, notes, and before/after values are never emitted |
-| `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. |
+| `roll.logged` | character or campaign | caller-selected all_members/dm_only/actor_and_dm | formula, total, context, detail, actor-only actorCommandId on new events | Cooperative evidence, not cryptographic roll authority. Activity presentation prefers bounded `detail.title` and selectively renders safe breakdown/result/advantage/critical/spell/ability/target fields. The undeployed owner-history candidate reads bounded own-event projections; other viewers never receive command correlation. Legacy events remain readable without it. |
 | `xp.granted` | character | explicit DM+owner | amount, reason, resulting XP | DM/co-DM also included by visibility policy; activity and the recipient notice render the bounded reason when present |
 | `item.granted` | character | explicit DM actor+owner | `{awardId,index,targetCount,sourceKind,note,entry}` | One deterministic per-target fact; `sourceKind` is the resolved `catalog`/`campaign_item` authority for catalog-like grants (`party_inventory` for stash grants; legacy records may omit it), and `entry.item` is a bounded privacy-safe summary rather than the complete authoritative inventory item. Followed by that target's projection invalidation; activity and the recipient notice render the bounded note as the award reason |
 | `party_inventory.invalidated` | campaign | all_members | empty | Metadata-only shared-stash refresh signal |
@@ -60,7 +60,7 @@
 | `transfer.reserved` | transfer | explicit actor+target owner | source/target kinds; each non-DM sees only owned character endpoint ids | Escrow content and counterpart identities are not broadcast |
 | `transfer.committed` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Destination write complete; direct-authority proposals emit this without a preceding `transfer.reserved`, and affected owners refetch authoritative state |
 | `transfer.rejected` | transfer | explicit actor+target owner | privacy-reduced source/target endpoints | Source restored; affected owners refetch authoritative state |
-| `transfer.cancelled` | transfer | explicit actor+target owner | lifecycle reason plus privacy-reduced endpoints | Source restored; affected owners refetch authoritative state |
+| `transfer.cancelled` | transfer | explicit actor+target owner | bounded lifecycle or `source_insufficient` reason plus privacy-reduced endpoints | Reserved escrow is restored on lifecycle cancellation; an unfunded competing proposed stash request is terminalized without touching the stash (unshipped GD-FIND-009 candidate). Affected owners refetch authoritative state |
 
 Legacy pre-v3 `action.*` records may remain as history, but migration 0005 terminalizes arbitrary pending
 structured effects and the protocol-v3 API cannot apply them.
@@ -81,7 +81,7 @@ Character Sheet workflow.
 | `character.multi_operation.target_requested` | target owner + source owner + DM/co-DM | viewer-projected operation/invitation data; target sees only this leg, source sees authorized label/coarse status |
 | `character.multi_operation.target_responded` | target owner + source owner + DM/co-DM | viewer-projected approved/rejected/expired/revoked state; no rationale, hidden target truth, or co-target identity/decision |
 | `character.multi_operation.ready` | source owner + DM/co-DM | operation id and coarse candidate statuses after every response is terminal |
-| `character.multi_operation.source_cost_consumed` | source owner + DM/co-DM | operation id, stable leg id, closed source cost, resulting source revision; first mutation event unless self-target is combined |
+| `character.multi_operation.source_cost_consumed` | source owner + DM/co-DM | operation id, deterministic `operationId/source` operation-leg key, closed source cost, resulting source revision; first mutation event unless self-target is combined |
 | `character.multi_operation.target_applied` | target owner + source owner + DM/co-DM | viewer-projected target/combined result; changed flag/revision and character aggregate envelope are visible only to that target owner and DM/co-DM. Source projection rewrites the envelope to `semantic_operation`/operation id/null revision and removes canonical target id, changed, and result revision; target events follow immutable proposal order |
 | `character.multi_operation.finalized` | source owner + DM/co-DM | operation id, selected-count, terminal result, source/combined event identity, and no target roster or per-leg changed flags |
 | `character.multi_operation.cancelled` / `.expired` / `.failed` | authorization-shaped participants | operation id, terminal state, generic reason and safe snapshots only |
@@ -95,6 +95,9 @@ Both HTTP and WebSocket projection remove that discriminator before returning an
 A reviewed `allowTargetNoOp=true` healing leg emits its target-owner applied event with no revision and produces
 no invalidation; the source event/result does not reveal which leg was full. Rejected finalization emits no
 workflow, character, projection, audit, or outbox event.
+Authorized result DTOs reuse each persisted event row's campaign sequence. Changed source/target/combined legs
+may expose it as the character operation watermark; a revisionless allowed no-op exposes only `eventSequence`
+and never claims a canonical watermark.
 
 DM/co-DM are intentional observers for support, abuse moderation, lifecycle diagnosis, and audit. Their bounded
 management projection still excludes character documents, hidden resource values, and unrelated co-target

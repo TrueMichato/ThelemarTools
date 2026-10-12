@@ -150,12 +150,12 @@ describe("Second Wind / Action Surge uses scale with level", () => {
 		expect(state.getFeature("Second Wind").uses.max).toBe(4);
 	});
 
-	it("keeps the mirrored resource in sync with the corrected max", () => {
+	it("keeps the synthetic Second Wind pool scaled without a generic mirror", () => {
 		const state = buildFighter(10, "XPHB");
 		addSecondWind(state);
 		state.getSecondWindUsesRemaining(); // trigger ensure
-		const resource = state.getResources().find(r => r.name === "Second Wind");
-		expect(resource).toBeDefined();
+		const resource = state.getSyntheticCombatResources().find(r => r.kind === "secondWind");
+		expect(state.getResources().find(r => r.name === "Second Wind")).toBeUndefined();
 		expect(resource.max).toBe(4);
 		expect(resource.current).toBe(4);
 	});
