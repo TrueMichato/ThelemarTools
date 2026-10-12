@@ -556,6 +556,125 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		expect(finalEvents.at(-1).payload).toEqual({});
 	});
 
+	it("binds duplicate-named owned invitations to exact current target refs without leaking them", async () => {
+		const ctx = await pFixture();
+		const duplicateA = await ctx.pCharacter({actor: ctx.targetOwner, name: "Twin"});
+		const duplicateB = await ctx.pCharacter({actor: ctx.targetOwner, name: "Twin"});
+		const proposed = await ctx.pPropose({
+			targetRefs: [duplicateA.targetRef, duplicateB.targetRef],
+		});
+		const ownerDetail = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(ownerDetail.operation.targets.map(target => ({
+			name: target.presentation.targetName,
+			targetRef: target.targetRef,
+		}))).toEqual([
+			{name: "Twin", targetRef: duplicateA.targetRef},
+			{name: "Twin", targetRef: duplicateB.targetRef},
+		]);
+		for (const target of ownerDetail.operation.targets) {
+			const ownerTruth = await ctx.store.pGetCharacter({
+				accountId: ctx.targetOwner.account.id,
+				characterId: target.targetRef === duplicateA.targetRef ? duplicateA.id : duplicateB.id,
+			});
+			expect(ownerTruth.kind).toBe("owner_truth");
+			expect(ownerTruth.targetRef).toBe(target.targetRef);
+		}
+		const sourceDetail = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(JSON.stringify(sourceDetail)).not.toContain(duplicateA.targetRef);
+		expect(JSON.stringify(sourceDetail)).not.toContain(duplicateB.targetRef);
+		const dmDetail = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(JSON.stringify(dmDetail)).not.toContain(duplicateA.targetRef);
+		expect(JSON.stringify(dmDetail)).not.toContain(duplicateB.targetRef);
+		await ctx.store.pArchiveCharacter({
+			accountId: ctx.targetOwner.account.id,
+			characterId: duplicateA.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const afterArchive = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.targetOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(afterArchive.operation.targets
+			.find(target => target.invitationId === proposed.operation.targets[0].invitationId))
+			.not.toHaveProperty("targetRef");
+		expect(afterArchive.operation.targets
+			.find(target => target.invitationId === proposed.operation.targets[1].invitationId).targetRef)
+			.toBe(duplicateB.targetRef);
+	});
+
+	it("rechecks membership after awaited inbox and outgoing work", async () => {
+		for (const method of ["pListMultiTargetInbox", "pListMultiTargetOutgoing"]) {
+			const ctx = await pFixture();
+			await ctx.pPropose();
+			const originalExpire = ctx.store.pExpireMultiTargetOperations.bind(ctx.store);
+			ctx.store.pExpireMultiTargetOperations = async args => {
+				const result = await originalExpire(args);
+				ctx.store._memberships.get(`${ctx.campaign.id}::${ctx.dm.account.id}`).status = "removed";
+				return result;
+			};
+			await expect(ctx.store[method]({
+				accountId: ctx.dm.account.id,
+				campaignId: ctx.campaign.id,
+				...(method === "pListMultiTargetInbox" ? {mode: "recovery"} : {}),
+			})).rejects.toMatchObject({code: "CAMPAIGN_NOT_FOUND"});
+		}
+	});
+
+	it("shapes source workflow labels from current target visibility and lifecycle", async () => {
+		const ctx = await pFixture();
+		const proposed = await ctx.pPropose({targetRefs: [ctx.targetA.targetRef]});
+		const sourceBefore = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(sourceBefore.operation.targets[0].presentation.targetName).toBe("Target A");
+		ctx.store._characters.get(ctx.targetA.id).projectionPolicy = {version: 1, preset: "private", overrides: {}};
+		const sourcePrivate = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(sourcePrivate.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		const outgoing = await ctx.store.pListMultiTargetOutgoing({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		expect(outgoing.operations[0].targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		const sourceReplay = (await ctx.store.pListVisibleEvents({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		})).find(event =>
+			event.type === "character.multi_operation.target_requested"
+			&& event.payload.invitationId === proposed.operation.targets[0].invitationId);
+		expect(sourceReplay.payload.presentation.targetName).toBe("Campaign character unavailable");
+		expect(JSON.stringify(sourceReplay)).not.toContain(ctx.targetA.targetRef);
+		await ctx.store.pArchiveCharacter({
+			accountId: ctx.targetOwner.account.id,
+			characterId: ctx.targetA.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const sourceArchived = await ctx.store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(sourceArchived.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+	});
+
 	it("persists an immediately-ready proposal event in the command receipt", async () => {
 		const ctx = await pFixture();
 		const commandId = crypto.randomUUID();
@@ -1050,7 +1169,79 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		expect(operation.status).toBe("cancelled");
 		expect(operation.terminalEventId).toEqual(expect.any(String));
 		expect(targets).toHaveLength(1);
-		if (side === "target") expect(targets[0].responseState).toBe("revoked");
+		if (side === "target") {
+			expect(targets[0].responseState).toBe("revoked");
+			const detail = await ctx.store.pGetMultiTargetOperation({
+				accountId: ctx.targetOwner.account.id,
+				campaignId: ctx.campaign.id,
+				operationId: operation.id,
+			});
+			expect(detail.operation.targets[0]).not.toHaveProperty("targetRef");
+		}
+	});
+
+	it.each(["archive", "move"])("keeps a live parent when a second source-owned candidate is %sd after peer approval", async lifecycle => {
+		const ctx = await pFixture();
+		const sourceOwnedTarget = await ctx.pCharacter({
+			actor: ctx.sourceOwner,
+			name: "Source-owned candidate",
+		});
+		const proposed = await ctx.pPropose({
+			targetRefs: [sourceOwnedTarget.targetRef, ctx.targetA.targetRef],
+		});
+		const sourceOwnedInvitation = proposed.operation.targets.find(target =>
+			target.presentation.targetName === "Source-owned candidate");
+		const peerInvitation = proposed.operation.targets.find(target =>
+			target.presentation.targetName === "Target A");
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: peerInvitation.invitationId,
+		});
+		if (lifecycle === "archive") {
+			await ctx.store.pArchiveCharacter({
+				accountId: ctx.sourceOwner.account.id,
+				characterId: sourceOwnedTarget.id,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		} else {
+			const destination = (await ctx.store.pCreateCampaign({
+				accountId: ctx.sourceOwner.account.id,
+				name: "Source-owned lifecycle destination",
+				idempotencyKey: crypto.randomUUID(),
+			})).campaign;
+			const rulesVersion = (await ctx.store.pCreateRulesVersion({
+				accountId: ctx.sourceOwner.account.id,
+				campaignId: destination.id,
+				schemaVersion: 1,
+				rules: {},
+				idempotencyKey: crypto.randomUUID(),
+			})).rulesVersion;
+			await ctx.store.pActivateRulesVersion({
+				accountId: ctx.sourceOwner.account.id,
+				campaignId: destination.id,
+				rulesVersionId: rulesVersion.id,
+				idempotencyKey: crypto.randomUUID(),
+			});
+			await ctx.store.pMoveCharacter({
+				accountId: ctx.sourceOwner.account.id,
+				characterId: sourceOwnedTarget.id,
+				campaignId: destination.id,
+				rulesVersionId: rulesVersion.id,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		}
+		const operation = ctx.store._semanticOperations.get(proposed.operation.operationId);
+		expect(operation.status).toBe("awaiting_source_selection");
+		expect(ctx.store._getMultiTargetTargets(operation.id)).toEqual([
+			expect.objectContaining({
+				invitationId: sourceOwnedInvitation.invitationId,
+				responseState: "revoked",
+			}),
+			expect.objectContaining({
+				invitationId: peerInvitation.invitationId,
+				responseState: "approved",
+			}),
+		]);
 	});
 
 	it("cancels a live multi-target parent before purging one target owner and continues the due batch", async () => {

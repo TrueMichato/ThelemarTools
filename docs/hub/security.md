@@ -152,6 +152,11 @@ exhaustion is an explicit 503, not hidden missing history. This capability is de
   Source-visible target-applied projections also replace the character aggregate id/revision envelope with the
   semantic operation id and null revision, so a null no-op revision cannot be distinguished from a changed
   target or used to recover canonical target identity.
+- Multi-target recovery exposes an existing opaque target ref only to the currently authorized pinned owner of
+  that exact leg, for equality against fresh owner truth. Source, DM-only, co-target, and unrelated projections
+  do not receive it. Current sharing/lifecycle truth re-shapes proposal labels and replay; immutable snapshots
+  never restore a hidden canonical name. Inbox/outgoing membership reads are transactionally fenced against
+  concurrent access loss.
 - Multi-target proposal caps which cross campaign tenants for the same account use a dedicated seed-10 quota
   advisory-lock namespace. Proposal creation locks the source account and all distinct target-owner accounts in
   ascending UUID order before campaign authority, so two campaigns cannot race past the global

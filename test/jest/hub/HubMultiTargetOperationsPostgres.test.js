@@ -319,12 +319,20 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 				arguments: {amount: 4},
 			},
 		});
+		expect(ownerDetail.operation.targets[0].targetRef).toBe(ctx.targets[0].targetRef);
+		const ownerTruth = await store.pGetCharacter({
+			accountId: ctx.targetOwners[0].account.id,
+			characterId: ctx.targets[0].id,
+		});
+		expect(ownerTruth).toMatchObject({kind: "owner_truth", targetRef: ctx.targets[0].targetRef});
+		expect(JSON.stringify(finalized.operation.targets)).not.toContain(ctx.targets[0].targetRef);
 		const dmDetail = await store.pGetMultiTargetOperation({
 			accountId: ctx.dm.account.id,
 			campaignId: ctx.campaign.id,
 			operationId: proposed.operation.operationId,
 		});
 		expect(dmDetail.operation.sourceResult).toEqual(finalized.operation.sourceResult);
+		expect(JSON.stringify(dmDetail.operation.targets)).not.toContain(ctx.targets[0].targetRef);
 		expect(dmDetail.operation.targets).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				result: expect.objectContaining({
@@ -347,6 +355,54 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 			applied_targets: targetCount,
 			leg_count: targetCount,
 		});
+	});
+
+	test("shapes source workflow labels and replay from current target visibility", async () => {
+		const ctx = await pFixture({targetCount: 1});
+		const proposed = await ctx.pPropose();
+		const sourceBefore = await store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(sourceBefore.operation.targets[0].presentation.targetName).toBe("Target 0");
+		await pool.query(`
+			UPDATE hub.characters
+			SET projection_policy = '{"version":1,"preset":"private","overrides":{}}'::jsonb,
+				projection_revision = projection_revision + 1
+			WHERE id = $1
+		`, [ctx.targets[0].id]);
+		const sourcePrivate = await store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(sourcePrivate.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		expect(JSON.stringify(sourcePrivate)).not.toContain(ctx.targets[0].targetRef);
+		const outgoing = await store.pListMultiTargetOutgoing({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		expect(outgoing.operations[0].targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		const sourceReplay = (await store.pListVisibleEvents({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		})).find(event =>
+			event.type === "character.multi_operation.target_requested"
+			&& event.payload.invitationId === proposed.operation.targets[0].invitationId);
+		expect(sourceReplay.payload.presentation.targetName).toBe("Campaign character unavailable");
+		expect(JSON.stringify(sourceReplay)).not.toContain(ctx.targets[0].targetRef);
+		await store.pArchiveCharacter({
+			accountId: ctx.targetOwners[0].account.id,
+			characterId: ctx.targets[0].id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const sourceArchived = await store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(sourceArchived.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 	});
 
 	test("recovers own responded and terminal invitations without weakening pending fairness", async () => {
@@ -412,6 +468,113 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 				}),
 			}),
 		]));
+		const pagedInvitationIds = [];
+		let cursor = null;
+		do {
+			const page = await store.pListMultiTargetInbox({
+				accountId: ctx.targetOwners[0].account.id,
+				campaignId: ctx.campaign.id,
+				mode: "recovery",
+				cursor,
+				limit: 1,
+			});
+			pagedInvitationIds.push(...page.invitations.map(invitation => invitation.invitationId));
+			cursor = page.nextCursor;
+		} while (cursor);
+		expect(pagedInvitationIds).toEqual(expect.arrayContaining(
+			proposed.operation.targets.map(target => target.invitationId),
+		));
+		expect(new Set(pagedInvitationIds).size).toBe(proposed.operation.targets.length);
+	});
+
+	test("binds duplicate-named owned invitations to exact current target refs without leaking them", async () => {
+		const ctx = await pFixture({targetCount: 1});
+		const duplicateA = await pCharacter({
+			actor: ctx.targetOwners[0],
+			campaign: ctx.campaign,
+			name: "Twin",
+		});
+		const duplicateB = await pCharacter({
+			actor: ctx.targetOwners[0],
+			campaign: ctx.campaign,
+			name: "Twin",
+		});
+		const proposed = await ctx.pPropose({
+			targetRefs: [duplicateA.targetRef, duplicateB.targetRef],
+		});
+		const ownerDetail = await store.pGetMultiTargetOperation({
+			accountId: ctx.targetOwners[0].account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(ownerDetail.operation.targets.map(target => ({
+			name: target.presentation.targetName,
+			targetRef: target.targetRef,
+		}))).toEqual([
+			{name: "Twin", targetRef: duplicateA.targetRef},
+			{name: "Twin", targetRef: duplicateB.targetRef},
+		]);
+		for (const [target, character] of ownerDetail.operation.targets.map((target, index) => [
+			target,
+			index === 0 ? duplicateA : duplicateB,
+		])) {
+			const ownerTruth = await store.pGetCharacter({
+				accountId: ctx.targetOwners[0].account.id,
+				characterId: character.id,
+			});
+			expect(ownerTruth).toMatchObject({kind: "owner_truth", targetRef: target.targetRef});
+		}
+		const recovery = await store.pListMultiTargetInbox({
+			accountId: ctx.targetOwners[0].account.id,
+			campaignId: ctx.campaign.id,
+			mode: "recovery",
+		});
+		expect(recovery.invitations.map(invitation => invitation.targetRef)).toEqual(expect.arrayContaining([
+			duplicateA.targetRef,
+			duplicateB.targetRef,
+		]));
+		const responded = await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: proposed.operation.targets[0].invitationId,
+		});
+		expect(responded.invitation.targetRef).toBe(duplicateA.targetRef);
+		const sourceDetail = await store.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(JSON.stringify(sourceDetail)).not.toContain(duplicateA.targetRef);
+		expect(JSON.stringify(sourceDetail)).not.toContain(duplicateB.targetRef);
+		const targetEvent = (await store.pListVisibleEvents({
+			accountId: ctx.targetOwners[0].account.id,
+			campaignId: ctx.campaign.id,
+		})).find(event =>
+			event.type === "character.multi_operation.target_requested"
+			&& event.payload.invitationId === proposed.operation.targets[0].invitationId);
+		expect(targetEvent.payload.targetDisplaySnapshot.targetRef).toBe(duplicateA.targetRef);
+		const sourceEvent = (await store.pListVisibleEvents({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+		})).find(event =>
+			event.type === "character.multi_operation.target_requested"
+			&& event.payload.invitationId === proposed.operation.targets[0].invitationId);
+		expect(JSON.stringify(sourceEvent)).not.toContain(duplicateA.targetRef);
+		await store.pArchiveCharacter({
+			accountId: ctx.targetOwners[0].account.id,
+			characterId: duplicateA.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const afterArchive = await store.pGetMultiTargetOperation({
+			accountId: ctx.targetOwners[0].account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		});
+		expect(afterArchive.operation.targets
+			.find(target => target.invitationId === proposed.operation.targets[0].invitationId))
+			.not.toHaveProperty("targetRef");
+		expect(afterArchive.operation.targets
+			.find(target => target.invitationId === proposed.operation.targets[1].invitationId).targetRef)
+			.toBe(duplicateB.targetRef);
 	});
 
 	test("uses the bounded owner recovery index for recent invitation history", async () => {
@@ -646,6 +809,103 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 			expect.objectContaining({invitationId: proposed.operation.targets[1].invitationId}),
 		]);
 		expect(removedExport.multiTargetOperations[0]).not.toHaveProperty("candidateCount");
+	});
+
+	test.each(["inbox", "outgoing"])("fences %s authorization and snapshot across concurrent co-DM removal", async surface => {
+		const ctx = await pFixture({targetCount: 1});
+		const observer = await pActor(`Multi PG ${surface} observer`);
+		const observerMembership = await pJoin({
+			dm: ctx.dm,
+			campaign: ctx.campaign,
+			actor: observer,
+			role: "co_dm",
+		});
+		const proposed = await ctx.pPropose();
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: proposed.operation.targets[0].invitationId,
+		});
+
+		let resolveRead;
+		const readReached = new Promise(resolve => resolveRead = resolve);
+		let resumeRead;
+		const readResume = new Promise(resolve => resumeRead = resolve);
+		let isPaused = false;
+		const pMaybePauseRead = async (query, args, fnQuery) => {
+			const sql = typeof query === "string" ? query : query?.text || "";
+			const isTargetRead = surface === "inbox"
+				? sql.includes("AS recovery_bucket")
+				: sql.includes("FROM hub.semantic_operations")
+					&& sql.includes("ORDER BY created_at, id");
+			if (!isPaused && isTargetRead) {
+				isPaused = true;
+				resolveRead();
+				await readResume;
+			}
+			return fnQuery(query, ...args);
+		};
+		const barrierPool = {
+			on: (...args) => pool.on(...args),
+			query: (query, ...args) => pMaybePauseRead(
+				query,
+				args,
+				(...queryArgs) => pool.query(...queryArgs),
+			),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: (query, ...args) => pMaybePauseRead(
+						query,
+						args,
+						(...queryArgs) => client.query(...queryArgs),
+					),
+					release: () => client.release(),
+				};
+			},
+		};
+		const barrierStore = new PostgresHubStore({
+			pool: barrierPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		const readPromise = surface === "inbox"
+			? barrierStore.pListMultiTargetInbox({
+				accountId: observer.account.id,
+				campaignId: ctx.campaign.id,
+				mode: "recovery",
+			})
+			: barrierStore.pListMultiTargetOutgoing({
+				accountId: observer.account.id,
+				campaignId: ctx.campaign.id,
+			});
+		await readReached;
+		let isRemovalSettled = false;
+		const removalPromise = store.pRemoveMember({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: observerMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		}).finally(() => isRemovalSettled = true);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(isRemovalSettled).toBe(false);
+		resumeRead();
+		const snapshot = await readPromise;
+		const operation = surface === "inbox"
+			? snapshot.invitations[0]
+			: snapshot.operations[0];
+		expect(operation.operationStatus || operation.status).toBe("awaiting_source_selection");
+		expect(JSON.stringify(operation)).not.toContain("resultingCharacterRevision");
+		await removalPromise;
+		await expect(surface === "inbox"
+			? store.pListMultiTargetInbox({
+				accountId: observer.account.id,
+				campaignId: ctx.campaign.id,
+				mode: "recovery",
+			})
+			: store.pListMultiTargetOutgoing({
+				accountId: observer.account.id,
+				campaignId: ctx.campaign.id,
+			})).rejects.toMatchObject({code: "CAMPAIGN_NOT_FOUND"});
 	});
 
 	test("fails protocols 3/4/5 and duplicate targets without workflow evidence", async () => {
@@ -2106,6 +2366,118 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 		} finally {
 			store = originalStore;
 		}
+	});
+
+	test.each(["archive", "move"])("keeps a live parent when a second source-owned candidate is %sd after peer approval", async lifecycle => {
+		const ctx = await pFixture({targetCount: 1});
+		const sourceOwnedTarget = await pCharacter({
+			actor: ctx.sourceOwner,
+			campaign: ctx.campaign,
+			name: "Source-owned candidate",
+		});
+		const proposed = await ctx.pPropose({
+			targetRefs: [sourceOwnedTarget.targetRef, ctx.targets[0].targetRef],
+		});
+		const sourceOwnedInvitation = proposed.operation.targets.find(target =>
+			target.presentation.targetName === "Source-owned candidate");
+		const peerInvitation = proposed.operation.targets.find(target =>
+			target.presentation.targetName === "Target 0");
+		await ctx.pRespond({
+			operationId: proposed.operation.operationId,
+			invitationId: peerInvitation.invitationId,
+		});
+
+		if (lifecycle === "archive") {
+			await expect(store.pArchiveCharacter({
+				accountId: ctx.sourceOwner.account.id,
+				characterId: sourceOwnedTarget.id,
+				idempotencyKey: crypto.randomUUID(),
+			})).resolves.toBeDefined();
+		} else {
+			const destination = await pCreateCampaign({
+				dm: ctx.sourceOwner,
+				name: "Source-owned lifecycle destination",
+			});
+			await expect(store.pMoveCharacter({
+				accountId: ctx.sourceOwner.account.id,
+				characterId: sourceOwnedTarget.id,
+				campaignId: destination.campaign.id,
+				rulesVersionId: destination.rulesVersion.id,
+				idempotencyKey: crypto.randomUUID(),
+			})).resolves.toMatchObject({character: {campaignId: destination.campaign.id}});
+		}
+		const persisted = await pool.query(`
+			SELECT operation.status, target.invitation_id, target.response_state
+			FROM hub.semantic_operations operation
+			JOIN hub.semantic_operation_targets target ON target.operation_id = operation.id
+			WHERE operation.id = $1
+			ORDER BY target.ordinal
+		`, [proposed.operation.operationId]);
+		expect(persisted.rows).toEqual([
+			expect.objectContaining({
+				status: "awaiting_source_selection",
+				invitation_id: sourceOwnedInvitation.invitationId,
+				response_state: "revoked",
+			}),
+			expect.objectContaining({
+				status: "awaiting_source_selection",
+				invitation_id: peerInvitation.invitationId,
+				response_state: "approved",
+			}),
+		]);
+	});
+
+	test("rejects invalid source-owned and peer consent states under migration 0013", async () => {
+		const ctx = await pFixture({targetCount: 1});
+		const sourceOwnedTarget = await pCharacter({
+			actor: ctx.sourceOwner,
+			campaign: ctx.campaign,
+			name: "Source-owned constraint",
+		});
+		const proposed = await ctx.pPropose({
+			targetRefs: [sourceOwnedTarget.targetRef, ctx.targets[0].targetRef],
+		});
+		const sourceOwnedInvitation = proposed.operation.targets.find(target =>
+			target.presentation.targetName === "Source-owned constraint");
+		const peerInvitation = proposed.operation.targets.find(target =>
+			target.presentation.targetName === "Target 0");
+		const pExpect23514 = async fn => {
+			const client = await pool.connect();
+			try {
+				await client.query("BEGIN");
+				try {
+					await fn(client);
+					await expect(client.query("SET CONSTRAINTS ALL IMMEDIATE"))
+						.rejects.toMatchObject({code: "23514"});
+				} catch (error) {
+					expect(error).toMatchObject({code: "23514"});
+				}
+			} finally {
+				await client.query("ROLLBACK").catch(() => undefined);
+				client.release();
+			}
+		};
+		await pExpect23514(client => client.query(`
+			UPDATE hub.semantic_operation_targets
+			SET response_state = 'pending',
+				response_actor_account_id = NULL,
+				responded_at = NULL
+			WHERE operation_id = $1 AND invitation_id = $2
+		`, [proposed.operation.operationId, sourceOwnedInvitation.invitationId]));
+		await pExpect23514(client => client.query(`
+			UPDATE hub.semantic_operation_targets
+			SET response_state = 'approved',
+				response_actor_account_id = $3,
+				responded_at = now()
+			WHERE operation_id = $1 AND invitation_id = $2
+		`, [proposed.operation.operationId, sourceOwnedInvitation.invitationId, ctx.sourceOwner.account.id]));
+		await pExpect23514(client => client.query(`
+			UPDATE hub.semantic_operation_targets
+			SET response_state = 'approved_by_source',
+				response_actor_account_id = $3,
+				responded_at = now()
+			WHERE operation_id = $1 AND invitation_id = $2
+		`, [proposed.operation.operationId, peerInvitation.invitationId, ctx.sourceOwner.account.id]));
 	});
 
 	test("cancels a live two-owner parent before purging one target owner and continues the due batch", async () => {

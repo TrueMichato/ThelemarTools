@@ -396,7 +396,7 @@ capability is default-off and has no production template or Character Sheet UI i
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/invitations/:invitationId/respond` | Current pinned target owner for that invitation; DM/co-DM reject only | command id and `approve` or `reject` | One immutable terminal leg response; exact replay returns the same response/event ids |
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/finalize` | Current source owner | command id and exact ordered unique selected invitation ids; empty list means cancel | Empty list cancels with no character mutation; non-empty approved/current subset commits one source cost and all selected legs atomically |
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/cancel` | Current source owner or DM/co-DM | contract/command id | Cancels from either live collection state, terminalizes each live leg in proposal order, consumes no cost, and writes no character |
-| `GET /api/campaigns/:campaignId/multi-target-operations/inbox` | Current target participant or DM/co-DM | optional cursor, limit <=100, and `mode=pending|recovery` | Default `pending` preserves oldest-pending fairness. `recovery` returns pending first, then only the viewer's responded live/recent retained legs; target owners never receive co-target identity/count/decision |
+| `GET /api/campaigns/:campaignId/multi-target-operations/inbox` | Current target participant or DM/co-DM | optional cursor, limit <=100, and `mode=pending|recovery` | Default `pending` preserves oldest-pending fairness. `recovery` returns pending first, then only the viewer's responded live/recent retained legs; the current pinned owner receives that own leg's opaque `targetRef`; target owners never receive co-target identity/count/decision |
 | `GET /api/campaigns/:campaignId/multi-target-operations/outgoing` | Current source participant or DM/co-DM | optional bounded cursor and limit <=100 | Source sees authorized labels, aggregate coarse status, and no per-target applicability result |
 | `GET /api/campaigns/:campaignId/multi-target-operations/:operationId` | Current participant or DM/co-DM | operation id | Viewer-shaped detail; unrelated users receive `ACTION_NOT_FOUND` |
 
@@ -425,6 +425,12 @@ traffic cannot starve an older invitation.
 Recovery mode keeps that pending prefix, then orders the viewer's own non-pending live/recent legs by target-row
 update time descending with operation/character tie-breakers. Migration 0012 adds the partial owner-recovery
 index over existing migration-0011 columns; no new workflow data is stored.
+Migration 0013 corrects only the database validator so lifecycle terminalization of one source-owned candidate
+does not roll back while another eligible leg keeps the parent live; it adds no API or authority.
+The cursor encodes database microsecond time exactly, avoiding skipped same-transaction legs. Inbox and outgoing
+authorization are fenced in one repeatable-read membership snapshot. Display labels are recomputed from current
+authorized projection/lifecycle state; hidden or unavailable targets use `Campaign character unavailable`
+instead of the immutable proposal name.
 
 The source-account and target-owner limits are global across campaigns. Proposal creation serializes them with a
 dedicated seed-10 quota advisory lock for the source account and every distinct target-owner account, acquired

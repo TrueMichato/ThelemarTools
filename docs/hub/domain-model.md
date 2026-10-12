@@ -4,7 +4,7 @@
 > **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0012. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0013. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 
@@ -51,6 +51,7 @@ security boundary.
 | `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, expanded multi-target command types, response invitation identity, response/event ids | one-target and protocol-6 multi-target command replay active |
 | `semantic_multi_target_usage` | Irreversible schema-use high-water marker | singleton; no history FK; runtime `SELECT, INSERT` only; backup `SELECT`; normal cleanup never deletes it | inserted transactionally on first accepted proposal; fences true pre-0011 rollback permanently |
 | `semantic_operation_targets_owner_recovery_idx` | Partial target-owner participant-recovery index (migration 0012) | existing migration-0011 columns only; non-pending rows ordered by campaign/owner/update/id | supports bounded fresh-device recovery; stores no new authority or history |
+| migration 0013 validator replacement | Forward-only replacement of the deferred multi-target shape validator | source-owned lifecycle-terminal responses are legal inside a still-live parent; invalid source/peer consent and all selection/finalization constraints remain | prevents archive/move/member lifecycle rollback; no schema/data shape change |
 | `transfers` | Asset-transfer workflow | exactly one source and target container, status, escrow/request payload | direct authority is created as committed; approval-bound escrow is reserved -> committed/rejected/cancelled; player stash withdrawal is proposed -> committed/rejected/cancelled |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |

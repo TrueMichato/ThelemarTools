@@ -149,9 +149,9 @@ const MUTATIONS = [
 	},
 	{
 		name: "invitation-safe-presentation-omitted",
-		file: "server/src/memory-hub-store.js",
-		from: "presentation: getMultiTargetInvitationPresentation({operation, target}),",
-		to: "presentation: {targetName: target.targetDisplaySnapshot?.identity?.name || \"Campaign character\", effectLabel: operation.effectDisplaySnapshot?.label || \"Campaign effect\"},",
+		file: "server/src/multi-target-operation-authority.js",
+		from: "sourceName: effectPresentation?.sourceName || \"A party member\",",
+		to: "sourceName: \"\",",
 		pattern: "keeps two invitations",
 	},
 	{
@@ -174,6 +174,27 @@ const MUTATIONS = [
 		from: "eventSequence: target.legEventSequence,",
 		to: "eventSequence: null,",
 		pattern: "permits a reviewed target no-op",
+	},
+	{
+		name: "owner-target-ref-omitted",
+		file: "server/src/multi-target-operation-authority.js",
+		from: "return target.targetRef;",
+		to: "return null;",
+		pattern: "binds duplicate-named",
+	},
+	{
+		name: "source-current-visibility-bypassed",
+		file: "server/src/multi-target-operation-authority.js",
+		from: "const peerName = isSource\n\t\t? computePeerProfile({character: currentCharacter})?.data?.identity?.name\n\t\t: null;",
+		to: "const peerName = isSource ? target.targetDisplaySnapshot?.identity?.name : null;",
+		pattern: "shapes source workflow",
+	},
+	{
+		name: "inbox-membership-recheck-omitted",
+		file: "server/src/memory-hub-store.js",
+		from: "const currentMembership = this._getMembership({\n\t\t\taccountId,\n\t\t\tcampaignId,\n\t\t\troles: [\"dm\", \"co_dm\", \"player\"],\n\t\t\tisRequireActiveCampaign: false,\n\t\t});",
+		to: "const currentMembership = membership;",
+		pattern: "rechecks membership",
 	},
 ];
 

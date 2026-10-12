@@ -60,6 +60,11 @@
       "phase": "expand",
       "previousAppCompatible": true,
       "notes": "Adds only the partial target-owner participant-recovery index over existing migration-0011 columns. Previous applications ignore the index; it changes no rows, authority, protocol, capability, retention, or rollback marker semantics."
+    },
+    "0013": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Replaces only the deferred multi-target shape validator so source-owned candidate legs may enter existing lifecycle-terminal response states while another eligible leg keeps the parent live. Tables, columns, indexes, persisted rows, privileges, protocol, capability, retention, selection, and finalization semantics are unchanged."
     }
   }
 }

@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through additive multi-target participant-recovery migration 0012
+> **Status:** Implemented through multi-target source-owned lifecycle validator migration 0013
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -110,6 +110,10 @@ Current migrations:
   migration does not add runtime routes, stores, protocol 6, capability advertisement, or enablement.
 - 0012 additive partial target-owner recovery index over existing migration-0011 columns. It stores no new
   authority/history and changes no protocol, capability, audience, retention, or rollback-marker semantics.
+- 0013 forward-only validator replacement. It permits existing lifecycle-terminal response states for a
+  source-owned candidate while another eligible leg keeps the parent live, while retaining source-only
+  `approved_by_source`, invalid source `pending`/peer `approved`, peer auto-approval prohibition, and every
+  selection/finalization constraint.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
@@ -143,13 +147,15 @@ Terminal 90-day cleanup and purge may still delete history in the explicit paren
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
 Protocol v3 never resolves those legacy bodies. Migration 0012 adds only a partial target-owner recovery index
 over existing migration-0011 columns; it changes no runtime authority, protocol, capability, retention, or
-rollback marker semantics. The disposable PostgreSQL stack applies 0001-0012, grants the
-runtime role, boots the production image against required version 0012, and runs semantic role/replay/
+rollback marker semantics. Migration 0013 replaces only the validator function; it adds no schema/data shape.
+The disposable PostgreSQL stack applies 0001-0013, grants the
+runtime role, boots the production image against required version 0013, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
 A2's immutable migration 0010 (`0010_source_cost_binding_identity.sql`) precedes ADR 0020's additive
 `0011_multi_target_semantic_operations.sql`; A3's bounded participant recovery adds
-`0012_multi_target_participant_recovery.sql`. All three migrations and policy entries are checked in.
+`0012_multi_target_participant_recovery.sql`, followed by validator repair
+`0013_multi_target_source_owned_lifecycle.sql`. All migrations and policy entries are checked in.
 The policy phase is `expand` and `previousAppCompatible: true` describes only schema-before-use: a true pre-0011
 binary is operationally compatible only while the singleton `hub.semantic_multi_target_usage` marker is absent
 and normalized history counts remain zero. The first

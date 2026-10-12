@@ -508,6 +508,24 @@ legs first, followed by only that viewer's responded live or retained terminal l
 exclusive cursor and the existing 90-day workflow retention. Migration 0012,
 `0012_multi_target_participant_recovery.sql` adds only the partial target-owner recovery index required by that
 bounded query; it changes no authority, audience, protocol, capability, retention, or rollback-marker semantics.
+Migration 0013 replaces only the migration-0011 deferred validator: a source-owned candidate may enter an
+existing lifecycle-terminal state (`rejected`, `expired`, `revoked`, or `declined`) while another eligible leg
+keeps the parent live. Source-owned `pending`/peer `approved` and peer `approved_by_source` remain invalid;
+selection and finalization checks are unchanged.
+Recovery cursors preserve PostgreSQL microsecond timestamps rather than round-tripping through JavaScript
+milliseconds. Inbox/outgoing reads hold current membership authority for one repeatable-read snapshot, so a
+concurrent removal cannot publish newly committed privileged workflow data through a stale co-DM role.
+
+Only the currently authorized pinned owner of one target leg receives that leg's existing opaque `targetRef`
+in inbox/detail/respond DTOs. The client binds it by exact equality to a freshly fetched
+`owner_truth.targetRef`; names, ordinals, event scans, and UUID decoding are never identity authority. Source,
+DM-only, co-target, and unrelated projections receive no target ref. Move/archive/removal/ref rotation makes the
+old ref unavailable or mismatched before another response can be authorized.
+
+Immutable proposal snapshots remain internal audit/history facts. Viewer DTOs and replayed target-request events
+derive the displayed target label from current authorization and lifecycle state: owner/DM canonical identity,
+currently shared peer identity for the source, or the neutral `Campaign character unavailable`. Hiding identity
+or losing lifecycle authority therefore cannot replay the old canonical proposal name.
 
 Rollout order: A1/A2 foundations, A3 migration/server with capability off, protocol-6 A4 clients, A5 templates,
 Memory/PostgreSQL and real-stack proof, one allowlisted campaign/template canary, then measured expansion.

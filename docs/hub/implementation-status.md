@@ -183,7 +183,8 @@ responses, source-finalization consent for source-owned legs, collection expiry,
 source-selected subset, and one-cost/all-selected-leg atomic finalization. Reviewed multi-target healing
 templates may privately record a full-HP selected leg as applied/no-change while consuming the single source
 cost. Wave A3 implements migration 0011 after A2's source-cost binding migration 0010, additive migration 0012
-for the bounded target-owner recovery index, protocol 6, default-off exact-campaign capability, HTTP/event DTOs,
+for the bounded target-owner recovery index, and migration 0013 for source-owned lifecycle validation, protocol 6,
+default-off exact-campaign capability, HTTP/event DTOs,
 Memory/PostgreSQL state-machine authority, consent/finalization/cancel, lifecycle/expiry/retention, global quota
 locks, permanent global/per-campaign usage markers, participant recovery, and marker-aware rollback preflight. **No multi-target
 production capability is enabled:** full Character Sheet UX and production templates remain A4/A5, and the

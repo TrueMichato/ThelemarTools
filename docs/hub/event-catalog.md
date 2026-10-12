@@ -78,7 +78,7 @@ Character Sheet workflow.
 | Event | Audience | Minimal payload and ordering |
 |---|---|---|
 | `character.multi_operation.proposed` | source owner + DM/co-DM | operation id, response/finalization deadlines, candidate count, safe source/effect summary; never the complete private target set |
-| `character.multi_operation.target_requested` | target owner + source owner + DM/co-DM | viewer-projected operation/invitation data; target sees only this leg, source sees authorized label/coarse status |
+| `character.multi_operation.target_requested` | target owner + source owner + DM/co-DM | viewer-projected operation/invitation data; current pinned target owner may receive that own leg's opaque target ref, source sees only a current authorized/neutral label and coarse status |
 | `character.multi_operation.target_responded` | target owner + source owner + DM/co-DM | viewer-projected approved/rejected/expired/revoked state; no rationale, hidden target truth, or co-target identity/decision |
 | `character.multi_operation.ready` | source owner + DM/co-DM | operation id and coarse candidate statuses after every response is terminal |
 | `character.multi_operation.source_cost_consumed` | source owner + DM/co-DM | operation id, deterministic `operationId/source` operation-leg key, closed source cost, resulting source revision; first mutation event unless self-target is combined |
@@ -92,6 +92,9 @@ audience of changed projections. No event exposes the complete selected recipien
 A target-applied row retains a server-private source/target audience discriminator for the independent domain
 event lifetime, so 90-day workflow cleanup cannot degrade later target-owner replay into the source projection.
 Both HTTP and WebSocket projection remove that discriminator before returning any event.
+A replayed target-request event also reprojects the target label from current sharing/lifecycle truth and removes
+the target ref for every viewer except the currently authorized pinned owner. Proposal-time canonical names do
+not reappear after identity hiding, move, archive, ref rotation, or membership loss.
 A reviewed `allowTargetNoOp=true` healing leg emits its target-owner applied event with no revision and produces
 no invalidation; the source event/result does not reveal which leg was full. Rejected finalization emits no
 workflow, character, projection, audit, or outbox event.

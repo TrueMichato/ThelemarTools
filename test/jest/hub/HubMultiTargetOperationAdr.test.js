@@ -67,10 +67,11 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr.indexOf("quota advisory locks (seed 10)")).toBeLessThan(normalizedAdr.indexOf("campaign advisory lock (seed 6)"));
 	});
 
-	it("requires normalized migration 0011 after A2 reserves migration 0010 and additive recovery migration 0012", () => {
+	it("requires normalized migration 0011 after A2 reserves migration 0010 plus migrations 0012 and 0013", () => {
 		expect(normalizedAdr).toContain("Migration `0011_multi_target_semantic_operations.sql` is implemented");
 		expect(normalizedAdr).toContain("A2 owns the immediately preceding immutable migration `0010_source_cost_binding_identity.sql`");
 		expect(normalizedAdr).toContain("`0012_multi_target_participant_recovery.sql`");
+		expect(normalizedAdr).toContain("Migration 0013");
 		expect(normalizedAdr).toContain("`hub.semantic_operation_targets`");
 		expect(normalizedAdr).toContain("`semantic_operation_finalizations`");
 		expect(normalizedAdr).toContain("`hub.semantic_multi_target_usage`");
@@ -112,6 +113,13 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 			implementationStatus,
 			testing,
 		]) expect(record).toMatch(/\bmigration 0012\b/i);
+		for (const record of [
+			normalizedAdr,
+			migrations,
+			roadmap,
+			implementationStatus,
+			testing,
+		]) expect(record).toMatch(/\bmigration 0013\b/i);
 		expect(eventCatalog).toContain("events are implemented by both stores behind the default-off capability");
 		expect(security).toContain("Migration 0010 is reserved for A2 source-cost binding identity");
 		expect(security).toContain("migration 0011 and protocol 6 are required");

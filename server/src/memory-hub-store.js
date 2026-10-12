@@ -97,6 +97,7 @@ import {
 	getMultiTargetCursor,
 	getMultiTargetInvitationPresentation,
 	getMultiTargetLegAudience,
+	getMultiTargetOwnedTargetRef,
 	getMultiTargetOperationSummary,
 	getMultiTargetOperationsCampaignCapability,
 	getMultiTargetSourceAudience,
@@ -3560,6 +3561,42 @@ export class MemoryHubStore {
 				target?.targetOwnerAccountIdAtProposal;
 			delete sanitized.payload._sourceOwnerAccountId;
 			delete sanitized.payload._targetOwnerAccountId;
+			if (sanitized.payload?.targetDisplaySnapshot || sanitized.payload?.presentation) {
+				const currentCharacter = target
+					? this._characters.get(target.targetCharacterId) || null
+					: null;
+				const presentation = target && operation
+					? getMultiTargetInvitationPresentation({
+						operation,
+						target,
+						currentCharacter,
+						accountId,
+						role,
+					})
+					: {
+						targetName: "Campaign character unavailable",
+						sourceName: sanitized.payload?.presentation?.sourceName || "A party member",
+						effectLabel: sanitized.payload?.presentation?.effectLabel || "Campaign effect",
+						outcomeLabel: sanitized.payload?.presentation?.outcomeLabel || "Review campaign effect",
+					};
+				const targetRef = target && operation
+					? getMultiTargetOwnedTargetRef({
+						operation,
+						target,
+						currentCharacter,
+						accountId,
+					})
+					: null;
+				sanitized.payload.presentation = presentation;
+				if (sanitized.payload.targetDisplaySnapshot) {
+					sanitized.payload.targetDisplaySnapshot = {
+						identity: presentation.targetName === "Campaign character unavailable"
+							? null
+							: {name: presentation.targetName},
+						...(targetRef ? {targetRef} : {}),
+					};
+				}
+			}
 			if (
 				event.type === "character.multi_operation.target_applied"
 				&& !["dm", "co_dm"].includes(role)
@@ -4613,20 +4650,36 @@ export class MemoryHubStore {
 		const visibleTargets = (isDm || isSource
 			? targets
 			: targets.filter(target => target.targetOwnerAccountIdAtProposal === accountId))
-			.map(target => ({
-				invitationId: target.invitationId,
-				status: target.responseState,
-				presentation: getMultiTargetInvitationPresentation({operation, target}),
-				capabilities: {
-					canApprove: target.responseState === "pending"
+			.map(target => {
+				const currentCharacter = this._characters.get(target.targetCharacterId) || null;
+				const targetRef = getMultiTargetOwnedTargetRef({
+					operation,
+					target,
+					currentCharacter,
+					accountId,
+				});
+				return {
+					invitationId: target.invitationId,
+					status: target.responseState,
+					presentation: getMultiTargetInvitationPresentation({
+						operation,
+						target,
+						currentCharacter,
+						accountId,
+						role,
+					}),
+					...(targetRef ? {targetRef} : {}),
+					capabilities: {
+						canApprove: target.responseState === "pending"
 						&& target.targetOwnerAccountIdAtProposal === accountId,
-					canReject: target.responseState === "pending"
+						canReject: target.responseState === "pending"
 						&& (target.targetOwnerAccountIdAtProposal === accountId || isDm),
-				},
-				...((isDm || target.targetOwnerAccountIdAtProposal === accountId) && target.selectionState === "applied"
-					? {result: getMultiTargetTargetResult(target)}
-					: {}),
-			}));
+					},
+					...((isDm || target.targetOwnerAccountIdAtProposal === accountId) && target.selectionState === "applied"
+						? {result: getMultiTargetTargetResult(target)}
+						: {}),
+				};
+			});
 		const summary = getMultiTargetOperationSummary({
 			operation,
 			targets,
@@ -5912,6 +5965,12 @@ export class MemoryHubStore {
 			isRequireActiveCampaign: false,
 		});
 		await this.pExpireMultiTargetOperations({campaignId, limit: MULTI_TARGET_PAGE_LIMIT});
+		const currentMembership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
 		const after = parseMultiTargetCursor(
 			cursor,
 			mode === MULTI_TARGET_INBOX_MODE_PENDING ? 3 : 4,
@@ -5930,7 +5989,7 @@ export class MemoryHubStore {
 			}
 			return [
 				"recent",
-				target.updatedAt || target.respondedAt || operation.updatedAt,
+				`${new Date(target.updatedAt || target.respondedAt || operation.updatedAt).getTime() * 1_000}`,
 				operation.id,
 				target.targetCharacterId,
 			];
@@ -5956,12 +6015,12 @@ export class MemoryHubStore {
 				return parts.slice(1).join("\u0000") > after.slice(1).join("\u0000");
 			}
 			if (parts[0] === MULTI_TARGET_INBOX_MODE_PENDING) return false;
-			if (parts[1] !== after[1]) return parts[1] < after[1];
+			if (parts[1] !== after[1]) return BigInt(parts[1]) < BigInt(after[1]);
 			return parts.slice(2).join("\u0000") > after.slice(2).join("\u0000");
 		};
 		const rows = [...this._semanticOperationTargets.values()]
 			.filter(target => target.campaignId === campaignId)
-			.filter(target => ["dm", "co_dm"].includes(membership.role)
+			.filter(target => ["dm", "co_dm"].includes(currentMembership.role)
 				|| target.targetOwnerAccountIdAtProposal === accountId)
 			.map(target => ({target, operation: this._semanticOperations.get(target.operationId)}))
 			.filter(({target, operation}) => {
@@ -5988,23 +6047,39 @@ export class MemoryHubStore {
 				: isAfterRecoveryCursor(row));
 		const page = rows.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
 		return {
-			invitations: page.map(({target, operation}) => ({
-				operationId: operation.id,
-				operationStatus: operation.status,
-				invitationId: target.invitationId,
-				status: target.responseState,
-				collectionClosesAt: operation.collectionClosesAt,
-				expiresAt: operation.expiresAt,
-				presentation: getMultiTargetInvitationPresentation({operation, target}),
-				capabilities: {
-					canApprove: target.responseState === "pending"
+			invitations: page.map(({target, operation}) => {
+				const currentCharacter = this._characters.get(target.targetCharacterId) || null;
+				const targetRef = getMultiTargetOwnedTargetRef({
+					operation,
+					target,
+					currentCharacter,
+					accountId,
+				});
+				return {
+					operationId: operation.id,
+					operationStatus: operation.status,
+					invitationId: target.invitationId,
+					status: target.responseState,
+					collectionClosesAt: operation.collectionClosesAt,
+					expiresAt: operation.expiresAt,
+					presentation: getMultiTargetInvitationPresentation({
+						operation,
+						target,
+						currentCharacter,
+						accountId,
+						role: currentMembership.role,
+					}),
+					...(targetRef ? {targetRef} : {}),
+					capabilities: {
+						canApprove: target.responseState === "pending"
 						&& target.targetOwnerAccountIdAtProposal === accountId,
-					canReject: target.responseState === "pending",
-				},
-				...(target.selectionState === "applied"
-					? {result: getMultiTargetTargetResult(target)}
-					: {}),
-			})),
+						canReject: target.responseState === "pending",
+					},
+					...(target.selectionState === "applied"
+						? {result: getMultiTargetTargetResult(target)}
+						: {}),
+				};
+			}),
 			nextCursor: rows.length > page.length && page.length
 				? getMultiTargetCursor(mode === MULTI_TARGET_INBOX_MODE_PENDING
 					? [
@@ -6030,10 +6105,16 @@ export class MemoryHubStore {
 			isRequireActiveCampaign: false,
 		});
 		await this.pExpireMultiTargetOperations({campaignId, limit: MULTI_TARGET_PAGE_LIMIT});
+		const currentMembership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
 		const after = parseMultiTargetCursor(cursor, 2);
 		const rows = [...this._semanticOperations.values()]
 			.filter(operation => operation.campaignId === campaignId && operation.targetSetVersion === 1)
-			.filter(operation => ["dm", "co_dm"].includes(membership.role) || operation.originActorAccountId === accountId)
+			.filter(operation => ["dm", "co_dm"].includes(currentMembership.role) || operation.originActorAccountId === accountId)
 			.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
 			.filter(operation => !after || [operation.createdAt, operation.id].join("\u0000") > after.join("\u0000"));
 		const page = rows.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
@@ -6041,7 +6122,7 @@ export class MemoryHubStore {
 			operations: page.map(operation => this._getMultiTargetOperationView({
 				operation,
 				accountId,
-				role: membership.role,
+				role: currentMembership.role,
 			})),
 			nextCursor: rows.length > page.length && page.length
 				? getMultiTargetCursor([page.at(-1).createdAt, page.at(-1).id])

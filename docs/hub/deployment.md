@@ -26,7 +26,7 @@ Startup order:
 
 1. PostgreSQL initializes UTF-8 data and creates `hub_runtime`/`hub_backup` login roles.
 2. Database health passes.
-3. Migrator applies immutable migrations through required version 0012 under the owner credential.
+3. Migrator applies immutable migrations through required version 0013 under the owner credential.
 4. Role grant job idempotently creates any newly introduced login role when supplied its password, then
    assigns runtime DML, backup read-only, and operations-evidence privileges/defaults. The migration-0011 usage
    marker is the exception to broad runtime DML: runtime receives only `SELECT, INSERT`, while backup receives
@@ -126,7 +126,7 @@ resolution.
 | `HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS` | BFF | No | Non-empty subset of configured providers which every active account must retain; defaults to `github` |
 | `HUB_ACCOUNT_IDENTITY_LINKING_ENABLED` | BFF | No | Default `false`; advertises `account.identity_linking.v1` and enables own identity list/link/unlink APIs and UI only after layer-3 preflight |
 | `HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Comma-separated exact campaign UUID rollout allowlist for protocol-4 peer source costs; blank disables it, and production rejects `*`, malformed IDs, duplicates, and more than 100 IDs |
-| `HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Default blank/off. Comma-separated exact campaign UUID enrollment for protocol-6 multi-target server authority; production rejects `*`, malformed IDs, duplicates, and more than 100 IDs, then requires migrations 0011/0012, normalized tables/index, and active campaign rules preflight before startup |
+| `HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Default blank/off. Comma-separated exact campaign UUID enrollment for protocol-6 multi-target server authority; production rejects `*`, malformed IDs, duplicates, and more than 100 IDs, then requires migrations 0011-0013, normalized tables/index/validator, and active campaign rules preflight before startup |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | BFF | Secret (client secret) | Discord confidential OAuth application |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | BFF | Secret (client secret) | Google confidential web/OIDC application |

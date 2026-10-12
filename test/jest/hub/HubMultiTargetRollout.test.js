@@ -38,7 +38,7 @@ describe("multi-target rollout enrollment", () => {
 		expect(parseMultiTargetOperationsCampaignIds("*", {allowWildcard: true})).toEqual(["*"]);
 	});
 
-	it("checks migration 0012, normalized tables, active campaign, and rules pins", async () => {
+	it("checks migration 0013, normalized tables, active campaign, and rules pins", async () => {
 		const queryable = {
 			query: async (sql, params) => {
 				if (sql.includes("schema_migrations")) {
@@ -63,7 +63,7 @@ describe("multi-target rollout enrollment", () => {
 		})).resolves.toEqual({
 			configuredCampaignCount: 2,
 			readyCampaignCount: 2,
-			migrationVersion: "0012",
+			migrationVersion: "0013",
 		});
 	});
 
@@ -138,7 +138,7 @@ describe("multi-target rollout enrollment", () => {
 		})).resolves.toEqual({
 			configuredCampaignCount: 1,
 			readyCampaignCount: 1,
-			migrationVersion: "0012",
+			migrationVersion: "0013",
 		});
 	});
 

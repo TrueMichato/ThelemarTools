@@ -1,5 +1,6 @@
 import {HubStoreError} from "./hub-store-error.js";
 import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation.js";
+import {computePeerProfile} from "./character-projection.js";
 import {
 	getMultiTargetOperationsCapability,
 	MULTI_TARGET_OPERATION_LIVE_STATUSES,
@@ -143,7 +144,20 @@ const getBoundedLabel = (value, fallback, maxLength = 120) => {
 	return normalized ? normalized.slice(0, maxLength) : fallback;
 };
 
-export function getMultiTargetInvitationPresentation ({operation, target}) {
+const isCurrentMultiTargetCharacter = ({operation, target, currentCharacter}) => (
+	currentCharacter?.status === "active"
+	&& currentCharacter.campaignId === operation.campaignId
+	&& currentCharacter.ownerAccountId === target.targetOwnerAccountIdAtProposal
+	&& currentCharacter.targetRef === target.targetRef
+);
+
+export function getMultiTargetInvitationPresentation ({
+	operation,
+	target,
+	currentCharacter = null,
+	accountId = null,
+	role = null,
+}) {
 	const effectPresentation = getPendingEffectPresentation({
 		operationId: operation.id,
 		status: "proposed",
@@ -154,12 +168,33 @@ export function getMultiTargetInvitationPresentation ({operation, target}) {
 		operationArguments: target.operation?.arguments,
 		expiresAt: operation.expiresAt,
 	})?.presentation;
+	const isCurrent = isCurrentMultiTargetCharacter({operation, target, currentCharacter});
+	const isOwner = isCurrent && target.targetOwnerAccountIdAtProposal === accountId;
+	const isDm = isCurrent && ["dm", "co_dm"].includes(role);
+	const isSource = isCurrent && operation.originActorAccountId === accountId;
+	const currentName = currentCharacter?.data?.identity?.name || currentCharacter?.data?.name;
+	const peerName = isSource
+		? computePeerProfile({character: currentCharacter})?.data?.identity?.name
+		: null;
+	const targetName = accountId == null
+		? getBoundedLabel(target.targetDisplaySnapshot?.identity?.name, "Campaign character")
+		: isOwner || isDm
+			? getBoundedLabel(currentName, "Campaign character unavailable")
+			: isSource && peerName
+				? getBoundedLabel(peerName, "Campaign character unavailable")
+				: "Campaign character unavailable";
 	return {
-		targetName: getBoundedLabel(target.targetDisplaySnapshot?.identity?.name, "Campaign character"),
+		targetName,
 		sourceName: effectPresentation?.sourceName || "A party member",
 		effectLabel: effectPresentation?.effectLabel || "Campaign effect",
 		outcomeLabel: effectPresentation?.outcomeLabel || "Review campaign effect",
 	};
+}
+
+export function getMultiTargetOwnedTargetRef ({operation, target, currentCharacter, accountId}) {
+	if (!isCurrentMultiTargetCharacter({operation, target, currentCharacter})) return null;
+	if (target.targetOwnerAccountIdAtProposal !== accountId) return null;
+	return target.targetRef;
 }
 
 export function getMultiTargetTargetResult (target) {

@@ -351,6 +351,12 @@ first-use insert, cleanup persistence, backup/restore, role grants, and rollback
 Participant-recovery coverage keeps default pending fairness, pages only the viewer's own live/recent legs,
 proves the migration 0012 index in a real runtime-role query plan, and verifies target no-op event sequences
 without inventing canonical watermarks.
+It also proves database-microsecond cursor pagination for same-transaction legs, repeatable-read membership
+fencing for inbox/outgoing, current-visibility shaping for source DTO/replay, and exact own-leg target-ref binding
+for duplicate-named characters with move/archive/access-loss invalidation.
+Migration 0013 tests reproduce the prior real archive rollback, retain a live parent with a revoked source-owned
+candidate plus an approved peer leg, reject source-owned pending/peer-approved and peer auto-approved states,
+and kill a real-call-site mutation which restores the old live-parent equivalence.
 
 A separate A3 PostgreSQL source-account-cap test seeds one source account with four live collections, then races
 proposals in two different campaigns for slot five under the seed-10 source-account lock. It must produce exactly

@@ -44,7 +44,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **active** | Wave A3 multi-target server authority | [ADR 0020](adr/0020-consented-multi-target-operations.md), migration 0011 after A2's migration 0010, additive participant-recovery index migration 0012, protocol-6 default-off routes/events, both stores, lifecycle/expiry/cleanup, quota locks, and rollback markers are implemented in the held draft; A4/A5 client/templates remain. Local draft refresh is authorized, but integration requires its separate hold-lift decision; r11f's physical-retest waiver is not GO or a hold lift. |
+| **active** | Wave A3 multi-target server authority | [ADR 0020](adr/0020-consented-multi-target-operations.md), migrations 0011-0013 after A2's migration 0010, protocol-6 default-off routes/events, both stores, lifecycle/expiry/cleanup, participant recovery, quota locks, and rollback markers are implemented in the held draft; A4/A5 client/templates remain. Local draft refresh is authorized, but integration requires its separate hold-lift decision; r11f's physical-retest waiver is not GO or a hold lift. |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 participant-level provider verification retain their own acceptance gates |
 | **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
@@ -490,14 +490,15 @@ Global source-account and target-owner caps are serialized across campaigns by d
 acquired in ascending account UUID order before campaign authority.
 
 The server authority is **implemented in the held draft, not enabled**. A2's migration 0010 precedes A3's
-multi-target migration 0011, and additive migration 0012 supplies only the bounded target-owner recovery index.
+multi-target migration 0011, additive migration 0012 supplies only the bounded target-owner recovery index, and
+migration 0013 repairs only the source-owned lifecycle validator.
 Protocol 6, routes, both stores, events, capability advertisement, required-version/
 policy/role/backup/restore contracts, and marker-aware rollback preflight are checked in.
 Character Sheet UX and production templates remain future A4/A5 work. The sequence is:
 
 1. **A1:** DM typed effects.
 2. **A2:** generalized source-cost authority.
-3. **A3:** normalized migration 0011, additive recovery-index migration 0012, and server state machine implemented default-off, after A2's migration 0010.
+3. **A3:** normalized migration 0011, additive recovery-index migration 0012, validator-repair migration 0013, and server state machine implemented default-off, after A2's migration 0010.
 4. **A4:** Character Sheet proposal/response/finalization UX and per-leg reconciliation.
 5. **A5:** Healing Word and Mass Healing Word templates.
 
