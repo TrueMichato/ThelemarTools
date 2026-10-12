@@ -223,6 +223,22 @@ Exact PID checks require termination before cleanup begins and before runner exi
 owned process groups. The existing 50 ms required-child timeout remains covered, and wrong-exit assertions
 include captured stdout/stderr. These are local harness proofs, not real-Docker, database, or deployment evidence.
 
+Resistance probes use a test-only Node preload at the real `spawn` call site. It tracks the actual owned PID,
+releases an initialization gate, sends a nonce-bound signal challenge, and requires an acknowledgement written
+by that child's signal handler plus a live-PID check before returning the real child to the runner's unchanged
+timer call site (500 ms in the ready-child timeout probe). SIGTERM challenges the ignoring children; SIGINT
+challenges the descendant's leader, which intentionally exits on the later measured SIGTERM. Assertions
+require both challenge acknowledgements and the later measured signal receipts, not just PID presence.
+Signal tests likewise wait for acknowledged resistance before interrupting the runner.
+
+This seam deliberately separates startup scheduling from ready-child termination; it is not evidence about
+Node boot speed. A separate real-runner probe withholds the initialization gate, deterministically reproducing
+the former fixture's missing handler/PID records while independently tracking exactly one spawned child.
+That child must still terminate under the unchanged 500 ms deadline with no resistance claim or survivors.
+The unpreloaded 50 ms probe remains unchanged. Total and cleanup watchdogs keep their original wall-clock
+budgets across the readiness seam; cleanup completion is determined by actual runner output, never readiness.
+All probes retain the four-second external hard bound, and the handshake has a shorter three-second bound.
+
 On 2026-09-21, run `35600079625` was cancelled after a timezone misread made a roughly two-minute live Playwright
 step appear three hours old. Terminal logs showed PostgreSQL parity had completed and Playwright was active; the
 cancelled run is not evidence of a product deadlock. It did expose that the job had no explicit timeout or

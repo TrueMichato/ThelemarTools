@@ -44,8 +44,22 @@ exit 0
 import fs from "node:fs";
 import {spawn} from "node:child_process";
 const args = process.argv.slice(2);
-process.on("SIGTERM", () => ${mode === "descendants" ? "process.exit(0)" : "{}"});
-process.on("SIGINT", () => {});
+fs.writeFileSync(${JSON.stringify(path.join(dir, "initializing-"))} + process.pid, "initializing");
+while (!fs.existsSync(${JSON.stringify(path.join(dir, "release-"))} + process.pid)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+const onSignal = signal => {
+  const challengePath = ${JSON.stringify(path.join(dir, "challenge-"))} + process.pid;
+  const nonce = fs.existsSync(challengePath) ? fs.readFileSync(challengePath, "utf8") : null;
+  const receipt = {pid: process.pid, signal, nonce};
+  fs.appendFileSync(${JSON.stringify(path.join(dir, "signals.jsonl"))}, JSON.stringify(receipt) + "\\n");
+  if (nonce) {
+    const ackPath = ${JSON.stringify(path.join(dir, "ack-"))} + nonce;
+    fs.writeFileSync(ackPath + ".writing", JSON.stringify(receipt));
+    fs.renameSync(ackPath + ".writing", ackPath);
+  }
+  ${mode === "descendants" ? "if (signal === \"SIGTERM\") process.exit(0);" : ""}
+};
+process.on("SIGTERM", () => onSignal("SIGTERM"));
+process.on("SIGINT", () => onSignal("SIGINT"));
 fs.appendFileSync(${JSON.stringify(pidFile)}, JSON.stringify({pid: process.pid, args}) + "\\n");
 fs.appendFileSync(${JSON.stringify(path.join(dir, "pids.txt"))}, process.pid + "\\n");
 ${mode === "descendants" ? `spawn(process.execPath, [${JSON.stringify(path.join(dir, "descendant.mjs"))}], {stdio: "inherit", env: {...process.env, HUB_PROBE_GROUP_PID: process.pid}});` : ""}
@@ -53,11 +67,66 @@ setInterval(() => {}, 1000);
 `);
 	fs.writeFileSync(path.join(dir, "descendant.mjs"), `
 import fs from "node:fs";
-process.on("SIGTERM", () => {});
-process.on("SIGINT", () => {});
+const onSignal = signal => {
+  const challengePath = ${JSON.stringify(path.join(dir, "challenge-"))} + process.pid;
+  const nonce = fs.existsSync(challengePath) ? fs.readFileSync(challengePath, "utf8") : null;
+  const receipt = {pid: process.pid, signal, nonce};
+  fs.appendFileSync(${JSON.stringify(path.join(dir, "signals.jsonl"))}, JSON.stringify(receipt) + "\\n");
+  if (nonce) {
+    const ackPath = ${JSON.stringify(path.join(dir, "ack-"))} + nonce;
+    fs.writeFileSync(ackPath + ".writing", JSON.stringify(receipt));
+    fs.renameSync(ackPath + ".writing", ackPath);
+  }
+};
+process.on("SIGTERM", () => onSignal("SIGTERM"));
+process.on("SIGINT", () => onSignal("SIGINT"));
 fs.appendFileSync(${JSON.stringify(pidFile)}, JSON.stringify({pid: process.pid, groupPid: Number(process.env.HUB_PROBE_GROUP_PID), args: ["descendant"]}) + "\\n");
 fs.appendFileSync(${JSON.stringify(path.join(dir, "pids.txt"))}, process.pid + "\\n");
 setInterval(() => {}, 1000);
+`);
+	fs.writeFileSync(path.join(dir, "resistance-preload.mjs"), `
+import childProcess from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import {syncBuiltinESMExports} from "node:module";
+const spawn = childProcess.spawn;
+const readRecords = file => fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim().split("\\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+childProcess.spawn = (command, args, options) => {
+  const child = spawn(command, args, options);
+  const isBlocking = command === "docker" && (
+    (args[0] === "network" && args[1] === "ls" && ${mode !== "cleanup"})
+    || (args[0] === "rm" && ${mode === "cleanup" || mode === "total-cleanup"})
+  );
+  if (!isBlocking) return child;
+  fs.appendFileSync(${JSON.stringify(path.join(dir, "spawned.jsonl"))}, JSON.stringify({pid: child.pid, args}) + "\\n");
+  const deadline = Date.now() + 3000;
+  const waitFor = predicate => {
+    while (!predicate()) {
+      if (Date.now() >= deadline) throw new Error("Owned child failed the resistance readiness handshake.");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  };
+  waitFor(() => fs.existsSync(${JSON.stringify(path.join(dir, "initializing-"))} + child.pid));
+  ${mode === "initializing" ? "return child;" : `fs.writeFileSync(${JSON.stringify(path.join(dir, "release-"))} + child.pid, "release");`}
+  waitFor(() => readRecords(${JSON.stringify(pidFile)}).filter(record => record.pid === child.pid || record.groupPid === child.pid).length === ${mode === "descendants" ? 2 : 1});
+  const children = readRecords(${JSON.stringify(pidFile)}).filter(record => record.pid === child.pid || record.groupPid === child.pid);
+  for (const {pid, groupPid} of children) {
+    const signal = ${mode === "descendants"} && !groupPid ? "SIGINT" : "SIGTERM";
+    const nonce = crypto.randomUUID();
+    const challengePath = ${JSON.stringify(path.join(dir, "challenge-"))} + pid;
+    const ackPath = ${JSON.stringify(path.join(dir, "ack-"))} + nonce;
+    fs.writeFileSync(challengePath, nonce);
+    process.kill(pid, signal);
+    waitFor(() => fs.existsSync(ackPath));
+    const receipt = JSON.parse(fs.readFileSync(ackPath, "utf8"));
+    if (receipt.pid !== pid || receipt.signal !== signal || receipt.nonce !== nonce) throw new Error("Invalid resistance acknowledgement.");
+    process.kill(pid, 0);
+    fs.rmSync(challengePath);
+    fs.appendFileSync(${JSON.stringify(path.join(dir, "ready.jsonl"))}, JSON.stringify(receipt) + "\\n");
+  }
+  return child;
+};
+syncBuiltinESMExports();
 `);
 	fs.writeFileSync(path.join(dir, "success-preload.mjs"), `
 import childProcess from "node:child_process";
@@ -77,9 +146,13 @@ https.get = (url, options, callback) => {
 };
 syncBuiltinESMExports();
 `);
-	const getChildren = () => fs.existsSync(pidFile)
-		? fs.readFileSync(pidFile, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))
+	const readRecords = file => fs.existsSync(file)
+		? fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))
 		: [];
+	const getChildren = () => [...new Map([
+		...readRecords(path.join(dir, "spawned.jsonl")),
+		...readRecords(pidFile),
+	].map(record => [record.pid, record])).values()];
 	const killOwnedChildren = () => {
 		for (const {pid, groupPid} of getChildren()) {
 			try {
@@ -95,7 +168,7 @@ syncBuiltinESMExports();
 	let signalPoll;
 	try {
 		runner = spawn(process.execPath, [
-			...mode === "success" ? ["--import", path.join(dir, "success-preload.mjs")] : [],
+			...mode === "required" ? [] : ["--import", path.join(dir, mode === "success" ? "success-preload.mjs" : "resistance-preload.mjs")],
 			"server/scripts/run-hub-e2e.mjs",
 		], {
 			cwd: root,
@@ -118,7 +191,7 @@ syncBuiltinESMExports();
 		runner.stderr.on("data", chunk => stderr += chunk);
 		if (signal) {
 			signalPoll = setInterval(() => {
-				if (getChildren().length < (mode === "descendants" ? 2 : 1)) return;
+				if (readRecords(path.join(dir, "ready.jsonl")).length < (mode === "descendants" ? 2 : 1)) return;
 				clearInterval(signalPoll);
 				runner.kill(signal);
 			}, 10);
@@ -143,6 +216,10 @@ syncBuiltinESMExports();
 			stderr,
 			watchdogTriggered,
 			children,
+			ready: readRecords(path.join(dir, "ready.jsonl")),
+			signals: readRecords(path.join(dir, "signals.jsonl")),
+			installedHandlers: readRecords(pidFile),
+			initializing: children.filter(({pid}) => fs.existsSync(path.join(dir, `initializing-${pid}`))).map(({pid}) => pid),
 			survivingPids: children.filter(({pid}) => isProcessAlive(pid)).map(({pid}) => pid),
 			aliveBeforeCleanup: fs.existsSync(path.join(dir, "alive-before-cleanup.txt"))
 				? fs.readFileSync(path.join(dir, "alive-before-cleanup.txt"), "utf8").trim().split("\n").map(Number)
@@ -187,6 +264,16 @@ function expectRunnerCleanup (result, isComplete) {
 	const count = result.diagnostics.filter(value => value.type === "hub_e2e_cleanup_complete").length;
 	if (count !== (isComplete ? 1 : 0)) {
 		throw new Error(`Runner cleanup-complete count expected ${isComplete ? 1 : 0}; got ${count}.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+	}
+}
+
+function expectResistanceReady (result, measuredSignal = "SIGTERM") {
+	expect(result.ready).toHaveLength(result.children.length);
+	for (const {pid} of result.children) {
+		const acknowledgement = result.ready.find(receipt => receipt.pid === pid);
+		expect(acknowledgement).toMatchObject({pid, nonce: expect.any(String)});
+		expect(result.signals).toContainEqual(acknowledgement);
+		expect(result.signals).toContainEqual({pid, signal: measuredSignal, nonce: null});
 	}
 }
 
@@ -350,6 +437,21 @@ describe("Hub CI and real-stack test contract", () => {
 		const result = await probeRunnerTimeout({mode: "child"});
 		expectRunnerExit(result);
 		expect(result.children).toHaveLength(1);
+		expectResistanceReady(result);
+		expect(result.survivingPids).toEqual([]);
+		expect(result.aliveBeforeCleanup).toEqual([]);
+		expect(result.diagnostics.find(value => value.type === "hub_e2e_timeout")).toMatchObject({scope: "child", timeoutMs: 500, phase: "environment"});
+		expectRunnerCleanup(result, true);
+	});
+
+	it("bounds initialization before handlers install without claiming resistance or cleanup from readiness", async () => {
+		const result = await probeRunnerTimeout({mode: "initializing"});
+		expectRunnerExit(result);
+		expect(result.children).toHaveLength(1);
+		expect(result.initializing).toEqual([result.children[0].pid]);
+		expect(result.installedHandlers).toEqual([]);
+		expect(result.ready).toEqual([]);
+		expect(result.signals).toEqual([]);
 		expect(result.survivingPids).toEqual([]);
 		expect(result.aliveBeforeCleanup).toEqual([]);
 		expect(result.diagnostics.find(value => value.type === "hub_e2e_timeout")).toMatchObject({scope: "child", timeoutMs: 500, phase: "environment"});
@@ -360,6 +462,7 @@ describe("Hub CI and real-stack test contract", () => {
 		const result = await probeRunnerTimeout({mode: "total", childTimeoutMs: 5_000, totalTimeoutMs: 500});
 		expectRunnerExit(result);
 		expect(result.children).toHaveLength(1);
+		expectResistanceReady(result);
 		expect(result.survivingPids).toEqual([]);
 		expect(result.aliveBeforeCleanup).toEqual([]);
 		expect(result.diagnostics.find(value => value.type === "hub_e2e_timeout")).toMatchObject({scope: "total", timeoutMs: 500, phase: "environment"});
@@ -375,6 +478,7 @@ describe("Hub CI and real-stack test contract", () => {
 		const result = await probeRunnerTimeout({mode: "descendants", signal: "SIGTERM", childTimeoutMs: 5_000});
 		expectRunnerExit(result, 143);
 		expect(result.children).toHaveLength(2);
+		expectResistanceReady(result);
 		expect(result.children[1].groupPid).toBe(result.children[0].pid);
 		expect(result.survivingPids).toEqual([]);
 		expect(result.aliveBeforeCleanup).toEqual([]);
@@ -385,6 +489,7 @@ describe("Hub CI and real-stack test contract", () => {
 		const result = await probeRunnerTimeout({mode: "child", signal, childTimeoutMs: 5_000});
 		expectRunnerExit(result, status);
 		expect(result.children).toHaveLength(1);
+		expectResistanceReady(result, signal);
 		expect(result.survivingPids).toEqual([]);
 		expect(result.aliveBeforeCleanup).toEqual([]);
 		expect(result.diagnostics.some(value => value.type === "hub_e2e_timeout")).toBe(false);
@@ -407,6 +512,7 @@ describe("Hub CI and real-stack test contract", () => {
 		const result = await probeRunnerTimeout({mode, childTimeoutMs: 5_000, totalTimeoutMs, cleanupTimeoutMs: 300});
 		expectRunnerExit(result);
 		expect(result.children).toHaveLength(name === "normal finally" ? 1 : 2);
+		expectResistanceReady(result);
 		expect(result.children.at(-1).args[0]).toBe("rm");
 		expect(result.survivingPids).toEqual([]);
 		const diagnostic = result.diagnostics.find(value => value.type === "hub_e2e_timeout" && value.scope === "cleanup");
