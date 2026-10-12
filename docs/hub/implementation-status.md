@@ -1,23 +1,66 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-21
+> **Last updated:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-Private invite-only V1 release `hub-staging-2026-09-10-r7` at
-`77d955c053dcdfe949235620db93f7eba477af34` is deployed on the reused, Hub-only Oracle Always Free ARM
+The last independently verified private invite-only release is `hub-staging-2026-10-12-r11f` at
+`4578c8671a7b05066fb9a19411cb8a31cdd753ef` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,
-GitHub OAuth, PostgreSQL, static site, BFF, API, and WebSocket checks pass. Phase 6G deployment and the
-authenticated recovery/rollback and genuine scheduled-operations evidence for V1-G1 are complete. The physical
-one-DM/two-player game day remains V1-G2. Semi-public onboarding remains intentionally disabled.
+PostgreSQL, static site, BFF, API, WebSocket, and served service-worker checks passed r11f post-release
+verification. Phase 6G deployment and V1-G1 host-operations evidence are complete. The 2026-09-28 r10
+physical rerun returned **NO-GO** for a P1 Character Sheet context divergence and disabled player targeting;
+r11b fixed the route identity but its physical return advanced the canonical revision without an edit. R11c
+stopped safely on a false campaign-effect history save block on Open Local; no canonical write occurred.
+R11d deployed the coverage correction, but its first physical Campaign -> Local leg acquired a lease and
+persisted a derived-modifier repair, advancing the canonical revision from 23 to 24 without an edit.
+R11e deployed late-modifier identity and JSON-wire normalization; physical Campaign -> Local -> Return and
+Back/Forward reload had zero server-side writes/leases and stable revision. BFCache restoration remains
+unobserved; a fresh-tab no-lease check exceeded its window, with the gap accepted to continue testing.
+An approved same-tag r11e redeploy enabled only Campaign A's narrow Cure Wounds targeting canary;
+independent rollout, health, and release-time off-machine backup checks passed. Separate real-profile
+participant reports cover XPHB reject/cancel/accept, PHB accept, self-target accept, and picker privacy;
+natural expiry was automated-only and no character/operation database payload was inspected.
+The private-launch verdict is still NO-GO. See the
+[prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
+
+The **deployed r11f correction bundle** combines GD-FIND-003/006/007/009
+with GD-FIND-013: owner-only latest-200 Roll History over existing events, live cross-device/reload
+convergence, exact attempted-command recovery, and explicit offline/unconfirmed states. It adds
+`character.roll_history.v1` without changing protocol 5 or migrations `0001`-`0009`. The migration-free
+query has explicit 5s statement/2s lock budgets; sparse finite load evidence does not prove unbounded
+growth. Exact-source review/CI, immutable tagging, approved dry run, human-confirmed promotion and
+independent runtime/static/off-machine backup verification are complete; physical retest is waived.
+Draft sharing #289 and held Wave A are excluded.
+Independent correction review found and cleared a Roll History authorization fence: co-DM demotion
+conceals formerly authorized DM-only rows before refetch and rejects delayed old-role reads while
+preserving attempted commands. Verification also exposed a baseline Hub-index Delete-account startup
+race. The subsequent local correction keeps account actions disabled until their handlers are ready,
+settles account rendering before enabling them, and preserves deletion-callback focus. Permanent
+slow-read and service-error browser probes cover the fix; see
+[candidate validation evidence](testing.md#source-candidate-validation-residual).
+The decision owner requested r11f and waived another physical game-day retest for that release.
+The initial correction bundle was published as `661b138ea91c3ad4e99b73439a6bac7eaca554b8`;
+the complete follow-up is `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, with all four jobs green
+in exact-source CI `38223244640`.
+The r11f follow-up additionally corrects GD-FIND-004/005: explicit-local Create/Open/Import choices
+separate from cloud copy, and nested basic/advanced/field/preview sharing disclosures retaining drafts,
+open states and focus across parent rerender. Both Sheet entry paths preserve saved policy and peer
+projection until explicit Save. R11f promotion completed at 2026-10-12T10:53:06Z; the annotated tag,
+actual BFF revision and pinned images match the reviewed source, all 14 changed served browser assets
+match Git/container/public hashes, and the prerelease encrypted archive matches the trusted second machine.
+Existing configuration and Campaign A-only targeting remain unchanged;
+design requests002/008/010/011, draft #289 and held Wave A remain outside the bundle.
+This is not private-launch GO.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.
 
-All 59 planned implementation todos in the coordinating program are complete. The only remaining V1 evidence is
-V1-G2's physical one-DM/two-player game day and explicit private-launch go/no-go.
+The original 59 planned implementation todos in the coordinating program are complete. That historical
+closeout does not silently close the physical findings. R11f correction delivery is complete under the
+physical-retest waiver; an explicit private-launch GO/NO-GO remains separate from continued engineering.
 
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
@@ -25,8 +68,8 @@ Google OIDC adapters, bounded provider HTTP/JWKS validation, paired first-enable
 guidance, and deterministic memory/PostgreSQL/real-stack coverage. Layer 3 adds capability-gated own-identity
 listing, fresh-reauth provider linking, different-identity unlinking, required-provider retention, complete
 session/lease/socket rotation, account-level security UI, linked-outcome preflight support, and Memory/PostgreSQL
-parity. Normal production configuration remains GitHub-only and `account.identity_linking.v1` remains
-default-off pending rollout evidence.
+parity. R10 public metadata now advertises GitHub, Discord, and Google as available and identity linking
+as enabled; participant-by-participant linked-provider sign-in was not fully recorded.
 
 The first r9 identity layer now adds ADR 0018 and migration 0008: signed-out invite links exchange the raw token
 once for a five-minute server-side context bound to one durable OAuth transaction. Existing identities sign in
@@ -44,8 +87,9 @@ The stacked r9 entitlement layer adds migration 0009, provider-neutral `campaign
 reauthentication with session rotation, transaction-local freshness checks, hidden idempotent operator
 administration, lifecycle/export protection, an ordinary-user account reauthentication/deletion flow, stable
 UUID disambiguation for duplicate account names, and focused creator/operator browser states. Enforcement remains
-default-off until release preflight. The descendant account-linking layer reuses that ordinary-user
-account-level reauthentication authority and adds no migration.
+default-off for a new installation until release preflight; r10 preflight confirmed the entitlement rollout
+enabled on Oracle. The descendant account-linking layer reuses that ordinary-user account-level
+reauthentication authority and adds no migration.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback
@@ -67,7 +111,10 @@ invalidations, owner/DM/peer views, sharing controls, and fail-closed privacy co
 V2-T5 whole-site campaign context is implemented: account-bound device selection, lightweight Hub/shared-nav
 switchers, early temporary brew/rules activation, authorized bare Character Sheet and DM Screen defaults,
 explicit local routes, pinned-resource behavior, access-loss concealment, BFCache/reconnect revalidation, and
-server capability `campaign.active_context.v1`. ADR 0015/V2-T6 now consumes its source/edition metadata and
+server capability `campaign.active_context.v1`. Character Sheet routes additionally expose explicit Local or
+Campaign authority, label selector scope, save/fence before cross-authority navigation, retain a validated exact
+campaign-character return route through Local refresh/new-tab entry, and keep deliberate same-id local/campaign
+documents isolated by repository. ADR 0015/V2-T6 now consumes its source/edition metadata and
 teardown generation for content enforcement.
 
 The focused `t2-effects-server-role` prerequisite slice established the ADR 0012 server contract without changing
@@ -128,6 +175,27 @@ disclosure. The same merge fences historical role replay against current authori
 bootstrap/event parity, closes archived mutation paths in both stores, and reads PostgreSQL cursor/snapshot authority
 from one transactionally consistent view.
 
+An unshipped GD-FIND-003 correction preserves an expanded peer shared-profile disclosure and keyboard focus
+across ordinary realtime roster refetches. Authorization invalidation still clears the roster before a new
+projection is shown. This local change is **not** part of the deployed r11e image or physical evidence.
+
+An unshipped GD-FIND-006 Character Sheet improvement makes inventory **Share...** reveal the next
+Quantity/Destination step by focusing and scrolling to its composer. A live announcement explains that
+nothing has moved until confirmation; Cancel restores focus to Share. This does not alter transfer authority
+or the deployed r11e inventory experience.
+
+An unshipped GD-FIND-007 correction adds an owner-only incoming transfer notice and Accept/Reject controls
+to the open Character Sheet, backed by the existing authorization-scoped transfer list and resolution API.
+The notice refetches on realtime/reconnect, fails closed on incomplete transfer status, conceals stale
+source details before projection/membership revalidation, and fences decisions when the sheet detaches.
+The deployed r11e Sheet does not yet include this recipient workflow.
+
+An unshipped GD-FIND-009 correction cancels pending stash requests that become definitively unfundable
+when another request, direct DM stash move, or stash-backed award consumes the source. Memory/PostgreSQL
+authority records one bounded cancellation reason, audit and audience-scoped event per loser in the
+winning transaction; affordable requests remain pending. Open losing-player Sheets announce the terminal
+outcome instead of leaving an actionable stale draft. This candidate is not deployed on r11e.
+
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,
   escrow/action cleanup, and seven-day deletion request/cancel/purge with blocked-id reporting.
@@ -174,13 +242,17 @@ than registry digest, because the free tier is ARM while CI runners are x86 (ADR
 
 The guarded `do-connecting-ip` adapter and 25-second WebSocket heartbeat are implemented and pass the full
 real-stack gate; the adapter stays disabled on Oracle, where Caddy is the sole ingress. Release
-`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34` is live on the Oracle VM
-originally repurposed from Foundry. The deployment and recovery checks pass. Only genuine daily
-maintenance/backup timer evidence and the physical one-DM/two-player game day remain before the V1 go/no-go.
+`hub-staging-2026-10-01-r11e` at `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f` is the last verified
+Oracle source identity. Genuine daily timer and recovery evidence remain recorded; the approved
+Campaign A-only same-tag configuration redeploy passed independent rollout checks and its release-time
+encrypted off-machine backup matched Oracle. A bounded later host check passed after the participant-reported
+physical canary; the next scenario requires a fresh backup comparison. Tested physical paths do not
+reverse the private-launch NO-GO. The [backlog](game-day-backlog.md) owns the re-entry work.
 
 ## Implemented
 
-- Existing-identity OAuth sign-in, default-off invite-gated first access, server sessions, CSRF/origin checks,
+- Existing-identity OAuth sign-in, capability-gated invite first access (enabled on r10), server sessions,
+  CSRF/origin checks,
   and protocol gating.
 - Accounts, campaigns, roles, invites, membership, export, archive, and ownership transfer.
 - Local/cloud Character Sheet repository switch, non-destructive claim, clone, move, archive, lease takeover.
@@ -337,8 +409,9 @@ rewritten into a current whole-repository baseline. The latest merged handoffs a
 1. **Host-operations proof — complete:** installation, manual drills, five-minute monitoring, encrypted
    off-machine backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return,
    exact cleanup, and the first genuine scheduled maintenance/backup executions passed by 2026-09-13.
-2. **Physical game day:** execute the [private one-DM/two-player runbook](runbooks/private-game-day.md) with real
-   GitHub OAuth and physical devices, then make an explicit go/no-go decision.
+2. **Physical game day — NO-GO on r10:** the 2026-09-28 rerun found the P1 context divergence and disabled
+   targeting. Remediate the [prioritized backlog](game-day-backlog.md), then rerun the incomplete physical
+   scenarios with actual providers/devices and make a new explicit go/no-go decision.
 
 The [living roadmap](roadmap.md) owns scope, dependencies, and acceptance criteria for these gates and the
 approved V2 program.

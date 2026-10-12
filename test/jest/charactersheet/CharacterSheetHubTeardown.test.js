@@ -109,6 +109,27 @@ async function pFlushPromises () {
 }
 
 describe("Character Sheet hub teardown owners", () => {
+	it("synchronously invalidates personal history on matching membership changes", () => {
+		const page = makePage();
+		page._hubCampaignId = "campaign-1";
+		page._rollHistory = {onHubAuthorityChanged: jest.fn()};
+		page._onHubMembershipChanged({campaignId: "other-campaign"});
+		expect(page._rollHistory.onHubAuthorityChanged).not.toHaveBeenCalled();
+		page._onHubMembershipChanged({campaignId: "campaign-1"});
+		expect(page._rollHistory.onHubAuthorityChanged).toHaveBeenCalledTimes(1);
+	});
+
+	it("fences retained history immediately and clears it on private-character concealment", () => {
+		const page = makePage();
+		page._isHubCharacter = true;
+		page._rollHistory = {onHubConnectionState: jest.fn(), resetCharacterScopeUi: jest.fn()};
+		page._fenceHubGeneration();
+		expect(page._rollHistory.onHubConnectionState).toHaveBeenLastCalledWith({state: "suspended"});
+		page._concealHubPrivateCharacter();
+		expect(page._rollHistory.onHubConnectionState).toHaveBeenLastCalledWith({state: "access_lost"});
+		expect(page._rollHistory.resetCharacterScopeUi).toHaveBeenCalledTimes(1);
+	});
+
 	it("applies campaign rules as a settings overlay while the context is active", () => {
 		const page = makePage();
 		expect(page._state.getSettings().thelemar_carryWeight).toBe(false);

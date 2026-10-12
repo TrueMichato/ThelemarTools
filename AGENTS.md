@@ -136,6 +136,7 @@ Modules assign to `globalThis` | Tests use ES `import` then `globalThis.ClassNam
 - **Spell slots keyed by level**: `_data.spellcasting.spellSlots[1].current`, not by spell name.
 - **Edition detection**: `source === "XPHB"` or `edition === "one"` for 2024. PHB vs XPHB features differ (e.g., Blade Ward is concentration in XPHB only).
 - **No reactive UI**: After `state.setX()`, module must call `render()` manually. Forgetting = stale UI bug.
+- **Campaign Roll History**: `CharacterSheetRollHistory` reads the latest 200 own authorized events under `character.roll_history.v1`, never PATCHes/acquires a lease. Exact attempted rolls recover separately; no offline auto-send or campaign Clear.
 - **Feature calculations**: `getFeatureCalculations()` returns flat object: `has{Feature}` (bool), `{feature}Damage|Dc|Uses|Bonus|Range|Count|Die`.
 - **Active states**: 24 toggle types (Rage, Bladesong, etc.) in `ACTIVE_STATE_TYPES`. Mutual exclusivity: Rage ↔ Bladesong. Rage breaks concentration.
 - **Test import pattern**: `import "...charactersheet-state.js"; const X = globalThis.CharacterSheetState;` — import deps BEFORE the module under test or get `ReferenceError`.

@@ -5,7 +5,7 @@ const adr = fs.readFileSync(
 	new URL("../../../docs/hub/adr/0020-consented-multi-target-operations.md", import.meta.url),
 	"utf8",
 );
-const normalizedAdr = adr.replace(/\s+/g, " ");
+const normalizedAdr = adr.replace(/^>\s?/gm, "").replace(/\s+/g, " ");
 const proofSql = fs.readFileSync(
 	new URL("../../fixtures/hub/adr-0020-multi-target-set-shaping.sql", import.meta.url),
 	"utf8",
@@ -32,6 +32,9 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr).toContain("requires future additive migration `0011_multi_target_semantic_operations.sql`");
 		expect(normalizedAdr).toContain("`0010_source_cost_binding_identity.sql`");
 		expect(normalizedAdr).toContain("must remain unmerged until the coordinator records the physical game-day GO/NO-GO");
+		expect(normalizedAdr).toContain("Local draft refresh and held implementation may proceed.");
+		expect(normalizedAdr).toContain("the separate integration, release, and capability-enablement holds remain");
+		expect(normalizedAdr).toContain("the waiver is not permission to integrate this stack or enable multi-target operations");
 	});
 
 	it("fixes the target set and separates consent from one atomic finalization", () => {

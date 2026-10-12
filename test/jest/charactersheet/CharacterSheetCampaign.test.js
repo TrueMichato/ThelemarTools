@@ -38,6 +38,38 @@ function expireStoredCloneCommand (storage) {
 	storage.setItem(key, JSON.stringify(registry));
 }
 
+function makeDomElement (tagName = "div") {
+	const attributes = new Map();
+	const element = {
+		tagName: tagName.toUpperCase(),
+		children: [],
+		className: "",
+		textContent: "",
+		disabled: false,
+		value: "",
+		classList: {toggle: jest.fn()},
+		append (...children) { this.children.push(...children); },
+		replaceChildren (...children) { this.children = [...children]; },
+		setAttribute (name, value) {
+			attributes.set(name, `${value}`);
+			if (name === "href") this.href = `${value}`;
+		},
+		getAttribute (name) { return attributes.get(name) ?? null; },
+		addEventListener (name, handler) { this[`on${name}`] = handler; },
+		querySelector (selector) {
+			const all = flattenDom(this);
+			if (selector === "select") return all.find(it => it.tagName === "SELECT") || null;
+			return null;
+		},
+		focus: jest.fn(),
+	};
+	return element;
+}
+
+function flattenDom (root) {
+	return [root, ...(root.children || []).flatMap(flattenDom)];
+}
+
 function getControl ({
 	saveResult = true,
 	createResult = {character: {id: "cloud-1"}},
@@ -170,6 +202,63 @@ describe("Character Sheet campaign control", () => {
 
 		expect(control._getDetail({isCloud: true}))
 			.toBe("Read-only DM view · use campaign actions to make authorized changes");
+	});
+
+	it("shows explicit Local authority and restores the exact validated campaign character", async () => {
+		const documentPrev = globalThis.document;
+		const windowPrev = globalThis.window;
+		const locationPrev = globalThis.location;
+		const campaignId = "33333333-3333-4333-8333-333333333333";
+		const characterId = "55555555-5555-4555-8555-555555555555";
+		const root = makeDomElement();
+		globalThis.document = {createElement: tagName => makeDomElement(tagName)};
+		globalThis.window = {addEventListener: jest.fn()};
+		globalThis.location = {
+			href: `https://tools.example/charactersheet.html?local=1&returnHubCampaign=${campaignId}&returnHubCharacter=${characterId}`,
+		};
+		const api = {
+			pGetSession: jest.fn(async () => ({
+				signedIn: true,
+				account: {id: "11111111-1111-4111-8111-111111111111"},
+			})),
+			pListCampaigns: jest.fn(async () => [{
+				id: campaignId,
+				name: "Ashen March",
+				role: "player",
+				status: "active",
+			}]),
+			pGetCharacter: jest.fn(async () => ({
+				id: characterId,
+				campaignId,
+				ownerAccountId: "11111111-1111-4111-8111-111111111111",
+				data: {name: "Canonical Hero"},
+			})),
+		};
+		const page = {
+			_isHubCharacter: false,
+			_currentCharacterId: "77777777-7777-4777-8777-777777777777",
+			_characterRepository: {hasPendingWrites: () => false},
+			isCurrentCharacterReadOnly: () => false,
+			_state: {toJson: () => ({name: "Local Hero"})},
+		};
+
+		try {
+			const control = new CharacterSheetCampaign({page, api, root});
+			await control.pInit();
+
+			const elements = flattenDom(root);
+			expect(elements.find(it => it.className.includes("charsheet__campaign-authority"))?.textContent)
+				.toBe("Local authority");
+			const returnLink = elements.find(it => it.textContent === "Return to campaign character");
+			expect(returnLink?.getAttribute("href"))
+				.toBe(`charactersheet.html?id=${characterId}&hubCampaign=${campaignId}`);
+			expect(returnLink?.getAttribute("data-charsheet-authority-navigation")).toBe("true");
+			expect(api.pGetCharacter).toHaveBeenCalledWith({characterId});
+		} finally {
+			globalThis.document = documentPrev;
+			globalThis.window = windowPrev;
+			globalThis.location = locationPrev;
+		}
 	});
 
 	it("reloads character-scoped campaign state and binds sharing writes to the loaded character", async () => {

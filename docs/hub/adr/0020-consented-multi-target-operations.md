@@ -18,6 +18,11 @@ Status: Accepted design contract; Wave A0 proof only, not implemented (2026-09-2
 > future additive migration `0011_multi_target_semantic_operations.sql` in A3, after A2's reserved immutable
 > `0010_source_cost_binding_identity.sql`. The draft must remain unmerged until the coordinator records the physical game-day GO/NO-GO.
 
+> **Continuation boundary (2026-10-12):** R11f correction delivery is complete and its physical retest was
+> waived. Local draft refresh and held implementation may proceed. The recorded private-launch NO-GO
+> and the separate integration, release, and capability-enablement holds remain; the waiver is not
+> permission to integrate this stack or enable multi-target operations.
+
 In short, this contract extends ADR 0012 and extends ADR 0016 while superseding only the narrow rules stated
 above. It requires future additive migration `0011_multi_target_semantic_operations.sql`.
 

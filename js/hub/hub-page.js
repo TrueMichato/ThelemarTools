@@ -66,6 +66,7 @@ const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
 const pendingIdentityLinks = new Map();
 const pendingIdentityUnlinks = new Map();
+const profileDisclosureCharacterIds = new WeakMap();
 let campaignAuthorizationErrorHandler = null;
 
 function getAwardDraftStorageKey ({accountId, campaignId}) {
@@ -1053,6 +1054,7 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	setHidden(document.getElementById("campaign-content-managed-note"), isDm);
 	setHidden(document.getElementById("campaign-open-dm-screen"), !isDm);
 	setHidden(document.getElementById("campaign-upload-local"), !canPlay);
+	setHidden(document.getElementById("campaign-local-character-actions"), !canPlay);
 
 	const primaryCharacter = document.getElementById("campaign-open-primary-character");
 	const characterSetup = document.getElementById("campaign-open-character-setup");
@@ -1352,6 +1354,25 @@ function captureCampaignTransferDraft () {
 	const form = document.getElementById("campaign-transfer-form");
 	if (!form || form._hubProjectionTransferDraft) return;
 	form._hubProjectionTransferDraft = getCampaignTransferDraft();
+}
+
+function updateCapturedCampaignTransferDraft ({form, control}) {
+	const draft = form?._hubProjectionTransferDraft;
+	if (!draft) return;
+	const currencyType = CURRENCY_TYPES.find(type => control.id === `campaign-transfer-${type}`);
+	if (currencyType) {
+		draft.currency[currencyType] = control.value;
+		return;
+	}
+	if (control.id === "campaign-transfer-source") {
+		draft.source = control.value;
+		draft.item = document.getElementById("campaign-transfer-entry")?.value || "";
+		draft.quantity = document.getElementById("campaign-transfer-quantity")?.value || "";
+	} else if (control.id === "campaign-transfer-target") draft.target = control.value;
+	else if (control.id === "campaign-transfer-entry") {
+		draft.item = control.value;
+		draft.quantity = document.getElementById("campaign-transfer-quantity")?.value || "";
+	} else if (control.id === "campaign-transfer-quantity") draft.quantity = control.value;
 }
 
 function renderAccountDeletionPending (deletion) {
@@ -1909,6 +1930,10 @@ async function pInitOperatorPanel ({session}) {
 }
 
 async function pInitHubIndex ({session}) {
+	const requestDeletionButton = document.getElementById("hub-request-deletion");
+	const revokeSessionsButton = document.getElementById("hub-revoke-other-sessions");
+	if (requestDeletionButton) requestDeletionButton.disabled = true;
+	if (revokeSessionsButton) revokeSessionsButton.disabled = true;
 	const name = document.getElementById("hub-account-name");
 	if (name) name.textContent = session.account.displayName;
 	// The Hub index has no explicit campaign, so this is where an account-matching stored
@@ -2013,16 +2038,18 @@ async function pInitHubIndex ({session}) {
 		}
 	});
 	try {
-		const [identityRender] = await Promise.all([
+		const renders = await Promise.allSettled([
 			pRenderAccountIdentities({session}),
 			pRenderAccountSessions(),
 			pInitOperatorPanel({session}),
 		]);
+		const failure = renders.find(render => render.status === "rejected");
+		if (failure) throw failure.reason;
+		const identityRender = renders[0].value;
 		if (accountAction === "delete") {
 			setHidden(document.getElementById("hub-account-reauth"), true);
 			setIdentityStatus("Reauthentication complete. Confirm account deletion again to continue.");
 			window.history.replaceState(null, "", "/hub.html");
-			document.getElementById("hub-request-deletion")?.focus();
 		} else {
 			handleAccountReauthenticationCompletion({
 				accountAction,
@@ -2033,7 +2060,7 @@ async function pInitHubIndex ({session}) {
 	} catch (error) {
 		renderError(error);
 	}
-	document.getElementById("hub-revoke-other-sessions")?.addEventListener("click", async event => {
+	revokeSessionsButton?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
 		try {
@@ -2045,7 +2072,7 @@ async function pInitHubIndex ({session}) {
 			button.disabled = false;
 		}
 	});
-	document.getElementById("hub-request-deletion")?.addEventListener("click", async event => {
+	requestDeletionButton?.addEventListener("click", async event => {
 		if (window.prompt(`Type DELETE to schedule account deletion after a 7-day grace period.`) !== "DELETE") return;
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -2072,6 +2099,9 @@ async function pInitHubIndex ({session}) {
 			button.disabled = false;
 		}
 	});
+	if (revokeSessionsButton) revokeSessionsButton.disabled = false;
+	if (requestDeletionButton) requestDeletionButton.disabled = false;
+	if (accountAction === "delete") requestDeletionButton?.focus();
 }
 
 async function pInitCampaign ({session}) {
@@ -2867,6 +2897,18 @@ function renderCharacterList ({campaignId, characters, session, isDm}) {
 function renderPartyRoster ({campaignId, characters, members, session, isDm, roster = null}) {
 	const list = document.getElementById("campaign-party-roster");
 	if (!list) return;
+	const openCharacterNames = new Map([...list.querySelectorAll("details.hub-shared-profile[open]")]
+		.map(details => [
+			profileDisclosureCharacterIds.get(details),
+			details.querySelector(".hub-data-row__name")?.textContent,
+		])
+		.filter(([characterId, name]) => characterId && name));
+	const focusedDetails = document.activeElement?.closest?.("details.hub-shared-profile");
+	const focusedCharacterId = focusedDetails && list.contains(focusedDetails)
+		? profileDisclosureCharacterIds.get(focusedDetails)
+		: null;
+	const focusedCharacterName = focusedDetails?.querySelector(".hub-data-row__name")?.textContent;
+	const nextDetailsByCharacterId = new Map();
 	setCount({id: "campaign-party-count", count: characters.length});
 	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
 	list.replaceChildren(...characters.map(character => {
@@ -2907,6 +2949,11 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 
 		const details = document.createElement("details");
 		details.className = "hub-shared-profile";
+		if (characterId) {
+			profileDisclosureCharacterIds.set(details, characterId);
+			details.open = openCharacterNames.get(characterId) === getCharacterName(character);
+			nextDetailsByCharacterId.set(characterId, details);
+		}
 		details.append(row);
 		const profile = document.createElement("div");
 		profile.className = "hub-shared-profile__body";
@@ -2934,6 +2981,10 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 		details.append(profile);
 		return details;
 	}));
+	if (focusedCharacterId && focusedCharacterName === nextDetailsByCharacterId.get(focusedCharacterId)
+		?.querySelector(".hub-data-row__name")?.textContent) {
+		nextDetailsByCharacterId.get(focusedCharacterId)?.querySelector("summary")?.focus({preventScroll: true});
+	}
 }
 
 function renderRecentActivity ({
@@ -3681,9 +3732,9 @@ async function pInitCampaignForms ({
 			fnIsCurrent,
 		});
 		if (!fnIsCurrent() || transferState.isFenced) return {pendingTransferIds: [], isFenced: true};
-		const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 		const restoreTransferControlState = () => {
 			if (!fnIsCurrent()) return false;
+			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 			if (pendingProposal) {
 				setTransferProposalControls({
 					form,
@@ -3699,6 +3750,13 @@ async function pInitCampaignForms ({
 				}
 				delete form?._hubProjectionTransferDraft;
 				applyTransferRefreshRecoverySuccess({form});
+				const status = document.getElementById("campaign-transfer-form-status");
+				if (!status?.textContent || status.textContent === "Latest balances loaded. You can send another transfer.") {
+					setFormStatus({
+						formId: "campaign-transfer-form",
+						message: "The transfer outcome is not yet confirmed. Retry to reconcile the same transfer.",
+					});
+				}
 				return true;
 			}
 			setTransferProposalControls({form, isLocked: false});
@@ -3745,6 +3803,13 @@ async function pInitCampaignForms ({
 	fillCharacterSelect(document.getElementById("campaign-xp-target"), characters);
 	document.getElementById("campaign-transfer-source")?.addEventListener("change", () => syncTransferItemPicker({characters, partyInventory}));
 	document.getElementById("campaign-transfer-entry")?.addEventListener("change", syncTransferQuantity);
+	const transferForm = document.getElementById("campaign-transfer-form");
+	for (const eventType of ["input", "change"]) {
+		transferForm?.addEventListener(eventType, event => updateCapturedCampaignTransferDraft({
+			form: transferForm,
+			control: event.target,
+		}));
+	}
 	setFormAvailability({
 		formId: "campaign-action-form",
 		isAvailable: !!document.getElementById("campaign-action-target")?.options.length,
@@ -4248,12 +4313,19 @@ async function pInitCampaignForms ({
 						let proposed;
 						try {
 							proposed = await api.pProposeTransfer(proposalRequest);
-							if (!fnIsCurrent()) return null;
 						} catch (error) {
 							if (!isTransferOutcomeUncertain(error)) {
 								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 							}
 							throw error;
+						}
+						if (!["proposed", "reserved", "committed", "rejected", "cancelled", "expired"].includes(proposed?.transfer?.status)) {
+							throw new HubApiError({code: "RESPONSE_INVALID", status: 0});
+						}
+						if (!fnIsCurrent()) {
+							if (proposalRequest.isAutoResolved && ["proposed", "reserved"].includes(proposed.transfer.status)) return null;
+							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+							return {transfer: proposed.transfer, isAutoResolved: proposalRequest.isAutoResolved, targetKind: proposalRequest.targetKind};
 						}
 						const transfers = await api.pListTransfers({campaignId});
 						if (!fnIsCurrent()) return null;
@@ -4344,12 +4416,19 @@ async function pInitCampaignForms ({
 					let proposed;
 					try {
 						proposed = await api.pProposeTransfer(proposalRequest);
-						if (!fnIsCurrent()) return null;
 					} catch (error) {
 						if (!isTransferOutcomeUncertain(error)) {
 							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
 						}
 						throw error;
+					}
+					if (!["proposed", "reserved", "committed", "rejected", "cancelled", "expired"].includes(proposed?.transfer?.status)) {
+						throw new HubApiError({code: "RESPONSE_INVALID", status: 0});
+					}
+					if (!fnIsCurrent()) {
+						if (isAutoResolved && ["proposed", "reserved"].includes(proposed.transfer.status)) return null;
+						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
+						return {transfer: proposed.transfer, isAutoResolved, targetKind};
 					}
 					if (!isAutoResolved) {
 						transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});

@@ -426,6 +426,16 @@ export function prepareTransferRequest ({container, payload}) {
 	};
 }
 
+export function isTransferRequestInsufficient ({container, request}) {
+	try {
+		removeTransferPayload({container, payload: request});
+		return false;
+	} catch (error) {
+		if (error?.code === "TRANSFER_INSUFFICIENT") return true;
+		throw error;
+	}
+}
+
 export function isDirectTransferAuthority ({
 	role,
 	accountId,

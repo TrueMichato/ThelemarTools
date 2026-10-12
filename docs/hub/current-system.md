@@ -1,13 +1,13 @@
 # Campaign Hub current system
 
 > **Status:** Current implementation reference
-> **Scope:** Repository implementation through PR #253; deployed Oracle baseline identified separately
-> **Last verified:** 2026-09-20
+> **Scope:** Repository implementation; deployed Oracle baseline identified separately
+> **Last verified:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository. It is not the delivery plan, and repository implementation
 must not be confused with target-environment promotion. Oracle runs annotated release
-`hub-staging-2026-09-10-r7` at `77d955c053dcdfe949235620db93f7eba477af34`; later repository changes are not
+`hub-staging-2026-10-12-r11f` at `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; later repository changes are not
 deployed evidence until separately promoted. Start here when changing Hub behavior, then follow the linked
 domain, protocol, security, operations, and
 [living roadmap](roadmap.md) references.
@@ -40,6 +40,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Semantic operations | `js/hub/hub-semantic-operations.js`, `js/hub/hub-effect-presentation.js`, `js/hub/hub-store-error.js` | Pure versioned damage/heal/condition/spell-slot catalog plus privacy-safe approval/effect presentation shared by the server and browser |
 | Operation reconciliation | `js/hub/hub-character-operation-reconciler.js`, `js/hub/hub-http-character-repository.js` | ADR 0012 `B/L -> R/F` transition, per-track coverage, prepare/adopt/commit atomicity, and no-reload resync recovery |
 | Roll bridge | `js/hub/hub-roll-log-adapter.js` | Durable server roll events from Character Sheet rolls |
+| Owner Roll History | `js/hub/hub-roll-history.js`, `js/charactersheet/charactersheet-rollhistory.js` | Latest 200 own authorized rolls, cross-device/reload convergence, exact-command recovery and explicit device-only offline states |
 | BFF routes | `server/src/app.js` | Auth, schemas, roles, CSRF/origin/protocol checks, HTTP and WebSocket endpoints |
 | Production authority | `server/src/postgres-hub-store.js` | PostgreSQL queries, locks, transactions, canonical writes, audit/events/outbox/receipts |
 | Test authority | `server/src/memory-hub-store.js` | Deterministic behavioral double for domain/API tests; never used by `server/src/index.js` |
