@@ -159,6 +159,14 @@ const MUTATIONS = [
 		test: "test/jest/hub/HubPeerSourceCostsAuthority.test.js",
 		pattern: "atomically spends one slot",
 	},
+	{
+		name: "omit-post-commit-authorization-teardown",
+		file: "js/hub/hub-page.js",
+		from: "if (campaignAuthorizationErrorHandler?.(refreshError)) return;",
+		to: "",
+		test: "test/jest/hub/HubDmEffectSubmission.test.js",
+		pattern: "fences private campaign data",
+	},
 ];
 
 async function copyTree (root) {

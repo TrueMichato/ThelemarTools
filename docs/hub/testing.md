@@ -271,7 +271,10 @@ and no projection invalidation for heal-at-max, add-existing-condition, remove-a
 restore-full-slot. Character Sheet tests assert per-track no-op transforms, zero redundant live adoption/render,
 one accessible notice, HTTP-plus-realtime dedupe, reverse-delivery resync, save interleavings, and
 character/access/document-generation fencing.
-`scripts/test-hub-semantic-operation-mutations.mjs` plants nineteen defects at the real role, write/event ordering,
+`HubDmEffectSubmission.test.js` executes the shipped submit listener and authorization dispatcher: a committed
+effect followed by a terminal authorization failure conceals campaign data and stops live updates, without
+retrying the mutation. Transient refresh failures preserve committed success; stale responses cannot publish.
+`scripts/test-hub-semantic-operation-mutations.mjs` plants twenty defects at the real role, write/event ordering,
 idempotency, invalidation, coverage, document-track, post-await fence, and duplicate-delivery call sites. The
 gate must demonstrate that every mutant is killed before the unmodified result is accepted.
 
