@@ -1,4 +1,6 @@
 import {getAppliedEffectNotice} from "../hub/hub-effect-presentation.js";
+import {getMultiTargetResultDelivery, hasMultiTargetOperationsCapability} from "../hub/hub-multi-target-operations.js";
+import {getCampaignCharacterSheetUrl} from "../hub/hub-character-sheet-routes.js";
 
 const {e_} = /** @type {*} */ (globalThis);
 
@@ -33,6 +35,10 @@ export class CharacterSheetHubEffects {
 		fnSetTimeout = (fn, ms) => setTimeout(fn, ms),
 		fnClearTimeout = timer => clearTimeout(timer),
 		fnOnAuthoritativeApproval = null,
+		fnGetMultiTargetCapability = () => null,
+		fnGetCharacterId = null,
+		fnIsOwner = null,
+		fnGetAuthorityVersion = () => null,
 	} = {}) {
 		this._campaignId = campaignId;
 		this._api = api;
@@ -41,6 +47,11 @@ export class CharacterSheetHubEffects {
 		this._fnSetTimeout = fnSetTimeout;
 		this._fnClearTimeout = fnClearTimeout;
 		this._fnOnAuthoritativeApproval = fnOnAuthoritativeApproval;
+		this._fnGetMultiTargetCapability = fnGetMultiTargetCapability;
+		this._fnGetCharacterId = fnGetCharacterId;
+		this._fnIsOwner = fnIsOwner;
+		this._fnGetAuthorityVersion = fnGetAuthorityVersion;
+		this._authorityVersion = null;
 		this._generation = 0;
 		this._collectionRevision = 0;
 		this._characterId = null;
@@ -53,6 +64,7 @@ export class CharacterSheetHubEffects {
 		this._seenAppliedOperationIds = new Set();
 		this._noticeTimers = new Map();
 		this._commandIds = new Map();
+		this._multiCommands = new Map();
 		this._pRefreshActive = null;
 		this._onFocus = () => {
 			if (this._characterId) void this.pRefresh();
@@ -77,11 +89,18 @@ export class CharacterSheetHubEffects {
 	}
 
 	activate ({characterId}) {
+		if (characterId && this._characterId === characterId && this._isCapabilityRevoked) {
+			this._authorityVersion = this._fnGetAuthorityVersion();
+			this._isCapabilityRevoked = false;
+			void this.pRefresh();
+			return true;
+		}
 		this.deactivate();
 		if (!characterId || !this._api || !this._campaignId) return false;
 		this._generation++;
 		this._collectionRevision = 0;
 		this._characterId = characterId;
+		this._authorityVersion = this._fnGetAuthorityVersion();
 		this._isCapabilityRevoked = false;
 		void this.pRefresh();
 		return true;
@@ -99,6 +118,7 @@ export class CharacterSheetHubEffects {
 		this._notices.clear();
 		this._seenAppliedOperationIds.clear();
 		this._commandIds.clear();
+		this._multiCommands.clear();
 		for (const timer of this._noticeTimers.values()) this._fnClearTimeout(timer);
 		this._noticeTimers.clear();
 		this._pRefreshActive = null;
@@ -107,6 +127,10 @@ export class CharacterSheetHubEffects {
 
 	async pRefresh () {
 		if (!this._characterId || this._isCapabilityRevoked) return false;
+		if (!this._isCurrent({generation: this._generation, characterId: this._characterId})) {
+			this._revokeApprovalCapability();
+			return false;
+		}
 		if (this._pRefreshActive) return this._pRefreshActive;
 		const token = {
 			generation: this._generation,
@@ -122,7 +146,34 @@ export class CharacterSheetHubEffects {
 			campaignId: this._campaignId,
 			characterId: token.characterId,
 		})
-			.then(actions => {
+			.then(async actions => {
+				if (!this._isCurrent(token)) return false;
+				const multiActions = [];
+				if (this._hasMultiCapability()) {
+					let cursor = null;
+					const seenCursors = new Set();
+					const invitations = [];
+					do {
+						const page = await this._api.pListMultiTargetInbox({campaignId: this._campaignId, mode: "recovery", limit: 100, ...(cursor ? {cursor} : {})});
+						if (!this._isCurrent(token)) return false;
+						invitations.push(...(page?.invitations || []));
+						cursor = page?.nextCursor ?? null;
+						if (cursor && seenCursors.has(cursor)) throw Object.assign(new Error("Repeated inbox cursor."), {code: "RESPONSE_INVALID"});
+						if (cursor) seenCursors.add(cursor);
+					} while (cursor);
+					const owned = await this._pLoadOwnedCharacters(token);
+					if (!this._isCurrent(token)) return false;
+					for (const invitation of invitations) {
+						const normalized = this._normalizeMultiInvitation(invitation, owned);
+						if (!normalized) continue;
+						if (normalized.ownedCharacterId === token.characterId && invitation.result) {
+							const delivery = getMultiTargetResultDelivery({operationId: invitation.operationId, result: invitation.result, characterId: token.characterId});
+							if (delivery) await this._fnOnAuthoritativeApproval?.(delivery);
+							if (!this._isCurrent(token)) return false;
+						}
+						multiActions.push(normalized);
+					}
+				}
 				if (!this._isCurrent(token)) return false;
 				if (this._collectionRevision !== token.collectionRevision) {
 					isCollectionStale = true;
@@ -132,6 +183,7 @@ export class CharacterSheetHubEffects {
 				this._actions = new Map((actions || [])
 					.map(action => this._getNormalizedActionWithTransientState(action))
 					.filter(Boolean)
+					.concat(multiActions)
 					.map(action => [action.actionId, action]));
 				return true;
 			})
@@ -156,7 +208,7 @@ export class CharacterSheetHubEffects {
 				this._pRefreshActive = null;
 				if (this._characterId !== token.characterId) return;
 				this._renderApprovals();
-				if (!this._isCapabilityRevoked && (isCollectionStale || !this._isCurrent(token))) void this.pRefresh();
+				if (!this._isCapabilityRevoked && isCollectionStale && this._isCurrent(token)) void this.pRefresh();
 			});
 		this._pRefreshActive = promise;
 		return promise;
@@ -167,13 +219,28 @@ export class CharacterSheetHubEffects {
 			this._revokeApprovalCapability();
 			return;
 		}
+		if (state?.state === "reconnecting") {
+			this._revokeApprovalCapability();
+			return;
+		}
 		if (state?.state === "live" && this._characterId) {
+			this._authorityVersion = this._fnGetAuthorityVersion();
 			this._isCapabilityRevoked = false;
 			void this.pRefresh();
 		}
 	}
 
+	suspend () {
+		return this._revokeApprovalCapability();
+	}
+
 	onRealtimeOperation (event) {
+		if (event?.type?.startsWith("character.multi_operation.")) {
+			if (!this._characterId || this._isCapabilityRevoked) return false;
+			this._collectionRevision++;
+			void this.pRefresh();
+			return true;
+		}
 		if (!this._characterId || (event?.targetCharacterId != null && event.targetCharacterId !== this._characterId)) return false;
 		if (event.status === "proposed") {
 			if (event.targetCharacterId == null) {
@@ -204,11 +271,12 @@ export class CharacterSheetHubEffects {
 		return false;
 	}
 
-	onApplied ({operation, changed = true, beforeData = null, afterData = null}) {
+	onApplied ({operation, legId = null, changed = true, beforeData = null, afterData = null}) {
+		const coverageKey = legId ? `${operation?.operationId}/${legId}` : operation?.operationId;
 		if (
 			!operation?.operationId
 			|| operation.targetCharacterId !== this._characterId
-			|| this._seenAppliedOperationIds.has(operation.operationId)
+			|| this._seenAppliedOperationIds.has(coverageKey)
 		) return false;
 		if (this._actions.delete(operation.operationId)) this._collectionRevision++;
 		this._commandIds.delete(`${operation.operationId}:accept`);
@@ -219,8 +287,8 @@ export class CharacterSheetHubEffects {
 			this._renderApprovals();
 			return false;
 		}
-		this._seenAppliedOperationIds.add(operation.operationId);
-		this._addNotice({...notice, kind: "success"});
+		this._seenAppliedOperationIds.add(coverageKey);
+		this._addNotice({...notice, id: coverageKey, kind: "success"});
 		this._renderApprovals();
 		return true;
 	}
@@ -258,6 +326,7 @@ export class CharacterSheetHubEffects {
 	async pResolve ({actionId, decision}) {
 		if (!this._characterId || !this._isAuthorized || !["accept", "reject"].includes(decision)) return false;
 		const action = this._actions.get(actionId);
+		if (action?.isMulti) return this._pResolveMultiInvitation({action, decision});
 		if (!action || action.decisionState === "submitting" || action.decisionState === "waiting") return false;
 		const token = {generation: this._generation, characterId: this._characterId};
 		const commandKey = `${actionId}:${decision}`;
@@ -333,7 +402,113 @@ export class CharacterSheetHubEffects {
 	}
 
 	_isCurrent ({generation, characterId}) {
-		return this._generation === generation && this._characterId === characterId;
+		return this._generation === generation && this._characterId === characterId
+			&& (!this._fnGetCharacterId || this._fnGetCharacterId() === characterId)
+			&& (!this._fnIsOwner || this._fnIsOwner() === true)
+			&& this._authorityVersion === this._fnGetAuthorityVersion();
+	}
+
+	_hasMultiCapability () {
+		return hasMultiTargetOperationsCapability(this._fnGetMultiTargetCapability())
+			&& (!this._fnIsOwner || this._fnIsOwner() === true);
+	}
+
+	async _pLoadOwnedCharacters (token) {
+		const response = await this._api.pListCampaignCharacterProjections({campaignId: this._campaignId});
+		if (!this._isCurrent(token)) return new Map();
+		const owned = new Map();
+		for (const projection of response?.projections || []) {
+			if (projection.kind !== "owner_truth" || typeof projection.targetRef !== "string" || typeof projection.character?.id !== "string") continue;
+			if (owned.has(projection.targetRef)) throw Object.assign(new Error("Ambiguous owned target reference."), {code: "RESPONSE_INVALID"});
+			owned.set(projection.targetRef, projection.character.id);
+		}
+		return owned;
+	}
+
+	_normalizeMultiInvitation (invitation, owned) {
+		if (!invitation?.operationId || !invitation.invitationId || typeof invitation.presentation?.effectLabel !== "string") return null;
+		const actionId = `multi:${invitation.operationId}:${invitation.invitationId}`;
+		const current = this._actions.get(actionId);
+		const characterId = owned.get(invitation.targetRef) ?? null;
+		return {
+			isMulti: true,
+			actionId,
+			operationId: invitation.operationId,
+			invitationId: invitation.invitationId,
+			targetRef: invitation.targetRef ?? null,
+			ownedCharacterId: characterId,
+			status: invitation.status,
+			presentation: {
+				sourceName: String(invitation.presentation.sourceName || "A party member").slice(0, 120),
+				effectLabel: invitation.presentation.effectLabel.slice(0, 120),
+				outcomeLabel: String(invitation.presentation.outcomeLabel || "Review campaign effect").slice(0, 120),
+				targetName: String(invitation.presentation.targetName || "Your campaign character").slice(0, 120),
+			},
+			capabilities: {canApprove: invitation.capabilities?.canApprove === true, canReject: invitation.capabilities?.canReject === true},
+			decisionState: current?.decisionState ?? null,
+			error: current?.error ?? null,
+		};
+	}
+
+	async _pResolveMultiInvitation ({action, decision}) {
+		const token = {generation: this._generation, characterId: this._characterId};
+		if (!this._isCurrent(token) || !this._hasMultiCapability() || this._isCapabilityRevoked || action.status !== "pending"
+			|| action.ownedCharacterId !== token.characterId || action.decisionState === "submitting"
+			|| action.capabilities[decision === "accept" ? "canApprove" : "canReject"] !== true) return false;
+		const apiDecision = decision === "accept" ? "approve" : "reject";
+		const existing = this._multiCommands.get(action.actionId);
+		if (existing && existing.decision !== apiDecision) return false;
+		action.decisionState = "submitting";
+		action.decision = decision;
+		action.error = null;
+		this._renderApprovals();
+		try {
+			const owned = await this._pLoadOwnedCharacters(token);
+			if (!this._isCurrent(token) || !this._hasMultiCapability()) return false;
+			if (owned.get(action.targetRef) !== token.characterId) {
+				throw Object.assign(new Error("Owned target identity changed."), {code: "ACTION_NOT_FOUND"});
+			}
+			let request = existing;
+			if (!request) {
+				request = Object.freeze({
+					campaignId: this._campaignId,
+					operationId: action.operationId,
+					invitationId: action.invitationId,
+					decision: apiDecision,
+					idempotencyKey: this._fnCreateId(),
+				});
+				this._multiCommands.set(action.actionId, request);
+			}
+			const response = await this._api.pRespondMultiTargetInvitation(request);
+			if (!this._isCurrent(token) || !this._hasMultiCapability()) return false;
+			if (response?.operation?.operationId !== action.operationId || response?.invitation?.invitationId !== action.invitationId) {
+				throw Object.assign(new Error("Invalid invitation receipt."), {code: "RESPONSE_INVALID"});
+			}
+			// Approval is consent, not effect application. Recovery reads supply current workflow/result truth.
+			this._multiCommands.delete(action.actionId);
+			action.decisionState = null;
+			this._collectionRevision++;
+			await this.pRefresh();
+			if (!this._isCurrent(token)) return false;
+			this._focusMultiInvitation(action.actionId);
+			return true;
+		} catch (error) {
+			if (!this._isCurrent(token)) return false;
+			if (_CAPABILITY_LOSS_CODES.has(error?.code)) this._revokeApprovalCapability();
+			else {
+				action.decisionState = null;
+				action.error = _getSafeErrorMessage(error).slice(0, _MAX_ERROR_LENGTH);
+				this._renderApprovals();
+				this._focusMultiInvitation(action.actionId);
+				if (error?.code === "ACTION_NOT_FOUND") void this.pRefresh();
+			}
+			return false;
+		}
+	}
+
+	_focusMultiInvitation (actionId) {
+		const card = [...(this._approvalsRoot?.querySelectorAll?.("[data-hub-action-id]") || [])].find(element => element.dataset.hubActionId === actionId);
+		(card || document.getElementById?.("charsheet-ipt-hp-current"))?.focus({preventScroll: true});
 	}
 
 	_revokeApprovalCapability () {
@@ -486,7 +661,7 @@ export class CharacterSheetHubEffects {
 		}
 
 		if (this._actions.size) {
-			const heading = e_({tag: "h2", clazz: "charsheet__hub-approvals-title", text: "Campaign effect requests"});
+			const heading = e_({tag: "h2", clazz: "charsheet__hub-approvals-title", text: [...this._actions.values()].some(action => action.isMulti) ? "Requests for your characters" : "Campaign effect requests"});
 			this._approvalsRoot.append(heading);
 		}
 		for (const action of this._actions.values()) this._approvalsRoot.append(this._getApprovalCard(action));
@@ -519,13 +694,25 @@ export class CharacterSheetHubEffects {
 		);
 		const controls = e_({tag: "div", clazz: "charsheet__hub-approval-controls"});
 		const isBusy = ["submitting", "waiting", "recovery"].includes(action.decisionState);
+		if (action.isMulti) {
+			const isCurrent = action.ownedCharacterId === this._characterId;
+			copy.append(e_({tag: "span", text: `For ${action.presentation.targetName} · ${isCurrent ? "this character" : action.ownedCharacterId ? "another owned character" : "owned identity not verified"} · ${action.status.replaceAll("_", " ")}`}));
+			if (!isCurrent) {
+				if (action.ownedCharacterId) {
+					const open = e_({tag: "a", clazz: "ve-btn ve-btn-sm ve-btn-default", text: "Open character to respond"});
+					open.href = getCampaignCharacterSheetUrl({characterId: action.ownedCharacterId, campaignId: this._campaignId});
+					controls.append(open);
+				} else copy.append(e_({tag: "span", text: "Exact owned identity is unavailable. Refresh before responding."}));
+			}
+		}
 		for (const [decision, label, clazz] of [
 			["accept", "Approve", "ve-btn-primary"],
 			["reject", "Reject", "ve-btn-default"],
 		]) {
+			if (action.isMulti && (action.ownedCharacterId !== this._characterId || action.status !== "pending" || action.capabilities[decision === "accept" ? "canApprove" : "canReject"] !== true)) continue;
 			const button = e_({tag: "button", clazz: `ve-btn ve-btn-sm ${clazz}`, text: label});
 			button.type = "button";
-			button.disabled = isBusy;
+			button.disabled = isBusy || (action.isMulti && this._multiCommands.has(action.actionId) && this._multiCommands.get(action.actionId).decision !== (decision === "accept" ? "approve" : "reject"));
 			button.dataset.hubActionId = action.actionId;
 			button.dataset.hubDecision = decision;
 			button.setAttribute("aria-label", `${label} ${action.presentation.effectLabel}: ${action.presentation.outcomeLabel} from ${action.presentation.sourceName}`);

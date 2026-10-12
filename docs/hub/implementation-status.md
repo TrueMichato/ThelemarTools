@@ -5,6 +5,17 @@
 
 ## Status
 
+The held local **A4 candidate** extends the existing shared Character Sheet source-targeting and incoming-effects
+controllers with fixed-set multi-target collection, independent per-character consent, deselectable source-owned
+candidates, and one atomic selected-subset finalization. It consumes reviewed A3 protocol-6 DTOs without authority,
+migration, or protocol changes. Exact retries acknowledge original command receipts; fresh detail/outgoing/owner
+recovery establishes current workflow state. Exact opaque owned identity gates consent and canonical current
+character identity gates queued adoption. All-track reconciliation includes distinct target/combined legs and
+durable bounded revisionless no-op coverage. Authorization/projection invalidation conceals controls and closes
+pickers before queued work completes. This is local held work awaiting independent A4 review, not deployed or
+enabled product. Production multi-spell descriptors remain absent until A5; singular Cure Wounds and local casting
+are unchanged. Disposable browser fixtures alone inject the existing reviewed Shared Restoration template.
+
 The last independently verified private invite-only release is `hub-staging-2026-10-12-r11f` at
 `4578c8671a7b05066fb9a19411cb8a31cdd753ef` on the reused, Hub-only Oracle Always Free ARM
 instance. Foundry was intentionally decommissioned and is not a release prerequisite. The same-origin HTTPS,

@@ -1,6 +1,7 @@
 import {getProjectionId, getProjectionName, getTargetableProjections} from "../hub/hub-character-view.js";
 import {isTransferOutcomeUncertain} from "../hub/hub-api-client.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {getMultiTargetResultDelivery, hasMultiTargetOperationsCapability, MULTI_TARGET_OPERATION_LIVE_STATUSES, MULTI_TARGET_OPERATION_TERMINAL_STATUSES, resolveReviewedMultiTargetSpell} from "../hub/hub-multi-target-operations.js";
 
 const {e_} = /** @type {*} */ (globalThis);
 
@@ -33,6 +34,7 @@ const _getSafeError = error => {
 		case "CAPABILITY_UNAVAILABLE": return "Campaign targeting is not available right now.";
 		case "SOURCE_OR_TARGET_UNAVAILABLE": return "That spell or target is no longer available.";
 		case "SOURCE_COST_UNSUPPORTED": return "This casting option cannot be paid atomically yet.";
+		case "FINALIZATION_SELECTION_INVALID": return "The selected subset changed. Refresh requests and choose currently approved candidates.";
 		case "IDEMPOTENCY_KEY_REUSED": return "This request changed while retrying. Start a new cast.";
 		default: return "The campaign request could not be sent. Retry without spending the spell slot.";
 	}
@@ -47,6 +49,10 @@ export class CharacterSheetPeerTargeting {
 		fnIsOwner,
 		fnGetRulesVersionId,
 		fnGetCapability,
+		fnGetMultiTargetCapability = () => null,
+		fnResolveMultiTargetSpell = resolveReviewedMultiTargetSpell,
+		fnPickTargets = null,
+		fnGetAuthorityVersion = () => null,
 		fnRefreshCampaignContext = null,
 		fnCreateId = () => crypto.randomUUID(),
 		fnPickTarget = null,
@@ -59,6 +65,10 @@ export class CharacterSheetPeerTargeting {
 		this._fnIsOwner = fnIsOwner;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		this._fnGetCapability = fnGetCapability;
+		this._fnGetMultiTargetCapability = fnGetMultiTargetCapability;
+		this._fnResolveMultiTargetSpell = fnResolveMultiTargetSpell;
+		this._fnPickTargets = fnPickTargets || (options => this._pPickTargets(options));
+		this._fnGetAuthorityVersion = fnGetAuthorityVersion;
 		this._fnRefreshCampaignContext = fnRefreshCampaignContext;
 		this._fnCreateId = fnCreateId;
 		this._fnPickTarget = fnPickTarget || (options => this._pPickTarget(options));
@@ -68,12 +78,16 @@ export class CharacterSheetPeerTargeting {
 		this._collectionRevision = 0;
 		this._characterId = null;
 		this._membershipRole = null;
+		this._authorityVersion = null;
 		this._outgoing = new Map();
 		this._drafts = new Map();
+		this._multiSourceCommands = new Map();
 		this._isSuspended = false;
+		this._isAuthorityRevalidating = false;
 		this._isLoading = false;
 		this._loadError = null;
 		this._definitiveRecoveryPromise = null;
+		this._cancelTargetPicker = null;
 		this._onFocus = () => {
 			if (this._characterId && !this._isSuspended) void this.pRefresh();
 		};
@@ -97,12 +111,13 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	activate ({characterId, membershipRole}) {
-		if (!characterId || membershipRole !== "player" || !this._hasOwnerAuthority() || !this._hasCapability()) {
+		if (!characterId || membershipRole !== "player" || !this._hasOwnerAuthority() || !this._hasAnyCapability()) {
 			this.deactivate();
 			return false;
 		}
 		if (this._isSuspended && this._characterId === characterId) {
 			this._membershipRole = membershipRole;
+			this._authorityVersion = this._fnGetAuthorityVersion();
 			this._isSuspended = false;
 			this._loadError = null;
 			this._render();
@@ -112,6 +127,7 @@ export class CharacterSheetPeerTargeting {
 		this.deactivate();
 		this._characterId = characterId;
 		this._membershipRole = membershipRole;
+		this._authorityVersion = this._fnGetAuthorityVersion();
 		this._generation++;
 		void this.pRefresh();
 		return true;
@@ -119,7 +135,20 @@ export class CharacterSheetPeerTargeting {
 
 	suspend () {
 		if (!this._characterId) return false;
+		this._cancelTargetPicker?.();
 		this._isSuspended = true;
+		this._isAuthorityRevalidating = true;
+		this._generation++;
+		for (const draft of this._drafts.values()) {
+			if (!draft.isMulti) draft.target = {...draft.target, name: "Campaign character"};
+			if (draft.isMulti) {
+				draft.isSubmitting = false;
+				draft.error = "Reconnect before retrying the original request.";
+			}
+		}
+		for (const action of this._outgoing.values()) {
+			if (action.isMulti) action.isSubmitting = false;
+		}
 		this._refreshSequence++;
 		this._isLoading = false;
 		this._loadError = null;
@@ -128,13 +157,16 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	deactivate () {
+		this._cancelTargetPicker?.();
 		this._generation++;
 		this._refreshSequence++;
 		this._characterId = null;
 		this._membershipRole = null;
 		this._outgoing.clear();
 		this._drafts.clear();
+		this._multiSourceCommands.clear();
 		this._isSuspended = false;
+		this._isAuthorityRevalidating = false;
 		this._isLoading = false;
 		this._loadError = null;
 		this._definitiveRecoveryPromise = null;
@@ -166,6 +198,10 @@ export class CharacterSheetPeerTargeting {
 			return false;
 		}
 		if (!this._characterId || !event?.operationId) return false;
+		if (event.type?.startsWith("character.multi_operation.") || this._outgoing.get(event.operationId)?.isMulti) {
+			void this.pRefresh();
+			return true;
+		}
 		const current = this._outgoing.get(event.operationId);
 		if (!current && event.status === "proposed") return false;
 		if (current) {
@@ -196,9 +232,20 @@ export class CharacterSheetPeerTargeting {
 		hasMetamagic = false,
 		hasVariantComponent = false,
 	} = {}) {
+		const descriptor = this._fnResolveMultiTargetSpell({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 		const isSupportedSpellShape = this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 		if (
-			this._isSuspended
+			this._isAuthorityRevalidating && !this._isSuspended
+			&& ((descriptor && this._hasMultiCapability()) || (isSupportedSpellShape && this._hasCapability()))
+		) {
+			const token = {generation: this._generation, characterId: this._characterId};
+			if (!await this.pRefresh() || !this._isCurrent(token)) return {handled: true, proposed: false};
+		}
+		if (descriptor && this._hasMultiCapability()) {
+			return this._pMaybeProposeMultiTarget({descriptor, spell, selectedSlot});
+		}
+		if (
+			(this._isSuspended || this._isAuthorityRevalidating)
 			&& this._characterId
 			&& isSupportedSpellShape
 		) {
@@ -270,7 +317,7 @@ export class CharacterSheetPeerTargeting {
 			!this._hasOwnerAuthority()
 			|| this._isSuspended
 			|| !this._characterId
-			|| !this._hasCapability()
+			|| !this._hasAnyCapability()
 			|| typeof this._api.pListCharacterOutgoingActions !== "function"
 		) return false;
 		const token = {
@@ -278,6 +325,7 @@ export class CharacterSheetPeerTargeting {
 			characterId: this._characterId,
 			refreshSequence: ++this._refreshSequence,
 			collectionRevision: this._collectionRevision,
+			isMulti: this._hasMultiCapability(),
 		};
 		let isCollectionStale = false;
 		this._isLoading = true;
@@ -289,14 +337,41 @@ export class CharacterSheetPeerTargeting {
 				characterId: this._characterId,
 			});
 			if (!this._isRefreshCurrent(token)) return false;
+			const multi = [];
+			if (this._hasMultiCapability()) {
+				let cursor = null;
+				const seenCursors = new Set();
+				do {
+					const page = await this._api.pListMultiTargetOutgoing({campaignId: this._campaignId, limit: 100, ...(cursor ? {cursor} : {})});
+					if (!this._isRefreshCurrent(token)) return false;
+					multi.push(...(page?.operations || []));
+					cursor = page?.nextCursor ?? null;
+					if (cursor && seenCursors.has(cursor)) throw Object.assign(new Error("Repeated outgoing cursor."), {code: "RESPONSE_INVALID"});
+					if (cursor) seenCursors.add(cursor);
+				} while (cursor);
+				for (const operationId of this._multiSourceCommands.keys()) {
+					if (multi.some(operation => operation.operationId === operationId)) continue;
+					const detail = await this._api.pGetMultiTargetOperation({campaignId: this._campaignId, operationId});
+					if (!this._isRefreshCurrent(token)) return false;
+					if (detail?.operation?.sourceCharacterId !== token.characterId) throw Object.assign(new Error("Operation authorization changed."), {code: "ACTION_NOT_FOUND"});
+					multi.push(detail.operation);
+				}
+				for (const operation of multi) {
+					if (operation.sourceCharacterId !== token.characterId) continue;
+					await this._pAdoptMultiResult(operation, token);
+					if (!this._isRefreshCurrent(token)) return false;
+				}
+			}
 			if (this._collectionRevision !== token.collectionRevision) {
 				isCollectionStale = true;
 				return false;
 			}
-			this._outgoing = new Map((actions || [])
+			const outgoing = (actions || [])
 				.map(action => this._normalizeOutgoing(action))
 				.filter(Boolean)
-				.map(action => [action.actionId, action]));
+				.concat(multi.filter(operation => operation.sourceCharacterId === token.characterId).map(operation => this._normalizeMultiOutgoing(operation)).filter(Boolean));
+			this._outgoing = new Map(outgoing.map(action => [action.actionId, action]));
+			this._isAuthorityRevalidating = false;
 			return true;
 		} catch (error) {
 			if (!this._isRefreshCurrent(token)) return false;
@@ -321,6 +396,7 @@ export class CharacterSheetPeerTargeting {
 
 	async pCancel ({actionId}) {
 		const action = this._outgoing.get(actionId);
+		if (action?.isMulti) return this._pResolveMultiSource({actionId, kind: "cancel"});
 		if (this._isSuspended || !action?.canCancel || action.isSubmitting) return false;
 		const token = {generation: this._generation, characterId: this._characterId};
 		action.isSubmitting = true;
@@ -392,6 +468,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async _pSubmitDraft (draft) {
+		if (draft.isMulti) return this._pSubmitMultiDraft(draft);
 		if (this._isSuspended || draft.isSubmitting || draft.isAwaitingAuthoritativeReconciliation) return false;
 		const token = {generation: this._generation, characterId: draft.sourceCharacterId};
 		draft.isSubmitting = true;
@@ -422,7 +499,14 @@ export class CharacterSheetPeerTargeting {
 			this._render();
 			return true;
 		} catch (error) {
-			if (!this._isCurrent(token)) return false;
+			if (!this._isCurrent(token)) {
+				if (this._isSuspended && this._characterId === token.characterId && this._drafts.get(draft.draftKey) === draft) {
+					draft.isSubmitting = false;
+					draft.error = _getSafeError(error);
+					draft.errorCode = error?.code;
+				}
+				return false;
+			}
 			if (_ACCESS_LOSS_CODES.has(error?.code)) {
 				this.deactivate();
 				return false;
@@ -481,6 +565,236 @@ export class CharacterSheetPeerTargeting {
 		return this._fnIsOwner?.() === true;
 	}
 
+	_hasMultiCapability () {
+		return hasMultiTargetOperationsCapability(this._fnGetMultiTargetCapability());
+	}
+
+	_hasAnyCapability () {
+		return this._hasCapability() || this._hasMultiCapability();
+	}
+
+	async _pMaybeProposeMultiTarget ({descriptor, spell, selectedSlot}) {
+		if (!this._characterId || this._membershipRole !== "player" || !this._hasOwnerAuthority()) return {handled: false};
+		if (this._isSuspended || this._isAuthorityRevalidating || this._hasDraftAwaitingAuthoritativeReconciliation()) {
+			this._showError("Reconnect and verify campaign requests before sending another request. No source cost has been spent.");
+			return {handled: true, proposed: false};
+		}
+		const token = {generation: this._generation, characterId: this._characterId, isMulti: true};
+		try {
+			const targets = await this._pLoadTargets();
+			if (!this._isCurrent(token)) return {handled: true, proposed: false};
+			const picked = await this._fnPickTargets({spell, slotLevel: selectedSlot?.level, targets});
+			if (!this._isCurrent(token) || !picked || picked.kind === "cancel") return {handled: true, proposed: false};
+			if (picked.kind === "local") return {handled: false};
+			const refs = picked.targetRefs;
+			const selected = Array.isArray(refs) ? refs.map(ref => targets.find(target => target.targetRef === ref)) : [];
+			if (!selected.length || selected.length > 8 || selected.some(target => !target) || new Set(selected.map(target => target.characterId)).size !== selected.length) {
+				this._showError("Choose between one and eight different campaign characters.");
+				return {handled: true, proposed: false};
+			}
+			if (!descriptor?.sourceEntity?.uid || !descriptor.sourceEntity.version || !descriptor.effectTemplateId || !descriptor.choice || typeof descriptor.choice !== "object" || Array.isArray(descriptor.choice)) {
+				this._showError("This effect has no reviewed campaign descriptor. No source cost has been spent.");
+				return {handled: true, proposed: false};
+			}
+			const freeze = value => {
+				if (value && typeof value === "object") {
+					for (const child of Object.values(value)) freeze(child);
+					Object.freeze(value);
+				}
+				return value;
+			};
+			const draftKey = `multi:${token.characterId}:${JSON.stringify([descriptor, refs])}`;
+			let draft = this._drafts.get(draftKey);
+			if (!draft) {
+				const commandId = this._fnCreateId();
+				draft = {
+					isMulti: true,
+					commandId,
+					draftKey,
+					sourceCharacterId: token.characterId,
+					target: {name: `${selected.length} selected characters`},
+					spell,
+					request: freeze({
+						campaignId: this._campaignId,
+						contractVersion: 1,
+						sourceCharacterId: token.characterId,
+						sourceEntity: structuredClone(descriptor.sourceEntity),
+						effectTemplateId: descriptor.effectTemplateId,
+						choice: structuredClone(descriptor.choice),
+						targetRefs: [...refs],
+						rulesVersionId: this._fnGetRulesVersionId(),
+						idempotencyKey: commandId,
+					}),
+				};
+				this._drafts.set(draftKey, draft);
+			}
+			return {handled: true, proposed: await this._pSubmitDraft(draft), isMulti: true};
+		} catch (error) {
+			if (this._isCurrent(token)) {
+				if (_ACCESS_LOSS_CODES.has(error?.code)) this.deactivate();
+				else this._showError(_getSafeError(error));
+			}
+			return {handled: true, proposed: false};
+		}
+	}
+
+	async _pSubmitMultiDraft (draft) {
+		const token = {generation: this._generation, characterId: draft.sourceCharacterId, isMulti: true};
+		if (!this._isCurrent(token) || this._isAuthorityRevalidating || draft.isSubmitting || draft.isAwaitingAuthoritativeReconciliation) return false;
+		draft.isSubmitting = true;
+		draft.error = null;
+		this._render();
+		try {
+			const receipt = await this._api.pCreateMultiTargetOperation(draft.request);
+			if (!this._isCurrent(token)) return false;
+			const operationId = receipt?.operation?.operationId;
+			if (typeof operationId !== "string" || !operationId) throw Object.assign(new Error("Invalid command receipt."), {code: "RESPONSE_INVALID"});
+			// An exact retry acknowledges the original command, not current readiness.
+			const detail = await this._api.pGetMultiTargetOperation({campaignId: this._campaignId, operationId});
+			if (!this._isCurrent(token)) return false;
+			const action = this._normalizeMultiOutgoing(detail?.operation);
+			if (!action || detail.operation.sourceCharacterId !== token.characterId) throw Object.assign(new Error("Invalid operation detail."), {code: "RESPONSE_INVALID"});
+			await this._pAdoptMultiResult(detail.operation, token);
+			if (!this._isCurrent(token)) return false;
+			this._outgoing.set(action.actionId, action);
+			this._drafts.delete(draft.draftKey);
+			this._collectionRevision++;
+			this._render();
+			return true;
+		} catch (error) {
+			if (!this._isCurrent(token)) return false;
+			draft.isSubmitting = false;
+			draft.error = _getSafeError(error);
+			if (_ACCESS_LOSS_CODES.has(error?.code)) this.deactivate();
+			else {
+				this._render();
+				if (_isDefinitiveProposalRejection(error) && !["RESPONSE_INVALID"].includes(error.code)) {
+					draft.isAwaitingAuthoritativeReconciliation = true;
+					await this._pRecoverDefinitiveProposalRejections();
+				}
+			}
+			return false;
+		}
+	}
+
+	_normalizeMultiOutgoing (operation) {
+		if (!operation?.operationId || ![...MULTI_TARGET_OPERATION_LIVE_STATUSES, ...MULTI_TARGET_OPERATION_TERMINAL_STATUSES].includes(operation.status)) return null;
+		const current = this._outgoing.get(operation.operationId);
+		const command = this._multiSourceCommands.get(operation.operationId) ?? current?.command ?? null;
+		const targets = (operation.targets || []).map(target => ({
+			invitationId: target.invitationId,
+			status: target.status,
+			name: String(target.presentation?.targetName || "Campaign character unavailable").slice(0, 120),
+		}));
+		const approvedIds = new Set(targets.filter(target => ["approved", "approved_by_source"].includes(target.status)).map(target => target.invitationId));
+		return {
+			isMulti: true,
+			actionId: operation.operationId,
+			status: operation.status,
+			presentation: {effectLabel: String(operation.presentation?.effectLabel || "Campaign effect").slice(0, 120), targetName: `${targets.length} candidate characters`, outcomeLabel: "Owners respond independently. Finalization applies your selected approved subset atomically."},
+			targets,
+			selectedInvitationIds: current?.selectedInvitationIds
+				? new Set([...current.selectedInvitationIds].filter(id => approvedIds.has(id)))
+				: approvedIds,
+			sourceCostState: operation.status === "applied" ? "consumed" : command && MULTI_TARGET_OPERATION_LIVE_STATUSES.includes(operation.status) ? "unconfirmed" : "not_consumed",
+			canCancel: operation.capabilities?.canCancel === true,
+			canFinalize: operation.capabilities?.canFinalize === true,
+			isSubmitting: current?.isSubmitting === true,
+			error: current?.error ?? null,
+			command,
+		};
+	}
+
+	async _pAdoptMultiResult (operation, token) {
+		if (!this._isCurrent(token)) return false;
+		const delivery = getMultiTargetResultDelivery({operationId: operation.operationId, result: operation.sourceResult, characterId: token.characterId});
+		if (!delivery) return false;
+		return this._fnOnAuthoritativeApplied?.(delivery);
+	}
+
+	async pFinalize ({actionId, selectedInvitationIds}) {
+		return this._pResolveMultiSource({actionId, kind: "finalize", selectedInvitationIds});
+	}
+
+	async _pResolveMultiSource ({actionId, kind, selectedInvitationIds}) {
+		const action = this._outgoing.get(actionId);
+		const token = {generation: this._generation, characterId: this._characterId, isMulti: true};
+		if (!action?.isMulti || !this._isCurrent(token) || this._isAuthorityRevalidating || action.isSubmitting) return false;
+		if (action.command && action.command.kind !== kind) return false;
+		action.isSubmitting = true;
+		action.error = null;
+		this._render();
+		try {
+			if (!action.command) {
+				const fresh = await this._api.pGetMultiTargetOperation({campaignId: this._campaignId, operationId: actionId});
+				if (!this._isCurrent(token)) return false;
+				const operation = fresh?.operation;
+				const ids = selectedInvitationIds ?? [...action.selectedInvitationIds];
+				if (operation?.sourceCharacterId !== token.characterId || (kind === "cancel" ? operation.capabilities?.canCancel !== true : operation.status !== "awaiting_source_selection" || operation.capabilities?.canFinalize !== true)) {
+					throw Object.assign(new Error("This operation is no longer ready."), {code: "ACTION_NOT_FOUND"});
+				}
+				if (kind === "finalize" && (!ids.length || ids.length > 8 || new Set(ids).size !== ids.length || ids.some(id => !operation.targets.some(target => target.invitationId === id && ["approved", "approved_by_source"].includes(target.status))))) {
+					throw Object.assign(new Error("Choose an approved subset."), {code: "FINALIZATION_SELECTION_INVALID"});
+				}
+				action.command = {
+					kind,
+					request: Object.freeze({
+						campaignId: this._campaignId,
+						operationId: actionId,
+						idempotencyKey: this._fnCreateId(),
+						...(kind === "finalize" ? {selectedInvitationIds: Object.freeze([...ids])} : {}),
+					}),
+				};
+				this._multiSourceCommands.set(actionId, action.command);
+			}
+			action.sourceCostState = "unconfirmed";
+			this._render();
+			const receipt = await (kind === "cancel"
+				? this._api.pCancelMultiTargetOperation(action.command.request)
+				: this._api.pFinalizeMultiTargetOperation(action.command.request));
+			if (!this._isCurrent(token)) return false;
+			if (receipt?.operation?.operationId !== actionId) throw Object.assign(new Error("Invalid receipt."), {code: "RESPONSE_INVALID"});
+			await this._pAdoptMultiResult(receipt.operation, token);
+			if (!this._isCurrent(token)) return false;
+			const fresh = await this._api.pGetMultiTargetOperation({campaignId: this._campaignId, operationId: actionId});
+			if (!this._isCurrent(token)) return false;
+			await this._pAdoptMultiResult(fresh.operation, token);
+			if (!this._isCurrent(token)) return false;
+			const normalized = this._normalizeMultiOutgoing(fresh.operation);
+			if (!normalized) throw Object.assign(new Error("Invalid detail."), {code: "RESPONSE_INVALID"});
+			normalized.isSubmitting = false;
+			normalized.command = null;
+			this._multiSourceCommands.delete(actionId);
+			normalized.error = null;
+			this._outgoing.set(actionId, normalized);
+			this._collectionRevision++;
+			this._render();
+			this._focusAction(actionId);
+			return true;
+		} catch (error) {
+			if (!this._isCurrent(token)) return false;
+			if (_ACCESS_LOSS_CODES.has(error?.code)) this.deactivate();
+			else {
+				const current = this._outgoing.get(actionId);
+				if (current) {
+					current.isSubmitting = false;
+					current.error = isTransferOutcomeUncertain(error) || error?.code === "RESPONSE_INVALID"
+						? "The command response is unconfirmed; it may already have committed. Check refreshed status, or retry the exact original request."
+						: _getSafeError(error);
+					// Only a definitive rejection permits a new selection/key, after authoritative refresh.
+					if (_isDefinitiveProposalRejection(error) && error?.code !== "RESPONSE_INVALID") {
+						current.command = null;
+						this._multiSourceCommands.delete(actionId);
+					}
+				}
+				this._render();
+				this._focusAction(actionId);
+				void this.pRefresh();
+			}
+			return false;
+		}
+	}
+
 	_isSupportedSpellShape ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
 		return String(spell?.name || "").toLowerCase() === "cure wounds"
 			&& _SOURCE_VERSIONS.has(spell?.source)
@@ -504,7 +818,8 @@ export class CharacterSheetPeerTargeting {
 		const token = {generation: this._generation, characterId: this._characterId};
 		const promise = (async () => {
 			const isOutgoingReconciled = await this._pRefreshOutgoingActions();
-			if (!isOutgoingReconciled || !this._isCurrent(token)) {
+			if (!this._isCurrent(token)) return false;
+			if (!isOutgoingReconciled) {
 				this._setDefinitiveRecoveryError();
 				return false;
 			}
@@ -514,7 +829,7 @@ export class CharacterSheetPeerTargeting {
 			} catch {
 				isContextReconciled = false;
 			}
-			if (!this._isCurrent(token)) return false;
+			if (!this._isCurrent({...token, generation: this._generation})) return false;
 			if (!isContextReconciled) {
 				this._setDefinitiveRecoveryError();
 				return false;
@@ -565,8 +880,12 @@ export class CharacterSheetPeerTargeting {
 		});
 	}
 
-	_isCurrent ({generation, characterId}) {
-		return this._generation === generation && this._characterId === characterId;
+	_isCurrent ({generation, characterId, isMulti = false}) {
+		return this._generation === generation && this._characterId === characterId
+			&& !this._isSuspended && this._hasOwnerAuthority()
+			&& this._fnGetCharacterId() === characterId && this._hasAnyCapability()
+			&& (!isMulti || this._hasMultiCapability())
+			&& this._authorityVersion === this._fnGetAuthorityVersion();
 	}
 
 	_isRefreshCurrent (token) {
@@ -581,11 +900,18 @@ export class CharacterSheetPeerTargeting {
 	async _pPickTarget ({spell, slotLevel, targets}) {
 		return new Promise(resolve => {
 			let isResolved = false;
+			let closePicker = null;
+			const cancelPicker = () => {
+				doResolve({kind: "cancel"});
+				closePicker?.(false);
+			};
 			const doResolve = value => {
 				if (isResolved) return;
 				isResolved = true;
+				if (this._cancelTargetPicker === cancelPicker) this._cancelTargetPicker = null;
 				resolve(value);
 			};
+			this._cancelTargetPicker = cancelPicker;
 			CharacterSheetModal.pGetShow({
 				title: `Target ${spell.name}`,
 				isMinHeight0: true,
@@ -593,7 +919,8 @@ export class CharacterSheetPeerTargeting {
 				cbClose: () => doResolve({kind: "cancel"}),
 				cbCharacterScopeTeardown: () => doResolve({kind: "cancel"}),
 			}).then(({eleModalInner, doClose}) => {
-				if (isResolved) return;
+				closePicker = doClose;
+				if (isResolved) { doClose(false); return; }
 				const body = e_({tag: "div", clazz: "charsheet__peer-target-picker cs-adaptive-panel"});
 				const help = e_({
 					tag: "p",
@@ -643,10 +970,75 @@ export class CharacterSheetPeerTargeting {
 		});
 	}
 
-	_focusAction (actionId) {
+	async _pPickTargets ({spell, targets}) {
+		return new Promise(resolve => {
+			let resolved = false;
+			let closePicker = null;
+			const cancelPicker = () => {
+				finish({kind: "cancel"});
+				closePicker?.(false);
+			};
+			const finish = value => {
+				if (resolved) return;
+				resolved = true;
+				if (this._cancelTargetPicker === cancelPicker) this._cancelTargetPicker = null;
+				resolve(value);
+			};
+			this._cancelTargetPicker = cancelPicker;
+			CharacterSheetModal.pGetShow({
+				title: `Target ${spell.name}`,
+				isMinHeight0: true,
+				isWidth100: true,
+				cbClose: () => finish({kind: "cancel"}),
+				cbCharacterScopeTeardown: () => finish({kind: "cancel"}),
+			}).then(({eleModalInner, doClose}) => {
+				closePicker = doClose;
+				if (resolved) { doClose(false); return; }
+				const body = e_({tag: "div", clazz: "charsheet__peer-target-picker cs-adaptive-panel"});
+				body.append(e_({tag: "p", text: "Choose 1–8 different characters. No cost is reserved or spent while owners respond. Your own candidates are auto-approved; you may deselect them before finalizing."}));
+				const selected = new Set();
+				const list = e_({tag: "ul", clazz: "charsheet__peer-target-list"});
+				const send = e_({tag: "button", clazz: "ve-btn ve-btn-primary", text: "Send requests"});
+				send.type = "button";
+				send.disabled = true;
+				for (const target of targets) {
+					const checkbox = e_({tag: "input"});
+					checkbox.type = "checkbox";
+					checkbox.dataset.hubTargetRef = target.targetRef;
+					checkbox.addEventListener("change", () => {
+						if (checkbox.checked && selected.size >= 8) checkbox.checked = false;
+						if (checkbox.checked) selected.add(target.targetRef);
+						else selected.delete(target.targetRef);
+						send.disabled = selected.size < 1;
+					});
+					const label = e_({tag: "label", clazz: "charsheet__peer-target-option"});
+					label.append(checkbox, e_({tag: "span", text: `${target.name}${target.isSelf ? " · Current character" : ""}`}));
+					const row = e_({tag: "li"});
+					row.append(label);
+					list.append(row);
+				}
+				send.addEventListener("click", () => {
+					finish({kind: "targets", targetRefs: [...selected]});
+					doClose(true);
+				});
+				const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", text: "Cancel"});
+				cancel.type = "button";
+				cancel.addEventListener("click", () => { finish({kind: "cancel"}); doClose(false); });
+				const controls = e_({tag: "div", clazz: "charsheet__peer-target-controls"});
+				controls.append(send, cancel);
+				body.append(list, controls);
+				eleModalInner.append(body);
+				list.querySelector("input")?.focus();
+			});
+		});
+	}
+
+	_focusAction (actionId, invitationId = null) {
 		const action = [...(this._root?.querySelectorAll?.("[data-hub-action-id]") || [])]
 			.find(element => element.dataset.hubActionId === actionId && typeof element.focus === "function");
-		action?.focus();
+		const checkbox = invitationId && [...(action?.querySelectorAll?.("[data-hub-invitation-id]") || [])]
+			.find(element => element.dataset.hubInvitationId === invitationId);
+		(checkbox || action)?.focus();
 	}
 
 	_render () {
@@ -654,6 +1046,19 @@ export class CharacterSheetPeerTargeting {
 		this._root.innerHTML = "";
 		this._root.setAttribute("aria-busy", this._isLoading ? "true" : "false");
 		this._root.setAttribute("aria-live", "polite");
+		if (this._isSuspended || this._isAuthorityRevalidating) {
+			this._root.append(e_({tag: "p", text: "Campaign targeting is reconnecting. Requests keep their original identities; wait for authorized context before continuing."}));
+			if (!this._isSuspended) {
+				const refresh = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-default", text: "Refresh requests"});
+				refresh.type = "button";
+				refresh.disabled = this._isLoading;
+				refresh.addEventListener("click", () => void this.pRefresh());
+				this._root.append(refresh);
+				if (this._loadError) this._root.append(e_({tag: "p", text: this._loadError, attrs: {role: "alert"}}));
+			}
+			this._root.hidden = false;
+			return;
+		}
 
 		if (this._loadError) {
 			const error = e_({tag: "div", clazz: "charsheet__peer-action-error", text: this._loadError});
@@ -662,7 +1067,14 @@ export class CharacterSheetPeerTargeting {
 		}
 		const drafts = [...this._drafts.values()].filter(draft => draft.isSubmitting || draft.error);
 		const actions = [...this._outgoing.values()];
-		if (drafts.length || actions.length) this._root.append(e_({tag: "h2", clazz: "charsheet__peer-actions-title", text: "Your campaign requests"}));
+		if (drafts.length || actions.length) {
+			this._root.append(e_({tag: "h2", clazz: "charsheet__peer-actions-title", text: "Your campaign requests"}));
+			const refresh = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-default", text: "Refresh requests"});
+			refresh.type = "button";
+			refresh.disabled = this._isLoading;
+			refresh.addEventListener("click", () => void this.pRefresh());
+			this._root.append(refresh);
+		}
 		for (const draft of drafts) this._root.append(this._getDraftCard(draft));
 		for (const action of actions) this._root.append(this._getActionCard(action));
 		this._root.hidden = !this._loadError && !drafts.length && !actions.length;
@@ -675,7 +1087,7 @@ export class CharacterSheetPeerTargeting {
 		if (draft.isAwaitingAuthoritativeReconciliation) statusText = draft.error;
 		if (this._isSuspended) statusText = "Reconnecting… This request keeps its original identity. No spell slot has been spent.";
 		card.append(
-			e_({tag: "strong", text: `Cure Wounds → ${draft.target.name}`}),
+			e_({tag: "strong", text: `${draft.isMulti ? draft.spell.name : "Cure Wounds"} → ${draft.target.name}`}),
 			e_({tag: "span", text: statusText}),
 		);
 		if (draft.error && !draft.isAwaitingAuthoritativeReconciliation) {
@@ -700,14 +1112,43 @@ export class CharacterSheetPeerTargeting {
 			e_({tag: "span", clazz: "charsheet__peer-action-state", text: `${action.status.replaceAll("_", " ")} · source cost ${action.sourceCostState.replaceAll("_", " ")}`}),
 		);
 		card.append(copy);
-		if (action.canCancel && action.status === "proposed") {
+		if (action.isMulti) {
+			for (const target of action.targets) {
+				const row = e_({tag: "label", clazz: "charsheet__peer-target-option"});
+				const approved = ["approved", "approved_by_source"].includes(target.status);
+				if (action.canFinalize && approved) {
+					const checkbox = e_({tag: "input"});
+					checkbox.type = "checkbox";
+					checkbox.dataset.hubInvitationId = target.invitationId;
+					checkbox.checked = action.selectedInvitationIds.has(target.invitationId);
+					checkbox.disabled = this._isSuspended || action.isSubmitting || !!action.command;
+					checkbox.addEventListener("change", () => {
+						if (checkbox.checked) action.selectedInvitationIds.add(target.invitationId);
+						else action.selectedInvitationIds.delete(target.invitationId);
+						this._render();
+						this._focusAction(action.actionId, target.invitationId);
+					});
+					row.append(checkbox);
+				}
+				row.append(e_({tag: "span", text: `${target.name} · ${target.status.replaceAll("_", " ")}`}));
+				card.append(row);
+			}
+			if (action.canFinalize || action.command?.kind === "finalize") {
+				const finalize = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", text: action.command ? "Retry exact finalization" : "Finalize selected effects"});
+				finalize.type = "button";
+				finalize.disabled = this._isSuspended || action.isSubmitting || (!action.command && !action.targets.some(target => action.selectedInvitationIds.has(target.invitationId) && ["approved", "approved_by_source"].includes(target.status)));
+				finalize.addEventListener("click", () => void this.pFinalize({actionId: action.actionId}));
+				card.append(finalize);
+			}
+		}
+		if ((action.canCancel && (action.status === "proposed" || action.isMulti)) || action.command?.kind === "cancel") {
 			const cancel = e_({
 				tag: "button",
 				clazz: "ve-btn ve-btn-sm ve-btn-default",
 				text: this._isSuspended ? "Reconnect to cancel" : action.isSubmitting ? "Cancelling…" : "Cancel request",
 			});
 			cancel.type = "button";
-			cancel.disabled = this._isSuspended || action.isSubmitting;
+			cancel.disabled = this._isSuspended || action.isSubmitting || (action.command && action.command.kind !== "cancel");
 			cancel.dataset.hubActionId = action.actionId;
 			cancel.setAttribute("aria-label", `Cancel ${action.presentation.effectLabel} request for ${action.presentation.targetName}`);
 			cancel.addEventListener("click", () => void this.pCancel({actionId: action.actionId}));

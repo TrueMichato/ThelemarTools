@@ -22,6 +22,11 @@ monster/NPC targets, party/multi-target resolution, and range automation are not
 The picker states the touch-range requirement without exposing target HP, defenses, applicability, or other
 private state. Local and signed-out sheets retain the existing local cast flow.
 
+The held A4 consumer candidate adds generic protocol-6 collection/consent/subset-finalization UI to the same Sheet,
+but does not add a production multi-spell mapping. Its resolver intentionally returns null until A5 and the
+capability remains default-off. Synthetic reviewed-template tests are not evidence that Mass Healing Word or any
+other production multi-target spell is enabled. Independent review, integration, and deployment remain separate.
+
 ---
 
 ## Implementation Status

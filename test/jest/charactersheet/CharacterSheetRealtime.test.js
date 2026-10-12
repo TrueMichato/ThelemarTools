@@ -107,6 +107,26 @@ const makeLifecycleEvent = ({
 });
 
 describe("Character Sheet realtime coordinator", () => {
+	it.each(["character.projection.invalidated", "character.archived", "rules.activated", "brew.activated"])("conceals targeting synchronously on %s while document delivery is queued behind a save", type => {
+		const queued = [];
+		const repository = {pEnqueueRealtimeDelivery: jest.fn(({fnDeliver}) => { queued.push(fnDeliver); return new Promise(() => {}); })};
+		const {coordinator, clients} = makeCoordinator({repository});
+		const conceal = jest.fn();
+		coordinator.on("targetingInvalidated", conceal);
+		coordinator.attach({characterId: "character-1"});
+		clients[0].emit("event", {
+			id: "authority-changed",
+			campaignId: "campaign-1",
+			sequence: 40,
+			type,
+			aggregateType: type === "rules.activated" ? "rules_version" : "character",
+			aggregateId: "other-candidate",
+		});
+		expect(conceal).toHaveBeenCalledTimes(1);
+		expect(conceal).toHaveBeenCalledWith(expect.objectContaining({campaignId: "campaign-1", type}));
+		expect(queued.length).toBeGreaterThan(0);
+	});
+
 	it("delivers only the current owner's rolls even when covered by a character baseline", async () => {
 		const {coordinator, clients} = makeCoordinator();
 		const received = [];

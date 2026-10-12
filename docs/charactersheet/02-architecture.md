@@ -335,6 +335,16 @@ toJson(), loadFromJson()
 - Render source-owner pending and terminal status without target truth or source resource internals
 - Refetch on reconnect/focus and fence stale responses on character switches
 
+The held A4 candidate also requires the separate exact protocol-6 multi-target capability and a reviewed descriptor.
+The production resolver is null until A5. A reviewed descriptor freezes 1–8 opaque candidates without local cost;
+fresh outgoing/detail drives per-character response status and source subset finalization. Source-owned candidates
+are auto-approved only for this new workflow, not singular Cure Wounds. Account-wide incoming cards resolve exact
+owned identity through fresh `owner_truth.targetRef` equality and open the corresponding shared Sheet route before
+consent. HTTP receipts and realtime legs use only the existing repository delivery queue for adoption.
+Projection/rules/lifecycle invalidations synchronously conceal targeting and close its picker, even behind a save.
+Revisionless no-op legs add exact coverage to every ordinary/conflict/durable track, with no sheet adoption/redraw,
+save, or canonical watermark advance. The actor-scoped tab-session no-op journal is bounded to 256 leg identities.
+
 The spell module calls this coordinator after slot and casting-option selection but before any local resource
 mutation. A handled campaign proposal returns immediately; ordinary, unsupported, local, and signed-out casts
 continue through the pre-existing local flow.

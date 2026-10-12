@@ -443,6 +443,7 @@ class CharacterSheetPage {
 		this._state.setCarryAuthorityContext(cleared.carryAuthorityContext);
 		if (isSuspendPeerTargeting) this._peerTargeting?.suspend?.();
 		else this._peerTargeting?.deactivate();
+		this._hubEffects?.suspend?.();
 	}
 
 	_teardownHubRules () {
@@ -478,7 +479,13 @@ class CharacterSheetPage {
 		if (!this._hubRealtime || this._isHubRealtimeListenersBound) return false;
 		this._isHubRealtimeListenersBound = true;
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
+		this._hubRealtime.on("targetingInvalidated", () => {
+			this._peerTargeting?.suspend();
+			this._hubEffects?.suspend();
+		});
+		this._hubRealtime.on("targetingRefresh", () => { void this._pRefreshHubRules({isUseLatest: true}); });
 		this._hubRealtime.on("projectionInvalidated", event => {
+			if (event?.source === "event") void this._pRefreshHubRules({isUseLatest: true});
 			if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
 				void this._pRefreshHubReadOnlyCharacter({characterId: event?.characterId});
 				return;
@@ -911,6 +918,11 @@ class CharacterSheetPage {
 			characterId: this._currentCharacterId,
 			membershipRole: context?.membership?.role,
 		});
+		if (this._currentCharacterId && !this.isCurrentCharacterReadOnly()) this._hubEffects?.activate({characterId: this._currentCharacterId});
+		else this._hubEffects?.deactivate();
+		if (this._characterRepository?.hasPendingResync?.(this._currentCharacterId)) {
+			this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
+		}
 	}
 
 	_onHubCampaignContextChanged (event = null) {
@@ -1057,7 +1069,7 @@ class CharacterSheetPage {
 
 	_onHubSemanticOperation (event) {
 		if (!this._currentCharacterId) return false;
-		this._peerTargeting?.onRealtimeOperation(event);
+		if (!event.isAuthoritativeResult) this._peerTargeting?.onRealtimeOperation(event);
 		const characterId = event.characterId || event.targetCharacterId;
 		if (event?.status !== "applied") {
 			if (event.targetCharacterId != null && event.targetCharacterId !== this._currentCharacterId) return false;
@@ -1073,6 +1085,8 @@ class CharacterSheetPage {
 			leg: event.leg || "target",
 			operationId: event.operationId || event.payload?.operation?.operationId,
 			operationLegKey: event.operationLegKey,
+			legId: event.legId,
+			changed: event.payload?.changed !== false,
 			operation: event.payload?.operation,
 			sourceCost: event.payload?.sourceCost,
 			resultingCharacterRevision: event.payload?.resultingCharacterRevision,
@@ -1098,11 +1112,21 @@ class CharacterSheetPage {
 				if (event.payload?.operation) {
 					this._hubEffects?.onApplied({
 						operation: event.payload.operation,
+						legId: event.legId,
 						changed: event.payload.changed !== false,
 						beforeData,
 						afterData: this._getHubLiveCharacterData(),
 					});
 				}
+				return true;
+			case "coverage_only":
+				this._hubEffects?.onApplied({
+					operation: event.payload.operation,
+					legId: event.legId,
+					changed: false,
+					beforeData,
+					afterData: beforeData,
+				});
 				return true;
 			case "resync_required":
 				this._scheduleHubRealtimeResync({characterId: this._currentCharacterId});
@@ -1147,6 +1171,9 @@ class CharacterSheetPage {
 		resultingCharacterRevision,
 		leg = "target",
 		sourceCost = null,
+		legId = null,
+		operationLegKey = null,
+		changed = true,
 	}) {
 		if (characterId !== this._currentCharacterId) return false;
 		const repository = this._characterRepository;
@@ -1161,10 +1188,13 @@ class CharacterSheetPage {
 			|| typeof eventId !== "string"
 			|| !eventId
 			|| !Number.isInteger(sequence)
-			|| !Number.isInteger(resultingCharacterRevision)
+			|| (!Number.isInteger(resultingCharacterRevision) && !(leg === "target" && typeof legId === "string" && legId && changed === false && resultingCharacterRevision == null))
 		) return false;
 		const generation = this._characterLoadGeneration;
 		const realtimeGeneration = this._hubRealtimeGeneration;
+		const contextGeneration = this._hubContextGeneration;
+		const roleGeneration = this._hubRoleRosterGeneration;
+		const campaignId = this._hubCampaignId;
 		return repository.pEnqueueRealtimeDelivery({
 			characterId,
 			fnDeliver: () => {
@@ -1172,6 +1202,9 @@ class CharacterSheetPage {
 					characterId !== this._currentCharacterId
 					|| generation !== this._characterLoadGeneration
 					|| realtimeGeneration !== this._hubRealtimeGeneration
+					|| contextGeneration !== this._hubContextGeneration
+					|| roleGeneration !== this._hubRoleRosterGeneration
+					|| campaignId !== this._hubCampaignId
 				) return false;
 				return this._onHubSemanticOperation({
 					eventId,
@@ -1187,12 +1220,16 @@ class CharacterSheetPage {
 					characterId,
 					targetCharacterId: characterId,
 					status: "applied",
+					isAuthoritativeResult: true,
 					leg,
+					legId,
+					operationLegKey,
 					payload: {
 						leg,
 						...(isTargetLeg ? {operation} : {}),
 						...(isSourceLeg ? {sourceCost} : {}),
 						resultingCharacterRevision,
+						changed,
 					},
 				});
 			},
@@ -1203,13 +1240,28 @@ class CharacterSheetPage {
 		const repository = this._characterRepository;
 		if (typeof repository?.pRunPendingResync !== "function") return false;
 		const generation = this._characterLoadGeneration;
+		const realtimeGeneration = this._hubRealtimeGeneration;
+		const contextGeneration = this._hubContextGeneration;
+		const roleGeneration = this._hubRoleRosterGeneration;
+		const campaignId = this._hubCampaignId;
+		const isCurrent = () => this._currentCharacterId === characterId
+			&& this._characterLoadGeneration === generation && this._hubRealtimeGeneration === realtimeGeneration
+			&& this._hubContextGeneration === contextGeneration && this._hubRoleRosterGeneration === roleGeneration
+			&& this._hubCampaignId === campaignId;
 		const result = await repository.pRunPendingResync({
 			characterId,
 			fnGetLiveData: () => this._getHubLiveCharacterData(),
 			fnAdoptLive: liveNext => this._adoptHubLiveCharacterData(liveNext),
-			fnIsCurrent: () => this._currentCharacterId === characterId && this._characterLoadGeneration === generation,
+			fnIsCurrent: isCurrent,
 		}).catch(error => ({status: "failed", error}));
-
+		if (!isCurrent()) {
+			if (
+				this._currentCharacterId === characterId && this._hubContext
+				&& !this._hubRulesRefreshBlocked && !this._isHubContextRefreshing
+				&& this._characterRepository?.hasPendingResync?.(characterId)
+			) this._scheduleHubRealtimeResync({characterId});
+			return false;
+		}
 		switch (result?.status) {
 			case "recovered":
 				if (result.liveChanged !== false) this._renderCharacter();
@@ -1781,6 +1833,10 @@ class CharacterSheetPage {
 					api: this._hubCampaignContext.api,
 					root: document.getElementById("charsheet-hub-effects"),
 					fnOnAuthoritativeApproval: detail => this._onHubAuthoritativeApproval(detail),
+					fnGetMultiTargetCapability: () => this._hubCampaignContext?.context?.capabilities?.multiTargetOperations ?? null,
+					fnGetCharacterId: () => this._currentCharacterId,
+					fnIsOwner: () => !this.isCurrentCharacterReadOnly(),
+					fnGetAuthorityVersion: () => `${this._hubRealtimeGeneration}:${this._hubContextGeneration}:${this._hubRoleRosterGeneration}`,
 				});
 				this._hubEffects.init();
 			} catch (e) { console.error("Failed to init campaign effect controls:", e); }
@@ -1793,6 +1849,8 @@ class CharacterSheetPage {
 					fnIsOwner: () => !this.isCurrentCharacterReadOnly(),
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
+					fnGetMultiTargetCapability: () => this._hubCampaignContext?.context?.capabilities?.multiTargetOperations ?? null,
+					fnGetAuthorityVersion: () => `${this._hubRealtimeGeneration}:${this._hubContextGeneration}:${this._hubRoleRosterGeneration}`,
 					fnRefreshCampaignContext: () => this._pRefreshHubRules({isUseLatest: true}),
 					fnOnAuthoritativeApplied: detail => this._onHubAuthoritativeApproval(detail),
 				});

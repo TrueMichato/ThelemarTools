@@ -11,6 +11,26 @@ type HubSession = {
 
 type CampaignPrimaryAction = "dm" | "character" | "character-setup" | "character-choice" | "read-only";
 
+type MultiTargetView = {
+	operationId: string;
+	status: string;
+	sourceCharacterId?: string;
+	sourceResult?: Record<string, unknown>;
+	targets: Array<{invitationId: string; status: string; targetRef?: string; result?: Record<string, unknown>}>;
+};
+
+type MultiTargetSheetFixtureHost = Window & {charSheet?: {
+	_pRefreshHubRules: () => Promise<boolean>;
+	_peerTargeting?: {
+		_hasMultiCapability: () => boolean;
+		_fnResolveMultiTargetSpell: (options: {spell?: {name?: string}}) => {
+			sourceEntity: {type: string; uid: string; version: string};
+			effectTemplateId: string;
+			choice: {amount: number};
+		} | null;
+	};
+}};
+
 export class HubCampaignPage {
 	readonly page: Page;
 	readonly _characterLeases = new Map<string, {epoch: number; expiresAt: string}>();
@@ -1634,6 +1654,105 @@ export class HubCampaignPage {
 			() => this.page.evaluate(() => (window as any).charSheet?._peerTargeting?._hasCapability?.() === true),
 			{timeout: 15_000},
 		).toBe(true);
+	}
+
+	async enableReviewedMultiTargetFixture ({campaignId, secret}: {campaignId: string; secret: string}): Promise<void> {
+		const response = await this.page.request.post("/auth/__test/multi-target-campaign", {
+			headers: {"x-hub-test-auth": secret}, data: {campaignId},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+	}
+
+	async prepareReviewedMultiTargetSpellFixture (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+			if (!sheet || !await sheet._pRefreshHubRules() || !sheet._peerTargeting?._hasMultiCapability()) {
+				throw new Error("Reviewed multi-target fixture capability is unavailable.");
+			}
+			sheet._peerTargeting._fnResolveMultiTargetSpell = ({spell}) => spell?.name === "Cure Wounds"
+				? {
+					sourceEntity: {type: "ability", uid: "shared restoration|tst", version: "tst-v1"},
+					effectTemplateId: "ability.shared-restoration.heal", choice: {amount: 4},
+				}
+				: null;
+		});
+	}
+
+	async getMultiTargetRefs (campaignId: string): Promise<Map<string, string>> {
+		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/character-projections`, {
+			headers: {"x-hub-protocol-version": "6"},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+		const body: {roster: Array<{characterId: string; targetRef?: string}>} = await response.json();
+		return new Map(body.roster.filter(entry => entry.targetRef).map(entry => [entry.characterId, entry.targetRef!]));
+	}
+
+	async castReviewedMultiTargetFixture (targetRefs: string[]): Promise<MultiTargetView> {
+		await this.page.locator('a[href="#charsheet-tab-spells"]').click();
+		const spell = this.page.locator(".charsheet__spell-item").filter({hasText: "Cure Wounds"}).first();
+		await spell.locator(".charsheet__spell-cast").click();
+		const picker = this.page.locator(".charsheet__peer-target-picker");
+		await expect(picker).toBeVisible();
+		await expect(picker).toContainText("No cost is reserved or spent");
+		for (const targetRef of targetRefs) await picker.locator(`input[data-hub-target-ref="${targetRef}"]`).check();
+		const response = this.page.waitForResponse(response => response.request().method() === "POST" && /\/multi-target-operations$/.test(new URL(response.url()).pathname));
+		await picker.getByRole("button", {name: "Send requests", exact: true}).click();
+		const created = await response;
+		expect(created.status(), await created.text()).toBe(201);
+		await expect(picker).toBeHidden();
+		const body: {operation: MultiTargetView} = await created.json();
+		return body.operation;
+	}
+
+	async getMultiTargetDetail ({campaignId, operationId}: {campaignId: string; operationId: string}): Promise<MultiTargetView> {
+		const response = await this.page.request.get(`/api/campaigns/${campaignId}/multi-target-operations/${operationId}`, {
+			headers: {"x-hub-protocol-version": "6"},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+		const body: {operation: MultiTargetView} = await response.json();
+		return body.operation;
+	}
+
+	async getMultiTargetInbox (campaignId: string): Promise<Array<{operationId: string; invitationId: string; targetRef?: string; status: string}>> {
+		const response = await this.page.request.get(`/api/campaigns/${campaignId}/multi-target-operations/inbox?mode=recovery&limit=100`, {
+			headers: {"x-hub-protocol-version": "6"},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+		return (await response.json()).invitations;
+	}
+
+	async resolveMultiTargetInvitation ({operationId, invitationId, decision}: {operationId: string; invitationId: string; decision: "Approve" | "Reject"}): Promise<void> {
+		const card = this.page.locator(`#charsheet-hub-effects article[data-hub-action-id="multi:${operationId}:${invitationId}"]`);
+		await expect(card).toBeVisible();
+		const control = card.getByRole("button", {name: new RegExp(`^${decision} `)});
+		await control.click();
+		await expect(control).toBeHidden();
+	}
+
+	async finalizeMultiTargetSubset ({operationId, invitationIds}: {operationId: string; invitationIds: string[]}): Promise<void> {
+		const card = this.page.locator(`#charsheet-peer-targeting article[data-hub-action-id="${operationId}"]`);
+		await expect(card).toContainText("awaiting source selection");
+		for (const checkbox of await card.locator("input[data-hub-invitation-id]").all()) {
+			const id = await checkbox.getAttribute("data-hub-invitation-id");
+			await checkbox.setChecked(id != null && invitationIds.includes(id));
+		}
+		await card.getByRole("button", {name: "Finalize selected effects", exact: true}).click();
+		await expect(card).toContainText("applied");
+	}
+
+	async refreshMultiTargetRequests (): Promise<void> {
+		await this.page.locator("#charsheet-peer-targeting").getByRole("button", {name: "Refresh requests", exact: true}).click();
+	}
+
+	async expectCharacterSheetHp (hp: number): Promise<void> {
+		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(String(hp));
+	}
+
+	async openCharacterSheetFromCampaign ({campaignId, characterId, name}: {campaignId: string; characterId: string; name: string}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.page.locator(`a[href="charactersheet.html?id=${characterId}&hubCampaign=${campaignId}"]`).first().click();
+		await expect(this.page.locator("#charsheet-ipt-name")).toHaveValue(name);
+		await this.waitForCharacterRealtimeLive();
 	}
 
 	async expectPeerTargetingUnavailable (): Promise<void> {

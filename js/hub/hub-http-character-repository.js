@@ -116,6 +116,7 @@ export class HubHttpCharacterRepository {
 		// Separate from `_conflicts` on purpose: a live conflict must receive the same operation transform, but
 		// must NOT gate `pUpsert` the way a stored overlap conflict does.
 		this._liveConflicts = new Map();
+		this._revisionlessCoverage = new Map();
 	}
 
 	async _pEnsureSession () {
@@ -939,8 +940,9 @@ export class HubHttpCharacterRepository {
 				if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
 			} else if (plan.decisions[name] === TRACK_DECISION.COVERED) {
 				markCoverageOperationLeg(coverage, operationLegKey);
-				if (Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
+				if (Number.isInteger(revision) && Number.isInteger(sequence)) coverage.acceptedSequence = Math.max(coverage.acceptedSequence || 0, sequence);
 			}
+			if (plan.status === RECONCILE_STATUS.COVERAGE_ONLY) markCoverageOperationLeg(coverage, operationLegKey);
 			return {data: structuredClone(data), coverage};
 		};
 		return entry.queue.map((command, index) => {
@@ -1027,7 +1029,61 @@ export class HubHttpCharacterRepository {
 			tracks.liveConflictLocal = {data: liveConflict.local, coverage: this._getConflictCoverage(liveConflict, "local")};
 			tracks.liveConflictServer = {data: liveConflict.server, coverage: this._getConflictCoverage(liveConflict, "server")};
 		}
+		const revisionlessIds = this._getRevisionlessCoverage(canonicalId).toArray({limit: 256});
+		for (const track of Object.values(tracks)) {
+			for (const key of revisionlessIds) markCoverageOperationLeg(track.coverage, key);
+		}
 		return tracks;
+	}
+
+	_getRevisionlessCoverageKey (characterId) {
+		return `hub-character-operation-coverage:${this._scopeKey}:${this._session?.account?.id || "unbound"}:${characterId}`;
+	}
+
+	_getRevisionlessCoverage (characterId) {
+		const key = this._getRevisionlessCoverageKey(characterId);
+		if (this._revisionlessCoverage.has(key)) return this._revisionlessCoverage.get(key);
+		let ids = [];
+		const raw = this._recoveryStorage?.getItem(key);
+		if (raw) {
+			let parsed;
+			try {
+				parsed = JSON.parse(raw);
+			} catch (cause) {
+				throw Object.assign(new Error("Campaign no-op coverage is invalid. Reload or export before continuing.", {cause}), {code: "CHARACTER_RECOVERY_STORAGE_INVALID"});
+			}
+			if (parsed?.version !== 1 || !Array.isArray(parsed.operationLegIds) || parsed.operationLegIds.length > 256 || parsed.operationLegIds.some(id => typeof id !== "string")) {
+				throw Object.assign(new Error("Campaign no-op coverage is invalid. Reload or export before continuing."), {code: "CHARACTER_RECOVERY_STORAGE_INVALID"});
+			}
+			ids = parsed.operationLegIds;
+		}
+		const coverage = new BoundedIdSet({ids});
+		this._revisionlessCoverage.set(key, coverage);
+		return coverage;
+	}
+
+	_stageRevisionlessCoverage ({characterId, operationLegKey = null, operationLegKeys = []}) {
+		if (!this._recoveryStorage || !this._session?.account?.id) {
+			throw Object.assign(new Error("Campaign no-op coverage could not be stored. Saving is paused."), {code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		}
+		const key = this._getRevisionlessCoverageKey(characterId);
+		const previousRaw = this._recoveryStorage.getItem(key);
+		const ids = this._getRevisionlessCoverage(characterId).clone();
+		for (const key of [operationLegKey, ...operationLegKeys]) {
+			if (key) ids.add(key);
+		}
+		try {
+			this._recoveryStorage.setItem(key, JSON.stringify({version: 1, operationLegIds: ids.toArray({limit: 256})}));
+		} catch (cause) {
+			throw Object.assign(new Error("Campaign no-op coverage could not be stored. Saving is paused.", {cause}), {code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		}
+		return {key, ids, previousRaw};
+	}
+
+	_rollbackRevisionlessCoverage (staged) {
+		if (!staged) return;
+		if (staged.previousRaw == null) this._recoveryStorage.removeItem(staged.key);
+		else this._recoveryStorage.setItem(staged.key, staged.previousRaw);
 	}
 
 	/**
@@ -1045,6 +1101,8 @@ export class HubHttpCharacterRepository {
 		leg = CHARACTER_OPERATION_LEGS.TARGET,
 		operationId = null,
 		operationLegKey = null,
+		legId = null,
+		changed = true,
 		operation = null,
 		sourceCost = null,
 		resultingCharacterRevision,
@@ -1056,12 +1114,21 @@ export class HubHttpCharacterRepository {
 		if (typeof characterId !== "string" || !characterId) throw new TypeError(`characterId is required.`);
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
 		const {events: appliedEventIds, operationLegs: appliedOperationLegIds} = this._getAppliedIds(canonicalId);
-
+		let tracks;
+		try {
+			tracks = this._buildReconciliationTracks({canonicalId, liveData});
+		} catch (error) {
+			const detail = {code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE", message: error.message || "Campaign effect coverage could not be read. Saving is paused."};
+			this._setSaveBlock(canonicalId, {reason: "recovery_storage_failed", ...detail});
+			return {status: RECONCILE_STATUS.BLOCKED, error: detail};
+		}
 		const plan = planOperationLeg({
-			tracks: this._buildReconciliationTracks({canonicalId, liveData}),
+			tracks,
 			leg,
 			operationId,
 			operationLegKey,
+			legId,
+			changed,
 			operation,
 			sourceCost,
 			resultingCharacterRevision,
@@ -1077,6 +1144,9 @@ export class HubHttpCharacterRepository {
 					eventId,
 					sequence,
 					leg,
+					legId,
+					changed,
+					operationLegKey,
 					operationId: plan.operationId || operationId || operation?.operationId,
 					operation,
 					sourceCost,
@@ -1111,9 +1181,43 @@ export class HubHttpCharacterRepository {
 				canonicalId,
 				eventId,
 				operationLegKey: plan.operationLegKey,
-				sequence,
+				sequence: Number.isInteger(resultingCharacterRevision) ? sequence : null,
 			});
 			return {status: plan.status, decisions: plan.decisions};
+		}
+		if (plan.status === RECONCILE_STATUS.COVERAGE_ONLY) {
+			const queue = this._getRecoveryQueueFromPlan({canonicalId, plan, sequence: null});
+			let durable = null;
+			let revisionless = null;
+			try {
+				if (queue) durable = this._stageRecoveryCommandQueue({characterId: canonicalId, queue});
+				revisionless = this._stageRevisionlessCoverage({characterId: canonicalId, operationLegKey: plan.operationLegKey});
+			} catch (error) {
+				this._rollbackStagedRecoveryCommandQueue(durable);
+				this._setSaveBlock(canonicalId, {reason: "recovery_storage_failed", code: error.code, message: error.message});
+				return {status: RECONCILE_STATUS.BLOCKED, error: {code: error.code, message: error.message}};
+			}
+			if (durable) this._commitStagedRecoveryCommandQueue(durable);
+			this._revisionlessCoverage.set(revisionless.key, revisionless.ids);
+			const book = this._getCoverageBook(canonicalId);
+			book.acceptedOperationLegIds.add(plan.operationLegKey);
+			for (const name of ["live", "latestSubmitted", "recoveredBase", "failedWrite"]) {
+				if (plan.decisions[name]) markCoverageOperationLeg(book[name], plan.operationLegKey);
+			}
+			for (const store of [this._conflicts, this._liveConflicts]) {
+				const conflict = store.get(canonicalId);
+				if (!conflict) continue;
+				conflict.coverage ||= {};
+				for (const part of ["base", "local", "server"]) {
+					const coverage = this._getConflictCoverage(conflict, part);
+					markCoverageOperationLeg(coverage, plan.operationLegKey);
+					conflict.coverage[part] = serializeCoverage(coverage);
+				}
+			}
+			if (!durable) this._writeRecoveryCoverage(canonicalId);
+			this._commitAppliedIds({canonicalId, eventId, operationLegKey: plan.operationLegKey});
+			this._clearRecoveryStorageSaveBlock(canonicalId);
+			return {status: RECONCILE_STATUS.COVERAGE_ONLY, liveChanged: false, decisions: plan.decisions};
 		}
 
 		const recoveryQueueNxt = this._getRecoveryQueueFromPlan({canonicalId, plan, sequence});
@@ -1263,10 +1367,12 @@ export class HubHttpCharacterRepository {
 		const operationLegKey = getOperationLegKey({
 			operationId: envelope.operationId || envelope.operation?.operationId,
 			leg: envelope.leg || CHARACTER_OPERATION_LEGS.TARGET,
+			legId: envelope.legId,
 		});
 		if (operationLegKey && pending.some(it => getOperationLegKey({
 			operationId: it.operationId || it.operation?.operationId,
 			leg: it.leg || CHARACTER_OPERATION_LEGS.TARGET,
+			legId: it.legId,
 		}) === operationLegKey)) return;
 		if (pending.length >= _PENDING_RESYNC_LIMIT) {
 			this._setSaveBlock(canonicalId, {
@@ -1356,6 +1462,8 @@ export class HubHttpCharacterRepository {
 					leg: routing.leg,
 					operationId: routing.operationId,
 					operationLegKey: routing.operationLegKey,
+					legId: routing.legId,
+					changed: routing.payload.changed,
 					operation: routing.payload.operation,
 					sourceCost: routing.payload.sourceCost,
 					resultingCharacterRevision: routing.payload.resultingCharacterRevision,
@@ -1396,10 +1504,13 @@ export class HubHttpCharacterRepository {
 				let history;
 				try {
 					await this._pEnsureSession();
+					if (!fnIsCurrent()) return {status: "fenced"};
 					canonical = await this._api.pGetCharacter({characterId: canonicalId});
+					if (!fnIsCurrent()) return {status: "fenced"};
 					this._assertCharacterScope(canonical);
 					history = await this._pListOperationHistory({afterSequence: this._getResyncFloorSequence(canonicalId)});
 				} catch (error) {
+					if (!fnIsCurrent()) return {status: "fenced"};
 					this._setSaveBlock(canonicalId, {
 						reason: "resync_failed",
 						code: error?.code || "OPERATION_RESYNC_FAILED",
@@ -1417,12 +1528,13 @@ export class HubHttpCharacterRepository {
 					const operationLegKey = getOperationLegKey({
 						operationId: envelope.operationId || envelope.operation?.operationId,
 						leg: envelope.leg || CHARACTER_OPERATION_LEGS.TARGET,
+						legId: envelope.legId,
 					});
 					if (operationLegKey && !known.has(operationLegKey)) known.set(operationLegKey, {...envelope, operationLegKey});
 				}
 				const ordered = [...known.values()].sort((a, b) => (
-					a.resultingCharacterRevision - b.resultingCharacterRevision
-					|| (a.sequence || 0) - (b.sequence || 0)
+					(a.sequence || 0) - (b.sequence || 0)
+					|| a.resultingCharacterRevision - b.resultingCharacterRevision
 				));
 
 				if (!history.isComplete && ordered.length < pending.length) {
@@ -1455,13 +1567,16 @@ export class HubHttpCharacterRepository {
 
 				const recoveryQueueNxt = this._getRecoveryQueueFromWorkingSet({canonicalId, working});
 				let stagedRecoveryQueue = null;
-				if (recoveryQueueNxt) {
+				let stagedRevisionlessCoverage = null;
+				const revisionlessKeys = plan.applied.filter(entry => entry.changed === false && entry.resultingCharacterRevision == null).map(entry => entry.operationLegKey);
+				if (recoveryQueueNxt || revisionlessKeys.length) {
 					try {
-						stagedRecoveryQueue = this._stageRecoveryCommandQueue({
-							characterId: canonicalId,
-							queue: recoveryQueueNxt,
-						});
+						if (recoveryQueueNxt) {
+							stagedRecoveryQueue = this._stageRecoveryCommandQueue({characterId: canonicalId, queue: recoveryQueueNxt});
+						}
+						if (revisionlessKeys.length) stagedRevisionlessCoverage = this._stageRevisionlessCoverage({characterId: canonicalId, operationLegKeys: revisionlessKeys});
 					} catch (error) {
+						this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
 						this._setSaveBlock(canonicalId, {
 							reason: "recovery_storage_failed",
 							code: error.code || "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
@@ -1478,12 +1593,14 @@ export class HubHttpCharacterRepository {
 						fnAdoptLive(structuredClone(liveNext));
 					} catch (error) {
 						this._rollbackStagedRecoveryCommandQueue(stagedRecoveryQueue);
+						this._rollbackRevisionlessCoverage(stagedRevisionlessCoverage);
 						// Nothing has been committed yet, so a retry replays the identical batch.
 						return {status: "failed", error: {code: "LIVE_ADOPTION_FAILED", message: error?.message}};
 					}
 				}
 
 				if (stagedRecoveryQueue) this._commitStagedRecoveryCommandQueue(stagedRecoveryQueue);
+				if (stagedRevisionlessCoverage) this._revisionlessCoverage.set(stagedRevisionlessCoverage.key, stagedRevisionlessCoverage.ids);
 				this._commitResyncBatch({canonicalId, canonical, plan, isRecoveryQueueCommitted: !!stagedRecoveryQueue});
 				this._pendingResync.delete(canonicalId);
 				this._clearSaveBlock(canonicalId);
@@ -1548,6 +1665,9 @@ export class HubHttpCharacterRepository {
 				};
 			}
 		}
+		for (const track of Object.values(working)) {
+			for (const key of this._getRevisionlessCoverage(canonicalId).toArray({limit: 256})) markCoverageOperationLeg(track.coverage, key);
+		}
 		return working;
 	}
 
@@ -1569,6 +1689,9 @@ export class HubHttpCharacterRepository {
 				tracks: working,
 				leg: entry.leg || CHARACTER_OPERATION_LEGS.TARGET,
 				operationId: entry.operationId || entry.operation?.operationId,
+				legId: entry.legId,
+				operationLegKey: entry.operationLegKey,
+				changed: entry.changed,
 				operation: entry.operation,
 				sourceCost: entry.sourceCost,
 				resultingCharacterRevision: entry.resultingCharacterRevision,
@@ -1576,10 +1699,14 @@ export class HubHttpCharacterRepository {
 				appliedEventIds: workingEvents,
 				appliedOperationLegIds: workingOperationLegs,
 			});
-			if (plan.status !== RECONCILE_STATUS.APPLIED && plan.status !== RECONCILE_STATUS.SUPPRESSED) {
+			if (![RECONCILE_STATUS.APPLIED, RECONCILE_STATUS.SUPPRESSED, RECONCILE_STATUS.COVERAGE_ONLY].includes(plan.status)) {
 				return {status: plan.status, error: plan.error};
 			}
 			const operationLegKey = plan.operationLegKey;
+			if (plan.status === RECONCILE_STATUS.COVERAGE_ONLY) {
+				for (const track of Object.values(working)) markCoverageOperationLeg(track.coverage, operationLegKey);
+				applied.push({...entry, operationLegKey, liveChanged: false, appliedEffect: {operation: entry.operation, legId: entry.legId, operationLegKey, changed: false}});
+			}
 			if (plan.status === RECONCILE_STATUS.APPLIED) {
 				for (const [name, next] of Object.entries(plan.staged)) {
 					working[name].data = next;
@@ -1606,6 +1733,7 @@ export class HubHttpCharacterRepository {
 						? {
 							appliedEffect: {
 								operation: structuredClone(entry.operation),
+								...(entry.legId ? {legId: entry.legId} : {}),
 								changed: plan.changedTracks?.live !== false,
 								beforeData: liveBefore,
 								afterData: structuredClone(plan.staged.live),
@@ -1646,7 +1774,7 @@ export class HubHttpCharacterRepository {
 		this._appliedEventIds.set(canonicalId, plan.workingEvents);
 		this._appliedOperationLegIds.set(canonicalId, plan.workingOperationLegs);
 
-		const sequences = plan.applied.map(entry => entry.sequence).filter(Number.isInteger);
+		const sequences = plan.applied.filter(entry => Number.isInteger(entry.resultingCharacterRevision)).map(entry => entry.sequence).filter(Number.isInteger);
 		if (sequences.length) {
 			const cursor = this._realtimeCursors.get(canonicalId) || {};
 			this._realtimeCursors.set(canonicalId, {...cursor, operationWatermark: Math.max(cursor.operationWatermark || 0, ...sequences)});

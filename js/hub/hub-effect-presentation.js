@@ -81,7 +81,7 @@ export function getAppliedEffectNotice ({operation, changed = true, beforeData =
 			return {id: operation.operationId, message: `${amount} damage applied by the campaign.`};
 		}
 		case "hp.heal": {
-			const amount = beforeData && afterData
+			const amount = changed === false ? 0 : beforeData && afterData
 				? Math.max(0, (Number(afterData.hp?.current) || 0) - (Number(beforeData.hp?.current) || 0))
 				: Math.max(0, Number(args.amount) || 0);
 			return {

@@ -1,4 +1,5 @@
 import {getPendingEffectPresentation} from "./hub-effect-presentation.js";
+import {getMultiTargetOperationRouting} from "./hub-multi-target-operations.js";
 
 export const CHARACTER_OPERATION_EVENT_TYPES = Object.freeze([
 	"character.operation.proposed",
@@ -27,13 +28,15 @@ const _TERMINAL_STATUSES = new Map([
 
 const _isRecord = value => !!value && typeof value === "object" && !Array.isArray(value);
 
-export function getOperationLegKey ({operationId, leg}) {
+export function getOperationLegKey ({operationId, leg, legId = null}) {
 	if (typeof operationId !== "string" || !operationId) return null;
 	if (!Object.values(CHARACTER_OPERATION_LEGS).includes(leg)) return null;
-	return `${operationId}/${leg}`;
+	if (legId != null && (typeof legId !== "string" || !legId)) return null;
+	return `${operationId}/${leg}${legId ? `/${legId}` : ""}`;
 }
 
 export function getCharacterOperationRouting (event) {
+	if (event?.type?.startsWith("character.multi_operation.")) return getMultiTargetOperationRouting(event);
 	if (!CHARACTER_OPERATION_EVENT_TYPE_SET.has(event?.type)) return null;
 
 	if (event.type === "character.operation.source_cost_consumed") {

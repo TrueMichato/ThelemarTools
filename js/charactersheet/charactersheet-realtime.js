@@ -14,6 +14,8 @@ const _LISTENER_TYPES = new Set([
 	"rollLogged",
 	"rulesChanged",
 	"semanticOperation",
+	"targetingInvalidated",
+	"targetingRefresh",
 ]);
 
 const _CHARACTER_TEARDOWN_EVENT_TYPES = new Set([
@@ -311,6 +313,14 @@ export class CharacterSheetRealtimeCoordinator {
 				baselineSequence: active.authorityBaselineSequence,
 			});
 		if (isViewerRoleChangeCoveredByBaseline) return;
+		if (
+			isViewerRoleChange
+			|| ["campaign.archived", "rules.activated", "brew.activated", "character.projection.invalidated"].includes(event.type)
+			|| _CHARACTER_TEARDOWN_EVENT_TYPES.has(event.type)
+		) {
+			// Conceal consent/picker metadata immediately, even while the document queue is behind a save.
+			this._emit("targetingInvalidated", {campaignId: this._campaignId, type: event.type});
+		}
 		const isViewerDemotedFromDm = isViewerRoleChange
 			&& active.isAuthorityBaselineValid
 			&& !_DM_MEMBERSHIP_ROLES.has(event.payload?.role)
@@ -381,6 +391,14 @@ export class CharacterSheetRealtimeCoordinator {
 				reason: "Character is no longer available in this campaign.",
 				sequence: event.sequence,
 			});
+			return;
+		}
+		if (
+			event.aggregateType === "character"
+			&& event.aggregateId !== active.characterId
+			&& (event.type === "character.projection.invalidated" || _CHARACTER_TEARDOWN_EVENT_TYPES.has(event.type))
+		) {
+			this._enqueue(active, {type: "targetingRefresh", value: {campaignId: this._campaignId}});
 			return;
 		}
 
@@ -488,6 +506,7 @@ export class CharacterSheetRealtimeCoordinator {
 				leg: routing.leg,
 				operationId: routing.operationId,
 				operationLegKey: routing.operationLegKey,
+				legId: routing.legId,
 				targetCharacterId: routing.targetCharacterId,
 				status: routing.status,
 				payload: routing.payload,

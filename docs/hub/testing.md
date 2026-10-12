@@ -22,6 +22,7 @@
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
 | Multi-target Wave A0/A3 contract | `HubMultiTargetOperationAdr.test.js`, `HubMultiTargetOperations*.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0011 authority after A2's migration 0010, additive migration-0012 owner-recovery index, fixed-set/response/finalization/leg constraints, participant recovery, privacy, event sequence, hazards, fairness, and A1-A5 handoff |
+| Held A4 shared Sheet consumer | `CharacterSheetMultiTarget.test.js`, `HubMultiTargetConsumer.test.js`, existing realtime/reconciler suites, `shared-sheet-multi-target.spec.ts` | Frozen lost-create/finalize commands, fresh authoritative readiness, exact duplicate-name owned consent, 1/8 candidates, source-owned deselection, all-track/durable no-op coverage, mixed-batch storage/adoption rollback, save/HTTP/event interleavings, immediate queued authority fencing, and real multi-owner consent/subset/expiry/access-loss |
 | Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
 | Account entitlements/reauthentication | entitlement and multi-provider suites | Provider/account/session binding, five-minute commit-time freshness, creator enforcement, operator hiding/idempotency/concurrency, last-operator lifecycle protection, migration backfill/reconciliation, export redaction, and memory/PostgreSQL parity |
 | Account identity lifecycle | `HubMultiProviderIdentity`, `HubAuthServer`, `HubApiClient`, provider operations/config, PostgreSQL parity, `test-hub-account-identity-mutations.mjs`, real-stack provider journey | Bounded own-identity listing, no account creation during link, cross-account conflict, transaction replay, display-name stability, commit-time freshness, provider disable, different-identity unlink, last/retention protection, concurrent/idempotent unlink, session/lease/socket rotation, fresh CSRF, purge/export/deletion-grace behavior |
@@ -38,6 +39,21 @@ peer projection. It requires the runner's disposable loopback Hub and `HUB_TEST_
 fails closed if they are missing or remote. Never point the stack runner or synthetic-auth browser at Oracle.
 This evidence does not replace the physical real-OAuth/device first-leg check against the actual deployed
 service worker and loaded Character Sheet assets.
+
+The A4 journey uses the existing disposable real-PG harness, five synthetic account profiles (source, two target
+owners, unrelated player, DM), and two identically named characters for one owner. It starts capability-disabled,
+then enables only its exact synthetic campaign through a secret-protected test-only route. The production resolver
+remains null: the test server appends the existing reviewed A3 Shared Restoration fixture with `additionalTemplates`,
+and the page object injects its closed descriptor into the existing source controller. The fixture uses the store's
+existing 60-second collection-TTL injection; production advertises/retains the normal contract. Expiry readiness
+is read from the authority, never inferred from a browser timer. Both Sheet entry paths use the same controllers.
+Run `npm run test:hub:e2e:stack -- shared-sheet-multi-target.spec.ts`; the runner owns uniquely named loopback
+containers/ports and cleans up that stack. No fixture authorizes live enrollment or replaces physical acceptance.
+
+Fragile A4 guards are checked by temporary mutations at actual call sites: accepting `changed:true` as a
+revisionless no-op, replacing exact fresh owner-character equality with mere reference existence, and replacing
+synchronous targeting concealment with refresh-only delivery. Each must fail its behavioral assertions before
+restoring the real code; comments and snapshot-string mutations are not substitutes.
 
 `character-sheet-party-inventory.spec.ts` also exercises the recipient's open-sheet transfer inbox:
 server-scoped offer visibility, immediate concealment before a delayed projection refetch, anonymous source

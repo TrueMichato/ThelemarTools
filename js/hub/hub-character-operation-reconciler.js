@@ -24,6 +24,7 @@ export const RECONCILE_STATUS = Object.freeze({
 	REJECTED: "rejected",
 	RESYNC_REQUIRED: "resync_required",
 	SUPPRESSED: "suppressed",
+	COVERAGE_ONLY: "coverage_only",
 });
 
 export const COVERAGE_VERSION = 2;
@@ -148,7 +149,7 @@ export function classifyTrack ({
 	const legKey = operationLegKey || getOperationLegKey({operationId, leg});
 	if (legKey && coverage.appliedOperationLegIds?.has?.(legKey)) return TRACK_DECISION.COVERED;
 	// Coverage created in memory by an older protocol-3 client has target-only ids but no leg set.
-	if (leg === CHARACTER_OPERATION_LEGS.TARGET && operationId && coverage.appliedOperationIds?.has?.(operationId)) {
+	if (leg === CHARACTER_OPERATION_LEGS.TARGET && legKey === getOperationLegKey({operationId, leg}) && operationId && coverage.appliedOperationIds?.has?.(operationId)) {
 		return TRACK_DECISION.COVERED;
 	}
 	const revision = coverage.revision;
@@ -292,6 +293,8 @@ export function planOperationLeg ({
 	leg = CHARACTER_OPERATION_LEGS.TARGET,
 	operationId: explicitOperationId = null,
 	operationLegKey: explicitOperationLegKey = null,
+	legId = null,
+	changed = true,
 	operation = null,
 	sourceCost = null,
 	resultingCharacterRevision,
@@ -303,7 +306,11 @@ export function planOperationLeg ({
 	if (!Object.values(CHARACTER_OPERATION_LEGS).includes(leg)) {
 		return {status: RECONCILE_STATUS.REJECTED, error: {code: "OPERATION_INVALID", message: `Operation leg is invalid.`}};
 	}
-	if (!Number.isInteger(resultingCharacterRevision) || resultingCharacterRevision < 0) {
+	if (legId != null && (typeof legId !== "string" || !legId)) {
+		return {status: RECONCILE_STATUS.REJECTED, error: {code: "OPERATION_INVALID", message: `Operation leg identity is invalid.`}};
+	}
+	const isRevisionlessNoOp = leg === CHARACTER_OPERATION_LEGS.TARGET && legId != null && changed === false && resultingCharacterRevision == null;
+	if (!isRevisionlessNoOp && (!Number.isInteger(resultingCharacterRevision) || resultingCharacterRevision < 0)) {
 		return {status: RECONCILE_STATUS.REJECTED, error: {code: "OPERATION_INVALID", message: `Resulting character revision is invalid.`}};
 	}
 
@@ -323,9 +330,27 @@ export function planOperationLeg ({
 	if (!operationId || (normalized?.operationId && normalized.operationId !== operationId)) {
 		return {status: RECONCILE_STATUS.REJECTED, error: {code: "OPERATION_INVALID", message: `Operation id is invalid.`}};
 	}
-	const operationLegKey = getOperationLegKey({operationId, leg});
+	const operationLegKey = getOperationLegKey({operationId, leg, legId});
 	if (explicitOperationLegKey != null && explicitOperationLegKey !== operationLegKey) {
 		return {status: RECONCILE_STATUS.REJECTED, error: {code: "OPERATION_INVALID", message: `Operation leg key is invalid.`}};
+	}
+	if (isRevisionlessNoOp) {
+		const decisions = Object.fromEntries(Object.entries(tracks || {}).filter(([, track]) => track).map(([name, track]) => [
+			name, track.coverage?.appliedOperationLegIds?.has(operationLegKey) ? TRACK_DECISION.COVERED : TRACK_DECISION.APPLY,
+		]));
+		return {
+			status: Object.values(decisions).every(value => value === TRACK_DECISION.COVERED) ? RECONCILE_STATUS.SUPPRESSED : RECONCILE_STATUS.COVERAGE_ONLY,
+			leg,
+			legId,
+			operation: normalized,
+			operationId,
+			operationLegKey,
+			sourceCost: null,
+			decisions,
+			staged: {},
+			changedTracks: {},
+			revisionNext: null,
+		};
 	}
 
 	if (eventId && appliedEventIds?.has?.(eventId)) {
@@ -335,7 +360,7 @@ export function planOperationLeg ({
 		return {status: RECONCILE_STATUS.SUPPRESSED, leg, operation: normalized, operationId, operationLegKey, sourceCost: normalizedSourceCost, decisions: {}};
 	}
 	// Legacy global ids are target-only.
-	if (leg === CHARACTER_OPERATION_LEGS.TARGET && appliedOperationIds?.has?.(operationId)) {
+	if (!legId && leg === CHARACTER_OPERATION_LEGS.TARGET && appliedOperationIds?.has?.(operationId)) {
 		return {status: RECONCILE_STATUS.SUPPRESSED, leg, operation: normalized, operationId, operationLegKey, sourceCost: normalizedSourceCost, decisions: {}};
 	}
 

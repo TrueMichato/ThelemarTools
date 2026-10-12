@@ -44,7 +44,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **active** | Wave A3 multi-target server authority | [ADR 0020](adr/0020-consented-multi-target-operations.md), migrations 0011-0013 after A2's migration 0010, protocol-6 default-off routes/events, both stores, lifecycle/expiry/cleanup, participant recovery, quota locks, and rollback markers are implemented in the held draft; A4/A5 client/templates remain. Local draft refresh is authorized, but integration requires its separate hold-lift decision; r11f's physical-retest waiver is not GO or a hold lift. |
+| **active** | Wave A3/A4 multi-target workflow | [ADR 0020](adr/0020-consented-multi-target-operations.md), migrations 0011-0013 after A2's migration 0010 and protocol-6 default-off authority are implemented in the held draft. The local A4 candidate adds shared Sheet collection/consent/subset finalization and exact-leg reconciliation; independent A4 review remains separate. A5 production spell templates/resolver remain absent. Local descendant work is authorized, not publication/integration/enrollment; r11f's physical-retest waiver is not GO or a hold lift. |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 participant-level provider verification retain their own acceptance gates |
 | **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
@@ -494,7 +494,16 @@ multi-target migration 0011, additive migration 0012 supplies only the bounded t
 migration 0013 repairs only the source-owned lifecycle validator.
 Protocol 6, routes, both stores, events, capability advertisement, required-version/
 policy/role/backup/restore contracts, and marker-aware rollback preflight are checked in.
-Character Sheet UX and production templates remain future A4/A5 work. The sequence is:
+The local A4 candidate extends the existing source/incoming controllers on the same Sheet route for Campaign
+Overview and ordinary-site entry. Incoming recovery is account-wide, but consent/navigation and adoption use only
+exact current-authorized `targetRef` -> `owner_truth.character.id` identity, never names or event-history scans.
+Source-owned multi candidates are deselectable; singular Cure Wounds self-targets still require manual consent.
+Current detail/outgoing/recovery drives readiness; historical exact-command receipts acknowledge only that command.
+Revisionless no-ops cover every reconciliation track without character adoption, redraw, PATCH, or watermark
+advance. An actor-scoped tab-session journal retains at most 256 exact no-op leg keys across reload; older evicted
+notice identities are not an unlimited deduplication guarantee. A5 production descriptors remain absent, so no new
+production spell is intercepted. The capability remains default-off and A4 still requires independent review.
+The sequence is:
 
 1. **A1:** DM typed effects.
 2. **A2:** generalized source-cost authority.

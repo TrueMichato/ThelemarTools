@@ -126,7 +126,7 @@ const makeApi = character => {
 	const state = {character: structuredClone(character), patches: [], isOffline: false};
 	return {
 		state,
-		pGetSession: jest.fn(async () => ({signedIn: true})),
+		pGetSession: jest.fn(async () => ({signedIn: true, account: {id: "account-1"}})),
 		pGetCharacter: jest.fn(async () => structuredClone(state.character)),
 		pAcquireCharacterLease: jest.fn(async () => ({epoch: 1})),
 		pPatchCharacter: jest.fn(async ({patches}) => {
@@ -186,13 +186,14 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 
 	const toasts = [];
 	const hubEffects = {
+		suspend: jest.fn(),
 		onConnectionState: jest.fn(),
 		onRealtimeOperation: jest.fn(),
 		onApplied: jest.fn(),
 		onApplicationError: jest.fn(),
 		onAuthoritativeCoverage: jest.fn(),
 	};
-	const peerTargeting = {onConnectionState: jest.fn(), onRealtimeOperation: jest.fn()};
+	const peerTargeting = {suspend: jest.fn(), onConnectionState: jest.fn(), onRealtimeOperation: jest.fn()};
 	// The sheet modules destructure `JqueryUtil` at load time, so mutate the shared object rather than
 	// replacing it (see test/jest/charactersheet/setup.js).
 	globalThis.JqueryUtil.doToast = message => toasts.push(message);
@@ -265,6 +266,147 @@ beforeAll(async () => {
 	globalThis.window ||= {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
 	globalThis.document ||= {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
 	CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
+});
+
+describe("Reviewed multi-target deliveries on the real sheet/repository queue", () => {
+	it.each(["_hubContextGeneration", "_hubRoleRosterGeneration", "_hubRealtimeGeneration"])("fences an authoritative receipt behind a real save when %s changes", async field => {
+		const {host, repository, api, state, hubEffects} = await pMakeHarness();
+		const started = makeDeferred();
+		const release = makeDeferred();
+		api.pPatchCharacter.mockImplementationOnce(async input => {
+			started.resolve();
+			await release.promise;
+			api.state.character = makeCharacterDocument(applyJsonPatch(api.state.character.data, input.patches), 2);
+			return {character: structuredClone(api.state.character)};
+		});
+		state.setName("Save A");
+		const save = repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+		await started.promise;
+		const pending = host._onHubAuthoritativeApproval({
+			actionId: "multi-1",
+			characterId: "character-1",
+			eventId: "multi-source",
+			sequence: 20,
+			resultingCharacterRevision: 3,
+			leg: "source",
+			sourceCost: makeSourceCost(),
+		});
+		host[field] = (host[field] ?? 0) + 1;
+		release.resolve();
+		await save;
+		expect(await pending).toBe(false);
+		expect(state.toJson().spellcasting.spellSlots[1].current).toBe(2);
+		expect(host._renderCount).toBe(0);
+		expect(hubEffects.onApplied).not.toHaveBeenCalled();
+	});
+
+	it.each(["http-first", "event-first"])("adopts a combined self-cost/effect once with %s delivery", async order => {
+		const {host, clients, state, hubEffects} = await pMakeHarness();
+		const event = makeCombinedEvent();
+		event.type = "character.multi_operation.target_applied";
+		event.payload.operationId = "operation-1";
+		event.payload.legId = "combined-leg";
+		const deliverHttp = () => host._onHubAuthoritativeApproval({
+			actionId: "operation-1",
+			characterId: "character-1",
+			eventId: event.id,
+			sequence: event.sequence,
+			operation: event.payload.operation,
+			resultingCharacterRevision: 2,
+			leg: "combined",
+			legId: "combined-leg",
+			operationLegKey: "operation-1/combined/combined-leg",
+			sourceCost: makeSourceCost(),
+		});
+		if (order === "http-first") await deliverHttp();
+		clients[0].emit("event", event);
+		await pFlush();
+		if (order === "event-first") await deliverHttp();
+		expect(state.toJson().hp.current).toBe(34);
+		expect(state.toJson().spellcasting.spellSlots[1].current).toBe(1);
+		expect(host._renderCount).toBe(1);
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(["http-first", "event-first"])("covers a revisionless no-op with zero sheet adoption/render/save in %s order", async order => {
+		const {host, clients, repository, api, hubEffects, state} = await pMakeHarness();
+		const event = makeAppliedEvent({kind: "hp.heal"});
+		event.type = "character.multi_operation.target_applied";
+		event.aggregateRevision = null;
+		event.payload.operationId = "operation-1";
+		event.payload.legId = "noop-leg";
+		event.payload.leg = "target";
+		event.payload.changed = false;
+		delete event.payload.resultingCharacterRevision;
+		const before = JSON.stringify(state.toJson());
+		const adopt = jest.spyOn(host, "_adoptHubLiveCharacterData");
+		const http = () => host._onHubAuthoritativeApproval({
+			actionId: "operation-1",
+			characterId: "character-1",
+			eventId: event.id,
+			sequence: event.sequence,
+			operation: event.payload.operation,
+			resultingCharacterRevision: null,
+			legId: "noop-leg",
+			changed: false,
+		});
+		if (order === "http-first") await http();
+		clients[0].emit("event", event);
+		await pFlush();
+		if (order === "event-first") await http();
+		expect(JSON.stringify(state.toJson())).toBe(before);
+		expect(adopt).not.toHaveBeenCalled();
+		expect(host._renderCount).toBe(0);
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+		expect(repository._realtimeCursors.get("character-1")?.operationWatermark).toBeUndefined();
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
+		expect(hubEffects.onApplied).toHaveBeenCalledWith(expect.objectContaining({legId: "noop-leg", changed: false}));
+	});
+
+	it.each(["http-first", "event-first"])("preserves edit/save B after save A and source-cost delivery queued in %s order", async order => {
+		const {host, clients, repository, api, state} = await pMakeHarness();
+		const started = makeDeferred();
+		const release = makeDeferred();
+		api.pPatchCharacter.mockImplementationOnce(async input => {
+			started.resolve();
+			await release.promise;
+			api.state.character = makeCharacterDocument(applyJsonPatch(api.state.character.data, input.patches), 2);
+			return {character: structuredClone(api.state.character)};
+		});
+		state.setName("Save A");
+		const saveA = repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+		await started.promise;
+		const event = makeSourceEvent({revision: 3});
+		event.type = "character.multi_operation.source_cost_consumed";
+		const http = () => host._onHubAuthoritativeApproval({
+			actionId: "operation-1",
+			characterId: "character-1",
+			eventId: event.id,
+			sequence: event.sequence,
+			resultingCharacterRevision: 3,
+			leg: "source",
+			sourceCost: makeSourceCost(),
+			operationLegKey: "operation-1/source",
+		});
+		const pendingHttp = order === "http-first" ? http() : null;
+		clients[0].emit("event", event);
+		state.setName("Unsaved B");
+		release.resolve();
+		await saveA;
+		await pFlush();
+		if (pendingHttp) await pendingHttp;
+		else await http();
+		expect(state.toJson().name).toBe("Unsaved B");
+		expect(state.toJson().spellcasting.spellSlots[1].current).toBe(1);
+		expect(host._renderCount).toBe(1);
+		api.pPatchCharacter.mockImplementationOnce(async input => {
+			api.state.character = makeCharacterDocument(applyJsonPatch(repository._accepted.get("character-1").data, input.patches), 4);
+			return {character: structuredClone(api.state.character)};
+		});
+		await repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
+		expect(repository._accepted.get("character-1").data.name).toBe("Unsaved B");
+		expect(repository._accepted.get("character-1").data.spellcasting.spellSlots[1].current).toBe(1);
+	});
 });
 
 describe("Live campaign effects on an open Character Sheet", () => {

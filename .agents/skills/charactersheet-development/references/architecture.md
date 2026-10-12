@@ -112,16 +112,26 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   invalidations and character.operation lifecycle events to the open canonical
 │   character, then serializes ephemeral callbacks behind repository saves.
 │   It never mutates CharacterSheetState or fetches/replaces the owner document.
+│   Held A4 adds immediate targeting-authority concealment before queued delivery,
+│   including other candidate projection changes. Document adoption still uses only
+│   the repository queue; scoped authoritative refresh restores consent controls.
 │
 ├── CharacterSheetHubEffects (charactersheet-hub-effects.js)
 │   Lifecycle-scoped, owner-only pending-effect approvals and post-adoption notices.
 │   Reconciles a privacy-safe server projection on open/reconnect/focus, fences async
-│   work by character generation, and never applies an effect from an HTTP response.
+│   work by character generation, and never directly mutates state from an HTTP response.
+│   Held A4 owner recovery is account-wide. Exact invitation targetRef equality with
+│   fresh owner_truth selects the canonical owned document; duplicate names and
+│   historical event scans never establish identity. HTTP results enter the page's
+│   serialized authoritative-delivery seam, not direct state mutation.
 │
 ├── CharacterSheetPeerTargeting (charactersheet-peer-targeting.js)
 │   Campaign-only source-side targeting for exact accepted templates. Discovers only
 │   privacy-visible target identities, submits opaque targetRef values, preserves
 │   proposal/cancel command identity across retries, and renders outgoing lifecycle.
+│   Held A4 requires a separate protocol-6 capability and reviewed descriptor.
+│   Its production descriptor resolver stays null until A5. Fixed 1–8 candidates,
+│   independent consent and frozen subset-finalize retries reuse this controller.
 │
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.

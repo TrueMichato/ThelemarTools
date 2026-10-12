@@ -2733,7 +2733,9 @@ class CharacterSheetSpells {
 			if (peerTargetingResult.proposed) {
 				JqueryUtil.doToast({
 					type: "success",
-					content: `${spell.name} request sent. The spell slot will be spent only if the target approves and the cast is still available.`,
+					content: peerTargetingResult.isMulti
+						? `${spell.name} requests sent. No source cost is spent while owners respond; finalize a nonempty approved subset when the campaign reports it ready.`
+						: `${spell.name} request sent. The spell slot will be spent only if the target approves and the cast is still available.`,
 				});
 			}
 			return;

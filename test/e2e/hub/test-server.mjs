@@ -26,6 +26,7 @@ const appOrigin = requireEnv("HUB_APP_ORIGIN");
 const cookieSecret = requireEnv("HUB_COOKIE_SECRET");
 const csrfSecret = requireEnv("HUB_CSRF_SECRET");
 const testAuthSecret = requireEnv("HUB_TEST_AUTH_SECRET");
+const multiTargetCampaignIds = new Set();
 const semanticOperationRegistry = createSemanticOperationRegistry({
 	additionalTemplates: [{
 		sourceEntity: {type: "ability", uid: "steadying word|phb", version: "tst-v1"},
@@ -43,6 +44,22 @@ const semanticOperationRegistry = createSemanticOperationRegistry({
 			return {amount: choice.amount};
 		},
 		deriveOperation: ({choice}) => ({kind: "hp.heal", arguments: {amount: choice.amount}}),
+	}, {
+		sourceEntity: {type: "ability", uid: "shared restoration|tst", version: "tst-v1"},
+		effectTemplateId: "ability.shared-restoration.heal",
+		sourceCostVersion: 1,
+		multiTarget: {contractVersion: 1, maxTargets: 8, allowTargetNoOp: true},
+		display: {label: "Shared Restoration", outcomeLabel: "Healing"},
+		normalizeChoice: choice => {
+			if (!choice || Object.keys(choice).length !== 1 || !Number.isSafeInteger(choice.amount) || choice.amount < 1 || choice.amount > 20) {
+				throw new Error("Invalid reviewed multi-target fixture choice.");
+			}
+			return {amount: choice.amount};
+		},
+		hasSource: () => true,
+		buildSourceCost: () => ({version: 1, components: [{kind: "spell_slot", pool: "standard", level: 1, amount: 1}]}),
+		deriveOperation: ({choice}) => ({kind: "hp.heal", arguments: {amount: choice.amount}}),
+		targetFootprint: () => ["hp"],
 	}],
 });
 const store = PostgresHubStore.fromConnectionString({
@@ -50,6 +67,8 @@ const store = PostgresHubStore.fromConnectionString({
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
 	semanticOperationRegistry,
 	isAccountEntitlementsEnabled: true,
+	multiTargetOperationsEnabled: campaignId => multiTargetCampaignIds.has(campaignId),
+	multiTargetCollectionTtlMs: 60_000,
 	peerSourceCostsEnabled: parsePeerSourceCostsCampaignIds(
 		process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS,
 		{allowWildcard: true},
@@ -142,6 +161,19 @@ const app = await createHubApp({
 		operatorAccountIds: [operatorAccount.id],
 		isOperatorReconciliationComplete: true,
 	},
+});
+
+app.post("/auth/__test/multi-target-campaign", {
+	schema: {body: {
+		type: "object",
+		required: ["campaignId"],
+		additionalProperties: false,
+		properties: {campaignId: {type: "string", format: "uuid"}},
+	}},
+}, async (request, reply) => {
+	if (!isConstantTimeEqual(request.headers["x-hub-test-auth"], testAuthSecret)) return reply.code(404).send({error: "NOT_FOUND"});
+	multiTargetCampaignIds.add(request.body.campaignId);
+	return {ok: true};
 });
 
 for (const definition of deterministicProviderDefinitions) {
