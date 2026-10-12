@@ -188,6 +188,19 @@ export function getCanonicalCharacter (projection) {
 	throw new HubProjectionScopeError(projection?.kind || "unknown");
 }
 
+export function getCanonicalCharacterWithOperationWatermark (projection) {
+	const character = getCanonicalCharacter(projection);
+	if (!character || typeof character !== "object" || Array.isArray(character)) {
+		throw new TypeError("Canonical character data is unavailable.");
+	}
+	return {
+		...character,
+		...(Number.isInteger(projection.operationWatermark) && projection.operationWatermark >= 0
+			? {operationWatermark: projection.operationWatermark}
+			: {}),
+	};
+}
+
 /** The peer-facing profile: the owner's own preview, the DM's preview, or a peer read. */
 export function getPeerProfile (projection) {
 	if (projection?.kind === "peer_profile") return projection;

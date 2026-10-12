@@ -107,6 +107,32 @@ const makeLifecycleEvent = ({
 });
 
 describe("Character Sheet realtime coordinator", () => {
+	it("delivers only the current owner's rolls even when covered by a character baseline", async () => {
+		const {coordinator, clients} = makeCoordinator();
+		const received = [];
+		coordinator.on("rollLogged", event => received.push(event));
+		coordinator.attach({characterId: "character-1", membershipRole: "player"});
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 30},
+			membership: {role: "player", accountId: "owner"},
+			characterRefs: [{id: "character-1", revision: 4, projectionRevision: 2, operationWatermark: 30}],
+		});
+		const roll = {
+			id: "roll-own",
+			campaignId: "campaign-1",
+			sequence: 20,
+			type: "roll.logged",
+			actorAccountId: "owner",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {total: 17},
+		};
+		clients[0].emit("event", roll);
+		clients[0].emit("event", {...roll, id: "roll-dm", actorAccountId: "dm"});
+		clients[0].emit("event", {...roll, id: "roll-other-character", aggregateId: "character-2"});
+		await pFlush();
+		expect(received).toEqual([roll]);
+	});
 	it.each([
 		{campaignId: null, isAuthenticated: true},
 		{campaignId: "campaign-1", isAuthenticated: false},

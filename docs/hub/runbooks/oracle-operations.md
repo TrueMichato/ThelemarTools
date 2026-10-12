@@ -1,19 +1,32 @@
 # Runbook: Oracle host operations for the Campaign Hub
 
-> **Status:** Release r7 deployed; V1-G1 operations and recovery evidence complete
+> **Status:** Genuine-provenance r11b deployed and independently verified; V1-G1 operations complete
 > **Last drilled:** 2026-09-13
+> **Last reviewed:** 2026-09-29
 > **Owner:** Campaign Hub operator
 
 This procedure adds scheduled maintenance, encrypted backups, off-machine copies, and five-minute health
 checks without stopping or resizing the Oracle instance. The host is now dedicated to the Campaign Hub after
 Foundry was intentionally decommissioned.
 
-The current deployed release is the annotated tag `hub-staging-2026-09-10-r7` (tag object
+The latest independently verified deployment is annotated tag `hub-staging-2026-09-29-r11b` at
+`a8a70f5f3faeb31bf0f1f2c0d36091723fb3b167`. Its post-release host, image, static/service-worker,
+backup/off-machine, and monitor checks passed. Fresh host-private deployment identity and
+backup/restore/monitor evidence must be rechecked before any later release; the 2026-09-28 prospective
+r11 preflight found a stale off-machine copy and could not authenticate to the host. The r7
+qualification used annotated tag `hub-staging-2026-09-10-r7` (tag object
 `a65fec81eba3cd147fd44b54e617bf83d4a707f8`, commit
 `77d955c053dcdfe949235620db93f7eba477af34`). Manual maintenance and backup runs, five-minute monitoring,
 off-machine backup copying, an isolated authenticated restore, and an exact-r6 application rollback rehearsal
 passed on 2026-09-12. The first genuine daily maintenance and backup timer activations passed on 2026-09-13,
 completing V1-G1.
+
+The 2026-09-29 preflight subsequently passed, but an r11 promotion was interrupted after traffic
+changed. The release engine completed compatible application rollback; independent checks confirmed
+exact r10, healthy Hub-only services, no schema migration, and no continuing outage. Keep the failed
+release evidence and existing r11 tag immutable. A separate genuine-provenance r11b tag subsequently
+passed exact-head CI, dry run, human-confirmed promotion, independent post-release verification, and
+off-machine backup match. These successes do not enable peer targeting or reverse the r10 physical NO-GO.
 
 ## Safety rules
 

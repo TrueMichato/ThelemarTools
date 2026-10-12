@@ -15,7 +15,13 @@ Status: Accepted design contract; Wave A0 proof only, not implemented (2026-09-2
 > **Implementation boundary:** This Wave A0 change records design and executable documentation/query proof only.
 > This design-only PR contains no production migration, routes, store methods, protocol 6, capability
 > advertisement, events, browser controls, or production state-machine behavior. ADR 0020 nevertheless requires
-> future additive migration `0011_multi_target_semantic_operations.sql` in A3. The draft must remain unmerged until the coordinator records the physical game-day GO/NO-GO.
+> future additive migration `0011_multi_target_semantic_operations.sql` in A3, after A2's reserved immutable
+> `0010_source_cost_binding_identity.sql`. The draft must remain unmerged until the coordinator records the physical game-day GO/NO-GO.
+
+> **Continuation boundary (2026-10-12):** R11f correction delivery is complete and its physical retest was
+> waived. Local draft refresh and held implementation may proceed. The recorded private-launch NO-GO
+> and the separate integration, release, and capability-enablement holds remain; the waiver is not
+> permission to integrate this stack or enable multi-target operations.
 
 In short, this contract extends ADR 0012 and extends ADR 0016 while superseding only the narrow rules stated
 above. It requires future additive migration `0011_multi_target_semantic_operations.sql`.
@@ -337,7 +343,9 @@ arrival order.
 
 ### Schema decision: additive migration 0011 is required
 
-Migration `0011_multi_target_semantic_operations.sql` is required in A3. The normalized target table is
+Migration `0011_multi_target_semantic_operations.sql` is required in A3. A2 owns the immediately preceding
+immutable migration `0010_source_cost_binding_identity.sql` for shared/PostgreSQL resource-binding identity and
+ABA correctness. The normalized target table is
 `hub.semantic_operation_targets`; do not store target/response/selection arrays in JSON.
 
 Migration 0011 also creates singleton `hub.semantic_multi_target_usage`:
@@ -440,8 +448,8 @@ reads legacy rows, ignores additive tables/nullable columns, and never creates `
 
 After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`, operational rollback to a
 true pre-0011 binary is permanently forbidden even if all parent/child history has been cleaned. The normal
-rollback target must be a bridge/r10+ release which understands `target_set_version`, child history, projection
-filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0011 rollback preflight requires the
+rollback target must be an A3-aware bridge release which understands `target_set_version`, child history,
+projection filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0011 rollback preflight requires the
 usage marker to be absent; current parent/child counts are diagnostic only and cannot clear a present marker.
 
 Returning to a true pre-0011 binary after data creation requires a separately reviewed destructive
@@ -505,7 +513,7 @@ pre-0011 target is blocked whenever the usage marker exists, regardless of curre
 |---|---|---|
 | **A1 — DM typed effects** | Existing six-operation immediate DM/co-DM lane completed in the Wave A1 descendant implementation | No prose; pure fixtures; route/Memory/PostgreSQL parity; replay/no-op/privacy/reconciliation coverage; held pending physical game-day GO/NO-GO |
 | **A2 — source-cost authority** | Generalized deterministic one-time cost/ABA authority | No reservation; shared Memory/PostgreSQL parity |
-| **A3 — server state machine** | Migration 0011, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
+| **A3 — server state machine** | Migration 0011 after A2's migration 0010, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
 | **A4 — Character Sheet UX and reconciliation** | Proposal, invitation response, exact-subset finalization, per-leg recovery | Same-owner/two-target and source-as-target UX; dirty/in-flight/reconnect/access-loss coverage |
 | **A5 — Healing Word and Mass Healing Word templates** | First reviewed production templates | PHB/XPHB semantics and explicit `allowTargetNoOp=true` privacy evidence |
 

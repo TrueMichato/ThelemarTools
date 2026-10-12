@@ -14,6 +14,8 @@ The character sheet test suite is in **good overall health**: **86 test files, 7
 6. **Infrastructure note**: `npm install` required before tests run — dependencies are not pre-installed in worktrees
 
 ### Previous Updates
+- **R11f entry/sharing follow-up:** `CharacterSheetLocalEntry.test.js` adds seven controller-level delegation, one-shot URL, authority-guard and visible-error cases. `game-day-ux.spec.ts` covers zero-write local entry and nested sharing draft/open-state/focus preservation on both entry paths, with unchanged saved policy/full peer profile and phone/desktop day/night artifacts. These additions do not revise the historical July 2025 totals below.
+- **Owner Roll History candidate:** `CharacterSheetHubRollHistory.test.js` covers retained-event/realtime/POST convergence, reload-safe exact retries, deadlines, privacy, malformed/mismatched responses, access fencing, and recovery independent of the display cap. Hub store/PostgreSQL tests and the four-context `owner-roll-history.spec.ts` cover authority and real browser integration. These additions do not revise the historical July 2025 totals below.
 - ✅ **(Aug 2025)** Psionic powers made first-class: `CharacterSheetPowers.test.js` (parser, projection, `manifestPower()`, Psionic Exertion, Strain to Maintain, acquisition) and `CharacterSheetConcentration.test.js` (multi-slot concentration, PB cap, power/spell exclusion, legacy migration). See `docs/charactersheet/17-talent-psionics.md`.
 - ✅ **Gemstone Empowerment** has dedicated host-lifecycle/resource/rider/migration and Chalice storage suites.
 - ✅ **(Feb 2025)** All core class subclasses now have full mechanical calculations

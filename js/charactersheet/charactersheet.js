@@ -49,7 +49,9 @@ import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinat
 import {HubApiClient} from "../hub/hub-api-client.js";
 import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
+import {HUB_CAPABILITY_ROLL_HISTORY} from "../hub/hub-roll-history.js";
 import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
+import {normalizeCharacterSheetAuthorityNavigationUrl} from "../hub/hub-character-sheet-routes.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
 import {
 	CHARACTER_REALTIME_ACCESS_END_CAUSES,
@@ -139,6 +141,7 @@ class CharacterSheetPage {
 		this._hubAuthoritativeReconcilePromise = null;
 		this._isHubAuthoritativeReconcileScheduled = false;
 		this._isHubCharacterConflictPromptOpen = false;
+		this._isAuthorityNavigationPending = false;
 		this._hubContextGeneration = 0;
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
@@ -283,6 +286,15 @@ class CharacterSheetPage {
 		this._hubRealtimeGeneration++;
 		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
+		const session = this._hubActiveCampaign?.session;
+		if (this._isHubCharacter && this._rollHistory) {
+			void this._rollHistory.activateHubScope({
+				characterId,
+				campaignId: this._hubCampaignId,
+				accountId: session?.account?.id,
+				isEnabled: session?.signedIn === true && session.capabilities?.includes(HUB_CAPABILITY_ROLL_HISTORY) === true,
+			});
+		}
 		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
 			this._hubEffects?.deactivate();
 			this._peerTargeting?.deactivate();
@@ -368,11 +380,13 @@ class CharacterSheetPage {
 		this._hubRealtimeGeneration++;
 		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
+		this._rollHistory?.onHubConnectionState?.({state: "suspended"});
 	}
 
 	/** `teardown-realtime`: detach the realtime client only. */
 	_detachHubRealtimeClient () {
 		this._hubRealtime?.detach();
+		this._rollHistory?.onHubConnectionState?.({state: "closed"});
 	}
 
 	/** `teardown-projections`: viewer-scoped projections, party inventory, and optionally reconciliation. */
@@ -387,6 +401,7 @@ class CharacterSheetPage {
 
 	_concealHubPrivateCharacter () {
 		if (!this._isHubCharacter) return;
+		this._rollHistory?.onHubConnectionState?.({state: "access_lost"});
 		this._characterLoadGeneration++;
 		this._closeCharacterScopedTransientUi?.();
 		this._currentCharacterId = null;
@@ -476,6 +491,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("membershipChanged", event => this._onHubMembershipChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("recipientNotice", notice => this._onHubRecipientNotice(notice));
+		this._hubRealtime.on("rollLogged", event => this._rollHistory?.receiveHubRoll?.(event));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
 	}
@@ -663,6 +679,7 @@ class CharacterSheetPage {
 	}
 
 	_onHubRealtimeConnectionState (state) {
+		this._rollHistory?.onHubConnectionState?.(state || {state: "unavailable"});
 		this._hubEffects?.onConnectionState(state);
 		const isReadOnly = this.isCurrentCharacterReadOnly?.();
 		if (isReadOnly) this._peerTargeting?.deactivate();
@@ -780,6 +797,7 @@ class CharacterSheetPage {
 
 	_onHubMembershipChanged (event) {
 		if (event?.campaignId && event.campaignId !== this._hubCampaignId) return false;
+		this._rollHistory?.onHubAuthorityChanged();
 		const roleRosterGeneration = this._beginHubRoleScopedRosterRefresh();
 		if (!this._hubCampaignContext) {
 			this._peerTargeting?.deactivate();
@@ -1530,6 +1548,7 @@ class CharacterSheetPage {
 				// BFCache: the page may be restored, so campaign context, rules, and brew must
 				// survive. Only synchronisation pauses.
 				this._hubRealtime?.suspend();
+				this._rollHistory?.onHubConnectionState?.({state: "suspended"});
 				this._hubActiveCampaign?.suspend();
 			} else {
 				this._detachHubRealtime();
@@ -1547,6 +1566,20 @@ class CharacterSheetPage {
 			pResumed
 				.then(() => {
 					if (this._hubActiveCampaign && !this._hubActiveCampaign.activeCampaignId) return;
+					const characterId = this._currentCharacterId;
+					if (
+						this._partyInventory?.isAttachedTo?.({characterId}) === true
+						&& this._partyInventory.isAttachedTo({
+							characterId,
+							generation: this._characterLoadGeneration,
+						}) !== true
+					) {
+						this._reattachRetainedHubCharacterIntegrations?.({
+							characterId,
+							generation: this._characterLoadGeneration,
+							isPartyInventoryAttached: true,
+						});
+					}
 					this._hubRealtime?.resume();
 				})
 				// eslint-disable-next-line no-console
@@ -1827,6 +1860,7 @@ class CharacterSheetPage {
 			(/** @type {*} */ (elOverlay)).style.opacity = "0";
 			setTimeout(() => elOverlay.remove(), 300);
 		}
+		await this._pHandleLocalActionUrl(urlParams);
 
 		// Add page unload protection. The canonical store is IndexedDB (async), which cannot be
 		// written reliably during unload, so we SYNCHRONOUSLY mirror ONLY the active character to
@@ -3011,6 +3045,20 @@ class CharacterSheetPage {
 			element?.addEventListener(eventName, handler);
 			return element;
 		};
+		document.addEventListener("click", event => {
+			if (
+				event.defaultPrevented
+				|| event.button !== 0
+				|| event.metaKey
+				|| event.ctrlKey
+				|| event.shiftKey
+				|| event.altKey
+			) return;
+			const link = event.target?.closest?.("a[data-charsheet-authority-navigation=\"true\"]");
+			if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
+			event.preventDefault();
+			void this._pNavigateCharacterAuthority({href: link.getAttribute("href") || link.href});
+		});
 
 		// Character selection
 		bind(this._selCharacter, "change", () => this._onCharacterSelect());
@@ -3309,6 +3357,31 @@ class CharacterSheetPage {
 	}
 
 	// #region Character Management
+	async _pNavigateCharacterAuthority ({
+		href,
+		fnNavigate = target => window.location.assign(target),
+	} = {}) {
+		if (!href || this._isAuthorityNavigationPending) return false;
+		this._isAuthorityNavigationPending = true;
+		try {
+			if (this._currentCharacterId && !await this._saveCurrentCharacter()) return false;
+			const target = normalizeCharacterSheetAuthorityNavigationUrl({
+				href,
+				currentCampaignId: this._hubCampaignId,
+				currentCharacterId: this._currentCharacterId,
+			});
+			this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+			this._closeCharacterScopedTransientUi?.();
+			this._fenceHubGeneration?.();
+			this._hubRealtime?.suspend?.();
+			this._hubActiveCampaign?.suspend?.();
+			fnNavigate(target);
+			return true;
+		} finally {
+			this._isAuthorityNavigationPending = false;
+		}
+	}
+
 	async _pLoadCharacters () {
 		let characters = await this._characterRepository.pList();
 		if (!characters) {
@@ -3433,7 +3506,9 @@ class CharacterSheetPage {
 		if (characters.length) {
 			const divider = document.createElement("option");
 			divider.disabled = true;
-			divider.textContent = "────── Saved Characters ──────";
+			divider.textContent = this._isHubCharacter
+				? "────── Campaign characters ──────"
+				: "────── Local characters ──────";
 			this._selCharacter.append(divider);
 		}
 
@@ -3546,10 +3621,16 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
-			this._closeCharacterScopedTransientUi?.();
-			this._detachHubRealtime?.();
-			this._campaign?.resetCharacterScope?.();
 			const resolvedId = canonical?.id || charId;
+			this._closeCharacterScopedTransientUi?.();
+			this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
+			if (previousCharacterId && previousCharacterId !== resolvedId) {
+				this._characterRepository.clearRealtimeReconciliation?.({
+					characterId: previousCharacterId,
+					exceptCharacterId: resolvedId,
+				});
+			}
+			this._campaign?.resetCharacterScope?.();
 			this._currentCharacterId = resolvedId;
 			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: resolvedId})
 				|| CHARACTER_ACCESS_MODES.OWNER;
@@ -3730,6 +3811,27 @@ class CharacterSheetPage {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Spawn]", e);
 			JqueryUtil.doToast({type: "danger", content: `Spawn failed: ${(/** @type {*} */ (e)).message}`});
+		}
+	}
+
+	async _pHandleLocalActionUrl (urlParams) {
+		const action = urlParams.get("localAction");
+		if (!action) return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete("localAction");
+		window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+		if (urlParams.get("local") !== "1" || this._isHubCharacter) {
+			JqueryUtil.doToast({type: "warning", content: "This action requires the local Character Sheet. Your campaign character is unchanged."});
+			return;
+		}
+		try {
+			if (action === "create") await this._onNewCharacter();
+			else if (action === "import") await this._export._showImportDialog();
+			else JqueryUtil.doToast({type: "warning", content: "That local character action is not supported. Use New Character or Import on this sheet."});
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet Local Entry]", error);
+			JqueryUtil.doToast({type: "danger", content: "The local character action could not open. Use New Character or Import on this sheet to try again."});
 		}
 	}
 

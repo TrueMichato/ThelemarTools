@@ -61,8 +61,11 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(workflow).toContain("hub-trivy-results.json");
 		expect(workflow).toContain("upload-artifact: false");
 		expect(workflow).toContain("HUB_MIN_PCRE2_VERSION: 10.42-1+deb12u1");
+		expect(workflow).toContain("HUB_MIN_PERL_BASE_VERSION: 5.36.0-7+deb12u4");
 		expect(workflow).toContain("dpkg-query");
 		expect(workflow).toContain("dpkg \"$HUB_BFF_IMAGE\" --compare-versions");
+		expect(workflow).toContain("libpcre2-8-0)");
+		expect(workflow).toContain("perl-base)");
 		expect(workflow).toContain("github.run_attempt");
 		expect(workflow).toContain("overwrite: true");
 		expect(provenanceWriter).toContain("packageLockSha256");
@@ -237,5 +240,12 @@ exit 0
 	it("runs source-cost and account-entitlement PostgreSQL parity before browser journeys", () => {
 		expect(e2eRunner).toContain("HubSourceCostAdapterAuthorityPostgres.test.js");
 		expect(e2eRunner).toContain("HubAccountEntitlementsPostgres.test.js");
+	});
+
+	it("runs retained-roll Sheet regressions in the actual affected-regressions command", () => {
+		const step = workflow.match(/- name: Character Sheet Hub seams\s+run: >\s+([\s\S]*?)(?=\n\s+- name:)/)?.[1];
+		expect(step).toBeDefined();
+		for (const path of ["CharacterSheetHubRollHistory.test.js", "CharacterSheetRealtime.test.js"]) expect(step).toContain(`test/jest/charactersheet/${path}`);
+		expect(e2eRunner).toContain(`"test/jest/hub/HubRollHistory.test.js"`);
 	});
 });
