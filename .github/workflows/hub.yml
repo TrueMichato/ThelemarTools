@@ -66,6 +66,15 @@ jobs:
           docker run --rm --entrypoint dpkg "$HUB_BFF_IMAGE" --compare-versions "$actual" ge "$HUB_MIN_PCRE2_VERSION"
           printf 'libpcre2-8-0 %s (minimum %s)\n' "$actual" "$HUB_MIN_PCRE2_VERSION"
 
+      - name: Verify patched Perl runtime
+        env:
+          HUB_BFF_IMAGE: thelemartools-hub-bff:${{ github.sha }}
+          HUB_MIN_PERL_BASE_VERSION: 5.36.0-7+deb12u4
+        run: |
+          actual="$(docker run --rm --entrypoint dpkg-query "$HUB_BFF_IMAGE" -W -f='${Version}\n' perl-base)"
+          docker run --rm --entrypoint dpkg "$HUB_BFF_IMAGE" --compare-versions "$actual" ge "$HUB_MIN_PERL_BASE_VERSION"
+          printf 'perl-base %s (minimum %s)\n' "$actual" "$HUB_MIN_PERL_BASE_VERSION"
+
       - name: Export immutable image artifact
         run: |
           docker save --output hub-bff-image.tar "thelemartools-hub-bff:${GITHUB_SHA}"
@@ -132,6 +141,8 @@ jobs:
           test/jest/charactersheet/CharacterSheetCampaignRules.test.js
           test/jest/charactersheet/CharacterSheetHubTeardown.test.js
           test/jest/charactersheet/CharacterSheetRollHistory.test.js
+          test/jest/charactersheet/CharacterSheetHubRollHistory.test.js
+          test/jest/charactersheet/CharacterSheetRealtime.test.js
           test/jest/charactersheet/CharacterSheetMagicItemCategorization.test.js
           test/jest/charactersheet/CharacterSheetItemRepairLoadOrder.test.js
           --no-coverage --forceExit

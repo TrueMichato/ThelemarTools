@@ -1057,6 +1057,16 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 		await expect(disclosure).toHaveAttribute("open", "");
 		await expect(body).toBeVisible();
 		await expect(body).toContainText("Server-authorized profile shared with players");
+		await summary.focus();
+		const previousDisclosure = await disclosure.elementHandle();
+		await owner.logRolls({campaignId, characterId: character.id, count: 1});
+		await expect.poll(() => viewer.page.evaluate(
+			previous => !previous.isConnected,
+			previousDisclosure,
+		), {timeout: 15_000}).toBe(true);
+		await expect(disclosure).toHaveAttribute("open", "");
+		await expect(summary).toBeFocused();
+		await expect(body).toContainText("Server-authorized profile shared with players");
 
 		const initialPolicy = await owner.getProjectionPolicy(character.id);
 		const hiddenIdentityPolicy = {version: 1, preset: "private", overrides: {hp: {mode: "share"}}};
@@ -1066,6 +1076,7 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 			policy: hiddenIdentityPolicy,
 		});
 		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero");
+		await expect(viewer.page.locator("#campaign-party-roster details.hub-shared-profile[open]")).toHaveCount(0);
 
 		let markActionsRefreshStarted = () => {};
 		const actionsRefreshStarted = new Promise<void>(resolve => {
@@ -1217,6 +1228,7 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 	};
 	const dmContext = await browser.newContext(contextOptions);
 	const ownerContext = await browser.newContext(contextOptions);
+	let releaseSnapshot = () => {};
 	try {
 		const dm = new HubCampaignPage(await dmContext.newPage());
 		const owner = new HubCampaignPage(await ownerContext.newPage());
@@ -1241,30 +1253,12 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
 		}));
 
-		let markFirstRefreshStarted = () => {};
-		const firstRefreshStarted = new Promise<void>(resolve => {
-			markFirstRefreshStarted = resolve;
-		});
-		let continueFirstRefresh = () => {};
-		const firstRefreshGate = new Promise<void>(resolve => {
-			continueFirstRefresh = resolve;
-		});
-		let isRefreshGateEnabled = false;
-		let transferRefreshCount = 0;
-		await dm.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
-			if (route.request().method() !== "GET") {
-				await route.continue();
-				return;
-			}
-			if (!isRefreshGateEnabled) {
-				await route.continue();
-				return;
-			}
-			transferRefreshCount++;
-			if (transferRefreshCount === 1) {
-				markFirstRefreshStarted();
-				await firstRefreshGate;
-			}
+		const snapshotGate = new Promise<void>(resolve => releaseSnapshot = resolve);
+		let snapshotRequestCount = 0;
+		await dm.page.route(`**/api/campaigns/${campaignId}/snapshot`, async route => {
+			if (route.request().method() !== "GET") return route.continue();
+			snapshotRequestCount++;
+			if (snapshotRequestCount === 1) await snapshotGate;
 			await route.continue();
 		});
 
@@ -1276,29 +1270,38 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 				identity: {mode: "hide"},
 			},
 		};
-		isRefreshGateEnabled = true;
 		const firstUpdate = await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: policy.projectionRevision,
 			policy: changedPolicy,
 		});
-		await firstRefreshStarted;
+		await expect.poll(() => dm.page.locator("#campaign-transfer-form").evaluate(form =>
+			!!(form as HTMLFormElement & {_hubProjectionTransferDraft?: object})._hubProjectionTransferDraft,
+		)).toBe(true);
+		await expect.poll(() => snapshotRequestCount).toBeGreaterThan(0);
+		// The in-flight input event can arrive after concealment captures the older draft.
+		await dm.page.locator("#campaign-transfer-sp").evaluate(input => {
+			(input as HTMLInputElement).value = "2";
+			input.dispatchEvent(new Event("input", {bubbles: true}));
+		});
+		await expect(dm.page.locator("#campaign-transfer-sp")).toHaveValue("2");
 		await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: firstUpdate.projectionRevision,
 			policy: policy.policy,
 		});
-		continueFirstRefresh();
+		releaseSnapshot();
 
-		await expect.poll(() => transferRefreshCount).toBeGreaterThanOrEqual(2);
 		await expect.poll(() => dm.page.evaluate(() => ({
 			source: (document.getElementById("campaign-transfer-source") as HTMLSelectElement).value,
 			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
 			gp: (document.getElementById("campaign-transfer-gp") as HTMLInputElement).value,
+			sp: (document.getElementById("campaign-transfer-sp") as HTMLInputElement).value,
 			hasDraft: !!(document.getElementById("campaign-transfer-form") as any)._hubProjectionTransferDraft,
-		}))).toEqual({...selections, gp: "7", hasDraft: false});
+		}))).toEqual({...selections, gp: "7", sp: "2", hasDraft: false});
 		await expect(dm.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
 	} finally {
+		releaseSnapshot();
 		await Promise.all([pCloseContext(dmContext), pCloseContext(ownerContext)]);
 	}
 });

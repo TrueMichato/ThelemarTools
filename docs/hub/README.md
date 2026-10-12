@@ -3,11 +3,12 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** Coordinated implementation program complete through merged PR #253
-> **Deployment:** Release `hub-staging-2026-09-10-r7` at
-> `77d955c053dcdfe949235620db93f7eba477af34` is live on private Oracle staging; V1-G1 operations and
-> recovery proof passed, while the physical one-DM/two-player game day remains gated
-> **Last verified:** 2026-09-20
+> **Implementation:** R11f game-day corrections delivered; gameplay waves
+> A0-A3 and the separate sharing UX PR remain draft/unmerged
+> **Deployment:** `hub-staging-2026-10-12-r11f` at
+> `4578c8671a7b05066fb9a19411cb8a31cdd753ef` passed independent Oracle runtime/static/recovery checks;
+> physical retest is waived for this release, not a new private-launch GO
+> **Last reviewed:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -16,6 +17,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 |---|---|
 | What exists now | [Current system](current-system.md) |
 | What ships next and why | [Living roadmap](roadmap.md) |
+| Prioritized game-day findings and the next delivery/release gates | [Game-day backlog and delivery plan](game-day-backlog.md) |
 | Campaign Overview design and implementation record | [Campaign Overview redesign brief](campaign-overview-redesign-brief.md) |
 | Why it is structured this way | [Architecture](architecture.md) and [ADRs](#architecture-decisions) |
 | What was implemented and why | [Implementation history](implementation-history.md) |
@@ -133,7 +135,8 @@ ADR 0019 defines that entitlement layer, provider-bound reauthentication, hidden
 the staged enablement/rollback boundary.
 ADR 0020 defines the accepted protocol-6 model with at most eight fixed target legs, opaque per-leg invitations,
 per-character owner consent, one exact source-selected subset, and one-cost atomic finalization. It requires a
-future normalized migration 0010; this design/proof change contains no production migration and changes no live
+future normalized migration 0011 after A2's reserved migration 0010; this design/proof change contains no
+production migration and changes no live
 capability.
 
 ## Local BFF setup

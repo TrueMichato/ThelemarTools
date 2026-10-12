@@ -1,8 +1,30 @@
 # Campaign Hub staging plan
 
-> **Status:** Release r7 deployed; V1-G1 complete; physical game day remains
-> **Last reviewed:** 2026-09-13
+> **Status:** r11f deployed; Campaign A-only targeting unchanged; physical retest waived; private launch **NO-GO**
+> **Last reviewed:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
+
+The [prioritized game-day backlog](game-day-backlog.md) records the 2026-09-28 r10 findings, focused
+correction release, and physical re-entry gate. Earlier r7 drills below are historical evidence, not a
+claim that r7 is still deployed or that the r10 findings have been resolved. The 2026-09-29 r11
+promotion was interrupted after traffic changed; its compatible application rollback restored exact
+r10 with no schema migration. Genuine-provenance r11b through r11e tags were subsequently promoted.
+R11e passed runtime/static checks and matching off-machine encrypted backup; its approved same-tag
+redeploy enabled only Campaign A's narrow targeting canary, with post-cutover readiness/rollout and
+newest off-machine backup equality verified. The r11b P1 return advanced canonical revision without
+an edit; r11c stopped on a false history warning; r11d's first Open Local leg advanced revision
+(23 -> 24) on a derived-modifier PATCH. On r11e, physical Campaign -> Local -> Return and
+Back/Forward reload caused no lease/write and held revision stable, but actual BFCache restoration and
+fresh-tab no-lease evidence remain unproven. The separate Campaign A physical targeting canary
+passed participant-reported PHB/XPHB accept, XPHB reject/cancel, self-target, and picker privacy;
+natural expiry was not physically tested. Private-launch GO is still blocked by other findings.
+
+R11f subsequently deployed the reviewed game-day correction bundle, including owner Roll History and
+the direct-local/nested-sharing follow-up, at `4578c8671a7b05066fb9a19411cb8a31cdd753ef`.
+The approved dry run, human-confirmed promotion and independent runtime/static/recovery checks passed;
+the new encrypted prerelease backup matches the trusted second machine. No migration or campaign
+enrollment changed. The decision owner waived another physical game day for this bounded release,
+not the historical evidence gaps, private-launch decision or held gameplay scope.
 
 ## Objectives
 
@@ -16,8 +38,10 @@ environment and must not use copied production characters.
 - The host is Hub-only. Foundry was intentionally decommissioned and port 30000 is not a release prerequisite.
 - Caddy terminates public HTTPS and keeps the static site, API, OAuth, and WebSocket routes on one origin.
 - GitHub OAuth, PostgreSQL, campaign creation, and the basic deployment smoke checks pass.
-- Annotated release `hub-staging-2026-09-10-r7` at
-  `77d955c053dcdfe949235620db93f7eba477af34` is deployed; Phase 6G is complete.
+- The independently verified deployed source is annotated `hub-staging-2026-10-12-r11f` at
+  `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, with protocol 5, `character.roll_history.v1`
+  and migrations `0001`-`0009`. Existing Campaign A-only targeting is unchanged; Phase 6G is complete.
+  Recheck live identity/capability before the next scenario or promotion.
 - Hash-matched systemd units, manual maintenance/backup, five-minute Healthchecks.io monitoring, off-machine
   backup, authenticated isolated restore, continuous RPO/RTO, exact-r6 rollback, exact-r7 return, and cleanup
   passed on 2026-09-12.
@@ -28,8 +52,9 @@ environment and must not use copied production characters.
   unavailable; normal guest reboots are allowed.
 - The staging-baseline repair, lightweight Hub boot, Character Sheet-native campaign linking, role-aware
   campaign operation page, and human-readable interaction controls are deployed and pass Oracle smoke checks.
-- The [living roadmap](roadmap.md) gates the V1 decision on the physical
-  [one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go.
+- The [living roadmap](roadmap.md) retains an explicit private-launch decision before pilot expansion.
+  R11f's physical [game-day](runbooks/private-game-day.md) retest is waived for engineering continuation,
+  without relabeling historical gaps as PASS or lifting gameplay holds.
 
 ## Environment requirements
 

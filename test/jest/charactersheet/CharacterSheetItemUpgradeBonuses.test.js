@@ -279,6 +279,7 @@ describe("Item Upgrade Bonuses (#14 weapon, #15 armor)", () => {
 			state.applyItemUpgrade(id, {name: "Climbing Harness", source: "TCAH", upgradeType: ["AU"]}, 200);
 			const before = state._data.namedModifiers.filter(m => m.sourceType === "itemUpgrade").length;
 			expect(before).toBe(1);
+			const beforeIds = state._data.namedModifiers.filter(m => m.sourceType === "itemUpgrade").map(m => m.id);
 
 			const json = state.toJson();
 			const reloaded = new CharacterSheetState();
@@ -286,7 +287,23 @@ describe("Item Upgrade Bonuses (#14 weapon, #15 armor)", () => {
 
 			const after = reloaded._data.namedModifiers.filter(m => m.sourceType === "itemUpgrade").length;
 			expect(after).toBe(1);
+			expect(reloaded._data.namedModifiers.filter(m => m.sourceType === "itemUpgrade").map(m => m.id)).toEqual(beforeIds);
 			expect(reloaded.aggregateModifiers("skill:athletics").conditionalsAvailable.some(c => c.conditional.includes("climb"))).toBe(true);
+		});
+
+		it("does not reuse an old modifier id when the persisted effect is mechanically different", () => {
+			const id = addEquippedArmor();
+			state.applyItemUpgrade(id, {name: "Climbing Harness", source: "TCAH", upgradeType: ["AU"]}, 200);
+			const json = state.toJson();
+			const stale = json.namedModifiers.find(modifier => modifier.sourceType === "itemUpgrade");
+			const oldId = stale.id;
+			stale.value = 99;
+
+			const reloaded = new CharacterSheetState();
+			reloaded.loadFromJson(json);
+			const repaired = reloaded._data.namedModifiers.find(modifier => modifier.sourceType === "itemUpgrade");
+			expect(repaired.value).toBe(0);
+			expect(repaired.id).not.toBe(oldId);
 		});
 
 		it("strips the conditional modifier when the upgraded armor is removed from inventory", () => {

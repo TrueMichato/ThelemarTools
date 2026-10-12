@@ -90,6 +90,19 @@ describe("Divine Favor — data + catalog", () => {
 });
 
 describe("Divine Favor — Zeus boon application", () => {
+	test("reapplying an unchanged boon preserves derived modifier identity across load and reconcile", () => {
+		const s = makeState([ZEUS]);
+		s.setDivineFavorGod("Zeus|TGTT");
+		s.setDivineFavorLevel(3);
+		const original = s.toJson().namedModifiers.filter(mod => mod._divineFavor);
+		expect(original.length).toBeGreaterThan(0);
+
+		const reloaded = makeState([ZEUS]);
+		reloaded.loadFromJson(s.toJson());
+		reloaded.applyDivineFavorEffects();
+		expect(reloaded.toJson().namedModifiers.filter(mod => mod._divineFavor)).toEqual(original);
+	});
+
 	test("Devotee (3): Command limited-cast + Insight advantage when judging oaths", () => {
 		const s = makeState([ZEUS]);
 		s.setAbilityBase("cha", 16); // +3

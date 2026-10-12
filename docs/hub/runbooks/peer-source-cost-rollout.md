@@ -96,6 +96,12 @@ cost after the capability is disabled; reject, cancel, inspect, and expiry remai
 If verification fails, follow [application/database rollback](rollback.md). Do not edit the database, broaden the
 allowlist, or use the wildcard as a workaround.
 
+A same-tag `--allow-redeploy` changes runtime configuration, not the immutable source revision. Restoring the
+previous application image alone does **not** restore the prior `.env.hub` value: a recreated BFF can still
+start with the campaign enrolled. Recheck the advertised capability after any rollback. Returning to disabled
+requires a separately authorized protected-configuration edit and another checked-in release/redeploy; do not
+assume automatic application rollback disabled targeting.
+
 ## Escalation
 
 Treat an unauthorized selector, private projection leak, cost without effect, effect without cost, duplicate

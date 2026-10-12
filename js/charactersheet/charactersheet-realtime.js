@@ -1,5 +1,6 @@
 import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "../hub/hub-realtime-client.js";
 import {getCharacterOperationRouting} from "../hub/hub-character-operation-events.js";
+import {isOwnCharacterRoll} from "../hub/hub-roll-history.js";
 
 const _LISTENER_TYPES = new Set([
 	"connectionState",
@@ -10,6 +11,7 @@ const _LISTENER_TYPES = new Set([
 	"membershipChanged",
 	"projectionInvalidated",
 	"recipientNotice",
+	"rollLogged",
 	"rulesChanged",
 	"semanticOperation",
 ]);
@@ -450,6 +452,15 @@ export class CharacterSheetRealtimeCoordinator {
 				});
 			}
 
+			return;
+		}
+
+		if (isOwnCharacterRoll(event, {
+			campaignId: this._campaignId,
+			characterId: active.characterId,
+			accountId: active.viewerAccountId,
+		}) && !this._repository.isCharacterReadOnly?.({characterId: active.characterId})) {
+			this._enqueue(active, {type: "rollLogged", value: event});
 			return;
 		}
 

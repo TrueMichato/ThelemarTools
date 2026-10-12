@@ -6,6 +6,7 @@ import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation
 import {HubStoreError} from "./hub-store-error.js";
 import {normalizeCharacterPatchActivity} from "./hub-spell-activity.js";
 import {canViewEvent} from "./projections.js";
+import {HUB_ROLL_HISTORY_CONTRACT_VERSION, isOwnCharacterRoll, projectRollHistoryEvent} from "../../js/hub/hub-roll-history.js";
 import {
 	computePeerProfile,
 	getDefaultProjectionPolicy,
@@ -30,6 +31,7 @@ import {
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
 	isDirectTransferAuthority,
+	isTransferRequestInsufficient,
 	normalizeItemAwardRequest,
 	normalizeItemAwardQuantity,
 	normalizeCharacterInventory,
@@ -2005,6 +2007,7 @@ export class MemoryHubStore {
 		for (const {transfer, restore, targetOwnerAccountId} of prepared) {
 			if (restore) this._setTransferContainer({...restore, actorAccountId});
 			transfer.status = "cancelled";
+			transfer.payload = {...transfer.payload, cancellationReason: reason};
 			transfer.resolvedAt = this._fnNow().toISOString();
 			this._appendEvent({
 				campaignId: transfer.campaignId,
@@ -2036,6 +2039,31 @@ export class MemoryHubStore {
 
 	_cancelTransferForLifecycle ({transfer, actorAccountId, reason}) {
 		this._cancelTransferBatchForLifecycle({transfers: [transfer], actorAccountId, reason});
+	}
+
+	_cancelInsufficientStashRequests ({campaignId, partyInventoryId, container, actorAccountId, excludeTransferId = null}) {
+		const insufficient = [...this._transfers.values()]
+			.filter(transfer => transfer.campaignId === campaignId
+				&& transfer.id !== excludeTransferId
+				&& transfer.status === "proposed"
+				&& transfer.sourceKind === "party_inventory"
+				&& transfer.sourceId === partyInventoryId
+				&& isTransferRequestInsufficient({container, request: transfer.payload.request}));
+		this._cancelTransferBatchForLifecycle({
+			transfers: insufficient,
+			actorAccountId,
+			reason: "source_insufficient",
+		});
+		for (const transfer of insufficient) {
+			this._appendAudit({
+				campaignId,
+				actorAccountId,
+				action: "transfer.cancelled",
+				targetType: "transfer",
+				targetId: transfer.id,
+				details: {reason: "source_insufficient"},
+			});
+		}
 	}
 
 	_cancelTransfersForLifecycle ({campaignId, affectedAccountId, characterIds, actorAccountId, reason}) {
@@ -3404,6 +3432,38 @@ export class MemoryHubStore {
 			: redactEventActor(event);
 	}
 
+	async pListCharacterRollHistory ({accountId, campaignId, characterId, beforeSequence = null, limit = 200, commandId = null}) {
+		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const character = this._characters.get(characterId);
+		if (
+			this._accounts.get(accountId)?.status !== "active"
+			|| !character
+			|| character.ownerAccountId !== accountId
+			|| character.campaignId !== campaignId
+		) throw new HubStoreError("CHARACTER_NOT_FOUND", "Character is unavailable.", {status: 404});
+		const events = [];
+		const scope = {accountId, campaignId, characterId};
+		const campaignEvents = this._getCampaignEvents(campaignId);
+		for (let index = campaignEvents.length - 1; index >= 0; --index) {
+			const event = campaignEvents[index];
+			if (beforeSequence != null && event.sequence >= beforeSequence) continue;
+			if (!isOwnCharacterRoll(event, scope) || !canViewEvent({event, accountId, role: membership.role})) continue;
+			if (commandId != null && event.payload.actorCommandId !== commandId) continue;
+			events.push(projectRollHistoryEvent(event));
+			if (events.length > limit) break;
+		}
+		const selected = events.slice(0, limit).reverse();
+		return {
+			contractVersion: HUB_ROLL_HISTORY_CONTRACT_VERSION,
+			highWaterSequence: this._getCampaignLastSequence(campaignId),
+			events: selected,
+			history: {
+				scannedBackThroughSequence: selected[0]?.sequence ?? beforeSequence ?? 1,
+				hasMore: events.length > limit,
+			},
+		};
+	}
+
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
@@ -3423,7 +3483,7 @@ export class MemoryHubStore {
 			aggregateType: characterId ? "character" : "campaign",
 			aggregateId: characterId || campaignId,
 			visibility,
-			payload,
+			payload: {...payload, actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key},
 		});
 		return this._setReceipt({accountId, idempotencyKey, response: {event}});
 	}
@@ -4654,6 +4714,12 @@ export class MemoryHubStore {
 				aggregateRevision: stagedPartyInventory.revision,
 				payload: {},
 			});
+			this._cancelInsufficientStashRequests({
+				campaignId,
+				partyInventoryId: stagedPartyInventory.id,
+				container: stagedPartyInventory,
+				actorAccountId: accountId,
+			});
 		}
 		return this._setReceipt({accountId, idempotencyKey: commandIdempotencyKey, response});
 	}
@@ -4835,6 +4901,15 @@ export class MemoryHubStore {
 			visibleAccountIds: [...new Set([accountId, target._character?.ownerAccountId].filter(Boolean))],
 			payload: {sourceKind, sourceId, targetKind, targetId},
 		});
+		if (isDirectAuthority && sourceKind === "party_inventory") {
+			this._cancelInsufficientStashRequests({
+				campaignId,
+				partyInventoryId: sourceId,
+				container: prepared.container,
+				actorAccountId: accountId,
+				excludeTransferId: transfer.id,
+			});
+		}
 		const response = this._projectTransferResponseForViewer({
 			response: {transfer},
 			accountId,
@@ -4872,6 +4947,7 @@ export class MemoryHubStore {
 				? target._character.ownerAccountId === accountId || isDm
 				: isDm);
 		if (!canResolve) throw new HubStoreError("FORBIDDEN", `Cannot resolve this transfer.`, {status: 403});
+		let remainingStash = null;
 		if (transfer.status === "proposed") {
 			if (decision === "accept") {
 				const source = this._getTransferContainer({kind: transfer.sourceKind, id: transfer.sourceId, campaignId});
@@ -4889,6 +4965,7 @@ export class MemoryHubStore {
 				}
 				this._setTransferContainer({holder: source, container: removed.container, actorAccountId: accountId});
 				this._setTransferContainer({holder: target, container: after, actorAccountId: accountId});
+				if (transfer.sourceKind === "party_inventory") remainingStash = removed.container;
 				transfer.payload = {...transfer.payload, escrow: removed.escrow};
 			}
 		} else {
@@ -4933,6 +5010,15 @@ export class MemoryHubStore {
 				targetId: transfer.targetId,
 			},
 		});
+		if (remainingStash) {
+			this._cancelInsufficientStashRequests({
+				campaignId,
+				partyInventoryId: transfer.sourceId,
+				container: remainingStash,
+				actorAccountId: accountId,
+				excludeTransferId: transfer.id,
+			});
+		}
 		const response = this._projectTransferResponseForViewer({
 			response: {transfer},
 			accountId,

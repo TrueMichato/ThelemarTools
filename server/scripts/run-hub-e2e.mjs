@@ -321,6 +321,7 @@ try {
 		"test/jest/hub/HubMultiProviderIdentityPostgres.test.js",
 		"test/jest/hub/HubAccountEntitlementsPostgres.test.js",
 		"test/jest/hub/HubRulesPolicyPostgres.test.js",
+		"test/jest/hub/HubRollHistory.test.js",
 		"--runInBand",
 		"--no-coverage",
 		"--forceExit",
