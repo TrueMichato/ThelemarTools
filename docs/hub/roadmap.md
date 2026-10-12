@@ -64,7 +64,9 @@ may continue, but its integration/release/enablement holds are unchanged.
 On 2026-10-12 the decision owner requested the correction release as r11f and waived another physical
 game-day retest before continuing engineering. That changes the physical recheck requirement for this
 bounded release, not its automated/operational safeguards, the measured historical evidence, a
-private-launch GO, or the separately held P3/design/gameplay scope. See the
+private-launch GO, or the separately held design/gameplay scope. The r11f follow-up now also corrects
+GD-FIND-004/005's explicit-local entry and nested sharing UX without changing authority; it does not
+integrate draft #289's outer disclosure. Final-candidate publication/CI and deployment remain required. See the
 [r11f release preparation](game-day-backlog.md#r11f-correction-release-preparation--2026-10-12).
 
 Phase 6G and V1-G1 are complete. The 2026-09-28 r10 physical game day returned **NO-GO**. The remaining launch

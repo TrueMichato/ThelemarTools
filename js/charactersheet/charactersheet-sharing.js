@@ -239,6 +239,8 @@ export class CharacterSheetSharing {
 		this._replacementDrafts = {};
 		this._isSaving = false;
 		this._expandedField = null;
+		this._disclosureStates = new Map();
+		this._renderedRoot = null;
 	}
 
 	getState () {
@@ -418,7 +420,11 @@ export class CharacterSheetSharing {
 	}
 
 	render ({fnRerender}) {
+		for (const section of this._renderedRoot?.querySelectorAll("details[data-sharing-section]") || []) {
+			this._disclosureStates.set(section.dataset.sharingSection, section.open);
+		}
 		const root = el("section", {className: "charsheet__sharing", attrs: {"aria-labelledby": "charsheet-sharing-heading"}});
+		this._renderedRoot = root;
 		root.append(el("h3", {className: "charsheet__sharing-heading", text: "What other players can see", attrs: {id: "charsheet-sharing-heading"}}));
 
 		if (this._state === "loading") {
@@ -434,9 +440,9 @@ export class CharacterSheetSharing {
 
 		root.append(
 			el("p", {className: "charsheet__sharing-intro", text: "You choose what the rest of the table sees. Your DM always sees your full sheet.", attrs: {id: "charsheet-sharing-intro"}}),
-			this._renderPresets({fnRerender}),
-			this._renderFields({fnRerender}),
-			this._renderPreview(),
+			this._renderDisclosure({key: "basic", label: "Basic sharing", isDefaultOpen: true, content: this._renderPresets({fnRerender})}),
+			this._renderDisclosure({key: "advanced", label: "Advanced field overrides", content: this._renderFields({fnRerender})}),
+			this._renderDisclosure({key: "preview", label: "Saved player preview", isDefaultOpen: true, content: this._renderPreview()}),
 			this._renderSaveRow({fnRerender}),
 		);
 		if (this._feedback) {
@@ -449,10 +455,40 @@ export class CharacterSheetSharing {
 		return root;
 	}
 
+	getFocusRestorer () {
+		const active = document.activeElement;
+		if (!this._renderedRoot?.contains(active)) return null;
+		const id = active.id;
+		const summaryId = active.closest("details")?.querySelector(":scope > summary")?.id;
+		return () => {
+			const target = document.getElementById(id) || document.getElementById(summaryId);
+			if (!target || !this._renderedRoot?.contains(target)) return;
+			const closed = target.closest("details:not([open])");
+			(closed?.querySelector(":scope > summary") || target).focus();
+		};
+	}
+
+	_renderDisclosure ({key, label, content, isDefaultOpen = false}) {
+		const id = `charsheet-sharing-section-${key}`;
+		const section = el("details", {
+			className: "charsheet__sharing-disclosure",
+			attrs: {id, "data-sharing-section": key},
+		});
+		section.open = this._disclosureStates.get(key) ?? isDefaultOpen;
+		const summary = el("summary", {text: label, attrs: {id: `${id}-summary`}});
+		section.append(summary, content);
+		section.addEventListener("toggle", () => {
+			if (!section.isConnected || !this._renderedRoot?.contains(section)) return;
+			this._disclosureStates.set(key, section.open);
+			if (!section.open && section.contains(document.activeElement)) summary.focus();
+		});
+		return section;
+	}
+
 	_renderInvalidBanner ({fnRerender}) {
 		const banner = el("div", {className: "charsheet__sharing-banner", attrs: {role: "alert"}});
 		banner.append(el("p", {text: "Your saved sharing settings could not be read, so nothing is being shared with other players right now. Choose settings below and save to fix this."}));
-		const reset = el("button", {className: "charsheet__sharing-reset", text: "Reset to table view", attrs: {type: "button"}});
+		const reset = el("button", {className: "charsheet__sharing-reset", text: "Reset to table view", attrs: {type: "button", id: "charsheet-sharing-reset"}});
 		reset.addEventListener("click", () => {
 			this.resetToDefault();
 			fnRerender();
@@ -501,7 +537,11 @@ export class CharacterSheetSharing {
 				group.append(input, el("label", {text: choice.label, attrs: {for: id}}));
 			}
 			if (mode === "replace") group.append(this._renderReplacementControls({field, fnRerender}));
-			wrp.append(group);
+			wrp.append(this._renderDisclosure({
+				key: `field-${field}`,
+				label: `${descriptor.label}: ${mode === "default" ? "Use sharing level" : MODE_LABELS[mode]}`,
+				content: group,
+			}));
 		}
 		return wrp;
 	}
@@ -578,14 +618,14 @@ export class CharacterSheetSharing {
 			input.value = value ?? "";
 			input.addEventListener("input", () => { draft.items[index] = input.value; });
 			label.append(input);
-			const remove = el("button", {className: "charsheet__sharing-row-remove", text: "Remove", attrs: {type: "button", "aria-label": `Remove ${itemLabel} ${index + 1}`}});
+			const remove = el("button", {className: "charsheet__sharing-row-remove", text: "Remove", attrs: {type: "button", id: `charsheet-sharing-${field}-list-remove-${index}`, "aria-label": `Remove ${itemLabel} ${index + 1}`}});
 			remove.addEventListener("click", () => {
 				draft.items.splice(index, 1);
 				fnRerender();
 			});
 			wrp.append(label, remove);
 		});
-		const add = el("button", {className: "charsheet__sharing-row-add", text: `Add ${itemLabel.toLowerCase()}`, attrs: {type: "button"}});
+		const add = el("button", {className: "charsheet__sharing-row-add", text: `Add ${itemLabel.toLowerCase()}`, attrs: {type: "button", id: `charsheet-sharing-${field}-list-add`}});
 		add.addEventListener("click", () => {
 			draft.items.push("");
 			fnRerender();
@@ -602,7 +642,7 @@ export class CharacterSheetSharing {
 			row._id ??= `${index}`;
 			const rowWrp = el("div", {className: "charsheet__sharing-row"});
 			for (const part of parts) rowWrp.append(this._renderPart({field, draft, part, target: row}));
-			const remove = el("button", {className: "charsheet__sharing-row-remove", text: "Remove", attrs: {type: "button", "aria-label": `Remove ${label} ${index + 1}`}});
+			const remove = el("button", {className: "charsheet__sharing-row-remove", text: "Remove", attrs: {type: "button", id: `charsheet-sharing-${field}-${key}-remove-${row._id}`, "aria-label": `Remove ${label} ${index + 1}`}});
 			remove.addEventListener("click", () => {
 				draft[key].splice(index, 1);
 				fnRerender();
@@ -610,9 +650,9 @@ export class CharacterSheetSharing {
 			rowWrp.append(remove);
 			wrp.append(rowWrp);
 		});
-		const add = el("button", {className: "charsheet__sharing-row-add", text: `Add to ${label.toLowerCase()}`, attrs: {type: "button"}});
+		const add = el("button", {className: "charsheet__sharing-row-add", text: `Add to ${label.toLowerCase()}`, attrs: {type: "button", id: `charsheet-sharing-${field}-${key}-add`}});
 		add.addEventListener("click", () => {
-			draft[key].push({_id: `${draft[key].length}`});
+			draft[key].push({_id: this._fnRandomId()});
 			fnRerender();
 		});
 		wrp.append(add);
@@ -660,7 +700,7 @@ export class CharacterSheetSharing {
 		const save = el("button", {
 			className: "charsheet__sharing-save",
 			text: this._isSaving ? "Saving…" : "Save sharing settings",
-			attrs: {type: "button"},
+			attrs: {type: "button", id: "charsheet-sharing-save"},
 		});
 		if (this._isSaving) save.setAttribute("disabled", "disabled");
 		save.addEventListener("click", async () => {

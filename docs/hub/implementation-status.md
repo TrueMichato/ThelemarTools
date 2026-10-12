@@ -40,8 +40,14 @@ settles account rendering before enabling them, and preserves deletion-callback 
 slow-read and service-error browser probes cover the fix; see
 [candidate validation evidence](testing.md#source-candidate-validation-residual).
 The decision owner has requested an r11f correction release and waived another physical game-day
-retest for that release. Commit/tag/deployment evidence must still be recorded separately; unimplemented
-P3 UX/design requests and held Wave A remain outside the bounded bundle. This is not private-launch GO.
+retest for that release. The correction bundle is published as
+`661b138ea91c3ad4e99b73439a6bac7eaca554b8`, with all four jobs green in exact-source CI `38217301747`.
+The r11f follow-up additionally corrects GD-FIND-004/005: explicit-local Create/Open/Import choices
+separate from cloud copy, and nested basic/advanced/field/preview sharing disclosures retaining drafts,
+open states and focus across parent rerender. Both Sheet entry paths preserve saved policy and peer
+projection until explicit Save. Final-candidate publication/CI, tagging and deployment remain separate;
+design requests002/008/010/011, draft #289 and held Wave A remain outside the bundle.
+This is not private-launch GO.
 
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,

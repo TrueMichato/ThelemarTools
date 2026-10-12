@@ -15,6 +15,7 @@
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
 | Owner Roll History | `HubRollHistory.test.js`, `HubRollLogAdapter.test.js`, `CharacterSheetHubRollHistory.test.js`, `owner-roll-history.spec.ts` | Owner-only pre-limit reads, actor-only correlation, 200-event retention, cursors, exact retry/reload recovery, lost responses, multi-device convergence, lifecycle fences, no character write/lease, phone layout |
+| Game-day entry/sharing UX | `CharacterSheetLocalEntry.test.js`, `HubCharacterSheetAuthorityRoutes.test.js`, `game-day-ux.spec.ts`, existing projection-policy/privacy suites | Explicit-local Create/Open/Import controller delegation and guards, zero campaign writes, nested native disclosures, draft/open-state/focus preservation through rerender on both entry paths, unchanged saved policy and full peer profile, phone/desktop day/night |
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, `CharacterSheetHubTeardown.test.js`, `CharacterSheetCampaign.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, archive/move/demotion concealment, character-scoped sharing refresh, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
@@ -93,6 +94,22 @@ the old enabled button before the fix, and both legs now pass with the full prov
 These probes add no automatic mutation retries, skips, or assertion-timeout increases.
 The corrected full disposable stack passed 77 PostgreSQL checks and all 52 browser journeys;
 the focused provider suite passed all 10, including both deterministic startup cases.
+
+The subsequent GD-FIND-004/005 follow-up passed the full disposable stack: 77 PostgreSQL checks and
+54 browser journeys. An earlier accelerated 13-case subset exhausted the unchanged shared-IP
+campaign-creation quota (10 POSTs/minute), producing a 429 in the existing overview journey.
+The unchanged overview passed in a fresh four-case stack, then the full suite passed without changing
+limits, retries, skips or timeouts. The new sharing probe initially compared a raw API seed with a
+post-load profile; normal missing-feature repair changed the document during setup. It now measures
+after load repairs settle and explicitly selects the character from the ordinary entry's roster.
+The full saved-policy and peer-profile equality assertions remain intact.
+
+Desktop/mobile day/night inspection then found native markers suppressed by Bootstrap's global summary
+display reset. The real-browser affordance assertion failed with `display: block`; scoped sharing CSS
+restores `display: list-item` and closed/open native marker styles. The focused four-journey stack then
+passed all 77 PostgreSQL checks and all four browser journeys; the final desktop/mobile day/night captures
+show the native markers. These follow-up checks are source
+verification, not a repeated physical game day or an r11f deployment.
 
 ## Current commands
 

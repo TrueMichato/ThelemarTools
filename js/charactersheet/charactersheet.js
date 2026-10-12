@@ -1857,6 +1857,7 @@ class CharacterSheetPage {
 			(/** @type {*} */ (elOverlay)).style.opacity = "0";
 			setTimeout(() => elOverlay.remove(), 300);
 		}
+		await this._pHandleLocalActionUrl(urlParams);
 
 		// Add page unload protection. The canonical store is IndexedDB (async), which cannot be
 		// written reliably during unload, so we SYNCHRONOUSLY mirror ONLY the active character to
@@ -3807,6 +3808,27 @@ class CharacterSheetPage {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Spawn]", e);
 			JqueryUtil.doToast({type: "danger", content: `Spawn failed: ${(/** @type {*} */ (e)).message}`});
+		}
+	}
+
+	async _pHandleLocalActionUrl (urlParams) {
+		const action = urlParams.get("localAction");
+		if (!action) return;
+		const url = new URL(window.location.href);
+		url.searchParams.delete("localAction");
+		window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+		if (urlParams.get("local") !== "1" || this._isHubCharacter) {
+			JqueryUtil.doToast({type: "warning", content: "This action requires the local Character Sheet. Your campaign character is unchanged."});
+			return;
+		}
+		try {
+			if (action === "create") await this._onNewCharacter();
+			else if (action === "import") await this._export._showImportDialog();
+			else JqueryUtil.doToast({type: "warning", content: "That local character action is not supported. Use New Character or Import on this sheet."});
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet Local Entry]", error);
+			JqueryUtil.doToast({type: "danger", content: "The local character action could not open. Use New Character or Import on this sheet to try again."});
 		}
 	}
 

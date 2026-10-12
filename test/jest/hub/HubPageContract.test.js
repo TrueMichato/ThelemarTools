@@ -707,6 +707,15 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("globalThis.InputUiUtil");
 	});
 
+	it("offers explicit local entry separately from adding a cloud copy", () => {
+		expect(campaignHtml).toContain("id=\"campaign-local-character-actions\"");
+		expect(campaignHtml).toContain("aria-label=\"Local character actions\"");
+		expect(campaignHtml).toContain("href=\"charactersheet.html?local=1&amp;localAction=create\"");
+		expect(campaignHtml).toContain("href=\"charactersheet.html?local=1\"");
+		expect(campaignHtml).toContain("href=\"charactersheet.html?local=1&amp;localAction=import\"");
+		expect(read("js/hub/hub-page.js")).toContain("setHidden(document.getElementById(\"campaign-local-character-actions\"), !canPlay)");
+	});
+
 	it("uses the latest campaign context for long-lived mutation forms", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toMatch(/async function pInitCampaignForms \(\{[\s\S]*\}\) \{[\s\S]*let currentContext = context;/);

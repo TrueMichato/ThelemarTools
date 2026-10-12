@@ -1,7 +1,7 @@
 # Campaign Hub game-day backlog and delivery plan
 
 > **Status:** Prioritized follow-up; private-pilot expansion is **NO-GO**
-> **Last reviewed:** 2026-10-01
+> **Last reviewed:** 2026-10-12
 > **Owner:** Campaign Hub maintainers
 
 This is the sanitized repository tracking record for the 2026-09-28 r10 physical game day and its
@@ -157,24 +157,34 @@ then continuing the remaining plan without another physical game-day retest. Rec
 physical-retest waiver, not a measured PASS or private-launch GO. Automated exact-commit CI and fresh
 operational release/backup/health checks still apply.
 
-The reviewed correction bundle includes GD-FIND-003/006/007/009/013, the previously pushed supply-chain
-fixes, and the subsequently corrected account-action startup race. GD-FIND-014's core route correction
+The published correction commit `661b138ea91c3ad4e99b73439a6bac7eaca554b8` includes
+GD-FIND-003/006/007/009/013, the previously pushed supply-chain fixes, and the subsequently corrected
+account-action startup race. Exact-source CI run `38217301747` passed all four jobs.
+GD-FIND-014's core route correction
 and GD-FIND-012's narrow Campaign A targeting canary remain in r11e; their unmeasured physical residuals
 are retained under the waiver. Local candidate evidence passed 1,642 Hub tests, 17,392 Character Sheet
 tests, 77 PostgreSQL checks, and 52 browser journeys. These totals describe the verified local overlay,
-not yet-published CI or a deployed r11f.
+not a deployed r11f.
 
-This release does not implement GD-FIND-004/005's P3 entry/nested-sharing UX or resolve
-GD-FIND-002/008/010/011's privacy/custody/DM-authority/content-publication decisions. They remain in the
-continuation plan; do not report every backlog row as solved. Draft #289 and held Wave A remain excluded,
-with no protocol change, no migration after 0009, and no additional campaign enrollment.
-The broader scope clarification could not obtain a human answer; this bounded release preserves the
-already-approved correction scope rather than silently lifting those separate holds or inventing authority.
+The follow-up r11f candidate also corrects GD-FIND-004/005 without changing authority: the Campaign
+manifest offers explicit-local Create, Open and Import routes, and the shared Sheet sharing UI has
+basic, advanced, per-field and saved-preview disclosures. Unsaved values, open states and keyboard focus
+survive rerender; toggling or editing a draft does not save policy or change the peer projection.
+The complete disposable stack passed 77 PostgreSQL checks and 54 browser journeys. A subsequent
+visual inspection caught Bootstrap's global `summary { display: block }` suppressing native disclosure
+markers; a red-first browser assertion now requires native closed/open markers, restored by scoped CSS.
+Publication and exact-head CI for this follow-up remain separate from the earlier commit's evidence.
+
+GD-FIND-002/008/010/011's privacy/custody/DM-authority/content-publication decisions remain in the
+continuation plan; do not report every backlog row as solved. Draft #289's outer disclosure and held
+Wave A remain excluded, with no protocol change, no migration after 0009, and no additional campaign
+enrollment. The P3 follow-up supersedes the initial conservative scope exclusion after the decision
+owner requested continued autonomous completion; it does not lift gameplay holds or invent authority.
 
 Current target identity is the proposed `hub-staging-2026-10-12-r11f`. It is not tagged or deployed merely
 because it is named here. Fresh read-only inspection at 2026-10-12T07:10:45Z still found clean r11e source
 `cf9b09f1a8df99e47167528aa37aa2cdfe766e9f`, healthy Hub services, one BFF, no active release process/lock,
-and a successful current monitor. Published-commit CI, exact-tag approval, shared-host dry run,
+and a successful current monitor. Final-candidate CI, exact-tag approval, shared-host dry run,
 human-confirmed promotion and post-release verification remain separate required evidence.
 
 ## Prioritized findings
@@ -195,8 +205,8 @@ finding.
 | P2, source fix not deployed | **GD-FIND-007** | Recipients previously had to visit Campaign Hub to discover and resolve a player transfer. A local Sheet correction adds an owner-scoped notice near the sheet header with item/source summary and inline Accept/Reject through the existing server-authorized transfer API. Pending state arrives live and survives reload; identity concealment removes old details before refetch, lost responses use one bounded authoritative retry/read before claiming a terminal outcome, and access loss fences late actions. Red-first browser evidence, affected Sheet Jest (202), full Hub Jest (1,629), and disposable PostgreSQL/browser stack (62/49) passed after integration. | Exact-head review/CI/release and physical recipient confirmation remain; the r11e Sheet still lacks these controls. **B1/B2**. |
 | P2, source fix not deployed | **GD-FIND-009** | After one of two requests for the same stash item was approved, the losing request stayed visibly pending for manual rejection. The local candidate now atomically cancels only definitively insufficient proposed losers on an approved/direct stash debit or stash-backed award, preserving affordable requests and adding `source_insufficient` reason/event/audit. The losing player's open Sheet announces the outcome and the DM inbox clears without manual rejection. Red-first Memory/PostgreSQL and multi-user browser tests pass, including concurrent approvals; integrated full Hub Jest (1,629), affected Sheet Jest (202), and disposable PostgreSQL/browser stack (62/49) pass. R11e still has the old behavior. | Reviewed exact-head CI/release and physical contention/reconnect confirmation remain; verify conservation, event audience and no duplicate asset. **B4**. |
 | P2, source candidate under verification | **GD-FIND-013** | Confirmed continuation contract: latest 200 own authorized rolls for the current character owner, live across devices and after reload. The candidate reads existing domain events with a protocol-5 capability, bounded detail, exact-command lost-response recovery, and explicit device-only offline states; it does not acquire an editor lease or PATCH the character. | Bundle with GD-FIND-003/006/007/009; exact candidate review/release and physical owner-device/audience/reconnect recheck remain. No migration/index; finite sparse-load evidence is not unbounded-growth proof. R11e retains the old behavior. **Roll-history UX**. |
-| P3 | **GD-FIND-004** | **Add local character** lacked direct create/open-sheet/import choices. | Offer clear routes to create, open, or import without making a local copy appear campaign-authoritative; keyboard/mobile coverage. **Character entry UX**. |
-| P3 | **GD-FIND-005** | Sharing Settings lacked per-section collapse and an advanced overrides disclosure. PR #289 covers only the outer section. | Preserve draft values/focus through nested open/close and rerender; separate basic sharing from advanced overrides and test both entry paths. **Sharing UX**. |
+| P3, source fix not deployed | **GD-FIND-004** | The manifest now offers Create local character, Open local sheet and Import character JSON separately from Add cloud copy. All three routes force explicit local authority and delegate to existing Sheet flows; the multi-user journey observes zero character writes and an unchanged DM snapshot. | Final-candidate publication/CI and r11f release; physical retest waived, not measured PASS. **Character entry UX**. |
+| P3, source fix not deployed | **GD-FIND-005** | Shared sharing controls now separate Basic sharing, closed-by-default Advanced field overrides, individual field disclosures and Saved player preview. Keyboard close/reopen and parent rerender retain draft values, open state and focus on both campaign and ordinary entry; saved policy and the full peer projection remain unchanged until Save. PR #289 remains a separate outer-disclosure draft. | Final-candidate publication/CI and r11f release; phone/desktop day/night artifacts and native-marker regression cover presentation. Physical retest waived, not measured PASS. **Sharing UX**. |
 | Design | **GD-FIND-002** | DM requested bounded provider/account-source context; peer sharing should be optional and default hidden. | Decide which account facts, roles, consent and audience are allowed; test absence of provider subjects and hidden details from peer/network projections. **Privacy decision**. |
 | Design | **GD-FIND-008** | Participants want fewer routine stash approvals, transparent withdrawals and shared-weight handling. | Decide custody, concurrent debit/approval, carry ownership, activity and notifications before changing inventory authority. **B0/B3 decision; ADR if authority changes**. |
 | Design | **GD-FIND-010** | DM requested direct player-sheet editing/transfers with player notification; current arbitrary edit authority is intentionally limited. | Choose explicit typed, auditable DM operations and recipient notices; do not bypass owner leases or grant arbitrary writes. **Wave A/B authority decision**. |
@@ -221,7 +231,7 @@ remain untested or insufficiently evidenced unless the private report explicitly
    Sheet campaign test and campaign-context browser spec with normal descendant commits, no history rewrite.
    Rerun route/convergence and, if included, disclosure/projection-privacy journeys on the *integrated*
    head, plus full Hub, affected Character Sheet, relevant mutation and real-stack gates. The nested
-   GD-FIND-005 request remains open either way.
+   GD-FIND-005 nested correction is now in the separate r11f follow-up candidate; it does not require #289.
 3. **Keep release identity separate from game-day acceptance.** The r11b, r11c, r11d and r11e corrections were
    deployed from reviewed, immutable annotated tags; the initial r11 attempt rolled back and is not
    a deployment, and its tag remains immutable and unused. R11e's runtime and backup evidence passed

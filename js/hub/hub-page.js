@@ -1054,6 +1054,7 @@ function applyCampaignRoleLayout ({campaign, characters}) {
 	setHidden(document.getElementById("campaign-content-managed-note"), isDm);
 	setHidden(document.getElementById("campaign-open-dm-screen"), !isDm);
 	setHidden(document.getElementById("campaign-upload-local"), !canPlay);
+	setHidden(document.getElementById("campaign-local-character-actions"), !canPlay);
 
 	const primaryCharacter = document.getElementById("campaign-open-primary-character");
 	const characterSetup = document.getElementById("campaign-open-character-setup");

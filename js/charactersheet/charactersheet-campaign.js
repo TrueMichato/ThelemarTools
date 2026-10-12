@@ -284,6 +284,7 @@ export class CharacterSheetCampaign {
 
 	render () {
 		if (!this._root) return;
+		const restoreSharingFocus = this._sharing?.getFocusRestorer();
 		this._root.replaceChildren();
 		this._root.classList.toggle("charsheet__campaign--expanded", this._isExpanded);
 		this._root.classList.toggle("charsheet__campaign--busy", this._isBusy);
@@ -336,6 +337,7 @@ export class CharacterSheetCampaign {
 		// are no other players to share with otherwise.
 		if (isCloud && this._currentCharacter?.campaignId && this._sharing) {
 			this._root.append(this._sharing.render({fnRerender: () => this.render()}));
+			restoreSharingFocus?.();
 		}
 	}
 

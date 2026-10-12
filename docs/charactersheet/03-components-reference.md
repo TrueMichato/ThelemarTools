@@ -32,11 +32,34 @@ The nonmodal panel preserves keyboard focus across pending/checking/synced row r
 Escape closes it and returns focus to the toggle; closed controls are inert. Recovery display
 values are reconstructed from the immutable request rather than mutable saved row metadata.
 
+## CharacterSheetSharing
+
+**File:** `js/charactersheet/charactersheet-sharing.js`
+
+The same owner-sharing component serves campaign and ordinary Sheet entry. Basic sharing and Saved
+player preview start open; Advanced field overrides and each field start closed. Native summaries
+support keyboard expansion and visible closed/open markers. Disclosure state is instance-local UI state,
+not character JSON or projection policy. Closing a section does not discard its unsaved values or save
+anything. The preview always describes the saved result, not the draft.
+
+`render()` captures disclosure states before replacing the old tree. `getFocusRestorer()` lets
+`CharacterSheetCampaign.render()` restore the active control, or the enclosing summary if it is now
+closed. Stable control IDs preserve focus across preset/mode changes; authoritative character/scope
+refresh creates a new sharing instance rather than carrying a previous character's draft into it.
+
 ## CharacterSheetPage
 
 **File**: `js/charactersheet/charactersheet.js`  
 **Lines**: ~5,861  
 **Role**: Main Controller
+
+### Explicit local entry actions
+
+The Campaign manifest links to `charactersheet.html?local=1` for Open, with `localAction=create` or
+`localAction=import` for the other two choices. `_pHandleLocalActionUrl()` runs after Sheet initialization,
+consumes only the one-shot action parameter, and delegates to the existing New Character or Import
+controller. It rejects non-local/cloud authority with visible feedback. These routes never create a
+campaign copy; adding a cloud copy remains an explicit separate action.
 
 ### Constructor
 

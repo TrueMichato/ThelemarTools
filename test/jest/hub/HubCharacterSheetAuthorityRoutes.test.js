@@ -11,6 +11,13 @@ const CHARACTER = "55555555-5555-4555-8555-555555555555";
 const CANONICAL_CHARACTER = "66666666-6666-4666-8666-666666666666";
 
 describe("Character Sheet authority routes", () => {
+	it("keeps direct creation and import actions explicitly local", () => {
+		expect(getLocalCharacterSheetUrl({action: "create"})).toBe("charactersheet.html?local=1&localAction=create");
+		expect(getLocalCharacterSheetUrl({action: "import"})).toBe("charactersheet.html?local=1&localAction=import");
+		expect(getLocalCharacterSheetUrl()).toBe("charactersheet.html?local=1");
+		expect(() => getLocalCharacterSheetUrl({action: "award"})).toThrow(TypeError);
+	});
+
 	it("round-trips an exact campaign character through explicit local mode", () => {
 		const localUrl = getLocalCharacterSheetUrl({
 			returnCampaignId: CAMPAIGN,

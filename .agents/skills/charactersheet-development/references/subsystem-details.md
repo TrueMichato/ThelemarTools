@@ -13,6 +13,18 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
 - Roll History (owner-scoped retained events and exact-command recovery)
+- Local Entry and Sharing Disclosures (existing controllers, instance-local drafts and focus)
+
+## Local Entry and Sharing Disclosures
+
+`CharacterSheetPage._pHandleLocalActionUrl()` (`js/charactersheet/charactersheet.js`) consumes
+`localAction=create|import` only with explicit `local=1` and non-cloud authority, then calls the existing
+New Character/Import flow. Open uses the ordinary explicit-local route; cloud copying stays separate.
+
+`CharacterSheetSharing.render()` and `getFocusRestorer()` (`js/charactersheet/charactersheet-sharing.js`)
+retain nested disclosure state, unsaved replacement values and control focus across Campaign parent
+rerender. Basic/preview start open; advanced/fields start closed. Disclosure state is never serialized
+or saved to policy. Authoritative scope refresh creates a fresh instance; saved preview remains saved.
 
 ## Roll History
 

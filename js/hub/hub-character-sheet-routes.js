@@ -34,11 +34,14 @@ export function getDetachedCloudCharacterSheetUrl ({characterId}) {
 export function getLocalCharacterSheetUrl ({
 	returnCampaignId = null,
 	returnCharacterId = null,
+	action = null,
 } = {}) {
+	if (action != null && !["create", "import"].includes(action)) throw new TypeError("Local character action must be create or import.");
 	const hasCampaign = returnCampaignId != null;
 	const hasCharacter = returnCharacterId != null;
 	if (hasCampaign !== hasCharacter) throw new TypeError(`Campaign return routes require both campaign and character ids.`);
 	const params = new URLSearchParams({local: "1"});
+	if (action) params.set("localAction", action);
 	if (hasCampaign) {
 		if (!isActiveCampaignUuid(returnCampaignId) || !isActiveCampaignUuid(returnCharacterId)) {
 			throw new TypeError(`Campaign return ids must be UUIDs.`);

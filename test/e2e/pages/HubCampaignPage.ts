@@ -1322,11 +1322,96 @@ export class HubCampaignPage {
 	/** Set one field to "Show instead" and save, exercising the generated typed controls. */
 	async replaceSharedFieldAndSave ({field, expectPreviewText}: {field: string; expectPreviewText: string}): Promise<void> {
 		const sharing = this.page.locator(".charsheet__sharing");
+		await this.openSharingField(field);
 		await sharing.locator(`input[name='charsheet-sharing-${field}'][value='replace']`).check();
 		await expect(sharing.locator(".charsheet__sharing-replacement").first()).toBeVisible();
 		await sharing.locator(".charsheet__sharing-save").click();
 		await expect(sharing.locator(".charsheet__sharing-feedback--success")).toHaveText("Sharing settings saved.");
 		await expect(sharing.locator(".charsheet__sharing-preview")).toContainText(expectPreviewText);
+	}
+
+	async openSharingField (field: string): Promise<void> {
+		for (const key of ["advanced", `field-${field}`]) {
+			const section = this.page.locator(`#charsheet-sharing-section-${key}`);
+			await expect(section).toBeVisible();
+			if (!await section.evaluate(element => (element as HTMLDetailsElement).open)) {
+				await section.locator(":scope > summary").press("Enter");
+			}
+			await expect(section).toHaveAttribute("open", "");
+		}
+	}
+
+	async expectSharingDraftSurvivesDisclosures (): Promise<void> {
+		const sharing = this.page.locator(".charsheet__sharing");
+		const advanced = sharing.locator("#charsheet-sharing-section-advanced");
+		await expect(advanced).not.toHaveAttribute("open", "");
+		await expect(advanced.locator(":scope > summary")).toHaveCSS("display", "list-item");
+		await expect(advanced.locator(":scope > summary")).toHaveCSS("list-style-type", "disclosure-closed");
+		await this.openSharingField("hp");
+		await expect(advanced.locator(":scope > summary")).toHaveCSS("list-style-type", "disclosure-open");
+		const replace = sharing.locator("#charsheet-sharing-hp-replace");
+		await replace.check();
+		await expect(replace).toBeFocused();
+		const state = sharing.locator("#charsheet-sharing-hp-state");
+		await state.fill("Unsaved steady");
+		await this.page.evaluate(() => (window as any).charSheet._campaign.render());
+		await expect(state).toBeFocused();
+		await expect(state).toHaveValue("Unsaved steady");
+
+		const field = sharing.locator("#charsheet-sharing-section-field-hp");
+		await field.locator(":scope > summary").press("Enter");
+		await expect(state).toBeHidden();
+		await expect(field.locator(":scope > summary")).toBeFocused();
+		await advanced.locator(":scope > summary").press("Enter");
+		await expect(advanced).not.toHaveAttribute("open", "");
+		await advanced.locator(":scope > summary").press("Enter");
+		await expect(field).not.toHaveAttribute("open", "");
+		await this.openSharingField("hp");
+		await expect(state).toHaveValue("Unsaved steady");
+
+		const preset = sharing.locator("#charsheet-sharing-preset-open");
+		await preset.check();
+		await expect(preset).toBeFocused();
+		await expect(advanced).toHaveAttribute("open", "");
+		await expect(field).toHaveAttribute("open", "");
+		await expect(state).toHaveValue("Unsaved steady");
+		for (const key of ["basic", "preview"]) {
+			const section = sharing.locator(`#charsheet-sharing-section-${key}`);
+			await section.locator(":scope > summary").press("Enter");
+			await expect(section).not.toHaveAttribute("open", "");
+			await section.locator(":scope > summary").press("Enter");
+			await expect(section).toHaveAttribute("open", "");
+		}
+		await expect(state).toHaveValue("Unsaved steady");
+	}
+
+	async waitForSharingReady (): Promise<void> {
+		await expect(this.page.locator("#charsheet-sharing-section-advanced")).toBeVisible();
+		await expect(this.page.locator("#charsheet-sharing-save")).toBeEnabled();
+		await expect.poll(() => this.page.evaluate(() => {
+			const sheet = (window as any).charSheet;
+			return !!sheet && !sheet._characterRepository?.hasPendingWrites?.();
+		})).toBe(true);
+	}
+
+	async openLocalEntryAction ({campaignId, action}: {campaignId: string; action: "create" | "open" | "import"}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const labels = {create: "Create local character", open: "Open local sheet", import: "Import character JSON"};
+		const navigation = this.page.getByRole("navigation", {name: "Local character actions"});
+		await expect(navigation).toBeVisible();
+		await this.page.getByRole("link", {name: labels[action], exact: true}).click();
+		await waitForToolsLoaded(this.page);
+		await expect(this.page.locator(".charsheet__campaign-authority--local")).toHaveText("Local authority");
+		const url = new URL(this.page.url());
+		expect(url.searchParams.get("local")).toBe("1");
+		expect(url.searchParams.has("hubCampaign")).toBe(false);
+		expect(url.searchParams.has("localAction")).toBe(false);
+		expect(await this.page.evaluate(() => (window as any).charSheet._isHubCharacter)).toBe(false);
+		if (action === "create") await expect(this.page.locator("#charsheet-tab-builder")).toBeVisible();
+		if (action === "import") {
+			await expect(this.page.locator(".charsheet__import-info")).toBeVisible();
+			await expect(this.page.locator(".ve-ui-modal__overlay input[type=file]")).toBeVisible();
+		}
 	}
 
 	/**
@@ -1417,6 +1502,11 @@ export class HubCampaignPage {
 			path: `/charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`,
 			name,
 		});
+	}
+
+	async selectCharacterOnSheet ({characterId, name}: {characterId: string; name: string}): Promise<void> {
+		await this.page.locator("#charsheet-sel-character").selectOption(characterId);
+		await expect(this.page.locator("#charsheet-ipt-name")).toHaveValue(name);
 	}
 
 	async waitForCharacterRealtimeLive (): Promise<void> {
