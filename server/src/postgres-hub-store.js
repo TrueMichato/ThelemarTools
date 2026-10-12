@@ -87,6 +87,7 @@ import {
 	isPeerSourceCostsPinCurrent,
 } from "./peer-source-cost-authority.js";
 import {canViewEvent} from "./projections.js";
+import {HUB_ROLL_HISTORY_CONTRACT_VERSION, projectRollHistoryEvent} from "../../js/hub/hub-roll-history.js";
 import {
 	getAccountDisplayName,
 	normalizeExternalIdentity,
@@ -5004,6 +5005,77 @@ export class PostgresHubStore {
 			: redactEventActor(event);
 	}
 
+	async pListCharacterRollHistory ({accountId, campaignId, characterId, beforeSequence = null, limit = 200, commandId = null}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query("SET LOCAL statement_timeout = '5s'");
+			await client.query("SET LOCAL lock_timeout = '2s'");
+			await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 6))", [campaignId]);
+			const campaign = await client.query("SELECT next_event_sequence FROM hub.campaigns WHERE id = $1 AND status <> 'deleting' FOR SHARE", [campaignId]);
+			if (!campaign.rowCount) throw new HubStoreError("CAMPAIGN_NOT_FOUND", "Campaign is unavailable.", {status: 404});
+			const highWaterSequence = Number(campaign.rows[0].next_event_sequence) - 1;
+			const membership = await this._pGetMembershipForShare({client, accountId, campaignId});
+			const character = await client.query(`
+				SELECT c.id FROM hub.characters c
+				WHERE c.id = $1 AND c.campaign_id = $2 AND c.owner_account_id = $3
+					AND EXISTS (SELECT 1 FROM hub.accounts a WHERE a.id = $3 AND a.status = 'active')
+				FOR SHARE
+			`, [characterId, campaignId, accountId]);
+			if (!character.rowCount) throw new HubStoreError("CHARACTER_NOT_FOUND", "Character is unavailable.", {status: 404});
+			const visibilities = ["all_members", "actor_and_dm", ...(membership.role === "dm" || membership.role === "co_dm" ? ["dm_only", "explicit_accounts"] : [])];
+			const result = await client.query(`
+				SELECT id, campaign_id, sequence, actor_account_id, aggregate_id, visibility, created_at,
+					jsonb_build_object(
+						'formula', left(payload->>'formula', 200),
+						'total', payload->'total',
+						'context', left(payload->>'context', 100),
+						'actorCommandId', left(payload->>'actorCommandId', 200),
+						'detail', jsonb_build_object(
+							'title', left(payload->'detail'->>'title', 200),
+							'breakdown', left(payload->'detail'->>'breakdown', 200),
+							'resultClass', left(payload->'detail'->>'resultClass', 100),
+							'resultNote', left(payload->'detail'->>'resultNote', 200)
+						)
+					) AS payload
+				FROM hub.domain_events
+				WHERE campaign_id = $1 AND actor_account_id = $2 AND aggregate_type = 'character'
+					AND aggregate_id = $3 AND event_type = 'roll.logged'
+					AND (visibility = ANY($4::text[]) OR (visibility = 'explicit_accounts' AND $2 = ANY(visible_account_ids)))
+					AND sequence <= $6
+					${beforeSequence == null ? "" : "AND sequence < $7"}
+					${commandId == null ? "" : `AND payload->>'actorCommandId' = $${beforeSequence == null ? 7 : 8}`}
+				ORDER BY sequence DESC LIMIT $5
+			`, [campaignId, accountId, characterId, visibilities, limit + 1, highWaterSequence, ...(beforeSequence == null ? [] : [beforeSequence]), ...(commandId == null ? [] : [commandId])]);
+			const events = result.rows.slice(0, limit).reverse().map(row => projectRollHistoryEvent({
+				id: row.id,
+				campaignId: row.campaign_id,
+				sequence: Number(row.sequence),
+				actorAccountId: row.actor_account_id,
+				aggregateId: row.aggregate_id,
+				visibility: row.visibility,
+				payload: row.payload,
+				createdAt: row.created_at,
+			}));
+			await client.query("COMMIT");
+			return {
+				contractVersion: HUB_ROLL_HISTORY_CONTRACT_VERSION,
+				highWaterSequence,
+				events,
+				history: {
+					scannedBackThroughSequence: events[0]?.sequence ?? beforeSequence ?? 1,
+					hasMore: result.rows.length > limit,
+				},
+			};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			if (["57014", "55P03"].includes(error.code)) throw new HubStoreError("ROLL_HISTORY_UNAVAILABLE", "Roll history could not be read within its resource budget.", {status: 503});
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
@@ -5029,7 +5101,7 @@ export class PostgresHubStore {
 				aggregateType: characterId ? "character" : "campaign",
 				aggregateId: characterId || campaignId,
 				visibility,
-				payload,
+				payload: {...payload, actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key},
 			});
 			const events = await client.query(`SELECT * FROM hub.domain_events WHERE campaign_id = $1 ORDER BY sequence DESC LIMIT 1`, [campaignId]);
 			const row = events.rows[0];

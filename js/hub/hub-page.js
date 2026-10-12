@@ -1929,6 +1929,10 @@ async function pInitOperatorPanel ({session}) {
 }
 
 async function pInitHubIndex ({session}) {
+	const requestDeletionButton = document.getElementById("hub-request-deletion");
+	const revokeSessionsButton = document.getElementById("hub-revoke-other-sessions");
+	if (requestDeletionButton) requestDeletionButton.disabled = true;
+	if (revokeSessionsButton) revokeSessionsButton.disabled = true;
 	const name = document.getElementById("hub-account-name");
 	if (name) name.textContent = session.account.displayName;
 	// The Hub index has no explicit campaign, so this is where an account-matching stored
@@ -2033,16 +2037,18 @@ async function pInitHubIndex ({session}) {
 		}
 	});
 	try {
-		const [identityRender] = await Promise.all([
+		const renders = await Promise.allSettled([
 			pRenderAccountIdentities({session}),
 			pRenderAccountSessions(),
 			pInitOperatorPanel({session}),
 		]);
+		const failure = renders.find(render => render.status === "rejected");
+		if (failure) throw failure.reason;
+		const identityRender = renders[0].value;
 		if (accountAction === "delete") {
 			setHidden(document.getElementById("hub-account-reauth"), true);
 			setIdentityStatus("Reauthentication complete. Confirm account deletion again to continue.");
 			window.history.replaceState(null, "", "/hub.html");
-			document.getElementById("hub-request-deletion")?.focus();
 		} else {
 			handleAccountReauthenticationCompletion({
 				accountAction,
@@ -2053,7 +2059,7 @@ async function pInitHubIndex ({session}) {
 	} catch (error) {
 		renderError(error);
 	}
-	document.getElementById("hub-revoke-other-sessions")?.addEventListener("click", async event => {
+	revokeSessionsButton?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
 		try {
@@ -2065,7 +2071,7 @@ async function pInitHubIndex ({session}) {
 			button.disabled = false;
 		}
 	});
-	document.getElementById("hub-request-deletion")?.addEventListener("click", async event => {
+	requestDeletionButton?.addEventListener("click", async event => {
 		if (window.prompt(`Type DELETE to schedule account deletion after a 7-day grace period.`) !== "DELETE") return;
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -2092,6 +2098,9 @@ async function pInitHubIndex ({session}) {
 			button.disabled = false;
 		}
 	});
+	if (revokeSessionsButton) revokeSessionsButton.disabled = false;
+	if (requestDeletionButton) requestDeletionButton.disabled = false;
+	if (accountAction === "delete") requestDeletionButton?.focus();
 }
 
 async function pInitCampaign ({session}) {

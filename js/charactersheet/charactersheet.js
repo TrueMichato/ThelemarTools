@@ -49,6 +49,7 @@ import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinat
 import {HubApiClient} from "../hub/hub-api-client.js";
 import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
+import {HUB_CAPABILITY_ROLL_HISTORY} from "../hub/hub-roll-history.js";
 import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
 import {normalizeCharacterSheetAuthorityNavigationUrl} from "../hub/hub-character-sheet-routes.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
@@ -285,6 +286,15 @@ class CharacterSheetPage {
 		this._hubRealtimeGeneration++;
 		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
+		const session = this._hubActiveCampaign?.session;
+		if (this._isHubCharacter && this._rollHistory) {
+			void this._rollHistory.activateHubScope({
+				characterId,
+				campaignId: this._hubCampaignId,
+				accountId: session?.account?.id,
+				isEnabled: session?.signedIn === true && session.capabilities?.includes(HUB_CAPABILITY_ROLL_HISTORY) === true,
+			});
+		}
 		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
 			this._hubEffects?.deactivate();
 			this._peerTargeting?.deactivate();
@@ -370,11 +380,13 @@ class CharacterSheetPage {
 		this._hubRealtimeGeneration++;
 		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
+		this._rollHistory?.onHubConnectionState?.({state: "suspended"});
 	}
 
 	/** `teardown-realtime`: detach the realtime client only. */
 	_detachHubRealtimeClient () {
 		this._hubRealtime?.detach();
+		this._rollHistory?.onHubConnectionState?.({state: "closed"});
 	}
 
 	/** `teardown-projections`: viewer-scoped projections, party inventory, and optionally reconciliation. */
@@ -389,6 +401,7 @@ class CharacterSheetPage {
 
 	_concealHubPrivateCharacter () {
 		if (!this._isHubCharacter) return;
+		this._rollHistory?.onHubConnectionState?.({state: "access_lost"});
 		this._characterLoadGeneration++;
 		this._closeCharacterScopedTransientUi?.();
 		this._currentCharacterId = null;
@@ -478,6 +491,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("membershipChanged", event => this._onHubMembershipChanged(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("recipientNotice", notice => this._onHubRecipientNotice(notice));
+		this._hubRealtime.on("rollLogged", event => this._rollHistory?.receiveHubRoll?.(event));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
 	}
@@ -665,6 +679,7 @@ class CharacterSheetPage {
 	}
 
 	_onHubRealtimeConnectionState (state) {
+		this._rollHistory?.onHubConnectionState?.(state || {state: "unavailable"});
 		this._hubEffects?.onConnectionState(state);
 		const isReadOnly = this.isCurrentCharacterReadOnly?.();
 		if (isReadOnly) this._peerTargeting?.deactivate();
@@ -782,6 +797,7 @@ class CharacterSheetPage {
 
 	_onHubMembershipChanged (event) {
 		if (event?.campaignId && event.campaignId !== this._hubCampaignId) return false;
+		this._rollHistory?.onHubAuthorityChanged();
 		const roleRosterGeneration = this._beginHubRoleScopedRosterRefresh();
 		if (!this._hubCampaignContext) {
 			this._peerTargeting?.deactivate();
@@ -1529,6 +1545,7 @@ class CharacterSheetPage {
 				// BFCache: the page may be restored, so campaign context, rules, and brew must
 				// survive. Only synchronisation pauses.
 				this._hubRealtime?.suspend();
+				this._rollHistory?.onHubConnectionState?.({state: "suspended"});
 				this._hubActiveCampaign?.suspend();
 			} else {
 				this._detachHubRealtime();

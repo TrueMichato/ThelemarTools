@@ -87,6 +87,54 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#hub-signed-in")).toBeVisible();
 	}
 
+	async holdAccountSessionRendering ({isUnavailable = false}: {isUnavailable?: boolean} = {}): Promise<{blocked: Promise<void>; release: () => void; dispose: () => Promise<void>}> {
+		let release = () => {};
+		const gate = new Promise<void>(resolve => { release = resolve; });
+		let markBlocked = () => {};
+		const blocked = new Promise<void>(resolve => { markBlocked = resolve; });
+		let inFlight: Promise<void> | null = null;
+		const handler = (route: Route) => {
+			inFlight = (async () => {
+				if (route.request().resourceType() === "fetch") {
+					markBlocked();
+					await gate;
+					if (isUnavailable) {
+						await route.fulfill({status: 503, contentType: "application/json", body: JSON.stringify({error: "SERVICE_UNAVAILABLE"})});
+						return;
+					}
+				}
+				await route.continue();
+			})();
+			return inFlight;
+		};
+		await this.page.route("**/api/account/sessions", handler);
+		return {
+			blocked,
+			release,
+			dispose: async () => {
+				release();
+				await inFlight;
+				await this.page.unroute("**/api/account/sessions", handler);
+			},
+		};
+	}
+
+	async expectAccountActionsInitializing (): Promise<void> {
+		await expect(this.page.getByRole("button", {name: "Link Google"})).toBeVisible();
+		await expect(this.page.getByRole("button", {name: "Delete account", exact: true})).toBeDisabled();
+		await expect(this.page.getByRole("button", {name: "Sign out other devices", exact: true})).toBeDisabled();
+	}
+
+	async expectAccountActionsReady (): Promise<void> {
+		await expect(this.page.getByRole("button", {name: "Delete account", exact: true})).toBeEnabled();
+		await expect(this.page.getByRole("button", {name: "Sign out other devices", exact: true})).toBeEnabled();
+	}
+
+	async expectAccountInitializationError (): Promise<void> {
+		await expect(this.page.locator("#hub-error")).toBeVisible();
+		await expect(this.page.locator("#hub-error")).toContainText("temporarily unavailable");
+	}
+
 	async expectLightweightSignedOutBoot (): Promise<void> {
 		await this._expectLightweightBoot({
 			path: "/hub.html",
@@ -677,6 +725,7 @@ export class HubCampaignPage {
 		spellsKnown = [],
 		rulesVersionId = null,
 		inventory = null,
+		rollVisibility = "all_members",
 	}: {
 		campaignId: string;
 		name: string;
@@ -697,6 +746,7 @@ export class HubCampaignPage {
 		}>;
 		rulesVersionId?: string | null;
 		inventory?: Array<Record<string, unknown>> | null;
+		rollVisibility?: "all_members" | "actor_and_dm";
 	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
@@ -720,6 +770,7 @@ export class HubCampaignPage {
 						...(spellsKnown.length ? {spellsKnown, cantripsKnown: []} : {}),
 					},
 					conditions: [],
+					settings: {hubRollVisibility: rollVisibility},
 					inventory: inventory || [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
 					currency: {cp: 8, sp: 6, ep: 4, gp: 10, pp: 2},
 				},
@@ -1158,7 +1209,7 @@ export class HubCampaignPage {
 		return (await response.json()).character;
 	}
 
-	async logRolls ({campaignId, characterId, count}: {campaignId: string; characterId: string; count: number}): Promise<void> {
+	async logRolls ({campaignId, characterId, count, visibility = "all_members"}: {campaignId: string; characterId: string; count: number; visibility?: "all_members" | "actor_and_dm" | "dm_only"}): Promise<void> {
 		const chunks = Array.from({length: Math.ceil(count / 20)}, (_, chunkIndex) =>
 			Array.from({length: Math.min(20, count - chunkIndex * 20)}, (_, offset) => chunkIndex * 20 + offset),
 		);
@@ -1171,7 +1222,7 @@ export class HubCampaignPage {
 					formula: "1d20+5",
 					total: 6 + (index % 20),
 					context: `Load roll ${index}`,
-					visibility: "all_members",
+					visibility,
 					detail: {},
 				},
 			})));
@@ -1373,6 +1424,117 @@ export class HubCampaignPage {
 			() => this.page.evaluate(() => (window as any).charSheet?._hubRealtime?._active?.client?.getConnectionState?.().state),
 			{timeout: 15_000},
 		).toBe("live");
+	}
+
+	async expectSheetMembershipRole (role: "co_dm" | "player"): Promise<void> {
+		await expect.poll(() => this.page.evaluate(() => (window as any).charSheet?._hubContext?.membership?.role)).toBe(role);
+	}
+
+	async openRollHistory (): Promise<void> {
+		const panel = this.page.locator(".charsheet__roll-history-wrapper");
+		if (!await panel.evaluate(element => element.classList.contains("charsheet__roll-history--open"))) {
+			await this.page.locator("#charsheet-btn-rolllog").click();
+		}
+		await expect(panel).toHaveClass(/charsheet__roll-history--open/);
+		await expect(panel.getByRole("button", {name: "Clear all"})).toHaveCount(0);
+	}
+
+	async rollInitiativeForHistory (expectedCount: number): Promise<void> {
+		await this.waitForCharacterRealtimeLive();
+		await expect(this.page.locator("#charsheet-roll-history-visibility")).toBeEnabled();
+		await this.page.locator("#charsheet-box-initiative").click();
+		await this.expectRetainedRollCount(expectedCount);
+	}
+
+	async rollInitiativeWithUnconfirmedHistory (): Promise<void> {
+		await this.waitForCharacterRealtimeLive();
+		await this.page.locator("#charsheet-box-initiative").click();
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='unconfirmed']")).toHaveCount(1);
+	}
+
+	async rollInitiativeOfflineForHistory (): Promise<void> {
+		await this.page.context().setOffline(true);
+		await this.page.locator("#charsheet-box-initiative").click();
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='unsynced']")).toHaveCount(1);
+	}
+
+	async reconnectRollHistory (): Promise<void> {
+		await this.page.context().setOffline(false);
+		await this.waitForCharacterRealtimeLive();
+		await this.page.locator(".charsheet__roll-history").getByRole("button", {name: "Refresh", exact: true}).click();
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='unsynced']")).toHaveCount(1);
+	}
+
+	async retryRollHistoryByKeyboard (expectedCount: number): Promise<void> {
+		const retry = this.page.getByRole("button", {name: "Check history / Retry", exact: true});
+		await retry.focus();
+		await this.page.keyboard.press("Enter");
+		await this.expectRetainedRollCount(expectedCount);
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='synced']:focus")).toHaveCount(1);
+	}
+
+	async expectRetainedRollCount (count: number): Promise<void> {
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='synced']")).toHaveCount(count);
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='sending']")).toHaveCount(0);
+		await expect(this.page.locator(".charsheet__roll-history-entry[data-roll-sync-state='unconfirmed']")).toHaveCount(0);
+	}
+
+	async expectPersonalRollHistoryDenied ({campaignId, characterId}: {campaignId: string; characterId: string}): Promise<void> {
+		const response = await this.page.request.get(`/api/campaigns/${campaignId}/characters/${characterId}/roll-history`, {headers: {"x-hub-protocol-version": "5"}});
+		expect(response.status()).toBe(404);
+		expect(JSON.stringify(await response.json())).not.toContain("formula");
+	}
+
+	watchRollHistoryTraffic (characterId: string): {requests: string[]; writePaths: string[][]; stop: () => void} {
+		const requests: string[] = [];
+		const writePaths: string[][] = [];
+		const listener = (request: Request) => {
+			const url = new URL(request.url());
+			if (request.method() === "POST" && url.pathname.endsWith("/rolls")) requests.push("roll");
+			if (request.method() === "PATCH" && url.pathname === `/api/characters/${characterId}`) {
+				requests.push("character-write");
+				writePaths.push((request.postDataJSON()?.patches || []).map((operation: {path: string}) => operation.path));
+			}
+			if (request.method() !== "GET" && url.pathname.startsWith(`/api/characters/${characterId}/lease`)) requests.push("lease");
+			if (url.pathname.endsWith("/roll-history")) requests.push("history-read");
+		};
+		this.page.on("request", listener);
+		return {requests, writePaths, stop: () => this.page.off("request", listener)};
+	}
+
+	async expectRollHistoryResponsive (): Promise<void> {
+		await this.page.setViewportSize({width: 390, height: 844});
+		const panel = this.page.locator(".charsheet__roll-history");
+		await expect.poll(() => panel.evaluate(element => Math.round(element.getBoundingClientRect().right))).toBe(390);
+		const measure = await panel.evaluate(element => {
+			if (!(element instanceof HTMLElement)) throw new Error("Roll History panel is not an HTML element.");
+			return {width: element.offsetWidth, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth};
+		});
+		expect(measure.width).toBeLessThanOrEqual(390);
+		expect(measure.scrollWidth).toBeLessThanOrEqual(measure.clientWidth);
+		await expect(panel.getByRole("button", {name: "Refresh", exact: true})).toBeVisible();
+		await this.page.setViewportSize({width: 1280, height: 720});
+	}
+
+	async captureRollHistoryReview (outputPath: (name: string) => string): Promise<void> {
+		const panel = this.page.locator(".charsheet__roll-history");
+		for (const theme of ["day", "night"]) {
+			await this.page.evaluate(theme => {
+				const switcher = (window as any).styleSwitcher;
+				if (!switcher) throw new Error("Theme switcher is unavailable.");
+				switcher.setTemporaryTheme(theme);
+			}, theme);
+			for (const width of [1280, 390]) {
+				await this.page.setViewportSize({width, height: 844});
+				await expect.poll(() => panel.evaluate(element => Math.round(element.getBoundingClientRect().right))).toBe(width);
+				await panel.screenshot({path: outputPath(`roll-history-${theme}-${width}.png`)});
+			}
+		}
+		await panel.getByRole("button", {name: "Refresh", exact: true}).focus();
+		await this.page.keyboard.press("Escape");
+		await expect(this.page.locator("#charsheet-btn-rolllog")).toBeFocused();
+		await expect(this.page.locator(".charsheet__roll-history-wrapper")).toHaveJSProperty("inert", true);
+		await this.openRollHistory();
 	}
 
 	async waitForPeerTargetingReady (): Promise<void> {

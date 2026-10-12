@@ -11,6 +11,18 @@
 - PostgreSQL is canonical; client snapshots never overwrite state without revision and fencing checks.
 - Campaign homebrew is DM-authored but still untrusted content.
 
+### Owner Roll History candidate
+
+The protocol-5 `character.roll_history.v1` read requires current active membership/account and ownership
+of the campaign-bound character. Peer visibility and DM inspection do not grant access. Existing event
+audiences still apply, and DM-authored rolls about another owner's character are excluded. Filtering happens
+before the bounded latest-200 selection; the query never scans forward campaign replay to infer absence.
+Only the actor sees new-event command correlation, and selected detail fields are bounded in the
+PostgreSQL projection before transmission to the application. Recovery is scoped to account, campaign,
+and character; access loss conceals history, clears scoped recovery, and fences delayed responses.
+No history read writes a document, lease, receipt, audit, event, or outbox row. Statement/lock budget
+exhaustion is an explicit 503, not hidden missing history. This is source work, not deployed evidence.
+
 ## Controls implemented
 
 - OAuth authorization uses a validated concrete-route provider registry, PKCE according to adapter capability,

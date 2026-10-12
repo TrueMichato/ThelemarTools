@@ -127,4 +127,11 @@ describe("Hub CI and real-stack test contract", () => {
 	it("runs account-entitlement PostgreSQL parity before browser journeys", () => {
 		expect(e2eRunner).toContain("HubAccountEntitlementsPostgres.test.js");
 	});
+
+	it("runs retained-roll Sheet regressions in the actual affected-regressions command", () => {
+		const step = workflow.match(/- name: Character Sheet Hub seams\s+run: >\s+([\s\S]*?)(?=\n\s+- name:)/)?.[1];
+		expect(step).toBeDefined();
+		for (const path of ["CharacterSheetHubRollHistory.test.js", "CharacterSheetRealtime.test.js"]) expect(step).toContain(`test/jest/charactersheet/${path}`);
+		expect(e2eRunner).toContain(`"test/jest/hub/HubRollHistory.test.js"`);
+	});
 });

@@ -1,5 +1,6 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
+import {HubRollLogAdapter} from "../../../js/hub/hub-roll-log-adapter.js";
 
 let CharacterSheetRollHistory;
 let HUB_ROLL_VISIBILITY_CHOICES;
@@ -12,6 +13,15 @@ beforeAll(async () => {
 
 describe("CharacterSheetRollHistory", () => {
 	let history;
+	const makeAdapter = pLog => new HubRollLogAdapter({
+		api: {pLogRoll: pLog, pListCharacterRollHistory: async () => ({contractVersion: 1, highWaterSequence: 0, events: [], history: {hasMore: false, scannedBackThroughSequence: 1}})},
+		campaignId: "campaign",
+		getCharacterId: () => "character",
+	});
+	const activate = async () => {
+		await history.activateHubScope({accountId: "owner", campaignId: "campaign", characterId: "character", isEnabled: true});
+		history.onHubConnectionState({state: "live"});
+	};
 
 	function getStubByClass (root, className) {
 		if (!root) return null;
@@ -65,7 +75,8 @@ describe("CharacterSheetRollHistory", () => {
 
 		test("persists campaign rolls through the optional hub adapter", async () => {
 			const pLog = jest.fn(async () => ({}));
-			history = new CharacterSheetRollHistory({_hubRollLogAdapter: {pLog}});
+			history = new CharacterSheetRollHistory({_hubRollLogAdapter: makeAdapter(pLog)}, {recoveryStorage: {setItem () {}, removeItem () {}, getItem: () => null}});
+			await activate();
 			history.addRoll({title: "Saving Throw: Dexterity", total: 17, breakdown: "1d20 (14) + 3"});
 			await Promise.resolve();
 			expect(pLog).toHaveBeenCalledWith(expect.objectContaining({
@@ -79,9 +90,10 @@ describe("CharacterSheetRollHistory", () => {
 		test("passes the saved actor-and-DM audience to the Hub adapter", async () => {
 			const pLog = jest.fn(async () => ({}));
 			history = new CharacterSheetRollHistory({
-				_hubRollLogAdapter: {pLog},
+				_hubRollLogAdapter: makeAdapter(pLog),
 				_state: {getSettings: () => ({hubRollVisibility: "actor_and_dm"})},
-			});
+			}, {recoveryStorage: {setItem () {}, removeItem () {}, getItem: () => null}});
+			await activate();
 			history.addRoll({title: "Initiative", total: 14});
 			await Promise.resolve();
 
@@ -128,9 +140,10 @@ describe("CharacterSheetRollHistory", () => {
 			let activeSettings = {hubRollVisibility: "actor_and_dm"};
 			const pLog = jest.fn(async () => ({}));
 			history = new CharacterSheetRollHistory({
-				_hubRollLogAdapter: {pLog},
+				_hubRollLogAdapter: makeAdapter(pLog),
 				_state: {getSettings: () => activeSettings},
-			});
+			}, {recoveryStorage: {setItem () {}, removeItem () {}, getItem: () => null}});
+			await activate();
 			const control = history._buildHubVisibilityControl();
 			const select = getStubByClass(control, "charsheet__roll-history-visibility-select");
 

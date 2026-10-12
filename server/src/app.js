@@ -11,6 +11,7 @@ import {
 	isConstantTimeEqual,
 } from "./security.js";
 import {HubStoreError} from "./hub-store-error.js";
+import {HUB_CAPABILITY_ROLL_HISTORY} from "../../js/hub/hub-roll-history.js";
 import {AuthProviderError} from "./auth-provider-error.js";
 import {
 	AUTH_PROVIDER_REGISTRY_CAPABILITY,
@@ -694,6 +695,7 @@ export async function createHubApp ({
 		protocolVersion: HUB_PROTOCOL_VERSION,
 		appVersion: process.env.npm_package_version || null,
 		capabilities: [
+			HUB_CAPABILITY_ROLL_HISTORY,
 			AUTH_PROVIDER_REGISTRY_CAPABILITY,
 			ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
 			...(config.isInviteAccountAdmissionEnabled ? [INVITE_ADMISSION_CAPABILITY] : []),
@@ -1168,6 +1170,7 @@ export async function createHubApp ({
 			reauthenticationProviders,
 			csrfToken: getCsrfToken({csrfSecret: config.csrfSecret, sessionId: auth.session.id}),
 			capabilities: [
+				HUB_CAPABILITY_ROLL_HISTORY,
 				ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
 				...(config.isAccountEntitlementsEnabled ? [ACCOUNT_ENTITLEMENTS_CAPABILITY] : []),
 				...(config.isAccountIdentityLinkingEnabled ? [ACCOUNT_IDENTITY_LINKING_CAPABILITY] : []),
@@ -1679,6 +1682,38 @@ export async function createHubApp ({
 			limit: request.query.limit,
 		});
 	});
+
+	app.get("/api/campaigns/:campaignId/characters/:characterId/roll-history", {
+		preValidation: async (request, reply) => {
+			const query = new URL(request.url, config.appOrigin).searchParams;
+			if ([...query.keys()].some(key => !["beforeSequence", "commandId", "limit"].includes(key))) {
+				return reply.code(400).send({error: "INVALID_ROLL_HISTORY_CURSOR"});
+			}
+		},
+		preHandler: [requireProtocolVersion, requireCurrentProtocolVersion],
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "characterId"],
+				additionalProperties: false,
+				properties: {campaignId: {type: "string", format: "uuid"}, characterId: {type: "string", format: "uuid"}},
+			},
+			querystring: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					beforeSequence: {type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER},
+					commandId: {type: "string", format: "uuid"},
+					limit: {type: "integer", minimum: 1, maximum: 200, default: 200},
+				},
+			},
+		},
+	}, async request => store.pListCharacterRollHistory({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		characterId: request.params.characterId,
+		...request.query,
+	}));
 
 	app.post("/api/campaigns/:campaignId/rolls", {
 		preHandler: requireMutationSecurity,

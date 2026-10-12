@@ -25,6 +25,24 @@ natural expiry was automated-only and no character/operation database payload wa
 The private-launch verdict is still NO-GO. See the
 [prioritized backlog and re-entry plan](game-day-backlog.md). Semi-public onboarding remains disabled.
 
+The next **source candidate under verification**, not a deployed release, combines GD-FIND-003/006/007/009
+with GD-FIND-013: owner-only latest-200 Roll History over existing events, live cross-device/reload
+convergence, exact attempted-command recovery, and explicit offline/unconfirmed states. It adds
+`character.roll_history.v1` without changing protocol 5 or migrations `0001`-`0009`. The migration-free
+query has explicit 5s statement/2s lock budgets; sparse finite load evidence does not prove unbounded
+growth. Exact candidate review, publication/release approval, and physical rechecks remain separate.
+Draft sharing #289 and held Wave A are excluded.
+Independent correction review found and cleared a Roll History authorization fence: co-DM demotion
+conceals formerly authorized DM-only rows before refetch and rejects delayed old-role reads while
+preserving attempted commands. Verification also exposed a baseline Hub-index Delete-account startup
+race. The subsequent local correction keeps account actions disabled until their handlers are ready,
+settles account rendering before enabling them, and preserves deletion-callback focus. Permanent
+slow-read and service-error browser probes cover the fix; see
+[candidate validation evidence](testing.md#source-candidate-validation-residual).
+The decision owner has requested an r11f correction release and waived another physical game-day
+retest for that release. Commit/tag/deployment evidence must still be recorded separately; unimplemented
+P3 UX/design requests and held Wave A remain outside the bounded bundle. This is not private-launch GO.
+
 Phase 6A documentation/handoff, the reviewed checkpoint series, Phase 6B lifecycle administration, Phase 6C
 migration management, Phase 6D portable deployment, Phase 6E operations, Phase 6F CI/real-stack integration,
 and Phase 6G Oracle deployment are complete.

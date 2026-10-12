@@ -141,6 +141,8 @@ jobs:
           test/jest/charactersheet/CharacterSheetCampaignRules.test.js
           test/jest/charactersheet/CharacterSheetHubTeardown.test.js
           test/jest/charactersheet/CharacterSheetRollHistory.test.js
+          test/jest/charactersheet/CharacterSheetHubRollHistory.test.js
+          test/jest/charactersheet/CharacterSheetRealtime.test.js
           test/jest/charactersheet/CharacterSheetMagicItemCategorization.test.js
           test/jest/charactersheet/CharacterSheetItemRepairLoadOrder.test.js
           --no-coverage --forceExit

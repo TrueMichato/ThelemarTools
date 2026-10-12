@@ -207,6 +207,30 @@ for (const provider of providers.filter(({slug}) => slug !== "google")) {
 	});
 }
 
+for (const isUnavailable of [false, true]) {
+	test(`account actions wait for their handlers while device rendering is ${isUnavailable ? "unavailable" : "delayed"}`, async ({page}) => {
+		const hub = new HubCampaignPage(page);
+		const rendering = await hub.holdAccountSessionRendering({isUnavailable});
+		try {
+			await page.goto("/hub.html");
+			await page.getByRole("link", {name: "Sign in with Discord"}).click();
+			await page.waitForURL(/\/hub\.html$/);
+			await rendering.blocked;
+			await hub.expectAccountActionsInitializing();
+			await expect(page.locator("#hub-account-reauth")).toBeHidden();
+			page.on("dialog", dialog => dialog.accept("DELETE"));
+			rendering.release();
+			await hub.expectAccountActionsReady();
+			if (isUnavailable) await hub.expectAccountInitializationError();
+			await page.getByRole("button", {name: "Delete account", exact: true}).click();
+			await expect(page.locator("#hub-account-reauth")).toBeVisible();
+			await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toBeVisible();
+		} finally {
+			await rendering.dispose();
+		}
+	});
+}
+
 test("ordinary accounts reauthenticate before requesting deletion", async ({page}) => {
 	await page.goto("/hub.html");
 	await page.getByRole("link", {name: "Sign in with Discord"}).click();

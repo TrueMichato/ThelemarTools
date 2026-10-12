@@ -2,6 +2,36 @@
 
 This document provides a detailed reference for each component in the character sheet system.
 
+## CharacterSheetRollHistory
+
+**File:** `js/charactersheet/charactersheet-rollhistory.js`
+
+Local mode keeps its session-only latest-200 log and Clear control. Campaign mode uses the
+`character.roll_history.v1` owner read over existing events: the owner's latest 200 authorized own
+rolls persist across devices and reload; DM inspection has no personal-history access. Campaign Clear
+is absent. History synchronization never saves the character or acquires its editor lease.
+
+`activateHubScope()` binds account/campaign/character, restores attempted-command recovery, and reads
+history. `receiveHubRoll()` deduplicates POST/socket/history event IDs and confirms only matching exact
+commands. `pRefreshHubHistory()` replaces through the server high-water boundary while retaining newer
+socket events. `pRetryHubRoll()` checks exact command history before replaying the same immutable request
+inside its 23-hour deadline. `onHubConnectionState()` fences suspended callbacks and conceals/clears on
+access loss; `resetCharacterScopeUi()` resets visible scope without deleting recovery on an ordinary switch.
+`onHubAuthorityChanged()` immediately conceals retained events and fences old-role callbacks before
+refreshing current authorization. Failed replacement keeps those events concealed while preserving
+attempted-command recovery; socket arrivals during replacement require a fresh authoritative refill.
+
+Sending, Synced, Unsynced (device-only), Checking history, and Outcome unconfirmed are distinct. Attempted
+commands persist before POST in account/campaign/character-scoped session storage, independently of the
+display cap. Reload and reconnect never auto-resend; failed/expired/mismatched reconciliation stays
+unconfirmed. Unavailable recovery storage blocks sends explicitly. Offline rolls are not cloud queues.
+Changing future-roll audience remains a deliberate owner setting save. See the
+[Hub API contract](../hub/api-reference.md#owner-roll-history-source-candidate-not-deployed).
+
+The nonmodal panel preserves keyboard focus across pending/checking/synced row replacement.
+Escape closes it and returns focus to the toggle; closed controls are inert. Recovery display
+values are reconstructed from the immutable request rather than mutable saved row metadata.
+
 ## CharacterSheetPage
 
 **File**: `js/charactersheet/charactersheet.js`  

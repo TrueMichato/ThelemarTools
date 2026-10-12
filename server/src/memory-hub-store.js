@@ -6,6 +6,7 @@ import {getPendingEffectPresentation} from "../../js/hub/hub-effect-presentation
 import {HubStoreError} from "./hub-store-error.js";
 import {normalizeCharacterPatchActivity} from "./hub-spell-activity.js";
 import {canViewEvent} from "./projections.js";
+import {HUB_ROLL_HISTORY_CONTRACT_VERSION, isOwnCharacterRoll, projectRollHistoryEvent} from "../../js/hub/hub-roll-history.js";
 import {
 	computePeerProfile,
 	getDefaultProjectionPolicy,
@@ -3430,6 +3431,38 @@ export class MemoryHubStore {
 			: redactEventActor(event);
 	}
 
+	async pListCharacterRollHistory ({accountId, campaignId, characterId, beforeSequence = null, limit = 200, commandId = null}) {
+		const membership = this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const character = this._characters.get(characterId);
+		if (
+			this._accounts.get(accountId)?.status !== "active"
+			|| !character
+			|| character.ownerAccountId !== accountId
+			|| character.campaignId !== campaignId
+		) throw new HubStoreError("CHARACTER_NOT_FOUND", "Character is unavailable.", {status: 404});
+		const events = [];
+		const scope = {accountId, campaignId, characterId};
+		const campaignEvents = this._getCampaignEvents(campaignId);
+		for (let index = campaignEvents.length - 1; index >= 0; --index) {
+			const event = campaignEvents[index];
+			if (beforeSequence != null && event.sequence >= beforeSequence) continue;
+			if (!isOwnCharacterRoll(event, scope) || !canViewEvent({event, accountId, role: membership.role})) continue;
+			if (commandId != null && event.payload.actorCommandId !== commandId) continue;
+			events.push(projectRollHistoryEvent(event));
+			if (events.length > limit) break;
+		}
+		const selected = events.slice(0, limit).reverse();
+		return {
+			contractVersion: HUB_ROLL_HISTORY_CONTRACT_VERSION,
+			highWaterSequence: this._getCampaignLastSequence(campaignId),
+			events: selected,
+			history: {
+				scannedBackThroughSequence: selected[0]?.sequence ?? beforeSequence ?? 1,
+				hasMore: events.length > limit,
+			},
+		};
+	}
+
 	async pLogRoll ({accountId, campaignId, characterId = null, visibility, payload, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
@@ -3449,7 +3482,7 @@ export class MemoryHubStore {
 			aggregateType: characterId ? "character" : "campaign",
 			aggregateId: characterId || campaignId,
 			visibility,
-			payload,
+			payload: {...payload, actorCommandId: this._normalizeIdempotencyKey(idempotencyKey).key},
 		});
 		return this._setReceipt({accountId, idempotencyKey, response: {event}});
 	}

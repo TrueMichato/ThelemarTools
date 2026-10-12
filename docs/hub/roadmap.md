@@ -54,6 +54,19 @@ target-environment evidence until separately reviewed, merged, tagged, approved,
 
 ## V1 launch closeout
 
+The next correction candidate bundles existing GD-FIND-003/006/007/009 source fixes with GD-FIND-013
+owner-only retained Roll History (latest 200 own authorized rolls, live across devices and after reload).
+It is under verification and not deployed. It uses existing domain events, protocol 5, and no migration;
+query/lock budgets fail explicitly, and finite load tests do not establish unbounded-growth performance.
+Candidate review and Git publication are separate from immutable tagging, shared-host dry run,
+human-confirmed promotion, physical recheck, and the decision owner's GO/NO-GO. Held Wave A engineering
+may continue, but its integration/release/enablement holds are unchanged.
+On 2026-10-12 the decision owner requested the correction release as r11f and waived another physical
+game-day retest before continuing engineering. That changes the physical recheck requirement for this
+bounded release, not its automated/operational safeguards, the measured historical evidence, a
+private-launch GO, or the separately held P3/design/gameplay scope. See the
+[r11f release preparation](game-day-backlog.md#r11f-correction-release-preparation--2026-10-12).
+
 Phase 6G and V1-G1 are complete. The 2026-09-28 r10 physical game day returned **NO-GO**. The remaining launch
 gate is remediation followed by a new observed physical run and explicit private-launch GO/NO-GO. This rollout
 gate proceeds in parallel with V2 engineering and gates expansion of the private pilot, not implementation

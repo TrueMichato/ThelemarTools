@@ -12,6 +12,26 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+- Roll History (owner-scoped retained events and exact-command recovery)
+
+## Roll History
+
+`CharacterSheetRollHistory` (`js/charactersheet/charactersheet-rollhistory.js`, `activateHubScope`
+and `pRefreshHubHistory`) binds account/campaign/character to the capability-gated latest-200 own authorized
+event read. It retains newer socket events across HTTP high-water replacement without character writes
+or leases. Local mode remains session-only with Clear; campaign mode has no Clear, and DM inspection
+never fetches another owner's personal history.
+
+`receiveHubRoll` confirms matching exact payload/key and deduplicates event IDs. `pRetryHubRoll`
+reconciles actor-only command history before replaying the immutable attempted request within 23 hours.
+Recovery is persisted before POST in scoped session storage, independently of the display cap; reload
+never auto-resends. `onHubConnectionState` fences suspension and clears/conceals on access loss.
+`onHubAuthorityChanged` synchronously conceals old-role events and fences delayed reads on membership
+change. Attempted commands survive separately; failed replacement cannot redisplay revoked rows.
+Recovery rows derive their display from the exact command; socket events also require the page's
+current character. Row replacement preserves keyboard focus, Escape returns to the toggle, and
+closed panel controls are inert.
+See [component reference](../../../../docs/charactersheet/03-components-reference.md#charactersheetrollhistory).
 
 ## Gemstone Empowerment
 

@@ -88,6 +88,21 @@ describe("campaign hub pages", () => {
 		for (const id of ["campaign-invite-list", "campaign-leave"]) expect(campaignHtml).toContain(`id="${id}"`);
 	});
 
+	it("keeps account mutation controls inactive until listeners are bound and restores callback focus afterward", () => {
+		const source = read("js/hub/hub-page.js");
+		const init = source.slice(source.indexOf("async function pInitHubIndex"), source.indexOf("async function pInitCampaign"));
+		for (const button of ["requestDeletionButton", "revokeSessionsButton"]) {
+			const disabled = init.indexOf(`${button}.disabled = true`);
+			const listener = init.indexOf(`${button}?.addEventListener("click"`);
+			const enabled = init.lastIndexOf(`${button}.disabled = false`);
+			expect(disabled).toBeGreaterThan(-1);
+			expect(listener).toBeGreaterThan(-1);
+			expect(disabled).toBeLessThan(init.indexOf("await activeCampaign.pResolve"));
+			expect(listener).toBeLessThan(enabled);
+		}
+		expect(init.indexOf("requestDeletionButton?.focus()")).toBeGreaterThan(init.lastIndexOf("requestDeletionButton.disabled = false"));
+	});
+
 	it("keeps ordinary reauthentication hidden until requested and handles callback success safely", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toContain("getAccountReauthenticationReturnTo");

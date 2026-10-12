@@ -14,6 +14,7 @@
 | BFF/domain API | `HubServerApp.test.js`, `HubPhase1Domain.test.js` through `HubPhase4Domain.test.js`, `HubLifecycle.test.js`, `HubSemanticOperations.test.js` | Auth, campaigns, characters, content, semantic operation roles/replay/privacy/lifecycle, realtime actions |
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
+| Owner Roll History | `HubRollHistory.test.js`, `HubRollLogAdapter.test.js`, `CharacterSheetHubRollHistory.test.js`, `owner-roll-history.spec.ts` | Owner-only pre-limit reads, actor-only correlation, 200-event retention, cursors, exact retry/reload recovery, lost responses, multi-device convergence, lifecycle fences, no character write/lease, phone layout |
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, `CharacterSheetHubTeardown.test.js`, `CharacterSheetCampaign.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, archive/move/demotion concealment, character-scoped sharing refresh, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
@@ -49,6 +50,49 @@ terminal insufficient losers, no extra restoration for non-escrowed requests, on
 event/audit per loser, stale-request disappearance from the DM inbox, and a losing-player Sheet notice.
 They also cover concurrent approvals, direct DM stash debits, stash-backed awards, and preservation of
 still-affordable requests. The source change remains unshipped until exact-head review/release.
+
+The owner-history candidate's four-context journey uses two devices for one owner, a DM, and a peer.
+It logs actual Sheet rolls, loses committed POST responses with and without live socket confirmation,
+recovers across reload without another POST, and catches up after another device rolls while it is offline.
+Device-only offline rolls never auto-submit. An uncommitted transport failure replays the exact request
+through keyboard activation, preserving focus as the pending row becomes authoritative.
+The journey excludes DM-authored rolls, rejects DM/peer history reads, and observes
+character-write/lease traffic separately from roll POSTs. Its raw API fixture's ordinary missing-feature
+repair is setup; after a positive database write/lease baseline, clean reopen and all history interactions
+must leave revision, lease epoch, PATCH receipts/events and projection invalidations unchanged.
+Desktop/mobile day/night captures and Escape/closed-panel keyboard checks cover the presentation seam.
+Role-change coverage demotes an owner from co-DM to player and removes their own formerly visible
+DM-only roll on both devices. Sheet regressions hold an old-role read across demotion, fail its
+replacement, and require concealment with attempted commands preserved; overlapping socket arrivals
+are refilled under current authority.
+PostgreSQL tests place 100,000 newer unrelated
+events ahead of 205 own rolls, require exact latest-200 IDs, less than five seconds and one megabyte,
+and print both the measurement and the no-index/unbounded-growth caveat. Contention tests interleave
+duplicate-key writes with reads and force explicit authority-lock timeout. These are disposable local
+checks, not Oracle load evidence or physical acceptance.
+
+### Source-candidate validation residual
+
+The correction candidate's initial full stack passed 77 PostgreSQL checks and 49 of 50 browser
+journeys; the ordinary-account deletion journey did not reveal reauthentication after its first click.
+The unchanged focused provider suite then passed 8/8. A diagnostic against the unchanged Hub index
+confirmed a baseline readiness defect: while account-session rendering is delayed, Delete account is
+visible and enabled before its click handler is bound; an early click does nothing, and the same action
+works once binding completes. This reproduces the failure shape, not the uncaptured timing of that run.
+After the independent Roll History role-change remediation, the complete unrelaxed stack passed all
+77 PostgreSQL checks and 50 browser journeys. That historical green run did not fix the baseline
+readiness defect; no auth code, assertion timeout, retry, or skip was changed for those results.
+
+The subsequent source correction disables Delete account and Sign out other devices synchronously
+before Hub-index initialization awaits. Both controls enable only after their handlers are bound and
+all account renderers settle, including failures; reauthentication callback focus is restored afterward.
+The permanent provider-registry journey holds the real account-session read and requires disabled
+controls before release, then working deletion reauthentication afterward. Its unavailable-service leg
+also requires the explicit service error rather than a silently dead control. The delayed leg failed on
+the old enabled button before the fix, and both legs now pass with the full provider lifecycle.
+These probes add no automatic mutation retries, skips, or assertion-timeout increases.
+The corrected full disposable stack passed 77 PostgreSQL checks and all 52 browser journeys;
+the focused provider suite passed all 10, including both deterministic startup cases.
 
 ## Current commands
 
@@ -98,7 +142,7 @@ npm run test:hub:e2e:stack
 ```
 
 The disposable stack exposes PostgreSQL only on a random loopback port for the duration of the run. Before
-browser journeys, it executes the semantic-operation, inventory, provider-identity, and rules-policy PostgreSQL
+browser journeys, it executes the semantic-operation, inventory, provider-identity, entitlement, rules-policy, and owner-history PostgreSQL
 suites against the migrated runtime role. The production-image provider smoke container is removed immediately
 after its metadata check so its independent outbox dispatcher cannot consume events intended for the
 socket-serving test BFF. The rules-policy parity suite proves the exact memory/PostgreSQL

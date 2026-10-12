@@ -16,6 +16,20 @@ function getResponse ({status = 200, body = {}} = {}) {
 }
 
 describe("hub API client", () => {
+	it("reads owner history with only the backward cursor and exact-command filter, forwarding cancellation", async () => {
+		const api = new HubApiClient();
+		const calls = [];
+		api._pRequest = async (...args) => { calls.push(args); return {events: []}; };
+		const abort = new AbortController();
+		await api.pListCharacterRollHistory({campaignId: "campaign/1", characterId: "character/1", limit: 3, beforeSequence: 42, commandId: "command", signal: abort.signal});
+		expect(calls).toEqual([[
+			"/api/campaigns/campaign%2F1/characters/character%2F1/roll-history?limit=3&beforeSequence=42&commandId=command",
+			{signal: abort.signal},
+		]]);
+		await api.pListCharacterRollHistory({campaignId: "campaign", characterId: "character"});
+		expect(calls[1]).toEqual(["/api/campaigns/campaign/characters/character/roll-history?limit=200", {signal: null}]);
+	});
+
 	it("retains the authorized operation watermark when reading canonical truth", async () => {
 		const api = new HubApiClient();
 		api._pRequest = async () => ({
