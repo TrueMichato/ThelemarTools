@@ -405,6 +405,33 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 		expect(sourceArchived.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 	});
 
+	test.each(["hidden", "archived"])("reprojects exact proposal replay after target identity becomes %s", async lifecycle => {
+		const ctx = await pFixture({targetCount: 1});
+		const commandId = crypto.randomUUID();
+		const proposed = await ctx.pPropose({commandId});
+		expect(proposed.operation.targets[0].presentation.targetName).toBe("Target 0");
+		if (lifecycle === "hidden") {
+			await store.pSetProjectionPolicy({
+				accountId: ctx.targetOwners[0].account.id,
+				characterId: ctx.targets[0].id,
+				policy: {version: 1, preset: "private", overrides: {}},
+				expectedProjectionRevision: ctx.targets[0].projectionRevision,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		} else {
+			await store.pArchiveCharacter({
+				accountId: ctx.targetOwners[0].account.id,
+				characterId: ctx.targets[0].id,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		}
+		const replay = await ctx.pPropose({commandId});
+		expect(replay.eventIds).toEqual(proposed.eventIds);
+		expect(replay.operation.operationId).toBe(proposed.operation.operationId);
+		expect(replay.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		expect(replay.operation.targets[0]).not.toHaveProperty("targetRef");
+	});
+
 	test("recovers own responded and terminal invitations without weakening pending fairness", async () => {
 		const ctx = await pFixture({targetCount: 3});
 		const proposed = await ctx.pPropose();
@@ -906,6 +933,100 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 				accountId: observer.account.id,
 				campaignId: ctx.campaign.id,
 			})).rejects.toMatchObject({code: "CAMPAIGN_NOT_FOUND"});
+	});
+
+	test("orders detail behind a concurrent target privacy write without deadlock", async () => {
+		const ctx = await pFixture({targetCount: 1});
+		const proposed = await ctx.pPropose();
+		let resolveCharacterLock;
+		const characterLockReached = new Promise(resolve => resolveCharacterLock = resolve);
+		let resumePolicy;
+		const policyResume = new Promise(resolve => resumePolicy = resolve);
+		let isPaused = false;
+		const pMaybePausePolicy = async (query, args, fnQuery) => {
+			const sql = typeof query === "string" ? query : query?.text || "";
+			const result = await fnQuery(query, ...args);
+			if (
+				!isPaused
+					&& sql.includes("FROM hub.characters")
+					&& sql.includes("owner_account_id = $2 FOR UPDATE")
+			) {
+				isPaused = true;
+				resolveCharacterLock();
+				await policyResume;
+			}
+			return result;
+		};
+		const barrierPool = {
+			on: (...args) => pool.on(...args),
+			query: (...args) => pool.query(...args),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: (query, ...args) => pMaybePausePolicy(
+						query,
+						args,
+						(...queryArgs) => client.query(...queryArgs),
+					),
+					release: () => client.release(),
+				};
+			},
+		};
+		const barrierStore = new PostgresHubStore({
+			pool: barrierPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		let resolveDetailCharacterRead;
+		const detailCharacterReadReached = new Promise(resolve => resolveDetailCharacterRead = resolve);
+		let isDetailReadObserved = false;
+		const detailPool = {
+			on: (...args) => pool.on(...args),
+			query: (...args) => pool.query(...args),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: (query, ...args) => {
+						const sql = typeof query === "string" ? query : query?.text || "";
+						if (
+							!isDetailReadObserved
+							&& sql.includes("WHERE id = ANY($1::uuid[])")
+							&& sql.includes("FOR SHARE")
+						) {
+							isDetailReadObserved = true;
+							resolveDetailCharacterRead();
+						}
+						return client.query(query, ...args);
+					},
+					release: () => client.release(),
+				};
+			},
+		};
+		const detailStore = new PostgresHubStore({
+			pool: detailPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		const policyPromise = barrierStore.pSetProjectionPolicy({
+			accountId: ctx.targetOwners[0].account.id,
+			characterId: ctx.targets[0].id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: ctx.targets[0].projectionRevision,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await characterLockReached;
+		let isDetailSettled = false;
+		const detailPromise = detailStore.pGetMultiTargetOperation({
+			accountId: ctx.sourceOwner.account.id,
+			campaignId: ctx.campaign.id,
+			operationId: proposed.operation.operationId,
+		}).finally(() => isDetailSettled = true);
+		await detailCharacterReadReached;
+		expect(isDetailSettled).toBe(false);
+		resumePolicy();
+		await expect(policyPromise).resolves.toBeDefined();
+		const detail = await detailPromise;
+		expect(detail.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 	});
 
 	test("fails protocols 3/4/5 and duplicate targets without workflow evidence", async () => {

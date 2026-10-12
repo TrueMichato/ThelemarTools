@@ -4728,6 +4728,55 @@ export class MemoryHubStore {
 		};
 	}
 
+	_projectMultiTargetCommandResponse ({response, accountId, campaignId}) {
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		const operationId = response?.operation?.operationId;
+		const operation = this._semanticOperations.get(operationId);
+		if (!operation || operation.campaignId !== campaignId || operation.targetSetVersion !== 1) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		}
+		const targetsByInvitationId = new Map(
+			this._getMultiTargetTargets(operation.id)
+				.map(target => [target.invitationId, target]),
+		);
+		const projectTarget = stored => {
+			if (!stored?.invitationId) return stored;
+			const target = targetsByInvitationId.get(stored.invitationId);
+			if (!target) return stored;
+			const currentCharacter = this._characters.get(target.targetCharacterId) || null;
+			const targetRef = getMultiTargetOwnedTargetRef({
+				operation,
+				target,
+				currentCharacter,
+				accountId,
+			});
+			const projected = {
+				...copy(stored),
+				presentation: getMultiTargetInvitationPresentation({
+					operation,
+					target,
+					currentCharacter,
+					accountId,
+					role: membership.role,
+				}),
+			};
+			if (targetRef) projected.targetRef = targetRef;
+			else delete projected.targetRef;
+			return projected;
+		};
+		const projected = copy(response);
+		if (Array.isArray(projected.operation?.targets)) {
+			projected.operation.targets = projected.operation.targets.map(projectTarget);
+		}
+		if (projected.invitation) projected.invitation = projectTarget(projected.invitation);
+		return projected;
+	}
+
 	_refreshMultiTargetReadiness ({operation, actorAccountId = null}) {
 		if (operation.status !== "collecting_responses") return null;
 		const targets = this._getMultiTargetTargets(operation.id);
@@ -4983,7 +5032,7 @@ export class MemoryHubStore {
 	}) {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
-		if (prior) return prior;
+		if (prior) return this._projectMultiTargetCommandResponse({response: prior, accountId, campaignId});
 		const membership = this._getMembership({accountId, campaignId, roles: ["player"]});
 		const campaign = this._campaigns.get(campaignId);
 		if (!this._isMultiTargetOperationsEnabled(campaignId)) {
@@ -5238,7 +5287,7 @@ export class MemoryHubStore {
 	}) {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
-		if (prior) return prior;
+		if (prior) return this._projectMultiTargetCommandResponse({response: prior, accountId, campaignId});
 		if (!["approve", "reject"].includes(decision)) {
 			throw new HubStoreError("INVALID_REQUEST", `The response decision is invalid.`, {status: 400});
 		}
@@ -5371,7 +5420,7 @@ export class MemoryHubStore {
 	}) {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
-		if (prior) return prior;
+		if (prior) return this._projectMultiTargetCommandResponse({response: prior, accountId, campaignId});
 		const membership = this._getMembership({
 			accountId,
 			campaignId,
@@ -5897,7 +5946,7 @@ export class MemoryHubStore {
 	}) {
 		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
 		this._assertSemanticSession({accountId, sessionId});
-		if (prior) return prior;
+		if (prior) return this._projectMultiTargetCommandResponse({response: prior, accountId, campaignId});
 		const membership = this._getMembership({
 			accountId,
 			campaignId,

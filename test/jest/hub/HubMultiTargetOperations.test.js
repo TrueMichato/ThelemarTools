@@ -675,6 +675,39 @@ describe("Campaign Hub multi-target Memory authority", () => {
 		expect(sourceArchived.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
 	});
 
+	it.each(["hidden", "archived"])("reprojects exact proposal replay after target identity becomes %s", async lifecycle => {
+		const ctx = await pFixture();
+		const commandId = crypto.randomUUID();
+		const proposed = await ctx.pPropose({
+			targetRefs: [ctx.targetA.targetRef],
+			commandId,
+		});
+		expect(proposed.operation.targets[0].presentation.targetName).toBe("Target A");
+		if (lifecycle === "hidden") {
+			await ctx.store.pSetProjectionPolicy({
+				accountId: ctx.targetOwner.account.id,
+				characterId: ctx.targetA.id,
+				policy: {version: 1, preset: "private", overrides: {}},
+				expectedProjectionRevision: ctx.targetA.projectionRevision,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		} else {
+			await ctx.store.pArchiveCharacter({
+				accountId: ctx.targetOwner.account.id,
+				characterId: ctx.targetA.id,
+				idempotencyKey: crypto.randomUUID(),
+			});
+		}
+		const replay = await ctx.pPropose({
+			targetRefs: [ctx.targetA.targetRef],
+			commandId,
+		});
+		expect(replay.eventIds).toEqual(proposed.eventIds);
+		expect(replay.operation.operationId).toBe(proposed.operation.operationId);
+		expect(replay.operation.targets[0].presentation.targetName).toBe("Campaign character unavailable");
+		expect(replay.operation.targets[0]).not.toHaveProperty("targetRef");
+	});
+
 	it("persists an immediately-ready proposal event in the command receipt", async () => {
 		const ctx = await pFixture();
 		const commandId = crypto.randomUUID();

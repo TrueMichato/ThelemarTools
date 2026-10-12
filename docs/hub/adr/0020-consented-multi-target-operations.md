@@ -526,6 +526,13 @@ Immutable proposal snapshots remain internal audit/history facts. Viewer DTOs an
 derive the displayed target label from current authorization and lifecycle state: owner/DM canonical identity,
 currently shared peer identity for the source, or the neutral `Campaign character unavailable`. Hiding identity
 or losing lifecycle authority therefore cannot replay the old canonical proposal name.
+Exact command replay preserves the stored operation, command, event, receipt, and leg identities, but reprojects
+viewer-sensitive target labels and own-leg target refs under current authorization; the stored receipt is not
+rewritten and a replay is not treated as a new command.
+
+PostgreSQL detail reads follow membership then character lock order and do not acquire the campaign/parent write
+locks used by lifecycle mutations. This prevents the character-policy-write/campaign-event cycle while retaining
+one coherent current-authority result after any in-flight policy write completes.
 
 Rollout order: A1/A2 foundations, A3 migration/server with capability off, protocol-6 A4 clients, A5 templates,
 Memory/PostgreSQL and real-stack proof, one allowlisted campaign/template canary, then measured expansion.

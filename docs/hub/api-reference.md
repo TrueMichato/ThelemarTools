@@ -46,6 +46,9 @@ The server hashes method, route, params, query, and body (excluding `baseRevisio
 the hash with the per-account receipt. Reusing one key for a different logical request returns
 `IDEMPOTENCY_KEY_REUSED`. Excluding revision/epoch lets the same logical mutation retry after safe rebase or
 lease refresh without becoming a different command.
+Multi-target exact replay keeps the stored command/result/event identities but reprojects target labels and the
+owner-only target ref under current sharing/lifecycle authority. It neither mutates the receipt nor creates a
+new command.
 
 ### Responses
 
@@ -431,6 +434,8 @@ The cursor encodes database microsecond time exactly, avoiding skipped same-tran
 authorization are fenced in one repeatable-read membership snapshot. Display labels are recomputed from current
 authorized projection/lifecycle state; hidden or unavailable targets use `Campaign character unavailable`
 instead of the immutable proposal name.
+Detail reads use membership-before-character locking and no campaign/parent write lock, so they wait behind an
+in-flight privacy write and return the resulting coherent view rather than deadlocking or aborting either request.
 
 The source-account and target-owner limits are global across campaigns. Proposal creation serializes them with a
 dedicated seed-10 quota advisory lock for the source account and every distinct target-owner account, acquired

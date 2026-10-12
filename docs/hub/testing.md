@@ -357,6 +357,10 @@ for duplicate-named characters with move/archive/access-loss invalidation.
 Migration 0013 tests reproduce the prior real archive rollback, retain a live parent with a revoked source-owned
 candidate plus an approved peer leg, reject source-owned pending/peer-approved and peer auto-approved states,
 and kill a real-call-site mutation which restores the old live-parent equivalence.
+Exact-replay tests hide or archive a target after proposal, then prove the same command/event/operation identities
+return with current neutral presentation. A controlled real PostgreSQL policy/detail interleaving holds the
+target-character lock, starts detail, resumes policy, and requires both legitimate requests to complete without
+`40P01` or stale canonical-name output.
 
 A separate A3 PostgreSQL source-account-cap test seeds one source account with four live collections, then races
 proposals in two different campaigns for slot five under the seed-10 source-account lock. It must produce exactly

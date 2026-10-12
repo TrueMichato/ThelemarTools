@@ -5839,6 +5839,62 @@ export class PostgresHubStore {
 		};
 	}
 
+	async _pProjectMultiTargetCommandResponse ({client, response, accountId, campaignId}) {
+		const membership = await this._pGetMembershipForShare({
+			client,
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+		});
+		const operationId = response?.operation?.operationId;
+		const operationResult = await client.query(`
+			SELECT *
+			FROM hub.semantic_operations
+			WHERE id = $1 AND campaign_id = $2 AND target_set_version = 1
+		`, [operationId, campaignId]);
+		if (!operationResult.rowCount) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		}
+		const operation = this._getSemanticOperation(operationResult.rows[0]);
+		const targets = await this._pGetMultiTargetTargets({
+			client,
+			operationId,
+			isIncludeLegEventSequence: true,
+			isLockCurrentCharacters: true,
+		});
+		const targetsByInvitationId = new Map(targets.map(target => [target.invitationId, target]));
+		const projectTarget = stored => {
+			if (!stored?.invitationId) return stored;
+			const target = targetsByInvitationId.get(stored.invitationId);
+			if (!target) return stored;
+			const targetRef = getMultiTargetOwnedTargetRef({
+				operation,
+				target,
+				currentCharacter: target.currentCharacter,
+				accountId,
+			});
+			const projected = {
+				...structuredClone(stored),
+				presentation: getMultiTargetInvitationPresentation({
+					operation,
+					target,
+					currentCharacter: target.currentCharacter,
+					accountId,
+					role: membership.role,
+				}),
+			};
+			if (targetRef) projected.targetRef = targetRef;
+			else delete projected.targetRef;
+			return projected;
+		};
+		const projected = structuredClone(response);
+		if (Array.isArray(projected.operation?.targets)) {
+			projected.operation.targets = projected.operation.targets.map(projectTarget);
+		}
+		if (projected.invitation) projected.invitation = projectTarget(projected.invitation);
+		return projected;
+	}
+
 	async _pGetMultiTargetTargets ({
 		client,
 		operationId,
@@ -6491,8 +6547,14 @@ export class PostgresHubStore {
 				sessionId: args.sessionId,
 			});
 			if (prior) {
+				const response = await this._pProjectMultiTargetCommandResponse({
+					client,
+					response: prior,
+					accountId: args.accountId,
+					campaignId: args.campaignId,
+				});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 
 			const discovery = await client.query(`
@@ -6912,8 +6974,14 @@ export class PostgresHubStore {
 				sessionId: args.sessionId,
 			});
 			if (prior) {
+				const response = await this._pProjectMultiTargetCommandResponse({
+					client,
+					response: prior,
+					accountId: args.accountId,
+					campaignId: args.campaignId,
+				});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 			if (!["approve", "reject"].includes(args.decision)) {
 				throw new HubStoreError("INVALID_REQUEST", `The response decision is invalid.`, {status: 400});
@@ -7112,8 +7180,14 @@ export class PostgresHubStore {
 				sessionId: args.sessionId,
 			});
 			if (prior) {
+				const response = await this._pProjectMultiTargetCommandResponse({
+					client,
+					response: prior,
+					accountId: args.accountId,
+					campaignId: args.campaignId,
+				});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [args.campaignId]);
 			const campaignResult = await client.query(`
@@ -7825,8 +7899,14 @@ export class PostgresHubStore {
 				sessionId: args.sessionId,
 			});
 			if (prior) {
+				const response = await this._pProjectMultiTargetCommandResponse({
+					client,
+					response: prior,
+					accountId: args.accountId,
+					campaignId: args.campaignId,
+				});
 				await client.query("COMMIT");
-				return prior;
+				return response;
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [args.campaignId]);
 			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 AND status <> 'deleting' FOR UPDATE`, [args.campaignId]);
@@ -8282,48 +8362,57 @@ export class PostgresHubStore {
 	}
 
 	async pGetMultiTargetOperation ({accountId, campaignId, operationId}) {
+		await this.pExpireMultiTargetOperations({limit: MULTI_TARGET_PAGE_LIMIT});
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
-			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
-			const campaign = await client.query(`
-				SELECT id FROM hub.campaigns WHERE id = $1 AND status <> 'deleting' FOR UPDATE
-			`, [campaignId]);
-			if (!campaign.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const membership = await this._pGetMembershipForShare({
+				client,
+				accountId,
+				campaignId,
+				roles: ["dm", "co_dm", "player"],
+			});
 			const operationResult = await client.query(`
 				SELECT *
 				FROM hub.semantic_operations
 				WHERE campaign_id = $1 AND id = $2 AND target_set_version = 1
-				FOR UPDATE
 			`, [campaignId, operationId]);
 			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
-			const operation = this._getSemanticOperation(operationResult.rows[0]);
+			const participantTargets = await client.query(`
+				SELECT target_character_id, target_owner_account_id_at_proposal
+				FROM hub.semantic_operation_targets
+				WHERE operation_id = $1
+				ORDER BY target_character_id
+			`, [operationId]);
+			const isParticipant = operationResult.rows[0].origin_actor_account_id === accountId
+				|| participantTargets.rows.some(target => target.target_owner_account_id_at_proposal === accountId);
+			if (
+				!isParticipant
+				&& !["dm", "co_dm"].includes(membership.role)
+			) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			if (participantTargets.rowCount) {
+				await client.query(`
+					SELECT id
+					FROM hub.characters
+					WHERE id = ANY($1::uuid[])
+					ORDER BY id
+					FOR SHARE
+				`, [participantTargets.rows.map(target => target.target_character_id)]);
+			}
+			const currentOperationResult = await client.query(`
+				SELECT *
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2 AND target_set_version = 1
+			`, [campaignId, operationId]);
+			if (!currentOperationResult.rowCount) {
+				throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			}
+			const operation = this._getSemanticOperation(currentOperationResult.rows[0]);
 			const targets = await this._pGetMultiTargetTargets({
 				client,
 				operationId,
-				isForUpdate: true,
 				isIncludeLegEventSequence: true,
-				isLockCurrentCharacters: true,
 			});
-			const memberships = await this._pLockSemanticMemberships({
-				client,
-				campaignId,
-				accountIds: [
-					accountId,
-					operation.originActorAccountId,
-					...targets.map(target => target.targetOwnerAccountIdAtProposal),
-				],
-			});
-			const membership = memberships.get(accountId);
-			const isParticipant = operation.originActorAccountId === accountId
-				|| targets.some(target => target.targetOwnerAccountIdAtProposal === accountId);
-			if (
-				!membership
-				|| membership.status !== "active"
-				|| !["dm", "co_dm", "player"].includes(membership.role)
-				|| (!isParticipant && !["dm", "co_dm"].includes(membership.role))
-			) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
-			await this._pTerminalizeElapsedMultiTarget({client, operation, targets});
 			const finalization = await this._pGetMultiTargetFinalization({
 				client,
 				operationId,

@@ -196,6 +196,13 @@ const MUTATIONS = [
 		to: "const currentMembership = membership;",
 		pattern: "rechecks membership",
 	},
+	{
+		name: "proposal-replay-current-shaping-omitted",
+		file: "server/src/memory-hub-store.js",
+		from: "const projected = copy(response);",
+		to: "return response;\n\t\tconst projected = copy(response);",
+		pattern: "reprojects exact proposal replay",
+	},
 ];
 
 async function copyTree (root) {
