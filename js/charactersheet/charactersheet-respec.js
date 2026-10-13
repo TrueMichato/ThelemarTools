@@ -432,6 +432,17 @@ class CharacterSheetRespec {
 		const raceName = this._state.getRaceName?.() || race?.name || "";
 		rows.append(mkRow("🧬", "Species", raceName, race ? () => this._editRace(1, level1History || {level: 1, choices: {}}, null) : null));
 		rows.append(mkRow("🎒", "Background", background?.name || "", background ? () => this._editBackground(1, level1History || {level: 1, choices: {}}, null) : null));
+		const starting = this._engine?.getStartingAbilityDistribution();
+		if (starting) {
+			const edit = e_({tag: "button", clazz: "ve-btn ve-btn-default ve-btn-sm mt-2", txt: "Edit Starting Ability Scores"});
+			edit.dataset.respecStartingAbilities = "true";
+			edit.addEventListener("click", () => this._editStartingAbilityDistribution());
+			rows.append(edit, e_({tag: "p",
+				clazz: "ve-small ve-muted mt-1",
+				txt: starting.isIncomplete
+					? "Reconstructed baseline — history incomplete. Verified increases and unknown adjustments are preserved."
+					: "Recorded starting scores. Later increases and independent adjustments are preserved."}));
+		}
 		const backgroundAbilityDecisions = (this._engine?.manifest?.base?.decisions || []).filter(decision =>
 			decision.meta?.originAbilityDistribution
 				&& (decision.provenance?.ownerType === "background" || decision.meta?.originFreeAbility),
@@ -464,6 +475,75 @@ class CharacterSheetRespec {
 		if (unplacedFeats) card.append(unplacedFeats);
 
 		return card;
+	}
+
+	async _editStartingAbilityDistribution () {
+		const initial = this._engine.getStartingAbilityDistribution();
+		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({title: "Starting Ability Scores", isMinHeight0: true});
+		eleModalInner.append(e_({tag: "p",
+			clazz: "ve-muted",
+			txt: initial.isIncomplete
+				? "History incomplete: these are reconstructed scores before verified increases, not proven original scores. Editing changes only this baseline; other adjustments are preserved."
+				: "Edit the recorded starting distribution, before species/background bonuses and later increases. Other adjustments are preserved."}));
+		const method = e_({tag: "select", clazz: "ve-form-control mb-2"});
+		method.setAttribute("aria-label", "Ability score method");
+		for (const [value, label] of [["standard", "Standard Array"], ["pointbuy", "Point Buy"], ["manual", "Manual Entry"]]) {
+			const option = e_({tag: "option", txt: label});
+			option.value = value;
+			method.append(option);
+		}
+		method.value = initial.method;
+		eleModalInner.append(method);
+		const guidance = e_({tag: "p", clazz: "ve-small ve-muted"});
+		const grid = e_({tag: "div", clazz: "charsheet__builder-ability-grid"});
+		const inputs = {};
+		const preview = e_({tag: "p", clazz: "ve-small ve-muted mt-2"});
+		const update = () => {
+			guidance.textContent = method.value === "standard" ? "Assign 15, 14, 13, 12, 10 and 8 once each."
+				: method.value === "pointbuy" ? "Spend exactly 27 points. Each starting score must be between 8 and 15."
+					: "Enter a whole number from 3 to 18 for each starting score.";
+			preview.textContent = Parser.ABIL_ABVS.map(ability => {
+				const score = Number(inputs[ability].value);
+				const base = this._state.getAbilityBase(ability) + score - initial.scores[ability];
+				return `${ability.toUpperCase()}: starting ${score}, later ${initial.gains[ability]}, other ${initial.adjustments[ability]}, base ${base}, species/background bonus ${this._state._data.abilityBonuses[ability] || 0}`;
+			}).join(" · ");
+		};
+		method.addEventListener("change", update);
+		for (const ability of Parser.ABIL_ABVS) {
+			const label = e_({tag: "label", clazz: "charsheet__builder-ability-cell", txt: Parser.attAbvToFull(ability)});
+			const input = e_({tag: "input", clazz: "ve-form-control charsheet__builder-ability-score-input"});
+			input.type = "number";
+			input.min = "3";
+			input.max = "18";
+			input.step = "1";
+			input.value = String(initial.scores[ability]);
+			input.setAttribute("aria-label", `${Parser.attAbvToFull(ability)} starting score`);
+			input.dataset.startingAbility = ability;
+			input.addEventListener("input", update);
+			inputs[ability] = input;
+			label.append(input);
+			grid.append(label);
+		}
+		const error = e_({tag: "p", clazz: "text-danger"});
+		error.setAttribute("role", "alert");
+		const cancel = e_({tag: "button", clazz: "ve-btn ve-btn-default mr-2", txt: "Cancel"});
+		cancel.addEventListener("click", doClose);
+		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage Starting Scores"});
+		apply.addEventListener("click", async () => {
+			apply.disabled = true;
+			try {
+				await this._engine.stageStartingAbilityDistribution({
+					method: method.value, scores: Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, Number(inputs[ability].value)])),
+				});
+				this.render();
+				doClose();
+			} catch (failure) {
+				error.textContent = failure.message;
+				apply.disabled = false;
+			}
+		});
+		update();
+		eleModalInner.append(guidance, grid, preview, error, cancel, apply);
 	}
 
 	_renderUnplacedFeatHistory () {
@@ -1344,6 +1424,7 @@ class CharacterSheetRespec {
 					out.index = (history.choices?.featureChoices || []).findIndex(choice =>
 						choice.featureName === decision.sourceKey,
 					);
+					if (out.index < 0) out.index = history.choices?.featureChoices?.length || 0;
 				}
 				if (decision.type === "classFeatProgressionFeat") {
 					out.index = (history.choices?.classFeatProgressionFeats || []).findIndex(choice =>
@@ -1830,6 +1911,11 @@ class CharacterSheetRespec {
 			clazz: "ve-muted",
 			txt: `Choose ${decision.count} option${decision.count === 1 ? "" : "s"}. ${decision.required ? "This decision is required." : "You may leave it deferred."}`,
 		}));
+		if (decision.meta?.descriptorRules?.originAbilityWeights) {
+			content.append(e_({
+				tag: "p", clazz: "ve-muted", txt: `Select distinct abilities in order: ${decision.meta.descriptorRules.originAbilityWeights.map(amount => `+${amount}`).join(", ")}. Deselect and reselect to change the order.`,
+			}));
+		}
 		let legacyLanguageMode = null;
 		let alsoIndependent = null;
 		if (unresolvedLanguages.length) {
@@ -2546,18 +2632,22 @@ class CharacterSheetRespec {
 			if (decision.type === "nestedConfiguration" && decision.meta?.originAbilityDistribution) {
 				const mode = options.find(option => CharacterSheetRespec._getDecisionOptionKey(option) ===
 					CharacterSheetRespec._getDecisionOptionKey(next[0]));
-				if (!mode) throw new Error("The selected background ability distribution is no longer available.");
-				const choices = MiscUtil.copyFast(this._state.getBaseBackgroundUserChoices() || {});
+				if (!mode) throw new Error("The selected origin ability distribution is no longer available.");
+				const isRace = decision.provenance?.ownerType === "race";
+				const prefix = isRace ? "rc" : "bg";
+				const choices = MiscUtil.copyFast((isRace ? this._state.getBaseRaceUserChoices() : this._state.getBaseBackgroundUserChoices()) || {});
 				choices.selectedAbilityBonuses = {};
+				if (isRace) choices.selectedAbilityChoices = {};
 				(mode.weights || []).forEach((weight, ix) => {
-					choices.selectedAbilityBonuses[`bg_${ix}`] = null;
-					choices.selectedAbilityBonuses[`bg_${ix}_weight`] = weight;
+					choices.selectedAbilityBonuses[`${prefix}_${ix}`] = null;
+					choices.selectedAbilityBonuses[`${prefix}_${ix}_weight`] = weight;
 				});
 				for (const [ability, amount] of Object.entries(mode.fixedBonuses || {})) {
 					const before = this._state._data.abilityBonuses[ability] || 0;
 					this._state.setAbilityBonus(ability, before + amount);
 				}
-				this._state.setBaseBackgroundUserChoices(choices);
+				if (isRace) this._state.setBaseRaceUserChoices(choices);
+				else this._state.setBaseBackgroundUserChoices(choices);
 				return {selection: mode};
 			}
 			if (decision.type === "nestedAbility") {
@@ -2595,7 +2685,9 @@ class CharacterSheetRespec {
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
 				const isOriginAbility = decision.scope === "origin"
 					&& ["race", "background"].includes(decision.provenance?.ownerType);
+				if (isOriginAbility) decision.meta.receiptPreviousAbilityBonus = {};
 				next.forEach((value, pickIndex) => {
+					const appliedAmount = decision.meta?.descriptorRules?.originAbilityWeights?.[pickIndex] ?? amount;
 					const ability = String(value || "").toLowerCase();
 					if (!ability) return;
 					if (isOriginAbility) {
@@ -2605,7 +2697,7 @@ class CharacterSheetRespec {
 						if (decision.meta.receiptPreviousAbilityBonus[ability] == null) {
 							decision.meta.receiptPreviousAbilityBonus[ability] = before;
 						}
-						this._state.setAbilityBonus(ability, before + amount);
+						this._state.setAbilityBonus(ability, before + appliedAmount);
 						if (decision.provenance?.ownerType === "race" && !decision.meta?.originFreeAbility) {
 							const race = this._state.getRace?.();
 							const choices = MiscUtil.copyFast(this._state.getBaseRaceUserChoices?.() || {});
@@ -2619,8 +2711,14 @@ class CharacterSheetRespec {
 							};
 							const choiceIndex = Number(String(decision.provenance?.sourcePath || "")
 								.match(/ability\[(\d+)\]/)?.[1] || 0);
-							ownerChoices[`choose_${choiceIndex}_${pickIndex}`] = ability;
-							ownerChoices[`choose_${choiceIndex}_${pickIndex}_amount`] = amount;
+							const slot = decision.meta?.originAbilityDistribution ? decision.slot : pickIndex;
+							ownerChoices[`choose_${choiceIndex}_${slot}`] = ability;
+							ownerChoices[`choose_${choiceIndex}_${slot}_amount`] = appliedAmount;
+							if (decision.meta?.originAbilitySelectionKey) {
+								choices.selectedAbilityBonuses ||= {};
+								choices.selectedAbilityBonuses[decision.meta.originAbilitySelectionKey] = ability;
+								choices.selectedAbilityBonuses[`${decision.meta.originAbilitySelectionKey}_weight`] = appliedAmount;
+							}
 							this._state.setBaseRaceUserChoices(choices);
 						} else if (decision.provenance?.ownerType === "background" || decision.meta?.originFreeAbility) {
 							const choices = MiscUtil.copyFast(this._state.getBaseBackgroundUserChoices?.() || {});
@@ -4655,10 +4753,16 @@ class CharacterSheetRespec {
 			doClose = modal.doClose;
 		}
 
-		const currentChoice = history.choices.featureChoices[choice.index];
+		const selected = Array.isArray(choice.decision?.selection) ? choice.decision.selection[0] : choice.decision?.selection;
+		const currentChoice = history.choices?.featureChoices?.[choice.index] || {
+			featureName: choice.decision?.sourceKey || choice.label,
+			choice: selected?.choice || selected?.name || null,
+			source: selected?.source,
+			acquisitionLevel: choice.decision?.classLevel,
+		};
 		const content = e_({tag: "div", clazz: "charsheet__respec-feature-modal"});
 
-		content.append(e_({outer: `<p class="text-muted mb-2">Current: <strong>${currentChoice.choice}</strong></p>`}));
+		content.append(e_({outer: `<p class="text-muted mb-2">Current: <strong>${currentChoice.choice || "Not selected"}</strong></p>`}));
 
 		// Get available options for this feature
 		const parentFeatureName = currentChoice.featureName;
@@ -4823,7 +4927,8 @@ class CharacterSheetRespec {
 		const decision = this._engine?.manifest?.decisions?.find(it =>
 			it.type === "featureChoice"
 			&& Number(it.characterLevel) === Number(level)
-			&& (Number(it.slot) === Number(choiceIndex) || it.sourceKey === oldChoice?.featureName),
+			&& it.sourceKey === oldChoice?.featureName
+			&& it.className === history.class.name && it.classSource === history.class.source,
 		);
 		if (!decision && !this._engine?.stageCandidateMutation) {
 			return this._applyFeatureChoiceChangeInner(level, history, choiceIndex, oldChoice, newOption);
@@ -4867,7 +4972,8 @@ class CharacterSheetRespec {
 		const decision = this._engine?.manifest?.decisions?.find(it =>
 			it.type === "featureChoice"
 			&& Number(it.characterLevel) === Number(level)
-			&& (Number(it.slot) === Number(choiceIndex) || it.sourceKey === oldChoice?.featureName),
+			&& it.sourceKey === oldChoice?.featureName
+			&& it.className === history.class.name && it.classSource === history.class.source,
 		);
 		const catalogs = {
 			classFeatures: this._page.getClassFeatures(),
@@ -5850,7 +5956,7 @@ class CharacterSheetRespec {
 
 		const raceList = e_({tag: "div", clazz: "charsheet__respec-feat-list"});
 		let selectedRace = null;
-		let currentPickers = [];
+		let raceDraft = null;
 		let choicesPanel;
 		let fnUpdateApplyState;
 
@@ -5879,25 +5985,22 @@ class CharacterSheetRespec {
 						<span class="text-muted">${Parser.sourceJsonToAbv(race.source)}</span>
 					</div>
 				`});
-				item.addEventListener("click", () => {
+				item.addEventListener("click", async () => {
 					selectedRace = race;
 					raceList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));
 					item.classList.add("charsheet__respec-feat-selected");
 
-					// Render choice pickers for the selected race
-					if (choicesPanel) {
-						choicesPanel.innerHTML = "";
-						currentPickers = [];
-						const langPicker = this._renderLanguageChoicePickers(choicesPanel, race, () => fnUpdateApplyState?.());
-						if (langPicker) currentPickers.push(langPicker);
-						const skillPicker = this._renderSkillChoicePickers(choicesPanel, race, () => fnUpdateApplyState?.());
-						if (skillPicker) currentPickers.push(skillPicker);
-						const toolPicker = this._renderToolChoicePickers(choicesPanel, race, () => fnUpdateApplyState?.());
-						if (toolPicker) currentPickers.push(toolPicker);
-						const abiPicker = this._renderAbilityChoicePickers(choicesPanel, race, "rc", () => fnUpdateApplyState?.());
-						if (abiPicker) currentPickers.push(abiPicker);
-					}
+					raceDraft = null;
 					fnUpdateApplyState?.();
+					try {
+						const draft = await this._createRaceDraft(race, history);
+						if (selectedRace !== race) return;
+						raceDraft = draft;
+						draft.render = () => this._renderBackgroundDraftChoices(choicesPanel, draft, fnUpdateApplyState, {originType: "race"});
+						draft.render();
+					} catch (error) {
+						choicesPanel.replaceChildren(e_({tag: "p", clazz: "text-danger", txt: `Could not prepare species choices: ${error.message}`}));
+					}
 				});
 				raceList.append(item);
 			});
@@ -5917,16 +6020,17 @@ class CharacterSheetRespec {
 		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Change Species"});
 
 		fnUpdateApplyState = () => {
-			applyBtn.disabled = !selectedRace || currentPickers.some(p => !p.isComplete());
+			applyBtn.disabled = !raceDraft || !raceDraft._engine.isDirty || this._getBackgroundDraftIssues(raceDraft, {originType: "race"}).length > 0;
 		};
+		fnUpdateApplyState();
 
 		applyBtn.addEventListener("click", async () => {
-			if (!selectedRace) {
+			if (!selectedRace || !raceDraft) {
 				JqueryUtil.doToast({type: "warning", content: "Please select a species."});
 				return;
 			}
 
-			if (currentPickers.some(p => !p.isComplete())) {
+			if (this._getBackgroundDraftIssues(raceDraft, {originType: "race"}).length) {
 				JqueryUtil.doToast({type: "warning", content: "Please complete all choices."});
 				return;
 			}
@@ -5942,48 +6046,13 @@ class CharacterSheetRespec {
 
 			if (!confirmed) return;
 
-			const userChoices = {};
-			currentPickers.forEach(p => {
-				if (p.type === "language") userChoices.selectedLanguages = p.getSelections();
-				else if (p.type === "skill") userChoices.selectedSkills = p.getSelections();
-				else if (p.type === "tool") userChoices.selectedTools = p.getSelections();
-				else if (p.type === "ability") userChoices.selectedAbilityChoices = p.getSelections();
-			});
-
-			const originDecision = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originRace");
-			const isSameRaceAbilityOnly = isSameEntity
-				&& currentPickers.length
-				&& currentPickers.every(picker => picker.type === "ability");
-			const didStageOwnedAbilityChoices = isSameRaceAbilityOnly
-				? await this._stageSameRaceAbilityChoices(userChoices)
-				: false;
-			if (!didStageOwnedAbilityChoices) {
-				if (originDecision) {
-					await this._engine.stageGraphMutation(originDecision.id, {
-						name: selectedRace.name,
-						source: selectedRace.source,
-					}, {
-						apply: ({state}) => {
-							const previousState = this._state;
-							this._state = state;
-							try {
-								this._applyRaceChange(history, selectedRace, userChoices);
-							} finally {
-								this._state = previousState;
-							}
-						},
-					});
-				} else {
-					await this._engine.stageCandidateMutation(({state}) => {
-						const previousState = this._state;
-						this._state = state;
-						try {
-							this._applyRaceChange(history, selectedRace, userChoices);
-						} finally {
-							this._state = previousState;
-						}
-					});
-				}
+			applyBtn.disabled = true;
+			try {
+				await this._stageBackgroundDraft(raceDraft, {originType: "race"});
+			} catch (error) {
+				JqueryUtil.doToast({type: "danger", content: `Could not stage species: ${error.message}`});
+				fnUpdateApplyState();
+				return;
 			}
 
 			doClose();
@@ -6168,27 +6237,70 @@ class CharacterSheetRespec {
 		return draft;
 	}
 
-	_getBackgroundDraftDecisions (draft) {
+	async _createRaceDraft (race, history) {
+		const draft = new CharacterSheetRespec({page: this._page, state: this._state});
+		draft._engine.begin();
+		draft._state = draft._engine.state;
+		draft._backgroundDraftBase = this._state.toJson();
+		if (CharacterSheetProgression.getEntityUid(draft._state.getRace()) !== CharacterSheetProgression.getEntityUid(race)) {
+			const parent = draft._engine.manifest.base.decisions.find(decision => decision.type === "originRace");
+			const starting = draft._engine.getStartingAbilityDistribution();
+			const apply = ({state}) => {
+				draft._state = state;
+				draft._applyRaceChange(history, race, {}, {graphReversed: !!parent});
+				if (!starting.isIncomplete && !state.getCharacterBase().decisions.some(decision => decision.meta?.startingAbilityDistribution)) {
+					state.getCharacterBase().decisions.push(CharacterSheetProgression.normalizeDecision({
+						type: "nestedConfiguration",
+						scope: "origin",
+						semanticKey: "base:ability-scores",
+						characterLevel: 0,
+						className: "Base",
+						classSource: "",
+						classLevel: 0,
+						label: "Starting Ability Scores",
+						sourceKey: "base:ability-scores",
+						count: 1,
+						required: false,
+						status: "resolved",
+						selection: {method: starting.method, scores: starting.scores, isIncomplete: false},
+						meta: {startingAbilityDistribution: true, creationAbilityScores: starting.scores, creationAbilityMethod: starting.method},
+						receipt: {version: 1, sourceDecisionKey: "base:ability-scores", effects: []},
+					}));
+				}
+			};
+			if (parent) await draft._engine.stageGraphMutation(parent.id, {name: race.name, source: race.source}, {apply});
+			else await draft._engine.stageCandidateMutation(apply);
+		}
+		return draft;
+	}
+
+	_getBackgroundDraftDecisions (draft, {originType = "background"} = {}) {
+		const priorKeys = new Set((this._engine.manifest?.base?.decisions || []).map(decision => decision.semanticKey));
 		return (draft._engine.manifest?.base?.decisions || []).filter(decision =>
-			decision.provenance?.ownerType === "background"
+			decision.provenance?.ownerType === originType
 				|| decision.meta?.originFreeAbility
-				|| decision.rootSemanticKey?.startsWith("base:background:"),
+				|| (originType === "race" && decision.provenance?.ownerType === "background"
+					&& String(decision.provenance.sourcePath || "").startsWith("background.ability")
+					&& !priorKeys.has(decision.semanticKey))
+				|| decision.rootSemanticKey?.startsWith(`base:${originType}:`),
 		);
 	}
 
-	_getBackgroundDraftIssues (draft) {
-		const ids = new Set(this._getBackgroundDraftDecisions(draft).map(decision => decision.id));
+	_getBackgroundDraftIssues (draft, {originType = "background"} = {}) {
+		const ids = new Set(this._getBackgroundDraftDecisions(draft, {originType}).map(decision => decision.id));
 		return draft._engine.getValidation().blockingErrors.filter(issue => !issue.decisionId || ids.has(issue.decisionId));
 	}
 
-	_renderBackgroundDraftChoices (container, draft, onUpdate) {
+	_renderBackgroundDraftChoices (container, draft, onUpdate, {originType = "background"} = {}) {
+		const name = originType === "race" ? "species" : "background";
 		container.replaceChildren();
-		container.append(e_({tag: "p", clazz: "ve-muted", txt: "Complete every new or changed background choice below. Unchanged pre-existing issues may remain for later repair. These changes are isolated until Change Background; Cancel discards them."}));
+		container.append(e_({tag: "p", clazz: "ve-muted", txt: `Complete every new or changed ${name} choice below. Unchanged pre-existing issues may remain for later repair. These changes are isolated until Change ${name === "species" ? "Species" : "Background"}; Cancel discards them.`}));
 		const editor = e_({tag: "div", clazz: "charsheet__respec-nested-editor-host"});
-		for (const decision of this._getBackgroundDraftDecisions(draft)) {
-			if (decision.type === "originBackground") continue;
+		for (const decision of this._getBackgroundDraftDecisions(draft, {originType})) {
+			if (["originBackground", "originRace"].includes(decision.type)) continue;
 			const row = e_({tag: "div", clazz: "charsheet__respec-choice-item"});
-			row.dataset.backgroundDecision = decision.type;
+			if (originType === "race") row.dataset.speciesDecision = decision.type;
+			else row.dataset.backgroundDecision = decision.type;
 			row.append(e_({tag: "span", txt: `${decision.label}: ${CharacterSheetProgression.getDecisionDisplayValue(decision)} (${decision.status})`}));
 			if (!decision.meta?.fixedOriginGrant) {
 				const button = e_({tag: "button", clazz: "ve-btn ve-btn-default ve-btn-sm", txt: decision.status === "resolved" ? "Change" : "Choose"});
@@ -6197,23 +6309,24 @@ class CharacterSheetRespec {
 			}
 			container.append(row);
 		}
-		const issues = this._getBackgroundDraftIssues(draft);
-		if (issues.length) container.append(e_({tag: "p", clazz: "text-warning", txt: `${issues.length} background item${issues.length === 1 ? "" : "s"} remain: ${issues.map(issue => issue.message).join(" ")}`}));
-		const ids = new Set(this._getBackgroundDraftDecisions(draft).map(decision => decision.id));
+		const issues = this._getBackgroundDraftIssues(draft, {originType});
+		if (issues.length) container.append(e_({tag: "p", clazz: "text-warning", txt: `${issues.length} ${name} item${issues.length === 1 ? "" : "s"} remain: ${issues.map(issue => issue.message).join(" ")}`}));
+		const ids = new Set(this._getBackgroundDraftDecisions(draft, {originType}).map(decision => decision.id));
 		const remaining = draft._engine.getValidation().carriedForwardIssues.filter(issue => ids.has(issue.decisionId));
-		if (remaining.length) container.append(e_({tag: "p", clazz: "text-warning", txt: `${remaining.length} unchanged background issue${remaining.length === 1 ? "" : "s"} will remain for review: ${remaining.map(issue => issue.message).join(" ")}`}));
+		if (remaining.length) container.append(e_({tag: "p", clazz: "text-warning", txt: `${remaining.length} unchanged ${name} issue${remaining.length === 1 ? "" : "s"} will remain for review: ${remaining.map(issue => issue.message).join(" ")}`}));
 		container.append(editor);
 		onUpdate?.();
 	}
 
-	async _stageBackgroundDraft (draft) {
-		const issues = this._getBackgroundDraftIssues(draft);
+	async _stageBackgroundDraft (draft, {originType = "background"} = {}) {
+		const name = originType === "race" ? "species" : "background";
+		const issues = this._getBackgroundDraftIssues(draft, {originType});
 		if (issues.length) throw new Error(issues.map(issue => issue.message).join(" "));
 		if (JSON.stringify(this._state.toJson()) !== JSON.stringify(draft._backgroundDraftBase)) {
-			throw new Error("The Respec draft changed while the background editor was open. Reopen the background editor.");
+			throw new Error(`The Respec draft changed while the ${name} editor was open. Reopen the ${name} editor.`);
 		}
 		await this._engine.stageCandidateMutation(({state}) => {
-			if (state.loadFromJson(draft._state.toJson()) === false) throw new Error("The background draft could not be loaded.");
+			if (state.loadFromJson(draft._state.toJson()) === false) throw new Error(`The ${name} draft could not be loaded.`);
 		});
 		this._state = this._engine.state;
 	}
@@ -6222,7 +6335,7 @@ class CharacterSheetRespec {
 	 * Clear old race grants and apply new race traits.
 	 * Mirrors the builder's _applyRacialTraits pattern.
 	 */
-	_applyRaceChange (history, newRace, userChoices = {}) {
+	_applyRaceChange (history, newRace, userChoices = {}, {graphReversed = false} = {}) {
 		const oldRace = this._state.getRace();
 		const oldSubrace = this._state.getSubrace();
 		const raceSourceId = "base:origin-race";
@@ -6247,8 +6360,12 @@ class CharacterSheetRespec {
 		// Reset senses
 		CharacterSheetClassUtils.SENSE_DISPLAY_ORDER.forEach(senseKey => this._state.setSense(senseKey, 0));
 
-		// Clear ability bonuses (will be reapplied for both race and background)
-		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
+		const oldBonuses = this._getRaceAbilityBonusDeltas(oldRace, oldUserChoices, {includeChoices: !graphReversed, fixedReversed: graphReversed});
+		const subraceBonuses = this._getRaceAbilityBonusDeltas(oldSubrace, oldUserChoices, {includeChoices: !graphReversed, fixedReversed: graphReversed});
+		for (const ability of Parser.ABIL_ABVS) {
+			this._state.setAbilityBonus(ability, (this._state._data.abilityBonuses[ability] || 0)
+				- (oldBonuses[ability] || 0) - (subraceBonuses[ability] || 0));
+		}
 
 		// Clear old racial languages
 		this._clearLanguagesFromData(oldRace, raceSourceId);
@@ -6275,6 +6392,18 @@ class CharacterSheetRespec {
 		// Determine subrace from merged race data
 		const newSubrace = newRace._baseName ? null : null;
 		this._state.setRace(newRace, newSubrace);
+		if (graphReversed) {
+			const semanticKey = CharacterSheetProgression.getOriginSemanticKey({
+				originType: "race", originUid: CharacterSheetProgression.getEntityUid(newRace), grantKey: "entity",
+			});
+			this._state.getCharacterBase().decisions.push(CharacterSheetProgression.normalizeDecision({
+				type: "originRace",
+				scope: "origin",
+				semanticKey,
+				selection: {name: newRace.name, source: newRace.source},
+				meta: {freshOriginChoices: true},
+			}));
+		}
 
 		// Speed
 		this._applySpeedFromRaceData(newRace);
@@ -6298,7 +6427,7 @@ class CharacterSheetRespec {
 		}
 
 		// Fixed ability bonuses
-		if (newRace.ability) {
+		if (newRace.ability?.length === 1) {
 			newRace.ability.forEach(abiSet => {
 				Object.entries(abiSet).forEach(([abi, bonus]) => {
 					if (abi !== "choose" && Parser.ABIL_ABVS.includes(abi)) {
@@ -6323,9 +6452,6 @@ class CharacterSheetRespec {
 				}
 			});
 		}
-
-		// Reapply background ability bonuses (since we reset all to 0)
-		this._reapplyBackgroundAbilityBonuses(history);
 
 		// Apply user-chosen languages
 		if (userChoices.selectedLanguages) {
@@ -6409,6 +6535,45 @@ class CharacterSheetRespec {
 	 * Clear old background grants and apply new background traits.
 	 * Mirrors the builder's _applyBackgroundFeatures pattern.
 	 */
+	_getRaceAbilityBonusDeltas (race, choices, {includeChoices = true, fixedReversed = false} = {}) {
+		const deltas = {};
+		const add = (ability, amount) => {
+			if (Parser.ABIL_ABVS.includes(ability) && Number.isFinite(amount)) deltas[ability] = (deltas[ability] || 0) + amount;
+		};
+		if (!race) return deltas;
+		if (choices.useTashasRules) {
+			if (includeChoices) for (const [key, ability] of Object.entries(choices.tashasAbilityBonuses || {})) add(ability, choices.tashasAbilityBonuses[`${key}_amount`]);
+			return deltas;
+		}
+		let sets = race.ability || [];
+		if (sets.length > 1 && sets.some(set => Parser.ABIL_ABVS.some(ability => set[ability]))) {
+			const distribution = (this._engine?.manifest?.base?.decisions || []).find(decision =>
+				decision.type === "nestedConfiguration" && decision.meta?.originAbilityDistribution
+					&& decision.provenance?.ownerUid === CharacterSheetProgression.getEntityUid(race));
+			const index = distribution?.selection?.modeIndex;
+			if (!Number.isInteger(index) || !sets[index]) {
+				throw new Error("This species has fixed ability alternatives without a recorded selected branch. Restore its original ability distribution before replacing it; unrelated Respec changes remain available.");
+			}
+			const fixed = Object.entries(sets[index]).filter(([ability]) => Parser.ABIL_ABVS.includes(ability));
+			const isReversed = fixedReversed && distribution.receipt?.sourceDecisionKey === distribution.semanticKey
+				&& fixed.every(([ability, amount]) => distribution.receipt.effects.some(effect =>
+					effect.type === "abilityBonusDelta" && effect.sourceDecisionKey === distribution.semanticKey
+						&& effect.ability === ability && effect.amount === Number(amount)));
+			sets = isReversed ? [] : [sets[index]];
+		}
+		for (const set of sets) for (const [ability, amount] of Object.entries(set)) add(ability, amount);
+		if (includeChoices) {
+			const owners = this._getRaceAbilityOwnerUids(race);
+			const picks = Object.entries(choices.selectedAbilityChoices || {}).find(([key]) => owners.has(key.toLowerCase()))?.[1]
+				|| choices.selectedAbilityChoices || {};
+			for (const [key, ability] of Object.entries(picks)) {
+				if (key.endsWith("_amount") || key.endsWith("_weight")) continue;
+				add(ability, Number(picks[`${key}_amount`] ?? picks[`${key}_weight`]) || 0);
+			}
+		}
+		return deltas;
+	}
+
 	_applyBackgroundChange (history, newBg, userChoices = {}, {graphReversed = false} = {}) {
 		const oldBg = this._state.getBackground();
 		const sourceIdFor = background => CharacterSheetProgression.getOriginSemanticKey({

@@ -12687,31 +12687,51 @@ class CharacterSheetState {
 	_getNonProgressionOwnershipKeys (manifest) {
 		const out = Object.fromEntries(["skills", "expertise", "tools", "languages", "saves", "weapons", "armor", "resistances", "spells", "cantrips"]
 			.map(type => [type, new Set()]));
-		const add = (type, value) => {
+		const raceOwners = new Set([this._data.race, this._data.subrace].filter(Boolean).map(CharacterSheetProgression.getEntityUid));
+		const recordedRaceLanguages = new Set((manifest?.base?.decisions || [])
+			.filter(decision => decision.provenance?.ownerType === "race" && raceOwners.has(decision.provenance.ownerUid)
+				&& decision.receipt?.version === 1 && decision.receipt.sourceDecisionKey === decision.semanticKey)
+			.flatMap(decision => {
+				const represented = decision.type === "nestedLanguage"
+					? (Array.isArray(decision.selection) ? decision.selection : [decision.selection]).filter(value => typeof value === "string")
+					: decision.type === "originRace" && CharacterSheetProgression.getEntityUid(decision.selection) === decision.provenance.ownerUid
+						? [this._data.race, this._data.subrace].filter(entity => CharacterSheetProgression.getEntityUid(entity) === decision.provenance.ownerUid)
+							.flatMap(entity => (entity.languageProficiencies || []).flatMap(group => Object.entries(group)
+								.filter(([, value]) => value === true).map(([language]) => language)))
+						: [];
+				const keys = new Set(represented.map(value => this._getProgressionOwnershipKey("languages", value)));
+				return (decision.receipt.effects || []).flatMap(effect => effect.ownership || [])
+					.filter(owned => owned.type === "languages" && typeof owned.value === "string"
+						&& keys.has(this._getProgressionOwnershipKey("languages", owned.value)));
+			})
+			.filter(owned => owned.type === "languages" && typeof owned.value === "string")
+			.map(owned => this._getProgressionOwnershipKey("languages", owned.value)));
+		const add = (type, value, {isRaceFallback = false} = {}) => {
 			const key = this._getProgressionOwnershipKey(type, value);
+			if (type === "languages" && isRaceFallback && recordedRaceLanguages.has(key)) return;
 			if (key) out[type]?.add(key);
 		};
-		const addDefinitionKeys = (type, definitions, excluded) => {
+		const addDefinitionKeys = (type, definitions, excluded, options = {}) => {
 			for (const definition of Array.isArray(definitions) ? definitions : []) {
 				if (!definition || typeof definition !== "object") continue;
 				for (const [key, value] of Object.entries(definition)) {
 					if (excluded.has(key) || value !== true) continue;
-					add(type, type === "languages" ? CharacterSheetClassUtils.resolveLanguageProficiencyName(key) : key);
+					add(type, type === "languages" ? CharacterSheetClassUtils.resolveLanguageProficiencyName(key) : key, options);
 				}
 			}
 		};
-		const addUserChoices = choices => {
+		const addUserChoices = (choices, options = {}) => {
 			for (const skill of choices?.selectedSkills || []) add("skills", skill);
 			for (const tool of choices?.selectedTools || []) add("tools", typeof tool === "string" ? tool : tool?.tool);
 			const languages = choices?.selectedLanguages;
 			for (const value of Array.isArray(languages) ? languages : Object.values(languages || {})) {
 				for (const language of Array.isArray(value) ? value : [value]) {
-					add("languages", typeof language === "string" ? language : language?.language);
+					add("languages", typeof language === "string" ? language : language?.language, options);
 				}
 			}
-			for (const language of choices?.selectedSubraceLanguages || []) add("languages", language);
+			for (const language of choices?.selectedSubraceLanguages || []) add("languages", language, options);
 			for (const skill of choices?.tashasSkillReplacements || []) add("skills", skill);
-			for (const language of choices?.tashasLanguageReplacements || []) add("languages", language);
+			for (const language of choices?.tashasLanguageReplacements || []) add("languages", language, options);
 		};
 
 		for (const [type, entries] of Object.entries(this._data.grantedProficiencies || {})) {
@@ -12731,9 +12751,9 @@ class CharacterSheetState {
 		for (const entity of [this._data.race, this._data.subrace, ...(backgroundIsRepresented ? [] : [this._data.background])]) {
 			addDefinitionKeys("skills", entity?.skillProficiencies, proficiencyMeta);
 			addDefinitionKeys("tools", entity?.toolProficiencies, proficiencyMeta);
-			addDefinitionKeys("languages", entity?.languageProficiencies, proficiencyMeta);
+			addDefinitionKeys("languages", entity?.languageProficiencies, proficiencyMeta, {isRaceFallback: entity !== this._data.background});
 		}
-		addUserChoices(this.getBaseRaceUserChoices());
+		addUserChoices(this.getBaseRaceUserChoices(), {isRaceFallback: true});
 		if (!backgroundIsRepresented) addUserChoices(this.getBaseBackgroundUserChoices());
 		for (const value of this._data.saveProficiencies || []) {
 			if (!(this._data.grantedProficiencies?.saves?.[value]?.length)) add("saves", value);
@@ -12982,6 +13002,9 @@ class CharacterSheetState {
 				const type = owned?.type;
 				const value = owned?.value;
 				if (!type) continue;
+				if (type === "languages" && (typeof value !== "string" || !value.trim())) {
+					throw new Error("This language receipt has incomplete history. Repair its recorded origin language choices before replacing that origin.");
+				}
 				if (!this.releaseProgressionOwnership(type, value, sourceId)) continue;
 				if (type === "skills") {
 					const skill = this.normalizeSkillProficiencyKey(value);
@@ -26787,16 +26810,38 @@ class CharacterSheetState {
 	 * pending-choice record). Lets Improved Blessed Strikes (L14) scale the SAME choice.
 	 * @returns {?string}
 	 */
-	getChosenBlessedStrikesOption () {
-		const fromChosen = (this._data.chosenSubfeatures || []).find(r =>
-			String(r.parent || "").toLowerCase() === "blessed strikes");
-		if (fromChosen) return fromChosen.name;
-		const feats = this._data.features || [];
-		const has = (nm) => feats.some(f => String(f.name || "").toLowerCase() === nm
-			&& String(f.parentFeature || "").toLowerCase() === "blessed strikes");
-		if (has("divine strike")) return "Divine Strike";
-		if (has("potent spellcasting")) return "Potent Spellcasting";
-		return null;
+	getChosenBlessedStrikesOption ({classSource = null} = {}) {
+		const norm = value => String(value || "").trim().toLowerCase();
+		const allOwners = this.getClasses().filter(cls => norm(cls.name) === "cleric");
+		const owners = allOwners.filter(cls => !classSource || norm(cls.source) === norm(classSource));
+		if (owners.length > 1 || (!owners.length && classSource)) return null;
+		const owner = owners[0];
+		if (owner && (!Number.isFinite(Number(owner.level)) || Number(owner.level) < 7)) return null;
+		const definition = (this._classCatalog || []).find(cls =>
+			norm(cls.name) === "cleric" && norm(cls.source) === norm(owner?.source));
+		const reference = (definition?.classFeatures || []).flat().find(value =>
+			norm(typeof value === "string" ? value.split("|")[0] : value?.classFeature?.split("|")[0]) === "blessed strikes");
+		const definitionSource = (typeof reference === "string" ? reference : reference?.classFeature)?.split("|")[2];
+		const matchesSource = source => {
+			if (!source) return !owner || allOwners.length === 1;
+			return (!owner && !classSource) || norm(source) === norm(owner?.source)
+				|| (allOwners.length === 1 && norm(source) === norm(definitionSource)
+					&& !allOwners.some(cls => norm(cls.source) === norm(source)));
+		};
+		const matchesDefinition = source => !owner || !source || norm(source) === norm(owner.source)
+			|| (definitionSource && norm(source) === norm(definitionSource));
+		const chosen = (this._data.chosenSubfeatures || []).filter(record =>
+			norm(record.parent) === "blessed strikes" && Number(record.level ?? 7) === 7
+			&& (!record.parentClass || norm(record.parentClass) === "cleric")
+			&& matchesSource(record.parentClassSource) && matchesDefinition(record.parentSource || record.source));
+		const children = (this._data.features || []).filter(feature =>
+			norm(feature.parentFeature) === "blessed strikes" && Number(feature.acquisitionLevel || feature.level) === 7
+			&& (!feature.className || norm(feature.className) === "cleric") && matchesSource(feature.classSource)
+			&& matchesDefinition(feature.parentSource || feature.source));
+		const options = new Set([...chosen, ...children].map(record => norm(record.name)));
+		if (options.size !== 1) return null;
+		const option = [...options][0];
+		return option === "divine strike" ? "Divine Strike" : option === "potent spellcasting" ? "Potent Spellcasting" : null;
 	}
 
 	/**

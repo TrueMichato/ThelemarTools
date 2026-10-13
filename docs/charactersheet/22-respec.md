@@ -22,6 +22,63 @@ candidate until Apply succeeds. An untouched candidate refreshes if the live
 character changes before editing begins; a dirty candidate is never replaced
 silently.
 
+### Starting ability scores and species
+
+The Character Base card exposes **Edit Starting Ability Scores** with Standard
+Array, exactly 27-point Point Buy, and Manual Entry (whole numbers from 3 to 18).
+These are starting base scores, not final totals. The preview separates recorded
+later gains, other base adjustments, and the origin bonus channel. Missing
+creation history is labelled incomplete but does not disable editing.
+
+`getStartingAbilityDistribution()` reads recorded creation evidence when
+available. `stageStartingAbilityDistribution({method, scores})` changes only
+that baseline and preserves actual later acquisition deltas, including a zero
+gain at an ASI cap, independent bonus channels, and unknown adjustments.
+The stable `base:ability-scores` configuration survives species replacement.
+Receipt coordinates are rebased without recomputing or unlocking capped gains.
+Unchanged incomplete children of a still-legal acquired feat remain visible
+when only its unselected alternatives change eligibility; genuinely new
+prerequisite or choice failures still block Apply.
+
+**Change Species** uses a second isolated origin draft, like Change Background.
+It exposes new ability, language, proficiency and spell decisions, including
+background ability obligations which become applicable when the new species
+has no racial ASI. A weighted distribution preserves each pick's amount and
+requires distinct abilities. Multiple authored distributions are alternatives:
+select one branch, never all of them. Switching branches reverses only its
+owned receipts. Fixed alternatives without evidence of the selected branch
+produce an actionable replacement error rather than subtracting every branch.
+
+Grouped legacy species-language selections are normalized only for their exact
+descriptor group and evidenced scalar languages. Their corrected receipts and
+normalization marker survive rediscovery and save/reload, even if the choices
+are invalid against today's catalog. Species fallback ownership is excluded
+only where the exact decision selection and receipt prove that language grant.
+Independent background/class/manual overlap and unreceipted legacy languages
+remain preserved. Cancel discards the inner draft; Change Species stages it
+in Respec; only the outer Apply changes the live character.
+
+### Structured acquisition choices
+
+Class choice discovery also uses the existing structured acquisition parser,
+so unnamed sibling references such as Blessed Strikes are editable without
+mistaking at-use menus such as Cunning Strike for permanent acquisitions.
+A legacy durable choice can supply the editor when compatibility
+`choices.featureChoices` is absent. Replacement materializes that history and
+keeps exactly one acquired option, clearing only the exact owner's pending
+choice while preserving unrelated domain grants.
+
+`getChosenBlessedStrikesOption({classSource})` returns the canonical chosen
+option name or `null`. Scoped calls require an active, unique Cleric owner;
+a cross-source definition must be declared by that class. Contradictory picks,
+domain-only evidence, and foreign modern picks on a classic chassis are
+unresolved. The unscoped no-class fallback exists only for uniquely recorded
+legacy compatibility evidence, not for modern effect or trigger eligibility.
+Missing acquisition-owner metadata and legacy definition-source aliases require
+a single Cleric class; scoped calls never lend these ambiguous rows to multiple
+Cleric sources. Exact owner metadata remains source-scoped, including a TGTT
+owner using its declared XPHB definition.
+
 ### Partial repairs and Apply
 
 `getValidation().isValid` still answers whether the character has any unresolved
@@ -32,7 +89,10 @@ warnings or removed.
 
 Baseline matching uses source-qualified semantic identity, selection, required
 count, option/descriptor contract, provenance, receipt evidence, and the full
-parent lineage. Generated IDs and chronological levels do not identify an
+parent lineage. A resolved feat ancestor fingerprints its uniquely selected
+legal option, not unselected alternatives whose eligibility can change during
+score or species edits. The unresolved decision's own contract remains strict.
+Generated IDs and chronological levels do not identify an
 issue. Reordering a timeline can preserve the same class-level opportunity;
 changing its owner, parent, contract, invalid selection, or required children
 cannot. Explicitly editing an unresolved choice makes it a blocker even if its

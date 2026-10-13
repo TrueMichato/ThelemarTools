@@ -24,6 +24,112 @@ class CharacterSheetRespecEngine {
 	get isDirty () { return this._isDirty; }
 	get canUndo () { return !!this._undoSnapshot; }
 
+	getStartingAbilityDistribution () {
+		const state = this.state;
+		const decisions = state.getCharacterBase().decisions || [];
+		const stored = decisions.find(decision => decision.meta?.startingAbilityDistribution);
+		const observations = [...decisions, ...(this._originalSnapshot?.characterBase?.decisions || [])]
+			.filter(decision => Parser.ABIL_ABVS.every(ability => Number.isFinite(decision.meta?.creationAbilityScores?.[ability])));
+		const evidenceVectors = new Set(observations.map(decision => Parser.ABIL_ABVS.map(ability => decision.meta.creationAbilityScores[ability]).join(",")));
+		const observation = evidenceVectors.size === 1 ? observations[0] : null;
+		const gains = Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability,
+			state._getAbilityAcquisitionComponents(ability).reduce((total, component) => total + (component.amount || 0), 0),
+		]));
+		const scores = stored?.selection?.scores || observation?.meta.creationAbilityScores
+			|| Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, state.getAbilityBase(ability) - gains[ability]]));
+		return {
+			scores: {...scores},
+			method: stored?.selection?.method || observation?.meta.creationAbilityMethod || "manual",
+			isIncomplete: stored ? !!stored.selection.isIncomplete : !observation,
+			gains,
+			adjustments: Object.fromEntries(Parser.ABIL_ABVS.map(ability => [
+				ability, state.getAbilityBase(ability) - scores[ability] - gains[ability],
+			])),
+		};
+	}
+
+	async stageStartingAbilityDistribution ({method, scores}) {
+		const costs = {8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9};
+		if (!["standard", "pointbuy", "manual"].includes(method)
+			|| !scores || Object.keys(scores).length !== 6
+			|| !Parser.ABIL_ABVS.every(ability => Number.isInteger(scores[ability]) && scores[ability] >= 3 && scores[ability] <= 18)) {
+			throw new Error("Enter six whole starting scores between 3 and 18.");
+		}
+		if (method === "standard" && Parser.ABIL_ABVS.map(ability => scores[ability]).sort((a, b) => a - b).join(",") !== "8,10,12,13,14,15") {
+			throw new Error("Assign each Standard Array score once: 15, 14, 13, 12, 10, 8.");
+		}
+		if (method === "pointbuy" && (!Parser.ABIL_ABVS.every(ability => Object.hasOwn(costs, scores[ability]))
+			|| Parser.ABIL_ABVS.reduce((sum, ability) => sum + costs[scores[ability]], 0) !== 27)) {
+			throw new Error("Point Buy scores must be 8–15 and spend exactly 27 points.");
+		}
+		const previous = this.getStartingAbilityDistribution();
+		const offsets = Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, scores[ability] - previous.scores[ability]]));
+		const carriedKeys = new Set(this.getValidation().carriedForwardIssues.map(issue => issue.semanticKey).filter(Boolean));
+		const expectedManifest = CharacterSheetProgression._copy(this._manifest);
+		const rebase = decision => {
+			for (const effect of decision.receipt?.effects || []) {
+				if (effect.type !== "abilityDelta" || !Number.isFinite(effect.amount)) continue;
+				for (const field of ["before", "after"]) if (Number.isFinite(effect[field])) effect[field] += offsets[effect.ability] || 0;
+			}
+			for (const [ability, value] of Object.entries(decision.meta?.receiptPreviousAbility || {})) {
+				if (Number.isFinite(value)) decision.meta.receiptPreviousAbility[ability] += offsets[ability] || 0;
+			}
+			if (decision.meta?.creationAbilityScores) {
+				delete decision.meta.creationAbilityScores;
+				delete decision.meta.creationAbilityMethod;
+			}
+		};
+		expectedManifest.decisions.forEach(rebase);
+		await this.stageCandidateMutation(({state}) => {
+			for (const ability of Parser.ABIL_ABVS) {
+				const next = state.getAbilityBase(ability) + offsets[ability];
+				if (!Number.isInteger(next) || next < 1) throw new Error(`${Parser.attAbvToFull(ability)} would have an invalid base score after preserving later adjustments.`);
+				state.setAbilityBase(ability, next);
+			}
+			const base = state.getCharacterBase();
+			for (const decision of [...(base.decisions || []), ...state.getLevelHistory().flatMap(entry => entry.decisions || [])]) {
+				rebase(decision);
+			}
+			for (const feat of state._data.feats || []) {
+				for (const [ability, transition] of Object.entries(feat.appliedEffects?.abilityTransitions || {})) {
+					for (const field of ["before", "after"]) if (Number.isFinite(transition[field])) transition[field] += offsets[ability] || 0;
+				}
+			}
+			const semanticKey = "base:ability-scores";
+			base.decisions = (base.decisions || []).filter(decision => decision.semanticKey !== semanticKey);
+			base.decisions.push(CharacterSheetProgression.normalizeDecision({
+				type: "nestedConfiguration",
+				scope: "origin",
+				characterLevel: 0,
+				className: "Base",
+				classSource: "",
+				classLevel: 0,
+				semanticKey,
+				label: "Starting Ability Scores",
+				sourceKey: semanticKey,
+				count: 1,
+				required: false,
+				status: "resolved",
+				selection: {method, scores: {...scores}, isIncomplete: previous.isIncomplete},
+				meta: {startingAbilityDistribution: true, ...(!previous.isIncomplete ? {creationAbilityScores: {...scores}, creationAbilityMethod: method} : {})},
+				receipt: {version: 1, sourceDecisionKey: semanticKey, effects: []},
+			}, base));
+			const oldMax = state.getMaxHp();
+			const oldCurrent = state.getCurrentHp();
+			state.recalculateHp({syncCurrent: false});
+			if (state.getMaxHp() > oldMax) state.setCurrentHp(oldCurrent + state.getMaxHp() - oldMax);
+		});
+		for (const key of carriedKeys) {
+			const expected = expectedManifest.decisions.find(decision => decision.semanticKey === key);
+			const current = this._manifest.decisions.find(decision => decision.semanticKey === key);
+			if (!expected || !current) continue;
+			const fingerprint = this._getDecisionFingerprint(current, this._manifest);
+			if (fingerprint !== this._getDecisionFingerprint(expected, expectedManifest)) continue;
+			this._touchedDecisionKeys.delete(key);
+			this._baselineDecisionIssues.set(key, fingerprint);
+		}
+	}
+
 	syncCleanDraft () {
 		if (!this._candidateState) {
 			this.begin();
@@ -297,10 +403,19 @@ class CharacterSheetRespecEngine {
 	}
 
 	_getDecisionFingerprint (decision, manifest) {
-		const contract = row => {
+		const contract = (row, {isAncestor = false} = {}) => {
 			const provenance = {...row.provenance};
 			delete provenance.characterLevel;
 			delete provenance.acquisitionLevel;
+			let options = row.options || [];
+			if (isAncestor && row.status === "resolved"
+				&& ["feat", "asiOrFeat", "classFeatProgressionFeat", "originFeat", "nestedFeat"].includes(row.type)) {
+				const selected = row.selection?.mode === "feat" ? row.selection.feat : row.selection;
+				const uid = CharacterSheetProgression.getEntityUid(selected);
+				const matched = options.filter(option => CharacterSheetProgression.getEntityUid(option) === uid);
+				// Unselected feat eligibility is not an acquired parent's contract.
+				if (uid && matched.length === 1) options = matched;
+			}
 			return CharacterSheetRespecEngine._getSemanticValue({
 				semanticKey: row.semanticKey,
 				type: row.type,
@@ -318,7 +433,7 @@ class CharacterSheetRespecEngine {
 				rootSemanticKey: row.rootSemanticKey,
 				meta: row.meta,
 				receipt: row.receipt,
-				options: (row.options || []).map(option => CharacterSheetRespecEngine._getSemanticValue(option))
+				options: options.map(option => CharacterSheetRespecEngine._getSemanticValue(option))
 					.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
 			});
 		};
@@ -331,7 +446,7 @@ class CharacterSheetRespecEngine {
 			seen.add(parentKey);
 			const parent = byKey.get(parentKey);
 			if (!parent) return null;
-			lineage.push(contract(parent));
+			lineage.push(contract(parent, {isAncestor: true}));
 			parentKey = parent.parentSemanticKey;
 		}
 		return JSON.stringify({decision: contract(decision), lineage});
@@ -587,13 +702,13 @@ class CharacterSheetRespecEngine {
 			const isOriginAbility = decision.type === "nestedAbility"
 				&& decision.scope === "origin"
 				&& ["race", "background"].includes(decision.provenance?.ownerType);
-			effects.push(...(featEffects || values.map(value => ({
+			effects.push(...(featEffects || values.map((value, index) => ({
 				type: decision.type === "nestedAbility"
 					? isOriginAbility ? "abilityBonusDelta" : "abilityDelta"
 					: "configuration",
 				sourceDecisionKey: decision.semanticKey,
 				ability: decision.type === "nestedAbility" ? String(value) : undefined,
-				amount: decision.type === "nestedAbility" ? amount : undefined,
+				amount: decision.type === "nestedAbility" ? decision.meta?.descriptorRules?.originAbilityWeights?.[index] ?? amount : undefined,
 				before: decision.type === "nestedAbility"
 					? isOriginAbility
 						? decision.meta?.receiptPreviousAbilityBonus?.[String(value || "").toLowerCase()]
@@ -839,6 +954,12 @@ class CharacterSheetRespecEngine {
 		const decision = this.getDecision(decisionId);
 		if (!decision) throw new Error("That progression decision is no longer available.");
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
+		const originWeights = decision.meta?.descriptorRules?.originAbilityWeights;
+		if (originWeights && (!Array.isArray(selection) || selection.length !== originWeights.length
+			|| selection.some(value => !(decision.options || []).includes(value))
+			|| new Set(selection).size !== selection.length)) {
+			throw new Error("Choose a different ability for each species bonus.");
+		}
 		const unresolvedLanguages = CharacterSheetProgression.getUnresolvedRogueLanguages({
 			state: this._candidateState,
 			manifest: this._manifest,

@@ -824,6 +824,33 @@ newly recorded picks. Builder persists Tasha reassignment on the later
 Abilities step; Respec never reconstructs absent Tasha choices from
 aggregate scores.
 
+Starting-score editing uses engine `getStartingAbilityDistribution()` and
+`stageStartingAbilityDistribution({method, scores})`, with a stable
+`base:ability-scores` configuration independent of the species root. Rebase
+receipt coordinates, not actual acquired deltas: a capped zero remains zero.
+Incomplete creation evidence is labelled, not an editing prohibition.
+Unchanged incomplete feat children retain their issue fingerprint when only
+unselected alternatives change eligibility: resolved feat ancestors fingerprint
+the uniquely selected legal option, while direct issue contracts remain strict.
+
+Species and background replacements share the isolated origin-draft renderer
+and staging boundary. A species draft includes newly applicable background
+ability obligations. Alternative ability blocks use the shared origin
+distribution selector; weighted picks retain their actual individual amounts.
+Exact grouped race-language normalization repairs scalar ownership receipts and
+persists its marker through rediscovery. Do not infer language removal from
+species name/manifest presence alone: the exact selection and receipt must
+prove ownership, and independent or unreceipted legacy evidence survives.
+
+Structured acquisition parsing is also `findFeatureOptions`' fallback, not a
+second parser. Durable Blessed Strikes evidence can supply missing compatibility
+history; replacement leaves one exact-owner option and preserves domain grants.
+Modern consumers call `getChosenBlessedStrikesOption({classSource})`; ambiguity
+returns `null`. The unscoped no-class compatibility fallback is not an effect
+eligibility contract.
+Missing owner metadata and definition-source-only aliases require one Cleric
+class, even on scoped reads; explicit acquisition owners remain source-scoped.
+
 Choice discovery is catalog-backed but catalog-transient. The production census
 must classify structured options, union grants, recurring pools,
 `featProgression`, string/object spell filters, reviewed prose fallbacks, and
