@@ -7,6 +7,7 @@ describeCharacter({
 		...PRESET_FULL_TIME_CLERIC,
 		abilityPriority: ["wis", "con", "dex", "str", "int", "cha"],
 		signatureSpells: ["Sacred Flame", "Guidance", "Cure Wounds"],
+		preferredFeatureChoices: {"Blessed Strikes": "Potent Spellcasting"},
 	},
 	midTierLoadout: [
 		{name: "Mace", equipped: true},
@@ -183,6 +184,15 @@ describeCharacter({
 			name: "Potent Spellcasting",
 			kind: "passive",
 			effects: [{kind: "stateCalc", path: "hasPotentSpellcasting", exact: true}],
+		},
+		{
+			level: 14,
+			name: "Improved Blessed Strikes",
+			kind: "passive",
+			effects: [
+				{kind: "stateCalc", path: "hasImprovedPotentSpellcasting", exact: true},
+				{kind: "featureCalculationDerivedFrom", property: "improvedPotentSpellcastingTempHp", equals: "abilityMod", ability: "wis", multiplier: 2},
+			],
 		},
 		{
 			level: 17,

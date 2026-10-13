@@ -39,6 +39,8 @@ level-8 benefit. PHB chassis/domain behavior stays automatic.
 multiclass Cleric/Druid cannot borrow the other class's bonus. The public
 `hasPotentSpellcasting`/`potentSpellcastingBonus` compatibility fields still
 describe an available channel; absent channels leave those fields absent.
+Append each channel from that class's own grant verdict, never the shared
+`hasPotentSpellcasting` flag set by another class or stored feature.
 `getCantripDamageBonus` applies equivalent Potent grants once per cantrip.
 
 Selected Potent plus the actual source-authored level-14 upgrade exposes
@@ -52,6 +54,10 @@ Feature consumers pass `state.getClericFeatureDisplayContext()` into
 Projection merges only proven active equivalents, retains provenance, excludes
 custom/manual and foreign-subclass rows, and labels a superseded alternative
 inactive without deleting stored features.
+TGTT reselects retain definition `source: XPHB` but use acquisition
+`classSource: TGTT`; match their level-7 owner decision key supplied by the state
+context. Keep verified legacy XPHB-definition rows compatible, without accepting
+foreign class sources or decision keys.
 
 ## How It Works
 

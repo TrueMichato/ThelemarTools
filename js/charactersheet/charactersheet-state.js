@@ -32745,6 +32745,7 @@ class CharacterSheetState {
 				case "Cleric": {
 					const source = cls.source || "PHB";
 					const is2024 = source === "XPHB" || source === "TGTT";
+					let hasClericPotentSpellcasting = false;
 
 					// Ritual Casting — Clerics can ritual-cast prepared spells with ritual tag
 					calculations.hasRitualCasting = true;
@@ -32865,8 +32866,7 @@ class CharacterSheetState {
 									}
 									if (level >= 6) calculations.hasImprovedFlare = true;
 									if (level >= 8) {
-										calculations.hasPotentSpellcasting = true;
-										calculations.potentSpellcastingBonus = wisMod;
+										hasClericPotentSpellcasting = true;
 									}
 									if (level >= 17) calculations.hasCoronaOfLight = true;
 								}
@@ -32923,8 +32923,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8)
 								if (!is2024 && level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Visions of the Past (level 17)
@@ -33084,8 +33083,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8)
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Keeper of Souls (level 17)
@@ -33154,8 +33152,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8)
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Expansive Bond (level 17)
@@ -33266,8 +33263,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8)
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Arcane Mastery (level 17): four wizard spells, one each of
@@ -33297,8 +33293,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8): +WIS to cantrip damage
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Heavenly Beauty (level 17): attackers must make WIS save
@@ -33362,8 +33357,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8): +WIS to cantrip damage
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Night Supreme (level 17): 60ft aura, disadvantage on saves
@@ -33393,8 +33387,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8): +WIS to cantrip damage
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Supplicant of the Flesh (level 17): damage doesn't break charm
@@ -33423,8 +33416,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8): +WIS to cantrip damage
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Mantle of Insanity (level 17): redirect attacks, WIS mod uses
@@ -33464,8 +33456,7 @@ class CharacterSheetState {
 
 								// Potent Spellcasting (level 8): +WIS to cantrip damage
 								if (level >= 8) {
-									calculations.hasPotentSpellcasting = true;
-									calculations.potentSpellcastingBonus = wisMod;
+									hasClericPotentSpellcasting = true;
 								}
 
 								// Temporal Mastery (level 17): time stop, age control
@@ -33481,10 +33472,10 @@ class CharacterSheetState {
 					// "add your Wisdom modifier to the damage you deal with any CLERIC
 					// cantrip" — record the owning class so the damage roll can scope the
 					// bonus to that class's cantrips instead of every cantrip on the sheet.
-					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
-						calculations.potentSpellcastingClass = cls.name;
-					}
-					if (calculations.hasPotentSpellcasting) {
+					if (hasClericPotentSpellcasting) {
+						calculations.hasPotentSpellcasting = true;
+						calculations.potentSpellcastingBonus = this.getAbilityMod("wis");
+						calculations.potentSpellcastingClass ||= cls.name;
 						(calculations.cantripDamageBonuses ||= []).push({
 							className: cls.name, classSource: source, bonus: this.getAbilityMod("wis"),
 						});
@@ -37220,6 +37211,9 @@ class CharacterSheetState {
 			clericSource: cleric.source,
 			clericSubclass: this.getEffectiveSubclassForClass(cleric),
 			blessedStrikesOption: this.getChosenBlessedStrikesOption({classSource: cleric.source}),
+			blessedStrikesDecisionKey: globalThis.CharacterSheetProgression?.getSemanticKey?.({
+				className: cleric.name, classSource: cleric.source, classLevel: 7, type: "featureChoice", sourceKey: "Blessed Strikes",
+			}) || null,
 		};
 	}
 

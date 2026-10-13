@@ -7371,9 +7371,19 @@ class CharacterSheetClassUtils {
 		return {regularFeatures, optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions};
 	}
 
-	static mergeEquivalentFeaturesForDisplay (/** @type {*[]} */ features = [], {clericSource = null, clericSubclass = null, blessedStrikesOption = null} = {}) {
+	static mergeEquivalentFeaturesForDisplay (/** @type {*[]} */ features = [], {clericSource = null, clericSubclass = null, blessedStrikesOption = null, blessedStrikesDecisionKey = null} = {}) {
 		if (!["XPHB", "TGTT"].includes(clericSource) || !clericSubclass) return [...features];
 		const eq = (a, b) => !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase();
+		const definitionDecisionKey = globalThis.CharacterSheetProgression?.getSemanticKey?.({
+			className: "Cleric", classSource: "XPHB", classLevel: 7, type: "featureChoice", sourceKey: "Blessed Strikes",
+		});
+		const matchesOptionOwner = feature => feature.classSource === "XPHB"
+			? !feature.sourceDecisionKey || eq(feature.sourceDecisionKey, definitionDecisionKey) || eq(feature.sourceDecisionKey, blessedStrikesDecisionKey)
+			: eq(feature.classSource, clericSource)
+				&& feature.isFeatureOption === true
+				&& feature.featureType === "Class"
+				&& Number(feature.acquisitionLevel) === 7
+				&& eq(feature.sourceDecisionKey, blessedStrikesDecisionKey);
 		const domains = features.filter(feature =>
 			["Potent Spellcasting", "Divine Strike"].some(name => eq(feature.name, name))
 			&& eq(feature.className, "Cleric")
@@ -7390,7 +7400,7 @@ class CharacterSheetClassUtils {
 			eq(feature.name, blessedStrikesOption)
 			&& eq(feature.parentFeature, "Blessed Strikes")
 			&& eq(feature.className, "Cleric")
-			&& feature.classSource === "XPHB"
+			&& matchesOptionOwner(feature)
 			&& feature.source === "XPHB"
 			&& Number(feature.level) === 7
 			&& !feature.isSubclassFeature

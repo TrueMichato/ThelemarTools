@@ -2,6 +2,7 @@ import {jest} from "@jest/globals";
 import fs from "node:fs";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
@@ -12,6 +13,8 @@ const ClassUtils = globalThis.CharacterSheetClassUtils;
 const Spells = globalThis.CharacterSheetSpells;
 const Combat = globalThis.CharacterSheetCombat;
 const clericData = JSON.parse(fs.readFileSync(new URL("../../../data/class/class-cleric.json", import.meta.url), "utf8"));
+const druidData = JSON.parse(fs.readFileSync(new URL("../../../data/class/class-druid.json", import.meta.url), "utf8"));
+const phbSpells = JSON.parse(fs.readFileSync(new URL("../../../data/spells/spells-phb.json", import.meta.url), "utf8")).spell;
 const brew = JSON.parse(fs.readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url), "utf8"));
 const boomingBlade = JSON.parse(fs.readFileSync(new URL("../../../data/spells/spells-tce.json", import.meta.url), "utf8")).spell.find(spell => spell.name === "Booming Blade");
 const parent = clericData.classFeature.find(feature => feature.name === "Blessed Strikes" && feature.source === "XPHB");
@@ -126,6 +129,29 @@ describe("Source-owned Cleric Potent calculations", () => {
 		expect(state.getCantripDamageBonus({level: 1, sourceClass: "Druid"}).bonus).toBe(0);
 	});
 
+	it.each([["Cleric", "Life"], ["Druid", "Life"], ["Cleric", "Light"], ["Druid", "Light"]])("uses each real class's own Potent grant with %s first and PHB %s domain", (first, domain) => {
+		const state = makeState({source: "PHB", level: 8, domain});
+		state.setClassCatalog([...clericData.class, ...druidData.class, ...brew.class]);
+		state.setClassFeatureCatalog([...clericData.classFeature, ...druidData.classFeature, ...brew.classFeature], [...clericData.subclassFeature, ...druidData.subclassFeature, ...brew.subclassFeature]);
+		state.addClass({name: "Druid", source: "XPHB", level: 8});
+		const druidGrant = druidData.classFeature.find(feature => feature.name === "Potent Spellcasting" && feature.source === "XPHB");
+		state.addFeature(ClassUtils.buildFeatureStateObject(druidGrant));
+		if (domain === "Light") {
+			const domainGrant = clericData.subclassFeature.find(feature => feature.name === "Potent Spellcasting" && feature.subclassShortName === "Light" && feature.source === "PHB");
+			state.addFeature(ClassUtils.buildFeatureStateObject(domainGrant, {isSubclassFeature: true}));
+		}
+		if (first === "Druid") state._data.classes.reverse();
+		state.addCantrip({...phbSpells.find(spell => spell.name === "Sacred Flame"), sourceClass: "Cleric", sourceClassSource: "PHB"});
+		state.addCantrip({...phbSpells.find(spell => spell.name === "Thorn Whip"), sourceClass: "Druid", sourceClassSource: "XPHB"});
+		const clericSpell = state.getCantrips().find(spell => spell.name === "Sacred Flame");
+		const druidSpell = state.getCantrips().find(spell => spell.name === "Thorn Whip");
+		expect(clericSpell).toMatchObject({sourceClass: "Cleric", sourceClassSource: "PHB"});
+		expect(druidSpell).toMatchObject({sourceClass: "Druid", sourceClassSource: "XPHB"});
+		expect(state.getCantripDamageBonus(clericSpell).bonus).toBe(domain === "Light" ? 3 : 0);
+		expect(state.getCantripDamageBonus(druidSpell).bonus).toBe(3);
+		expect(state.getFeatureCalculations().cantripDamageBonuses.filter(channel => channel.className === "Cleric")).toHaveLength(domain === "Light" ? 1 : 0);
+	});
+
 	it("a contradictory choice is unresolved for both mechanic channels", () => {
 		const state = makeState({domain: "Time"});
 		state._recordChosenSubfeature({
@@ -163,6 +189,54 @@ describe("Source-owned Cleric Potent calculations", () => {
 });
 
 describe("Exact equivalent-feature projection", () => {
+	function reselectPotent (state) {
+		return ClassUtils.replaceStructuredFeatureChoice({
+			state,
+			page: {getClasses: () => brew.class},
+			catalogs: {classFeatures: [...clericData.classFeature, ...brew.classFeature], subclassFeatures: [...clericData.subclassFeature, ...brew.subclassFeature]},
+			characterLevel: 7,
+			classLevel: 7,
+			className: "Cleric",
+			classSource: "TGTT",
+			parentFeature: "Blessed Strikes",
+			oldChoice: {choice: "Potent Spellcasting", source: "XPHB", acquisitionLevel: 7},
+			newOption: potent,
+		});
+	}
+
+	it("projects the actual acquisition-owned reselect producer through partition and reload", () => {
+		const state = makeState({source: "TGTT", domain: "Time"});
+		const {feature} = reselectPotent(state);
+		expect(feature).toMatchObject({source: "XPHB", classSource: "TGTT", acquisitionLevel: 7, isFeatureOption: true, sourceDecisionKey: "cleric|tgtt:cl7:featurechoice:blessed-strikes:slot0"});
+		const check = candidate => {
+			expect(candidate.getChosenBlessedStrikesOption({classSource: "TGTT"})).toBe("Potent Spellcasting");
+			const rows = ClassUtils.mergeEquivalentFeaturesForDisplay(candidate.getFeatures(), candidate.getClericFeatureDisplayContext());
+			expect(rows.filter(row => row.name === "Potent Spellcasting")).toHaveLength(1);
+			expect(rows.find(row => row.name === "Potent Spellcasting").provenanceSources).toHaveLength(2);
+			const partition = ClassUtils.partitionClassFeaturesForDisplay(candidate.getFeatures(), candidate.getClericFeatureDisplayContext());
+			expect(partition.featureOptions.filter(row => row.name === "Potent Spellcasting")).toHaveLength(1);
+		};
+		check(state);
+		const loaded = makeState({source: "TGTT", domain: "Time"});
+		loaded.loadFromJson(state.toJson());
+		check(loaded);
+	});
+
+	it("does not absorb foreign, manual, or wrong-decision copies beside a real owned reselect", () => {
+		const state = makeState({source: "TGTT", domain: "Time"});
+		const {feature} = reselectPotent(state);
+		const foreignKey = globalThis.CharacterSheetProgression.getSemanticKey({className: "Cleric", classSource: "TST", classLevel: 7, type: "featureChoice", sourceKey: "Blessed Strikes"});
+		const distinct = [
+			{...feature, id: "foreign", classSource: "TST", sourceDecisionKey: foreignKey},
+			{...feature, id: "manual", isCustom: true},
+			{...feature, id: "wrong-decision", sourceDecisionKey: foreignKey},
+		];
+		state._data.features.push(...distinct);
+		const rows = ClassUtils.mergeEquivalentFeaturesForDisplay(state.getFeatures(), state.getClericFeatureDisplayContext());
+		expect(rows.find(row => row.id === feature.id).provenanceSources).toHaveLength(2);
+		for (const row of distinct) expect(rows.find(projected => projected.id === row.id)).toEqual(row);
+	});
+
 	it("merges the selected and inherited Time grants without mutating or swallowing other rows", () => {
 		const state = makeState({source: "TGTT", domain: "Time"});
 		state.addFeature({name: "Potent Spellcasting", source: "TST", className: "Cleric", description: "Manual distinct feature."});

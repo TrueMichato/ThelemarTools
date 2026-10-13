@@ -77,6 +77,14 @@ Drives the level-up wizard for L2+ (and multiclass entries).
 - `selectFeat(name)`.
 - `selectSubclass(name, sourceAbbv?)` — disambiguated by source if
   provided; falls back to first-match if not.
+- `selectFeatureOption(featureName, optionName, {onlyIfPresent?})` — exact
+  single-option pick with checked-result verification; unchecks an existing
+  auto-filled option through its real change handler before selecting another.
+  Strict by default; global
+  preset preferences opt in to returning `false` when that named group is
+  absent at the current level. A present group with a missing option still
+  fails. `levelUpTo` logs deferred preferences; feature-effect assertions
+  must verify the eventual acquisition.
 - `addKnownSpell(name)` / `addFirstAvailableKnownSpells(count)`.
 - `selectOptionalFeature(name)` / `selectFirstAvailableOptions()`.
 - `selectRequiredEfaArtificerPlans()` — opens the shared Replicate
