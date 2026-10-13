@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through multi-target source-owned lifecycle validator migration 0013
+> **Status:** Implemented through semantic event-reference lookup migration 0014
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -114,6 +114,13 @@ Current migrations:
   source-owned candidate while another eligible leg keeps the parent live, while retaining source-only
   `approved_by_source`, invalid source `pending`/peer `approved`, peer auto-approval prohibition, and every
   selection/finalization constraint.
+- 0014 partial `(campaign_id, event_id)` indexes for all twelve existing semantic parent, target and
+  finalization event foreign keys. PostgreSQL must verify those references for every deleted event; without
+  supporting indexes, unrelated retained workflows can turn bounded event cleanup into repeated table scans.
+  Existing foreign keys, rows, grants, retention rules, usage markers, protocol and capabilities are unchanged.
+  The runner builds the indexes in one transaction, not concurrently. These builds take write-blocking locks
+  on the three semantic tables until commit; growth-dependent build time and a release/maintenance window
+  require separate operator approval before live application.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
@@ -148,14 +155,18 @@ Migration 0005 is additive apart from terminalizing legacy `structured_effect` r
 Protocol v3 never resolves those legacy bodies. Migration 0012 adds only a partial target-owner recovery index
 over existing migration-0011 columns; it changes no runtime authority, protocol, capability, retention, or
 rollback marker semantics. Migration 0013 replaces only the validator function; it adds no schema/data shape.
-The disposable PostgreSQL stack applies 0001-0013, grants the
-runtime role, boots the production image against required version 0013, and runs semantic role/replay/
+Migration 0014 is an additive, previous-application-compatible index-only expansion. Predecessor applications
+retain the same read/write shapes and can leave the indexes in place on application rollback. It does not
+override migration 0011's schema-before-use restriction or permit pre-0011 rollback after first use.
+The disposable PostgreSQL stack applies 0001-0014, grants the
+runtime role, boots the production image against required version 0014, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
 A2's immutable migration 0010 (`0010_source_cost_binding_identity.sql`) precedes ADR 0020's additive
 `0011_multi_target_semantic_operations.sql`; A3's bounded participant recovery adds
 `0012_multi_target_participant_recovery.sql`, followed by validator repair
-`0013_multi_target_source_owned_lifecycle.sql`. All migrations and policy entries are checked in.
+`0013_multi_target_source_owned_lifecycle.sql`. The event-reference lookup repair follows as
+`0014_semantic_event_reference_indexes.sql`. All migrations and policy entries are checked in.
 The policy phase is `expand` and `previousAppCompatible: true` describes only schema-before-use: a true pre-0011
 binary is operationally compatible only while the singleton `hub.semantic_multi_target_usage` marker is absent
 and normalized history counts remain zero. The first

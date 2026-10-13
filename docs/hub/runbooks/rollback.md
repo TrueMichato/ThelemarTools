@@ -65,6 +65,10 @@ snapshot helpers with stricter identity/cardinality semantics; do not restore th
 function as rollback. A predecessor application can run with migration 0010 in place because the schema and
 persisted source-cost descriptors are unchanged.
 
+Migration 0014 adds only partial lookup indexes for existing semantic event foreign keys. Application rollback
+leaves them in place; do not drop the indexes, reverse the migration, or change foreign-key protections to
+speed cleanup. The index-only expansion does not change the migration-0011 usage-marker decision below.
+
 Migration 0011 is previous-app-compatible only before use. A true pre-0011 rollback requires the preflight above
 to pass with an absent marker and zero normalized history. Once `hub.semantic_multi_target_usage` exists, the
 normal rollback target must be a bridge/r10+ release which understands `target_set_version`, normalized target

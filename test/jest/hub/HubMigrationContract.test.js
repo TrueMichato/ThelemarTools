@@ -14,6 +14,7 @@ const sourceCostBindingIdentitySql = fs.readFileSync(new URL("../../../server/mi
 const multiTargetOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0011_multi_target_semantic_operations.sql", import.meta.url), "utf8");
 const multiTargetParticipantRecoverySql = fs.readFileSync(new URL("../../../server/migrations/0012_multi_target_participant_recovery.sql", import.meta.url), "utf8");
 const multiTargetSourceOwnedLifecycleSql = fs.readFileSync(new URL("../../../server/migrations/0013_multi_target_source_owned_lifecycle.sql", import.meta.url), "utf8");
+const semanticEventReferenceIndexesSql = fs.readFileSync(new URL("../../../server/migrations/0014_semantic_event_reference_indexes.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
 const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
@@ -342,6 +343,21 @@ describe("campaign hub first migration contract", () => {
 		expect(multiTargetSourceOwnedLifecycleSql).not.toMatch(/\b(?:CREATE TABLE|ALTER TABLE|CREATE INDEX|INSERT INTO|UPDATE hub\.)\b/);
 	});
 
+	it("adds only nullable-event lookup indexes in migration 0014 without weakening foreign keys", () => {
+		for (const [table, columns] of [
+			["semantic_operations", ["created_event_id", "applied_event_id", "terminal_event_id", "source_cost_event_id", "ready_event_id", "finalized_event_id"]],
+			["semantic_operation_targets", ["invitation_event_id", "response_event_id", "lifecycle_event_id", "leg_event_id"]],
+			["semantic_operation_finalizations", ["source_event_id", "terminal_event_id"]],
+		]) {
+			for (const column of columns) {
+				expect(semanticEventReferenceIndexesSql).toContain(`ON hub.${table} (campaign_id, ${column})`);
+				expect(semanticEventReferenceIndexesSql).toContain(`WHERE ${column} IS NOT NULL;`);
+			}
+		}
+		expect(semanticEventReferenceIndexesSql.match(/CREATE INDEX /g)).toHaveLength(12);
+		expect(semanticEventReferenceIndexesSql).not.toMatch(/\b(?:ALTER|DROP|UPDATE|DELETE|INSERT|GRANT|REVOKE|BEGIN|COMMIT|ROLLBACK)\b/);
+	});
+
 	it("classifies every immutable migration for release rollback compatibility", () => {
 		expect(Object.keys(migrationPolicy.migrations).sort()).toEqual(migrationVersions);
 		expect(migrationPolicy.migrations["0007"]).toMatchObject({
@@ -369,6 +385,11 @@ describe("campaign hub first migration contract", () => {
 			phase: "expand",
 			previousAppCompatible: true,
 		});
+		expect(migrationPolicy.migrations["0014"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
+		expect(migrationPolicy.migrations["0014"].notes).toMatch(/block writes/i);
 		expect(migrationPolicy.migrations["0011"].notes).toMatch(/usage marker/i);
 	});
 });

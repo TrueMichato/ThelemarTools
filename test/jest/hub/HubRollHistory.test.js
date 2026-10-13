@@ -143,6 +143,39 @@ for (const [name, describeStore, isPostgres] of [
 		});
 
 		if (isPostgres) {
+			it("indexes every semantic event-reference foreign key without weakening retention", async () => {
+				const {rows} = await pool.query(`
+					SELECT constraint_row.conname AS constraint_name,
+						EXISTS (
+							SELECT 1
+							FROM pg_index index_row
+							WHERE index_row.indrelid = constraint_row.conrelid
+								AND index_row.indisvalid AND index_row.indisready
+								AND index_row.indkey[0] = constraint_row.conkey[1]
+								AND index_row.indkey[1] = constraint_row.conkey[2]
+								AND (
+									index_row.indpred IS NULL
+									OR pg_get_expr(index_row.indpred, index_row.indrelid)
+										= format('(%I IS NOT NULL)', event_column.attname)
+								)
+						) AS indexed
+					FROM pg_constraint constraint_row
+					JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+					JOIN pg_attribute event_column ON event_column.attrelid = constraint_row.conrelid
+						AND event_column.attnum = constraint_row.conkey[2]
+					WHERE constraint_row.contype = 'f'
+						AND constraint_row.confrelid = 'hub.domain_events'::regclass
+						AND table_row.oid IN (
+							'hub.semantic_operations'::regclass,
+							'hub.semantic_operation_targets'::regclass,
+							'hub.semantic_operation_finalizations'::regclass
+						)
+					ORDER BY constraint_row.conname
+				`);
+				expect(rows).toHaveLength(12);
+				expect(rows.filter(row => !row.indexed)).toEqual([]);
+			});
+
 			it("reads sparse own history behind 100,000 unrelated events within the query and byte budgets", async () => {
 				const own = [];
 				for (let i = 0; i < 205; i++) own.push((await log({total: i})).event.id);

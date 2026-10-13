@@ -110,6 +110,8 @@ exact cleanup. Authentication failure/tampering must leave no plaintext output.
    - migration-0010 source-cost binding functions preserve trimmed UUID-only case folding, case-sensitive
      non-UUID ids, and duplicate match cardinality;
    - migration-0011 normalized parent/target/finalization constraints and role grants are present;
+   - migration-0014 semantic event-reference indexes are valid and ready if included in the exact released
+     migration set; the restore must retain foreign-key enforcement and not bypass cleanup with disabled triggers;
    - `hub.semantic_multi_target_usage` exactly matches the source archive: absent before use or present with one
      unchanged singleton after use. Never clear it to make a rollback preflight pass;
    - exact released migration and role-grant images complete successfully;

@@ -186,6 +186,14 @@ and print both the measurement and the no-index/unbounded-growth caveat. Content
 duplicate-key writes with reads and force explicit authority-lock timeout. These are disposable local
 checks, not Oracle load evidence or physical acceptance.
 
+The populated stress fixture deletes exactly its 100,000 synthetic rows only after the read assertions,
+preserving the 10s PostgreSQL statement limit, 30s body and 5s hook limits. Migration 0014 supplies partial
+campaign/event lookup indexes for all twelve semantic event foreign keys, without disabling retention
+constraints or changing the Roll History read query. The actual runtime-role catalog regression checks
+every existing semantic event foreign key has a valid, ready, eligible leading index. The original
+published-head CI failure was the synthetic-row DELETE during FK verification, not the history read
+(27.3ms/108131 bytes); browser tests were never reached. Local passes do not replace a new published-head gate.
+
 ### Source-candidate validation residual
 
 The correction candidate's initial full stack passed 77 PostgreSQL checks and 49 of 50 browser

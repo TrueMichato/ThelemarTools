@@ -253,6 +253,13 @@ authority. The first accepted proposal sets a permanent FK-independent usage mar
 true pre-0011 binary is forbidden even after workflow cleanup and requires an A3-aware bridge release unless a
 separately reviewed destructive history/event/outbox/recovery export/purge is approved.
 
+The post-integration cleanup repair adds migration 0014's twelve partial campaign/event indexes for the
+existing semantic parent/target/finalization foreign keys. It changes no authority, data, retention,
+protocol, enrollment or usage-marker behavior; application readiness requires 0014. Live transactional
+index builds still require a separately approved write-blocking release/maintenance window. The original
+published-head stress read passed, but its fixture DELETE timed out during FK verification before browsers ran;
+that failed CI is not replaced by local diagnostic passes or treated as deployment/enablement evidence.
+
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on
 campaign identity, party readiness, attention, recent activity, and one role-specific next action. Existing effects,
 transfers, XP, item awards, membership, homebrew, and rules capabilities remain available through progressive

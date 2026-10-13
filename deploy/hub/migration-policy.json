@@ -65,6 +65,11 @@
       "phase": "expand",
       "previousAppCompatible": true,
       "notes": "Replaces only the deferred multi-target shape validator so source-owned candidate legs may enter existing lifecycle-terminal response states while another eligible leg keeps the parent live. Tables, columns, indexes, persisted rows, privileges, protocol, capability, retention, selection, and finalization semantics are unchanged."
+    },
+    "0014": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds partial campaign/event lookup indexes for all twelve existing semantic-operation event foreign keys. No rows, constraints, privileges, protocol, capability, retention or irreversible usage markers change; predecessor applications can leave the indexes in place. The transactional builds block writes to the three indexed tables until commit, so live application requires a separately approved release/maintenance window. Existing migration-0011 schema-before-use and post-use rollback restrictions remain unchanged."
     }
   }
 }
