@@ -15,6 +15,35 @@ The `CharacterSheetSpells` module handles all spellcasting functionality:
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661
 
+## Cleric Potent Spellcasting and Damage Follow-Ups
+
+On an XPHB or TGTT Cleric, the source-owned level-7 Blessed Strikes choice
+supersedes the older domain's Potent Spellcasting or Divine Strike. Missing,
+contradictory, or foreign-owner choices grant neither alternative. Potent adds
+Wisdom to Cleric cantrip damage once, including when an inherited domain grant
+is also present. The feature lists merge proven equivalent grants for display
+only and keep both provenances; an older different alternative remains readable
+but is labeled inactive. Classic PHB domain benefits are unchanged.
+
+With the actual level-14 Improved Blessed Strikes upgrade and selected Potent,
+a committed Cleric cantrip's damage roll opens a nonblocking side offer. Confirm
+that a **creature actually took damage**, then choose **Gain temp HP** or **Give
+temp HP**. The amount is twice the effective Wisdom modifier, not extra damage.
+Self and companion choices update their real non-stacking temporary-HP pools.
+Other recipients require a named, explicitly **manual handoff**; no external
+sheet is updated. Another recipient must be within 60 feet of the Cleric,
+not the damaged target. Out-of-range input is rejected, not clamped into range.
+
+Each committed cast has one delivery opportunity; separate damaging cantrips
+can qualify in the same turn. Canceling a picker leaves that offer pending;
+dismissing it ends the opportunity. Character changes, loss of eligibility,
+and reload invalidate stale offers. Weapon-channel cantrips wait for their
+actual rider damage, rather than offering HP when the channel is merely armed.
+
+Reference-tag rolls, item casts, and cantrips with unresolved casting-class
+ownership do not qualify. Reattribute an imported unattributed cantrip to its
+actual class rather than inferring a source from its name.
+
 ## Add from the Spells Reference Page
 
 The Spells page's **Add to Character** action uses the same durable cross-page

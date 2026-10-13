@@ -243,17 +243,28 @@ describe("CS-BUG-113 feature summary and expanded class list", () => {
 			classRow("Duplicate Name", {source: "XPHB", important: true}),
 			classRow("Different Name", {important: true}),
 			classRow("Fourth", {important: true}),
-			classRow("Potent Spellcasting", {source: "XPHB", className: "Cleric", level: 7, parentFeature: "Blessed Strikes", important: true}),
-			classRow("Potent Spellcasting", {source: "TGTT", className: "Cleric", level: 8, subclassShortName: "Time", important: true}),
+			classRow("Potent Spellcasting", {source: "XPHB", className: "Cleric", classSource: "XPHB", level: 7, parentFeature: "Blessed Strikes", important: true}),
+			classRow("Potent Spellcasting", {source: "TGTT", className: "Cleric", classSource: "TGTT", level: 8, subclassShortName: "Time", subclassSource: "TGTT", isSubclassFeature: true, important: true}),
 			optionalRow("Sixth", {important: true}),
 		];
-		const {features, state} = makeFeatures(rows);
+		const {features, state} = makeFeatures(rows, {classes: [{
+			name: "Cleric", source: "XPHB", level: 14, subclass: {name: "Time Domain", shortName: "Time", source: "TGTT"},
+		}]});
+		state._recordChosenSubfeature({
+			parent: "Blessed Strikes",
+			parentSource: "XPHB",
+			parentClass: "Cleric",
+			parentClassSource: "XPHB",
+			level: 7,
+			name: "Potent Spellcasting",
+			source: "XPHB",
+		});
 		const before = state.toJson();
 		features._renderFeaturesSummary();
 		expect(summaryRows()).toHaveLength(5);
 		expect(summaryHtml()).toContain("+1 more class features");
 		await features._pShowMoreFeaturesModal("Class");
-		expect(modalNames()).toEqual(["Duplicate Name", "Duplicate Name", "Different Name", "Fourth", "Sixth", "Potent Spellcasting"]);
+		expect(modalNames()).toEqual(["Duplicate Name", "Duplicate Name", "Different Name", "Fourth", "Potent Spellcasting", "Sixth"]);
 		expect(modalRows()[0].outerHTML).toContain("Duplicate Name details");
 		features._renderClassFeatures();
 		expect(containers.get("charsheet-class-features").innerHTML.match(/>Potent Spellcasting<\/a>/g)).toHaveLength(1);

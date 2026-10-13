@@ -273,12 +273,14 @@ describe("Cleric — Blessed Strikes / Improved Blessed Strikes", () => {
 
 	it("merges canonical duplicate Potent Spellcasting grants for display while retaining both state records", () => {
 		const features = [
-			{id: "blessed-potent", name: "Potent Spellcasting", source: "XPHB", className: "Cleric", level: 7, parentFeature: "Blessed Strikes"},
-			{id: "time-potent", name: "Potent Spellcasting", source: "TGTT", className: "Cleric", subclassShortName: "Time", level: 8},
+			{id: "blessed-potent", name: "Potent Spellcasting", source: "XPHB", className: "Cleric", classSource: "XPHB", level: 7, parentFeature: "Blessed Strikes"},
+			{id: "time-potent", name: "Potent Spellcasting", source: "TGTT", className: "Cleric", classSource: "TGTT", subclassShortName: "Time", subclassSource: "TGTT", isSubclassFeature: true, level: 8},
 		];
-		const display = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features);
+		const display = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features, {
+			clericSource: "TGTT", clericSubclass: {name: "Time Domain", shortName: "Time", source: "TGTT"}, blessedStrikesOption: "Potent Spellcasting",
+		});
 		expect(display).toHaveLength(1);
-		expect(display[0]).toMatchObject({id: "time-potent"});
+		expect(display[0]).toMatchObject({id: "blessed-potent"});
 		expect(display[0].provenanceSources).toHaveLength(2);
 		expect(features).toHaveLength(2);
 	});

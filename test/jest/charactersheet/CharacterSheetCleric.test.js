@@ -1613,12 +1613,30 @@ describe("Cleric Core Class Features (XPHB 2024)", () => {
 
 		it("should have 1d8 Blessed Strikes damage at level 7", () => {
 			state.addClass({ name: "Cleric", source: "XPHB", level: 7 });
+			state._recordChosenSubfeature({
+				parent: "Blessed Strikes",
+				parentSource: "XPHB",
+				parentClass: "Cleric",
+				parentClassSource: "XPHB",
+				level: 7,
+				name: "Divine Strike",
+				source: "XPHB",
+			});
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.blessedStrikesDamage).toBe("1d8");
 		});
 
 		it("should have 2d8 Improved Blessed Strikes damage at level 14", () => {
 			state.addClass({ name: "Cleric", source: "XPHB", level: 14 });
+			state._recordChosenSubfeature({
+				parent: "Blessed Strikes",
+				parentSource: "XPHB",
+				parentClass: "Cleric",
+				parentClassSource: "XPHB",
+				level: 7,
+				name: "Divine Strike",
+				source: "XPHB",
+			});
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.blessedStrikesDamage).toBe("2d8");
 		});

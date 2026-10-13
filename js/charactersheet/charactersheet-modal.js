@@ -34,6 +34,33 @@
 class CharacterSheetModal {
 	static _uid = 0;
 
+	static createRollSideOffer ({title, caption = "", breakdown = "", choicesLabel = "Available follow-ups"}) {
+		if (!this._sideOfferStack?.isConnected) {
+			this._sideOfferStack = e_({outer: `<aside class="cs-post-roll-offer" role="region" aria-label="Optional roll follow-ups"></aside>`});
+			document.body.append(this._sideOfferStack);
+		}
+		const escape = this._escapeHtml;
+		const panel = e_({outer: `<section class="cs-post-roll-offer__panel" aria-label="${escape(title)}">
+			<div class="cs-post-roll-offer__summary">
+				<div class="cs-post-roll-offer__heading">${escape(title)}</div>
+				<div class="cs-post-roll-offer__caption">${escape(caption)}</div>
+				<div class="cs-post-roll-offer__breakdown">${escape(breakdown)}</div>
+			</div>
+			<div class="cs-post-roll-offer__choices" role="group" aria-label="${escape(choicesLabel)}"></div>
+			<div class="cs-post-roll-offer__footer">
+				<button type="button" class="cs-post-roll-offer__dismiss ve-btn ve-btn-xs ve-btn-default">Dismiss offers</button>
+			</div>
+		</section>`});
+		this._sideOfferStack.append(panel);
+		return panel;
+	}
+
+	static removeRollSideOffer (panel) {
+		const stack = panel?.parentElement;
+		panel?.remove();
+		if (stack && stack === this._sideOfferStack && !stack.children.length) stack.remove();
+	}
+
 	/** Elements that can hold focus, in document order. Excludes anything hidden or disabled. */
 	static _FOCUSABLE_SELECTOR = [
 		"a[href]",

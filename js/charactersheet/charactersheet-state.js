@@ -4857,6 +4857,7 @@ class CharacterSheetState {
 		this._gamblerRollSource = null;
 		this._committedFeatureUseHooks = new Map();
 		this._committedSpellCastHooks = new Map();
+		this._improvedPotentSpellcastingReceipts = new Map();
 		this._classSummonTemplateCatalog = [];
 		this._lastClassSummonReconciliationResults = [];
 		this._classSummonReconciliationDeferDepth = 0;
@@ -6065,6 +6066,7 @@ class CharacterSheetState {
 		this._gamblerRollSource = null;
 		this._committedFeatureUseHooks = new Map();
 		this._committedSpellCastHooks = new Map();
+		this._improvedPotentSpellcastingReceipts.clear();
 		this._lastClassSummonReconciliationResults = [];
 		this._classSummonReconciliationDeferDepth = 0;
 	}
@@ -6107,6 +6109,7 @@ class CharacterSheetState {
 			...this._getDefaultState(),
 			...MiscUtil.copyFast(data),
 		};
+		this._improvedPotentSpellcastingReceipts.clear();
 		const hadMovementEconomyUsage = !!data
 			&& typeof data === "object"
 			&& !Array.isArray(data)
@@ -20710,11 +20713,17 @@ class CharacterSheetState {
 		if (spell && spell.level != null && spell.level !== 0) return out;
 
 		const calc = this.getFeatureCalculations();
-		const potent = calc.potentSpellcastingBonus;
-		if (Number.isFinite(potent) && potent > 0
-			&& this.spellCountsForClass(spell, calc.potentSpellcastingClass)) {
-			out.bonus += potent;
-			out.sources.push({name: "Potent Spellcasting", value: potent});
+		const channels = calc.cantripDamageBonuses || [{
+			className: calc.potentSpellcastingClass,
+			bonus: calc.potentSpellcastingBonus,
+		}];
+		for (const channel of channels) {
+			if (!Number.isFinite(channel.bonus) || channel.bonus <= 0
+				|| !this.spellCountsForClass(spell, channel.className)) continue;
+			// Same-named Potent grants do not stack even for a cantrip on both lists.
+			if (out.sources.length) continue;
+			out.bonus += channel.bonus;
+			out.sources.push({name: "Potent Spellcasting", value: channel.bonus});
 		}
 
 		return out;
@@ -33427,6 +33436,11 @@ class CharacterSheetState {
 					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
 						calculations.potentSpellcastingClass = cls.name;
 					}
+					if (calculations.hasPotentSpellcasting) {
+						(calculations.cantripDamageBonuses ||= []).push({
+							className: cls.name, classSource: source, bonus: this.getAbilityMod("wis"),
+						});
+					}
 					break;
 				}
 				case "Druid": {
@@ -34011,6 +34025,11 @@ class CharacterSheetState {
 					// See the Cleric case: scope Potent Spellcasting to its owning class.
 					if (calculations.hasPotentSpellcasting && !calculations.potentSpellcastingClass) {
 						calculations.potentSpellcastingClass = cls.name;
+					}
+					if (isXPHB && level >= 7) {
+						(calculations.cantripDamageBonuses ||= []).push({
+							className: cls.name, classSource: source, bonus: this.getAbilityMod("wis"),
+						});
 					}
 					break;
 				}
@@ -37054,6 +37073,49 @@ class CharacterSheetState {
 	_applyClericDomainCalculations (calculations) {
 		if (!this.hasFeature) return;
 		const clericLevel = this.getClassLevel?.("Cleric") || 0;
+		const clerics = this._data.classes.filter(cls => String(cls.name).toLowerCase() === "cleric");
+		const cleric = clerics.length === 1 ? clerics[0] : null;
+		const isModern = clerics.some(cls => ["XPHB", "TGTT"].includes(cls.source));
+		const option = isModern && cleric && clericLevel >= 7
+			? this.getChosenBlessedStrikesOption({classSource: cleric.source})
+			: null;
+		if (isModern) {
+			calculations.cantripDamageBonuses = (calculations.cantripDamageBonuses || [])
+				.filter(channel => String(channel.className).toLowerCase() !== "cleric");
+			delete calculations.divineStrikeDamage;
+			delete calculations.divineStrikeType;
+			delete calculations.divineStrikeDamageType;
+			delete calculations.blessedStrikesDamage;
+			calculations.hasDivineStrike = option === "Divine Strike";
+			if (option === "Potent Spellcasting") {
+				calculations.cantripDamageBonuses.push({
+					className: cleric.name, classSource: cleric.source, bonus: this.getAbilityMod("wis"),
+				});
+				const improved = this._data.features.some(feature =>
+					feature.name === "Improved Blessed Strikes"
+					&& feature.className === "Cleric"
+					&& feature.classSource === "XPHB"
+					&& feature.source === "XPHB"
+					&& Number(feature.level) === 14
+					&& !feature.isCustom && !feature._isCustom
+					&& !feature.isSubclassFeature);
+				if (clericLevel >= 14 && improved) {
+					calculations.hasImprovedPotentSpellcasting = true;
+					calculations.improvedPotentSpellcastingTempHp = Math.max(0, 2 * this.getAbilityMod("wis"));
+					calculations.improvedPotentSpellcastingClassUid = `${cleric.name}|${cleric.source}`;
+				}
+			}
+		}
+		const potentChannel = calculations.cantripDamageBonuses?.[0];
+		if (potentChannel) {
+			calculations.hasPotentSpellcasting = true;
+			calculations.potentSpellcastingBonus = potentChannel.bonus;
+			calculations.potentSpellcastingClass = potentChannel.className;
+		} else {
+			delete calculations.hasPotentSpellcasting;
+			delete calculations.potentSpellcastingBonus;
+			delete calculations.potentSpellcastingClass;
+		}
 
 		let dsDice = null;
 		let dsType = null;
@@ -37077,8 +37139,11 @@ class CharacterSheetState {
 		// Cleric class) never keeps granting the rider, and the type is forced to a valid
 		// Blessed Strikes damage type (radiant/necrotic) — NOT a superseded 2014 domain type
 		// such as Tempest's thunder.
-		if (clericLevel >= 7 && this.getChosenBlessedStrikesOption?.() === "Divine Strike") {
+		if (isModern && option === "Divine Strike") {
 			dsDice = clericLevel >= 14 ? "2d8" : "1d8";
+			calculations.blessedStrikesDamage = dsDice;
+			calculations.divineStrikeDamage = dsDice;
+			calculations.divineStrikeType = "radiant";
 			dsType = "radiant";
 			dsChoices = ["necrotic", "radiant"];
 			dsName = "Divine Strike (Blessed Strikes)";
@@ -37097,6 +37162,17 @@ class CharacterSheetState {
 				note: dsNote,
 			});
 		}
+	}
+
+	getClericFeatureDisplayContext () {
+		const clerics = this._data.classes.filter(cls => String(cls.name).toLowerCase() === "cleric");
+		const cleric = clerics.length === 1 ? clerics[0] : null;
+		if (!cleric || !["XPHB", "TGTT"].includes(cleric.source) || Number(cleric.level) < 7) return {};
+		return {
+			clericSource: cleric.source,
+			clericSubclass: this.getEffectiveSubclassForClass(cleric),
+			blessedStrikesOption: this.getChosenBlessedStrikesOption({classSource: cleric.source}),
+		};
 	}
 
 	/**
@@ -53892,6 +53968,95 @@ class CharacterSheetState {
 			.slice(0, 50);
 	}
 
+	getImprovedPotentSpellcastingEligibility (receipt) {
+		const record = this._improvedPotentSpellcastingReceipts.get(receipt?.receiptId);
+		if (!record || record.data !== this._data
+			|| !receipt?.committed
+			|| receipt.castingClassUid !== record.receipt.castingClassUid
+			|| receipt.spellUid !== record.receipt.spellUid) {
+			return {eligible: false, reason: "staleOrUncommittedCast"};
+		}
+		if (record.status !== "pending") return {eligible: false, reason: "alreadyResolved"};
+		const calc = this.getFeatureCalculations();
+		const cleric = this._data.classes.find(cls => cls.id === record.classId);
+		if (!cleric || !calc.hasImprovedPotentSpellcasting
+			|| calc.improvedPotentSpellcastingClassUid !== record.receipt.castingClassUid) {
+			return {eligible: false, reason: "featureUnavailable"};
+		}
+		const amount = calc.improvedPotentSpellcastingTempHp;
+		if (!Number.isInteger(amount) || amount <= 0) return {eligible: false, reason: "noTemporaryHpBenefit"};
+		const evidence = record.receipt.damageEvidence;
+		if (!evidence?.damage.length) return {eligible: false, reason: "noDamageEvidence"};
+		const targets = evidence.targets.filter(target => ["damaged", "unconfirmed"].includes(target.outcome));
+		if (evidence.targets.length && !targets.length) return {eligible: false, reason: "noCreatureDamaged"};
+		return {eligible: true, amount, targets, damageEvidence: MiscUtil.copyFast(evidence)};
+	}
+
+	recordImprovedPotentSpellcastingDamage (receipt, damageEvidence) {
+		const record = this._improvedPotentSpellcastingReceipts.get(receipt?.receiptId);
+		if (!record || record.status !== "pending" || record.data !== this._data
+			|| receipt.castingClassUid !== record.receipt.castingClassUid
+			|| receipt.spellUid !== record.receipt.spellUid
+			|| record.receipt.damageEvidence?.damage.length) return false;
+		const evidence = this._normalizeCommittedSpellDamageEvidence(damageEvidence);
+		if (!evidence?.damage.length) return false;
+		record.receipt.damageEvidence = evidence;
+		return true;
+	}
+
+	dismissImprovedPotentSpellcasting (receipt) {
+		const record = this._improvedPotentSpellcastingReceipts.get(receipt?.receiptId);
+		if (!record || record.data !== this._data || record.status !== "pending") return false;
+		record.status = "dismissed";
+		return true;
+	}
+
+	grantImprovedPotentSpellcasting ({receipt, damagedTarget = null, confirmTargetDamaged = false, target = null} = {}) {
+		const eligibility = this.getImprovedPotentSpellcastingEligibility(receipt);
+		if (!eligibility.eligible) return {ok: false, reason: eligibility.reason};
+		const name = String(damagedTarget?.targetName || "").trim();
+		const damaged = eligibility.targets.find(candidate => damagedTarget?.targetId && candidate.targetId
+			? damagedTarget.targetId === candidate.targetId
+			: name && name.toLowerCase() === candidate.targetName.toLowerCase());
+		if (!name || (eligibility.targets.length && !damaged)
+			|| (damaged?.outcome !== "damaged" && confirmTargetDamaged !== true)) {
+			return {ok: false, reason: "creatureDamageNotConfirmed"};
+		}
+		let companion = null;
+		if (target?.type !== "self") {
+			const distance = target?.distanceFeet;
+			if (distance == null || !Number.isFinite(Number(distance)) || Number(distance) < 0 || Number(distance) > 60) {
+				return {ok: false, reason: "recipientOutOfRange"};
+			}
+			if (target?.type === "companion") {
+				companion = this.getCompanions().find(entry => entry.id === target.companionId);
+				if (!companion || companion.active === false
+					|| ["dead", "vanished"].includes(companion.lifecycle?.status)
+					|| String(companion.creatureType || "").toLowerCase() === "object") {
+					return {ok: false, reason: "recipientUnavailable"};
+				}
+			} else if (target?.type !== "external" || !String(target.name || "").trim()) {
+				return {ok: false, reason: "invalidRecipient"};
+			}
+		}
+		const previousTempHp = target.type === "self" ? this.getTempHp() : companion?.hp?.temp ?? null;
+		let applied = false;
+		if (target.type === "self") applied = this.grantTempHp(eligibility.amount);
+		else if (companion) {
+			applied = this.setCompanionTempHp(companion.id, eligibility.amount);
+		}
+		this._improvedPotentSpellcastingReceipts.get(receipt.receiptId).status = "delivered";
+		return {
+			ok: true,
+			amount: eligibility.amount,
+			applied,
+			manual: target.type === "external",
+			targetName: target.type === "self" ? this.getName() || "Self" : companion?.customName || companion?.name || String(target.name).trim(),
+			previousTempHp,
+			currentTempHp: target.type === "self" ? this.getTempHp() : companion?.hp?.temp ?? null,
+		};
+	}
+
 	_getAlchemicalEruptionOwnerStatus () {
 		const efaClass = (this._data.classes || []).find(cls =>
 			`${cls?.name || ""}|${cls?.source || ""}` === CharacterSheetState.EFA_ARTIFICER_CLASS_UID);
@@ -54155,6 +54320,16 @@ class CharacterSheetState {
 			followUpFailed: commitResult?.followUpFailed === true,
 		};
 
+		const clericCalc = this.getFeatureCalculations();
+		if (clericCalc.hasImprovedPotentSpellcasting
+			&& clericCalc.improvedPotentSpellcastingClassUid === receipt.castingClassUid
+			&& receipt.spell.level === 0
+			&& receipt.castType !== "item") {
+			const cleric = this._data.classes.find(cls => `${cls.name}|${cls.source}` === receipt.castingClassUid);
+			this._improvedPotentSpellcastingReceipts.set(receipt.receiptId, {
+				data: this._data, classId: cleric.id, status: "pending", receipt: MiscUtil.copyFast(receipt),
+			});
+		}
 		const hookGroups = [
 			this._committedSpellCastHooks.get(castingClass.uid.toLowerCase()),
 			this._committedSpellCastHooks.get("*"),
@@ -91247,8 +91422,7 @@ class CharacterSheetState {
 				};
 			} else {
 				const previousTempHp = this.getTempHp() || 0;
-				const applied = target.type === "self" && effect.total > previousTempHp;
-				if (applied) this.setTempHp(effect.total);
+				const applied = target.type === "self" && this.grantTempHp(effect.total);
 				result = {
 					kind: "temporaryHitPoints",
 					tempHp: effect.total,
@@ -92741,8 +92915,10 @@ class CharacterSheetState {
 	 */
 	setCompanionTempHp (companionId, amount) {
 		const companion = this.getCompanion(companionId);
-		if (!companion) return;
-		companion.hp.temp = Math.max(companion.hp.temp, amount);
+		const grant = Math.floor(Number(amount));
+		if (!companion || !Number.isFinite(grant) || grant <= companion.hp.temp) return false;
+		companion.hp.temp = grant;
+		return true;
 	}
 
 	/**

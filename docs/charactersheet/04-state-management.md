@@ -269,6 +269,17 @@ abilityScores: {
 
 ### Hit Points
 
+Temporary HP grants use `grantTempHp(amount)` or `grantOwnedTempHp(amount, owner)`,
+never the replacement setter. The pool becomes the higher of its current value
+and the offered amount; a lower or equal grant preserves any existing owner.
+A higher unowned grant clears the previous owner. Damage consumes the shared
+pool with `consumeTempHp`, retaining ownership until the pool reaches zero.
+Save/load preserves the surviving pool and its valid owner.
+
+`setTempHp` and the optional `temp` argument to `setHp` remain direct
+replacement APIs for editing, clearing, and snapshot restoration. Companion
+grants use `setCompanionTempHp`, which likewise retains a higher existing pool.
+
 ```javascript
 hp: {
     current: 45,               // Current HP

@@ -162,6 +162,13 @@ describe("CharacterSheetCombat._applyCombatActionEffects", () => {
 			},
 			getTempHp: () => tempHp,
 			setTempHp: (hp) => { tempHp = hp; return true; },
+			grantTempHp: hp => {
+				const state = new CharacterSheetState();
+				state.setTempHp(tempHp);
+				const applied = state.grantTempHp(hp);
+				tempHp = state.getTempHp();
+				return applied;
+			},
 			getAbilityMod: (ability) => {
 				const mods = {str: 2, dex: 3, con: 1, int: 0, wis: 2, cha: -1};
 				return mods[ability] ?? 0;
@@ -418,6 +425,13 @@ describe("CharacterSheetCombat._useCombatAction — effect pipeline integration"
 			addCondition: (cond) => { conditions.push(cond); return true; },
 			getTempHp: () => tempHp,
 			setTempHp: (hp) => { tempHp = hp; return true; },
+			grantTempHp: hp => {
+				const state = new CharacterSheetState();
+				state.setTempHp(tempHp);
+				const applied = state.grantTempHp(hp);
+				tempHp = state.getTempHp();
+				return applied;
+			},
 			getAbilityMod: () => 2,
 			useKiPoint: () => true,
 			getKiPointsCurrent: () => 5,

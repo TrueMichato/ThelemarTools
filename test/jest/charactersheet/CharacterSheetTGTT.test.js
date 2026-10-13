@@ -5500,7 +5500,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				it("should calculate Potent Spellcasting bonus at level 8", () => {
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source: "PHB",
 						level: 8,
 						subclass: {name: "Beauty Domain", shortName: "Beauty", source: "TGTT"},
 					});
@@ -5595,7 +5595,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				it("should calculate Divine Strike as 1d8 necrotic at level 8", () => {
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source: "PHB",
 						level: 8,
 						subclass: {name: "Blood Domain", shortName: "Blood", source: "TGTT"},
 					});
@@ -5609,7 +5609,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				it("should increase Divine Strike to 2d8 at level 14", () => {
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source: "PHB",
 						level: 14,
 						subclass: {name: "Blood Domain", shortName: "Blood", source: "TGTT"},
 					});
@@ -5728,7 +5728,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				it("should grant Potent Spellcasting at level 8", () => {
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source: "PHB",
 						level: 8,
 						subclass: {name: "Darkness Domain", shortName: "Darkness", source: "TGTT"},
 					});
@@ -5839,11 +5839,11 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				// condition the toggle actually applies.
 
 				/** Build a Time Domain cleric carrying the REAL homebrew subclass + feature data. */
-				function makeTimeCleric (level, {wis = 18} = {}) {
+				function makeTimeCleric (level, {wis = 18, source = "TGTT"} = {}) {
 					const sub = TGTT_BREW.subclass.find(s => s.name === "Time Domain" && s.className === "Cleric");
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source,
 						level,
 						hitDice: "d8",
 						subclass: JSON.parse(JSON.stringify(sub)),
@@ -5961,8 +5961,8 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					expect(readBlinded()).toBe(false);
 				});
 
-				it("Potent Spellcasting adds WIS to cleric cantrip damage (pins the reader)", () => {
-					makeTimeCleric(8, {wis: 18}); // +4
+				it("classic PHB chassis uses the TGTT domain's Potent Spellcasting for cantrip damage", () => {
+					makeTimeCleric(8, {wis: 18, source: "PHB"}); // +4
 					const bonus = state.getCantripDamageBonus({name: "Sacred Flame", level: 0, className: "Cleric"});
 					expect(bonus.bonus).toBe(4);
 					expect(bonus.sources.map(s => s.name)).toContain("Potent Spellcasting");
@@ -6079,7 +6079,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				it("should grant Potent Spellcasting at level 8", () => {
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source: "PHB",
 						level: 8,
 						subclass: {name: "Lust Domain", shortName: "Lust", source: "TGTT"},
 					});
@@ -6153,7 +6153,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						state.reset();
 						state.addClass({
 							name: "Cleric",
-							source: "TGTT",
+							source: "PHB",
 							level: 8,
 							subclass: {name: domain.name, shortName: domain.shortName, source: "TGTT"},
 						});
@@ -6168,7 +6168,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				it("Blood Domain should use Divine Strike instead of Potent Spellcasting", () => {
 					state.addClass({
 						name: "Cleric",
-						source: "TGTT",
+						source: "PHB",
 						level: 8,
 						subclass: {name: "Blood Domain", shortName: "Blood", source: "TGTT"},
 					});

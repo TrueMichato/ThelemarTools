@@ -236,6 +236,16 @@ class CharacterSheetSpells {
 	}
 
 	_registerCommittedSpellCastHooks () {
+		this._unregisterClericPotentHook?.();
+		this._unregisterClericPotentHook = null;
+		const cleric = this._state.getFeatureCalculations?.();
+		if (cleric?.hasImprovedPotentSpellcasting) {
+			this._unregisterClericPotentHook = this._state.registerCommittedSpellCastHook(
+				cleric.improvedPotentSpellcastingClassUid,
+				receipt => this.stageImprovedPotentSpellcasting(receipt),
+				{hookId: "cleric-improved-potent-spellcasting"},
+			);
+		}
 		this._unregisterEfaAlchemicalSavantHook?.();
 		this._unregisterEfaAlchemicalSavantHook = null;
 		if (!this._state.getFeatureCalculations?.().hasEfaAlchemicalSavant) return;
@@ -257,6 +267,159 @@ class CharacterSheetSpells {
 			});
 		}
 		return receipt;
+	}
+
+	_pruneImprovedPotentOffers () {
+		for (const [id, pending] of this._clericPotentOffers || []) {
+			if (pending.state === this._state
+				&& this._state.getImprovedPotentSpellcastingEligibility(pending.receipt).eligible) continue;
+			pending.state.dismissImprovedPotentSpellcasting(pending.receipt);
+			CharacterSheetModal.removeRollSideOffer(pending.element);
+			this._clericPotentOffers.delete(id);
+		}
+	}
+
+	stageImprovedPotentSpellcasting (receipt) {
+		this._pruneImprovedPotentOffers();
+		const eligibility = this._state.getImprovedPotentSpellcastingEligibility(receipt);
+		if (!eligibility.eligible) return {status: "notOffered", reason: eligibility.reason};
+		this._clericPotentOffers ||= new Map();
+		if (this._clericPotentOffers.has(receipt.receiptId)) return {status: "alreadyOffered"};
+		const total = eligibility.damageEvidence.damage.reduce((sum, entry) => sum + entry.amount, 0);
+		const rollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: `${receipt.spell.name} damage`,
+			total,
+			breakdown: eligibility.damageEvidence.damage.map(entry => `${entry.amount} ${entry.damageType}`).join(" + "),
+			outcome: "Confirm that a creature actually took this cantrip's damage before granting temporary HP.",
+		});
+		const element = CharacterSheetModal.createRollSideOffer({
+			title: "Improved Potent Spellcasting",
+			caption: `${receipt.spell.name} · ${eligibility.amount} temporary HP`,
+			breakdown: `${rollFollowup.breakdown}. Requires damage to a creature; recipient within 60 ft of you.`,
+		});
+		const choices = element.querySelector(".cs-post-roll-offer__choices");
+		choices.append(e_({outer: `<div class="cs-post-roll-offer__row">
+			<button type="button" class="cs-post-roll-offer__open ve-btn ve-btn-xs ve-btn-default" data-potent-self>Gain temp HP</button>
+			<button type="button" class="cs-post-roll-offer__open ve-btn ve-btn-xs ve-btn-default" data-potent-other>Give temp HP</button>
+		</div>`}));
+		const pending = {state: this._state, receipt, element, rollFollowup, inFlight: false};
+		this._clericPotentOffers.set(receipt.receiptId, pending);
+		element.querySelector("[data-potent-self]").addEventListener("click", () => void this._pResolveImprovedPotentOffer(pending, true));
+		element.querySelector("[data-potent-other]").addEventListener("click", () => void this._pResolveImprovedPotentOffer(pending, false));
+		element.querySelector(".cs-post-roll-offer__dismiss").addEventListener("click", () => {
+			if (pending.inFlight) return;
+			pending.state.dismissImprovedPotentSpellcasting(receipt);
+			CharacterSheetModal.removeRollSideOffer(element);
+			this._clericPotentOffers.delete(receipt.receiptId);
+		});
+		return {status: "offered"};
+	}
+
+	async _pResolveImprovedPotentOffer (pending, toSelf) {
+		if (pending.inFlight || this._clericPotentOffers?.get(pending.receipt.receiptId) !== pending) return false;
+		const buttons = [...pending.element.querySelectorAll("button")];
+		pending.inFlight = true;
+		buttons.forEach(button => { button.disabled = true; });
+		const rollFollowup = pending.rollFollowup;
+		try {
+			if (pending.state !== this._state) throw new Error("This offer belongs to a different character.");
+			const eligibility = this._state.getImprovedPotentSpellcastingEligibility(pending.receipt);
+			if (!eligibility.eligible) throw new Error("This cantrip's Improved Potent Spellcasting offer is no longer available.");
+			let damagedTarget = eligibility.targets.length === 1 ? eligibility.targets[0] : null;
+			if (eligibility.targets.length > 1) {
+				damagedTarget = await CharacterSheetModal.pGetUserEnum({
+					title: "Choose the Damaged Creature",
+					htmlDescription: "Choose a creature that actually took damage from this Cleric cantrip.",
+					values: eligibility.targets,
+					fnDisplay: value => value.targetName,
+					isResolveItem: true,
+					rollFollowup,
+				});
+				if (!damagedTarget) return false;
+			} else if (!damagedTarget) {
+				const targetName = await CharacterSheetModal.pGetUserString({
+					title: "Confirm Cleric Cantrip Damage",
+					htmlDescription: "Name the creature that actually took damage. A damage roll alone does not qualify.",
+					rollFollowup,
+				});
+				if (!String(targetName || "").trim()) return false;
+				damagedTarget = {targetName: String(targetName).trim(), targetId: null, outcome: "unconfirmed"};
+			}
+			const confirmTargetDamaged = damagedTarget.outcome === "damaged" || await CharacterSheetModal.pGetUserBoolean({
+				title: "Confirm Damage to a Creature",
+				htmlDescription: `Did <strong>${CharacterSheetModal._escapeHtml(damagedTarget.targetName)}</strong> actually take damage from this cantrip?`,
+				textYes: "Confirm damage",
+				textNo: "Cancel",
+				rollFollowup,
+			});
+			if (!confirmTargetDamaged) return false;
+			let target = {type: "self"};
+			if (!toSelf) {
+				const companions = this._state.getCompanions().filter(companion =>
+					companion.active !== false
+					&& !["dead", "vanished"].includes(companion.lifecycle?.status)
+					&& String(companion.creatureType || "").toLowerCase() !== "object");
+				const selected = await CharacterSheetModal.pGetUserEnum({
+					title: "Temporary HP Recipient",
+					htmlDescription: "Choose another creature within 60 feet of you. External recipients require a manual handoff.",
+					values: [
+						...companions.map(companion => ({type: "companion", companionId: companion.id, name: companion.customName || companion.name})),
+						{type: "external", name: "External creature (manual handoff)"},
+					],
+					fnDisplay: value => value.name,
+					isResolveItem: true,
+					rollFollowup,
+				});
+				if (!selected) return false;
+				target = {...selected};
+				if (target.type === "external") {
+					const name = await CharacterSheetModal.pGetUserString({
+						title: "Manual Temporary HP Handoff",
+						htmlDescription: "Name the recipient. This does not update another player's sheet; apply the offered amount there only if it exceeds their current temporary HP.",
+						rollFollowup,
+					});
+					if (!String(name || "").trim()) return false;
+					target.name = String(name).trim();
+				}
+				const distanceFeet = await CharacterSheetModal.pGetUserNumber({
+					title: "Recipient Distance from You",
+					htmlDescription: "Confirm the recipient is within 60 feet of the Cleric, not the cantrip's damaged target.",
+					rollFollowup,
+				});
+				if (distanceFeet == null) return false;
+				target.distanceFeet = distanceFeet;
+			}
+			if (pending.state !== this._state || this._clericPotentOffers.get(pending.receipt.receiptId) !== pending) {
+				throw new Error("This offer became stale while choosing a recipient.");
+			}
+			const result = this._state.grantImprovedPotentSpellcasting({
+				receipt: pending.receipt, damagedTarget, confirmTargetDamaged, target,
+			});
+			if (!result.ok) throw new Error(`Temporary HP was not granted (${result.reason}).`);
+			CharacterSheetModal.removeRollSideOffer(pending.element);
+			this._clericPotentOffers.delete(pending.receipt.receiptId);
+			if (!result.manual) {
+				this._page._renderHp?.();
+				this._page._renderCompanions?.();
+				if (this._state.getViewMode?.() === "play") this._page._playMode?.render();
+				const saved = await this._page.saveCharacter();
+				if (saved === false) throw new Error("Temporary HP changed locally, but saving failed. Save the character before leaving.");
+			}
+			JqueryUtil.doToast({
+				type: "info",
+				content: result.manual
+					? `Manual handoff to ${CharacterSheetModal._escapeHtml(result.targetName)}: offer ${result.amount} temporary HP; keep their higher existing pool. No external sheet was updated.`
+					: `${CharacterSheetModal._escapeHtml(result.targetName)}: ${result.applied ? `gained ${result.amount}` : `retained ${result.currentTempHp} (offered ${result.amount})`} temporary HP.`,
+			});
+			return true;
+		} catch (error) {
+			JqueryUtil.doToast({type: "danger", content: error instanceof Error ? error.message : String(error)});
+			this._pruneImprovedPotentOffers();
+			return false;
+		} finally {
+			pending.inFlight = false;
+			buttons.forEach(button => { button.disabled = false; });
+		}
 	}
 
 	_getCommittedSpellRollLabel (roll) {
@@ -7509,8 +7672,10 @@ class CharacterSheetSpells {
 				}
 			}
 
-			this._state.grantTempHp(tempHpAmount);
-			appliedEffects.push(`+${tempHpAmount} temp HP`);
+			const granted = this._state.grantTempHp(tempHpAmount);
+			appliedEffects.push(granted
+				? `${tempHpAmount} temp HP`
+				: `retained ${this._state.getTempHp()} temp HP (offered ${tempHpAmount})`);
 		}
 
 		// Check if spell grants conditions - if so, apply the condition itself
@@ -9925,6 +10090,7 @@ class CharacterSheetSpells {
 	}
 
 	render () {
+		this._pruneImprovedPotentOffers();
 		// Calculate spell slots based on class/level before rendering
 		this._state.calculateSpellSlots();
 

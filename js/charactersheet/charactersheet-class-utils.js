@@ -7335,8 +7335,8 @@ class CharacterSheetClassUtils {
 	 * @param {Array<*>} features
 	 * @returns {{regularFeatures: Array<*>, optionalFeatures: Array<*>, autoGrantedCombatMethods: Array<*>, standaloneFeatures: Array<*>, featureOptions: Array<*>}}
 	 */
-	static partitionClassFeaturesForDisplay (/** @type {*[]} */ features = []) {
-		const regularFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features.filter(f => f.featureType !== "Optional Feature"));
+	static partitionClassFeaturesForDisplay (/** @type {*[]} */ features = [], context = {}) {
+		const regularFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(features.filter(f => f.featureType !== "Optional Feature"), context);
 		const optionalFeatures = features.filter(f => f.featureType === "Optional Feature");
 		const autoGrantedCombatMethods = regularFeatures.filter(f => CharacterSheetClassUtils.isCombatMethod(f));
 		const standaloneFeatures = regularFeatures.filter(f => !f.parentFeature && !CharacterSheetClassUtils.isCombatMethod(f));
@@ -7344,22 +7344,54 @@ class CharacterSheetClassUtils {
 		return {regularFeatures, optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions};
 	}
 
-	static mergeEquivalentFeaturesForDisplay (/** @type {*[]} */ features = []) {
-		const potentSpellcasting = features.filter(feature =>
-			String(feature.name || "").toLowerCase() === "potent spellcasting"
-			&& String(feature.className || "").toLowerCase() === "cleric");
-		const blessedOption = potentSpellcasting.find(feature => String(feature.parentFeature || "").toLowerCase() === "blessed strikes");
-		const domainGrant = potentSpellcasting.find(feature => !feature.parentFeature);
-		if (!blessedOption || !domainGrant) return [...features];
-
-		const merged = {
-			...domainGrant,
-			provenanceSources: [
-				{feature: blessedOption.parentFeature, level: blessedOption.level, source: blessedOption.source},
-				{feature: domainGrant.subclassShortName || domainGrant.subclassName || "Divine Domain", level: domainGrant.level, source: domainGrant.source},
-			],
-		};
-		return features.filter(feature => !potentSpellcasting.includes(feature)).concat(merged);
+	static mergeEquivalentFeaturesForDisplay (/** @type {*[]} */ features = [], {clericSource = null, clericSubclass = null, blessedStrikesOption = null} = {}) {
+		if (!["XPHB", "TGTT"].includes(clericSource) || !clericSubclass) return [...features];
+		const eq = (a, b) => !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase();
+		const domains = features.filter(feature =>
+			["Potent Spellcasting", "Divine Strike"].some(name => eq(feature.name, name))
+			&& eq(feature.className, "Cleric")
+			&& feature.isSubclassFeature
+			&& !feature.isCustom
+			&& !feature._isCustom
+			&& !feature.parentFeature
+			&& Number(feature.level) === 8
+			&& eq(feature.source, clericSubclass.source)
+			&& eq(feature.subclassSource, clericSubclass.source)
+			&& (eq(feature.subclassShortName, clericSubclass.shortName) || eq(feature.subclassName, clericSubclass.name))
+			&& ["PHB", "XPHB", "TGTT"].includes(feature.classSource));
+		const options = features.filter(feature =>
+			eq(feature.name, blessedStrikesOption)
+			&& eq(feature.parentFeature, "Blessed Strikes")
+			&& eq(feature.className, "Cleric")
+			&& feature.classSource === "XPHB"
+			&& feature.source === "XPHB"
+			&& Number(feature.level) === 7
+			&& !feature.isSubclassFeature
+			&& !feature.isCustom
+			&& !feature._isCustom);
+		const equivalent = domains.filter(feature => eq(feature.name, blessedStrikesOption));
+		const selected = options.length === 1 && equivalent.length === 1 ? options[0] : null;
+		return features.flatMap(feature => {
+			if (selected && feature === equivalent[0]) return [];
+			if (feature === selected) {
+				return [{
+					...feature,
+					provenanceSources: [
+						{feature: feature.parentFeature, level: feature.level, source: feature.source},
+						{feature: equivalent[0].subclassShortName || clericSubclass.name, level: equivalent[0].level, source: equivalent[0].source},
+					],
+				}];
+			}
+			if (domains.includes(feature)) {
+				return [{
+					...feature,
+					inactiveReason: blessedStrikesOption
+						? `Superseded by Blessed Strikes: ${blessedStrikesOption}`
+						: "Inactive until a Blessed Strikes option is resolved",
+				}];
+			}
+			return [feature];
+		});
 	}
 
 	/**
