@@ -408,7 +408,7 @@ describe("CharacterSheetStatBreakdowns", () => {
 		describe("getInitiativeBreakdown.isCanonical", () => {
 			it("flags ability + JoaT as canonical, custom as effective", () => {
 				state._data.abilities.dex = 16;
-				state._data.customModifiers.initiative = 1;
+				state.setCustomModifier("initiative", 1);
 
 				const breakdown = state.getInitiativeBreakdown();
 				const byType = Object.fromEntries(breakdown.components.map(c => [c.type, c]));
@@ -418,7 +418,7 @@ describe("CharacterSheetStatBreakdowns", () => {
 
 			it("exposes canonical field excluding custom", () => {
 				state._data.abilities.dex = 16; // +3
-				state._data.customModifiers.initiative = 2;
+				state.setCustomModifier("initiative", 2);
 
 				const breakdown = state.getInitiativeBreakdown();
 				expect(breakdown.canonical).toBe(3);

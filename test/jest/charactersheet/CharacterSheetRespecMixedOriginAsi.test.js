@@ -300,18 +300,22 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 			isComplete: () => true,
 			getSelections: () => ["Athletics", "Arcana"],
 		});
+		const createDraft = jest.spyOn(respec, "_createRaceDraft");
 		globalThis.CharacterSheetModal.pGetShow = async () => ({eleModalInner: modalInner, doClose: jest.fn()});
 		try {
 			await respec._editRace(1, respec._state.getLevelHistoryEntry(1), null);
 			const list = findByClass(modalInner, "charsheet__respec-feat-list");
-			list._children[0].click();
-			expect(skillPicker).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({name: "Half-Elf", source: "PHB"}), expect.any(Function));
-			const selects = findAll(modalInner, element => element?._html?.startsWith("<select") && element._handlers.change);
-			expect(selects).toHaveLength(2);
-			["wis", "con"].forEach((ability, ix) => {
-				selects[ix].value = ability;
-				selects[ix]._handlers.change();
+			await list._children[0]._handlers.click();
+			expect(skillPicker).not.toHaveBeenCalled();
+			expect(languagePicker).not.toHaveBeenCalled();
+			const draft = await createDraft.mock.results[0].value;
+			const [ability] = getAbilityDecisions(draft, "race");
+			expect(ability.count).toBe(2);
+			await draft._engine.stageGraphMutation(ability.id, ["wis", "con"], {
+				reverseParent: true,
+				apply: ({state: candidate}) => draft._applyManifestSelectionMechanics(ability, ["wis", "con"], ability.options, candidate),
 			});
+			draft.render();
 			const changeButton = findByClass(modalInner, "charsheet__respec-btn-row")._children[1];
 			expect(changeButton.disabled).toBe(false);
 			await changeButton._handlers.click();
@@ -346,6 +350,7 @@ describe("Respec uses the actual owner of mixed-edition origin ASIs", () => {
 			globalThis.CharacterSheetModal.pGetShow = originalShow;
 			languagePicker.mockRestore();
 			skillPicker.mockRestore();
+			createDraft.mockRestore();
 			if (respec._engine.isActive) respec._engine.cancel();
 		}
 	});

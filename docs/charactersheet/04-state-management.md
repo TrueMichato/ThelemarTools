@@ -1425,6 +1425,30 @@ _getUnarmoredDefenseAc() {
 
 ### Initiative
 
+The production APIs are `getInitiative()`, `getCustomModifier("initiative")`,
+and `getInitiativeBreakdown()`. Named initiative values are resolved live from
+current ability scores and proficiency, not the last modifier-cache rebuild.
+The custom contribution is the explicit `customModifiers.initiativeAdjustment`
+remainder plus enabled named contributions. The raw initiative setter subtracts
+those current contributions before recording the remainder. Existing flat
+DEX-check/check-wide/d20-wide channels count once; advantage/disadvantage
+sentinels never become a numeric bonus. Ability base/bonus edits therefore
+update initiative before an unrelated modifier toggle or reload, and the
+canonical/effective breakdown remains consistent with the actual roll consumers.
+
+Feature teardown removes modifiers and active states by exact
+`sourceFeatureId` first. Its legacy name fallback never removes another owner's
+rows and preserves unattributed `initiative` rows, including disabled ones.
+Those ambiguous rows produce a warning directing the player to review
+Modifiers; a matching name or amount cannot prove ownership. Truly source-owned
+generated initiative is still revoked. Legacy unowned non-initiative cleanup and
+the `preserveUnattributedModifiers` option retain their existing behavior.
+`CharacterSheetPassiveModifierLifecycle.test.js` covers live Wisdom/proficiency,
+conditional-only trait toggles, exact active/inactive removal, Respec, raw
+remainders, reloads, and both initiative roll consumers.
+
+The following is an illustrative calculation sketch, not the production API:
+
 ```javascript
 getInitiativeMod() {
     let initiative = this.getAbilityMod("dex");

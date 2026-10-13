@@ -30,6 +30,7 @@ function makeRespec (overrides = {}) {
 	let currentSubrace = overrides.subrace || null;
 
 	respec._state = {
+		_data: {abilityBonuses},
 		getRace: () => currentRace,
 		getSubrace: () => currentSubrace,
 		getRaceName: () => currentRace?.name || null,

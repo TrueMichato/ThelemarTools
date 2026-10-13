@@ -107,12 +107,27 @@ remaining ambiguity; never infer ownership from a matching name or amount.
 `customModifiers.initiativeAdjustment` separately retains the scalar remainder
 while named effects are rebuilt. Other custom channels do not use this ledger.
 
+Named initiative is live too: `getCustomModifier("initiative")` combines that
+remainder with `_getNamedInitiativeTotal()` using current ability/proficiency
+values. Total and breakdown must use this accessor, never the cached scalar.
+Keep existing flat DEX-check/check-wide/d20-wide contributions in the ledger
+and exclude advantage/disadvantage sentinels. Cover public base/bonus writers
+before any unrelated toggle/recalculation, and proficiency registration order.
+
+For every feature, `removeFeature()` removes exact-owned modifiers/states before
+legacy name cleanup. `removeModifiersByName()` cannot erase another owner's
+rows. Preserve unowned exact-type `initiative` rows with an ownership warning;
+do not extend that unowned preservation to other modifier channels. Owned
+generated initiative still disappears, and `preserveUnattributedModifiers`
+retains its existing meaning. Do not invent ownership for a no-ID legacy feature.
+
 Test the actual catalog acquisition boundary, not a class-only fixture. Require
 at least two saved reload/reconciliation cycles, positive/zero/negative ability
 changes, manual same-name rows and scalar remainders, removal/Respec/down-level,
 and canonical/effective/actual-roll agreement under exhaustion. Lean saves without
 catalog features retain their source-qualified class-derived fallback.
-`CharacterSheetInitiativeFeatureOwnership.test.js` and the dedicated browser
+`CharacterSheetInitiativeFeatureOwnership.test.js`,
+`CharacterSheetPassiveModifierLifecycle.test.js`, and the dedicated browser
 regression are the focused coverage; the TGTT Chronurgy matrix's skipped
 minimum-only probe is not evidence against duplicate bonuses.
 

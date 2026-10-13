@@ -239,7 +239,7 @@ describe("Cleric — Blessed Strikes / Improved Blessed Strikes", () => {
 	});
 
 	it("Tempest + Blessed Strikes emits ONE rider typed radiant (Blessed Strikes supersedes domain thunder)", () => {
-		state.addClass({name: "Cleric", source: "PHB", level: 8, subclass: {name: "Tempest Domain", shortName: "Tempest", source: "PHB"}});
+		state.addClass({name: "Cleric", source: "XPHB", level: 8, subclass: {name: "Tempest Domain", shortName: "Tempest", source: "PHB"}});
 		recordBlessedStrikes("Divine Strike");
 		const calc = state.getFeatureCalculations();
 		const riders = (calc.weaponDamageRiders || []).filter(r => r.id === "clericDivineStrike");

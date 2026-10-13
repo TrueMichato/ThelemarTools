@@ -1328,7 +1328,9 @@ class CharacterSheetProgression {
 		state = null,
 		issues = [],
 	}) {
-		if (originType !== "background" && !isFreeOriginAbility) return [];
+		if (!["race", "background"].includes(originType) && !isFreeOriginAbility) return [];
+		const isRace = originType === "race" && !isFreeOriginAbility;
+		const choicePrefix = isRace ? "rc" : "bg";
 		const modes = isFreeOriginAbility
 			? [{name: "+2/+1", key: "free-2-1", modeIndex: 0, weights: [2, 1], from: ["str", "dex", "con", "int", "wis", "cha"]}]
 			: (entity?.ability || [])
@@ -1366,18 +1368,31 @@ class CharacterSheetProgression {
 			identityMode: "opportunity",
 		});
 		const stored = storedBasePool.get(semanticKey)?.find(decision => decision.selection != null);
-		const selectedBonuses = choices?.selectedAbilityBonuses || {};
+		let selectedBonuses = choices?.selectedAbilityBonuses || {};
+		let recordedRaceMode = null;
+		if (isRace) {
+			const picks = Object.entries(choices?.selectedAbilityChoices || {})
+				.find(([owner]) => CharacterSheetProgression._normalize(owner) === originUid)?.[1] || {};
+			const indexes = [...new Set(Object.keys(picks).map(key => key.match(/^choose_(\d+)_\d+$/)?.[1]).filter(value => value != null))];
+			recordedRaceMode = indexes.length === 1 ? modes.find(mode => mode.modeIndex === Number(indexes[0])) : null;
+			if (recordedRaceMode) {
+				selectedBonuses = Object.fromEntries(recordedRaceMode.weights.flatMap((weight, ix) => [
+					[`rc_${ix}`, picks[`choose_${recordedRaceMode.modeIndex}_${ix}`]],
+					[`rc_${ix}_weight`, Number(picks[`choose_${recordedRaceMode.modeIndex}_${ix}_amount`] ?? weight)],
+				]));
+			}
+		}
 		const selectedWeights = Object.keys(selectedBonuses)
-			.filter(key => /^bg_\d+_weight$/.test(key))
+			.filter(key => new RegExp(`^${choicePrefix}_\\d+_weight$`).test(key))
 			.sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]))
 			.map(key => Number(selectedBonuses[key]));
 		const matchingModes = selectedWeights.length ? modes.filter(mode =>
 			mode.weights.length === selectedWeights.length
 				&& !Object.keys(mode.fixedBonuses || {}).length
 				&& mode.weights.every((weight, ix) => weight === selectedWeights[ix])
-				&& mode.weights.every((weight, ix) => mode.from.includes(selectedBonuses[`bg_${ix}`])),
+				&& mode.weights.every((weight, ix) => mode.from.includes(selectedBonuses[`${choicePrefix}_${ix}`])),
 		) : [];
-		const persistedMode = matchingModes.length === 1 ? matchingModes[0] : null;
+		const persistedMode = recordedRaceMode || (matchingModes.length === 1 ? matchingModes[0] : null);
 		const selection = isFreeOriginAbility ? modes[0] : stored?.selection ?? persistedMode;
 		const weightMatches = selection?.key == null && Array.isArray(selection?.weights) && selection.weights.length
 			? modes.filter(mode => mode.weights.length === selection.weights.length
@@ -1392,7 +1407,7 @@ class CharacterSheetProgression {
 			classSource: "",
 			classLevel: 0,
 			type: "nestedConfiguration",
-			label: isFreeOriginAbility ? "Free Origin Ability Distribution" : "Background Ability Distribution",
+			label: isFreeOriginAbility ? "Free Origin Ability Distribution" : `${isRace ? "Species" : "Background"} Ability Distribution`,
 			sourceKey: grantKey,
 			count: 1,
 			options: modes,
@@ -1425,8 +1440,8 @@ class CharacterSheetProgression {
 		const decisions = [parent];
 		if (!selectedMode) return decisions;
 
-		const hasRecordedChoices = Object.keys(selectedBonuses).some(key => /^bg_\d+(?:_weight)?$/.test(key));
-		const selectedAbilities = selectedMode.weights.map((weight, ix) => selectedBonuses[`bg_${ix}`] || null);
+		const hasRecordedChoices = Object.keys(selectedBonuses).some(key => new RegExp(`^${choicePrefix}_\\d+(?:_weight)?$`).test(key));
+		const selectedAbilities = selectedMode.weights.map((weight, ix) => selectedBonuses[`${choicePrefix}_${ix}`] || null);
 		if (isFreeOriginAbility) {
 			const expectedKeys = ["bg_0", "bg_0_weight", "bg_1", "bg_1_weight"];
 			const complete = expectedKeys.every(key => Object.hasOwn(selectedBonuses, key))
@@ -1506,7 +1521,7 @@ class CharacterSheetProgression {
 				classSource: "",
 				classLevel: 0,
 				type: "nestedAbility",
-				label: `${isFreeOriginAbility ? "Free Origin" : "Background"} Ability +${amount}`,
+				label: `${isFreeOriginAbility ? "Free Origin" : isRace ? "Species" : "Background"} Ability +${amount}`,
 				sourceKey: childGrantKey,
 				slot: ix,
 				count: 1,
@@ -1527,7 +1542,7 @@ class CharacterSheetProgression {
 				meta: {
 					originAbilityDistribution: true,
 					...(isFreeOriginAbility ? {originFreeAbility: true} : {}),
-					originAbilitySelectionKey: `bg_${ix}`,
+					originAbilitySelectionKey: `${choicePrefix}_${ix}`,
 					descriptorRules: {
 						amount,
 						optionSource: {
@@ -1559,6 +1574,9 @@ class CharacterSheetProgression {
 
 	static _buildOriginManifest ({page, state, storedBasePool, issues}) {
 		const base = {scope: "origin", characterLevel: 0, decisions: []};
+		const starting = state?.getCharacterBase?.()?.decisions?.find(decision =>
+			decision.semanticKey === "base:ability-scores" && decision.meta?.startingAbilityDistribution);
+		if (starting) base.decisions.push(CharacterSheetProgression._copy(starting));
 		const addOrigin = (originType, entity, choices, originIx) => {
 			if (!entity) return;
 			const originUid = CharacterSheetProgression.getEntityUid(entity);
@@ -1604,6 +1622,15 @@ class CharacterSheetProgression {
 				subclassFeatures: page?.getSubclassFeatures?.() || [],
 				optionalFeatures: page?.getOptionalFeatures?.() || [],
 			});
+			if (originType === "race") {
+				for (const descriptor of descriptors) {
+					const index = descriptor.sourcePath?.match(/\.ability\[(\d+)\]$/)?.[1];
+					const weighted = index != null && entity.ability?.[Number(index)]?.choose?.weighted;
+					if (descriptor.kind !== "ability" || !Array.isArray(weighted?.weights)) continue;
+					descriptor.count = weighted.weights.length;
+					descriptor.rules = {...descriptor.rules, originAbilityWeights: [...weighted.weights]};
+				}
+			}
 			const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity, {
 				feats: page?.getFeats?.() || [],
 			});
@@ -1767,12 +1794,20 @@ class CharacterSheetProgression {
 					&& originType === "race"
 					&& Array.isArray(selected)
 					&& selected.length === descriptor.count;
-				const originSelection = originType === "background" && ["skill", "tool", "language"].includes(descriptor.kind)
-					? CharacterSheetProgression._getOriginProficiencySelection(descriptor, choices)
+				const originSelection = ["skill", "tool", "language"].includes(descriptor.kind)
+					? originType === "background"
+						? CharacterSheetProgression._getOriginProficiencySelection(descriptor, choices)
+						: CharacterSheetProgression._getRaceProficiencySelection(descriptor, choices)
 					: null;
+				const hasGroupedRaceSelection = originType === "race" && descriptor.kind === "language"
+					&& storedDecision?.selection && !Array.isArray(storedDecision.selection)
+					&& typeof storedDecision.selection === "object"
+					&& Object.keys(storedDecision.selection).every(key => /^\d+$/.test(key));
 				const selectedFallback = hasOwnerQualifiedRaceAbilityChoices || hasCompleteRaceAbilityChoices
 					? selected
-					: storedDecision?.selection ?? originSelection ?? selected ??
+					: (hasGroupedRaceSelection
+						? CharacterSheetProgression._getRaceProficiencySelection(descriptor, {selectedLanguages: storedDecision.selection})
+						: storedDecision?.selection) ?? originSelection ?? selected ??
 					choices?.[`selected${descriptor.kind[0].toUpperCase()}${descriptor.kind.slice(1)}s`] ??
 					(descriptor.kind === "ability" && descriptor.sourcePath.includes("additionalSpells")
 						? descriptor.options?.[0]
@@ -1781,12 +1816,29 @@ class CharacterSheetProgression {
 					|| originType !== "race"
 					|| !Array.isArray(selectedFallback)
 					|| new Set(selectedFallback.map(value => String(value).toLowerCase())).size === selectedFallback.length;
-				const storedReceipt = storedDecision?.receipt;
+				const isValidGroupedRaceSelection = hasGroupedRaceSelection
+					&& Array.isArray(selectedFallback) && selectedFallback.length === descriptor.count
+					&& selectedFallback.every(value => typeof value === "string"
+						&& state.getLanguages().some(language => CharacterSheetProgression._normalize(language) === CharacterSheetProgression._normalize(value)))
+					&& new Set(selectedFallback.map(CharacterSheetProgression._normalize)).size === selectedFallback.length;
+				const storedReceipt = isValidGroupedRaceSelection ? {
+					version: 1,
+					sourceDecisionKey: key,
+					effects: [
+						...(storedDecision?.receipt?.effects || []).map(effect => effect.type !== "ownership" ? effect : {
+							...effect,
+							ownership: (effect.ownership || []).filter(owned =>
+								owned.type !== "languages" || JSON.stringify(owned.value) !== JSON.stringify(storedDecision.selection)),
+						}),
+						{type: "ownership", ownership: selectedFallback.map(value => ({type: "languages", value}))},
+					],
+				} : storedDecision?.receipt;
 				const selectedAbilities = Array.isArray(selectedFallback) ? selectedFallback : [selectedFallback];
-				const expectedAmount = Number(descriptor.rules?.amount) || 1;
+				const expectedAmounts = descriptor.rules?.originAbilityWeights
+					|| Array(descriptor.count).fill(Number(descriptor.rules?.amount) || 1);
 				const receiptAbilities = (storedReceipt?.effects || [])
 					.filter(effect => effect.type === "abilityBonusDelta"
-						&& Number(effect.amount) === expectedAmount
+						&& Number(effect.amount) === expectedAmounts[selectedAbilities.findIndex(ability => String(ability).toLowerCase() === String(effect.ability).toLowerCase())]
 						&& Number.isFinite(Number(effect.before)))
 					.map(effect => String(effect.ability).toLowerCase());
 				const hasCompleteRaceAbilityReceipt = descriptor.kind !== "ability" || originType !== "race"
@@ -1805,6 +1857,7 @@ class CharacterSheetProgression {
 				const hasAssignedAbilityBonus = Object.keys(choices?.selectedAbilityBonuses || {}).some(key => !key.endsWith("_weight"));
 				const isUnassignedLegacyAbility = descriptor.kind === "ability"
 					&& selectedFallback == null
+					&& !entityStored?.meta?.freshOriginChoices
 					&& !hasAssignedAbilityChoice
 					&& !hasAssignedAbilityBonus;
 				const decision = CharacterSheetProgression._makeDecision({
@@ -1820,16 +1873,14 @@ class CharacterSheetProgression {
 					required: descriptor.required && !isUnassignedLegacyAbility,
 					options: descriptor.options,
 					selection: selectedFallback,
-					isValid: descriptor.kind !== "ability" || originType !== "race" || (
-						isDistinctRaceAbilityChoice && CharacterSheetProgression._isSelectionValid({
-							selection: selectedFallback,
-							count: descriptor.count,
-							options: descriptor.options,
-							type,
-						})
-					),
+					isValid: originType !== "race" || !["ability", "language"].includes(descriptor.kind) || (isDistinctRaceAbilityChoice && CharacterSheetProgression._isSelectionValid({
+						selection: selectedFallback,
+						count: descriptor.count,
+						options: descriptor.options,
+						type,
+					})),
 					receipt: hasCompleteRaceAbilityReceipt ? storedReceipt || null : null,
-					meta: {descriptorRules: descriptor.rules},
+					meta: {descriptorRules: descriptor.rules, ...(isValidGroupedRaceSelection || storedDecision?.meta?.originLanguageNormalizationVersion === 1 ? {originLanguageNormalizationVersion: 1} : {})},
 					scope: "origin",
 					semanticKeyOverride: key,
 					rootSemanticKey: entityKey,
@@ -1924,6 +1975,16 @@ class CharacterSheetProgression {
 		const legal = new Set((descriptor.options || []).map(value => CharacterSheetProgression._normalize(value?.name || value)));
 		const matching = normalized.filter(value => legal.has(CharacterSheetProgression._normalize(value)));
 		return matching.length ? matching : null;
+	}
+
+	static _getRaceProficiencySelection (descriptor, choices) {
+		const field = {skill: "selectedSkills", tool: "selectedTools", language: "selectedLanguages"}[descriptor.kind];
+		const recorded = choices?.[field];
+		const group = String(descriptor.sourcePath || "").match(/Proficiencies\[(\d+)\]/)?.[1];
+		const values = Array.isArray(recorded) ? recorded : group != null ? recorded?.[group] : null;
+		if (values == null) return null;
+		return (Array.isArray(values) ? values : [values]).map(value =>
+			typeof value === "string" ? value : value?.[descriptor.kind] || value?.name);
 	}
 
 	static _appendUnplacedFeatDecisions ({base, decisions, page, state, storedBasePool}) {
@@ -3744,6 +3805,15 @@ class CharacterSheetProgression {
 				.getFeatureOptionsForLevel(features, levelInfo.classLevel, page?.getClassFeatures?.() || [])
 				.filter(group => !group.options?.every(option => option.type === "optionalfeature"));
 			featureOptions.forEach((group, slot) => {
+				const parent = features.find(feature => feature.name === group.featureName);
+				const records = (state?.getChosenSubfeatures?.() || []).filter(record =>
+					CharacterSheetProgression._normalize(record.parent) === CharacterSheetProgression._normalize(group.featureName)
+					&& Number(record.level) === Number(levelInfo.classLevel)
+					&& (!record.parentSource || record.parentSource === parent?.source)
+					&& (!record.parentClass || record.parentClass === levelInfo.className)
+					&& (!record.parentClassSource || record.parentClassSource === levelInfo.classSource
+						|| (record.parentClassSource === parent?.classSource
+							&& !state.getClasses().some(cls => cls.name === levelInfo.className && cls.source === record.parentClassSource))));
 				addDecision(levelInfo, {
 					type: "featureChoice",
 					label: group.featureName || "Feature Choice",
@@ -3751,6 +3821,13 @@ class CharacterSheetProgression {
 					slot,
 					count: group.count || 1,
 					options: group.options || [],
+					fallbackSelection: records.length ? records.map(record => ({
+						featureName: group.featureName,
+						choice: record.name,
+						source: record.source,
+						acquisitionLevel: levelInfo.classLevel,
+					})) : null,
+					fallbackStatus: records.length === (group.count || 1) ? null : "ambiguous",
 					meta: {featureName: group.featureName},
 				});
 			});
@@ -4554,17 +4631,19 @@ class CharacterSheetProgression {
 		const priorByKey = new Map((out.decisions || []).map(decision => [decision.semanticKey, decision]));
 		const generatedDecisions = (base?.decisions || []).map(decision => {
 			const prior = priorByKey.get(decision.semanticKey);
+			const isNormalizedOriginLanguage = decision.meta?.originLanguageNormalizationVersion === 1
+				&& decision.type === "nestedLanguage";
 			return CharacterSheetProgression.normalizeDecision({
 				...decision,
 				options: [],
 				scope: decision.scope || prior?.scope || "origin",
-				selection: prior?.selection ?? decision.selection,
-				status: prior?.status ?? decision.status,
+				selection: isNormalizedOriginLanguage ? decision.selection : prior?.selection ?? decision.selection,
+				status: isNormalizedOriginLanguage ? decision.status : prior?.status ?? decision.status,
 				meta: decision.meta?.unplacedFeat
 					? {...(prior?.meta || {}), ...(decision.meta || {})}
 					: {...(decision.meta || {}), ...(prior?.meta || {})},
 				provenance: prior?.provenance || decision.provenance,
-				receipt: prior?.receipt || decision.receipt || null,
+				receipt: isNormalizedOriginLanguage ? decision.receipt : prior?.receipt || decision.receipt || null,
 			});
 		});
 		const generatedKeys = new Set(generatedDecisions.map(decision => decision.semanticKey));
