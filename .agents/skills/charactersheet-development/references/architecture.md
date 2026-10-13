@@ -848,6 +848,8 @@ history; replacement leaves one exact-owner option and preserves domain grants.
 Modern consumers call `getChosenBlessedStrikesOption({classSource})`; ambiguity
 returns `null`. The unscoped no-class compatibility fallback is not an effect
 eligibility contract.
+Missing owner metadata and definition-source-only aliases require one Cleric
+class, even on scoped reads; explicit acquisition owners remain source-scoped.
 
 Choice discovery is catalog-backed but catalog-transient. The production census
 must classify structured options, union grants, recurring pools,

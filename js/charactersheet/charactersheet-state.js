@@ -26812,8 +26812,8 @@ class CharacterSheetState {
 	 */
 	getChosenBlessedStrikesOption ({classSource = null} = {}) {
 		const norm = value => String(value || "").trim().toLowerCase();
-		const owners = this.getClasses().filter(cls => norm(cls.name) === "cleric"
-			&& (!classSource || norm(cls.source) === norm(classSource)));
+		const allOwners = this.getClasses().filter(cls => norm(cls.name) === "cleric");
+		const owners = allOwners.filter(cls => !classSource || norm(cls.source) === norm(classSource));
 		if (owners.length > 1 || (!owners.length && classSource)) return null;
 		const owner = owners[0];
 		if (owner && (!Number.isFinite(Number(owner.level)) || Number(owner.level) < 7)) return null;
@@ -26822,9 +26822,12 @@ class CharacterSheetState {
 		const reference = (definition?.classFeatures || []).flat().find(value =>
 			norm(typeof value === "string" ? value.split("|")[0] : value?.classFeature?.split("|")[0]) === "blessed strikes");
 		const definitionSource = (typeof reference === "string" ? reference : reference?.classFeature)?.split("|")[2];
-		const matchesSource = source => !source || (!owner && !classSource) || norm(source) === norm(owner?.source)
-			|| (norm(source) === norm(definitionSource)
-				&& !this.getClasses().some(cls => norm(cls.name) === "cleric" && norm(cls.source) === norm(source)));
+		const matchesSource = source => {
+			if (!source) return !owner || allOwners.length === 1;
+			return (!owner && !classSource) || norm(source) === norm(owner?.source)
+				|| (allOwners.length === 1 && norm(source) === norm(definitionSource)
+					&& !allOwners.some(cls => norm(cls.source) === norm(source)));
+		};
 		const matchesDefinition = source => !owner || !source || norm(source) === norm(owner.source)
 			|| (definitionSource && norm(source) === norm(definitionSource));
 		const chosen = (this._data.chosenSubfeatures || []).filter(record =>

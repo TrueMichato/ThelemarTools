@@ -74,6 +74,10 @@ a cross-source definition must be declared by that class. Contradictory picks,
 domain-only evidence, and foreign modern picks on a classic chassis are
 unresolved. The unscoped no-class fallback exists only for uniquely recorded
 legacy compatibility evidence, not for modern effect or trigger eligibility.
+Missing acquisition-owner metadata and legacy definition-source aliases require
+a single Cleric class; scoped calls never lend these ambiguous rows to multiple
+Cleric sources. Exact owner metadata remains source-scoped, including a TGTT
+owner using its declared XPHB definition.
 
 ### Partial repairs and Apply
 

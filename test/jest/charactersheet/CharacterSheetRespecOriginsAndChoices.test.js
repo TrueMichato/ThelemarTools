@@ -764,6 +764,47 @@ describe("Respec Blessed Strikes acquisition", () => {
 		state._data.features.find(feature => feature.id === "foreign-stored-option").classSource = "TGTT";
 		expect(state.getChosenBlessedStrikesOption({classSource: "TGTT"})).toBe("Potent Spellcasting");
 	});
+
+	it.each([
+		["chosen record", false],
+		["stored option", false],
+		["chosen record", true],
+		["stored option", true],
+	])("does not share ambiguous %s ownership across scoped Clerics (definition alias=%s)", (kind, isDefinitionAlias) => {
+		const state = clericWorkspace()._state;
+		state._data.classes[0].level = 14;
+		const otherSource = isDefinitionAlias ? "TST" : "XPHB";
+		state.addClass({name: "Cleric", source: otherSource, level: 14});
+		state.setClassCatalog([...brew.class, ...clericData.class, {...brew.class.find(cls => cls.name === "Cleric"), source: "TST"}]);
+		state._data.chosenSubfeatures = [];
+		state._data.features = state._data.features.filter(feature => feature.parentFeature !== "Blessed Strikes");
+		const ownerField = kind === "chosen record" ? "parentClassSource" : "classSource";
+		const missingOwner = isDefinitionAlias ? "XPHB" : undefined;
+		const evidence = kind === "chosen record"
+			? {parent: "Blessed Strikes", parentSource: "XPHB", parentClass: "Cleric", level: 7, name: "Potent Spellcasting", source: "XPHB"}
+			: {
+				...clericData.classFeature.find(feature => feature.name === "Potent Spellcasting" && feature.source === "XPHB" && feature.level === 7),
+				id: "ambiguous-stored-option",
+				parentFeature: "Blessed Strikes",
+				isFeatureOption: true,
+			};
+		evidence[ownerField] = missingOwner;
+		if (kind === "chosen record") state._data.chosenSubfeatures.push(evidence);
+		else state._data.features.push(evidence);
+		expect(state.getChosenBlessedStrikesOption({classSource: "TGTT"})).toBeNull();
+		expect(state.getChosenBlessedStrikesOption({classSource: otherSource})).toBeNull();
+		expect(state.getChosenBlessedStrikesOption()).toBeNull();
+		evidence[ownerField] = "TGTT";
+		expect(state.getChosenBlessedStrikesOption({classSource: "TGTT"})).toBe("Potent Spellcasting");
+		expect(state.getChosenBlessedStrikesOption({classSource: otherSource})).toBeNull();
+		evidence[ownerField] = missingOwner;
+		state._data.classes = state.getClasses().filter(cls => cls.source === "TGTT");
+		expect(state.getChosenBlessedStrikesOption({classSource: "TGTT"})).toBe("Potent Spellcasting");
+		expect(state.getChosenBlessedStrikesOption()).toBe("Potent Spellcasting");
+		state._data.classes = [];
+		expect(state.getChosenBlessedStrikesOption({classSource: "TGTT"})).toBeNull();
+		expect(state.getChosenBlessedStrikesOption()).toBe("Potent Spellcasting");
+	});
 });
 
 if (process.env.CS_PRIVATE_REPRO_SAVE) {
