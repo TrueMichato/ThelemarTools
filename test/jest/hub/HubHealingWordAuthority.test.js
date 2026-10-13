@@ -6,6 +6,7 @@ import "../charactersheet/setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
+import {createHubApp} from "../../../server/src/app.js";
 
 const idempotency = request => ({key: request.commandId, requestHash: crypto.createHash("sha256").update(JSON.stringify(request)).digest("hex")});
 const cases = ["PHB", "XPHB"].flatMap(source => [
@@ -14,21 +15,23 @@ const cases = ["PHB", "XPHB"].flatMap(source => [
 ]);
 const layOnHands = {name: "Lay on Hands", source: "XPHB", level: 1, template: "ability.lay-on-hands.heal", multi: false, ability: true};
 
-function acquiredLayOnHandsData () {
+function acquiredLayOnHandsData (level = 1, priorResources = []) {
 	const state = new globalThis.CharacterSheetState();
 	const book = JSON.parse(fs.readFileSync("data/class/class-paladin.json", "utf8"));
 	const cls = book.class.find(entry => entry.name === "Paladin" && entry.source === "XPHB");
-	state.addClass({name: "Paladin", source: "XPHB", level: 1});
-	globalThis.CharacterSheetClassUtils.updateClassResources(state, state.getClasses()[0], 1, cls);
+	for (const resource of priorResources) state.addResource(resource);
+	state.addClass({name: "Paladin", source: "XPHB", level});
+	globalThis.CharacterSheetClassUtils.updateClassResources(state, state.getClasses()[0], level, cls);
 	globalThis.CharacterSheetClassUtils.reconcileClassFeatures(state, {getClassData: () => cls, classFeatures: book.classFeature});
 	return state.toJson();
 }
 
 async function pFixture (store, definition, {targetCount = 2, full = false, sourceFull = false, prepared = true, wisdom = 16, castLevel = definition.level, sourceData = null} = {}) {
 	const pActor = async label => {
-		const account = await store.pUpsertOAuthAccount({provider: "github", providerSubject: `a5-${label}-${crypto.randomUUID()}`, displayName: label});
+		const identity = {provider: "github", providerSubject: `a5-${label}-${crypto.randomUUID()}`, displayName: label};
+		const account = await store.pUpsertOAuthAccount(identity);
 		const session = await store.pCreateSession({accountId: account.id, tokenHash: crypto.randomBytes(32).toString("hex"), expiresAt: new Date(Date.now() + 86_400_000)});
-		return {account, session};
+		return {account, session, identity};
 	};
 	const [dm, sourceOwner, ownerA, ownerB, unrelated] = await Promise.all(["DM", "Source", "Owner A", "Owner B", "Unrelated"].map(pActor));
 	const pCampaign = async () => {
@@ -72,14 +75,14 @@ async function pFixture (store, definition, {targetCount = 2, full = false, sour
 	const source = await pCharacter(sourceOwner, "Source", sourceFull ? 100 : 10, true);
 	const targets = await Promise.all(Array.from({length: targetCount}, (_, index) => pCharacter(index % 2 ? ownerB : ownerA, "Twin", full ? 100 : 5)));
 	const entity = {type: definition.ability ? "ability" : "spell", uid: `${definition.name}|${definition.source}`.toLowerCase(), version: definition.source === "PHB" ? "phb-2014-v1" : "xphb-2024-v1"};
-	const pPropose = async ({commandId = crypto.randomUUID(), refs = targets.map(target => target.targetRef), target = targets[0], entityOverride = entity} = {}) => {
+	const pPropose = async ({commandId = crypto.randomUUID(), refs = targets.map(target => target.targetRef), target = targets[0], entityOverride = entity, amount = 4} = {}) => {
 		const request = {
 			commandId,
 			contractVersion: 1,
 			sourceCharacterId: source.id,
 			sourceEntity: entityOverride,
 			effectTemplateId: definition.template,
-			choice: definition.ability ? {amount: 4} : {castLevel},
+			choice: definition.ability ? {amount} : {castLevel},
 			rulesVersionId: rules.id,
 			...(definition.multi ? {targetRefs: refs} : {targetRef: target.targetRef}),
 		};
@@ -111,12 +114,26 @@ async function pFixture (store, definition, {targetCount = 2, full = false, sour
 		});
 	};
 	const pRead = async (actor, character = source) => (await store.pGetCharacter({accountId: actor.account.id, characterId: character.id})).character;
+	const pPatchSource = async patches => {
+		const current = await pRead(sourceOwner);
+		const lease = await store.pAcquireCharacterLease({accountId: sourceOwner.account.id, sessionId: sourceOwner.session.id, characterId: source.id});
+		await store.pPatchCharacter({
+			accountId: sourceOwner.account.id,
+			sessionId: sourceOwner.session.id,
+			characterId: source.id,
+			baseRevision: current.revision,
+			leaseEpoch: lease.epoch,
+			protocolVersion: "4",
+			patches,
+			idempotencyKey: crypto.randomUUID(),
+		});
+	};
 	const pApprove = async proposed => {
 		for (let index = 0; index < (definition.multi ? targets.length : 1); ++index) {
 			await pRespond({operationId: proposed.operation.operationId, invitationId: proposed.operation.targets?.[index].invitationId, actor: index % 2 ? ownerB : ownerA});
 		}
 	};
-	return {campaign, rules, dm, sourceOwner, ownerA, ownerB, unrelated, memberships, source, targets, pPropose, pRespond, pFinalize, pApprove, pRead, pCampaign, pJoin};
+	return {campaign, rules, dm, sourceOwner, ownerA, ownerB, unrelated, memberships, source, targets, pPropose, pRespond, pFinalize, pApprove, pRead, pPatchSource, pCampaign, pJoin};
 }
 
 for (const backend of ["memory", "postgres"]) {
@@ -154,6 +171,120 @@ for (const backend of ["memory", "postgres"]) {
 				expect((await ctx.pRead(ctx.ownerA, ctx.targets[0])).data.hp.current).toBe(5 + count);
 				if (definition.multi) expect((await ctx.pRead(ctx.ownerB, ctx.targets[1])).data.hp.current).toBe(5 + count);
 				expect((await ctx.pRead(ctx.sourceOwner)).data.spellcasting.spellSlots[castLevel].current).toBe(0);
+			}
+		});
+
+		it.each(cases.flatMap(definition => ["uid", "brewBundleVersionId", "brewContentHash"].flatMap(field =>
+			[false, true].map(pending => ({...definition, field, pending})),
+		)))("$name $source rejects contradictory $field with pending=$pending at proposal/current concurrent finalization", async definition => {
+			const {pending, field} = definition;
+			const contradiction = {[field]: field === "uid" ? `fireball|${definition.source.toLowerCase()}` : field === "brewBundleVersionId" ? crypto.randomUUID() : "a".repeat(64)};
+			const ctx = await pFixture(store, definition);
+			const proposed = pending ? await ctx.pPropose() : null;
+			if (proposed && definition.multi) await ctx.pApprove(proposed);
+			const spell = {...ctx.source.data.spellcasting.spellsKnown[0], ...contradiction};
+			await ctx.pPatchSource([{op: "replace", path: "/spellcasting/spellsKnown/0", value: spell}]);
+			const before = await ctx.pRead(ctx.sourceOwner);
+			const targetsBefore = await Promise.all(ctx.targets.map((target, index) => ctx.pRead(index % 2 ? ctx.ownerB : ctx.ownerA, target)));
+			const eventsBefore = await store.pListVisibleEvents({accountId: ctx.sourceOwner.account.id, campaignId: ctx.campaign.id});
+			if (!proposed) {
+				const commandId = crypto.randomUUID();
+				const outcomes = await Promise.allSettled([ctx.pPropose({commandId}), ctx.pPropose({commandId})]);
+				expect(outcomes.map(outcome => outcome.status)).toEqual(["rejected", "rejected"]);
+				for (const outcome of outcomes) expect(outcome.reason).toMatchObject({code: "SOURCE_OR_TARGET_UNAVAILABLE"});
+				expect(await store.pListVisibleEvents({accountId: ctx.sourceOwner.account.id, campaignId: ctx.campaign.id})).toEqual(eventsBefore);
+			} else {
+				const request = {operationId: proposed.operation.operationId, commandId: crypto.randomUUID(), ...(definition.multi ? {selectedInvitationIds: proposed.operation.targets.map(target => target.invitationId)} : {})};
+				const resolve = () => definition.multi ? ctx.pFinalize(request) : ctx.pRespond(request);
+				const [first, concurrent] = await Promise.all([resolve(), resolve()]);
+				expect(first.operation.status).toBe("failed");
+				expect(concurrent.eventIds).toEqual(first.eventIds);
+				const eventsAfter = await store.pListVisibleEvents({accountId: ctx.sourceOwner.account.id, campaignId: ctx.campaign.id});
+				expect((await resolve()).eventIds).toEqual(first.eventIds);
+				expect(await store.pListVisibleEvents({accountId: ctx.sourceOwner.account.id, campaignId: ctx.campaign.id})).toEqual(eventsAfter);
+				expect(first.operation).not.toHaveProperty("sourceCost");
+				expect(first.operation).not.toHaveProperty("arguments");
+				expect(JSON.stringify(first)).not.toContain(spell.uid || spell.brewBundleVersionId || spell.brewContentHash);
+			}
+			expect(await ctx.pRead(ctx.sourceOwner)).toEqual(before);
+			for (let index = 0; index < ctx.targets.length; index++) expect(await ctx.pRead(index % 2 ? ctx.ownerB : ctx.ownerA, ctx.targets[index])).toEqual(targetsBefore[index]);
+		}, 30_000);
+
+		it.each(["source", "classSource", "className", "uid"])("Lay on Hands rejects already persisted contradictory resource %s before proposal", async field => {
+			const sourceData = acquiredLayOnHandsData();
+			const resource = sourceData.resources.find(entry => entry.featureRef?.uid === "lay on hands|xphb");
+			resource[field] = field === "className" ? "Cleric" : field === "uid" ? "lay on hands|phb" : "PHB";
+			const ctx = await pFixture(store, layOnHands, {sourceData});
+			const before = await ctx.pRead(ctx.sourceOwner);
+			const targetBefore = await ctx.pRead(ctx.ownerA, ctx.targets[0]);
+			await expect(ctx.pPropose()).rejects.toMatchObject({code: "SOURCE_OR_TARGET_UNAVAILABLE"});
+			expect(await ctx.pRead(ctx.sourceOwner)).toEqual(before);
+			expect(await ctx.pRead(ctx.ownerA, ctx.targets[0])).toEqual(targetBefore);
+		});
+
+		it("ordinary XPHB acquisition preserves a separate explicit PHB pool through persist/load and production cost", async () => {
+			const phbPool = {id: crypto.randomUUID(), name: "Lay on Hands", source: "PHB", description: "Unrelated manually tracked PHB pool", current: 17, max: 20, recharge: "long"};
+			const acquired = acquiredLayOnHandsData(1, [phbPool]);
+			expect(acquired.resources.find(resource => resource.id === phbPool.id)).toEqual(phbPool);
+			const restored = new globalThis.CharacterSheetState();
+			restored.loadFromJson(acquired);
+			const ctx = await pFixture(store, layOnHands, {sourceData: restored.toJson()});
+			const before = await ctx.pRead(ctx.sourceOwner);
+			const bound = before.data.resources.find(resource => resource.featureRef?.uid === "lay on hands|xphb");
+			expect(bound.id).not.toBe(phbPool.id);
+			const proposed = await ctx.pPropose();
+			await ctx.pRespond({operationId: proposed.operation.operationId});
+			const after = await ctx.pRead(ctx.sourceOwner);
+			expect(after.data.resources.find(resource => resource.id === phbPool.id)).toEqual(phbPool);
+			expect(after.data.resources.find(resource => resource.id === bound.id)).toMatchObject({current: 1, max: 5});
+			expect((await ctx.pRead(ctx.ownerA, ctx.targets[0])).data.hp.current).toBe(9);
+		});
+
+		it.each([10, 11, 15, 100, 101, 16])("authenticated protocol4 HTTP enforces amount %i on real serialized acquisition", async amount => {
+			const level = amount >= 100 ? 20 : 3;
+			const ctx = await pFixture(store, layOnHands, {sourceData: acquiredLayOnHandsData(level)});
+			const app = await createHubApp({
+				store,
+				oauthProvider: {getAuthorizationUrl: ({state}) => `https://example.invalid/?state=${state}`, pExchangeCode: async () => ctx.sourceOwner.identity},
+				config: {appOrigin: "https://tools.example", cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32)},
+			});
+			try {
+				const start = await app.inject({method: "GET", url: "/auth/github/start"});
+				const oauthState = new URL(start.headers.location).searchParams.get("state");
+				const callback = await app.inject({
+					method: "GET",
+					url: `/auth/github/callback?code=x&state=${oauthState}`,
+					headers: {cookie: `__Host-hub_oauth=${start.cookies.find(cookie => cookie.name === "__Host-hub_oauth").value}`},
+				});
+				const cookie = `__Host-hub_session=${callback.cookies.find(cookie => cookie.name === "__Host-hub_session").value}`;
+				const session = (await app.inject({method: "GET", url: "/api/session", headers: {cookie}})).json();
+				const commandId = crypto.randomUUID();
+				const before = await ctx.pRead(ctx.sourceOwner);
+				const targetBefore = await ctx.pRead(ctx.ownerA, ctx.targets[0]);
+				const response = await app.inject({
+					method: "POST",
+					url: `/api/campaigns/${ctx.campaign.id}/actions`,
+					headers: {cookie, origin: "https://tools.example", "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "4", "idempotency-key": commandId},
+					payload: {contractVersion: 1, commandId, sourceCharacterId: ctx.source.id, sourceEntity: {type: "ability", uid: "lay on hands|xphb", version: "xphb-2024-v1"}, effectTemplateId: layOnHands.template, choice: {amount}, targetRef: ctx.targets[0].targetRef, rulesVersionId: ctx.rules.id},
+				});
+				expect(response.statusCode).toBe(amount === 101 ? 400 : amount === 16 ? 409 : 201);
+				if (amount === 101) expect(response.json()).toMatchObject({error: "INVALID_REQUEST"});
+				else if (amount === 16) expect(response.json()).toMatchObject({error: "SOURCE_COST_UNAVAILABLE"});
+				else {
+					const result = await ctx.pRespond({operationId: response.json().operation.operationId});
+					expect(result.operation.status).toBe("applied");
+					const after = await ctx.pRead(ctx.sourceOwner);
+					const pool = after.data.resources.find(resource => resource.featureRef?.uid === "lay on hands|xphb");
+					expect(pool.current).toBe(5 * level - amount);
+					expect(after.data.features.find(feature => feature.id === pool.featureId).uses.current).toBe(pool.current);
+					expect((await ctx.pRead(ctx.ownerA, ctx.targets[0])).data.hp.current).toBe(Math.min(100, 5 + amount));
+				}
+				if ([101, 16].includes(amount)) {
+					expect(await ctx.pRead(ctx.sourceOwner)).toEqual(before);
+					expect(await ctx.pRead(ctx.ownerA, ctx.targets[0])).toEqual(targetBefore);
+				}
+			} finally {
+				await app.close();
 			}
 		});
 
@@ -201,7 +332,7 @@ for (const backend of ["memory", "postgres"]) {
 			expect((await ctx.pRead(ctx.sourceOwner)).data.resources[resourceIndex].current).toBe(0);
 		});
 
-		it.each(["duplicate resource", "duplicate feature", "stale mirror", "wrong link", "short recovery"])("Lay on Hands rejects %s at actual consent finalization without spending or changing the target", async corruption => {
+		it.each(["duplicate resource", "duplicate feature", "stale mirror", "wrong link", "short recovery", "PHB resource source", "PHB resource classSource", "other resource class", "contradictory resource UID"])("Lay on Hands rejects %s at actual consent finalization without spending or changing the target", async corruption => {
 			const ctx = await pFixture(store, layOnHands, {sourceData: acquiredLayOnHandsData()});
 			const proposed = await ctx.pPropose();
 			const source = await ctx.pRead(ctx.sourceOwner);
@@ -214,6 +345,10 @@ for (const backend of ["memory", "postgres"]) {
 			if (corruption === "stale mirror") feature.uses.current = 4;
 			if (corruption === "wrong link") resource.featureId = crypto.randomUUID();
 			if (corruption === "short recovery") resource.shortRestRecovery = true;
+			if (corruption === "PHB resource source") resource.source = "PHB";
+			if (corruption === "PHB resource classSource") resource.classSource = "PHB";
+			if (corruption === "other resource class") resource.className = "Cleric";
+			if (corruption === "contradictory resource UID") resource.uid = "lay on hands|phb";
 			const lease = await store.pAcquireCharacterLease({accountId: ctx.sourceOwner.account.id, sessionId: ctx.sourceOwner.session.id, characterId: source.id});
 			await store.pPatchCharacter({
 				accountId: ctx.sourceOwner.account.id,

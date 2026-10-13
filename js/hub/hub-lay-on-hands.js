@@ -16,6 +16,15 @@ export function isReviewedLayOnHandsFeature (feature) {
 		&& !feature?.brewBundleVersionId && !feature?.brewContentHash;
 }
 
+export function hasReviewedLayOnHandsResourceProvenance (resource) {
+	const norm = value => typeof value === "string" ? value.trim().toLowerCase() : "";
+	return (resource.source == null || norm(resource.source) === "xphb")
+		&& (resource.classSource == null || norm(resource.classSource) === "xphb")
+		&& (resource.className == null || norm(resource.className) === "paladin")
+		&& (resource.uid == null || ["lay on hands|xphb", "lay on hands|paladin|xphb|1"].includes(norm(resource.uid)))
+		&& resource.brewBundleVersionId == null && resource.brewContentHash == null;
+}
+
 export function resolveReviewedLayOnHands ({feature, amount} = {}) {
 	if (!isReviewedLayOnHandsFeature(feature) || !Number.isSafeInteger(amount) || amount < 1 || amount > 100) return null;
 	return {...REVIEWED_LAY_ON_HANDS, choice: {amount}};

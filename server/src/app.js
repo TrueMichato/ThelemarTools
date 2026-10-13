@@ -2169,7 +2169,7 @@ export async function createHubApp ({
 						additionalProperties: false,
 						maxProperties: 10,
 						properties: {
-							amount: {type: "integer", minimum: 1, maximum: 10},
+							amount: {type: "integer", minimum: 1, maximum: 100},
 							castLevel: {type: "integer", minimum: 1, maximum: 9},
 						},
 					},

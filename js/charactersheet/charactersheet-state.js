@@ -5,6 +5,7 @@
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {getCarryProfile, getCarryStatus} from "../hub/hub-carry-contract.js";
+import {hasReviewedLayOnHandsResourceProvenance} from "../hub/hub-lay-on-hands.js";
 import {
 	CARRY_SCHEMA_VERSION,
 	computeCarrySettingsDigest,
@@ -42547,14 +42548,29 @@ class CharacterSheetState {
 		const uid = String(feature.uid || "lay on hands|xphb").trim().toLowerCase();
 		const linked = this._data.resources.filter(resource => resource.featureId === feature.id || resource.id === feature.resourceId);
 		const named = this._data.resources.filter(resource => resource.name === "Lay on Hands");
-		const candidates = linked.length ? linked : named;
+		const qualified = this._data.resources.filter(resource => resource.featureRef?.uid === uid);
+		const candidates = [...new Set([...linked, ...qualified])];
 		if (candidates.length > 1) return unsupported("The ordinary resource binding is ambiguous.");
 		let resource = candidates[0];
+		const isExplicitPhbPool = entry => {
+			const norm = value => typeof value === "string" ? value.trim().toLowerCase() : "";
+			const phbUids = ["lay on hands|phb", "lay on hands|paladin|phb|1"];
+			return (norm(entry.source) === "phb" || norm(entry.classSource) === "phb" || phbUids.includes(norm(entry.uid)) || phbUids.includes(norm(entry.featureRef?.uid)))
+				&& (entry.source == null || norm(entry.source) === "phb")
+				&& (entry.classSource == null || norm(entry.classSource) === "phb")
+				&& (entry.className == null || norm(entry.className) === "paladin")
+				&& (entry.uid == null || phbUids.includes(norm(entry.uid)))
+				&& (entry.featureRef == null || phbUids.includes(norm(entry.featureRef.uid)));
+		};
+		if (!resource && named.some(entry => !isExplicitPhbPool(entry))) {
+			return unsupported("A name-only legacy pool has no exact source/ownership evidence.");
+		}
 		if (resource) {
 			if (typeof resource.id !== "string" || !resource.id || resource.id.trim() !== resource.id
 				|| resource.id.startsWith("__synthetic") || resource.id.startsWith("gem:")
 				|| this._data.resources.filter(entry => typeof entry.id === "string" && entry.id.toLowerCase() === resource.id.toLowerCase()).length !== 1
 				|| resource.synthetic || resource.linkedInnateSpellId != null
+				|| !hasReviewedLayOnHandsResourceProvenance(resource)
 				|| (Array.isArray(this._data.spellcasting?.innateSpells) && this._data.spellcasting.innateSpells.some(spell => spell.resourceId === resource.id || spell.linkedResourceId === resource.id))
 				|| resource.brewBundleVersionId || resource.brewContentHash
 				|| (resource.recharge != null && resource.recharge !== "long") || resource.shortRestRecovery != null

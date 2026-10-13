@@ -16,6 +16,13 @@ export const REVIEWED_HEALING_WORD_SPELLS = Object.freeze([
 	})),
 ]);
 
+export function isReviewedHealingWordSpellRecord ({spell, sourceEntity}) {
+	const norm = value => typeof value === "string" ? value.trim().toLowerCase() : "";
+	return `${norm(spell?.name)}|${norm(spell?.source)}` === sourceEntity.uid
+		&& (spell.uid == null || (typeof spell.uid === "string" && norm(spell.uid) === sourceEntity.uid))
+		&& spell.brewBundleVersionId == null && spell.brewContentHash == null;
+}
+
 export function resolveReviewedHealingWordSpell ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
 	const definition = REVIEWED_HEALING_WORD_SPELLS.find(candidate =>
 		candidate.name.toLowerCase() === String(spell?.name || "").trim().toLowerCase()
@@ -24,6 +31,7 @@ export function resolveReviewedHealingWordSpell ({spell, selectedSlot, hasMetama
 	);
 	if (
 		!definition
+		|| !isReviewedHealingWordSpellRecord({spell, sourceEntity: definition.sourceEntity})
 		|| !Number.isInteger(selectedSlot?.level)
 		|| selectedSlot.level < definition.level
 		|| selectedSlot.level > 9

@@ -355,6 +355,11 @@ feature evidence to one reciprocal ordinary resource, preserving IDs/spent point
 through acquisition, load/save, level-up/down/respec, rest and parser recalculation. Unsupported contradictory
 bindings are diagnosed, not silently normalized. A declined/failed/no-effect singular operation spends nothing;
 an explicit local choice spends only the chosen points and leaves target healing to the table.
+Legacy resource reconciliation needs an exact feature-ID link or exact resource `featureRef`; a name alone
+never supplies ownership. Explicit unrelated PHB manual pools are preserved byte-for-byte during new XPHB
+acquisition, which creates a distinct resource ID. Anonymous/malformed legacy pools remain unsupported with
+the normal diagnostic. Existing reciprocal links do not permit contradictory resource source/class/UID/brew
+provenance; the server independently rechecks it before proposal and final cost.
 The coordinator stamps queued semantic envelopes with an authority epoch; its immediate invalidation advances the
 page context fence and pauses HTTP, realtime, pending-resync and canonical adoption until fresh authorized context.
 Stale applied evidence remains in the existing ordered resync queue without committing coverage or watermark.

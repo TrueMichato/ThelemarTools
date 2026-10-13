@@ -13,8 +13,8 @@ import {
 	MULTI_TARGET_OPERATIONS_MAX_TARGETS,
 	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
 } from "../../js/hub/hub-multi-target-operations.js";
-import {REVIEWED_HEALING_WORD_SPELLS} from "../../js/hub/hub-healing-word-spells.js";
-import {isReviewedLayOnHandsFeature, REVIEWED_LAY_ON_HANDS} from "../../js/hub/hub-lay-on-hands.js";
+import {isReviewedHealingWordSpellRecord, REVIEWED_HEALING_WORD_SPELLS} from "../../js/hub/hub-healing-word-spells.js";
+import {hasReviewedLayOnHandsResourceProvenance, isReviewedLayOnHandsFeature, REVIEWED_LAY_ON_HANDS} from "../../js/hub/hub-lay-on-hands.js";
 
 const MAX_IDENTITY_LENGTH = 200;
 const MAX_TEMPLATE_ID_LENGTH = 120;
@@ -91,15 +91,15 @@ function isUsableLeveledSpell ({data, spell, level = 1}) {
 	return false;
 }
 
-function getUsableSpell ({sourceCharacter, sourceEntity, level = 1}) {
+function getUsableSpell ({sourceCharacter, sourceEntity, level = 1, requireReviewedIdentity = false}) {
 	const data = sourceCharacter.data || {};
 	const matches = (Array.isArray(data.spellcasting?.spellsKnown) ? data.spellcasting.spellsKnown : [])
-		.filter(spell => `${String(spell?.name || "").trim()}|${String(spell?.source || "").trim()}`.toLowerCase() === sourceEntity.uid)
-		.filter(spell => isUsableLeveledSpell({data, spell, level}));
-	if (matches.length !== 1) {
+		.filter(spell => `${String(spell?.name || "").trim()}|${String(spell?.source || "").trim()}`.toLowerCase() === sourceEntity.uid);
+	const usable = matches.filter(spell => isUsableLeveledSpell({data, spell, level}));
+	if (usable.length !== 1 || (requireReviewedIdentity && matches.some(spell => !isReviewedHealingWordSpellRecord({spell, sourceEntity})))) {
 		throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 	}
-	return matches[0];
+	return usable[0];
 }
 
 function getSpellcastingAbility ({data, spell}) {
@@ -153,9 +153,9 @@ function getAbilityScore ({data, ability}) {
 	return Math.max(0, score - damage);
 }
 
-function getSpellcastingModifier ({sourceCharacter, sourceEntity, level = 1}) {
+function getSpellcastingModifier ({sourceCharacter, sourceEntity, level = 1, requireReviewedIdentity = false}) {
 	const data = sourceCharacter.data || {};
-	const spell = getUsableSpell({sourceCharacter, sourceEntity, level});
+	const spell = getUsableSpell({sourceCharacter, sourceEntity, level, requireReviewedIdentity});
 	const ability = getSpellcastingAbility({data, spell});
 	if (!ability) {
 		throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
@@ -233,7 +233,7 @@ function getHealingWordTemplate (definition) {
 		display: Object.freeze({label: name, outcomeLabel: "Healing", tableRules}),
 		normalizeChoice: choice => normalizeSpellSlotChoice(choice, level),
 		hasSource: ({character}) => {
-			getUsableSpell({sourceCharacter: character, sourceEntity, level});
+			getUsableSpell({sourceCharacter: character, sourceEntity, level, requireReviewedIdentity: true});
 			return true;
 		},
 		buildSourceCost: ({choice}) => ({
@@ -246,7 +246,7 @@ function getHealingWordTemplate (definition) {
 				seed: effectResolutionSeed,
 				count,
 				size: 4,
-			}) + getSpellcastingModifier({sourceCharacter, sourceEntity, level});
+			}) + getSpellcastingModifier({sourceCharacter, sourceEntity, level, requireReviewedIdentity: true});
 			return {kind: "hp.heal", arguments: {amount: Math.max(count, amount)}};
 		},
 		sourceFootprint: ({sourceCost}) => getSourceCostMutationFootprint(sourceCost),
@@ -265,13 +265,14 @@ function getLayOnHandsBinding (character) {
 	const [feature] = features;
 	if (typeof feature.id !== "string" || !feature.id || feature.id.trim() !== feature.id
 		|| data.features.filter(entry => typeof entry?.id === "string" && entry.id.trim().toLowerCase() === feature.id.toLowerCase()).length !== 1) fail();
+	const uid = String(feature.uid || "lay on hands|xphb").trim().toLowerCase();
 	const resources = (Array.isArray(data?.resources) ? data.resources : []).filter(resource =>
-		resource?.featureId === feature.id || resource?.id === feature.resourceId,
+		resource?.featureId === feature.id || resource?.id === feature.resourceId || resource?.featureRef?.uid === uid,
 	);
 	if (resources.length !== 1) fail();
 	const [resource] = resources;
-	const uid = String(feature.uid || "lay on hands|xphb").trim().toLowerCase();
 	if (typeof resource.id !== "string" || !resource.id || resource.id.trim() !== resource.id || resource.synthetic
+		|| !hasReviewedLayOnHandsResourceProvenance(resource)
 		|| resource.id.startsWith("__synthetic") || resource.id.startsWith("gem:")
 		|| resource.featureId !== feature.id || feature.resourceId !== resource.id
 		|| data.features.some(entry => entry.id !== feature.id && entry.resourceId === resource.id)

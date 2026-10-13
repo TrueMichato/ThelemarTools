@@ -48,8 +48,13 @@ The third template is the authorized **XPHB Lay on Hands heal-only** singular `f
 acquisition/lifecycle binds one exact source-qualified feature to one unique persisted resource, keeps current/max
 mirrors and the canonical five-points-per-Paladin-level pool synchronized, and preserves spent points as the
 maximum grows or shrinks. Ambiguous, malformed, innate or contradictory bindings remain unsupported with
-diagnostics; no synthetic resource or display-name fallback is introduced. Touch/bonus-action eligibility is
-table-adjudicated; poison/disease removal and other resource exceptions remain excluded. Singular HW/LoH no-effect
+diagnostics; no synthetic resource or display-name fallback is introduced.
+Fresh A5 review found spell UID/brew provenance, name-only legacy resource acquisition,
+and the singular HTTP ten-point ceiling counterexamples. The bounded local remediation requires exact stored
+spell identity/provenance at proposal and final rederivation, explicit resource ownership/provenance with
+unrelated PHB-pool preservation, and the existing singular amount schema bound of 100 with strict affordability.
+These fixes still require retained-reviewer closure; prior green gates did not establish their authority.
+Touch/bonus-action eligibility is table-adjudicated; poison/disease removal and other resource exceptions remain excluded. Singular HW/LoH no-effect
 acceptance privately fails without spending or changing either canonical document/revision; only MHW opts into
 applied/revisionless target no-ops. A5 requires fresh independent
 exact-candidate review. Publication, integration, deployment, enrollment, enablement and migration holds remain.

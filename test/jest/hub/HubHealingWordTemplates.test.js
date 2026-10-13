@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
 import {resolveReviewedMultiTargetSpell} from "../../../js/hub/hub-multi-target-operations.js";
+import {resolveReviewedHealingWordSpell} from "../../../js/hub/hub-healing-word-spells.js";
 
 const registry = createSemanticOperationRegistry();
 const SEED = "a".repeat(64);
@@ -88,6 +89,26 @@ describe("Reviewed Healing Word production templates", () => {
 			const options = args({name, source, level});
 			mutate(options);
 			expect(() => derive(options)).toThrow();
+		}
+	});
+
+	it.each(cases)("%s %s preserves exact canonical/legacy identity and refuses contradictory UID or brew provenance in both resolvers", (name, source, level) => {
+		const derive = options => level === 3 ? registry.deriveMultiTarget(options) : registry.derive(options);
+		for (const uid of [undefined, `${name}|${source}`.toLowerCase()]) {
+			const options = args({name, source, level});
+			if (uid !== undefined) options.sourceCharacter.data.spellcasting.spellsKnown[0].uid = uid;
+			expect(derive(options).sourceCost.components[0].amount).toBe(1);
+			expect(resolveReviewedHealingWordSpell({spell: options.sourceCharacter.data.spellcasting.spellsKnown[0], selectedSlot: {level}})).toMatchObject({sourceEntity: options.sourceEntity});
+		}
+		for (const contradiction of [
+			{uid: `fireball|${source.toLowerCase()}`}, {uid: ""}, {uid: []},
+			{brewBundleVersionId: "unreviewed-brew"}, {brewContentHash: "a".repeat(64)}, {brewBundleVersionId: ""},
+		]) {
+			const options = args({name, source, level});
+			Object.assign(options.sourceCharacter.data.spellcasting.spellsKnown[0], contradiction);
+			expect(() => derive(options)).toThrow();
+			expect(resolveReviewedHealingWordSpell({spell: options.sourceCharacter.data.spellcasting.spellsKnown[0], selectedSlot: {level}})).toBeNull();
+			if (level === 3) expect(resolveReviewedMultiTargetSpell({spell: options.sourceCharacter.data.spellcasting.spellsKnown[0], selectedSlot: {level}})).toBeNull();
 		}
 	});
 

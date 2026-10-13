@@ -386,6 +386,11 @@ and Healing Word always require manual owner approval, including self.
 ### Held A5 healing-spell rules boundary
 
 All four HW/MHW definitions require exact source/edition and a usable class-owned known/prepared spell record.
+An explicit stored spell `uid` must agree with that exact identity; absent UIDs remain supported only with
+the existing exact name/source/class acquisition evidence. Any non-null `brewBundleVersionId` or
+`brewContentHash`, including malformed empty provenance, is unsupported for these production definitions.
+Both proposal and current final rederivation enforce this; consent cannot authorize a changed source record.
+This additional A5 validation does not change Cure Wounds.
 They consume exactly one standard slot of the chosen level, only when the effect atomically applies.
 
 | Spell | Source | Minimum slot | Healing dice at slot level L | Candidate cap |
@@ -415,8 +420,17 @@ caller cannot supply a resource ID. One exact XPHB Paladin feature and one ordin
 reciprocally, with unique canonical IDs, matching current/max mirrors, long-rest recovery and a maximum of
 five times the actual XPHB Paladin level. Duplicate, ambiguous, innate, brew, stale or contradictory bindings
 fail closed. Ordinary acquisition, load/save, level-up/down/respec, rest and parser recalculation preserve IDs
-and spent points; safe legacy repair requires exact source-qualified feature evidence. Load-time acquisition
+and spent points. Safe legacy repair requires exact feature-ID ownership or an exact source-qualified
+resource `featureRef`, not a shared display name. A separately tracked explicit PHB pool retains its ID and
+bytes while new XPHB acquisition creates a distinct qualified pool; anonymous or contradictory legacy ownership
+is diagnosed and left unsupported. Even reciprocal XPHB links cannot override contradictory resource
+`source`, `classSource`, `className`, `uid` or brew provenance at the server. Load-time acquisition
 repairs are persisted through the normal Sheet save, not an authority bypass.
+
+The existing singular HTTP `choice.amount` schema accepts integers 1 through 100. The production template
+still restricts the selected amount to the current canonical pool: overbound input is `400 INVALID_REQUEST`,
+while a valid-shaped unaffordable amount is `409 SOURCE_COST_UNAVAILABLE`. Other templates retain their
+own closed choices and source checks; this changes no input shape, protocol or cost kind.
 
 Touch range and bonus-action eligibility are table-adjudicated and disclosed before amount confirmation and
 target consent. Poison, disease and condition removal are unsupported. Proposal reserves/spends nothing.

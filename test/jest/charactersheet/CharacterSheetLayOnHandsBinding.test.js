@@ -10,8 +10,9 @@ const ClassUtils = globalThis.CharacterSheetClassUtils;
 const data = JSON.parse(fs.readFileSync("data/class/class-paladin.json", "utf8"));
 const paladin = data.class.find(entry => entry.name === "Paladin" && entry.source === "XPHB");
 
-function acquire (level = 1) {
+function acquire (level = 1, priorResources = []) {
 	const state = new State();
+	for (const resource of priorResources) state.addResource(resource);
 	state.addClass({name: "Paladin", source: "XPHB", level});
 	const cls = state.getClasses()[0];
 	ClassUtils.updateClassResources(state, cls, level, paladin);
@@ -112,7 +113,6 @@ describe("XPHB Lay on Hands ordinary acquisition and resource binding", () => {
 		const storedResource = legacy.resources.find(entry => entry.id === resource.id);
 		const storedFeature = legacy.features.find(entry => entry.id === feature.id);
 		delete storedResource.featureId;
-		delete storedResource.featureRef;
 		delete storedFeature.resourceId;
 		delete storedFeature.uses;
 		const loaded = new State();
@@ -120,7 +120,44 @@ describe("XPHB Lay on Hands ordinary acquisition and resource binding", () => {
 		expect(binding(loaded).resource).toMatchObject({id: resource.id, current: 2, max: 5});
 	});
 
-	it.each(["duplicate-resource", "duplicate-feature", "stale-link", "mismatched-mirror", "wrong-ref", "innate-alias", "wrong-recharge", "short-rest-recovery"])("rejects %s without silently rewriting the invalid binding", problem => {
+	it("never appropriates an explicit PHB manual pool during actual XPHB acquisition and round trip", () => {
+		const phbPool = {id: "phb-manual-pool", name: "Lay on Hands", source: "PHB", description: "Unrelated manually tracked PHB pool", current: 17, max: 20, recharge: "long"};
+		const state = acquire(1, [phbPool]);
+		expect(state.toJson().resources.find(resource => resource.id === phbPool.id)).toEqual(phbPool);
+		const own = binding(state);
+		expect(own.resource.id).not.toBe(phbPool.id);
+		const spent = applySourceCost({data: state.toJson(), sourceCost: own.sourceCost});
+		const loaded = new State();
+		loaded.loadFromJson(spent.data);
+		expect(loaded.toJson().resources.find(resource => resource.id === phbPool.id)).toEqual(phbPool);
+		expect(binding(loaded).resource).toMatchObject({id: own.resource.id, current: 4, max: 5});
+	});
+
+	it.each([undefined, "", "TST"])("leaves ambiguous name-only legacy ownership (source=%s) unsupported without resetting spent points or manufacturing links", source => {
+		const state = acquire();
+		const initial = binding(state);
+		state.setResourceCurrent(initial.resource.id, 2);
+		const legacy = state.toJson();
+		const resource = legacy.resources.find(entry => entry.id === initial.resource.id);
+		const feature = legacy.features.find(entry => entry.id === initial.feature.id);
+		delete resource.featureId;
+		delete resource.featureRef;
+		delete feature.resourceId;
+		delete feature.uses;
+		if (source !== undefined) resource.source = source;
+		const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const loaded = new State();
+			loaded.loadFromJson(legacy);
+			expect(loaded.toJson().resources).toEqual(legacy.resources);
+			expect(loaded.getFeatures().find(entry => entry.id === feature.id).resourceId).toBeUndefined();
+			expect(warning).toHaveBeenCalledWith(expect.stringContaining("Lay on Hands"), expect.any(String));
+		} finally {
+			warning.mockRestore();
+		}
+	});
+
+	it.each(["duplicate-resource", "duplicate-feature", "stale-link", "mismatched-mirror", "wrong-ref", "innate-alias", "wrong-recharge", "short-rest-recovery", "PHB-resource", "other-class-resource", "duplicate-exact-ref"])("rejects %s without silently rewriting the invalid binding", problem => {
 		const state = acquire();
 		const {feature, resource, sourceCost} = binding(state);
 		if (problem === "duplicate-resource") state._data.resources.push({...resource});
@@ -131,6 +168,9 @@ describe("XPHB Lay on Hands ordinary acquisition and resource binding", () => {
 		if (problem === "innate-alias") state._data.spellcasting.innateSpells.push({id: "unrelated-spell", resourceId: resource.id, uses: {...feature.uses}});
 		if (problem === "wrong-recharge") resource.recharge = "short";
 		if (problem === "short-rest-recovery") resource.shortRestRecovery = 1;
+		if (problem === "PHB-resource") resource.source = "PHB";
+		if (problem === "other-class-resource") resource.className = "Cleric";
+		if (problem === "duplicate-exact-ref") state._data.resources.push({...resource, id: "different-resource", featureId: undefined});
 		const before = JSON.stringify({features: state._data.features, resources: state._data.resources});
 		const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
 		try {
