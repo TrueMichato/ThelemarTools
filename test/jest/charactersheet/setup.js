@@ -38,6 +38,7 @@ globalThis.e_ = function (opts = {}) {
 			}
 		},
 		appendChild (child) { this.append(child); return child; },
+		replaceChildren (...children) { this._children = []; this._html = ""; this.append(...children); },
 		prepend (...children) { this._children.unshift(...children); },
 		querySelector () { return null; },
 		querySelectorAll () { return []; },

@@ -4185,6 +4185,17 @@ class CharacterSheetClassUtils {
 
 		searchEntries(feature.entries);
 
+		if (!results.length) {
+			const groups = globalThis.FeatureChoiceParser?.extractChoices(feature)?.subfeatureChoices || [];
+			for (const group of groups) {
+				if (group.optionalFeaturePool || !group.options?.length) continue;
+				const options = group.options
+					.filter(option => Number(option.level || 1) <= characterLevel)
+					.map(option => ({...option, type: option.refType}));
+				if (options.length) results.push({count: group.count || 1, options});
+			}
+		}
+
 		// Some features present a genuine 1-of-N choice as PROSE plus a bulleted list
 		// rather than a structured `options` entry, so nothing above can detect them.
 		// BH2022's Otherworldly Patron is the motivating case: the patron drives Rite
@@ -5392,6 +5403,7 @@ class CharacterSheetClassUtils {
 			&& norm(classSource) === "tgtt"
 			&& norm(parentFeature) === "specialties"
 			&& [1, 6].includes(acquisitionLevel);
+		const isUniqueClassOwner = state.getClasses().filter(cls => norm(cls.name) === norm(className)).length === 1;
 
 		try {
 			const matchesScope = item =>
@@ -5410,7 +5422,7 @@ class CharacterSheetClassUtils {
 			if (oldChoice) {
 				const oldFeatures = (state._data?.features || []).filter(item => matchesScope(item) && matchesOld(item));
 				if (!oldFeatures.length) {
-					const definitionClassSource = oldChoice.ref?.split("|")[2];
+					const definitionClassSource = oldChoice.ref?.split("|")[2] || declaredParent?.classSource || parentDefinition?.classSource;
 					const legacyFeatures = (state._data?.features || []).filter(item =>
 						matchesOld(item)
 						&& norm(item?.parentFeature) === norm(parentFeature)
@@ -5445,8 +5457,12 @@ class CharacterSheetClassUtils {
 					!(
 						norm(record.parent) === norm(parentFeature)
 						&& (!effectiveParentSource || norm(record.parentSource) === norm(effectiveParentSource))
-						&& (!className || norm(record.parentClass) === norm(className))
-						&& (!classSource || norm(record.parentClassSource) === norm(classSource))
+						&& (!className || norm(record.parentClass) === norm(className) || (!record.parentClass && isUniqueClassOwner))
+						&& (!classSource || norm(record.parentClassSource) === norm(classSource)
+							|| (!record.parentClassSource && isUniqueClassOwner)
+							|| (norm(record.parentClassSource) === norm(declaredParent?.classSource)
+								&& !state.getClasses().some(cls =>
+									norm(cls.name) === norm(className) && norm(cls.source) === norm(record.parentClassSource))))
 						&& Number(record.level) === acquisitionLevel
 						&& norm(record.name) === norm(oldChoice.choice || oldChoice.name)
 						&& (!oldChoice.source || norm(record.source) === norm(oldChoice.source))
@@ -5483,6 +5499,17 @@ class CharacterSheetClassUtils {
 				source: appliedFeature.source,
 				sourceDecisionKey: semanticKey,
 			});
+			for (const pending of state.getPendingFeatureChoices?.() || []) {
+				if (norm(pending.featureName) !== norm(parentFeature)
+					|| (pending.featureClass && norm(pending.featureClass) !== norm(className))
+					|| (pending.featureSource && norm(pending.featureSource) !== norm(effectiveParentSource))
+					|| (pending.level != null && Number(pending.level) !== acquisitionLevel)
+					|| (pending.featureClassSource && norm(pending.featureClassSource) !== norm(classSource)
+						&& !(norm(pending.featureClassSource) === norm(declaredParent?.classSource)
+							&& !state.getClasses().some(cls =>
+								norm(cls.name) === norm(className) && norm(cls.source) === norm(pending.featureClassSource))))) continue;
+				state.removePendingFeatureChoice(pending.id);
+			}
 
 			const resolved = CharacterSheetClassUtils.resolveFeatureOptionData(newOption, optionCatalogs);
 			const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
