@@ -73,10 +73,19 @@ cost mirrors, reconnect, still-open peer HP and private singular failed/unspent 
 preservation are asserted. After a character switch, await the new realtime attachment before measuring the
 canonical baseline: an ordinary load-time repair save is not a semantic no-effect write.
 
-The existing semantic-operation mutation runner includes nine A5 actual-callsite controls: wrong MHW upcast
+The semantic-operation mutation runner retains the initial nine A5 actual-callsite controls: wrong MHW upcast
 scaling, eight-target acceptance, preparation bypass, singular MHW routing, an incorrect minimum-one floor or omitted dice floor,
 two-slot cost, an eight-target browser picker, and local fallback during a fenced MHW cast. It copies the two checked-in spell data files into its owned
-temporary probe tree and requires a green baseline before each mutant. The current content/semantic matchers
+temporary probe tree and requires a green baseline before each mutant. Six retained-reviewer remediation
+controls additionally cover contradictory stored spell UID, unreviewed brew
+provenance, illicit resource provenance behind reciprocal links, name-only pool acquisition, ambiguous legacy
+ownership and the singular HTTP ten-point ceiling. The HTTP matcher includes singular `targetRef` so it cannot
+silently mutate the neighboring multi-target `targetRefs` schema. Public-store regressions cover proposal and
+leased source mutation before current finalization, concurrent/exact retries, unrelated PHB manual-pool
+preservation through real acquisition/persistence/load/cost, and authenticated protocol-4 amounts 10/11/15/100,
+overbound input and overspend in both stores. The full semantic gate has 35 controls including these 15 A5
+controls; those counts are not a unique sum with other gates.
+The current content/semantic matchers
 require exact production occurrence/replacement reach and restore candidate bytes after every mutant; stale
 or ambiguous reach is a failure, never a kill. The queued approval/access-loss probe calls through the actual
 repository executor and requires zero invocations after the released callback fully drains, followed by the
