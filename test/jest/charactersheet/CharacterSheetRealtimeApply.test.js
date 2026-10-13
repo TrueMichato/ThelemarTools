@@ -9,6 +9,7 @@ import {CharacterSheetPeerTargeting} from "../../../js/charactersheet/characters
 import {getMultiTargetOperationsCapability} from "../../../js/hub/hub-multi-target-operations.js";
 import {createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
+import {HubBroadcastSync} from "../../../js/hub/hub-broadcast-sync.js";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
 import {applyJsonPatch} from "../../../js/hub/hub-json-patch.js";
 
@@ -16,6 +17,15 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 
 let CharacterSheetPage;
+const ownedBroadcasts = new Set();
+
+afterEach(async () => {
+	for (const {sync, repository} of ownedBroadcasts) {
+		await repository._pMutationQueue;
+		sync.close();
+	}
+	ownedBroadcasts.clear();
+});
 
 /** Mirrors the transport double used by the merged coordinator tests. */
 class FakeRealtimeClient {
@@ -174,7 +184,9 @@ const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 			character: structuredClone(api.state.character),
 		}));
 	}
-	const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+	const sync = new HubBroadcastSync({campaignId: "campaign-1"});
+	const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api, broadcastSync: sync});
+	ownedBroadcasts.add({sync, repository});
 	if (previousStorage === undefined) delete globalThis.sessionStorage;
 	else globalThis.sessionStorage = previousStorage;
 
@@ -2043,8 +2055,8 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		}
 	});
 
-	it.each(["propose", "cancel", "authority-loss"])("routes actual acquired Lay on Hands through its amount prompt without eager cost for %s", async mode => {
-		const {host, state} = await pMakeHarness({seed: {classes: [{name: "Paladin", source: "XPHB", level: 1}], features: [], resources: []}});
+	it.each(["propose", "cancel", "authority-loss", "pool-changed", "local"])("routes actual acquired Lay on Hands through its amount prompt without eager cost for %s", async mode => {
+		const {host, state, api} = await pMakeHarness({seed: {classes: [{name: "Paladin", source: "XPHB", level: 1}], features: [], resources: []}});
 		const book = JSON.parse(fs.readFileSync("data/class/class-paladin.json", "utf8"));
 		const cls = book.class.find(entry => entry.name === "Paladin" && entry.source === "XPHB");
 		globalThis.CharacterSheetClassUtils.updateClassResources(state, state.getClasses()[0], 1, cls);
@@ -2052,22 +2064,37 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		const feature = state.getFeatures().find(entry => entry.name === "Lay on Hands" && entry.source === "XPHB");
 		const resource = state.getResources().find(entry => entry.featureId === feature.id);
 		host._peerTargeting.isSupportedHealingFeature = jest.fn(() => true);
-		host._peerTargeting.pMaybeProposeHealingFeature = jest.fn(async () => ({handled: true, proposed: true}));
+		host._peerTargeting.pMaybeProposeHealingFeature = jest.fn(async () => mode === "local" ? {handled: true, local: true} : {handled: true, proposed: true});
 		host._pUseHubLayOnHands = CharacterSheetPage.prototype._pUseHubLayOnHands.bind(host);
 		host._getActivatableAbilityForFeature = jest.fn();
+		if (mode === "local") {
+			api.pPatchCharacter.mockImplementationOnce(async input => {
+				api.state.character = {...api.state.character, revision: api.state.character.revision + 1, data: applyJsonPatch(api.state.character.data, input.patches)};
+				return {character: api.state.character};
+			});
+		}
 		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserNumber").mockImplementation(async () => {
 			if (mode === "authority-loss") host._onHubRealtimeConnectionState({state: "access_lost"});
+			if (mode === "pool-changed") state.setResourceCurrent(resource.id, 1);
 			return mode === "cancel" ? null : 4;
 		});
+		const save = jest.spyOn(host, "_saveCurrentCharacter");
 		try {
 			await expect(CharacterSheetPage.prototype._pUseFeatureAbility.call(host, feature)).resolves.toBe(true);
 			expect(prompt).toHaveBeenCalledWith(expect.objectContaining({min: 1, max: 5, int: true, elePre: expect.objectContaining({textContent: expect.stringContaining("not checked by the server")})}));
 			expect(host._getActivatableAbilityForFeature).not.toHaveBeenCalled();
-			if (mode === "propose") expect(host._peerTargeting.pMaybeProposeHealingFeature).toHaveBeenCalledWith({feature: expect.objectContaining({id: feature.id, resourceId: resource.id}), amount: 4});
+			if (["propose", "local"].includes(mode)) expect(host._peerTargeting.pMaybeProposeHealingFeature).toHaveBeenCalledWith({feature: expect.objectContaining({id: feature.id, resourceId: resource.id}), amount: 4});
 			else expect(host._peerTargeting.pMaybeProposeHealingFeature).not.toHaveBeenCalled();
-			expect(state.getResources().find(entry => entry.id === resource.id).current).toBe(5);
-			expect(state.getFeatures().find(entry => entry.id === feature.id).uses.current).toBe(5);
+			if (mode === "local") {
+				await pFlush();
+				expect(save).toHaveBeenCalledTimes(1);
+				expect(api.pPatchCharacter).toHaveBeenCalledTimes(1);
+			} else expect(save).not.toHaveBeenCalled();
+			const current = ["local", "pool-changed"].includes(mode) ? 1 : 5;
+			expect(state.getResources().find(entry => entry.id === resource.id).current).toBe(current);
+			expect(state.getFeatures().find(entry => entry.id === feature.id).uses.current).toBe(current);
 		} finally {
+			save.mockRestore();
 			prompt.mockRestore();
 		}
 	});
