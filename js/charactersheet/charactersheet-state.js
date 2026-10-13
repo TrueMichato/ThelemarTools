@@ -18236,7 +18236,7 @@ class CharacterSheetState {
 			icon: component.sourceType === "feat" ? "⚡" : "⚙️",
 			isCanonical: false,
 		}));
-		const residual = (this._data.customModifiers.initiative || 0) - named.reduce((sum, component) => sum + component.value, 0);
+		const residual = this.getCustomModifier("initiative") - named.reduce((sum, component) => sum + component.value, 0);
 		if (residual !== 0) components.push({type: "custom", name: "Custom Modifier", value: residual, icon: "⚙️", isCanonical: false});
 
 		if (this.hasJackOfAllTrades()) {
@@ -19966,7 +19966,10 @@ class CharacterSheetState {
 
 	_getNamedInitiativeTotal () {
 		return (this._data.namedModifiers || []).reduce((total, mod) => {
-			if (!mod.enabled || !["initiative", "check:all", "d20:all"].includes(mod.type)) return total;
+			if (!mod.enabled || (!["initiative", "check:all", "d20:all", "check:dex"].includes(mod.type)
+				&& !mod.type?.startsWith("check:dex:"))) return total;
+			const {advantage, disadvantage} = this._parseModifierType(mod.type);
+			if (advantage || disadvantage) return total;
 			return total + this._getNamedModifierEffectiveValue(mod);
 		}, 0);
 	}
@@ -20028,7 +20031,7 @@ class CharacterSheetState {
 	}
 
 	getInitiative () {
-		let initiative = this.getAbilityMod("dex") + (this._data.customModifiers.initiative || 0);
+		let initiative = this.getAbilityMod("dex") + this.getCustomModifier("initiative");
 
 		// Jack of All Trades adds half proficiency to initiative (it's a DEX ability check)
 		if (this.hasJackOfAllTrades()) {
@@ -63446,7 +63449,7 @@ class CharacterSheetState {
 			// Remove associated modifiers by owner; legacy callers may also clear orphaned name matches.
 			this.removeModifiersByFeature(feature.id);
 			if (!preserveUnattributedModifiers && !hasAnotherFeatureWithName) {
-				this.removeModifiersByName(feature.name, {preserveInitiative: !!this._getLiveInitiativeGrant(feature)});
+				this.removeModifiersByName(feature.name, {preserveInitiative: true});
 			}
 			for (const state of [...(this._data.activeStates || [])]) {
 				if (hasFeatureId && state.sourceFeatureId === feature.id) this.removeActiveState(state.id);
@@ -70782,14 +70785,22 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Remove all named modifiers by source name (catches orphaned modifiers without sourceFeatureId)
+	 * Remove legacy unowned named modifiers by source name.
 	 * @param {string} name - The modifier name (typically the feature/specialty name)
 	 */
 	removeModifiersByName (name, {preserveInitiative = false} = {}) {
 		if (!name) return;
-		const hadModifiers = this._data.namedModifiers.some(m => m.name === name);
-		this._data.namedModifiers = this._data.namedModifiers.filter(m => m.name !== name || (preserveInitiative && m.type === "initiative"));
-		if (hadModifiers) {
+		const before = this._data.namedModifiers.length;
+		this._data.namedModifiers = this._data.namedModifiers.filter(modifier => {
+			if (modifier.name !== name || modifier.sourceFeatureId) return true;
+			if (preserveInitiative && modifier.type === "initiative") {
+				// eslint-disable-next-line no-console
+				console.warn(`[CharSheet State] Preserving initiative modifier "${name}" (${modifier.id}): exact feature ownership is unavailable. Review it in Modifiers if it should be removed.`);
+				return true;
+			}
+			return false;
+		});
+		if (this._data.namedModifiers.length !== before) {
 			this._recalculateCustomModifiers();
 		}
 	}
@@ -71312,7 +71323,8 @@ class CharacterSheetState {
 	getCustomModifier (type) {
 		switch (type) {
 			case "ac": return this._data.customModifiers.ac || 0;
-			case "initiative": return this._data.customModifiers.initiative || 0;
+			// Ability/proficiency changes can precede a cache rebuild; keep named initiative live.
+			case "initiative": return (this._data.customModifiers.initiativeAdjustment || 0) + this._getNamedInitiativeTotal();
 			case "speed": return this._data.customModifiers.speed?.walk || 0;
 			case "speed:walk": return this._data.customModifiers.speed?.walk || 0;
 			case "speed:fly": return this._data.customModifiers.speed?.fly || 0;
