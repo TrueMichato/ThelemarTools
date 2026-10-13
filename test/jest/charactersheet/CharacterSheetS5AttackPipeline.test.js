@@ -304,11 +304,9 @@ describe("#13 Life Stealing crit weapon rider (getCritWeaponRiders)", () => {
 
 describe("#13 Life Stealing application (_applyCritWeaponRider)", () => {
 	function mkCritCombat (initialTemp = 0) {
-		let temp = initialTemp;
-		const combat = mkCombat({
-			getTempHp: () => temp,
-			setTempHp: (n) => { temp = n; },
-		});
+		const state = new CharacterSheetState();
+		state.setTempHp(initialTemp);
+		const combat = mkCombat(state);
 		combat._parseDamage = (str) => ({total: 0, rolls: []});
 		return {combat, getTemp: () => combat._state.getTempHp()};
 	}

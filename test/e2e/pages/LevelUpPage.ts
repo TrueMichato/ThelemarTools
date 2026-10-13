@@ -436,21 +436,28 @@ export class LevelUpPage {
 		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}. Visible options: ${JSON.stringify(optionTexts)}`);
 	}
 
-	async selectFeatureOption (featureName: string, optionName: string): Promise<void> {
+	async selectFeatureOption (featureName: string, optionName: string, {onlyIfPresent = false}: {onlyIfPresent?: boolean} = {}): Promise<boolean> {
 		const accordion = this.page.locator('[data-accordion-id="featoptions"]');
 		await accordion.waitFor({state: "visible", timeout: 10000});
 		const group = accordion.locator(".charsheet__levelup-feat-opt-group")
 			.filter({has: this.page.locator("strong", {hasText: featureName})})
 			.first();
+		if (onlyIfPresent && !await group.count()) return false;
 		await group.waitFor({state: "visible", timeout: 10000});
 		const option = group.locator("label.charsheet__levelup-feat-opt-item")
-			.filter({has: this.page.locator(".feat-opt-name", {hasText: optionName})})
+			.filter({has: this.page.getByText(optionName, {exact: true})})
 			.first();
 		await option.waitFor({state: "visible", timeout: 10000});
 		const checkbox = option.locator("input[type='checkbox']");
-		if (!await checkbox.isChecked()) await option.click();
+		if (!await checkbox.isChecked()) {
+			for (const previous of await group.locator("input[type='checkbox']").all()) {
+				if (await previous.isChecked()) await previous.uncheck();
+			}
+			await checkbox.check();
+		}
 		await expect(checkbox).toBeChecked();
 		await expect(group.locator(".feat-opt-count")).toHaveText("1");
+		return true;
 	}
 
 	// ========== KNOWN SPELLS SECTION ==========

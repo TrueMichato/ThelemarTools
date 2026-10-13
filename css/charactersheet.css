@@ -195,6 +195,18 @@
 	border-bottom: 1px solid var(--cs-border);
 }
 
+.cs-post-roll-offer:has(.cs-post-roll-offer__panel) {
+	overflow-y: auto;
+}
+
+.cs-post-roll-offer__panel {
+	flex-shrink: 0;
+}
+
+.cs-post-roll-offer__panel + .cs-post-roll-offer__panel {
+	border-top: 1px solid var(--cs-border-control);
+}
+
 .cs-post-roll-offer__heading {
 	font-weight: 700;
 	line-height: 1.3;

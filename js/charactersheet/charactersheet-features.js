@@ -887,7 +887,7 @@ class CharacterSheetFeatures {
 	 * @param {string} featureType - "Class" or "Species"
 	 */
 	async _pShowMoreFeaturesModal (featureType) {
-		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
+		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures(), this._state.getClericFeatureDisplayContext?.());
 
 		// Get features matching the type
 		let features;
@@ -928,6 +928,8 @@ class CharacterSheetFeatures {
 						${usesStr}
 						${feature.className ? `<span class="ve-muted ml-auto ve-small">${feature.className}${feature.level ? ` L${feature.level}` : ""}</span>` : ""}
 					</div>
+					${feature.provenanceSources?.length ? `<div class="ve-small ve-muted">${feature.provenanceSources.map(it => `${CharacterSheetModal._escapeHtml(it.feature)} (L${it.level}, ${CharacterSheetModal._escapeHtml(it.source)})`).join("; ")}</div>` : ""}
+					${feature.inactiveReason ? `<div class="ve-small ve-muted">${CharacterSheetModal._escapeHtml(feature.inactiveReason)}</div>` : ""}
 					${description ? `<div class="ve-small mt-1">${description}</div>` : ""}
 				</div>
 			`});
@@ -1037,7 +1039,7 @@ class CharacterSheetFeatures {
 		container.innerHTML = "";
 
 		const classes = this._state.getClasses();
-		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
+		const allFeatures = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures(), this._state.getClericFeatureDisplayContext?.());
 		const features = allFeatures.filter(f => this._getFeatureDisplayType(f) === "Class");
 
 		if (!classes.length) {
@@ -1060,7 +1062,7 @@ class CharacterSheetFeatures {
 		// hover + description treatment as player-picked methods, without disturbing the
 		// optional-feature combat methods (which already group correctly).
 		const {optionalFeatures, autoGrantedCombatMethods, standaloneFeatures, featureOptions} =
-			CharacterSheetClassUtils.partitionClassFeaturesForDisplay(features);
+			CharacterSheetClassUtils.partitionClassFeaturesForDisplay(features, this._state.getClericFeatureDisplayContext?.());
 
 		// Render standalone class features
 		standaloneFeatures.forEach(feature => {
@@ -1847,7 +1849,7 @@ class CharacterSheetFeatures {
 
 		container.innerHTML = "";
 
-		const features = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures());
+		const features = CharacterSheetClassUtils.mergeEquivalentFeaturesForDisplay(this._state.getFeatures(), this._state.getClericFeatureDisplayContext?.());
 		const classes = this._state.getClasses();
 		const race = this._state.getRace();
 
@@ -1877,7 +1879,9 @@ class CharacterSheetFeatures {
 					// Fall back to plain name
 				}
 			}
-			return featureNameHtml;
+			return feature.inactiveReason
+				? `${featureNameHtml} <span class="ve-muted" title="${CharacterSheetModal._escapeHtml(feature.inactiveReason)}">(superseded)</span>`
+				: featureNameHtml;
 		};
 
 		// Define important features - features with limited uses, or key combat/exploration features
@@ -2332,7 +2336,7 @@ class CharacterSheetFeatures {
 		// passive and not usable at all. Suppress the button here generically.
 		const allFeaturesForUse = this._state.getFeatures?.() || [];
 		const isHiddenAbilitySurface = CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(feature, allFeaturesForUse);
-		const showUseBtn = (hasUses || isAbility) && !isActiveBoon && !isHiddenAbilitySurface;
+		const showUseBtn = (hasUses || isAbility) && !isActiveBoon && !isHiddenAbilitySurface && !feature.inactiveReason;
 
 		// Feature name hover link — delegate to the single centralised builder on
 		// the page so every feature type (class/subclass, species, background,
@@ -2357,14 +2361,16 @@ class CharacterSheetFeatures {
 		// cannot show (e.g. Soul Eater → "Temp HP 13", Hellish Avenger → "+1d8 fire").
 		let derivedEffectBadge = "";
 		let derivedEffectRow = "";
-		const effectSummary = this._state.getFeatureEffectSummary?.(feature) || "";
+		const effectSummary = (!feature.inactiveReason && this._state.getFeatureEffectSummary?.(feature)) || "";
 		if (effectSummary) {
 			derivedEffectBadge = `<span class="badge badge-outline-success" title="Computed effect">${effectSummary}</span>`;
 			derivedEffectRow = `<div class="ve-small mb-1"><span class="ve-muted">Effect:</span> <strong>${effectSummary}</strong></div>`;
 		}
 		const provenanceBadge = feature.provenanceSources?.length
 			? `<span class="badge badge-outline-info" title="${feature.provenanceSources.map(it => `${it.feature} (level ${it.level})`).join("; ")}">${feature.provenanceSources.length} grants</span>`
-			: "";
+			: feature.inactiveReason
+				? `<span class="badge badge-outline-info" title="${CharacterSheetModal._escapeHtml(feature.inactiveReason)}">Superseded</span>`
+				: "";
 
 		// Combat-method attribution badge (tradition + focus gate). Surfaced for combat-method
 		// features — especially auto-granted ones (Singular Focus / Groundshatter) that would

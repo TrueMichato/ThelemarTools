@@ -4643,6 +4643,28 @@ clears it. `setHp(..., temp)` and reset or long-rest clear paths are replacement
 cannot leave a stale receipt. Save/load normalization preserves a valid receipt only while
 `temp > 0`; legacy, zero-pool, and malformed receipts load as unowned.
 
+All grant callers must use these helpers, including spell self-effects,
+combat actions, Life Stealing, and EFA Protector. Feedback must distinguish a
+new pool from retaining a higher/equal pool. Companion grants use
+`setCompanionTempHp`, which returns whether a finite, floored higher amount
+replaced the companion's pool.
+
+Improved Blessed Strikes' Potent branch is an instantaneous **unowned** grant,
+not a source-removal expiry. A runtime committed-cantrip receipt binds exact
+casting class, spell, character state, and one delivery opportunity. The
+Spells controller stages the incumbent roll-side offer only after damage
+evidence exists, and the recipient picker confirms actual creature damage.
+Self/companion choices update real pools; external recipients are a labeled
+manual handoff with caster-relative distance validation and no remote mutation.
+Cancel preserves pending status; dismissal, successful delivery, eligibility
+loss, character switch, and reload prevent replay. Deferred weapon-channel
+casts attach their committed receipt to the actual rider-damage path.
+
+`CharacterSheetModal.createRollSideOffer`/`removeRollSideOffer` are narrowly
+opted into by existing Combat post-attack offers and these Cleric offers.
+Independent panels share one scrollable sidebar, not overlapping asides.
+This does not change the generic modal front door or other sheet layouts.
+
 ### Short Rest
 - **Hit Dice**: d{classHitDie} + CON mod per die spent; minimum 1 HP healed
 - **Overview Use Hit Die**: Different spendable die types prompt for the class/type

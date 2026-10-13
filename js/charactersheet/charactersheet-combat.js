@@ -2903,7 +2903,7 @@ class CharacterSheetCombat {
 	}
 
 	_dismissPostAttackOffer () {
-		this._postAttackOffer?.element?.remove();
+		CharacterSheetModal.removeRollSideOffer(this._postAttackOffer?.element);
 		this._postAttackOffer = null;
 	}
 
@@ -2919,19 +2919,12 @@ class CharacterSheetCombat {
 		if (!hooks.length) return;
 
 		const escape = CharacterSheetModal._escapeHtml;
-		const offer = e_({outer: `
-			<aside class="cs-post-roll-offer" role="region" aria-label="Optional follow-ups for ${escape(ctx.attack?.name || "attack")}">
-				<div class="cs-post-roll-offer__summary">
-					<div class="cs-post-roll-offer__heading">${escape(ctx.attack?.name || "Attack")} · Optional follow-ups</div>
-					<div class="cs-post-roll-offer__caption">Natural ${escape(ctx.rollFollowup.naturalRoll)} · Total ${escape(ctx.rollFollowup.total)}${ctx.isCrit ? " · Critical hit" : ""}</div>
-					<div class="cs-post-roll-offer__breakdown">${escape(ctx.rollFollowup.breakdown)}</div>
-				</div>
-				<div class="cs-post-roll-offer__choices" role="group" aria-label="Available post-attack effects"></div>
-				<div class="cs-post-roll-offer__footer">
-					<button type="button" class="cs-post-roll-offer__dismiss ve-btn ve-btn-xs ve-btn-default">Dismiss offers</button>
-				</div>
-			</aside>
-		`});
+		const offer = CharacterSheetModal.createRollSideOffer({
+			title: `${ctx.attack?.name || "Attack"} · Optional follow-ups`,
+			caption: `Natural ${ctx.rollFollowup.naturalRoll} · Total ${ctx.rollFollowup.total}${ctx.isCrit ? " · Critical hit" : ""}`,
+			breakdown: ctx.rollFollowup.breakdown,
+			choicesLabel: "Available post-attack effects",
+		});
 		const choices = offer.querySelector(".cs-post-roll-offer__choices");
 		const pending = {rollId: this._lastAttackContext.rollId, state: this._state, ctx, element: offer, options: new Map(), inFlight: false};
 		for (const hook of hooks) {
@@ -2947,7 +2940,6 @@ class CharacterSheetCombat {
 			choices.append(row);
 		}
 		offer.querySelector(".cs-post-roll-offer__dismiss").addEventListener("click", () => this._dismissPostAttackOffer());
-		document.body.append(offer);
 		this._postAttackOffer = pending;
 	}
 
@@ -3196,16 +3188,11 @@ class CharacterSheetCombat {
 		// Temporary hit points (take-higher: never reduce existing temp HP). A
 		// `tempHp` of "damage" mirrors the necrotic dealt; a number is granted flat.
 		let tempHpGranted = 0;
+		let tempHpApplied = false;
 		if (rider.tempHp != null) {
 			const want = rider.tempHp === "damage" ? damage : (Number(rider.tempHp) || 0);
 			tempHpGranted = Math.max(0, want);
-			if (tempHpGranted > 0) {
-				if (this._state.grantTempHp) this._state.grantTempHp(tempHpGranted);
-				else {
-					const cur = this._state.getTempHp?.() || 0;
-					this._state.setTempHp?.(Math.max(cur, tempHpGranted));
-				}
-			}
+			if (tempHpGranted > 0) tempHpApplied = this._state.grantTempHp(tempHpGranted);
 		}
 
 		const typeWord = rider.damageType ? ` ${rider.damageType}` : "";
@@ -3221,12 +3208,17 @@ class CharacterSheetCombat {
 			});
 		}
 		if (tempHpGranted > 0) {
-			JqueryUtil.doToast({type: "success", content: `${rider.name}: gained ${tempHpGranted} temporary hit points.`});
+			JqueryUtil.doToast({
+				type: tempHpApplied ? "success" : "info",
+				content: tempHpApplied
+					? `${rider.name}: gained ${tempHpGranted} temporary hit points.`
+					: `${rider.name}: retained ${this._state.getTempHp()} temporary hit points (offered ${tempHpGranted}).`,
+			});
 		}
 
 		this._page.saveCharacter?.();
 		this._page.renderCharacter?.();
-		return {damage, damageType: rider.damageType, tempHpGranted};
+		return {damage, damageType: rider.damageType, tempHpGranted, tempHpApplied};
 	}
 
 	/**
@@ -4600,6 +4592,15 @@ class CharacterSheetCombat {
 			throw error;
 		}
 		if (committedItemRiderReceipts.length) this._page.saveCharacter?.();
+		if (channelSpell?.committedSpellCastReceipt && channelSpellDamage > 0) {
+			const spellController = this._page._spells;
+			const evidence = spellController?._getCommittedSpellDamageEvidence({
+				damageResult: {total: channelSpellDamage, damageType: channelSpell.damageType},
+			});
+			if (this._state.recordImprovedPotentSpellcastingDamage(channelSpell.committedSpellCastReceipt, evidence)) {
+				spellController.stageImprovedPotentSpellcasting(channelSpell.committedSpellCastReceipt);
+			}
+		}
 		if (pendingBrutalStrike) this._pendingBrutalStrike = null;
 		if (this._pendingSummonedWeaponThrow?.attackId === attackId) {
 			this._pendingSummonedWeaponThrow = null;
@@ -11130,16 +11131,13 @@ class CharacterSheetCombat {
 		if (effects.grantTempHp) {
 			const tempHp = this._resolveTempHp(effects.grantTempHp, feature);
 			if (tempHp > 0) {
-				const currentTemp = this._state.getTempHp?.() || 0;
-				// Temp HP doesn't stack — use the higher value
-				if (tempHp > currentTemp) {
-					if (this._state.grantTempHp) this._state.grantTempHp(tempHp);
-					else this._state.setTempHp?.(tempHp);
-					JqueryUtil.doToast({
-						type: "info",
-						content: `${feature.name}: Gained ${tempHp} temporary HP`,
-					});
-				}
+				const granted = this._state.grantTempHp(tempHp);
+				JqueryUtil.doToast({
+					type: "info",
+					content: granted
+						? `${feature.name}: Gained ${tempHp} temporary HP`
+						: `${feature.name}: Retained ${this._state.getTempHp()} temporary HP (offered ${tempHp})`,
+				});
 			}
 		}
 

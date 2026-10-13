@@ -1788,7 +1788,8 @@ export async function levelUpTo (
 		// the wizard. Apply caller-pinned feature options to the final live group.
 		if (await levelUp.isAccordionVisible("featoptions")) {
 			for (const [featureName, optionName] of Object.entries(opts?.preferredFeatureChoices || {})) {
-				await levelUp.selectFeatureOption(featureName, optionName);
+				const selected = await levelUp.selectFeatureOption(featureName, optionName, {onlyIfPresent: true});
+				if (!selected) console.log(`[wizard-preference] ${featureName} is not offered at level ${lvl}; preference deferred.`);
 			}
 		}
 

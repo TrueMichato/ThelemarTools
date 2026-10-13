@@ -12873,10 +12873,11 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (applyBtn.disabled) return;
 				applyBtn.disabled = true;
-				this._state.grantTempHp(tempHp);
-				applyBtn.textContent = "✓ Applied to Self";
+				const granted = this._state.grantTempHp(tempHp);
+				applyBtn.textContent = granted ? "✓ Applied to Self" : "✓ Kept Existing HP";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
+				if (!granted) JqueryUtil.doToast({type: "info", content: `Retained ${this._state.getTempHp()} temporary HP (offered ${tempHp}).`});
 			});
 			JqueryUtil.doToast({type: "success", content: toastEl, autoHideTime: 15000});
 		}
@@ -13317,12 +13318,16 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (applyBtn.disabled) return;
 				applyBtn.disabled = true;
-				const cur = this._state.getTempHp() || 0;
-				this._state.grantTempHp(tempHp);
-				applyBtn.textContent = "✓ Applied to Self";
+				const granted = this._state.grantTempHp(tempHp);
+				applyBtn.textContent = granted ? "✓ Applied to Self" : "✓ Kept Existing HP";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
-				JqueryUtil.doToast(/** @type {*} */ ({type: "success", content: `💪 Gained ${tempHp} temporary HP.`}));
+				JqueryUtil.doToast(/** @type {*} */ ({
+					type: granted ? "success" : "info",
+					content: granted
+						? `💪 Gained ${tempHp} temporary HP.`
+						: `💪 Retained ${this._state.getTempHp()} temporary HP (offered ${tempHp}).`,
+				}));
 			});
 		}
 		JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: toastEl, autoHideTime: 15000}));
@@ -13775,11 +13780,16 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (btn.disabled) return;
 				btn.disabled = true;
-				this._state.grantTempHp(res.tempHp);
-				btn.textContent = "✓ Applied to Self";
+				const granted = this._state.grantTempHp(res.tempHp);
+				btn.textContent = granted ? "✓ Applied to Self" : "✓ Kept Existing HP";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
-				JqueryUtil.doToast({type: "success", content: `Gained ${res.tempHp} temporary hit points.`});
+				JqueryUtil.doToast({
+					type: granted ? "success" : "info",
+					content: granted
+						? `Gained ${res.tempHp} temporary hit points.`
+						: `Retained ${this._state.getTempHp()} temporary hit points (offered ${res.tempHp}).`,
+				});
 			});
 			JqueryUtil.doToast({type: "success", content: toastEl, autoHideTime: 12000});
 		} else {
