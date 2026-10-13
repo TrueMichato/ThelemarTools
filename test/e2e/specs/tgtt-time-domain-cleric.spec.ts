@@ -9,6 +9,7 @@ describeCharacter({
 		signatureSpells: ["Sacred Flame", "Guidance", "Cure Wounds"],
 		preferredFeatureChoices: {"Blessed Strikes": "Potent Spellcasting"},
 	},
+	megaCheckpoints: [3, 5, 8, 11, 14, 17, 20],
 	midTierLoadout: [
 		{name: "Mace", equipped: true},
 		{name: "Shield", equipped: true},
@@ -157,6 +158,7 @@ describeCharacter({
 			name: "Potent Spellcasting",
 			kind: "passive",
 			effects: [
+				{kind: "stateCall", method: "getChosenBlessedStrikesOption", args: [{classSource: "TGTT"}], exact: "Potent Spellcasting"},
 				{kind: "stateCalc", path: "hasPotentSpellcasting", exact: true},
 				{kind: "cantripDamageBonus", spellName: "Sacred Flame", featureName: "Potent Spellcasting", ability: "wis"},
 			],
@@ -190,6 +192,7 @@ describeCharacter({
 			name: "Improved Blessed Strikes",
 			kind: "passive",
 			effects: [
+				{kind: "stateCall", method: "getChosenBlessedStrikesOption", args: [{classSource: "TGTT"}], exact: "Potent Spellcasting"},
 				{kind: "stateCalc", path: "hasImprovedPotentSpellcasting", exact: true},
 				{kind: "featureCalculationDerivedFrom", property: "improvedPotentSpellcastingTempHp", equals: "abilityMod", ability: "wis", multiplier: 2},
 			],
