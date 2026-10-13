@@ -3,7 +3,41 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None for the requested Round 68 fixes. Tablet implementation remains unstarted._
+### Round 69 — Respec, heritage initiative, and Cleric effects — PLANNING
+
+**S1 — Respec origins and feature choices (bugs 1, 2, 4).** Owns the Respec
+workspace/engine, progression decisions, and related origin/choice replay.
+
+- Changing the basic ability-score distribution is unavailable or ineffective.
+- Replacing the species through Respec does not work.
+- The chosen Blessed Strikes option cannot be changed through Respec.
+
+**S2 — Dauntless Heritage initiative (bug 3).** Owns passive-modifier
+activation/teardown and initiative attribution. Dauntless Heritage grants
+advantage against being frightened, not an initiative adjustment.
+
+- Deactivating the Child trait unexpectedly subtracts 5 from initiative.
+
+**S3 — Cleric and non-stacking temporary HP (bugs 5, 6, 7).** Owns Cleric
+feature calculations/display, cantrip effect triggers, the shared temporary-HP
+grant contract and its callers, and the existing side-popup/target delivery.
+
+- Mixed classic subclasses and XPHB/TGTT Cleric classes display Potent
+  Spellcasting twice.
+- Verify every temporary-HP gain keeps `max(current, gained)` rather than
+  stacking or replacing a larger pool. Direct pool editing remains distinct.
+- Level-14 Improved Potent Spellcasting should offer the existing compact
+  side popup to grant its temporary HP to self or another creature.
+
+**Coordination.** The orchestrator alone edits this file. State, ClassUtils,
+Page, and Combat are shared files with region-specific ownership, not blanket
+ownership. S2 owns `removeFeature()` active-state/initiative teardown; S1
+coordinates any needed changes and verifies species replacement with an active
+trait. S1 owns Blessed Strikes decision replay and exclusive persistence; S3
+owns its derived effects and display, coordinating any shared choice reader.
+Kastor's supplied save is private reproduction evidence and is never committed.
+All fixes require real regression assertions and the full integration gates
+before merge. Tablet implementation remains unstarted.
 
 ## Closed Bugs
 
