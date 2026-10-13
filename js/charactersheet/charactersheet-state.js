@@ -5720,6 +5720,7 @@ class CharacterSheetState {
 
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
+		this._ensureXphbLayOnHandsResource();
 
 		// Repair old saves whose entries-only features predate use/resource parsing.
 		// Runs after subclass repair + featureType migration and is idempotent.
@@ -8104,6 +8105,7 @@ class CharacterSheetState {
 		this.calculateSpellSlots();
 		// Re-apply class feature effects for new level
 		this.applyClassFeatureEffects();
+		this._ensureXphbLayOnHandsResource();
 		this._ensureBattleMasterSuperiorityDice();
 
 		return true;
@@ -8560,6 +8562,7 @@ class CharacterSheetState {
 		this._recalculateHitDice();
 		this.calculateSpellSlots();
 		this.applyClassFeatureEffects();
+		this._ensureXphbLayOnHandsResource();
 		this.ensureUnarmedStrike();
 		this.ensureXpMatchesLevel();
 
@@ -38336,6 +38339,7 @@ class CharacterSheetState {
 
 	// #region Resources
 	getResources () {
+		this._ensureXphbLayOnHandsResource({quiet: true});
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
@@ -42451,11 +42455,13 @@ class CharacterSheetState {
 	 * Called when ability scores change or on level up
 	 */
 	recalculateResourceMaximums () {
+		this._ensureXphbLayOnHandsResource();
 		const features = this.getFeatures();
 		const feats = this.getFeats();
 
 		// Recalculate for each feature with uses
 		[...features, ...feats].forEach(item => {
+			if (CharacterSheetState.isXphbLayOnHandsFeature(item)) return;
 			if (!item.description) return;
 
 			const getAbilityMod = (ability) => this.getAbilityMod(ability);
@@ -42508,6 +42514,83 @@ class CharacterSheetState {
 		});
 	}
 	// #endregion
+
+	static isXphbLayOnHandsFeature (feature) {
+		const norm = value => String(value || "").trim().toLowerCase();
+		const uid = norm(feature?.uid || `${feature?.name}|${feature?.source}`);
+		return ["lay on hands|xphb", "lay on hands|paladin|xphb|1"].includes(uid)
+			&& norm(feature?.source) === "xphb"
+			&& norm(feature?.className) === "paladin"
+			&& norm(feature?.classSource) === "xphb"
+			&& feature?.level === 1
+			&& !feature?.isSubclassFeature
+			&& !feature?.brewBundleVersionId && !feature?.brewContentHash;
+	}
+
+	_ensureXphbLayOnHandsResource ({acquiredFeatureId = null, quiet = false} = {}) {
+		const features = this._data.features.filter(CharacterSheetState.isXphbLayOnHandsFeature);
+		if (!features.length) return null;
+		const unsupported = reason => {
+			// eslint-disable-next-line no-console
+			if (!quiet) console.warn("[CharSheet State] Unsupported XPHB Lay on Hands binding:", reason);
+			return null;
+		};
+		const classes = this._data.classes.filter(cls => cls.name?.toLowerCase() === "paladin" && cls.source === "XPHB");
+		if (features.length !== 1 || classes.length !== 1 || !Number.isSafeInteger(classes[0].level) || classes[0].level < 1 || classes[0].level > 20) {
+			return unsupported("Exact unique XPHB feature and Paladin class evidence is required.");
+		}
+		const [feature] = features;
+		if (typeof feature.id !== "string" || !feature.id || feature.id.trim() !== feature.id
+			|| this._data.features.filter(entry => typeof entry.id === "string" && entry.id.trim().toLowerCase() === feature.id.toLowerCase()).length !== 1) {
+			return unsupported("The actual feature ID is missing or duplicated.");
+		}
+		const uid = String(feature.uid || "lay on hands|xphb").trim().toLowerCase();
+		const linked = this._data.resources.filter(resource => resource.featureId === feature.id || resource.id === feature.resourceId);
+		const named = this._data.resources.filter(resource => resource.name === "Lay on Hands");
+		const candidates = linked.length ? linked : named;
+		if (candidates.length > 1) return unsupported("The ordinary resource binding is ambiguous.");
+		let resource = candidates[0];
+		if (resource) {
+			if (typeof resource.id !== "string" || !resource.id || resource.id.trim() !== resource.id
+				|| resource.id.startsWith("__synthetic") || resource.id.startsWith("gem:")
+				|| this._data.resources.filter(entry => typeof entry.id === "string" && entry.id.toLowerCase() === resource.id.toLowerCase()).length !== 1
+				|| resource.synthetic || resource.linkedInnateSpellId != null
+				|| (Array.isArray(this._data.spellcasting?.innateSpells) && this._data.spellcasting.innateSpells.some(spell => spell.resourceId === resource.id || spell.linkedResourceId === resource.id))
+				|| resource.brewBundleVersionId || resource.brewContentHash
+				|| (resource.recharge != null && resource.recharge !== "long") || resource.shortRestRecovery != null
+				|| (resource.featureId != null && resource.featureId !== feature.id)
+				|| (feature.resourceId != null && feature.resourceId !== resource.id)
+				|| this._data.features.some(entry => entry.id !== feature.id && entry.resourceId === resource.id)
+				|| (resource.featureRef != null && (resource.featureRef.uid !== uid || Object.keys(resource.featureRef).some(key => key !== "uid")))
+				|| resource.feature
+				|| (!linked.length && this._data.features.filter(entry => entry.name === "Lay on Hands").length !== 1)) {
+				return unsupported("The resource identity or exact source link is stale, malformed or contradictory.");
+			}
+		} else if (feature.resourceId != null) {
+			return unsupported("The linked resource is absent; its ID cannot be fabricated.");
+		}
+		const max = 5 * classes[0].level;
+		const isPool = pool => Number.isSafeInteger(pool?.max) && pool.max >= 5 && pool.max <= 100
+			&& pool.max % 5 === 0 && Number.isSafeInteger(pool.current) && pool.current >= 0 && pool.current <= pool.max;
+		const newlyAcquired = feature.id === acquiredFeatureId;
+		if (resource && !isPool(resource)) return unsupported("The ordinary pool is malformed.");
+		if (!newlyAcquired && feature.uses != null && (!isPool(feature.uses)
+			|| (resource && (feature.uses.current !== resource.current || feature.uses.max !== resource.max))
+			|| (feature.uses.recharge != null && feature.uses.recharge !== "long") || feature.uses.shortRestRecovery != null)) {
+			return unsupported("Existing resource and feature-use mirrors disagree or are malformed.");
+		}
+		const oldPool = resource || (!newlyAcquired ? feature.uses : null);
+		const current = oldPool ? Math.max(0, max - (oldPool.max - oldPool.current)) : max;
+		if (!resource) {
+			this.addResource({name: "Lay on Hands", current, max, recharge: "long"});
+			resource = this._data.resources[this._data.resources.length - 1];
+		}
+		Object.assign(resource, {current, max, recharge: "long", featureId: feature.id, featureRef: {uid}});
+		delete resource.shortRestRecovery;
+		feature.resourceId = resource.id;
+		feature.uses = {current, max, recharge: "long"};
+		return {feature, resource};
+	}
 
 	// #region Illrigger Seals (Baleful Interdict)
 	/**
@@ -44273,6 +44356,9 @@ class CharacterSheetState {
 		}
 
 		this._data.features.push(featureData);
+		if (CharacterSheetState.isXphbLayOnHandsFeature(featureData)) {
+			this._ensureXphbLayOnHandsResource({acquiredFeatureId: featureData.id});
+		}
 
 		// Process resistances/immunities/vulnerabilities granted by the feature
 		if (feature.resistances) {
@@ -44286,7 +44372,7 @@ class CharacterSheetState {
 		}
 
 		// Also add to resources section for easy tracking
-		if (uses && uses.max > 0) {
+		if (uses && uses.max > 0 && !CharacterSheetState.isXphbLayOnHandsFeature(featureData)) {
 			// (R23 #6) Never materialise a tracked resource pool for a redundant
 			// "<X> Improvement" passive rider — it merely enhances an already-owned base
 			// feature and is not independently usable. The use-parser sometimes mis-detects
@@ -46539,6 +46625,15 @@ class CharacterSheetState {
 
 	setFeatureUses (featureId, current) {
 		const feature = this._data.features.find(f => f.id === featureId);
+		if (CharacterSheetState.isXphbLayOnHandsFeature(feature)) {
+			const binding = this._ensureXphbLayOnHandsResource();
+			if (!binding || !Number.isSafeInteger(current)) {
+				// eslint-disable-next-line no-console
+				if (binding) console.warn("[CharSheet State] Unsupported XPHB Lay on Hands binding:", "Remaining points must be integral.");
+				return;
+			}
+			current = Math.max(0, Math.min(current, binding.resource.max));
+		}
 		if (feature?.uses) {
 			feature.uses.current = current;
 		}
@@ -46567,7 +46662,11 @@ class CharacterSheetState {
 	useFeature (featureIdOrName) {
 		const feature = this._data.features.find(f => f.id === featureIdOrName || f.name === featureIdOrName);
 		if (feature?.uses && feature.uses.current > 0) {
-			feature.uses.current--;
+			if (CharacterSheetState.isXphbLayOnHandsFeature(feature)) {
+				const binding = this._ensureXphbLayOnHandsResource();
+				if (!binding) return false;
+				this.setResourceCurrent(binding.resource.id, binding.resource.current - 1);
+			} else feature.uses.current--;
 			return true;
 		}
 		return false;

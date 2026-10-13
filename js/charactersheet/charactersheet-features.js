@@ -878,7 +878,7 @@ class CharacterSheetFeatures {
 		// (R21) Canonical path: if this feature is a classified activatable ABILITY, route the
 		// click through the page's real activation pipeline (rolls/applies effects, consumes
 		// the right resource, opens the right modal) instead of a bare use decrement.
-		if (this._page?._getActivatableAbilityForFeature?.(feature)) {
+		if (this._page?._getActivatableAbilityForFeature?.(feature) || this._page?._peerTargeting?.isSupportedHealingFeature?.({feature})) {
 			Promise.resolve(this._page._pUseFeatureAbility(feature)).catch(e => {
 				// eslint-disable-next-line no-console
 				console.error("[CharSheet Features] Error using ability:", e);

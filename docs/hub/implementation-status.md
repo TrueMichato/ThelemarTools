@@ -24,9 +24,35 @@ Ordinary transport loss retains exact recovery evidence; terminal teardown remai
 coverage and demand. A fenced receipt retained after context installation also schedules existing semantic
 recovery automatically in the same recoverable scope; pending evidence and its save block must clear before
 the next save. Canonical catch-up waits behind that recovery, and scheduled scopes coalesce without letting
-an old task suppress new authorized work. This is local held work awaiting exact-delta independent A4 review, not deployed or
-enabled product. Production multi-spell descriptors remain absent until A5; singular Cure Wounds and local casting
-are unchanged. Disposable browser fixtures alone inject the existing reviewed Shared Restoration template.
+an old task suppress new authorized work. The exact A4 boundary independently passed review at
+`82984bcf1c4a12850cc5a5317446e4e5a6c43980`; its retained worktree is preserved. This is held local work, not
+deployed or enabled product.
+
+The held **A5 candidate** adds PHB/XPHB Healing Word (one target, explicit singular consent) and Mass Healing
+Word (one to six fixed candidates, independent consent and one selected-subset finalization). One selected
+standard slot pays for one deterministic healing roll, shared by all selected MHW legs. Exact PHB/XPHB
+base/upcast rules are static source-qualified definitions; neither browser nor server interprets arbitrary prose.
+The user authorized a narrow table-adjudicated boundary: 60-foot range/distance, actual caster sight,
+bonus-action/verbal eligibility, and PHB undead/construct applicability are **not server-enforced**. Source picker,
+source status and target approval explain that sharing/consent do not establish game-rule eligibility. Identity,
+source edition, known/prepared availability, one slot, target count, current membership/privacy/consent, retries
+and atomic typed effects remain server-enforced. The separately authorized A5-only convention floors healing
+after the casting modifier at the minimum of the selected dice expression (2d4: 2 HP; 4d4: 4 HP). It is not an
+authored RAW minimum or a global spell rule; Cure Wounds and the positive-only `hp.heal` contract are unchanged.
+The shared workflow discloses that convention. MHW retains revisionless full-HP no-op privacy.
+
+The production multi-spell resolver now selects only these reviewed-data MHW shapes, behind the unchanged
+default-off exact-campaign capability. Cure Wounds manual self-consent/local behavior and the reviewed A4
+adoption/recovery seam are unchanged. Disposable A4 fixtures still extend, never replace, the production registry.
+The third template is the authorized **XPHB Lay on Hands heal-only** singular `feature_use` flow. Ordinary
+acquisition/lifecycle binds one exact source-qualified feature to one unique persisted resource, keeps current/max
+mirrors and the canonical five-points-per-Paladin-level pool synchronized, and preserves spent points as the
+maximum grows or shrinks. Ambiguous, malformed, innate or contradictory bindings remain unsupported with
+diagnostics; no synthetic resource or display-name fallback is introduced. Touch/bonus-action eligibility is
+table-adjudicated; poison/disease removal and other resource exceptions remain excluded. Singular HW/LoH no-effect
+acceptance privately fails without spending or changing either canonical document/revision; only MHW opts into
+applied/revisionless target no-ops. A5 requires fresh independent
+exact-candidate review. Publication, integration, deployment, enrollment, enablement and migration holds remain.
 
 The last independently verified private invite-only release is `hub-staging-2026-10-12-r11f` at
 `4578c8671a7b05066fb9a19411cb8a31cdd753ef` on the reused, Hub-only Oracle Always Free ARM

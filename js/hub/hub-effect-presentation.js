@@ -63,6 +63,9 @@ export function getPendingEffectPresentation ({
 				getPendingEffectOutcomeLabel({kind: operationKind, arguments: operationArguments || {}})
 					|| "Review campaign effect",
 			),
+			...(typeof effectDisplaySnapshot?.tableRules === "string"
+				? {tableRules: effectDisplaySnapshot.tableRules.slice(0, 500)}
+				: {}),
 		},
 	};
 }

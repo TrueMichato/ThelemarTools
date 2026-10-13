@@ -131,6 +131,9 @@ export function getPeerSourceCostActionSummary (operation, {canCancel = operatio
 				outcomeLabel || operation.effectDisplaySnapshot?.outcomeLabel,
 				"Review campaign effect",
 			),
+			...(typeof operation.effectDisplaySnapshot?.tableRules === "string"
+				? {tableRules: operation.effectDisplaySnapshot.tableRules.slice(0, 500)}
+				: {}),
 		},
 		sourceCostState: getPeerSourceCostState(operation.status),
 		...(operation.status === "failed" ? {failureCode: "unavailable"} : {}),

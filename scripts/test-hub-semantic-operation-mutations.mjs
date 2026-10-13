@@ -8,6 +8,78 @@ const ROOT = process.cwd();
 
 const MUTATIONS = [
 	{
+		name: "healing-word-xphb-mass-double-upcast",
+		file: "js/hub/hub-healing-word-spells.js",
+		from: "dicePerHigherLevel: 1, effectTemplateId: \"spell.mass-healing-word.heal\"",
+		to: "dicePerHigherLevel: 2, effectTemplateId: \"spell.mass-healing-word.heal\"",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "matches exact checked-in base/upcast",
+	},
+	{
+		name: "healing-word-mass-eight-targets",
+		file: "js/hub/hub-healing-word-spells.js",
+		from: "maxTargets: 6",
+		to: "maxTargets: 8",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "permits six, rejects seven/eight",
+	},
+	{
+		name: "healing-word-preparation-bypass",
+		file: "server/src/semantic-operation-registry.js",
+		from: "if (model === \"prepared\") return spell.prepared === true || spell.alwaysPrepared === true;",
+		to: "if (model === \"prepared\") return true;",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "fails closed for malformed choices",
+	},
+	{
+		name: "healing-word-mass-singular-route",
+		file: "server/src/semantic-operation-registry.js",
+		from: "if (template.multiTargetOnly) {",
+		to: "if (false && template.multiTargetOnly) {",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "permits six, rejects seven/eight",
+	},
+	{
+		name: "healing-word-wrong-minimum-one-floor",
+		file: "server/src/semantic-operation-registry.js",
+		from: "return {kind: \"hp.heal\", arguments: {amount: Math.max(count, amount)}};",
+		to: "return {kind: \"hp.heal\", arguments: {amount: Math.max(1, amount)}};",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "applies the A5 selected-dice floor",
+	},
+	{
+		name: "healing-word-omit-dice-floor",
+		file: "server/src/semantic-operation-registry.js",
+		from: "return {kind: \"hp.heal\", arguments: {amount: Math.max(count, amount)}};",
+		to: "return {kind: \"hp.heal\", arguments: {amount}};",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "applies the A5 selected-dice floor",
+	},
+	{
+		name: "healing-word-two-slot-cost",
+		file: "server/src/semantic-operation-registry.js",
+		from: "components: [{kind: \"spell_slot\", pool: \"standard\", level: choice.castLevel, amount: 1}],\n\t\t}),\n\t\tderiveOperation: ({sourceCharacter, choice, effectResolutionSeed}) => {\n\t\t\tconst count = dice",
+		to: "components: [{kind: \"spell_slot\", pool: \"standard\", level: choice.castLevel, amount: 2}],\n\t\t}),\n\t\tderiveOperation: ({sourceCharacter, choice, effectResolutionSeed}) => {\n\t\t\tconst count = dice",
+		test: "test/jest/hub/HubHealingWordTemplates.test.js",
+		pattern: "matches exact checked-in base/upcast",
+	},
+	{
+		name: "healing-word-browser-eight-targets",
+		file: "js/charactersheet/charactersheet-peer-targeting.js",
+		from: "const maxTargets = Math.min(descriptor.maxTargets || 8, 8);",
+		to: "const maxTargets = 8;",
+		test: "test/jest/charactersheet/CharacterSheetMultiTarget.test.js",
+		pattern: "routes production.*six-candidate limit",
+	},
+	{
+		name: "healing-word-mass-fenced-local-fallback",
+		file: "js/charactersheet/charactersheet-peer-targeting.js",
+		from: "&& (isSupportedSpellShape || descriptor)",
+		to: "&& isSupportedSpellShape",
+		test: "test/jest/charactersheet/CharacterSheetMultiTarget.test.js",
+		pattern: "installed-authority fence",
+	},
+	{
 		name: "skip-current-role-recheck",
 		file: "server/src/memory-hub-store.js",
 		from: "if (![\"dm\", \"co_dm\"].includes(membership.role)) {",
@@ -82,8 +154,8 @@ const MUTATIONS = [
 	{
 		name: "omit-post-await-character-fence",
 		file: "js/charactersheet/charactersheet.js",
-		from: "if (\n\t\t\t\t\tcharacterId !== this._currentCharacterId\n\t\t\t\t\t|| generation !== this._characterLoadGeneration\n\t\t\t\t\t|| realtimeGeneration !== this._hubRealtimeGeneration\n\t\t\t\t) return false;",
-		to: "if (false) return false;",
+		from: "fnDeliver: () => {\n\t\t\t\tif (!_isHubOperationScopeCurrent(this, scope)) return false;\n\t\t\t\tconst isAuthorityStale",
+		to: "fnDeliver: () => {\n\t\t\t\tconst isAuthorityStale",
 		test: "test/jest/charactersheet/CharacterSheetRealtimeApply.test.js",
 		pattern: "fences a queued approval response after realtime access is lost",
 	},
@@ -176,6 +248,12 @@ async function copyTree (root) {
 	for (const file of ["package.json", "jest.config.json"]) {
 		await fs.copyFile(path.join(ROOT, file), path.join(root, file));
 	}
+	await fs.mkdir(path.join(root, "data/spells"), {recursive: true});
+	await fs.mkdir(path.join(root, "data/class"), {recursive: true});
+	await fs.copyFile(path.join(ROOT, "data/class/class-paladin.json"), path.join(root, "data/class/class-paladin.json"));
+	for (const source of ["phb", "xphb"]) {
+		await fs.copyFile(path.join(ROOT, `data/spells/spells-${source}.json`), path.join(root, `data/spells/spells-${source}.json`));
+	}
 	await fs.symlink(path.join(ROOT, "node_modules"), path.join(root, "node_modules"), "dir");
 }
 
@@ -194,6 +272,12 @@ function runProbe ({root, mutation}) {
 		encoding: "utf8",
 		env: {...process.env, FORCE_COLOR: "0"},
 	});
+	if (mutation.name === "omit-post-await-character-fence" && result.status !== 0) {
+		const output = `${result.stdout}\n${result.stderr}`;
+		process.stdout.write(output);
+		assert.match(output, /expect\(jest\.fn\(\)\)\.not\.toHaveBeenCalled\(\)/, "The immediate scope-fence mutant must fail at the actual call-through repository spy.");
+		assert.match(output, /Received number of calls:\s+[1-9]\d*/, "The immediate scope-fence mutant must reach the actual repository executor.");
+	}
 	return result.status === 0;
 }
 
@@ -211,11 +295,19 @@ try {
 	const survivors = [];
 	for (const mutation of MUTATIONS) {
 		const source = baseline.get(mutation.file);
-		const changed = source.replace(mutation.from, mutation.to);
+		const matches = source.split(mutation.from).length - 1;
+		assert.equal(matches, mutation.expectedMatches ?? 1, `${mutation.name} has stale or ambiguous reach in ${mutation.file}`);
+		process.stdout.write(`MATCHED ${mutation.name} ${matches} exact production occurrence(s).\n`);
+		const changed = source.replaceAll(mutation.from, mutation.to);
 		assert.notEqual(changed, source, `${mutation.name} mutation did not match ${mutation.file}`);
-		await fs.writeFile(path.join(root, mutation.file), changed);
-		const survived = runProbe({root, mutation});
-		await fs.writeFile(path.join(root, mutation.file), source);
+		let survived;
+		try {
+			await fs.writeFile(path.join(root, mutation.file), changed);
+			survived = runProbe({root, mutation});
+		} finally {
+			await fs.writeFile(path.join(root, mutation.file), source);
+			assert.equal(await fs.readFile(path.join(root, mutation.file), "utf8"), source, `${mutation.name} did not restore the candidate bytes`);
+		}
 		if (survived) {
 			survivors.push(mutation.name);
 			process.stderr.write(`SURVIVED ${mutation.name}\n`);

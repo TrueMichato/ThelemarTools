@@ -1,3 +1,5 @@
+import {resolveReviewedHealingWordSpell} from "./hub-healing-word-spells.js";
+
 export const MULTI_TARGET_OPERATIONS_CONTRACT_VERSION = 1;
 export const MULTI_TARGET_OPERATIONS_PROTOCOL_VERSION = "6";
 export const MULTI_TARGET_OPERATIONS_MAX_TARGETS = 8;
@@ -50,9 +52,9 @@ export function hasMultiTargetOperationsCapability (capability) {
 	return Object.entries(expected).every(([key, value]) => capability?.[key] === value);
 }
 
-// Production templates are a separately reviewed rollout; the shared workflow has no implicit spell mapping.
-export function resolveReviewedMultiTargetSpell () {
-	return null;
+export function resolveReviewedMultiTargetSpell (options) {
+	const descriptor = resolveReviewedHealingWordSpell(options);
+	return descriptor?.maxTargets === 6 ? descriptor : null;
 }
 
 export function getMultiTargetResultDelivery ({operationId, result, characterId}) {

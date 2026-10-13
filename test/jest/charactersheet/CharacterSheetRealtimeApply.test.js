@@ -1,4 +1,5 @@
 import {jest} from "@jest/globals";
+import fs from "node:fs";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
@@ -2009,30 +2010,66 @@ describe("Live campaign effects on an open Character Sheet", () => {
 
 	it("fences a queued approval response after realtime access is lost", async () => {
 		const {host, hubEffects, repository, state} = await pMakeHarness();
-		const gate = makeDeferred();
-		repository._pMutationQueue = gate.promise;
-		const operation = makeAppliedEvent({
-			operationId: "approved-operation",
-			kind: "hp.heal",
-			args: {amount: 4},
-		}).payload.operation;
+		const apply = jest.spyOn(repository, "applyRealtimeOperation");
+		try {
+			const gate = makeDeferred();
+			repository._pMutationQueue = gate.promise;
+			const operation = makeAppliedEvent({
+				operationId: "approved-operation",
+				kind: "hp.heal",
+				args: {amount: 4},
+			}).payload.operation;
 
-		const pending = host._onHubAuthoritativeApproval({
-			actionId: "approved-operation",
-			characterId: "character-1",
-			eventId: "approved-event",
-			sequence: 20,
-			operation,
-			resultingCharacterRevision: 2,
+			const pending = host._onHubAuthoritativeApproval({
+				actionId: "approved-operation",
+				characterId: "character-1",
+				eventId: "approved-event",
+				sequence: 20,
+				operation,
+				resultingCharacterRevision: 2,
+			});
+			host._onHubRealtimeConnectionState({state: "access_lost"});
+			expect(host._teardownHubRules).toHaveBeenCalledTimes(1);
+			expect(host._hubActiveCampaign.pHandleAccessLoss).toHaveBeenCalledWith({campaignId: "campaign-1"});
+			gate.resolve();
+
+			await expect(pending).resolves.toBe(false);
+			await repository._pMutationQueue;
+			expect(apply).not.toHaveBeenCalled();
+			expect(state.getHp().current).toBe(30);
+			expect(hubEffects.onApplied).not.toHaveBeenCalled();
+		} finally {
+			apply.mockRestore();
+		}
+	});
+
+	it.each(["propose", "cancel", "authority-loss"])("routes actual acquired Lay on Hands through its amount prompt without eager cost for %s", async mode => {
+		const {host, state} = await pMakeHarness({seed: {classes: [{name: "Paladin", source: "XPHB", level: 1}], features: [], resources: []}});
+		const book = JSON.parse(fs.readFileSync("data/class/class-paladin.json", "utf8"));
+		const cls = book.class.find(entry => entry.name === "Paladin" && entry.source === "XPHB");
+		globalThis.CharacterSheetClassUtils.updateClassResources(state, state.getClasses()[0], 1, cls);
+		globalThis.CharacterSheetClassUtils.reconcileClassFeatures(state, {getClassData: () => cls, classFeatures: book.classFeature});
+		const feature = state.getFeatures().find(entry => entry.name === "Lay on Hands" && entry.source === "XPHB");
+		const resource = state.getResources().find(entry => entry.featureId === feature.id);
+		host._peerTargeting.isSupportedHealingFeature = jest.fn(() => true);
+		host._peerTargeting.pMaybeProposeHealingFeature = jest.fn(async () => ({handled: true, proposed: true}));
+		host._pUseHubLayOnHands = CharacterSheetPage.prototype._pUseHubLayOnHands.bind(host);
+		host._getActivatableAbilityForFeature = jest.fn();
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserNumber").mockImplementation(async () => {
+			if (mode === "authority-loss") host._onHubRealtimeConnectionState({state: "access_lost"});
+			return mode === "cancel" ? null : 4;
 		});
-		host._onHubRealtimeConnectionState({state: "access_lost"});
-		expect(host._teardownHubRules).toHaveBeenCalledTimes(1);
-		expect(host._hubActiveCampaign.pHandleAccessLoss).toHaveBeenCalledWith({campaignId: "campaign-1"});
-		gate.resolve();
-
-		await expect(pending).resolves.toBe(false);
-		expect(state.getHp().current).toBe(30);
-		expect(hubEffects.onApplied).not.toHaveBeenCalled();
+		try {
+			await expect(CharacterSheetPage.prototype._pUseFeatureAbility.call(host, feature)).resolves.toBe(true);
+			expect(prompt).toHaveBeenCalledWith(expect.objectContaining({min: 1, max: 5, int: true, elePre: expect.objectContaining({textContent: expect.stringContaining("not checked by the server")})}));
+			expect(host._getActivatableAbilityForFeature).not.toHaveBeenCalled();
+			if (mode === "propose") expect(host._peerTargeting.pMaybeProposeHealingFeature).toHaveBeenCalledWith({feature: expect.objectContaining({id: feature.id, resourceId: resource.id}), amount: 4});
+			else expect(host._peerTargeting.pMaybeProposeHealingFeature).not.toHaveBeenCalled();
+			expect(state.getResources().find(entry => entry.id === resource.id).current).toBe(5);
+			expect(state.getFeatures().find(entry => entry.id === feature.id).uses.current).toBe(5);
+		} finally {
+			prompt.mockRestore();
+		}
 	});
 
 	it("applies DM damage to the open sheet without a reload", async () => {

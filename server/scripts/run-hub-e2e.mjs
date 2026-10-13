@@ -518,11 +518,13 @@ try {
 	await pWaitForContainerHealthy({name: productionSmokeName});
 	await pCheckProductionProviderMetadata({name: productionSmokeName});
 	await pRemoveProductionSmoke();
-	setActivePhase("postgresql-parity", "six Hub PostgreSQL authority suites");
+	setActivePhase("postgresql-parity", "Hub PostgreSQL authority suites including production healing and multi-target lifecycle");
 	await run("node", [
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",
 		"test/jest/hub/HubSourceCostAdapterAuthorityPostgres.test.js",
+		"test/jest/hub/HubHealingWordAuthority.test.js",
+		"test/jest/hub/HubMultiTargetOperationsPostgres.test.js",
 		"test/jest/hub/HubSemanticOperationsPostgres.test.js",
 		"test/jest/hub/HubInventoryPostgres.test.js",
 		"test/jest/hub/HubMultiProviderIdentityPostgres.test.js",

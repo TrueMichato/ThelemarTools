@@ -146,8 +146,12 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   privacy-visible target identities, submits opaque targetRef values, preserves
 │   proposal/cancel command identity across retries, and renders outgoing lifecycle.
 │   Held A4 requires a separate protocol-6 capability and reviewed descriptor.
-│   Its production descriptor resolver stays null until A5. Fixed 1–8 candidates,
-│   independent consent and frozen subset-finalize retries reuse this controller.
+│   Held A5 maps PHB/XPHB Healing Word singular and Mass Healing Word multi through
+│   shared static hub-healing-word-spells.js definitions. MHW caps at six, while
+│   generic fixtures retain eight. Exact default-off capabilities still gate both.
+│   Range/sight, bonus-action/verbal eligibility and PHB type applicability are
+│   table-adjudicated, explicitly not server-enforced. Independent consent and frozen
+│   subset-finalize retries reuse this controller; singular self remains manual.
 │
 ├── CharacterSheetSpellPicker (charactersheet-spell-picker.js, ~1,200 lines, all static)
 │   Reusable spell selection UI for Builder, LevelUp, QuickBuild.

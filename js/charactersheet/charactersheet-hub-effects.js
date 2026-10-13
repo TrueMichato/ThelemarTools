@@ -444,6 +444,7 @@ export class CharacterSheetHubEffects {
 				effectLabel: invitation.presentation.effectLabel.slice(0, 120),
 				outcomeLabel: String(invitation.presentation.outcomeLabel || "Review campaign effect").slice(0, 120),
 				targetName: String(invitation.presentation.targetName || "Your campaign character").slice(0, 120),
+				tableRules: typeof invitation.presentation.tableRules === "string" ? invitation.presentation.tableRules.slice(0, 500) : null,
 			},
 			capabilities: {canApprove: invitation.capabilities?.canApprove === true, canReject: invitation.capabilities?.canReject === true},
 			decisionState: current?.decisionState ?? null,
@@ -548,6 +549,7 @@ export class CharacterSheetHubEffects {
 				outcomeLabel: typeof action.presentation.outcomeLabel === "string"
 					? action.presentation.outcomeLabel.slice(0, 120)
 					: "Review campaign effect",
+				tableRules: typeof action.presentation.tableRules === "string" ? action.presentation.tableRules.slice(0, 500) : null,
 			},
 			capabilities: {canApprove: true, canReject: true},
 			decisionState: null,
@@ -693,6 +695,7 @@ export class CharacterSheetHubEffects {
 			e_({tag: "span", clazz: "charsheet__hub-approval-outcome", text: action.presentation.outcomeLabel}),
 			e_({tag: "span", clazz: "charsheet__hub-approval-source", text: `From ${action.presentation.sourceName}`}),
 		);
+		if (action.presentation.tableRules) copy.append(e_({tag: "span", text: action.presentation.tableRules}));
 		const controls = e_({tag: "div", clazz: "charsheet__hub-approval-controls"});
 		const isBusy = ["submitting", "waiting", "recovery"].includes(action.decisionState);
 		if (action.isMulti) {

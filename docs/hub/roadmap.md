@@ -44,7 +44,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **active** | Wave A3/A4 multi-target workflow | [ADR 0020](adr/0020-consented-multi-target-operations.md), migrations 0011-0013 after A2's migration 0010 and protocol-6 default-off authority are implemented in the held draft. The local A4 candidate adds shared Sheet collection/consent/subset finalization and exact-leg reconciliation; independent A4 review remains separate. A5 production spell templates/resolver remain absent. Local descendant work is authorized, not publication/integration/enrollment; r11f's physical-retest waiver is not GO or a hold lift. |
+| **active** | Wave A3/A4/A5 healing workflow | [ADR 0020](adr/0020-consented-multi-target-operations.md), immutable migrations 0011-0013 and protocol-6 default-off authority remain held. A4 independently passed at `82984bcf`; the local A5 candidate adds PHB/XPHB HW singular and six-target MHW production templates/resolver under the explicitly table-adjudicated rules boundary. Third-template acquisition/mechanics remains blocked and A5 needs fresh independent review. Local descendant work is authorized, not publication/integration/deployment/enrollment/enablement; r11f's physical-retest waiver is not GO or a hold lift. |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 participant-level provider verification retain their own acceptance gates |
 | **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
@@ -501,8 +501,10 @@ Source-owned multi candidates are deselectable; singular Cure Wounds self-target
 Current detail/outgoing/recovery drives readiness; historical exact-command receipts acknowledge only that command.
 Revisionless no-ops cover every reconciliation track without character adoption, redraw, PATCH, or watermark
 advance. An actor-scoped tab-session journal retains at most 256 exact no-op leg keys across reload; older evicted
-notice identities are not an unlimited deduplication guarantee. A5 production descriptors remain absent, so no new
-production spell is intercepted. The capability remains default-off and A4 still requires independent review.
+notice identities are not an unlimited deduplication guarantee. The held A5 candidate now supplies exact
+PHB/XPHB HW/MHW descriptors and XPHB LoH heal-only ordinary-resource binding under the authorized
+table-adjudicated boundaries. Its capability defaults and publication/live holds are unchanged; A4's exact
+independent review is inherited, not new A5 proof. A5 still requires fresh exact-candidate independent review.
 The sequence is:
 
 1. **A1:** DM typed effects.

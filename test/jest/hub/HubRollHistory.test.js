@@ -50,12 +50,16 @@ for (const [name, describeStore, isPostgres] of [
 
 		afterEach(async () => {
 			if (!isPostgres) return;
+			const cleanupPool = pool;
+			const cleanupStore = store;
+			const cleanupAccountIds = [owner?.id, dm?.id, peer?.id].filter(Boolean);
+			const cleanupCampaignId = campaign?.id;
 			try {
-				await pool.query("DELETE FROM hub.characters WHERE owner_account_id = ANY($1::uuid[])", [[owner?.id, dm?.id, peer?.id].filter(Boolean)]);
-				if (campaign) await pool.query("DELETE FROM hub.campaigns WHERE id = $1", [campaign.id]);
-				await pool.query("DELETE FROM hub.accounts WHERE id = ANY($1::uuid[])", [[owner?.id, dm?.id, peer?.id].filter(Boolean)]);
+				await cleanupPool.query("DELETE FROM hub.characters WHERE owner_account_id = ANY($1::uuid[])", [cleanupAccountIds]);
+				if (cleanupCampaignId) await cleanupPool.query("DELETE FROM hub.campaigns WHERE id = $1", [cleanupCampaignId]);
+				await cleanupPool.query("DELETE FROM hub.accounts WHERE id = ANY($1::uuid[])", [cleanupAccountIds]);
 			} finally {
-				await store.pClose();
+				await cleanupStore.pClose();
 			}
 		});
 
@@ -143,22 +147,40 @@ for (const [name, describeStore, isPostgres] of [
 				const own = [];
 				for (let i = 0; i < 205; i++) own.push((await log({total: i})).event.id);
 				const offset = (await pool.query("SELECT next_event_sequence FROM hub.campaigns WHERE id = $1", [campaign.id])).rows[0].next_event_sequence;
-				await pool.query(`
-					INSERT INTO hub.domain_events
-						(id, campaign_id, sequence, event_type, actor_account_id, aggregate_type, aggregate_id, visibility, payload)
-					SELECT gen_random_uuid(), $1, $2::bigint + i, 'roll.logged', $3, 'character', $4, 'actor_and_dm',
-						'{"formula":"1d20","total":10,"detail":{"privateBlob":"Unrelated roll"}}'::jsonb
-					FROM generate_series(0, 99999) AS i
-				`, [campaign.id, offset, peer.id, otherCharacter.id]);
-				await pool.query("UPDATE hub.campaigns SET next_event_sequence = $2::bigint + 100000 WHERE id = $1", [campaign.id, offset]);
-				const start = performance.now();
-				const result = await history();
-				const elapsed = performance.now() - start;
-				expect(result.events.map(event => event.id)).toEqual(own.slice(-200));
-				expect(elapsed).toBeLessThan(5_000);
-				expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(1_000_000);
-
-				console.log(`Roll History: 100,000 newer unrelated rows, ${elapsed.toFixed(1)} ms, ${Buffer.byteLength(JSON.stringify(result))} bytes. No dedicated index: unbounded growth is not proven; 5s timeout fails explicitly.`);
+				const stressPool = pool;
+				const stressIds = [campaign.id, offset, peer.id, otherCharacter.id];
+				let inserted = false;
+				try {
+					const insertion = await stressPool.query(`
+						INSERT INTO hub.domain_events
+							(id, campaign_id, sequence, event_type, actor_account_id, aggregate_type, aggregate_id, visibility, payload)
+						SELECT gen_random_uuid(), $1, $2::bigint + i, 'roll.logged', $3, 'character', $4, 'actor_and_dm',
+							'{"formula":"1d20","total":10,"detail":{"privateBlob":"Unrelated roll"}}'::jsonb
+						FROM generate_series(0, 99999) AS i
+					`, stressIds);
+					inserted = true;
+					expect(insertion.rowCount).toBe(100_000);
+					await stressPool.query("UPDATE hub.campaigns SET next_event_sequence = $2::bigint + 100000 WHERE id = $1", [stressIds[0], offset]);
+					const start = performance.now();
+					const result = await history();
+					const elapsed = performance.now() - start;
+					expect(result.events.map(event => event.id)).toEqual(own.slice(-200));
+					expect(elapsed).toBeLessThan(5_000);
+					expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(1_000_000);
+					console.log(`Roll History: 100,000 newer unrelated rows retained through read assertions, ${elapsed.toFixed(1)} ms, ${Buffer.byteLength(JSON.stringify(result))} bytes. No dedicated index: unbounded growth is not proven; 5s timeout fails explicitly.`);
+				} finally {
+					if (inserted) {
+						const deletion = await stressPool.query(`
+							DELETE FROM hub.domain_events
+							WHERE campaign_id = $1 AND sequence >= $2::bigint AND sequence < $2::bigint + 100000
+								AND actor_account_id = $3 AND aggregate_type = 'character' AND aggregate_id = $4
+								AND event_type = 'roll.logged' AND visibility = 'actor_and_dm'
+								AND payload = '{"formula":"1d20","total":10,"detail":{"privateBlob":"Unrelated roll"}}'::jsonb
+						`, stressIds);
+						expect(deletion.rowCount).toBe(100_000);
+						console.log(`Roll History cleanup: deleted exactly ${deletion.rowCount} owned synthetic rows by campaign, sequence interval, actor, aggregate and payload after the populated read. Original 30s body/5s hook limits remain.`);
+					}
+				}
 			}, 30_000);
 
 			it("interleaves reads and roll writes without a lock upgrade or duplicate command", async () => {

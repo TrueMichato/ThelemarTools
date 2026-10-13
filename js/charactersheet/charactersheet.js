@@ -15039,6 +15039,7 @@ class CharacterSheetPage {
 	 * @returns {Promise<boolean>} true if handled as an ability
 	 */
 	async _pUseFeatureAbility (feature) {
+		if (this._peerTargeting?.isSupportedHealingFeature?.({feature})) return this._pUseHubLayOnHands(feature);
 		const af = this._getActivatableAbilityForFeature(feature);
 		if (!af) return false;
 		// An already-running interdict boon is managed from "Currently Active" (Section 1);
@@ -15048,6 +15049,50 @@ class CharacterSheetPage {
 		const resourceCost = af.resource?.cost ?? af.activationInfo?.resourceCost ?? stateType?.resourceCost ?? 1;
 		await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);
 		this._features?.render?.();
+		return true;
+	}
+
+	async _pUseHubLayOnHands (feature) {
+		if (!this._isHubOperationAuthorityReady()) {
+			JqueryUtil.doToast({type: "warning", content: "Campaign healing is reconnecting. Wait before spending Lay on Hands points."});
+			return true;
+		}
+		const state = this._state;
+		const scope = _getHubOperationScope(this);
+		const binding = state._ensureXphbLayOnHandsResource();
+		if (!binding || binding.feature.id !== feature.id || binding.resource.current < 1) {
+			JqueryUtil.doToast({type: "warning", content: "Lay on Hands has no available, exact linked ordinary pool. Check the feature/resource binding before requesting healing."});
+			return true;
+		}
+		const amount = await InputUiUtil.pGetUserNumber({
+			title: "Lay on Hands: healing only",
+			elePre: e_({tag: "p", text: "Choose HP to restore, spending the same number of Lay on Hands points. No points are reserved while the target owner decides. Touch range and bonus-action eligibility are not checked by the server; adjudicate them at the table. Poison, disease and condition removal are not supported here."}),
+			inputMode: "numeric",
+			default: 1,
+			min: 1,
+			max: binding.resource.current,
+			int: true,
+		});
+		if (amount == null) return true;
+		if (this._state !== state || !_isHubOperationScopeCurrent(this, scope) || !this._isHubOperationAuthorityReady()) return true;
+		const currentBinding = state._ensureXphbLayOnHandsResource();
+		if (!currentBinding || currentBinding.resource.id !== binding.resource.id
+			|| !Number.isSafeInteger(amount) || amount < 1 || amount > currentBinding.resource.current) {
+			JqueryUtil.doToast({type: "warning", content: "Choose a positive HP amount within the current linked Lay on Hands pool. No points have been spent."});
+			return true;
+		}
+		const result = await this._peerTargeting.pMaybeProposeHealingFeature({feature: currentBinding.feature, amount});
+		if (result.local && this._state === state && _isHubOperationScopeCurrent(this, scope) && this._isHubOperationAuthorityReady()) {
+			const localBinding = state._ensureXphbLayOnHandsResource();
+			if (!localBinding || localBinding.resource.id !== binding.resource.id || amount > localBinding.resource.current) {
+				JqueryUtil.doToast({type: "warning", content: "The Lay on Hands pool changed. No points have been spent."});
+				return true;
+			}
+			state.setResourceCurrent(localBinding.resource.id, localBinding.resource.current - amount);
+			this._saveCurrentCharacter();
+			this._renderCharacter();
+			JqueryUtil.doToast({type: "info", content: `Spent ${amount} Lay on Hands points locally. Resolve the chosen target's healing at the table; no campaign healing request was sent.`});
+		}
 		return true;
 	}
 

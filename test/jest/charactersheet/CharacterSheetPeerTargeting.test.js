@@ -103,6 +103,46 @@ describe("Character Sheet peer targeting", () => {
 		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
 	});
 
+	it("proposes heal-only XPHB Lay on Hands through the singular controller without supplying a resource ID", async () => {
+		capability.resourceKinds.push("feature_use");
+		const feature = {name: "Lay on Hands", source: "XPHB", className: "Paladin", classSource: "XPHB", level: 1};
+		expect(await controller.pMaybeProposeHealingFeature({feature, amount: 4})).toEqual({handled: true, proposed: true});
+		expect(api.pCreatePeerAction).toHaveBeenCalledWith(expect.objectContaining({
+			sourceEntity: {type: "ability", uid: "lay on hands|xphb", version: "xphb-2024-v1"},
+			effectTemplateId: "ability.lay-on-hands.heal",
+			choice: {amount: 4},
+			targetRef: "opaque-target",
+		}));
+		expect(api.pCreatePeerAction.mock.calls[0][0]).not.toHaveProperty("resourceId");
+		expect(fnPickTarget.mock.calls[0][0].tableRules).toContain("Poison, disease and condition removal are not supported");
+	});
+
+	it("retains exact Lay on Hands amount/target/command for a lost-create retry", async () => {
+		capability.resourceKinds.push("feature_use");
+		api.pCreatePeerAction.mockRejectedValueOnce(Object.assign(new Error("lost"), {code: "NETWORK_UNAVAILABLE"}));
+		const feature = {name: "Lay on Hands", source: "XPHB", className: "Paladin", classSource: "XPHB", level: 1};
+		expect(await controller.pMaybeProposeHealingFeature({feature, amount: 4})).toEqual({handled: true, proposed: false});
+		const draft = [...controller._drafts.values()][0];
+		expect(await controller._pSubmitDraft(draft)).toBe(true);
+		expect(api.pCreatePeerAction.mock.calls[1][0]).toBe(api.pCreatePeerAction.mock.calls[0][0]);
+	});
+
+	it("keeps Lay on Hands explicit-local and manual-self choices, and fences local fallback during authority recovery", async () => {
+		capability.resourceKinds.push("feature_use");
+		const feature = {name: "Lay on Hands", source: "XPHB", className: "Paladin", classSource: "XPHB", level: 1};
+		fnPickTarget.mockResolvedValueOnce({kind: "local"});
+		expect(await controller.pMaybeProposeHealingFeature({feature, amount: 4})).toEqual({handled: false, local: true});
+		expect(api.pCreatePeerAction).not.toHaveBeenCalled();
+		fnPickTarget.mockResolvedValueOnce({kind: "target", targetRef: "opaque-self"});
+		expect(await controller.pMaybeProposeHealingFeature({feature, amount: 4})).toEqual({handled: true, proposed: true});
+		expect(api.pCreatePeerAction.mock.calls[0][0].targetRef).toBe("opaque-self");
+		expect(controller._outgoing.get("operation-1").status).toBe("proposed");
+		controller.suspend();
+		capability = null;
+		expect(await controller.pMaybeProposeHealingFeature({feature, amount: 4})).toEqual({handled: true, proposed: false});
+		expect(api.pCreatePeerAction).toHaveBeenCalledTimes(1);
+	});
+
 	it.each([
 		["PHB", "phb-2014-v1"],
 		["XPHB", "xphb-2024-v1"],
@@ -179,6 +219,44 @@ describe("Character Sheet peer targeting", () => {
 		});
 	});
 
+	it.each(["PHB", "XPHB"])("routes %s Healing Word through singular consent and preserves exact reconnect retry", async source => {
+		await pFlush();
+		api.pCreatePeerAction.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+		const spell = {name: "Healing Word", source, level: 1};
+		expect(await controller.pMaybeProposeSpell({spell, selectedSlot: {level: 3}})).toEqual({handled: true, proposed: false});
+		const [draft] = [...controller._drafts.values()];
+		expect(draft.request).toMatchObject({
+			sourceEntity: {type: "spell", uid: `healing word|${source.toLowerCase()}`, version: source === "PHB" ? "phb-2014-v1" : "xphb-2024-v1"},
+			effectTemplateId: "spell.healing-word.heal",
+			choice: {castLevel: 3},
+			targetRef: "opaque-target",
+		});
+		expect(draft.request).not.toHaveProperty("targetRefs");
+		expect(await controller._pSubmitDraft(draft)).toBe(true);
+		expect(api.pCreatePeerAction.mock.calls[0][0]).toBe(api.pCreatePeerAction.mock.calls[1][0]);
+		expect(JSON.stringify(fnPickTarget.mock.calls[0][0].targets)).not.toContain("hp");
+	});
+
+	it.each(["PHB", "XPHB"])("keeps %s Healing Word self manual, local opt-out and modified casts local", async source => {
+		await pFlush();
+		const spell = {name: "Healing Word", source, level: 1};
+		const options = {spell, selectedSlot: {level: 1}};
+		for (const unsupported of [
+			{...options, hasMetamagic: true},
+			{...options, hasVariantComponent: true},
+			{...options, selectedSlot: {level: 1, isPact: true}},
+			{...options, selectedSlot: {level: 1, isWizardCapstone: true}},
+			{...options, selectedSlot: {level: 1, isNoSlotResource: true}},
+		]) expect(await controller.pMaybeProposeSpell(unsupported)).toEqual({handled: false});
+		fnPickTarget.mockResolvedValueOnce({kind: "local"});
+		expect(await controller.pMaybeProposeSpell(options)).toEqual({handled: false});
+		expect(api.pCreatePeerAction).not.toHaveBeenCalled();
+		fnPickTarget.mockResolvedValueOnce({kind: "target", targetRef: "opaque-self"});
+		expect(await controller.pMaybeProposeSpell(options)).toEqual({handled: true, proposed: true});
+		expect(api.pCreatePeerAction).toHaveBeenCalledWith(expect.objectContaining({targetRef: "opaque-self"}));
+		expect(api.pResolveStructuredAction).not.toHaveBeenCalled();
+	});
+
 	it("settles an awaited target picker when character-scope teardown wins modal creation", async () => {
 		const pGetShowOriginal = globalThis.CharacterSheetModal.pGetShow;
 		let modalOptions;
@@ -230,7 +308,7 @@ describe("Character Sheet peer targeting", () => {
 		await pFlush();
 		const spell = {name: "Cure Wounds", source: "PHB", level: 1};
 		const selectedSlot = {level: 1};
-		expect(await controller.pMaybeProposeSpell({spell: {...spell, name: "Healing Word"}, selectedSlot})).toEqual({handled: false});
+		expect(await controller.pMaybeProposeSpell({spell: {...spell, name: "Healing Spirit"}, selectedSlot})).toEqual({handled: false});
 		expect(await controller.pMaybeProposeSpell({spell, selectedSlot, hasMetamagic: true})).toEqual({handled: false});
 		expect(await controller.pMaybeProposeSpell({spell, selectedSlot, hasVariantComponent: true})).toEqual({handled: false});
 		expect(await controller.pMaybeProposeSpell({spell, selectedSlot: {...selectedSlot, isPact: true}})).toEqual({handled: false});

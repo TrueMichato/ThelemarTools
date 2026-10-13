@@ -13,6 +13,8 @@ import {
 	MULTI_TARGET_OPERATIONS_MAX_TARGETS,
 	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
 } from "../../js/hub/hub-multi-target-operations.js";
+import {REVIEWED_HEALING_WORD_SPELLS} from "../../js/hub/hub-healing-word-spells.js";
+import {isReviewedLayOnHandsFeature, REVIEWED_LAY_ON_HANDS} from "../../js/hub/hub-lay-on-hands.js";
 
 const MAX_IDENTITY_LENGTH = 200;
 const MAX_TEMPLATE_ID_LENGTH = 120;
@@ -32,14 +34,14 @@ const CLASS_SPELLCASTING_ABILITIES = new Map([
 ]);
 export const PEER_EFFECT_TEMPLATE_REGISTRY_VERSION = PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION;
 
-function normalizeCureWoundsChoice (choice) {
+function normalizeSpellSlotChoice (choice, minimumLevel = 1) {
 	if (
 		!choice
 		|| typeof choice !== "object"
 		|| Array.isArray(choice)
 		|| Object.keys(choice).some(key => key !== "castLevel")
 		|| !Number.isInteger(choice.castLevel)
-		|| choice.castLevel < 1
+		|| choice.castLevel < minimumLevel
 		|| choice.castLevel > 9
 	) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 	return {castLevel: choice.castLevel};
@@ -72,10 +74,10 @@ function findSpellOwnerClass ({data, spell}) {
 	}) || null;
 }
 
-function isUsableLeveledSpell ({data, spell}) {
+function isUsableLeveledSpell ({data, spell, level = 1}) {
 	if (
 		!spell
-		|| spell.level !== 1
+		|| spell.level !== level
 		|| spell.sourceItem
 		|| spell.itemName
 		|| ["item", "innate"].includes(String(spell.sourceType || spell.sourceKind || spell.grantType || "").toLowerCase())
@@ -89,11 +91,11 @@ function isUsableLeveledSpell ({data, spell}) {
 	return false;
 }
 
-function getUsableSpell ({sourceCharacter, sourceEntity}) {
+function getUsableSpell ({sourceCharacter, sourceEntity, level = 1}) {
 	const data = sourceCharacter.data || {};
 	const matches = (Array.isArray(data.spellcasting?.spellsKnown) ? data.spellcasting.spellsKnown : [])
 		.filter(spell => `${String(spell?.name || "").trim()}|${String(spell?.source || "").trim()}`.toLowerCase() === sourceEntity.uid)
-		.filter(spell => isUsableLeveledSpell({data, spell}));
+		.filter(spell => isUsableLeveledSpell({data, spell, level}));
 	if (matches.length !== 1) {
 		throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 	}
@@ -151,9 +153,9 @@ function getAbilityScore ({data, ability}) {
 	return Math.max(0, score - damage);
 }
 
-function getSpellcastingModifier ({sourceCharacter, sourceEntity}) {
+function getSpellcastingModifier ({sourceCharacter, sourceEntity, level = 1}) {
 	const data = sourceCharacter.data || {};
-	const spell = getUsableSpell({sourceCharacter, sourceEntity});
+	const spell = getUsableSpell({sourceCharacter, sourceEntity, level});
 	const ability = getSpellcastingAbility({data, spell});
 	if (!ability) {
 		throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
@@ -183,7 +185,7 @@ function getCureWoundsTemplate ({source, version, dicePerLevel}) {
 		effectTemplateId: "spell.cure-wounds.heal",
 		sourceCostVersion: SOURCE_COST_VERSION,
 		display: Object.freeze({label: "Cure Wounds", outcomeLabel: "Healing"}),
-		normalizeChoice: normalizeCureWoundsChoice,
+		normalizeChoice: choice => normalizeSpellSlotChoice(choice),
 		buildSourceCost: ({choice}) => ({
 			version: SOURCE_COST_VERSION,
 			components: [{kind: "spell_slot", pool: "standard", level: choice.castLevel, amount: 1}],
@@ -218,9 +220,100 @@ function getCureWoundsTemplate ({source, version, dicePerLevel}) {
 	});
 }
 
+function getHealingWordTemplate (definition) {
+	const {name, sourceEntity, effectTemplateId, level, maxTargets, dice, dicePerHigherLevel, tableRules} = definition;
+	return Object.freeze({
+		sourceEntity,
+		effectTemplateId,
+		sourceCostVersion: SOURCE_COST_VERSION,
+		...(maxTargets > 1 ? {
+			multiTargetOnly: true,
+			multiTarget: Object.freeze({contractVersion: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION, maxTargets, allowTargetNoOp: true}),
+		} : {}),
+		display: Object.freeze({label: name, outcomeLabel: "Healing", tableRules}),
+		normalizeChoice: choice => normalizeSpellSlotChoice(choice, level),
+		hasSource: ({character}) => {
+			getUsableSpell({sourceCharacter: character, sourceEntity, level});
+			return true;
+		},
+		buildSourceCost: ({choice}) => ({
+			version: SOURCE_COST_VERSION,
+			components: [{kind: "spell_slot", pool: "standard", level: choice.castLevel, amount: 1}],
+		}),
+		deriveOperation: ({sourceCharacter, choice, effectResolutionSeed}) => {
+			const count = dice + dicePerHigherLevel * (choice.castLevel - level);
+			const amount = rollDeterministicDice({
+				seed: effectResolutionSeed,
+				count,
+				size: 4,
+			}) + getSpellcastingModifier({sourceCharacter, sourceEntity, level});
+			return {kind: "hp.heal", arguments: {amount: Math.max(count, amount)}};
+		},
+		sourceFootprint: ({sourceCost}) => getSourceCostMutationFootprint(sourceCost),
+		targetFootprint: () => ["hp"],
+	});
+}
+
+function getLayOnHandsBinding (character) {
+	const data = character?.data;
+	const fail = () => { throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404}); };
+	const classes = (Array.isArray(data?.classes) ? data.classes : []).filter(cls =>
+		String(cls?.name || "").trim().toLowerCase() === "paladin" && cls.source === "XPHB",
+	);
+	const features = (Array.isArray(data?.features) ? data.features : []).filter(isReviewedLayOnHandsFeature);
+	if (classes.length !== 1 || features.length !== 1 || !Number.isSafeInteger(classes[0].level) || classes[0].level < 1 || classes[0].level > 20) fail();
+	const [feature] = features;
+	if (typeof feature.id !== "string" || !feature.id || feature.id.trim() !== feature.id
+		|| data.features.filter(entry => typeof entry?.id === "string" && entry.id.trim().toLowerCase() === feature.id.toLowerCase()).length !== 1) fail();
+	const resources = (Array.isArray(data?.resources) ? data.resources : []).filter(resource =>
+		resource?.featureId === feature.id || resource?.id === feature.resourceId,
+	);
+	if (resources.length !== 1) fail();
+	const [resource] = resources;
+	const uid = String(feature.uid || "lay on hands|xphb").trim().toLowerCase();
+	if (typeof resource.id !== "string" || !resource.id || resource.id.trim() !== resource.id || resource.synthetic
+		|| resource.id.startsWith("__synthetic") || resource.id.startsWith("gem:")
+		|| resource.featureId !== feature.id || feature.resourceId !== resource.id
+		|| data.features.some(entry => entry.id !== feature.id && entry.resourceId === resource.id)
+		|| resource.featureRef?.uid !== uid || Object.keys(resource.featureRef).some(key => key !== "uid")
+		|| resource.feature || resource.brewBundleVersionId || resource.brewContentHash
+		|| resource.linkedInnateSpellId != null
+		|| (Array.isArray(data.spellcasting?.innateSpells) && data.spellcasting.innateSpells.some(spell => spell.resourceId === resource.id || spell.linkedResourceId === resource.id))
+		|| resource.max !== 5 * classes[0].level || feature.uses?.max !== resource.max
+		|| resource.recharge !== "long" || feature.uses?.recharge !== "long"
+		|| resource.shortRestRecovery != null || feature.uses?.shortRestRecovery != null) fail();
+	return {resource, featureRef: {uid}};
+}
+
+function getLayOnHandsTemplate () {
+	return Object.freeze({
+		sourceEntity: REVIEWED_LAY_ON_HANDS.sourceEntity,
+		effectTemplateId: REVIEWED_LAY_ON_HANDS.effectTemplateId,
+		sourceCostVersion: SOURCE_COST_VERSION,
+		display: Object.freeze({label: "Lay on Hands", outcomeLabel: "Healing", tableRules: REVIEWED_LAY_ON_HANDS.tableRules}),
+		normalizeChoice: choice => {
+			if (!choice || typeof choice !== "object" || Array.isArray(choice)
+				|| Object.keys(choice).length !== 1 || !Number.isSafeInteger(choice.amount) || choice.amount < 1 || choice.amount > 100) {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			return {amount: choice.amount};
+		},
+		hasSource: ({character}) => { getLayOnHandsBinding(character); return true; },
+		buildSourceCost: ({sourceCharacter, choice}) => {
+			const {resource, featureRef} = getLayOnHandsBinding(sourceCharacter);
+			return {version: SOURCE_COST_VERSION, components: [{kind: "feature_use", resourceId: resource.id, featureRef, amount: choice.amount}]};
+		},
+		deriveOperation: ({choice}) => ({kind: "hp.heal", arguments: {amount: choice.amount}}),
+		sourceFootprint: ({sourceCost}) => getSourceCostMutationFootprint(sourceCost),
+		targetFootprint: () => ["hp"],
+	});
+}
+
 const PRODUCTION_TEMPLATES = Object.freeze([
 	getCureWoundsTemplate({source: "phb", version: "phb-2014-v1", dicePerLevel: 1}),
 	getCureWoundsTemplate({source: "xphb", version: "xphb-2024-v1", dicePerLevel: 2}),
+	...REVIEWED_HEALING_WORD_SPELLS.map(getHealingWordTemplate),
+	getLayOnHandsTemplate(),
 ]);
 
 function normalizeBoundedString (value, {label, maxLength}) {
@@ -443,6 +536,9 @@ export class SemanticOperationRegistry {
 		effectResolutionSeed = null,
 	}) {
 		const template = this.getTemplate({sourceEntity, effectTemplateId});
+		if (template.multiTargetOnly) {
+			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		}
 		const isCostBearing = template.sourceCostVersion != null;
 		if (!isCostBearing && template.cost !== "none") {
 			throw new HubStoreError("SOURCE_COST_UNSUPPORTED", `The source cost is not supported.`, {status: 409});

@@ -3,7 +3,7 @@ import "./setup.js";
 import {CharacterSheetPeerTargeting} from "../../../js/charactersheet/charactersheet-peer-targeting.js";
 import {CharacterSheetHubEffects} from "../../../js/charactersheet/charactersheet-hub-effects.js";
 import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
-import {getMultiTargetOperationsCapability} from "../../../js/hub/hub-multi-target-operations.js";
+import {getMultiTargetOperationsCapability, resolveReviewedMultiTargetSpell} from "../../../js/hub/hub-multi-target-operations.js";
 
 const descriptor = {sourceEntity: {type: "ability", uid: "shared restoration|tst", version: "tst-v1"}, effectTemplateId: "ability.shared-restoration.heal", choice: {amount: 4}};
 const pFlush = () => new Promise(resolve => setImmediate(resolve));
@@ -130,11 +130,57 @@ describe("Shared sheet multi-target workflow", () => {
 		controller.destroy();
 	});
 
-	it("does not activate production multi-spell mapping just because the capability is available", async () => {
+	it("does not activate a production mapping when the descriptor resolver explicitly returns null", async () => {
 		const {controller, api} = makeSource({resolver: undefined});
 		controller._fnResolveMultiTargetSpell = () => null;
 		expect(await controller.pMaybeProposeSpell({spell: {name: "Mass Healing Word", source: "PHB"}, selectedSlot: {level: 3}})).toEqual({handled: false});
 		expect(api.pCreateMultiTargetOperation).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+
+	it.each(["PHB", "XPHB"])("routes production %s Mass Healing Word with six-candidate limit, never the singular route", async source => {
+		const refs = Array.from({length: 7}, (_, index) => `ref-${index}`);
+		const {controller, api} = makeSource({
+			refs: refs.slice(0, 6),
+			resolver: resolveReviewedMultiTargetSpell,
+			apiOverrides: {pListCampaignCharacterProjections: jest.fn(async () => ({
+				projections: refs.map((targetRef, index) => ({kind: "owner_truth", targetRef, character: {id: `character-${index}`, data: {name: "Twin"}}})),
+				roster: refs.map((targetRef, index) => ({characterId: `character-${index}`, targetRef})),
+			}))},
+		});
+		const pick = jest.fn(async () => ({kind: "targets", targetRefs: refs.slice(0, 6)}));
+		controller._fnPickTargets = pick;
+		const options = {spell: {name: "Mass Healing Word", source, level: 3}, selectedSlot: {level: 4}};
+		expect(await controller.pMaybeProposeSpell(options)).toMatchObject({handled: true, proposed: true, isMulti: true});
+		expect(pick).toHaveBeenCalledWith(expect.objectContaining({maxTargets: 6, tableRules: expect.stringMatching(/not checked by the server/)}));
+		expect(api.pCreateMultiTargetOperation).toHaveBeenCalledWith(expect.objectContaining({
+			sourceEntity: {type: "spell", uid: `mass healing word|${source.toLowerCase()}`, version: source === "PHB" ? "phb-2014-v1" : "xphb-2024-v1"},
+			effectTemplateId: "spell.mass-healing-word.heal",
+			choice: {castLevel: 4},
+			targetRefs: refs.slice(0, 6),
+		}));
+		pick.mockResolvedValueOnce({kind: "targets", targetRefs: refs});
+		expect(await controller.pMaybeProposeSpell(options)).toMatchObject({handled: true, proposed: false});
+		expect(api.pCreateMultiTargetOperation).toHaveBeenCalledTimes(1);
+		expect(controller._isSupportedSpellShape(options)).toBe(false);
+		controller.destroy();
+	});
+
+	it.each(["PHB", "XPHB"])("keeps production %s Mass Healing Word local when the exact multi capability is disabled", async source => {
+		const {controller, api} = makeSource({resolver: resolveReviewedMultiTargetSpell});
+		controller._fnGetMultiTargetCapability = () => getMultiTargetOperationsCapability({enabled: false});
+		expect(await controller.pMaybeProposeSpell({spell: {name: "Mass Healing Word", source, level: 3}, selectedSlot: {level: 3}})).toEqual({handled: false});
+		expect(api.pCreateMultiTargetOperation).not.toHaveBeenCalled();
+		controller.destroy();
+	});
+
+	it.each(["PHB", "XPHB"])("blocks production %s Mass Healing Word local fallback during an installed-authority fence", async source => {
+		const {controller, api} = makeSource({resolver: resolveReviewedMultiTargetSpell});
+		controller.suspend();
+		controller._fnGetMultiTargetCapability = () => null;
+		expect(await controller.pMaybeProposeSpell({spell: {name: "Mass Healing Word", source, level: 3}, selectedSlot: {level: 3}})).toEqual({handled: true, proposed: false});
+		expect(api.pCreateMultiTargetOperation).not.toHaveBeenCalled();
+		expect(controller._drafts.size).toBe(0);
 		controller.destroy();
 	});
 
@@ -186,6 +232,41 @@ describe("Shared sheet multi-target workflow", () => {
 		expect(inner.append).not.toHaveBeenCalled();
 		modal.mockRestore();
 		controller.destroy();
+	});
+
+	it("retains exact duplicate-named checkbox selections through legitimate outgoing rerenders and refresh", async () => {
+		const inner = globalThis.e_({tag: "div"});
+		const close = jest.fn();
+		const modal = jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: inner, doClose: close});
+		const {controller} = makeSource();
+		try {
+			await pFlush();
+			const pending = controller._pPickTargets({
+				spell: {name: "Mass Healing Word"},
+				maxTargets: 6,
+				targets: [{targetRef: "ref-0", name: "Twin"}, {targetRef: "ref-1", name: "Twin"}],
+			});
+			await pFlush();
+			const body = inner.children[0];
+			const list = body.children.find(child => child.tag === "ul");
+			const inputs = list.children.map(row => row.children[0].children[0]);
+			inputs[0].checked = true;
+			inputs[0]._handlers.change();
+			controller._render();
+			await controller.pRefresh();
+			expect(inner.children[0]).toBe(body);
+			expect(inputs.map(input => [input.dataset.hubTargetRef, input.checked])).toEqual([["ref-0", true], ["ref-1", false]]);
+			inputs[1].checked = true;
+			inputs[1]._handlers.change();
+			controller._render();
+			const controls = body.children.find(child => child._clazz === "charsheet__peer-target-controls");
+			controls.children.find(child => child.textContent === "Send requests").click();
+			await expect(pending).resolves.toEqual({kind: "targets", targetRefs: ["ref-0", "ref-1"]});
+			expect(close).toHaveBeenCalledWith(true);
+		} finally {
+			modal.mockRestore();
+			controller.destroy();
+		}
 	});
 
 	it.each([[], ["ref-0", "ref-0"], ["ref-0", "missing"], Array.from({length: 9}, (_, i) => `ref-${i}`)].map(refs => [refs]))("rejects invalid fixed candidate set %j before creating", async refs => {

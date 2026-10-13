@@ -7100,6 +7100,7 @@ class CharacterSheetClassUtils {
 		const currentResources = state.getResources();
 
 		classResourceDefs.forEach((/** @type {*} */ resourceDef) => {
+			if (classData.name === "Paladin" && classEntry.source === "XPHB" && resourceDef.name === "Lay on Hands") return;
 			let resourceName = resourceDef.name;
 			if (/** @type {*} */ resourceName === "__MONK_RESOURCE__") {
 				resourceName = "Focus Points";

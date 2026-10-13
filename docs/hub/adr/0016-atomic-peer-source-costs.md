@@ -2,6 +2,13 @@
 
 Status: Accepted; first protocol-4 Cure Wounds client/server slice implemented (2026-09-04)
 
+> **Held local A5 extension:** HW uses the existing standard-slot contract, while XPHB Lay on Hands uses the
+> already-defined ordinary `feature_use` contract with an exact reciprocal feature/resource binding and
+> synchronized five-points-per-Paladin-level pool. No new cost kind, API or migration is required. LoH is
+> heal-only; touch range and bonus-action eligibility remain expressly table-adjudicated. Singular HW/LoH
+> retain the private failed/unspent target-no-effect guard, including self consent and exact retries.
+> This is not publication, deployment, enrollment or capability enablement.
+>
 > **Hardened by migration `0010_source_cost_binding_identity.sql` (2026-09-21):** PostgreSQL ABA snapshots now
 > use the shared resolver's exact identity normalization (trim; lowercase UUIDs only; preserve non-UUID case) and
 > retain every matching entry/resource plus linked mirrors, so duplicate cardinality cannot be hidden by

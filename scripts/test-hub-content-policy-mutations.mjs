@@ -4,6 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import {pathToFileURL} from "node:url";
 
+function replaceExactOnce (source, from, to) {
+	assert.equal(source.split(from).length - 1, 1, "Disconnect refresh-reset mutation has stale or ambiguous production reach.");
+	process.stdout.write("MATCHED disconnect-refresh-lock-retained exactly one current disconnect refresh-reset callsite.\n");
+	return source.replace(from, to);
+}
+
 async function loadVariant ({name, mutations = {}}) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), `hub-content-mutation-${name}-`));
 	await Promise.all([
@@ -413,9 +419,9 @@ const MUTANTS = [
 		name: "disconnect-refresh-lock-retained",
 		probe: probeTeardownFence,
 		mutations: {
-			"js/charactersheet/charactersheet.js": source => source.replace(
-				"\t\tthis._hubContextRefreshActiveGeneration = null;\n\t\tthis._isHubContextRefreshing = false;\n\t\tthis._characterRepository?.clearRealtimeReconciliation?.",
-				"\t\tthis._characterRepository?.clearRealtimeReconciliation?.",
+			"js/charactersheet/charactersheet.js": source => replaceExactOnce(source,
+				"\t\tthis._hubContextRefreshActiveGeneration = null;\n\t\tthis._isHubContextRefreshing = false;\n\t\t// Exact coverage and unfinished recovery survive transport loss; terminal teardown clears them.\n\t\tthis._isHubContextRevalidationRequired = true;",
+				"\t\t// Exact coverage and unfinished recovery survive transport loss; terminal teardown clears them.\n\t\tthis._isHubContextRevalidationRequired = true;",
 			),
 		},
 	},

@@ -322,6 +322,7 @@ globalThis.InputUiUtil = globalThis.InputUiUtil || {
 	pGetUserBoolean: async () => true,
 	pGetUserEnum: async () => 0,
 	pGetUserString: async () => "",
+	pGetUserNumber: async () => null,
 };
 
 // Mock Renderer if needed

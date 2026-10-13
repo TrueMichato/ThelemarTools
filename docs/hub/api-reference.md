@@ -372,12 +372,60 @@ The version-1 catalog is `hp.damage`, `hp.heal`, `condition.add`, `condition.rem
 `spell_slot.restore`. Players cannot submit generic `kind`/`arguments`. Peer proposals rederive from the pinned
 server template at creation and approval, always require a later explicit target-owner acceptance (including
 self-target), and expire after at most 24 hours. DMs/co-DMs may reject/cancel but may accept only when they own
-the target. Protocol 4 and the exact advertised `peerSourceCosts` capability enable PHB/XPHB Cure Wounds with one
+the target. Protocol 4 and the exact advertised `peerSourceCosts` capability enable PHB/XPHB Cure Wounds and the
+held A5 Healing Word templates with one
 standard slot at the selected cast level. The private deterministic seed, source-cost descriptor, source resource
 identity/value, and target truth never appear in peer projections. Proposal neither consumes a source cost nor
 tests the effect against hidden target state; acceptance commits source and target mutations in one transaction
-or records a privacy-shaped unavailable outcome without spending. Pact slots and other production templates
-remain unsupported.
+or records a privacy-shaped unavailable outcome without spending. Healing Word uses
+`effectTemplateId: "spell.healing-word.heal"` and exact `healing word|phb` / `healing word|xphb` UIDs with the
+corresponding `phb-2014-v1` / `xphb-2024-v1` version. Its only choice is `castLevel` from 1 through 9.
+Pact slots, item/innate spell grants, metamagic and variant components remain unsupported. Singular Cure Wounds
+and Healing Word always require manual owner approval, including self.
+
+### Held A5 healing-spell rules boundary
+
+All four HW/MHW definitions require exact source/edition and a usable class-owned known/prepared spell record.
+They consume exactly one standard slot of the chosen level, only when the effect atomically applies.
+
+| Spell | Source | Minimum slot | Healing dice at slot level L | Candidate cap |
+|---|---|---|---|---|
+| Healing Word | PHB | 1 | Ld4 + casting modifier | 1 |
+| Healing Word | XPHB | 1 | 2Ld4 + casting modifier | 1 |
+| Mass Healing Word | PHB | 3 | (L-2)d4 + casting modifier | 6 |
+| Mass Healing Word | XPHB | 3 | (L-1)d4 + casting modifier | 6 |
+
+Checked-in spell data supplies these definitions; runtime prose is never parsed. The separately authorized
+A5-only convention floors healing **after the casting modifier** at the minimum of the selected dice
+expression: 2d4 cannot heal below 2 HP and 4d4 cannot heal below 4 HP. This is not an authored RAW minimum,
+a global spell rule, or a change to Cure Wounds or the positive-only typed healing contract.
+**Table adjudication is required** for current 60-foot range/distance, caster sight, bonus-action/verbal casting
+eligibility and PHB undead/construct applicability. No positions, sight or creature types are invented. The
+server-enforced identity, sharing, consent and resources do not prove those game-rule predicates. Optional
+bounded `presentation.tableRules` copy explains this on source and target workflows without exposing target
+HP, applicability, source resources or private seed. The user-authorized boundary changes no capability default,
+campaign enrollment, deployment or authority schema.
+
+### Held A5 XPHB Lay on Hands
+
+The heal-only production template uses `lay on hands|xphb`, version `xphb-2024-v1`,
+`effectTemplateId: "ability.lay-on-hands.heal"` and exactly `{amount}`: a positive safe integer within the
+remaining pool (at most 100). The server selects the actual persisted `feature_use` resource identity; the
+caller cannot supply a resource ID. One exact XPHB Paladin feature and one ordinary resource must link
+reciprocally, with unique canonical IDs, matching current/max mirrors, long-rest recovery and a maximum of
+five times the actual XPHB Paladin level. Duplicate, ambiguous, innate, brew, stale or contradictory bindings
+fail closed. Ordinary acquisition, load/save, level-up/down/respec, rest and parser recalculation preserve IDs
+and spent points; safe legacy repair requires exact source-qualified feature evidence. Load-time acquisition
+repairs are persisted through the normal Sheet save, not an authority bypass.
+
+Touch range and bonus-action eligibility are table-adjudicated and disclosed before amount confirmation and
+target consent. Poison, disease and condition removal are unsupported. Proposal reserves/spends nothing.
+Acceptance rechecks the source pool and current target authority and commits exact healing and both cost
+mirrors atomically. Singular HW and LoH preserve ADR 0016's private failed/unspent behavior when target data
+would not change: source/target JSON and revisions remain unchanged, including exact/concurrent retries.
+Only explicitly opted-in multi-target MHW retains applied/revisionless target no-ops with one normal source
+cost. Source status never identifies full HP or another hidden applicability reason. No new cost kind,
+API, migration, capability default or live enrollment is introduced.
 
 For direct DM/co-DM operations, a valid heal at maximum, duplicate condition add, absent condition remove, or
 full-slot restore succeeds with `operation.changed: false`. The command is still an exactly-once terminal
@@ -392,8 +440,9 @@ arbitrary spell prose.
 ### Protocol-6 multi-target operation API
 
 [ADR 0020](adr/0020-consented-multi-target-operations.md) defines the implemented server/store contract. The
-capability is default-off and has no production template or Character Sheet UI in Wave A3; the current
-`/actions` routes retain their one-target protocol-4 behavior.
+capability remains default-off. The held A4 shared Sheet workflow and A5 PHB/XPHB Mass Healing Word mappings
+consume that contract without enabling campaigns; `/actions` retains one-target protocol-4 behavior and rejects
+multi-target-only MHW templates.
 
 | Path | Authorization | Closed input | Result |
 |---|---|---|---|
@@ -405,7 +454,10 @@ capability is default-off and has no production template or Character Sheet UI i
 | `GET /api/campaigns/:campaignId/multi-target-operations/outgoing` | Current source participant or DM/co-DM | optional bounded cursor and limit <=100 | Source sees authorized labels, aggregate coarse status, and no per-target applicability result |
 | `GET /api/campaigns/:campaignId/multi-target-operations/:operationId` | Current participant or DM/co-DM | operation id | Viewer-shaped detail; unrelated users receive `ACTION_NOT_FOUND` |
 
-The server enforces `maxTargets: 8`, rejects duplicate resolved characters, post-proposal additions,
+The infrastructure ceiling remains `maxTargets: 8`; a template may impose a smaller ceiling. A5 MHW strictly
+enforces six in both picker and registry, with minimum slot 3 and one standard slot for the whole selected subset.
+It uses `effectTemplateId: "spell.mass-healing-word.heal"` and exact `mass healing word|phb` /
+`mass healing word|xphb` UIDs and edition versions above. The server rejects duplicate resolved characters, post-proposal additions,
 non-candidates, unapproved/expired/revoked invitations, and currently invalid selected legs. It never silently
 drops an invalid submitted invitation. A rejected finalization has no workflow/audit/event/outbox/character side
 effect; source authority, cost, rules, or template invalidity terminally fails the whole operation without any

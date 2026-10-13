@@ -112,6 +112,16 @@ Primary sources: `docs/hub/runbooks/account-deletion.md`, `member-removal.md`,
 - The only shipped player source-cost targeting flow is one PHB/XPHB Cure Wounds cast, one selected standard
   slot, one privacy-visible player-owned target, and explicit target-owner approval including self-target.
 - Pact slots, arbitrary spells/effects, multi-target/party resolution, and NPC/monster targets fail closed.
+- Held local A5 adds PHB/XPHB HW singular and six-target MHW production mappings without enabling a campaign.
+  Static checked-in definitions bind exact spell/preparation/edition, one standard slot, deterministic healing
+  and consent. The user-authorized rules boundary leaves range/distance, sight, bonus-action/verbal eligibility
+  and PHB undead/construct applicability to the table, visibly not server-enforced. The separately authorized
+  A5-only dice-floor convention uses the selected expression's minimum after the modifier, not an authored RAW
+  minimum or a global spell rule. Positive-only typed healing and revisionless/private full-HP MHW remain.
+  Held XPHB Lay on Hands heal-only uses exact ordinary acquisition/resource links and lifecycle mirrors; ambiguous
+  or malformed bindings fail closed. Singular HW/LoH target no-effect is privately failed/unspent; MHW alone opts
+  into applied/revisionless target no-ops. Fresh independent A5 review remains required; do not infer
+  deployment or live authority from local templates. See `docs/hub/api-reference.md`.
 
 Primary sources: `docs/hub/domain-model.md`, ADR 0016, ADR 0017, `hub-inventory-contract.js`,
 `hub-item-award.js`, `hub-source-costs.js`, and the relevant store/reconciliation/E2E tests.

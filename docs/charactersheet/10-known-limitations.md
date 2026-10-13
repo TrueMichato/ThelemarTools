@@ -22,10 +22,26 @@ monster/NPC targets, party/multi-target resolution, and range automation are not
 The picker states the touch-range requirement without exposing target HP, defenses, applicability, or other
 private state. Local and signed-out sheets retain the existing local cast flow.
 
-The held A4 consumer candidate adds generic protocol-6 collection/consent/subset-finalization UI to the same Sheet,
-but does not add a production multi-spell mapping. Its resolver intentionally returns null until A5 and the
-capability remains default-off. Synthetic reviewed-template tests are not evidence that Mass Healing Word or any
-other production multi-target spell is enabled. Independent review, integration, and deployment remain separate.
+The independently reviewed A4 boundary adds generic protocol-6 collection/consent/subset-finalization UI to the
+same Sheet. Held A5 adds static PHB/XPHB **Healing Word** singular and **Mass Healing Word** multi mappings,
+pending fresh independent review. HW preserves explicit self-consent and local opt-out. MHW permits at most six
+fixed characters and one selected standard slot (minimum level 3), with one pinned roll and one atomic selected
+subset. During recoverable campaign-authority fencing, supported MHW remains blocked even while capability
+metadata is absent; it must not silently become a local cast. PHB HW scales by one d4/slot, XPHB HW by two; PHB MHW starts at one d4 and XPHB at two, both adding only
+one d4 per slot above third.
+
+Current 60-foot range/distance, actual caster sight, bonus-action/verbal eligibility and PHB undead/construct
+applicability are **table-adjudicated, not server-enforced**. The picker and both consent/status workflows say so;
+sharing and consent do not prove game-rule eligibility. The separately authorized A5-only convention floors
+healing after the casting modifier at the selected dice expression's minimum (2d4: 2 HP; 4d4: 4 HP). This is not
+an authored RAW minimum and does not change Cure Wounds, other spells or positive-only typed healing. Full-HP MHW
+targets use the reviewed revisionless no-op privacy behavior. Held XPHB Lay on Hands heal-only targeting binds
+the actual ordinary resource through exact source-qualified acquisition and lifecycle repair, preserving IDs,
+spent points and feature/resource mirrors. Touch and bonus-action eligibility are table-adjudicated; condition
+removal and ambiguous/malformed bindings remain unsupported. Singular HW/LoH no-effect acceptance privately
+fails without spending or changing either character; it does not adopt MHW's applied no-op policy.
+Capabilities remain default-off; isolated synthetic
+test enrollment is not live enablement. Integration, publication, deployment and independent review remain separate.
 
 ---
 

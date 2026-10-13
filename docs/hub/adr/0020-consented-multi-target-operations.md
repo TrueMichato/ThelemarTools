@@ -24,8 +24,19 @@ Status: Accepted; Wave A3 server state machine implemented default-off, rollout 
 > permission to integrate this stack or enable multi-target operations.
 
 In short, this contract extends ADR 0012 and extends ADR 0016 while superseding only the narrow rules stated
-above. Its additive schema and server authority are implemented; production templates, client UX, enablement,
-and physical game-day acceptance remain future work.
+above. Its additive schema and server authority are implemented. The separately reviewed A4 boundary adds
+shared client UX; held A5 adds static PHB/XPHB Healing Word and Mass Healing Word definitions, pending fresh
+independent review. MHW's template ceiling is six, stricter than the infrastructure ceiling of eight, with one
+standard slot and one deterministic roll for the whole selected subset. Its explicit `allowTargetNoOp=true`
+permits the existing revisionless maximum-HP rule without exposing it to the source. Exact-source data gives XPHB
+MHW two base d4 but only one additional d4 per higher slot; XPHB HW instead adds two d4 per higher slot.
+The user-authorized A5 rules boundary leaves current range/distance, actual sight, bonus-action/verbal eligibility
+and PHB undead/construct applicability to the table. The workflow presents them as not server-enforced; consent,
+sharing and resource authority do not establish game-rule eligibility. No spatial/type defaults, migrations,
+new authority fields or arbitrary prose interpretation are introduced. A separate A5-only decision floors HW/MHW
+healing after the casting modifier at the selected dice expression's minimum (2d4: 2 HP; 4d4: 4 HP), not an authored
+RAW minimum. Other spells, Cure Wounds and positive-only typed healing remain unchanged. Enablement and physical
+acceptance remain held; the separately authorized XPHB Lay on Hands binding repair/heal-only template is pending implementation.
 
 ## Context
 

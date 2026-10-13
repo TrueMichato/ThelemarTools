@@ -21,10 +21,15 @@ type MultiTargetView = {
 
 type MultiTargetSheetFixtureHost = Window & {charSheet?: {
 	_currentCharacterId?: string;
+	_hubCampaignId?: string;
 	_isHubOperationAuthorityPending?: boolean;
 	_hubOperationAuthorityGeneration?: number;
 	_hubRulesRefreshBlocked?: boolean;
 	_isHubContextRefreshing?: boolean;
+	_characterLoadGeneration?: number;
+	_characterDocumentGeneration?: number;
+	_hubContextGeneration?: number;
+	_hubRealtimeGeneration?: number;
 	_characterRepository?: {
 		hasPendingResync: (characterId: string) => boolean;
 		getSaveBlock: (characterId: string) => unknown;
@@ -35,11 +40,14 @@ type MultiTargetSheetFixtureHost = Window & {charSheet?: {
 	};
 	_hubRealtime?: {
 		getAuthorityGeneration: () => number;
-		_active?: {client?: {getConnectionState: () => {state: string}}};
+		_active?: {client?: {_lastSequence: number; getConnectionState: () => {state: string}}};
 	};
 	_pRefreshHubRules: () => Promise<boolean>;
 	_peerTargeting?: {
 		_hasMultiCapability: () => boolean;
+		_hasCapability: (resourceKind?: string) => boolean;
+		_isSuspended: boolean;
+		_isAuthorityRevalidating: boolean;
 		_fnResolveMultiTargetSpell: (options: {spell?: {name?: string}}) => {
 			sourceEntity: {type: string; uid: string; version: string};
 			effectTemplateId: string;
@@ -757,6 +765,8 @@ export class HubCampaignPage {
 		features = [],
 		className = "Fighter",
 		classSource = "PHB",
+		classLevel = 1,
+		spellSlots = {1: {current: 2, max: 2}},
 		subclass = null,
 		race = null,
 		spellsKnown = [],
@@ -770,6 +780,8 @@ export class HubCampaignPage {
 		features?: Array<{name: string; source: string}>;
 		className?: string;
 		classSource?: string;
+		classLevel?: number;
+		spellSlots?: Record<number, {current: number; max: number}>;
 		subclass?: {name: string; source: string; shortName?: string} | null;
 		race?: {name: string; source: string; edition?: string} | null;
 		spellsKnown?: Array<{
@@ -797,13 +809,13 @@ export class HubCampaignPage {
 					abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
 					abilityBonuses: {str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0},
 					...(race ? {race} : {}),
-					classes: [{name: className, source: classSource, level: 1, ...(subclass ? {subclass} : {})}],
+					classes: [{name: className, source: classSource, level: classLevel, ...(subclass ? {subclass} : {})}],
 					xp: 0,
 					hp: {current: hpCurrent, max: 12, temp: 0},
 					features,
 					spellcasting: {
 						ability: "wis",
-						spellSlots: {1: {current: 2, max: 2}},
+						spellSlots,
 						...(spellsKnown.length ? {spellsKnown, cantripsKnown: []} : {}),
 					},
 					conditions: [],
@@ -1686,6 +1698,7 @@ export class HubCampaignPage {
 			if (!sheet || !await sheet._pRefreshHubRules() || !sheet._peerTargeting?._hasMultiCapability()) {
 				throw new Error("Reviewed multi-target fixture capability is unavailable.");
 			}
+
 			sheet._peerTargeting._fnResolveMultiTargetSpell = ({spell}) => spell?.name === "Cure Wounds"
 				? {
 					sourceEntity: {type: "ability", uid: "shared restoration|tst", version: "tst-v1"},
@@ -1693,6 +1706,112 @@ export class HubCampaignPage {
 				}
 				: null;
 		});
+	}
+
+	async refreshProductionMultiTargetCapability (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+			if (!sheet || !await sheet._pRefreshHubRules() || !sheet._peerTargeting?._hasMultiCapability()) {
+				throw new Error("Production multi-target capability is unavailable in the isolated test campaign.");
+			}
+		});
+	}
+
+	private async waitForSettledProductionTargeting (resourceKind: "multi" | "feature_use"): Promise<void> {
+		const campaignId = await this.page.evaluate(() => (window as MultiTargetSheetFixtureHost).charSheet?._hubCampaignId);
+		if (!campaignId) throw new Error("Production targeting requires an installed campaign scope.");
+		const snapshotResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/snapshot`, {
+			headers: {"x-hub-protocol-version": "6"},
+		});
+		expect(snapshotResponse.ok(), await snapshotResponse.text()).toBe(true);
+		const snapshot: {snapshot: {lastSequence: number}} = await snapshotResponse.json();
+		const sequence = snapshot.snapshot.lastSequence;
+		expect(Number.isSafeInteger(sequence) && sequence >= 0).toBe(true);
+		await expect.poll(() => this.page.evaluate(({sequence, resourceKind}) => {
+			const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+			const targeting = sheet?._peerTargeting;
+			const characterId = sheet?._currentCharacterId;
+			return (resourceKind === "multi" ? targeting?._hasMultiCapability() : targeting?._hasCapability(resourceKind)) === true
+				&& !targeting._isSuspended && !targeting._isAuthorityRevalidating
+				&& !sheet?._isHubOperationAuthorityPending && !sheet?._isHubContextRefreshing
+				&& (sheet?._hubRealtime?._active?.client?._lastSequence ?? -1) >= sequence
+				&& !!characterId && !sheet?._characterRepository?.hasPendingResync(characterId)
+				&& !sheet?._characterRepository?.getSaveBlock(characterId);
+		}, {sequence, resourceKind}), {timeout: 15_000}).toBe(true);
+	}
+
+	async saveOrdinaryLayOnHandsAcquisition ({characterId, name}: {characterId: string; name: string}): Promise<{featureId: string; resourceId: string}> {
+		const prior = await this.getCharacter(characterId);
+		expect(prior.data.classes).toEqual(expect.arrayContaining([expect.objectContaining({name: "Paladin", source: "XPHB", level: 1})]));
+		const saved = this.page.waitForResponse(response => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/characters/${characterId}`);
+		await this.page.locator("#charsheet-ipt-name").fill(name);
+		await this.page.locator("#charsheet-ipt-name").press("Tab");
+		const response = await saved;
+		expect(response.ok(), await response.text()).toBe(true);
+		const canonical = await this.getCharacter(characterId);
+		const feature = canonical.data.features.find((entry: {name: string; source: string}) => entry.name === "Lay on Hands" && entry.source === "XPHB");
+		expect(feature).toMatchObject({className: "Paladin", classSource: "XPHB", level: 1, uses: {current: 5, max: 5}});
+		const resource = canonical.data.resources.find((entry: {id: string}) => entry.id === feature.resourceId);
+		expect(resource).toMatchObject({featureId: feature.id, current: 5, max: 5});
+		expect(canonical.data.resources.filter((entry: {featureId: string}) => entry.featureId === feature.id)).toHaveLength(1);
+		expect(resource.id).toBeTruthy();
+		return {featureId: feature.id, resourceId: resource.id};
+	}
+
+	async useProductionLayOnHands ({featureId, amount, targetName}: {featureId: string; amount: number; targetName: string}): Promise<void> {
+		await this.waitForSettledProductionTargeting("feature_use");
+		await this.page.locator('a[href="#charsheet-tab-features"]').click();
+		const feature = this.page.locator(`.charsheet__feature[data-feature-id="${featureId}"]`);
+		await expect(feature).toContainText("Lay on Hands");
+		await feature.locator(".charsheet__feature-use").click();
+		const amountDialog = this.page.getByRole("dialog", {name: "Lay on Hands: healing only", exact: true});
+		await expect(amountDialog).toBeVisible();
+		await expect(amountDialog.getByText("Choose HP to restore", {exact: false})).toBeVisible();
+		await expect(amountDialog).toContainText("spending the same number of Lay on Hands points");
+		await expect(amountDialog).toContainText("not checked by the server");
+		await expect(amountDialog).toContainText("No points are reserved");
+		await expect(amountDialog).toContainText("condition removal are not supported");
+		await amountDialog.locator("input").fill(String(amount));
+		await amountDialog.getByRole("button", {name: "OK", exact: true}).click();
+		const picker = this.page.locator(".charsheet__peer-target-picker");
+		await expect(picker).toContainText("not checked by the server");
+		await expect(picker).toContainText("consent do not prove eligibility");
+		const response = this.page.waitForResponse(response => response.request().method() === "POST" && /\/actions$/.test(new URL(response.url()).pathname));
+		await picker.getByRole("button", {name: `Request Lay on Hands for ${targetName}`, exact: true}).click();
+		const created = await response;
+		expect(created.status(), await created.text()).toBe(201);
+		await expect(picker).toBeHidden();
+	}
+
+	async castProductionMassHealingWord (targetRefs: string[]): Promise<MultiTargetView> {
+		await this.waitForSettledProductionTargeting("multi");
+		await this.page.locator('a[href="#charsheet-tab-spells"]').click({timeout: 15_000});
+		const spell = this.page.locator(".charsheet__spell-item").filter({hasText: "Mass Healing Word"}).first();
+		await expect(spell).toBeVisible();
+		await spell.locator(".charsheet__spell-cast").click({timeout: 15_000});
+		const picker = this.page.locator(".charsheet__peer-target-picker");
+		await expect(picker).toBeVisible();
+		await expect(picker).toContainText("Choose 1–6");
+		await expect(picker).toContainText("No cost is reserved or spent");
+		await expect(picker).toContainText("not checked by the server");
+		await expect(picker).toContainText("consent do not prove eligibility");
+		await expect(picker.getByText("A5 Hub Healing Word/Mass Healing Word convention:", {exact: false})).toBeVisible();
+		await expect(picker).toContainText("selected dice expression's minimum");
+		for (const targetRef of targetRefs) await picker.locator(`input[data-hub-target-ref="${targetRef}"]`).check({timeout: 15_000});
+		const response = this.page.waitForResponse(response => response.request().method() === "POST" && /\/multi-target-operations$/.test(new URL(response.url()).pathname));
+		await picker.getByRole("button", {name: "Send requests", exact: true}).click();
+		const created = await response;
+		expect(created.status(), await created.text()).toBe(201);
+		await expect(picker).toBeHidden();
+		return (await created.json()).operation;
+	}
+
+	async expectHealingTableBoundary ({operationId = null, incoming = false, phb = false}: {operationId?: string | null; incoming?: boolean; phb?: boolean} = {}): Promise<void> {
+		const root = this.page.locator(incoming ? "#charsheet-hub-effects" : "#charsheet-peer-targeting");
+		const card = operationId ? root.locator(`article[data-hub-action-id="${operationId}"]`) : root;
+		await expect(card).toContainText("not checked by the server");
+		await expect(card).toContainText("consent do not prove eligibility");
+		if (phb) await expect(card).toContainText("undead or constructs");
 	}
 
 	async getMultiTargetRefs (campaignId: string): Promise<Map<string, string>> {
@@ -1824,8 +1943,15 @@ export class HubCampaignPage {
 		await expect(picker).toBeVisible();
 		const dialog = this.page.getByRole("dialog", {name: `Target ${spellName}`});
 		await expect(dialog).toHaveAttribute("aria-modal", "true");
-		await expect(picker).toContainText("within touch range");
-		await expect(picker).toContainText("Hidden hit points and applicability are checked privately");
+		if (spellName === "Cure Wounds") {
+			await expect(picker).toContainText("within touch range");
+			await expect(picker).toContainText("Hidden hit points and applicability are checked privately");
+		} else {
+			await expect(picker.getByText("A5 Hub Healing Word/Mass Healing Word convention:", {exact: false})).toBeVisible();
+			await expect(picker).toContainText("not checked by the server");
+			await expect(picker).toContainText("60-foot range");
+			await expect(picker).toContainText("consent do not prove eligibility");
+		}
 		if ((await this.page.viewportSize())?.width === 390) {
 			const box = await dialog.boundingBox();
 			expect(box).not.toBeNull();

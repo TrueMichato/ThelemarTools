@@ -2,6 +2,8 @@ import {getProjectionId, getProjectionName, getTargetableProjections} from "../h
 import {isTransferOutcomeUncertain} from "../hub/hub-api-client.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {getMultiTargetResultDelivery, hasMultiTargetOperationsCapability, MULTI_TARGET_OPERATION_LIVE_STATUSES, MULTI_TARGET_OPERATION_TERMINAL_STATUSES, resolveReviewedMultiTargetSpell} from "../hub/hub-multi-target-operations.js";
+import {resolveReviewedHealingWordSpell} from "../hub/hub-healing-word-spells.js";
+import {isReviewedLayOnHandsFeature, resolveReviewedLayOnHands} from "../hub/hub-lay-on-hands.js";
 
 const {e_} = /** @type {*} */ (globalThis);
 
@@ -226,6 +228,64 @@ export class CharacterSheetPeerTargeting {
 			&& this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 	}
 
+	isSupportedHealingFeature ({feature} = {}) {
+		return this._hasOwnerAuthority() && !!this._characterId && this._membershipRole === "player"
+			&& isReviewedLayOnHandsFeature(feature)
+			&& (this._hasCapability("feature_use") || this._isSuspended || this._isAuthorityRevalidating);
+	}
+
+	async pMaybeProposeHealingFeature ({feature, amount} = {}) {
+		if (!this.isSupportedHealingFeature({feature})) return {handled: false};
+		if (this._isAuthorityRevalidating && !this._isSuspended && this._hasCapability("feature_use")) {
+			const token = {generation: this._generation, characterId: this._characterId};
+			if (!await this.pRefresh() || !this._isCurrent(token)) return {handled: true, proposed: false};
+		}
+		if (this._isSuspended || this._isAuthorityRevalidating || this._hasDraftAwaitingAuthoritativeReconciliation()) {
+			this._showError("Campaign healing is reconnecting or reconciling an earlier request. Wait before spending Lay on Hands points.");
+			return {handled: true, proposed: false};
+		}
+		const descriptor = resolveReviewedLayOnHands({feature, amount});
+		if (!descriptor) {
+			this._showError("Choose a positive, integral Lay on Hands healing amount.");
+			return {handled: true, proposed: false};
+		}
+		const token = {generation: this._generation, characterId: this._characterId};
+		let targets;
+		try {
+			targets = await this._pLoadTargets();
+		} catch (error) {
+			if (this._isCurrent(token)) this._showError(_getSafeError(error));
+			return {handled: true, proposed: false};
+		}
+		if (!this._isCurrent(token) || !this._hasCapability("feature_use")) return {handled: true, proposed: false};
+		const picked = await this._fnPickTarget({spell: feature, slotLevel: null, targets, tableRules: descriptor.tableRules});
+		if (!this._isCurrent(token) || !this._hasCapability("feature_use") || !picked || picked.kind === "cancel") return {handled: true, proposed: false};
+		if (picked.kind === "local") return {handled: false, local: true};
+		const target = targets.find(entry => entry.targetRef === picked.targetRef);
+		if (!target) {
+			this._showError("The selected healing target is no longer available.");
+			return {handled: true, proposed: false};
+		}
+		const draftKey = `${this._characterId}|${descriptor.sourceEntity.uid}|${amount}|${target.targetRef}`;
+		let draft = this._drafts.get(draftKey);
+		if (!draft) {
+			const commandId = this._fnCreateId();
+			draft = {
+				commandId,
+				draftKey,
+				sourceCharacterId: this._characterId,
+				spell: feature,
+				slotLevel: null,
+				isFeature: true,
+				tableRules: descriptor.tableRules,
+				target,
+				request: this._getProposalRequest({commandId, sourceCharacterId: this._characterId, spell: feature, targetRef: target.targetRef, descriptor}),
+			};
+		}
+		this._drafts.set(draftKey, draft);
+		return {handled: true, proposed: await this._pSubmitDraft(draft)};
+	}
+
 	async pMaybeProposeSpell ({
 		spell,
 		selectedSlot,
@@ -247,9 +307,9 @@ export class CharacterSheetPeerTargeting {
 		if (
 			(this._isSuspended || this._isAuthorityRevalidating)
 			&& this._characterId
-			&& isSupportedSpellShape
+			&& (isSupportedSpellShape || descriptor)
 		) {
-			this._showError("Campaign targeting is reconnecting. Wait for the campaign context to refresh before casting Cure Wounds.");
+			this._showError(`Campaign targeting is reconnecting. Wait for the campaign context to refresh before casting ${spell.name}.`);
 			return {handled: true, proposed: false};
 		}
 		if (
@@ -258,7 +318,7 @@ export class CharacterSheetPeerTargeting {
 			&& isSupportedSpellShape
 			&& this._hasDraftAwaitingAuthoritativeReconciliation()
 		) {
-			this._showError("Campaign targeting is reconciling a rejected request. Reconnect before starting another Cure Wounds request.");
+			this._showError(`Campaign targeting is reconciling a rejected request. Reconnect before starting another ${spell.name} request.`);
 			return {handled: true, proposed: false};
 		}
 		if (!this.isSupportedSpellCast({spell, selectedSlot, hasMetamagic, hasVariantComponent})) return {handled: false};
@@ -278,7 +338,7 @@ export class CharacterSheetPeerTargeting {
 
 		const target = targets.find(it => it.targetRef === choice.targetRef);
 		if (!target) return {handled: true, proposed: false};
-		const draftKey = `${this._characterId}|${spell.source}|${selectedSlot.level}|${target.targetRef}`;
+		const draftKey = `${this._characterId}|${spell.name}|${spell.source}|${selectedSlot.level}|${target.targetRef}`;
 		let draft = this._drafts.get(draftKey);
 		if (!draft) {
 			const commandId = this._fnCreateId();
@@ -469,6 +529,10 @@ export class CharacterSheetPeerTargeting {
 
 	async _pSubmitDraft (draft) {
 		if (draft.isMulti) return this._pSubmitMultiDraft(draft);
+		if (draft.isFeature && !this._hasCapability("feature_use")) {
+			this._showError("Campaign feature targeting is unavailable. Lay on Hands points have not been spent.");
+			return false;
+		}
 		if (this._isSuspended || draft.isSubmitting || draft.isAwaitingAuthoritativeReconciliation) return false;
 		const token = {generation: this._generation, characterId: draft.sourceCharacterId};
 		draft.isSubmitting = true;
@@ -484,7 +548,7 @@ export class CharacterSheetPeerTargeting {
 					status: response?.operation?.status || "proposed",
 					expiresAt: response?.operation?.expiresAt,
 					presentation: {
-						effectLabel: `Cure Wounds (level ${draft.slotLevel})`,
+						effectLabel: draft.isFeature ? draft.spell.name : `${draft.spell.name} (level ${draft.slotLevel})`,
 						targetName: draft.target.name,
 						outcomeLabel: "Healing is rolled once and applied after approval.",
 					},
@@ -541,6 +605,7 @@ export class CharacterSheetPeerTargeting {
 				effectLabel: String(presentation.effectLabel || value.effectDisplaySnapshot?.label || "Campaign effect").slice(0, 120),
 				targetName: String(presentation.targetName || value.targetDisplaySnapshot?.name || "Campaign character").slice(0, 120),
 				outcomeLabel: String(presentation.outcomeLabel || value.effectDisplaySnapshot?.outcomeLabel || "Awaiting approval").slice(0, 160),
+				tableRules: typeof presentation.tableRules === "string" ? presentation.tableRules.slice(0, 500) : null,
 			},
 			sourceCostState: value.sourceCostState || (value.status === "applied" ? "consumed" : value.status === "proposed" ? "pending" : "not_consumed"),
 			canCancel: value.capabilities?.canCancel === true || value.canCancel === true,
@@ -550,7 +615,7 @@ export class CharacterSheetPeerTargeting {
 		};
 	}
 
-	_hasCapability () {
+	_hasCapability (resourceKind = "spell_slot") {
 		const capability = this._fnGetCapability?.();
 		return capability?.enabled === true
 			&& capability.contractVersion === _CAPABILITY.contractVersion
@@ -558,7 +623,7 @@ export class CharacterSheetPeerTargeting {
 			&& capability.operationVersion === _CAPABILITY.operationVersion
 			&& capability.templateRegistryVersion === _CAPABILITY.templateRegistryVersion
 			&& Array.isArray(capability.resourceKinds)
-			&& capability.resourceKinds.includes("spell_slot");
+			&& capability.resourceKinds.includes(resourceKind);
 	}
 
 	_hasOwnerAuthority () {
@@ -570,7 +635,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	_hasAnyCapability () {
-		return this._hasCapability() || this._hasMultiCapability();
+		return this._hasCapability() || this._hasCapability("feature_use") || this._hasMultiCapability();
 	}
 
 	async _pMaybeProposeMultiTarget ({descriptor, spell, selectedSlot}) {
@@ -583,13 +648,14 @@ export class CharacterSheetPeerTargeting {
 		try {
 			const targets = await this._pLoadTargets();
 			if (!this._isCurrent(token)) return {handled: true, proposed: false};
-			const picked = await this._fnPickTargets({spell, slotLevel: selectedSlot?.level, targets});
+			const maxTargets = Math.min(descriptor.maxTargets || 8, 8);
+			const picked = await this._fnPickTargets({spell, slotLevel: selectedSlot?.level, targets, maxTargets, tableRules: descriptor.tableRules});
 			if (!this._isCurrent(token) || !picked || picked.kind === "cancel") return {handled: true, proposed: false};
 			if (picked.kind === "local") return {handled: false};
 			const refs = picked.targetRefs;
 			const selected = Array.isArray(refs) ? refs.map(ref => targets.find(target => target.targetRef === ref)) : [];
-			if (!selected.length || selected.length > 8 || selected.some(target => !target) || new Set(selected.map(target => target.characterId)).size !== selected.length) {
-				this._showError("Choose between one and eight different campaign characters.");
+			if (!selected.length || selected.length > maxTargets || selected.some(target => !target) || new Set(selected.map(target => target.characterId)).size !== selected.length) {
+				this._showError(`Choose between one and ${maxTargets} different campaign characters.`);
 				return {handled: true, proposed: false};
 			}
 			if (!descriptor?.sourceEntity?.uid || !descriptor.sourceEntity.version || !descriptor.effectTemplateId || !descriptor.choice || typeof descriptor.choice !== "object" || Array.isArray(descriptor.choice)) {
@@ -691,7 +757,12 @@ export class CharacterSheetPeerTargeting {
 			isMulti: true,
 			actionId: operation.operationId,
 			status: operation.status,
-			presentation: {effectLabel: String(operation.presentation?.effectLabel || "Campaign effect").slice(0, 120), targetName: `${targets.length} candidate characters`, outcomeLabel: "Owners respond independently. Finalization applies your selected approved subset atomically."},
+			presentation: {
+				effectLabel: String(operation.presentation?.effectLabel || "Campaign effect").slice(0, 120),
+				targetName: `${targets.length} candidate characters`,
+				outcomeLabel: "Owners respond independently. Finalization applies your selected approved subset atomically.",
+				tableRules: typeof operation.presentation?.tableRules === "string" ? operation.presentation.tableRules.slice(0, 500) : null,
+			},
 			targets,
 			selectedInvitationIds: current?.selectedInvitationIds
 				? new Set([...current.selectedInvitationIds].filter(id => approvedIds.has(id)))
@@ -796,6 +867,8 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	_isSupportedSpellShape ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
+		const reviewed = resolveReviewedHealingWordSpell({spell, selectedSlot, hasMetamagic, hasVariantComponent});
+		if (reviewed?.maxTargets === 1) return true;
 		return String(spell?.name || "").toLowerCase() === "cure wounds"
 			&& _SOURCE_VERSIONS.has(spell?.source)
 			&& Number.isInteger(selectedSlot?.level)
@@ -860,19 +933,20 @@ export class CharacterSheetPeerTargeting {
 		}
 	}
 
-	_getProposalRequest ({commandId, sourceCharacterId, spell, slotLevel, targetRef}) {
-		const sourceEntity = Object.freeze({
+	_getProposalRequest ({commandId, sourceCharacterId, spell, slotLevel, targetRef, descriptor = null}) {
+		const reviewed = descriptor || resolveReviewedHealingWordSpell({spell, selectedSlot: {level: slotLevel}});
+		const sourceEntity = reviewed?.sourceEntity || Object.freeze({
 			type: "spell",
 			uid: `cure wounds|${String(spell.source).toLowerCase()}`,
 			version: _SOURCE_VERSIONS.get(spell.source),
 		});
-		const choice = Object.freeze({castLevel: slotLevel});
+		const choice = Object.freeze(reviewed?.choice ? {...reviewed.choice} : {castLevel: slotLevel});
 		return Object.freeze({
 			campaignId: this._campaignId,
 			contractVersion: 1,
 			sourceCharacterId,
 			sourceEntity,
-			effectTemplateId: "spell.cure-wounds.heal",
+			effectTemplateId: reviewed?.effectTemplateId || "spell.cure-wounds.heal",
 			choice,
 			targetRef,
 			rulesVersionId: this._fnGetRulesVersionId?.(),
@@ -897,7 +971,7 @@ export class CharacterSheetPeerTargeting {
 		this._render();
 	}
 
-	async _pPickTarget ({spell, slotLevel, targets}) {
+	async _pPickTarget ({spell, slotLevel, targets, tableRules = null}) {
 		return new Promise(resolve => {
 			let isResolved = false;
 			let closePicker = null;
@@ -925,13 +999,14 @@ export class CharacterSheetPeerTargeting {
 				const help = e_({
 					tag: "p",
 					clazz: "charsheet__peer-target-help",
-					text: `Choose one campaign character for a level ${slotLevel} Cure Wounds request. The target must be within touch range at the table. Hidden hit points and applicability are checked privately when they approve.`,
+					text: tableRules || resolveReviewedHealingWordSpell({spell, selectedSlot: {level: slotLevel}})?.tableRules
+						|| `Choose one campaign character for a level ${slotLevel} Cure Wounds request. The target must be within touch range at the table. Hidden hit points and applicability are checked privately when they approve.`,
 				});
 				const list = e_({tag: "ul", clazz: "charsheet__peer-target-list"});
 				for (const target of targets) {
 					const row = e_({tag: "button", clazz: "charsheet__peer-target-option"});
 					row.type = "button";
-					row.setAttribute("aria-label", `Request Cure Wounds for ${target.name}${target.isSelf ? ", your current character" : ""}`);
+					row.setAttribute("aria-label", `Request ${spell.name} for ${target.name}${target.isSelf ? ", your current character" : ""}`);
 					row.append(
 						e_({tag: "strong", text: target.name}),
 						e_({tag: "span", text: target.isSelf ? "Your character · approval still required" : "Campaign character · owner approval required"}),
@@ -970,7 +1045,7 @@ export class CharacterSheetPeerTargeting {
 		});
 	}
 
-	async _pPickTargets ({spell, targets}) {
+	async _pPickTargets ({spell, targets, maxTargets = 8, tableRules = null}) {
 		return new Promise(resolve => {
 			let resolved = false;
 			let closePicker = null;
@@ -995,7 +1070,8 @@ export class CharacterSheetPeerTargeting {
 				closePicker = doClose;
 				if (resolved) { doClose(false); return; }
 				const body = e_({tag: "div", clazz: "charsheet__peer-target-picker cs-adaptive-panel"});
-				body.append(e_({tag: "p", text: "Choose 1–8 different characters. No cost is reserved or spent while owners respond. Your own candidates are auto-approved; you may deselect them before finalizing."}));
+				body.append(e_({tag: "p", text: `Choose 1–${maxTargets} different characters. No cost is reserved or spent while owners respond. Your own candidates are auto-approved; you may deselect them before finalizing.`}));
+				if (tableRules) body.append(e_({tag: "p", text: tableRules}));
 				const selected = new Set();
 				const list = e_({tag: "ul", clazz: "charsheet__peer-target-list"});
 				const send = e_({tag: "button", clazz: "ve-btn ve-btn-primary", text: "Send requests"});
@@ -1006,7 +1082,7 @@ export class CharacterSheetPeerTargeting {
 					checkbox.type = "checkbox";
 					checkbox.dataset.hubTargetRef = target.targetRef;
 					checkbox.addEventListener("change", () => {
-						if (checkbox.checked && selected.size >= 8) checkbox.checked = false;
+						if (checkbox.checked && selected.size >= maxTargets) checkbox.checked = false;
 						if (checkbox.checked) selected.add(target.targetRef);
 						else selected.delete(target.targetRef);
 						send.disabled = selected.size < 1;
@@ -1025,6 +1101,12 @@ export class CharacterSheetPeerTargeting {
 				cancel.type = "button";
 				cancel.addEventListener("click", () => { finish({kind: "cancel"}); doClose(false); });
 				const controls = e_({tag: "div", clazz: "charsheet__peer-target-controls"});
+				if (tableRules) {
+					const local = e_({tag: "button", clazz: "ve-btn ve-btn-default", text: "Resolve locally"});
+					local.type = "button";
+					local.addEventListener("click", () => { finish({kind: "local"}); doClose(true); });
+					controls.append(local);
+				}
 				controls.append(send, cancel);
 				body.append(list, controls);
 				eleModalInner.append(body);
@@ -1083,13 +1165,16 @@ export class CharacterSheetPeerTargeting {
 	_getDraftCard (draft) {
 		const card = e_({tag: "article", clazz: "charsheet__peer-action"});
 		let statusText = draft.error;
-		if (draft.isSubmitting) statusText = "Sending request… No spell slot has been spent.";
+		const cost = draft.isFeature ? "Lay on Hands points" : "spell slot";
+		if (draft.isSubmitting) statusText = `Sending request… No ${cost} ${draft.isFeature ? "have" : "has"} been spent.`;
 		if (draft.isAwaitingAuthoritativeReconciliation) statusText = draft.error;
-		if (this._isSuspended) statusText = "Reconnecting… This request keeps its original identity. No spell slot has been spent.";
+		if (this._isSuspended) statusText = `Reconnecting… This request keeps its original identity. No ${cost} ${draft.isFeature ? "have" : "has"} been spent.`;
 		card.append(
-			e_({tag: "strong", text: `${draft.isMulti ? draft.spell.name : "Cure Wounds"} → ${draft.target.name}`}),
+			e_({tag: "strong", text: `${draft.spell.name} → ${draft.target.name}`}),
 			e_({tag: "span", text: statusText}),
 		);
+		const reviewed = resolveReviewedHealingWordSpell({spell: draft.spell, selectedSlot: {level: draft.slotLevel}});
+		if (draft.tableRules || reviewed?.tableRules) card.append(e_({tag: "span", text: draft.tableRules || reviewed.tableRules}));
 		if (draft.error && !draft.isAwaitingAuthoritativeReconciliation) {
 			const retry = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", text: "Retry"});
 			retry.type = "button";
@@ -1111,6 +1196,7 @@ export class CharacterSheetPeerTargeting {
 			e_({tag: "span", text: action.presentation.outcomeLabel}),
 			e_({tag: "span", clazz: "charsheet__peer-action-state", text: `${action.status.replaceAll("_", " ")} · source cost ${action.sourceCostState.replaceAll("_", " ")}`}),
 		);
+		if (action.presentation.tableRules) copy.append(e_({tag: "span", text: action.presentation.tableRules}));
 		card.append(copy);
 		if (action.isMulti) {
 			for (const target of action.targets) {

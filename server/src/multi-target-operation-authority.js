@@ -125,6 +125,9 @@ export function getMultiTargetOperationSummary ({
 		expiresAt: operation.expiresAt,
 		presentation: {
 			effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
+			...(typeof operation.effectDisplaySnapshot?.tableRules === "string"
+				? {tableRules: operation.effectDisplaySnapshot.tableRules.slice(0, 500)}
+				: {}),
 		},
 		counts: {
 			pending: targets.filter(target => target.responseState === "pending").length,
@@ -188,6 +191,7 @@ export function getMultiTargetInvitationPresentation ({
 		sourceName: effectPresentation?.sourceName || "A party member",
 		effectLabel: effectPresentation?.effectLabel || "Campaign effect",
 		outcomeLabel: effectPresentation?.outcomeLabel || "Review campaign effect",
+		...(effectPresentation?.tableRules ? {tableRules: effectPresentation.tableRules} : {}),
 	};
 }
 

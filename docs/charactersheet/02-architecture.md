@@ -335,13 +335,26 @@ toJson(), loadFromJson()
 - Render source-owner pending and terminal status without target truth or source resource internals
 - Refetch on reconnect/focus and fence stale responses on character switches
 
-The held A4 candidate also requires the separate exact protocol-6 multi-target capability and a reviewed descriptor.
-The production resolver is null until A5. A reviewed descriptor freezes 1–8 opaque candidates without local cost;
+The independently reviewed A4 boundary also requires the separate exact protocol-6 multi-target capability and
+a reviewed descriptor. Held A5 maps only PHB/XPHB Mass Healing Word through the production resolver, with a
+six-candidate ceiling and minimum standard slot 3; the generic fixture ceiling stays eight. Shared
+`hub-healing-word-spells.js` supplies static edition/slot/count/table-boundary descriptors used by browser and
+server. Healing Word uses the existing singular manual-consent flow. Neither capability default nor enrollment
+changes. Range/sight, bonus-action/verbal eligibility and PHB undead/construct applicability are explicitly
+table-adjudicated, not inferred from consent/privacy. A reviewed descriptor freezes opaque candidates without local cost;
 fresh outgoing/detail drives per-character response status and source subset finalization. Source-owned candidates
-are auto-approved only for this new workflow, not singular Cure Wounds. Account-wide incoming cards resolve exact
+are auto-approved only for this new workflow, not singular Cure Wounds or Healing Word. Account-wide incoming cards resolve exact
 owned identity through fresh `owner_truth.targetRef` equality and open the corresponding shared Sheet route before
 consent. HTTP receipts and realtime legs use only the existing repository delivery queue for adoption.
 Projection/rules/lifecycle invalidations synchronously conceal targeting and close its picker, even behind a save.
+
+Held XPHB Lay on Hands routes the actual feature Use control through an amount prompt and the same singular
+target/owner-consent controller. The visible pre-confirmation copy explains equal HP-point cost and the
+table-adjudicated touch/bonus-action boundary. `_ensureXphbLayOnHandsResource()` binds exact checked-in class
+feature evidence to one reciprocal ordinary resource, preserving IDs/spent points and current/max mirrors
+through acquisition, load/save, level-up/down/respec, rest and parser recalculation. Unsupported contradictory
+bindings are diagnosed, not silently normalized. A declined/failed/no-effect singular operation spends nothing;
+an explicit local choice spends only the chosen points and leaves target healing to the table.
 The coordinator stamps queued semantic envelopes with an authority epoch; its immediate invalidation advances the
 page context fence and pauses HTTP, realtime, pending-resync and canonical adoption until fresh authorized context.
 Stale applied evidence remains in the existing ordered resync queue without committing coverage or watermark.
