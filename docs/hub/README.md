@@ -119,6 +119,8 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0019: provider-neutral account entitlements and reauthentication](adr/0019-provider-neutral-account-entitlements.md)
 - [ADR 0020: consented multi-target semantic operations](adr/0020-consented-multi-target-operations.md) —
   accepted; Wave A authority and Sheet workflow integrated/published, default-off and not deployed
+- [ADR 0021: opted-in self-service party stash withdrawals](adr/0021-opted-in-self-service-stash-withdrawals.md) —
+  accepted product/authority boundary; implementation pending, existing approvals unchanged
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
