@@ -30,6 +30,7 @@ type MultiTargetSheetFixtureHost = Window & {charSheet?: {
 	_characterDocumentGeneration?: number;
 	_hubContextGeneration?: number;
 	_hubRealtimeGeneration?: number;
+	_renderCharacter: () => void;
 	_characterRepository?: {
 		hasPendingResync: (characterId: string) => boolean;
 		getSaveBlock: (characterId: string) => unknown;
@@ -1772,12 +1773,21 @@ export class HubCampaignPage {
 	async saveOrdinaryLayOnHandsAcquisition ({characterId, name}: {characterId: string; name: string}): Promise<{featureId: string; resourceId: string}> {
 		const prior = await this.getCharacter(characterId);
 		expect(prior.data.classes).toEqual(expect.arrayContaining([expect.objectContaining({name: "Paladin", source: "XPHB", level: 1})]));
-		const saved = this.page.waitForResponse(response => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/characters/${characterId}`);
-		await this.page.locator("#charsheet-ipt-name").fill(name);
-		await this.page.locator("#charsheet-ipt-name").press("Tab");
-		const response = await saved;
+		const input = this.page.locator("#charsheet-ipt-name");
+		await input.fill(name);
+		await this.page.evaluate(() => {
+			const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+			if (!sheet) throw new Error("Campaign character is unavailable.");
+			sheet._renderCharacter();
+		});
+		await expect(input).toHaveValue(name);
+		const [response] = await Promise.all([
+			this.page.waitForResponse(response => response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/characters/${characterId}`),
+			input.press("Tab"),
+		]);
 		expect(response.ok(), await response.text()).toBe(true);
 		const canonical = await this.getCharacter(characterId);
+		expect(canonical.data.name).toBe(name);
 		const feature = canonical.data.features.find((entry: {name: string; source: string}) => entry.name === "Lay on Hands" && entry.source === "XPHB");
 		expect(feature).toMatchObject({className: "Paladin", classSource: "XPHB", level: 1, uses: {current: 5, max: 5}});
 		const resource = canonical.data.resources.find((entry: {id: string}) => entry.id === feature.resourceId);

@@ -167,6 +167,58 @@ beforeAll(async () => {
 beforeEach(() => { backend = makeFakeBackend(); restoreBackend = installBackend(backend); });
 afterEach(() => { restoreBackend(); });
 
+describe("Scoped character-name input drafts", () => {
+	let previousDocument;
+	let input;
+	let host;
+	let name;
+
+	beforeEach(() => {
+		previousDocument = globalThis.document;
+		input = {value: ""};
+		name = "Original";
+		globalThis.document = {activeElement: input, getElementById: () => input};
+		host = Object.assign(Object.create(CharacterSheetPage.prototype), {
+			_currentCharacterId: "character-1",
+			_characterLoadGeneration: 1,
+			_state: {getName: () => name},
+			isCurrentCharacterReadOnly: jest.fn(() => false),
+			_saveCurrentCharacter: jest.fn(),
+		});
+		host._renderNameInput();
+	});
+
+	afterEach(() => { globalThis.document = previousDocument; });
+
+	it("preserves a focused edited name through late renders without mutating or saving state", () => {
+		input.value = "Draft name";
+		name = "Current canonical name";
+		host._renderNameInput();
+		host._renderNameInput();
+		expect(input.value).toBe("Draft name");
+		expect(host._state.getName()).toBe("Current canonical name");
+		expect(host._saveCurrentCharacter).not.toHaveBeenCalled();
+	});
+
+	it.each(["character", "load", "readonly", "blur"])("replaces the draft after a %s scope boundary", boundary => {
+		input.value = "Old draft";
+		name = "Replacement";
+		if (boundary === "character") host._currentCharacterId = "character-2";
+		if (boundary === "load") host._characterLoadGeneration++;
+		if (boundary === "readonly") host.isCurrentCharacterReadOnly.mockReturnValue(true);
+		if (boundary === "blur") globalThis.document.activeElement = null;
+		host._renderNameInput();
+		expect(input.value).toBe("Replacement");
+		expect(host._saveCurrentCharacter).not.toHaveBeenCalled();
+	});
+
+	it("adopts current canonical text when the focused input has not been edited", () => {
+		name = "New canonical name";
+		host._renderNameInput();
+		expect(input.value).toBe("New canonical name");
+	});
+});
+
 describe("Persistence backend — Fix 1 rescue mirror", () => {
 	// (1) State-layer roundtrip guard: proves toJson/loadFromJson themselves are healthy, so
 	// any observed reset must come from the controller/timing layer, not serialization.

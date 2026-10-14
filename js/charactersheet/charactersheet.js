@@ -6292,8 +6292,26 @@ class CharacterSheetPage {
 		globalThis._charsheetMobile?.resumeCharacterScopeUi?.();
 	}
 
+	_renderNameInput () {
+		const input = /** @type {HTMLInputElement} */ (document.getElementById("charsheet-ipt-name"));
+		const name = this._state.getName();
+		const prior = this._nameInputRenderScope;
+		const isEditingCurrentName = !!this._currentCharacterId
+			&& prior?.characterId === this._currentCharacterId
+			&& prior?.loadGeneration === this._characterLoadGeneration
+			&& !this.isCurrentCharacterReadOnly()
+			&& document.activeElement === input
+			&& input.value !== prior.name;
+		if (!isEditingCurrentName) input.value = name;
+		this._nameInputRenderScope = {
+			characterId: this._currentCharacterId,
+			loadGeneration: this._characterLoadGeneration,
+			name,
+		};
+	}
+
 	_renderBasicInfo () {
-		(/** @type {*} */ (document.getElementById("charsheet-ipt-name"))).value = this._state.getName();
+		this._renderNameInput();
 		this._renderXpTracking();
 
 		// Render race with hover link

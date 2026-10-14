@@ -57,6 +57,14 @@ refresh creates a new sharing instance rather than carrying a previous character
 **Lines**: ~5,861  
 **Role**: Main Controller
 
+### Focused name drafts
+
+`_renderBasicInfo()` delegates the name field to `_renderNameInput()`. An edited, focused name is retained
+through late renders only for the same character and load generation. Untouched input follows canonical
+updates; character/load changes, read-only access and blur restore canonical rendering. The render-scope
+record is transient controller state, not character JSON, and rendering neither commits nor saves the draft.
+The ordinary `change` handler still performs the actual state update/save.
+
 ### Explicit local entry actions
 
 The Campaign manifest links to `charactersheet.html?local=1` for Open, with `localAction=create` or
