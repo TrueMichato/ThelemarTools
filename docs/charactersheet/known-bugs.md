@@ -221,6 +221,63 @@ Two authoring rules came out of it, both preset-safety issues:
 
 ## Open
 
+### CS-BUG-178 — E2E Primal Champion checks expect the obsolete unqualified source label — OPEN
+
+**Status**: Open harness issue; explicitly deferred during Round 69 publication.
+This is not evidence that Primal Champion's ability increase is incorrect.
+
+**Affected tests**: `tgtt-chained-fury-barbarian-minotaur.spec.ts`, both
+`MEGA L1->20 with milestone asserts` and `MEGA Features matrix L1->20`.
+The L20 STR/CON `getAbilityBonusBreakdown().contributions` checks expect the
+serialized label `Primal Champion`, but the real contribution is
+`Primal Champion [XPHB]`, with amount 4, requested amount 4 and maximum 25.
+The hardcoded label assertion predates source-qualified disclosures.
+
+**Reproduction**:
+
+```bash
+RUN_MEGA=1 PW_PORT=<fresh-port> npx playwright test \
+  test/e2e/specs/tgtt-chained-fury-barbarian-minotaur.spec.ts \
+  -g MEGA --workers=2 --retries=0 --reporter=list
+```
+
+Both cases failed on integrated `0c2e784c6` and exact pre-fix base `8f9f2717d`,
+with the same L20 STR/CON values and label mismatch. No assertion was relaxed,
+source provenance removed, or check skipped. A future harness repair should
+retain the amount/mechanical checks and reflect the canonical source label.
+
+---
+
+### CS-BUG-179 — Gambler E2E navigation is intercepted by an open native score-details popup — OPEN
+
+**Status**: Open harness/interaction blocker; explicitly deferred during
+Round 69 publication. The underlying popup lifecycle is not fixed or fully
+attributed here.
+
+**Affected tests**: `tgtt-gambler-rogue-clairnian.spec.ts`, both MEGA and
+features-matrix cases, at the L17 Master of Fortune `gamblerProbe`.
+`CharacterSheetPage.switchToTab()` cannot click the Spells tab because the
+native `popover="auto"` Strength score-details region intercepts pointer events.
+Its existing transient-*modal* dismissal does not clear this popup in the
+observed flow. This is not an observed wrong Master of Fortune resource value.
+
+**Reproduction**:
+
+```bash
+RUN_MEGA=1 PW_PORT=<fresh-port> npx playwright test \
+  test/e2e/specs/tgtt-gambler-rogue-clairnian.spec.ts \
+  -g MEGA --workers=2 --retries=0 --reporter=list
+```
+
+Both cases failed on integrated `0c2e784c6` and exact pre-fix base `8f9f2717d`,
+with the same L17 assertion and intercepted native popup. UUIDs, timings and
+stack roots differ; this is matching causal reach, not byte-identical logs.
+The later checks behind the blocked navigation are not certified. No forced
+click, hidden popup injection, new skip or weakened assertion was used to
+convert the failure into a pass.
+
+---
+
 ### CS-BUG-106 — Otherworldly Wings renders with no toggle, so its fly speed can never be turned on
 
 **Status**: Open (not fixed here — found during the CS-BUG-016 sweep).

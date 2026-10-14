@@ -3,43 +3,100 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 69 — Respec, heritage initiative, and Cleric effects — PLANNING
-
-**S1 — Respec origins and feature choices (bugs 1, 2, 4).** Owns the Respec
-workspace/engine, progression decisions, and related origin/choice replay.
-
-- Changing the basic ability-score distribution is unavailable or ineffective.
-- Replacing the species through Respec does not work.
-- The chosen Blessed Strikes option cannot be changed through Respec.
-
-**S2 — Dauntless Heritage initiative (bug 3).** Owns passive-modifier
-activation/teardown and initiative attribution. Dauntless Heritage grants
-advantage against being frightened, not an initiative adjustment.
-
-- Deactivating the Child trait unexpectedly subtracts 5 from initiative.
-
-**S3 — Cleric and non-stacking temporary HP (bugs 5, 6, 7).** Owns Cleric
-feature calculations/display, cantrip effect triggers, the shared temporary-HP
-grant contract and its callers, and the existing side-popup/target delivery.
-
-- Mixed classic subclasses and XPHB/TGTT Cleric classes display Potent
-  Spellcasting twice.
-- Verify every temporary-HP gain keeps `max(current, gained)` rather than
-  stacking or replacing a larger pool. Direct pool editing remains distinct.
-- Level-14 Improved Potent Spellcasting should offer the existing compact
-  side popup to grant its temporary HP to self or another creature.
-
-**Coordination.** The orchestrator alone edits this file. State, ClassUtils,
-Page, and Combat are shared files with region-specific ownership, not blanket
-ownership. S2 owns `removeFeature()` active-state/initiative teardown; S1
-coordinates any needed changes and verifies species replacement with an active
-trait. S1 owns Blessed Strikes decision replay and exclusive persistence; S3
-owns its derived effects and display, coordinating any shared choice reader.
-Kastor's supplied save is private reproduction evidence and is never committed.
-All fixes require real regression assertions and the full integration gates
-before merge. Tablet implementation remains unstarted.
+_None._
 
 ## Closed Bugs
+
+### Round 69 — Respec, heritage initiative, and Cleric effects — INTEGRATED
+
+**S1 — Respec origins and choices (bugs 1, 2, 4).**
+
+- **Starting distribution:** A six-score editor now separates starting scores
+  from later increases and unknown adjustments. Standard Array, exact 27-point
+  buy and manual 3-18 validation use the existing creation rules. Replay
+  preserves actual capped ASI/feat deltas, including zero, rather than
+  subtracting authored allocations. Recorded creation evidence is used where
+  available; incomplete history stays labelled instead of inventing scores.
+- **Species replacement:** Isolated origin drafts share the existing choice
+  mechanics. Grouped language receipts no longer crash reversal; exact
+  ownership preserves independent or unproven overlapping grants. Weighted
+  picks retain distinct per-slot amounts, alternatives select one branch, and
+  newly applicable background obligations are validated. Inner Cancel, outer
+  Cancel, atomic Apply and Undo preserve their respective snapshots.
+- **Blessed Strikes:** Catalog-backed structured choices can be reselected and
+  survive reload with one acquisition-owned decision. TGTT acquisition ownership
+  remains distinct from its XPHB definition source. Scoped readers reject
+  inactive, foreign, contradictory or ambiguous owners; singleton declared
+  aliases and separate unscoped legacy compatibility remain narrow.
+
+**S2 — Initiative attribution (bug 3).** Exact-owner teardown no longer falls
+back to deleting independent same-name modifiers. Ambiguous unowned initiative
+rows remain with a warning. Initiative reads explicit adjustments plus live
+named values, so changing Wisdom does not leave a stale value that an unrelated
+toggle later exposes. The public preservation control captures the generated
+modifier UUID, proves it reachable, fails without S2 and passes with production
+S2. Dauntless Heritage itself grants fear-save advantage, not initiative.
+
+**S3 — Cleric benefits and temporary HP (bugs 5, 6, 7).**
+
+- **Mixed-edition Potent:** The selected modern Blessed Strikes option governs
+  the Cleric benefit instead of borrowing a classic domain's competing grant.
+  Legitimate classic domains keep their own mechanics. Exact acquisition keys
+  admit the real TGTT Respec producer while preserving manual, foreign and
+  wrong-key rows. Class tab and expanded Class modal project one canonical
+  Potent feature with both sources' provenance; raw acquisitions are retained.
+- **Temporary-HP gains:** Existing higher-only helpers were already correct.
+  Exceptional gain callers and feedback now use the canonical grant contract:
+  lower/equal gains preserve both pool and owner, and higher gains replace
+  rather than stack. Raw pool editing remains replacement, not a grant.
+- **Improved Potent:** An eligible, committed Cleric cantrip with confirmed
+  positive damage to a creature offers twice effective Wisdom modifier as
+  temporary HP at level 14. Delivery uses one runtime receipt per casting
+  event, revalidates after awaits and cannot be duplicated or persisted as a
+  stale offer. The shared nonblocking side-offer shell supports self and real
+  companions; a named external recipient is explicitly a manual handoff, not
+  remote sheet mutation. Range is 60 feet, with 61 rejected rather than clamped.
+  Lower/equal grants, Cancel, coexistence with attack offers and mobile
+  scrolling/touch targets are covered.
+
+**Integration and gates.** All child tips and dependencies are preserved with
+`--no-ff`, including the final exact-threshold Time Cleric follow-up. Configured
+ESLint and Stylelint passed. Full repository Jest passed **773 suites / 19,976
+tests**, with **2 existing suites / 208 cases skipped**, no failures and unchanged
+pending-test signatures. The optional real supplied-save test was reached.
+Exact Time checkpoints include levels 8 and 14; a real once-Wisdom production
+plant failed at 14, and both restored MEGA/matrix tests passed.
+
+The final complete Chromium TGTT sweep collected **53 specs / 433 cases** and
+finished **428 passed / 4 failed / 1 existing CS-BUG-002 skip**, with no retries
+or flaky passes (17,405.638 seconds). Time Cleric and EFA Armorer each passed all
+eight cases, including their MEGA and matrix tests. The four remaining failures
+are two stale Primal Champion source-label expectations (**CS-BUG-178**) and two
+Gambler score-popover navigation interruptions (**CS-BUG-179**). All four
+reproduced on exact original base `8f9f2717d` with matching assertion/interception
+signatures (471.490 seconds). **The user explicitly approved publication with
+these baseline failures disclosed.** They remain unfixed; no probes were
+skipped or weakened to manufacture a green browser gate.
+
+**Retained limits.** The original save did not reproduce a duplicate Potent
+display/bonus or the reported historical -5; the historical action is still
+unattributed. Actual activatable Child/Dauntless reach was zero. Its private
+native independent-modifier reach was also zero, so preservation relies on the
+public real-UUID control, not that import. The hypothesized Druid/class-order
+leak was not reproduced; the class-local verdict is defensive scoping.
+Overview receives one canonical Potent row but its incumbent passive/five-row
+filter shows zero direct Potent rows. Public spawn proof refreshed the clean
+Respec controller after spawn provenance finalized; the conflict guard was not
+weakened. A carried missing-subclass-history issue was preserved through explicit
+partial Apply. Reload regenerates eight class-modifier IDs and save metadata,
+so no whole-byte reload claim is made. Four original class resources, inventory,
+spell slots and all seven original cantrip UIDs remain; a new Species resource
+explains the fifth resource row. Keyboard Cancel is certified, not focused-input
+Escape. TS is executed by Playwright, not certified by the JS-only lint config.
+The UI detector retained incumbent findings, not a whole-site clean pass.
+Tablet implementation and the unrelated main checkout remain untouched.
+Private fixtures and gate artifacts are not committed; backup tag, branches,
+child sessions and local evidence remain available.
 
 ### Round 68 — Character lifecycle and single-owned initiative — INTEGRATED
 
