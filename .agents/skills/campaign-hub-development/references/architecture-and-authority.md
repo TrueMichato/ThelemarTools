@@ -155,3 +155,8 @@ Primary sources: ADR 0011, `server/src/character-projection.js`, `server/src/rea
 
 Primary sources: ADR 0012, ADR 0016, `server/src/semantic-operation-registry.js`,
 `peer-source-cost-authority.js`, both stores, and `js/hub/hub-character-operation-reconciler.js`.
+
+For multi-target participant recovery, historical command replay under current privacy, coherent PostgreSQL
+reads/cleanup, and installed-context recovery ordering, read
+[Semantic and reconnect review](./semantic-and-reconnect-review.md). A fresh detail read and an exact retry
+answer different questions; reconnecting and reinstalling authorization are different transitions.

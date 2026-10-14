@@ -32,6 +32,15 @@ Never expose old private state under a new context. Primary sources:
 - Campaign rules/brew are runtime overlays and serialization strips them.
 - Cloud writes, semantic reconciliation, party inventory, and peer targeting must go through the HTTP repository
   mutation queue; do not mutate two authoritative documents in the browser.
+- Route-only Campaign -> Local -> Return, Back/Forward and fresh-tab checks must not acquire a new cloud lease
+  or PATCH, nor advance canonical revision or create patch receipt/event rows. Compare an observer's authorized
+  server state, not only unchanged DOM. Load-time derived-modifier repair and JSON-wire normalization have caused
+  real no-edit writes; inspect accepted-versus-live dirty tracking and late repair callbacks before suppressing
+  saves. Keep genuine user edits and pending recovery intact. Back/Forward reload is not proof of BFCache.
+- Staged character operations must isolate state, module/page delegates, saves, roll logs, renders and deferred
+  callbacks until final scope approval. Rebinding only `_state` can leave a captured live save or callback
+  mutating a replacement character. Commit/adopt coherently, then bind live-owned feedback; a post-commit paint
+  failure must not masquerade as a rolled-back server mutation.
 
 Primary seams: `js/charactersheet/charactersheet.js`, `charactersheet-campaign.js`,
 `charactersheet-party-inventory.js`, `charactersheet-peer-targeting.js`, and
@@ -109,19 +118,15 @@ Primary sources: `docs/hub/runbooks/account-deletion.md`, `member-removal.md`,
 - Browser-supplied items are bounded safe summaries; a stash award supplies the authoritative entry id.
 - Carry preview is advisory and privacy-shaped (`known`, `lower_bound`, `unavailable`, `policy_blocked`), never
   invented from hidden fields.
-- The only shipped player source-cost targeting flow is one PHB/XPHB Cure Wounds cast, one selected standard
-  slot, one privacy-visible player-owned target, and explicit target-owner approval including self-target.
-- Pact slots, arbitrary spells/effects, multi-target/party resolution, and NPC/monster targets fail closed.
-- Held local A5 adds PHB/XPHB HW singular and six-target MHW production mappings without enabling a campaign.
-  Static checked-in definitions bind exact spell/preparation/edition, one standard slot, deterministic healing
-  and consent. The user-authorized rules boundary leaves range/distance, sight, bonus-action/verbal eligibility
-  and PHB undead/construct applicability to the table, visibly not server-enforced. The separately authorized
-  A5-only dice-floor convention uses the selected expression's minimum after the modifier, not an authored RAW
-  minimum or a global spell rule. Positive-only typed healing and revisionless/private full-HP MHW remain.
-  Held XPHB Lay on Hands heal-only uses exact ordinary acquisition/resource links and lifecycle mirrors; ambiguous
-  or malformed bindings fail closed. Singular HW/LoH target no-effect is privately failed/unspent; MHW alone opts
-  into applied/revisionless target no-ops. Fresh independent A5 review remains required; do not infer
-  deployment or live authority from local templates. See `docs/hub/api-reference.md`.
+- Determine supported targeting from current registry/shared definitions and rollout evidence. Cure Wounds,
+  HW/MHW and XPHB Lay on Hands have different consent, no-op and resource boundaries; code presence does not
+  establish review completion, deployment or campaign enrollment.
+- Use the approved fixed candidate set, independent consent and atomic selected-subset finalization for
+  multi-target flows; do not add targets after consent or infer target state from private no-ops.
+- Pact slots, arbitrary effects, metamagic/component changes and NPC/monster authority are not implied by an
+  existing template. Unsupported inputs fail closed. Read
+  [Semantic and reconnect review](./semantic-and-reconnect-review.md) before widening template admission,
+  acquisition/resource links, rules adjudication or singular-versus-multi-target no-op behavior.
 
 Primary sources: `docs/hub/domain-model.md`, ADR 0016, ADR 0017, `hub-inventory-contract.js`,
 `hub-item-award.js`, `hub-source-costs.js`, and the relevant store/reconciliation/E2E tests.

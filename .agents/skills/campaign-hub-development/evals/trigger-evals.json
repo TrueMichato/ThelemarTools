@@ -30,5 +30,22 @@
   {"query":"Use the live member-removal runbook to verify that a removed player's sockets, leases, transfers, and workspace were cleaned up on staging.","should_trigger":false},
   {"query":"Perform an explicitly authorized one-off ownership recovery for an incapacitated Campaign Hub owner on the live database and preserve audit/event/outbox evidence.","should_trigger":false},
   {"query":"A production deletion purge is blocked by an owned campaign. Diagnose the deployed record and follow the operator escalation procedure; do not change product code.","should_trigger":false},
-  {"query":"Check this user's GitHub Actions minutes and billing quota.","should_trigger":false}
+  {"query":"Check this user's GitHub Actions minutes and billing quota.","should_trigger":false},
+  {"query":"our hub offline queue keeps dropping the second save when the first one fails, but every CI job is green. this is in hub-http-character-repository","should_trigger":true},
+  {"query":"cure wounds isnt offered in the hub real-stack targeting spec even though the unit tests for peer targeting all pass. where do i even start","should_trigger":true},
+  {"query":"we're about to kick off 4 parallel campaign hub branches (targeting, house rules, whole-site context, and an ADR). how do we stop them colliding on app.js and the ADR numbering?","should_trigger":true},
+  {"query":"players say discord login and spell targeting still aren't there but we merged both of those weeks ago — is this a product bug or something else?","should_trigger":true},
+  {"query":"after a hub conflict resolution the sheet still shows the old HP and the realtime events stop arriving until I reload the page","should_trigger":true},
+  {"query":"write me a generic offline-first retry queue for a React app that syncs to a REST backend","should_trigger":false},
+  {"query":"my git working tree seems to be missing files that exist on the branch and git status says it's a bare repo. how do I repair the checkout?","should_trigger":false},
+  {"query":"our CI is green but reviewers keep finding real bugs. can you suggest general improvements to our code review process?","should_trigger":false},
+  {"query":"the Hub exact proposal retry now returns finalized instead of the original proposed state. How do we preserve idempotency without replaying names hidden by a later sharing change?","should_trigger":true},
+  {"query":"our open Sheet eventually shows the right HP after Hub reconnect but its next save rejects OPERATION_RESYNC_REQUIRED. Trace the actual page/repository recovery handoff.","should_trigger":true},
+  {"query":"Campaign -> Local -> Return increments the server character revision even though nobody edited anything. Fix no-write navigation, including late derived modifier repair.","should_trigger":true},
+  {"query":"add another reviewed Hub healing template: the saved spell has the expected name and source but a conflicting UID and brew provenance. Is that valid admission?","should_trigger":true},
+  {"query":"the new Hub point-cost ability only works with our synthetic fixture; ordinary XPHB acquisition does not persist the resource/feature links. Fix the lifecycle binding without stealing the existing PHB manual pool.","should_trigger":true},
+  {"query":"the r11f physical retest was waived and new Wave A templates are on my branch. Review the product continuation plan without declaring them deployed or lifting the enablement hold.","should_trigger":true},
+  {"query":"debug only the Hub Playwright page object's target-picker readiness wait in shared-sheet-multi-target.spec.ts; the product invalidation fence is behaving correctly and needs no change.","should_trigger":false},
+  {"query":"verify which Hub protocol and targeting capability are actually deployed on Oracle, then run the explicitly approved campaign enrollment procedure; do not change product code.","should_trigger":false},
+  {"query":"fix the ordinary local-only Paladin level-up resource pool on a sheet that has never used Hub; there is no targeting or campaign integration work.","should_trigger":false}
 ]

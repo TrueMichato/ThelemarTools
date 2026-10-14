@@ -9,6 +9,10 @@
 | Store or transaction | Matching memory tests and executable PostgreSQL suite |
 | Context/rules/content lifecycle | Targeted Jest plus `npm run test:hub:mutations` |
 | Realtime/projection/privacy | Realtime, authorization, projection canaries, reconnect/replay tests |
+| Multi-target replay/detail/recovery | Historical-outcome/current-privacy tests, exact-owner refs, precision pagination, real PostgreSQL lock/lifecycle/cleanup interleavings |
+| Reconnect/adoption scheduling | Actual page/coordinator/repository chain; recovery before/after context install; cleared save block and a successful next save |
+| Template/resource admission | Real ordinary acquisition/lifecycle, contradictory UID/brew/link negatives, actual HTTP bounds, both stores and browser disclosures |
+| Route-only local/cloud navigation | No new lease/PATCH/receipt/event, stable canonical revision, local isolation; distinguish BFCache from reload |
 | Character Sheet/DM Screen seam | Affected integration suites plus their domain-specific skill guidance |
 | Protocol, cross-user, privacy or real-stack behavior | `npm run test:hub:e2e:stack` |
 | Migration | fresh, prior-ledger, concurrent/failure/checksum, roles, readiness, and restore compatibility |
@@ -47,6 +51,22 @@ Test more than final state:
 
 Mutation runners must kill their seeded defects. A green ordinary unit test does not replace a mutation gate for
 the context/rules/content invariants those runners own.
+
+Use red-first regressions and real-call-site negative controls for new fragile guards. A test that manually
+advances a generation or replaces the scheduler may prove only its own setup. Record if a mutant survives
+because another path masks it, then isolate the intended handoff and require red before trusting the result.
+See [Semantic and reconnect review](./semantic-and-reconnect-review.md) for concrete interleavings.
+
+Preserve default budgets, full test cardinality and production templates. If a picker detaches, inspect the
+actual invalidation/context stack before blaming rerender: legitimate authority suspension must stay intact.
+Wait for installed context through the page object, and do not auto-recast or suppress the fence.
+Use the supported prompt API and assert the rule text is visible before confirmation; an ignored description
+option can look correct in a mocked helper but render nothing.
+
+For expensive runs, capture pipeline exit status (`set -o pipefail` when teeing), exact commands, selected/skipped
+suites, workload reached and owned cleanup. Keep failed samples alongside successful reruns. A narrow substituted
+stack is evidence for its named scope, not proof that the canonical stack command passed. Do not mutate live
+campaigns or inspect private payloads merely to gather development evidence.
 
 ## Review checklist
 

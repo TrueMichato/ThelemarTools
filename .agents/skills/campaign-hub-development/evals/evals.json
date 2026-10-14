@@ -58,6 +58,109 @@
         "The response requires targeted route/store/parity tests for retries and reused keys on durable commands while preserving explicit ephemeral lease/logout behavior.",
         "The response routes only deployed due-account purge, live member-removal verification, or explicitly authorized one-off ownership recovery execution to campaign-hub-operations."
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "A Campaign Hub PR reworks offline and queued character writes in js/hub/hub-http-character-repository.js. All four CI jobs are green and the author says it is ready to merge. Tell me how you would review it and what you would insist on before agreeing. Do not edit files.",
+      "expected_output": "A review plan that treats green CI as insufficient for this area, enumerates concrete multi-command interleavings, and demands an ordered durable recovery queue, reconciliation of every queued command, full-track resolution adoption, and consistent canonical identity handling.",
+      "files": [],
+      "expectations": [
+        "The response states explicitly that passing CI is not evidence of correctness for queueing, recovery, or reconciliation changes, and gives a reason rooted in untested command interleavings.",
+        "The response names at least one concrete two-command interleaving, such as a second save queued while an earlier save is in flight and then fails.",
+        "The response requires durable recovery to hold an ordered queue of every command with its snapshot and keys, not a single failed command.",
+        "The response requires an authoritative operation to reconcile the base and snapshot of every queued command, not only the newest entry.",
+        "The response requires a conflict resolution to be adopted atomically into repository, latest-submitted, coverage, durable recovery, and visible page state before realtime resumes.",
+        "The response covers migration from a temporary client-generated character id to the canonical server id across lookup, lease, recovery, deletion, and realtime attachment.",
+        "The response asks for regressions that encode the interleavings rather than accepting existing green suites as proof."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Players report that Campaign Hub spell targeting shows no target selector and that Discord sign-in is missing, even though both were implemented and merged weeks ago. Explain how you would investigate before changing any code. Do not edit files.",
+      "expected_output": "An investigation that separates merged, deployed, and capability-enabled state, checks the actual deployed release and capability configuration and the local checkout's freshness, and only then considers a product defect.",
+      "files": [],
+      "expectations": [
+        "The response distinguishes merged source, the deployed release, and enabled capabilities as three separate states and refuses to infer one from another.",
+        "The response checks the deployed release identity and capability or provider configuration before suspecting the feature code.",
+        "The response verifies the local checkout is current, noting that a branch can lag its remote tip and a working tree can lag its own branch ref.",
+        "The response treats protocol or capability gating as fail-closed behavior rather than a bug when the gate is off.",
+        "The response routes any deployed-release inspection or promotion decision to campaign-hub-operations rather than performing ad hoc host work.",
+        "The response avoids promising a code fix before establishing which of the three states is actually responsible."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "We are about to run four Campaign Hub lanes in parallel: peer targeting, campaign house rules, whole-site campaign context, and a new ADR. Tell me how to set them up so they do not block or collide with each other. Do not edit files.",
+      "expected_output": "A coordination plan that reserves globally ordered numbers up front, names the shared hotspot files, keeps lane substance in owned modules, forbids history rewriting, and forecasts conflicts before integration.",
+      "files": [],
+      "expectations": [
+        "The response requires ADR numbers and migration numbers to be assigned centrally before authoring, because contiguity and ledger contracts make independent choices collide.",
+        "The response identifies the shared hotspots that every lane touches, such as server/src/app.js, both stores, js/hub/hub-api-client.js, campaign.html, and Hub status or testing docs.",
+        "The response tells lanes to keep substance in lane-owned modules and reduce shared-file edits to thin wiring, and to announce hotspot edits early.",
+        "The response warns that a contiguity contract can deadlock lanes that each wait for another's file, and requires blocked lanes to report the exact ref they need instead of idling or renumbering.",
+        "The response forbids rebasing, amending, squashing, or force-pushing reviewed branches and requires remediation as descendant commits with old and new heads reported.",
+        "The response plans a read-only merge-conflict forecast and targeted post-integration tests before landing.",
+        "The response expects multiple independent exact-head review rounds rather than treating first green CI as completion."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "A Campaign Hub real-stack E2E spec for peer targeting fails because Cure Wounds is not offered as a castable option, but the targeting code and its unit tests look correct. Where would you look first? Do not edit files.",
+      "expected_output": "A diagnosis that suspects the test harness before the product, specifically the semantic operation registry fixture option that replaces production templates rather than extending them.",
+      "files": [],
+      "expectations": [
+        "The response suspects the E2E harness or fixture configuration before concluding the targeting product code is wrong.",
+        "The response identifies that createSemanticOperationRegistry templates replaces the production template set while additionalTemplates extends it, and that a fixture passing templates removes production spells.",
+        "The response points at test/e2e/hub/test-server.mjs and the contract test that keeps it using additionalTemplates.",
+        "The response rejects raising timeouts or relaxing assertions as a way to make the spec pass.",
+        "The response notes that a real-stack failure reproducing on retry indicates a genuine regression or harness defect rather than flake.",
+        "The response verifies the fix by rerunning the focused real-stack journey rather than only unit tests."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Review this proposed Hub multi-target recovery design without editing code: exact command retries return the saved response unchanged; alternatively the author can just return today's operation detail so clients see the newest status. Responded invitations leave the pending inbox, and the client joins invitations to owned sheets by display name. The author says sorted character locks and a timestamp cursor are enough for PostgreSQL safety. Explain which contracts you would preserve, what could go wrong, and the focused regressions needed before approval.",
+      "expected_output": "A review distinguishing original command outcome from current authorization/presentation, durable participant discovery from pending work, exact owner targetRef binding from names, precision-safe bounded pagination, and coherent real-PostgreSQL reads/replay/cleanup with explicit lock-order interleavings.",
+      "files": [],
+      "expectations": [
+        "Preserves the original command outcome and command/event/receipt/leg identity without substituting the later aggregate or mutating stored command evidence; uses a fresh read for current workflow state.",
+        "Reauthorizes exact retries under current role, membership and participation, then privacy-shapes stored outcomes instead of returning raw saved bodies; accounts for demoted nonparticipants and narrower participant views.",
+        "Requires exact currently owned character binding through opaque targetRef or equivalent authoritative identity, and includes duplicate-name and stale-ref regressions.",
+        "Distinguishes the pending inbox from bounded participant recovery for responded/live/terminal legs without widening the audience or starving pending work.",
+        "Specifies precision-safe exclusive cursors with deterministic tie-breakers and a limit-one same-transaction or sub-millisecond pagination regression.",
+        "Inspects advisory, row, campaign, membership and character lock dependencies rather than accepting sorted character locks as sufficient; proposes actual runtime-role PostgreSQL interleavings.",
+        "Includes retention cleanup racing detail and requires one coherent authorized aggregate or stable not-found, never hybrid state."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "An already-open Campaign Hub Sheet has a save in flight when reconnect delivers a healing result. HP eventually matches the server, but the next save fails with OPERATION_RESYNC_REQUIRED. Sometimes the target picker disappears during that reconnect too. The proposed fix clears the recovery flag whenever the socket reconnects and adds a unit test that increments the generation directly. Give a safe diagnosis and acceptance plan without editing files. Include how you would distinguish legitimate suspension, stuck recovery, a character switch, and a route-only Campaign -> Local -> Return check.",
+      "expected_output": "A concrete actual-chain interleaving plan that separates transport tokens from installed authority, proves same-scope recovery liveness and terminal-scope safety across every track, preserves picker safety, demonstrates the next save, and measures no-write navigation rather than DOM-only equality.",
+      "files": [],
+      "expectations": [
+        "Rejects clearing recovery merely on socket reconnect and distinguishes fresh transport/generation tokens from an installed-context authorization readiness barrier.",
+        "Uses the actual page/coordinator/repository/controller chain with a held save, queued result and before/after-context delivery; rejects manually incremented generation as sufficient proof.",
+        "Fences accepted/live/latest-submitted/pending/durable/coverage/page tracks and requires staged commands and coverage to roll back together on interrupted adoption.",
+        "Requires automatic semantic recovery and save-block clearance before canonical catch-up and a successful next save; visually matching HP alone is insufficient.",
+        "Preserves unfinished same-scope demand across awaits, protects newer coalesced demand, resumes with fresh attempts after context installation and does not spin while suspended.",
+        "Distinguishes legitimate picker concealment from failure, preserves invalidation safety, and discards or conceals old work on terminal loss or character/account/campaign/access/repository replacement.",
+        "Defines route-only navigation proof as zero new leases/PATCHes/patch receipts/events and unchanged canonical revision while preserving genuine edits/recovery; distinguishes actual BFCache from Back/Forward reload."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "We are extending Hub targeting with PHB/XPHB healing spells and a point-spending class ability. The fixtures already pass: spells are selected by name/source, the ability uses a same-name legacy resource, and registry tests accept a 15-point heal. Ordinary level-up/save/load has not been exercised, and the generic picker currently passes a description option to its prompt helper. The release owner waived a physical retest for the previous correction bundle, and these new templates exist locally. Give the implementation/review boundaries and explain what we can claim delivered, without editing files or performing live operations.",
+      "expected_output": "A source-led plan for exact UID/brew provenance and unique persisted resource binding through ordinary lifecycle, full HTTP/affordability bounds, visible pre-confirmation table-rule disclosure and explicit unsupported-rule decisions, distinct singular/multi no-ops, and stage-specific delivery/waiver claims.",
+      "files": [],
+      "expectations": [
+        "Requires exact source-qualified spell identity, contradictory explicit UID and brew-provenance negatives, and independent server checks at proposal and final rederivation.",
+        "Rejects same-name resource authority and requires unique persisted reciprocal resource/feature links and provenance from ordinary acquisition while preserving unrelated manual pools.",
+        "Proves current/max/recharge mirrors and spent-point preservation across load/round-trip, level-up/down, respec and rest rather than fixture-only or getter-side-effect repairs.",
+        "Traces legal healing amounts through prompts/resolver, actual closed HTTP schema, registry, both stores and affordability; does not treat a registry-only 15-point test as end-to-end proof.",
+        "Separates server-verifiable predicates from table-adjudicated range/sight/action/component/type rules, requires explicit approval for missing authority, and verifies supported prompt text visibly before confirmation.",
+        "Keeps singular unchanged-target private failed/unspent behavior distinct from opted-in multi-target applied/revisionless no-ops, and does not invent a global or RAW healing floor.",
+        "Separates local implementation, review, publication/CI, integration, deployment, enrollment and physical acceptance; the prior bundle's retest waiver is not approval or a measured PASS for the new templates."
+      ]
     }
   ]
 }
