@@ -10160,3 +10160,29 @@ emitted and three tests failed. The collision in the real save depends on
 the two `sourceName`s agreeing **by two different routes** (`featuresById`
 lookup vs the `mod.name` fallback). A fixture that simply names both
 "Dueling" passes while exercising a shape the sheet never produces.
+
+---
+
+## CS-BUG-171 — Late renders erase a focused name before its change event — FIXED
+
+**Status:** Fixed in `54cc1fa37` (`fix(sheet): preserve focused names across late renders`).
+
+**Repro:** Open an owned character, fill a different name without blurring, then run an ordinary
+`CharacterSheetPage._renderCharacter()` before pressing Tab. The name reverted to the old canonical value.
+In the Hub Lay on Hands acquisition journey this can leave the test waiting for a name-change PATCH that
+never occurs; exact-source CI `38599706230` recorded a timeout followed by a retry pass.
+
+**Root cause:** `_renderBasicInfo()` unconditionally assigned `input.value` from state. Name changes enter
+state only through the input's `change` handler, so a render could erase a real user's draft before blur
+committed it. The original CI attempt has no trace proving its exact timing; the actual render/typing
+interleaving was reproduced separately and failed at the changed input value, not merely at a timeout.
+
+**Fix:** `_renderNameInput()` preserves edited, focused text only within the same character/load generation.
+Untouched input still follows canonical updates. Character/load changes, read-only access and blur replace
+the transient draft; rendering itself neither mutates character state nor saves.
+
+**Regression evidence:** `CharacterSheetPersistenceBackend.test.js` covers focused drafts, untouched input,
+character/load changes, read-only access, blur and no render-time save. The real Hub acquisition page object
+now deliberately renders between fill and blur, requires the edited value to survive, and checks the
+persisted canonical name as well as the feature/resource links. The controlled stack failed before the fix
+and passed afterward without retry; the complete local stack then passed all 58 browser journeys.

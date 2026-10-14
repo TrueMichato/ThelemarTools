@@ -88,6 +88,10 @@ eligibility; HW/MHW pickers must likewise visibly disclose the selected-dice flo
 cost mirrors, reconnect, still-open peer HP and private singular failed/unspent source/target byte/revision
 preservation are asserted. After a character switch, await the new realtime attachment before measuring the
 canonical baseline: an ordinary load-time repair save is not a semantic no-effect write.
+The name edit deliberately survives a real Sheet render before blur, then must reach the canonical document.
+This guards [CS-BUG-171](../charactersheet/known-bugs.md): a focused draft must not be overwritten before its
+`change` handler runs. The scoped unit guards also require canonical replacement after load/character/read-only
+boundaries and ensure renders do not save. No retry or timeout increase substitutes for that behavior.
 
 The semantic-operation mutation runner retains the initial nine A5 actual-callsite controls: wrong MHW upcast
 scaling, eight-target acceptance, preparation bypass, singular MHW routing, an incorrect minimum-one floor or omitted dice floor,

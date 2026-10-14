@@ -20,6 +20,11 @@ change #289's PR state. The commit also bounds completed hook Jest runs with `--
 selection and failing exit statuses after an observed open-handle pre-commit hang.
 Wave B has started with shared transfer status wording and truthful terminal-outcome/failed-refresh recovery;
 its role-adaptive workspace, unified composer and award/stash work remain pending. Wave D remains unstarted.
+B0 was published as `32e876239`; its four-job CI passed with 57 first-attempt browser passes and one Lay on
+Hands acquisition retry, not 58 clean first attempts. The retained failure led to a separately reproduced
+focused-name draft-loss bug: a late render erased the edit before blur could save. Source fix `54cc1fa37`
+preserves that exact character/load-scoped draft; its real acquisition regression and complete local stack
+pass without retry. Exact-published-head verification remains separate from this local evidence.
 New gameplay is not deployed or enabled: A7 must separately qualify
 migrations 0010-0014, the index-build window, rollback, exact release and campaign enrollment.
 
