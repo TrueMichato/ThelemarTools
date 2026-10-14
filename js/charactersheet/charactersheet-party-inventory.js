@@ -6,6 +6,7 @@ import {
 import {getCarryProfile, getCarryStatus} from "../hub/hub-carry-contract.js";
 import {
 	getInventoryStackWeight,
+	getInventoryTransferStatusMessage,
 	getInventoryTransferEligibility,
 	getInventoryWeightSummary,
 } from "../hub/hub-inventory-contract.js";
@@ -1774,18 +1775,14 @@ export class CharacterSheetPartyInventory {
 						}
 						this._isSubmitting = false;
 						this._closeDraft();
-						const terminalMessages = {
-							committed: "Transfer complete. Both inventories are up to date.",
-							rejected: draft.kind === "party_inventory"
-								? "Request was rejected. The party stash was unchanged."
-								: "Transfer was rejected. The reserved items were restored.",
-							cancelled: draft.kind === "party_inventory"
-								? "Request was cancelled. The party stash was unchanged."
-								: "Transfer was cancelled. The reserved items were restored.",
-							expired: "Transfer expired. The reserved items were restored.",
-						};
-						const message = terminalMessages[matchedTransfer?.status]
-							|| "No matching transfer was found. Latest source and stash balances loaded; inspect the destination before starting another transfer.";
+						const message = matchedTransfer
+							? getInventoryTransferStatusMessage({
+								status: matchedTransfer.status,
+								sourceKind: draft.kind,
+								targetKind: draft.destinationKind,
+								isRefreshed: true,
+							})
+							: "No matching transfer was found. Latest source and stash balances loaded; inspect the destination before starting another transfer.";
 						this._fnToast?.({type: matchedTransfer?.status === "committed" ? "success" : "info", content: message});
 						this._announce(message);
 						return true;
@@ -1951,18 +1948,12 @@ export class CharacterSheetPartyInventory {
 					pendingTransferIds: isPending ? [transfer.id] : [],
 				});
 				if (!isPending) {
-					const messages = {
-						committed: "Transfer complete. Both inventories are up to date.",
-						rejected: draft.kind === "party_inventory"
-							? "Request was rejected. The party stash was unchanged."
-							: "Transfer was rejected. The reserved items were restored.",
-						cancelled: draft.kind === "party_inventory"
-							? "Request was cancelled. The party stash was unchanged."
-							: "Transfer was cancelled. The reserved items were restored.",
-						expired: "Transfer expired. The reserved items were restored.",
-					};
-					const message = messages[transfer.status];
-					if (!message) throw Object.assign(new Error("Transfer is no longer pending"), {code: "TRANSFER_NOT_FOUND"});
+					const message = getInventoryTransferStatusMessage({
+						status: transfer.status,
+						sourceKind: draft.kind,
+						targetKind: draft.destinationKind,
+						isRefreshed: true,
+					});
 					if (!await this._pRefreshAfterTransfer({active, visibilityEpoch})) {
 						throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
 					}
@@ -2120,22 +2111,12 @@ export class CharacterSheetPartyInventory {
 				throw Object.assign(new Error("Authoritative refresh failed"), {code: "NETWORK_UNAVAILABLE"});
 			}
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
-			const terminalMessages = {
-				committed: "Transfer complete. Both inventories are up to date.",
-				rejected: draft.kind === "party_inventory"
-					? "Request was rejected. The party stash was unchanged."
-					: "Transfer was rejected. The reserved items were restored.",
-				cancelled: draft.kind === "party_inventory"
-					? "Request was cancelled. The party stash was unchanged."
-					: "Transfer was cancelled. The reserved items were restored.",
-				expired: "Transfer expired. The reserved items were restored.",
-			};
-			const message = terminalMessages[draft.transfer.status]
-				|| (draft.transfer.status === "proposed"
-					? "Request sent. A DM can approve it from the campaign inbox; the party stash is unchanged until then."
-					: draft.destinationKind === "party_inventory"
-						? "Transfer reserved. A DM can accept it from the campaign inbox."
-						: "Transfer reserved. The recipient can accept it from the campaign inbox.");
+			const message = getInventoryTransferStatusMessage({
+				status: draft.transfer.status,
+				sourceKind: draft.kind,
+				targetKind: draft.destinationKind,
+				isRefreshed: true,
+			});
 			this._isSubmitting = false;
 			this._closeDraft();
 			this._fnToast?.({type: draft.transfer.status === "committed" ? "success" : "info", content: message});
@@ -2144,7 +2125,13 @@ export class CharacterSheetPartyInventory {
 		} catch (error) {
 			if (!this._isCurrent(active) || this._draft !== draft) return false;
 			if (draft.transfer) draft.needsStatusCheck = true;
-			this._error = getErrorMessage(error);
+			this._error = ["committed", "rejected", "cancelled", "expired"].includes(draft.transfer?.status)
+				? `${getInventoryTransferStatusMessage({
+					status: draft.transfer.status,
+					sourceKind: draft.kind,
+					targetKind: draft.destinationKind,
+				})} ${TRANSFER_REFRESH_REQUIRED_MESSAGE}`
+				: getErrorMessage(error);
 			this._render();
 			return false;
 		} finally {

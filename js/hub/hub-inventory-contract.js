@@ -13,6 +13,31 @@ const PARTIAL_TRANSFER_BLOCKERS = new Set([
 	"hosts Ioun items",
 ]);
 
+export function getInventoryTransferStatusMessage ({status, sourceKind, targetKind, isRefreshed = false}) {
+	if (status === "committed") {
+		return isRefreshed === true ? "Transfer complete. Both inventories are up to date." : "Transfer complete.";
+	}
+	if (status === "proposed") {
+		return "Request sent. A DM must approve before anything leaves the party stash.";
+	}
+	if (status === "reserved") {
+		return targetKind === "party_inventory"
+			? "Transfer reserved. A DM can accept it from the campaign inbox."
+			: "Transfer reserved. The recipient can accept it from the campaign inbox.";
+	}
+	const verb = status === "rejected" ? "was rejected"
+		: status === "cancelled" ? "was cancelled"
+			: status === "expired" ? "expired" : null;
+	if (!verb) throw new TypeError("Unsupported inventory transfer status.");
+	const isStashRequest = sourceKind === "party_inventory";
+	const restoration = isStashRequest
+		? " The party stash was unchanged."
+		: sourceKind === "character"
+			? " The reserved items were restored."
+			: "";
+	return `${isStashRequest ? "Request" : "Transfer"} ${verb}.${restoration}`;
+}
+
 function hasItemReference (value, itemId, fnNormalizeItemId) {
 	if (!value || typeof value !== "object") return false;
 	if (Array.isArray(value)) return value.some(it => hasItemReference(it, itemId, fnNormalizeItemId));

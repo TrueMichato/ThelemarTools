@@ -219,7 +219,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("const latestSelections = readSelections();");
 		expect(source).toContain("selectionsToRestore");
 		expect(source).toContain("if (sourceKind !== \"character\") return false;");
-		expect(source).toContain("Request sent. A DM must approve before anything leaves the party inventory.");
+		expect(source).toContain("getInventoryTransferStatusMessage: inventoryContract.getInventoryTransferStatusMessage");
+		expect(source).toContain(`import("./hub-inventory-contract.js")`);
 		expect(source).toMatch(/applyTransferSuccessUi\(\);\s+try \{\s+await pRefreshTransferState\(\{fnIsCurrent\}\);\s+\} catch \{\s+setTransferRefreshFailure\(/);
 		expect(source).not.toContain("Reload the campaign before sending another transfer.");
 		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
@@ -255,8 +256,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("resolutionRequest.decision !== decision");
 		expect(source).toContain("transferResolutionDrafts.isReplayable");
 		expect(source).toContain("transferResolutionDrafts.reconcilePending");
-		expect(source).toContain("Transfer applied.");
-		expect(source).toContain("The committed outcome is safe");
+		expect(source).toContain("status: outcome.resolution.transfer.status");
+		expect(source).toContain("The latest transfer state could not be loaded.");
+		expect(source).not.toContain("The authoritative inventories are updated.");
 		expect(source).toContain("The transfer outcome is not yet confirmed.");
 		expect(source).toContain("Retry inbox refresh");
 		expect(source).toContain("fnIsCurrentAtAdmission = refresh.fnIsCurrent || captureProjectionAuthorization()");

@@ -2120,10 +2120,11 @@ async function pInitCampaign ({session}) {
 	// An archived campaign still renders read-only, but never becomes the active selection.
 	await activeCampaign.adoptVerified({session, campaign});
 	await pRenderActiveCampaignSwitcher();
-	const [members, characters, snapshot] = await Promise.all([
+	const [members, characters, snapshot, inventoryContract] = await Promise.all([
 		api.pListMembers({campaignId}),
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
+		import("./hub-inventory-contract.js"),
 	]);
 	const [contextInitial, eventPage] = await Promise.all([
 		api.pGetCampaignContext({campaignId}),
@@ -2338,6 +2339,7 @@ async function pInitCampaign ({session}) {
 		isConditionCatalogRetryNeeded,
 		flushDeferredMutationUi,
 	} = await pInitCampaignForms({
+		getInventoryTransferStatusMessage: inventoryContract.getInventoryTransferStatusMessage,
 		campaign,
 		campaignId,
 		session,
@@ -3143,6 +3145,7 @@ async function renderPendingActions ({
 }
 
 async function renderPendingTransfers ({
+	getInventoryTransferStatusMessage,
 	campaign,
 	campaignId,
 	session,
@@ -3286,7 +3289,11 @@ async function renderPendingTransfers ({
 						setTransferInboxRefreshFailure({
 							controls,
 							meta,
-							message: `${decision === "accept" ? "Transfer applied." : "Transfer declined."} The committed outcome is safe, but the latest transfer state could not be loaded.`,
+							message: `${getInventoryTransferStatusMessage({
+								status: outcome.resolution.transfer.status,
+								sourceKind: transfer.sourceKind,
+								targetKind: transfer.targetKind,
+							})} The latest transfer state could not be loaded.`,
 							pRetry: pRefreshCurrentTransferState,
 							isResolutionKnown: true,
 						});
@@ -3388,6 +3395,7 @@ async function pRunFormMutation ({form, fingerprint, fnMutate, idempotencyKey = 
 }
 
 async function pInitCampaignForms ({
+	getInventoryTransferStatusMessage,
 	campaign,
 	campaignId,
 	session,
@@ -3723,6 +3731,7 @@ async function pInitCampaignForms ({
 		}
 		renderPartyInventoryStatus(partyInventory);
 		const transferState = await renderPendingTransfers({
+			getInventoryTransferStatusMessage,
 			campaign,
 			campaignId,
 			session,
@@ -4466,19 +4475,11 @@ async function pInitCampaignForms ({
 					return {transfer: resolved.transfer, isAutoResolved: true, targetKind};
 				}});
 			if (!result) return;
-			const terminalMessages = {
-				rejected: "Transfer declined. The authoritative inventories are unchanged.",
-				cancelled: "Transfer cancelled. The authoritative inventories are up to date.",
-				expired: "Transfer expired. Any reserved assets were restored.",
-			};
-			const successMessage = result.transfer.status === "committed"
-				? "Transfer complete. The authoritative inventories are updated."
-				: terminalMessages[result.transfer.status]
-					|| (result.transfer.status === "proposed"
-						? "Request sent. A DM must approve before anything leaves the party inventory."
-						: result.targetKind === "party_inventory"
-							? "Transfer reserved. A DM can accept it from the inbox."
-							: "Transfer reserved. The recipient can accept it from the inbox.");
+			const successMessage = getInventoryTransferStatusMessage({
+				status: result.transfer.status,
+				sourceKind: result.transfer.sourceKind,
+				targetKind: result.targetKind,
+			});
 			const applyTransferSuccessUi = () => {
 				setTransferProposalControls({form, isLocked: false});
 				for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";

@@ -50,6 +50,13 @@ assertions pass without retry. The product still refuses casting during revalida
 skip invalidation or weaken the authority fence. This controlled counterexample explains a reachable
 first-attempt failure mode; the old CI attempt had no trace proving its exact timing.
 
+`HubInventoryContract` checks common proposed/reserved/committed/rejected/cancelled/expired wording, explicit
+unknown-status rejection and the separate balance-refresh claim. `CharacterSheetPartyInventory` proves a
+confirmed commit remains visible when refresh fails, then recovers by reads without another proposal.
+The existing real-stack inventory and refresh-recovery journeys assert known terminal feedback plus a failed
+refresh notice, no false "up to date" claim, and one resolution command through the successful refresh retry.
+The `HubPerformanceBudget` gate still enforces the original signed-out 16-module ceiling.
+
 The A4 journey uses the existing disposable real-PG harness, five synthetic account profiles (source, two target
 owners, unrelated player, DM), and two identically named characters for one owner. It starts capability-disabled,
 then enables only its exact synthetic campaign through a secret-protected test-only route. The A4 journey does not

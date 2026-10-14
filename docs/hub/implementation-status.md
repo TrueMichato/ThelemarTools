@@ -13,10 +13,14 @@ first attempts. A controlled local regression reproduces the same missing-picker
 campaign-context installation is held; the follow-up page object waits for the existing installed-context,
 recovery and event-sequence barrier before casting. It changes no product authority fence.
 
-The separate local sharing follow-up composes draft #289's outer disclosure with r11f's nested controls,
-preserving drafts, focus, both entry paths and saved peer projections. These working-tree follow-ups still
-need combined independent review/publication. They are not deployed and do not change #289's PR state.
-Wave B and Wave D remain unstarted. New gameplay is not deployed or enabled: A7 must separately qualify
+The sharing follow-up composes draft #289's outer disclosure with r11f's nested controls,
+preserving drafts, focus, both entry paths and saved peer projections. Combined independent review passed;
+the follow-up was published as `339ddf24c39317312a6ae8eb91408ae7f942cf0d`. It is not deployed and does not
+change #289's PR state. The commit also bounds completed hook Jest runs with `--forceExit`, preserving test
+selection and failing exit statuses after an observed open-handle pre-commit hang.
+Wave B has started with shared transfer status wording and truthful terminal-outcome/failed-refresh recovery;
+its role-adaptive workspace, unified composer and award/stash work remain pending. Wave D remains unstarted.
+New gameplay is not deployed or enabled: A7 must separately qualify
 migrations 0010-0014, the index-build window, rollback, exact release and campaign enrollment.
 
 The reviewed **A4 workflow** extends the existing shared Character Sheet source-targeting and incoming-effects

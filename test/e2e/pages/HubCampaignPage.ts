@@ -3372,7 +3372,9 @@ export class HubCampaignPage {
 		try {
 			await transfer.getByRole("button", {name: buttonName, exact: true}).click();
 			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
-			await expect(transfer).toContainText("The committed outcome is safe");
+			await expect(transfer).toContainText(["Accept", "Approve"].includes(buttonName) ? "Transfer complete." : "was rejected.");
+			await expect(transfer).toContainText("The latest transfer state could not be loaded.");
+			await expect(transfer).not.toContainText("up to date");
 			await expect(transfer.getByRole("button", {name: buttonName, exact: true})).toHaveCount(0);
 			const retry = transfer.getByRole("button", {name: "Retry inbox refresh", exact: true});
 			await expect(retry).toBeVisible();

@@ -4,7 +4,8 @@ The Campaign Hub is an optional online layer over the existing local-first 5etoo
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
 > **Implementation:** R11f game-day corrections delivered; Wave A0-A6 reviewed, integrated and
-> published at `4d9a7220`. Wave A live delivery remains pending; outer sharing is a separate local follow-up.
+> published at `4d9a7220`; reliability and outer-sharing follow-up published at `339ddf24`.
+> Wave A live delivery remains pending; inventory Wave B has started with shared status/recovery wording.
 > **Deployment:** `hub-staging-2026-10-12-r11f` at
 > `4578c8671a7b05066fb9a19411cb8a31cdd753ef` passed independent Oracle runtime/static/recovery checks;
 > physical retest is waived for this release, not a new private-launch GO

@@ -201,8 +201,15 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - Transfer lifecycle events are restricted to DMs and involved owners, with non-owned endpoint/account
   identifiers removed per viewer. A metadata-only `party_inventory.invalidated` event tells all members to
   refresh the shared stash without exposing transfer endpoints.
-- The shared inventory contract exposes transfer eligibility and weight summaries for downstream awarding and
-  carry-capacity work without imposing either feature's future UI or policy.
+- The shared inventory contract exposes transfer eligibility, weight summaries and transfer status wording.
+  Hub and Sheet use the same pending/terminal descriptions. A confirmed transfer is distinct from a successful
+  balance refresh: only a completed refresh may claim both inventories are up to date. Stash requests that were
+  never reserved do not claim escrow restoration. Unsupported statuses fail explicitly.
+- If a confirmed terminal transfer outlives its balance refresh, the Sheet retains the terminal outcome and
+  original recovery draft. Its next attempt reads current status and refreshes balances without proposing the
+  transfer again. This presentation contract changes neither custody nor approval authority.
+- The inventory contract is loaded only for an authorized campaign on the Hub, preserving the signed-out
+  static-module budget; the Sheet already imports it for eligibility and weight summaries.
 
 ## Security and durability invariants
 

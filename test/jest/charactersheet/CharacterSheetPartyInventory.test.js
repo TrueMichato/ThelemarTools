@@ -2137,6 +2137,42 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._draft).toBeNull();
 	});
 
+	it("preserves confirmed transfer success when only the balance refresh fails", async () => {
+		const committed = {id: "transfer-1", status: "committed", sourceKind: "character", targetKind: "party_inventory"};
+		const propose = jest.fn();
+		const partyInventory = new CharacterSheetPartyInventory({
+			campaignId: "campaign-1",
+			api: {pListTransfers: jest.fn(async () => [committed]), pProposeTransfer: propose},
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnGetCharacterData: () => ({inventory: []}),
+			fnIsCurrentCharacter: () => true,
+		});
+		partyInventory._active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._partyInventory = {id: "party-1", inventory: [], currency: {}};
+		partyInventory._role = "player";
+		partyInventory._draft = {
+			kind: "character",
+			destinationKind: "party_inventory",
+			transfer: committed,
+			needsStatusCheck: true,
+		};
+		partyInventory._pDrainRefresh = jest.fn()
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(false);
+		expect(partyInventory._error).toContain("Transfer complete.");
+		expect(partyInventory._error).toContain("latest");
+		expect(partyInventory._error).not.toContain("up to date");
+		expect(partyInventory._error).not.toContain("inventories are unchanged");
+		expect(partyInventory._draft.transfer).toBe(committed);
+
+		await expect(partyInventory._pSubmitDraft()).resolves.toBe(true);
+		expect(partyInventory._announcement).toBe("Transfer complete. Both inventories are up to date.");
+		expect(propose).not.toHaveBeenCalled();
+		expect(partyInventory._draft).toBeNull();
+	});
+
 	it("reports a terminal transfer retry instead of announcing a new reservation", async () => {
 		const toast = jest.fn();
 		const partyInventory = new CharacterSheetPartyInventory({

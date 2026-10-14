@@ -1,10 +1,40 @@
 import {
 	getInventoryStackWeight,
 	getInventoryTransferEligibility,
+	getInventoryTransferStatusMessage,
 	getInventoryWeightSummary,
 } from "../../../js/hub/hub-inventory-contract.js";
 
 describe("Hub inventory contract", () => {
+	it("announces committed transfers without inventing successful balance refreshes", () => {
+		expect(getInventoryTransferStatusMessage({status: "committed"})).toBe("Transfer complete.");
+		expect(getInventoryTransferStatusMessage({status: "committed", isRefreshed: true}))
+			.toBe("Transfer complete. Both inventories are up to date.");
+	});
+
+	it.each(["rejected", "cancelled", "expired"])("distinguishes a %s stash request from restored escrow", status => {
+		const request = getInventoryTransferStatusMessage({status, sourceKind: "party_inventory"});
+		expect(request).toContain("Request");
+		expect(request).toContain("The party stash was unchanged.");
+		expect(request).not.toContain("restored");
+		expect(getInventoryTransferStatusMessage({status, sourceKind: "character"}))
+			.toContain("The reserved items were restored.");
+		expect(getInventoryTransferStatusMessage({status})).not.toContain("restored");
+	});
+
+	it("keeps approval and recipient obligations consistent across inventory surfaces", () => {
+		expect(getInventoryTransferStatusMessage({status: "proposed"}))
+			.toBe("Request sent. A DM must approve before anything leaves the party stash.");
+		expect(getInventoryTransferStatusMessage({status: "reserved", targetKind: "party_inventory"}))
+			.toBe("Transfer reserved. A DM can accept it from the campaign inbox.");
+		expect(getInventoryTransferStatusMessage({status: "reserved", targetKind: "character"}))
+			.toBe("Transfer reserved. The recipient can accept it from the campaign inbox.");
+	});
+
+	it.each(["unknown", "constructor", "__proto__", null, undefined])("rejects unsupported status %s explicitly", status => {
+		expect(() => getInventoryTransferStatusMessage({status})).toThrow(TypeError);
+	});
+
 	it("allows partial movement while preserving linked copies at the source", () => {
 		const entry = {
 			id: "stack-1",
