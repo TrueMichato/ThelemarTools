@@ -239,6 +239,7 @@ export class CharacterSheetSharing {
 		this._replacementDrafts = {};
 		this._isSaving = false;
 		this._expandedField = null;
+		this._isExpanded = false;
 		this._disclosureStates = new Map();
 		this._renderedRoot = null;
 	}
@@ -425,10 +426,35 @@ export class CharacterSheetSharing {
 		}
 		const root = el("section", {className: "charsheet__sharing", attrs: {"aria-labelledby": "charsheet-sharing-heading"}});
 		this._renderedRoot = root;
-		root.append(el("h3", {className: "charsheet__sharing-heading", text: "What other players can see", attrs: {id: "charsheet-sharing-heading"}}));
+		const heading = el("h3", {className: "charsheet__sharing-heading", attrs: {id: "charsheet-sharing-heading"}});
+		const content = el("div", {className: "charsheet__sharing-content", attrs: {id: "charsheet-sharing-content"}});
+		const toggle = el("button", {
+			className: "charsheet__sharing-toggle",
+			attrs: {id: "charsheet-sharing-toggle", type: "button", "aria-controls": "charsheet-sharing-content"},
+		});
+		const label = el("span", {text: "What other players can see"});
+		const state = el("span", {className: "charsheet__sharing-toggle-state", attrs: {"aria-hidden": "true"}});
+		const icon = el("span");
+		const stateText = el("span");
+		state.append(icon, stateText);
+		toggle.append(label, state);
+		const syncDisclosure = () => {
+			toggle.setAttribute("aria-expanded", `${this._isExpanded}`);
+			content.hidden = !this._isExpanded;
+			icon.className = `glyphicon glyphicon-chevron-${this._isExpanded ? "down" : "right"}`;
+			stateText.textContent = this._isExpanded ? "Collapse" : "Expand";
+		};
+		toggle.addEventListener("click", () => {
+			this._isExpanded = !this._isExpanded;
+			if (!this._isExpanded && content.contains(document.activeElement)) toggle.focus();
+			syncDisclosure();
+		});
+		syncDisclosure();
+		heading.append(toggle);
+		root.append(heading, content);
 
 		if (this._state === "loading") {
-			root.append(el("p", {className: "charsheet__sharing-loading", text: "Loading sharing settings…", attrs: {role: "status", "aria-live": "polite"}}));
+			content.append(el("p", {className: "charsheet__sharing-loading", text: "Loading sharing settings…", attrs: {role: "status", "aria-live": "polite"}}));
 			return root;
 		}
 		if (this._state === "unavailable") return root;
@@ -438,7 +464,7 @@ export class CharacterSheetSharing {
 		}
 		if (this._state === "invalid") root.append(this._renderInvalidBanner({fnRerender}));
 
-		root.append(
+		content.append(
 			el("p", {className: "charsheet__sharing-intro", text: "You choose what the rest of the table sees. Your DM always sees your full sheet.", attrs: {id: "charsheet-sharing-intro"}}),
 			this._renderDisclosure({key: "basic", label: "Basic sharing", isDefaultOpen: true, content: this._renderPresets({fnRerender})}),
 			this._renderDisclosure({key: "advanced", label: "Advanced field overrides", content: this._renderFields({fnRerender})}),
@@ -463,6 +489,10 @@ export class CharacterSheetSharing {
 		return () => {
 			const target = document.getElementById(id) || document.getElementById(summaryId);
 			if (!target || !this._renderedRoot?.contains(target)) return;
+			if (target.closest(".charsheet__sharing-content")?.hidden) {
+				this._renderedRoot.querySelector("#charsheet-sharing-toggle")?.focus();
+				return;
+			}
 			const closed = target.closest("details:not([open])");
 			(closed?.querySelector(":scope > summary") || target).focus();
 		};

@@ -264,6 +264,43 @@ describe("character sheet sharing controls", () => {
 		expect(sharing.getState().state).toBe("unavailable");
 	});
 
+	it("keeps loading errors visible when the outer sharing controls are collapsed", async () => {
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			createElement: tagName => ({
+				tagName,
+				attrs: {},
+				children: [],
+				setAttribute (name, value) { this.attrs[name] = `${value}`; },
+				append (...children) { this.children.push(...children); },
+				addEventListener (name, handler) { this[`on${name}`] = handler; },
+				querySelectorAll: () => [],
+				contains: () => false,
+			}),
+		};
+		try {
+			const sharing = getSharing({
+				api: {...getApi(), pGetProjectionPolicy: async () => { throw new Error("Disconnected"); }},
+			});
+			await sharing.pLoad();
+			const root = sharing.render({fnRerender: () => {}});
+			const toggle = root.children[0].children[0];
+			const content = root.children.find(child => child.attrs.id === "charsheet-sharing-content");
+			const alert = root.children.find(child => child.attrs.role === "alert");
+			expect(toggle.attrs["aria-expanded"]).toBe("false");
+			expect(content.hidden).toBe(true);
+			expect(alert.textContent).toContain("Sharing settings could not be reached");
+			expect(content.children).not.toContain(alert);
+			toggle.onclick();
+			expect(toggle.attrs["aria-expanded"]).toBe("true");
+			expect(content.hidden).toBe(false);
+			toggle.onclick();
+			expect(sharing.render({fnRerender: () => {}}).children[1].hidden).toBe(true);
+		} finally {
+			globalThis.document = previousDocument;
+		}
+	});
+
 	it("describes preview values as reading text", () => {
 		expect(describePreviewValue({state: "healthy"})).toBe("state: healthy");
 		expect(describePreviewValue([])).toBe("None");

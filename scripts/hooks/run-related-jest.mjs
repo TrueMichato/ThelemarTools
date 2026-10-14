@@ -23,6 +23,7 @@ const runJest = (extraArgs, label) => {
 			"--localstorage-file", "test/localstorage.tmp",
 			"node_modules/jest/bin/jest.js",
 			"--no-coverage",
+			"--forceExit",
 			"--bail",
 			"--passWithNoTests",
 			...extraArgs,

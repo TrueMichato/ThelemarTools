@@ -1,4 +1,4 @@
-import {expect, Page, Request, Route} from "@playwright/test";
+import {expect, type Locator, Page, Request, Route} from "@playwright/test";
 import {waitForToolsLoaded} from "../utils/waitHelpers";
 
 type HubSession = {
@@ -1354,6 +1354,22 @@ export class HubCampaignPage {
 		return result.body;
 	}
 
+	private async openSharingControls (): Promise<Locator> {
+		const sharing = this.page.locator(".charsheet__sharing");
+		const toggle = sharing.locator("#charsheet-sharing-toggle");
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute("aria-controls", "charsheet-sharing-content");
+		if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(sharing.locator("#charsheet-sharing-content")).toBeVisible();
+		return sharing;
+	}
+
+	async expectSharingInitiallyCollapsed (): Promise<void> {
+		await expect(this.page.locator("#charsheet-sharing-toggle")).toHaveAttribute("aria-expanded", "false");
+		await expect(this.page.locator("#charsheet-sharing-content")).toBeHidden();
+	}
+
 	/**
 	 * Drive the real sharing controls and the real Save button.
 	 *
@@ -1362,8 +1378,7 @@ export class HubCampaignPage {
 	 * request the browser actually sends.
 	 */
 	async changeSharingPresetAndSave ({preset, expectPreviewText}: {preset: string; expectPreviewText: string}): Promise<void> {
-		const sharing = this.page.locator(".charsheet__sharing");
-		await expect(sharing).toBeVisible();
+		const sharing = await this.openSharingControls();
 		await sharing.locator(`input[name='charsheet-sharing-preset'][value='${preset}']`).check();
 		await sharing.locator(".charsheet__sharing-save").click();
 		await expect(sharing.locator(".charsheet__sharing-feedback--success")).toHaveText("Sharing settings saved.");
@@ -1382,6 +1397,7 @@ export class HubCampaignPage {
 	}
 
 	async openSharingField (field: string): Promise<void> {
+		await this.openSharingControls();
 		for (const key of ["advanced", `field-${field}`]) {
 			const section = this.page.locator(`#charsheet-sharing-section-${key}`);
 			await expect(section).toBeVisible();
@@ -1408,6 +1424,18 @@ export class HubCampaignPage {
 		await this.page.evaluate(() => (window as any).charSheet._campaign.render());
 		await expect(state).toBeFocused();
 		await expect(state).toHaveValue("Unsaved steady");
+
+		const toggle = sharing.locator("#charsheet-sharing-toggle");
+		await toggle.press(" ");
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(state).toBeHidden();
+		await this.page.evaluate(() => (window as any).charSheet._campaign.render());
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(toggle).toBeFocused();
+		await toggle.press("Enter");
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(state).toHaveValue("Unsaved steady");
+		await expect(advanced).toHaveAttribute("open", "");
 
 		const field = sharing.locator("#charsheet-sharing-section-field-hp");
 		await field.locator(":scope > summary").press("Enter");
@@ -1437,6 +1465,7 @@ export class HubCampaignPage {
 	}
 
 	async waitForSharingReady (): Promise<void> {
+		await this.openSharingControls();
 		await expect(this.page.locator("#charsheet-sharing-section-advanced")).toBeVisible();
 		await expect(this.page.locator("#charsheet-sharing-save")).toBeEnabled();
 		await expect.poll(() => this.page.evaluate(() => {
@@ -1470,8 +1499,7 @@ export class HubCampaignPage {
 	 * preview must reflect the server's own peer profile.
 	 */
 	async expectSharingControls ({previewText}: {previewText: string}): Promise<void> {
-		const sharing = this.page.locator(".charsheet__sharing");
-		await expect(sharing).toBeVisible();
+		const sharing = await this.openSharingControls();
 		await expect(sharing.locator(".charsheet__sharing-presets legend")).toHaveText("Sharing level");
 		await expect(sharing.locator("input[name='charsheet-sharing-preset'][value='minimal']")).toBeChecked();
 		await expect(sharing.locator(".charsheet__sharing-preview")).toContainText(previewText);
@@ -1490,7 +1518,8 @@ export class HubCampaignPage {
 		replacedText: string;
 		omittedText: string;
 	}): Promise<void> {
-		const preview = this.page.locator(".charsheet__sharing-preview");
+		const sharing = await this.openSharingControls();
+		const preview = sharing.locator(".charsheet__sharing-preview");
 		await expect(preview).toContainText(sharedText);
 		await expect(preview.locator(".charsheet__sharing-preview-status--replace")).toHaveText("Shown instead");
 		await expect(preview.locator(".charsheet__sharing-preview-status--replace").locator("xpath=..")).toContainText(replacedText);
@@ -1717,7 +1746,7 @@ export class HubCampaignPage {
 		});
 	}
 
-	private async waitForSettledProductionTargeting (resourceKind: "multi" | "feature_use"): Promise<void> {
+	private async waitForSettledProductionTargeting (resourceKind: "multi" | "feature_use" | "spell_slot"): Promise<void> {
 		const campaignId = await this.page.evaluate(() => (window as MultiTargetSheetFixtureHost).charSheet?._hubCampaignId);
 		if (!campaignId) throw new Error("Production targeting requires an installed campaign scope.");
 		const snapshotResponse = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/snapshot`, {
@@ -1934,6 +1963,7 @@ export class HubCampaignPage {
 	}
 
 	async castSpellAtPeerTarget ({spellName, targetName}: {spellName: string; targetName: string}): Promise<void> {
+		await this.waitForSettledProductionTargeting("spell_slot");
 		await this.page.locator('a[href="#charsheet-tab-spells"]').click();
 		const spell = this.page.locator(".charsheet__spell-item").filter({hasText: spellName}).first();
 		await expect(spell).toBeVisible();
@@ -1981,6 +2011,37 @@ export class HubCampaignPage {
 			outgoing: expect.arrayContaining([`${spellName} -> ${targetName}`]),
 			draftErrors: [],
 		});
+	}
+
+	async castSpellDuringTargetingRevalidation (options: {spellName: string; targetName: string}): Promise<void> {
+		let release = () => {};
+		const gate = new Promise<void>(resolve => { release = resolve; });
+		const pattern = "**/api/campaigns/*/context";
+		const handler = async (route: Route) => {
+			await gate;
+			await route.continue();
+		};
+		let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+		await this.page.route(pattern, handler);
+		try {
+			const requested = this.page.waitForRequest(request => new URL(request.url()).pathname.endsWith("/context"));
+			await this.page.evaluate(() => {
+				const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+				if (!sheet) throw new Error("Campaign character is unavailable.");
+				void sheet._pRefreshHubRules();
+			});
+			await requested;
+			await expect.poll(() => this.page.evaluate(() => {
+				const sheet = (window as MultiTargetSheetFixtureHost).charSheet;
+				return !!sheet?._isHubContextRefreshing && sheet?._peerTargeting?._isSuspended === true;
+			})).toBe(true);
+			releaseTimer = setTimeout(release, 2_000);
+			await this.castSpellAtPeerTarget(options);
+		} finally {
+			if (releaseTimer) clearTimeout(releaseTimer);
+			release();
+			await this.page.unroute(pattern, handler);
+		}
 	}
 
 	async resolveIncomingPeerSpell ({spellName, decision}: {spellName: string; decision: "Approve" | "Reject"}): Promise<void> {

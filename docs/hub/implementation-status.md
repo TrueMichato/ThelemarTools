@@ -1,11 +1,25 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-10-12
+> **Last updated:** 2026-10-14
 > **Owner:** Campaign Hub maintainers
 
 ## Status
 
-The held local **A4 candidate** extends the existing shared Character Sheet source-targeting and incoming-effects
+Wave A0-A6 implementation, independent review, chosen-branch integration and publication completed at
+`4d9a722075e74a5f48ac1500f4f1cb756ad4bf21`. All four exact-source jobs passed in
+[CI run 38420205764](https://github.com/TrueMichato/ThelemarTools/actions/runs/38420205764).
+The historical browser report is 57 first-attempt passes and one Cure Wounds retry pass, not 58 clean
+first attempts. A controlled local regression reproduces the same missing-picker failure when actual
+campaign-context installation is held; the follow-up page object waits for the existing installed-context,
+recovery and event-sequence barrier before casting. It changes no product authority fence.
+
+The separate local sharing follow-up composes draft #289's outer disclosure with r11f's nested controls,
+preserving drafts, focus, both entry paths and saved peer projections. These working-tree follow-ups still
+need combined independent review/publication. They are not deployed and do not change #289's PR state.
+Wave B and Wave D remain unstarted. New gameplay is not deployed or enabled: A7 must separately qualify
+migrations 0010-0014, the index-build window, rollback, exact release and campaign enrollment.
+
+The reviewed **A4 workflow** extends the existing shared Character Sheet source-targeting and incoming-effects
 controllers with fixed-set multi-target collection, independent per-character consent, deselectable source-owned
 candidates, and one atomic selected-subset finalization. It consumes reviewed A3 protocol-6 DTOs without authority,
 migration, or protocol changes. Exact retries acknowledge original command receipts; fresh detail/outgoing/owner
@@ -25,10 +39,10 @@ coverage and demand. A fenced receipt retained after context installation also s
 recovery automatically in the same recoverable scope; pending evidence and its save block must clear before
 the next save. Canonical catch-up waits behind that recovery, and scheduled scopes coalesce without letting
 an old task suppress new authorized work. The exact A4 boundary independently passed review at
-`82984bcf1c4a12850cc5a5317446e4e5a6c43980`; its retained worktree is preserved. This is held local work, not
-deployed or enabled product.
+`82984bcf1c4a12850cc5a5317446e4e5a6c43980`; its retained worktree is preserved. It is integrated and published,
+not deployed or enabled product.
 
-The held **A5 candidate** adds PHB/XPHB Healing Word (one target, explicit singular consent) and Mass Healing
+The reviewed **A5 workflow** adds PHB/XPHB Healing Word (one target, explicit singular consent) and Mass Healing
 Word (one to six fixed candidates, independent consent and one selected-subset finalization). One selected
 standard slot pays for one deterministic healing roll, shared by all selected MHW legs. Exact PHB/XPHB
 base/upcast rules are static source-qualified definitions; neither browser nor server interprets arbitrary prose.
@@ -49,15 +63,16 @@ acquisition/lifecycle binds one exact source-qualified feature to one unique per
 mirrors and the canonical five-points-per-Paladin-level pool synchronized, and preserves spent points as the
 maximum grows or shrinks. Ambiguous, malformed, innate or contradictory bindings remain unsupported with
 diagnostics; no synthetic resource or display-name fallback is introduced.
-Fresh A5 review found spell UID/brew provenance, name-only legacy resource acquisition,
-and the singular HTTP ten-point ceiling counterexamples. The bounded local remediation requires exact stored
+Independent A5 review found spell UID/brew provenance, name-only legacy resource acquisition,
+and the singular HTTP ten-point ceiling counterexamples. The bounded remediation enforces exact stored
 spell identity/provenance at proposal and final rederivation, explicit resource ownership/provenance with
 unrelated PHB-pool preservation, and the existing singular amount schema bound of 100 with strict affordability.
-These fixes still require retained-reviewer closure; prior green gates did not establish their authority.
+The retained reviewer closed these fixes at `afff1ef666f67e50279d5a5e1c4f696451cfed6f`; prior green gates alone
+did not establish their authority.
 Touch/bonus-action eligibility is table-adjudicated; poison/disease removal and other resource exceptions remain excluded. Singular HW/LoH no-effect
 acceptance privately fails without spending or changing either canonical document/revision; only MHW opts into
-applied/revisionless target no-ops. A5 requires fresh independent
-exact-candidate review. Publication, integration, deployment, enrollment, enablement and migration holds remain.
+applied/revisionless target no-ops. A5 and the A6 composition review are complete and published.
+Deployment, enrollment, enablement and live migration approvals remain separate.
 
 The last independently verified private invite-only release is `hub-staging-2026-10-12-r11f` at
 `4578c8671a7b05066fb9a19411cb8a31cdd753ef` on the reused, Hub-only Oracle Always Free ARM

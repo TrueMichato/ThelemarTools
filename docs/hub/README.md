@@ -3,12 +3,12 @@
 The Campaign Hub is an optional online layer over the existing local-first 5etools experience.
 Signed-out character sheets, homebrew, and DM screens remain supported and do not use hub storage.
 
-> **Implementation:** R11f game-day corrections delivered; gameplay waves
-> A0-A3 and the separate sharing UX PR remain draft/unmerged
+> **Implementation:** R11f game-day corrections delivered; Wave A0-A6 reviewed, integrated and
+> published at `4d9a7220`. Wave A live delivery remains pending; outer sharing is a separate local follow-up.
 > **Deployment:** `hub-staging-2026-10-12-r11f` at
 > `4578c8671a7b05066fb9a19411cb8a31cdd753ef` passed independent Oracle runtime/static/recovery checks;
 > physical retest is waived for this release, not a new private-launch GO
-> **Last reviewed:** 2026-10-12
+> **Last reviewed:** 2026-10-14
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -117,27 +117,29 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0018: invite-gated first account access](adr/0018-invite-gated-first-access.md)
 - [ADR 0019: provider-neutral account entitlements and reauthentication](adr/0019-provider-neutral-account-entitlements.md)
 - [ADR 0020: consented multi-target semantic operations](adr/0020-consented-multi-target-operations.md) —
-  accepted; Wave A3 server authority implemented default-off in the held draft
+  accepted; Wave A authority and Sheet workflow integrated/published, default-off and not deployed
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
 Free; it is retained as the evaluation of record for the paid upgrade path. ADRs 0011 and 0013 are implemented
 by V2-T2 and V2-T5. ADR 0012's protocol substrate is implemented while broader T3 effects remain gated. ADR 0014
-has provider-neutral GitHub/Discord/Google adapter layers but not account-linking rollout. ADR 0015 now enforces
+has provider-neutral GitHub/Discord/Google adapters and account linking; participant-level continuity evidence
+remains incomplete. ADR 0015 now enforces
 source/species/edition and carry/encumbrance on its proven surfaces while the other non-content rules remain
 Advisory. ADR 0016 source-cost atomicity is implemented only for one-player PHB/XPHB Cure Wounds; broader
 targeting remains active. ADR 0017 records the implemented V2-T4 DM award slice and its atomic batch,
 source-trust, preview, event, and reconciliation contracts.
 ADR 0018 replaces provider-subject allowlisting for first account creation with an OAuth-bound campaign invite
-context. Its persistence/server foundation is implemented, but new-account admission remains default-off until
-the stacked provider-neutral `campaign:create` entitlement layer lands.
+context. Its persistence/server foundation and the provider-neutral `campaign:create` entitlement layer are
+implemented; first admission remains default-off on a new installation until explicit rollout.
 ADR 0019 defines that entitlement layer, provider-bound reauthentication, hidden operator administration, and
 the staged enablement/rollback boundary.
 ADR 0020 defines the accepted protocol-6 model with at most eight fixed target legs, opaque per-leg invitations,
-per-character owner consent, one exact source-selected subset, and one-cost atomic finalization. The held
-Wave A3 draft implements normalized migration 0011 after A2's source-cost binding migration 0010, protocol-6
-routes/events and both stores. The capability remains default-off; Character Sheet workflow and production
-templates remain A4/A5 work. Nothing in the held draft changes the deployed r11f release or enrolls a campaign.
+per-character owner consent, one exact source-selected subset, and one-cost atomic finalization. Published
+Wave A includes normalized migration 0011 after A2's migration 0010, recovery/lifecycle corrections 0012/0013,
+event-reference indexes 0014, protocol-6 routes/events, both stores, the A4 Sheet workflow and reviewed A5
+healing templates. The capability remains default-off. Publication does not change deployed r11f or enroll
+a campaign; A7 release, migration/rollback and enablement approvals remain separate.
 
 ## Local BFF setup
 

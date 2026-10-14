@@ -36,15 +36,19 @@ values are reconstructed from the immutable request rather than mutable saved ro
 
 **File:** `js/charactersheet/charactersheet-sharing.js`
 
-The same owner-sharing component serves campaign and ordinary Sheet entry. Basic sharing and Saved
-player preview start open; Advanced field overrides and each field start closed. Native summaries
+The same owner-sharing component serves campaign and ordinary Sheet entry. The whole panel starts
+collapsed behind a keyboard-operable button with `aria-expanded` and `aria-controls`. Its inner Basic
+sharing and Saved player preview start open; Advanced field overrides and each field start closed. Native summaries
 support keyboard expansion and visible closed/open markers. Disclosure state is instance-local UI state,
 not character JSON or projection policy. Closing a section does not discard its unsaved values or save
 anything. The preview always describes the saved result, not the draft.
+Loading errors, invalid-policy recovery and save feedback remain visible outside the collapsed form.
 
 `render()` captures disclosure states before replacing the old tree. `getFocusRestorer()` lets
 `CharacterSheetCampaign.render()` restore the active control, or the enclosing summary if it is now
-closed. Stable control IDs preserve focus across preset/mode changes; authoritative character/scope
+closed. A collapsed outer panel restores focus to its toggle instead of a hidden control. Outer and
+nested open states, drafts and focus survive parent rerenders without a policy save or character write.
+Stable control IDs preserve focus across preset/mode changes; authoritative character/scope
 refresh creates a new sharing instance rather than carrying a previous character's draft into it.
 
 ## CharacterSheetPage

@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-10-12
+> **Last reviewed:** 2026-10-14
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -40,11 +40,11 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
 | **active** | r10 game-day remediation | R11e deployed late-reapply/JSON-wire corrections; physical Campaign -> Local -> Return and Back/Forward reload made no lease/write, but actual BFCache was not observed and fresh-tab lease evidence expired (gap accepted to continue testing). Campaign A-only Cure Wounds targeting is enabled; participant-reported XPHB/PHB consent and self-target canaries passed, natural expiry remained automated-only. Private-launch NO-GO remains; [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) is a separate draft. |
 | **shipped** | R11f correction delivery | GD-FIND-003/004/005/006/007/009/013 and account-action startup/supply-chain corrections are committed, published, tagged and deployed. The decision owner's physical-retest waiver permits engineering continuation, not private-pilot expansion or gameplay hold lift. |
-| **next** | Wave A gameplay delivery | Stacked draft PRs [#285](https://github.com/TrueMichato/ThelemarTools/pull/285)-[#288](https://github.com/TrueMichato/ThelemarTools/pull/288) remain held/unmerged. A4/A5, inventory Wave B, and rules Wave D follow the [delivery plan](game-day-backlog.md). |
+| **next** | Wave A gameplay delivery | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. A7 release, migrations 0010-0014, rollback and exact-campaign enablement remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **active** | Wave A3/A4/A5 healing workflow | [ADR 0020](adr/0020-consented-multi-target-operations.md), immutable migrations 0011-0013 and protocol-6 default-off authority remain held. A4 independently passed at `82984bcf`; the local A5 candidate adds PHB/XPHB HW singular and six-target MHW production templates/resolver under the explicitly table-adjudicated rules boundary. Third-template acquisition/mechanics remains blocked and A5 needs fresh independent review. Local descendant work is authorized, not publication/integration/deployment/enrollment/enablement; r11f's physical-retest waiver is not GO or a hold lift. |
+| **active** | Wave A3/A4/A5 healing workflow | [ADR 0020](adr/0020-consented-multi-target-operations.md), protocol-6 authority, A4 shared Sheet workflow and A5 PHB/XPHB HW/MHW plus XPHB heal-only Lay on Hands are reviewed and published. Table-adjudicated rules, exact source/pool identity and no-op privacy remain unchanged. New capability is default-off and not deployed; the r11f waiver is not new-capability smoke or private-launch GO. |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 participant-level provider verification retain their own acceptance gates |
 | **shipped** | r9/r10 invite-gated identity | ADR 0018/migration 0008, ADR 0019/migration 0009, identity linking and r10 reauthentication UX are merged and deployed. Game-day public metadata reported GitHub/Discord/Google available, invite admission, entitlements and identity linking; full participant-by-participant identity checks remain incomplete. |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
@@ -62,8 +62,8 @@ It uses existing domain events, protocol 5, and no migration;
 query/lock budgets fail explicitly, and finite load tests do not establish unbounded-growth performance.
 Exact-source CI, Git publication, immutable tagging, approved shared-host dry run, human-confirmed
 promotion and independent post-release/off-machine backup checks are complete. Physical retest is
-waived for r11f, while the decision owner's private-launch GO/NO-GO remains separate. Held Wave A engineering
-may continue, but its integration/release/enablement holds are unchanged.
+waived for r11f, while the decision owner's private-launch GO/NO-GO remains separate. Subsequent explicit
+approvals completed Wave A integration/publication; its release/enablement gates remain unchanged.
 On 2026-10-12 the decision owner requested the correction release as r11f and waived another physical
 game-day retest before continuing engineering. That changes the physical recheck requirement for this
 bounded release, not its automated/operational safeguards, the measured historical evidence, a
@@ -76,7 +76,7 @@ Phase 6G and V1-G1 are complete. The 2026-09-28 r10 physical game day returned *
 gate retains an explicit private-launch GO/NO-GO and unresolved design/evidence decisions; the r11f
 correction-release physical retest is waived. This rollout
 gate proceeds in parallel with V2 engineering and gates expansion of the private pilot, not implementation
-or merging of independently safe V2 work; the current held Wave A stack retains its separate delivery hold.
+or merging of independently safe V2 work; Wave A's live delivery and enablement remain separately gated.
 
 ### V1-G1 — host-operations proof (**complete 2026-09-13**)
 
@@ -290,7 +290,7 @@ Acceptance:
   inaccessible;
 - projection generation cannot mutate or persist the canonical character/Board document.
 
-### V2-T3 — live semantic effects on the Character Sheet (**active — Wave A1 six-kind immediate lane complete in held implementation; broader Character Sheet effects remain**)
+### V2-T3 — live semantic effects on the Character Sheet (**active — Wave A1 six-kind immediate lane published; broader Character Sheet effects remain**)
 
 Dependency: V2-T2.
 
@@ -329,8 +329,8 @@ Acceptance:
 Wave A1 completes the existing immediate DM/co-DM lane for the six version-1 operations without enabling
 protocol-6 multi-target authority. Valid canonical no-ops are auditable and replayable, omit projection
 invalidation, and use a revision-only ordering point because migration 0005 requires a unique applied revision
-and migration 0011 remains reserved for ADR 0020. This implementation remains held as a draft descendant of
-PR #285 pending the physical r10 game-day GO/NO-GO.
+and the normalized migration-0011 multi-target model remains a separate contract. A1 is independently reviewed,
+integrated and published in the Wave A stack. Live delivery remains subject to A7, not an inferred launch GO.
 
 ### V2-T4 — party inventory, carry, and item awards (**active — player stash/transfer/carry and DM award slices shipped**)
 
@@ -489,33 +489,33 @@ diagnosis, and audit; a target owner never sees co-target identity or decisions.
 Global source-account and target-owner caps are serialized across campaigns by dedicated seed-10 quota locks
 acquired in ascending account UUID order before campaign authority.
 
-The server authority is **implemented in the held draft, not enabled**. A2's migration 0010 precedes A3's
+The server authority is **reviewed, integrated and published, not deployed or enabled**. A2's migration 0010 precedes A3's
 multi-target migration 0011, additive migration 0012 supplies only the bounded target-owner recovery index, and
-migration 0013 repairs only the source-owned lifecycle validator.
+migration 0013 repairs only the source-owned lifecycle validator. Migration 0014 adds event-reference lookup
+indexes with an independently approved live write-blocking window still required.
 Protocol 6, routes, both stores, events, capability advertisement, required-version/
 policy/role/backup/restore contracts, and marker-aware rollback preflight are checked in.
-The local A4 candidate extends the existing source/incoming controllers on the same Sheet route for Campaign
+The reviewed A4 workflow extends the existing source/incoming controllers on the same Sheet route for Campaign
 Overview and ordinary-site entry. Incoming recovery is account-wide, but consent/navigation and adoption use only
 exact current-authorized `targetRef` -> `owner_truth.character.id` identity, never names or event-history scans.
 Source-owned multi candidates are deselectable; singular Cure Wounds self-targets still require manual consent.
 Current detail/outgoing/recovery drives readiness; historical exact-command receipts acknowledge only that command.
 Revisionless no-ops cover every reconciliation track without character adoption, redraw, PATCH, or watermark
 advance. An actor-scoped tab-session journal retains at most 256 exact no-op leg keys across reload; older evicted
-notice identities are not an unlimited deduplication guarantee. The held A5 candidate now supplies exact
+notice identities are not an unlimited deduplication guarantee. The independently reviewed A5 workflow supplies exact
 PHB/XPHB HW/MHW descriptors and XPHB LoH heal-only ordinary-resource binding under the authorized
-table-adjudicated boundaries. Its capability defaults and publication/live holds are unchanged; A4's exact
-independent review is inherited, not new A5 proof. A5 still requires fresh exact-candidate independent review.
-The sequence is:
+table-adjudicated boundaries. A5 retained-reviewer closure and A6 composition review are complete; capability
+defaults and live-delivery gates are unchanged. The completed engineering sequence was:
 
 1. **A1:** DM typed effects.
 2. **A2:** generalized source-cost authority.
 3. **A3:** normalized migration 0011, additive recovery-index migration 0012, validator-repair migration 0013, and server state machine implemented default-off, after A2's migration 0010.
 4. **A4:** Character Sheet proposal/response/finalization UX and per-leg reconciliation.
-5. **A5:** Healing Word and Mass Healing Word templates.
+5. **A5:** Healing Word, Mass Healing Word and XPHB heal-only Lay on Hands templates.
 
 NPC/monster targets, arbitrary prose, damage combat resolution, offline writes, repeated partial commits,
-per-target costs, and post-proposal target additions remain deferred. Wave A0 may be reviewed as a draft but is
-held from merge until the coordinator records the physical game-day GO/NO-GO.
+per-target costs, and post-proposal target additions remain deferred. A0's PR merged and reviewed descendants
+are published on `multiplayer-hub`; old stacked-PR disposition is not permission for a new release.
 
 Migration 0011 is additive before use. The first accepted multi-target proposal permanently inserts an
 FK-independent usage marker which normal cleanup never deletes. Once that marker exists, rollback to a true

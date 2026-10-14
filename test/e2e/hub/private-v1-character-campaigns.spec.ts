@@ -583,7 +583,7 @@ test("players target Cure Wounds with approval-time source costs and atomic effe
 		await expect.poll(async () => (await target.getCharacter(targetCharacter.id)).data.hp.current).toBeGreaterThan(3);
 		await expect.poll(() => target.page.locator("#charsheet-ipt-hp-current").inputValue()).not.toBe("3");
 
-		await source.castSpellAtPeerTarget({spellName: "Cure Wounds", targetName: "Aster"});
+		await source.castSpellDuringTargetingRevalidation({spellName: "Cure Wounds", targetName: "Aster"});
 		await source.resolveIncomingPeerSpell({spellName: "Cure Wounds", decision: "Approve"});
 		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(0);
 		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.hp.current).toBeGreaterThan(4);

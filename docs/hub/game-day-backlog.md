@@ -1,7 +1,7 @@
 # Campaign Hub game-day backlog and delivery plan
 
 > **Status:** Prioritized follow-up; private-pilot expansion is **NO-GO**
-> **Last reviewed:** 2026-10-12
+> **Last reviewed:** 2026-10-14
 > **Owner:** Campaign Hub maintainers
 
 This is the sanitized repository tracking record for the 2026-09-28 r10 physical game day and its
@@ -119,12 +119,20 @@ identifiers, provider subjects, tokens, or private evidence into Git.
   disclosure. Its exact head `2048973d37198da04681ec86d5a7fb82af49ca1b` passed all four CI jobs,
   including the full projection-privacy journey, but remains an unmerged draft. It does **not**
   implement the nested/advanced disclosure requested in GD-FIND-005.
-- **Wave A:** [#285](https://github.com/TrueMichato/ThelemarTools/pull/285) (ADR 0020) ->
+- **Wave A engineering is published:** A0-A6 implementation, independent review, integration and publication
+  completed at `4d9a722075e74a5f48ac1500f4f1cb756ad4bf21`. All four jobs passed in
+  [CI run 38420205764](https://github.com/TrueMichato/ThelemarTools/actions/runs/38420205764), with 57 first-attempt
+  browser passes and one Cure Wounds retry pass. Migration 0014 closed the original 100,000-row cleanup failure
+  without larger budgets. A controlled local follow-up reproduces the picker failure during held context
+  installation and waits for the existing installed-authority/recovery barrier before casting; no safety
+  fence is relaxed. Combined follow-up review/publication remains separate from that historical CI result.
+  [#285](https://github.com/TrueMichato/ThelemarTools/pull/285) (ADR 0020) ->
   [#286](https://github.com/TrueMichato/ThelemarTools/pull/286) (DM effects) ->
   [#287](https://github.com/TrueMichato/ThelemarTools/pull/287) (source costs, migration 0010) ->
   [#288](https://github.com/TrueMichato/ThelemarTools/pull/288) (multi-target server, migration 0011)
-  remain stacked drafts, unmerged/undeployed with their runtime capability default-off. The existing
-  delivery hold has **not** been lifted by this document.
+  describe the original stack. #285 is merged; #286-#288 remain open drafts awaiting disposition even though
+  reviewed descendants are integrated/published on `multiplayer-hub`. New gameplay remains undeployed and
+  default-off. A7 live migrations, deployment, enrollment and smoke still require separate approvals.
 - **Release safety status:** the first r11 attempt was interrupted after traffic changed; its evidence
   records exit 130 in deploy, successful compatible rollback to r10, and no schema migration. Its
   placeholder-provenance tag remains immutable and unused. The separately approved, genuinely tagged
@@ -260,24 +268,27 @@ remain untested or insufficiently evidenced unless the private report explicitly
    offline convergence, and the previously reported P2 findings. Record each result or explicit skip and
    refresh operational preflight. Only the decision owner can replace the final NO-GO with a new GO.
 
-The existing hold on A0-A3 is a delivery decision, not a technical requirement for testing the merged
-PR #331 fix or the already-implemented Cure Wounds slice. To physically test **new** Wave A server
-capabilities, first decide whether to lift that hold, then integrate A0 -> A1 -> A2 -> A3 in reviewed order;
-verify migrations 0010/0011, previous-app/rollback rules, protocol 6, and default-off campaign enrollment
-before any promotion. Do not bundle the entire stack into the focused r10 correction release by accident.
+The original A0-A6 integration/publication hold was lifted by subsequent explicit decisions; engineering
+completion does not lift A7's live gates. To physically test **new** Wave A capabilities, first qualify the
+exact reviewed release, migrations 0010-0014 and the transactional index-build window, protocol 6, rollback
+before/after the irreversible first-use marker, and default-off deployment. Exact-campaign enrollment and
+the three-account smoke are later separately approved steps. Do not reinterpret r11f's bounded physical-retest
+waiver as permission to skip new-capability smoke or expand the private pilot.
 
 ## Forward delivery sequence
 
-R11f correction delivery is complete; refreshing the held Wave A stack is the next engineering milestone.
-Approved gameplay development remains a separate sequence,
-not a claim that these features have reached the live campaign:
+R11f correction delivery and Wave A engineering/publication are complete. The decision owner selected
+Cure Wounds reliability closeout and outer-sharing integration before inventory Wave B; rules Wave D follows
+reviewed B integration. A7 readiness and separately authorized delivery can proceed independently, without
+claiming that published gameplay reached the live campaign.
 
 | Wave | Planned scope | Prerequisite / proof |
 |---|---|---|
-| **A0-A3** | ADR 0020 consent model; immediate DM effect hardening; exact source-cost binding and migration 0010; multi-target proposal/consent/finalization and migration 0011. Draft PRs #285-#288 are held. | A release decision to lift the hold; normal bottom-up integration, schema/role and rollback proof, full Hub/mutation/PG/real-stack, exact-head review. |
-| **A4-A5** | One Character Sheet multi-target source/target UX and reconciliation, then reviewed one-to-one and first multi-target healing templates. NPC/monster and arbitrary effects remain deferred. | A3 server authority/protocol 6; template-scoped cost and privacy proof; three-account physical convergence and explicit capability enrollment. |
-| **B0-B4** | Shared inventory vocabulary; Hub party inventory home; one player Sheet composer; atomic DM award/stash modes; repeated-use, contention and uncertain-outcome recovery. GD-FIND-006/007/009 feed these slices. | Integrate reviewed Wave A first because shared Sheet, Hub, event and E2E seams overlap; Memory/PG conservation and audience parity, two-user real stack, no refresh requirement. |
-| **D0-D5** | Rule authority matrix; TGTT dependency evaluator; shared jumping, linguistics and exhaustion calculations; critical-roll contract last. Existing source/species/edition and carry policies stay enforced; other rules are not silently relabeled. | Integrate B before broad rule/UI changes; prove policy/calculation/mutation/roll authority separately, rollback/teardown parity, Character Sheet/Party Tracker and physical context-toggle checks. ADR 0021 only if structured roll authority changes. |
+| **A0-A6 engineering** | Consent model, typed DM effects, source costs, protocol-6 multi-target authority, shared Sheet workflow and reviewed HW/MHW/LoH healing; review/integration/publication complete. | Preserve exact source/privacy/recovery/resource contracts. Historical green CI retains the first-attempt Cure Wounds caveat. |
+| **Reliability and sharing** | Close the picker readiness counterexample and compose #289's outer disclosure with r11f's nested controls, drafts and focus. | Red-first regression, both entry paths, unchanged saved policy/peer projection, exact combined-candidate review. Local follow-up is not deployed or PR disposition. |
+| **A7 delivery** | Exact reviewed release, migrations 0010-0014, default-off deployment, later exact-campaign enrollment and three-account smoke. | Fresh backup/restore/role/health evidence, independently qualified rollback and index-build window, separate human tag/dry-run/promotion/enablement approvals. |
+| **B0-B4** | Shared inventory vocabulary; Hub party inventory home; one player Sheet composer; atomic DM award/stash modes; repeated-use, contention and uncertain-outcome recovery. GD-FIND-006/007/009 feed these slices. | Wave A integration is satisfied; complete the selected reliability/sharing milestone first. Memory/PG conservation and audience parity, two-user real stack, no refresh requirement. Do not wait for an unrelated A7 operator window. |
+| **D0-D5** | Rule authority matrix; TGTT dependency evaluator; shared jumping, linguistics and exhaustion calculations; critical-roll contract last. Existing source/species/edition and carry policies stay enforced; other rules are not silently relabeled. | Integrate reviewed B before broad rule/UI changes, not necessarily its live release; prove policy/calculation/mutation/roll authority separately. Reserve the next available ADR only if structured roll authority changes. |
 
 The detailed implementation handoffs and verification matrix remain in the coordinating session's private
 artifacts; this document is the repository-visible priority/acceptance map. Do not convert a design row into

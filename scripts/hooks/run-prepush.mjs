@@ -158,7 +158,7 @@ try {
 
 			run("eslint", "npm", ["run", "test:js"], tree);
 			run("stylelint", "npm", ["run", "test:css:lint"], tree);
-			run("jest (full)", "npm", ["run", "test:unit", "--", "--no-coverage"], tree);
+			run("jest (full)", "npm", ["run", "test:unit", "--", "--no-coverage", "--forceExit"], tree);
 			// run("data validation", "npm", ["run", "test:data"], tree);
 
 			if (process.env.RUN_E2E_FULL === "1") {

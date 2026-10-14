@@ -1,4 +1,4 @@
-import {expect, test, type BrowserContext} from "@playwright/test";
+import {expect, test, type BrowserContext, type Request} from "@playwright/test";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
 
 const contextOptions = {
@@ -41,7 +41,7 @@ test("local entry actions do not create campaign authority", async ({browser}) =
 	}
 });
 
-test("nested sharing preserves unsaved drafts and focus on both entry paths", async ({browser}, testInfo) => {
+test("outer and nested sharing preserve unsaved drafts and focus on both entry paths", async ({browser}, testInfo) => {
 	test.setTimeout(180_000);
 	const secret = process.env.HUB_TEST_AUTH_SECRET;
 	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
@@ -62,11 +62,22 @@ test("nested sharing preserves unsaved drafts and focus on both entry paths", as
 				await owner.openBareCharacterSheetDefault(campaignId);
 				await owner.selectCharacterOnSheet({characterId: character.id, name: "Disclosure Mira"});
 			}
+			await owner.expectSharingInitiallyCollapsed();
 			await owner.waitForSharingReady();
 			// Loading this minimal fixture backfills class features through the normal save
 			// path. Measure the disclosures after that load, not against the unrepaired seed.
 			const peerBaseline = await peer.getCharacterProjection(character.id);
+			const canonicalBaseline = await owner.getCharacter(character.id);
+			const writes: string[] = [];
+			const onRequest = (request: Request) => {
+				const path = new URL(request.url()).pathname;
+				if (request.method() !== "GET" && /^\/api\/characters(?:\/|$)/.test(path)) writes.push(path);
+			};
+			owner.page.on("request", onRequest);
 			await owner.expectSharingDraftSurvivesDisclosures();
+			owner.page.off("request", onRequest);
+			expect(writes).toEqual([]);
+			expect(await owner.getCharacter(character.id)).toEqual(canonicalBaseline);
 			const after = await owner.getProjectionPolicy(character.id);
 			expect(after.policy).toEqual(baseline.policy);
 			expect(after.projectionRevision).toBe(baseline.projectionRevision);

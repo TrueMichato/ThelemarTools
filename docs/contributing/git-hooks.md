@@ -29,6 +29,10 @@ Orchestrated by [`scripts/hooks/run-precommit.mjs`](../../scripts/hooks/run-prec
    `jest --testPathPattern=TGTT`. The filter is brittle, so we re-run all TGTT
    tests when it's touched.
 
+Both hook Jest invocations use `--forceExit` after the selected tests finish, matching the Hub scripts.
+Open sockets/timers must not leave a successful commit or push waiting indefinitely. Test failures still
+return their nonzero status and block the Git operation; no test selection or assertions are skipped.
+
 ## pre-push
 
 Orchestrated by [`scripts/hooks/run-prepush.mjs`](../../scripts/hooks/run-prepush.mjs).

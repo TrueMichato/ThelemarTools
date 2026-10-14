@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last updated:** 2026-10-12
+> **Last updated:** 2026-10-14
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -15,7 +15,7 @@
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
 | Owner Roll History | `HubRollHistory.test.js`, `HubRollLogAdapter.test.js`, `CharacterSheetHubRollHistory.test.js`, `owner-roll-history.spec.ts` | Owner-only pre-limit reads, actor-only correlation, 200-event retention, cursors, exact retry/reload recovery, lost responses, multi-device convergence, lifecycle fences, no character write/lease, phone layout |
-| Game-day entry/sharing UX | `CharacterSheetLocalEntry.test.js`, `HubCharacterSheetAuthorityRoutes.test.js`, `game-day-ux.spec.ts`, existing projection-policy/privacy suites | Explicit-local Create/Open/Import controller delegation and guards, zero campaign writes, nested native disclosures, draft/open-state/focus preservation through rerender on both entry paths, unchanged saved policy and full peer profile, phone/desktop day/night |
+| Game-day entry/sharing UX | `CharacterSheetLocalEntry.test.js`, `HubCharacterSheetAuthorityRoutes.test.js`, `game-day-ux.spec.ts`, existing projection-policy/privacy suites | Explicit-local Create/Open/Import guards, zero campaign writes, collapsed outer button plus nested native disclosures, draft/open-state/focus preservation through rerender on both entry paths, unchanged saved policy/full peer profile, phone/desktop day/night |
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, `CharacterSheetHubTeardown.test.js`, `CharacterSheetCampaign.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, archive/move/demotion concealment, character-scoped sharing refresh, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
@@ -40,6 +40,15 @@ peer projection. It requires the runner's disposable loopback Hub and `HUB_TEST_
 fails closed if they are missing or remote. Never point the stack runner or synthetic-auth browser at Oracle.
 This evidence does not replace the physical real-OAuth/device first-leg check against the actual deployed
 service worker and loaded Character Sheet assets.
+
+The Cure Wounds page object uses the same snapshot-sequence/installed-context/recovery readiness barrier as
+production HW/MHW/LoH journeys before clicking Cast. A visible outgoing `applied` status or a present capability
+does not establish that the next cast is ready: its effect can still be invalidating current authority.
+The singular Cure Wounds journey deliberately holds the real campaign-context fetch during self-target setup.
+Without the readiness wait it reproduces the missing-picker failure; with it, the original consent/cost/HP
+assertions pass without retry. The product still refuses casting during revalidation; tests never auto-recast,
+skip invalidation or weaken the authority fence. This controlled counterexample explains a reachable
+first-attempt failure mode; the old CI attempt had no trace proving its exact timing.
 
 The A4 journey uses the existing disposable real-PG harness, five synthetic account profiles (source, two target
 owners, unrelated player, DM), and two identically named characters for one owner. It starts capability-disabled,
