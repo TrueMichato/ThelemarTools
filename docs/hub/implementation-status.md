@@ -19,10 +19,10 @@ the follow-up was published as `339ddf24c39317312a6ae8eb91408ae7f942cf0d`. It is
 change #289's PR state. The commit also bounds completed hook Jest runs with `--forceExit`, preserving test
 selection and failing exit statuses after an observed open-handle pre-commit hang.
 Wave B's B0 shared transfer wording and truthful terminal-outcome/failed-refresh recovery are published.
-The local B1/B2 candidate adds a role-adaptive Hub workspace and one owned-Sheet composer over the existing
+B1/B2 is locally committed at `281b505b48a5405092cec26d823e31fad80c8de7` and adds a role-adaptive Hub workspace and one owned-Sheet composer over the existing
 ledger and approval rules. Independent correctness review and complete local qualification are finished,
 including controlled acknowledgement/revalidation recovery. It has not been
-committed, published or deployed. B3 atomic award/stash extensions, ADR 0021 self-service authority and broader
+published or deployed. B3 atomic award/stash extensions, ADR 0021 self-service authority and broader
 B4 completion remain pending. Wave D remains unstarted.
 B0 was published as `32e876239`; its four-job CI passed with 57 first-attempt browser passes and one Lay on
 Hands acquisition retry, not 58 clean first attempts. The retained failure led to a separately reproduced
@@ -32,12 +32,14 @@ pass without retry. Exact-published-head verification remains separate from this
 New gameplay is not deployed or enabled: A7 must separately qualify
 migrations 0010-0014, the index-build window, rollback, exact release and campaign enrollment.
 
-B1/B2 qualification is against the uncommitted delta on
+B1/B2 qualification was against the uncommitted delta on
 `25df6289ce2d08d090bfa5f664755202af6dd636`, not a new release SHA. The independently reviewed 15-file
 code/test/style manifest is `b44e22fa0a206fbf7ac9625b020c8a855e231464718e3b962cd95d02dad96be6`.
 The final canonical stack passed its 372-check runtime-role phase and all 75 browser tests without retries;
 full Hub and affected Sheet seam evidence is recorded in [testing](testing.md#b1b2-local-qualification--2026-10-15).
 Earlier failed samples remain separate, and this is not remote CI or physical acceptance.
+The subsequent normal local commit preserves all 26 candidate files byte-for-byte and excludes the
+16 unrelated modified/untracked files. Its normal hooks passed; publication remains separately gated.
 
 The reviewed **A4 workflow** extends the existing shared Character Sheet source-targeting and incoming-effects
 controllers with fixed-set multi-target collection, independent per-character consent, deselectable source-owned

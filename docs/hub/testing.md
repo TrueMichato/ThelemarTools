@@ -153,6 +153,13 @@ Jest's configured force-exit warnings remain; this is not a universal open-handl
 Counts overlap between commands and are not an aggregate unique-test total. No remote CI, commit,
 publication, deployment, campaign opt-in, private-launch GO or physical/OAuth/device acceptance is implied.
 
+The separately approved normal local commit `281b505b48a5405092cec26d823e31fad80c8de7`
+subsequently recorded exactly those 26 candidate files, with all file hashes unchanged after hooks.
+Its parent is `25df6289ce2d08d090bfa5f664755202af6dd636`; all 16 unrelated modified/untracked files
+remained unchanged and outside the commit. Normal lint-staged and related-Jest hooks passed
+(19 suites/423 tests). That commit is not published and has no new remote-CI or release identity;
+the preceding full-stack measurements remain exact-candidate local evidence.
+
 The A4 journey uses the existing disposable real-PG harness, five synthetic account profiles (source, two target
 owners, unrelated player, DM), and two identically named characters for one owner. It starts capability-disabled,
 then enables only its exact synthetic campaign through a secret-protected test-only route. The A4 journey does not

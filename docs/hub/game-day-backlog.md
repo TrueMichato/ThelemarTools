@@ -290,12 +290,13 @@ claiming that published gameplay reached the live campaign.
 | **B0-B4** | Shared inventory vocabulary; Hub party inventory home; one player Sheet composer; atomic DM award/stash modes; repeated-use, contention and uncertain-outcome recovery. GD-FIND-006/007/009 feed these slices. | Wave A integration is satisfied; complete the selected reliability/sharing milestone first. Memory/PG conservation and audience parity, two-user real stack, no refresh requirement. Do not wait for an unrelated A7 operator window. |
 | **D0-D5** | Rule authority matrix; TGTT dependency evaluator; shared jumping, linguistics and exhaustion calculations; critical-roll contract last. Existing source/species/edition and carry policies stay enforced; other rules are not silently relabeled. | Integrate reviewed B before broad rule/UI changes, not necessarily its live release; prove policy/calculation/mutation/roll authority separately. Reserve the next available ADR only if structured roll authority changes. |
 
-B0 is published. B1/B2 are now a local, independently reviewed implementation candidate over the
+B0 is published. B1/B2 are now a locally committed, independently reviewed implementation candidate over the
 existing ledger: searchable role-adaptive shared supplies and owned-Sheet Deposit/Request/Pass,
 including denomination-preserving currency. Review found and closed expired terminal-recovery
 recursion and a fresh-send connection race during the pre-transfer save. Integrated real-stack
 qualification passed all 75 browser tests and the selected runtime-role authority phase, without retries.
-The controlled positive-ACK/projection-revalidation interleaving is independently closed; see
+Normal local commit `281b505b48a5405092cec26d823e31fad80c8de7` preserves the qualified files without
+including unrelated edits. The controlled positive-ACK/projection-revalidation interleaving is independently closed; see
 [local qualification](testing.md#b1b2-local-qualification--2026-10-15). No new stash-withdrawal authority, publication, release, campaign
 opt-in or physical finding closure is implied; B3, broader B4 and D remain pending.
 

@@ -364,12 +364,13 @@ Implemented slice:
 - memory/PostgreSQL parity, authorization/idempotency/contention/event ordering, rendered UI, and real-stack
   coverage.
 
-The local B1/B2 candidate presents searchable authorized stash stacks, all denomination balances,
+The locally committed B1/B2 candidate presents searchable authorized stash stacks, all denomination balances,
 informational shared weight and recent authorized inventory activity. DM/co-DM links focus the existing
 move, award and approval controls; players continue from owned Sheets and spectators remain read-only.
 One Sheet composer handles Deposit, approval-required Request and Pass, including currency-only commands.
-Independent review and full local qualification are complete. This candidate is not committed,
-published or deployed; [the exact-delta evidence](testing.md#b1b2-local-qualification--2026-10-15)
+Independent review and full local qualification are complete. Normal local commit
+`281b505b48a5405092cec26d823e31fad80c8de7` preserves the qualified candidate; it is not
+published or deployed. [The exact-delta evidence](testing.md#b1b2-local-qualification--2026-10-15)
 retains the failed samples and subsequent clean run separately.
 
 Remaining T4 scope includes B3 award/stash extensions, [ADR 0021](adr/0021-opted-in-self-service-stash-withdrawals.md)
