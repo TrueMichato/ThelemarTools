@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import {getEncryptionKey, pDecryptFile, pGetFileEvidence} from "./backup-crypto.mjs";
 import {getPgEnv} from "./pg-env.mjs";
-import {pRecordOperationalEvidence} from "./operations-evidence.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error(`DATABASE_URL is required.`);
@@ -34,30 +33,14 @@ try {
 	if (result.error) throw result.error;
 	if (result.status !== 0) throw new Error(`pg_restore exited with status ${result.status}.`);
 	const output = {
+		phase: "archive-import-only",
+		completedDrill: false,
 		restoredAt: new Date().toISOString(),
 		filename: path.basename(resolvedSource),
 		durationSeconds: (Date.now() - startedAt.getTime()) / 1000,
 		...(await pGetFileEvidence(resolvedSource)),
 	};
-	pRecordOperationalEvidence({
-		jobType: "restore_drill",
-		status: "succeeded",
-		startedAt,
-		details: output,
-	});
 	process.stdout.write(`${JSON.stringify({...output, source: resolvedSource}, null, 2)}\n`);
-} catch (error) {
-	try {
-		pRecordOperationalEvidence({
-			jobType: "restore_drill",
-			status: "failed",
-			startedAt,
-			details: {errorCode: `${error.code || error.name || "ERROR"}`.slice(0, 100)},
-		});
-	} catch (evidenceError) {
-		process.stderr.write(`Campaign Hub failed to record restore failure evidence: ${evidenceError.code || evidenceError.name || "ERROR"}\n`);
-	}
-	throw error;
 } finally {
 	fs.rmSync(tempDir, {recursive: true, force: true});
 }

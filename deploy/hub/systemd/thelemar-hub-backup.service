@@ -8,7 +8,6 @@ Type=oneshot
 User=ubuntu
 RuntimeDirectory=thelemar-hub
 WorkingDirectory=/home/ubuntu/ThelemarTools
-ExecStartPre=/usr/bin/docker image inspect --format={{.Id}} thelemartools-hub-backup
-ExecStart=/usr/bin/flock -n /run/thelemar-hub/backup.lock /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile backup run --interactive=false -T --rm --no-deps --pull never backup
+ExecStart=/usr/bin/python3 /home/ubuntu/ThelemarTools/deploy/hub/release-helper.py recovery-job-run --state /home/ubuntu/.local/state/thelemar-hub/recovery/active-fallback.tsv --env /home/ubuntu/.local/state/thelemar-hub/recovery/active-fallback.env --blocked /home/ubuntu/.local/state/thelemar-hub/recovery/active-fallback.blocked --admission-lock /run/lock/thelemar-hub-release.lock --job-lock /run/thelemar-hub/backup.lock -- /usr/bin/docker compose --project-directory /home/ubuntu/ThelemarTools --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml -f /etc/thelemar-hub/compose.hub.recovery-mode.yml --profile backup run --interactive=false -T --rm --no-deps --pull never backup
 TimeoutStartSec=2h
 Nice=10

@@ -1,0 +1,55 @@
+name: ${HUB_RESTORE_PROJECT_NAME:?Set a unique restore-drill project name}
+
+services:
+  bff:
+    image: ${HUB_RESTORE_BFF_IMAGE:?Set the pinned r11f test-harness or exact BFF image ID for this phase}
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      NODE_ENV: ${HUB_RESTORE_NODE_ENV:-test}
+      HUB_TEST_AUTH_ENABLED: ${HUB_TEST_AUTH_ENABLED:-false}
+      HUB_TEST_AUTH_SECRET: ${HUB_TEST_AUTH_SECRET:-}
+      HUB_APP_ORIGIN: https://localhost:${HUB_RESTORE_EDGE_PORT:-8443}
+      HUB_HOST: 0.0.0.0
+      HUB_PORT: 5052
+      HUB_COOKIE_SECRET: ${HUB_COOKIE_SECRET:?Set a drill-only cookie secret}
+      HUB_CSRF_SECRET: ${HUB_CSRF_SECRET:?Set a drill-only CSRF secret}
+      HUB_INVITE_TOKEN_SECRET: ${HUB_INVITE_TOKEN_SECRET:?Set a drill-only invite secret}
+      HUB_METRICS_TOKEN: ${HUB_METRICS_TOKEN:?Set a drill-only metrics token}
+      HUB_AUTH_PROVIDERS: ${HUB_AUTH_PROVIDERS:-github}
+      HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS: ""
+      HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS: ${HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS:-github}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set a drill-only disabled provider placeholder}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set a drill-only disabled provider placeholder}
+      HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS: ${HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS:-}
+      HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS: ${HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS:-}
+      DATABASE_URL: postgresql://hub_runtime:${HUB_RUNTIME_DB_PASSWORD:?Set the restored target runtime password}@hub-restore-db:5432/hub
+      HUB_DATABASE_SSL: "false"
+    networks: [restore]
+
+  static:
+    image: ${HUB_RESTORE_STATIC_IMAGE:?Set the exact r11f static image ID}
+    restart: "no"
+    networks: [restore]
+
+  edge:
+    image: ${HUB_RESTORE_EDGE_IMAGE:?Set the pinned Caddy image ID}
+    restart: "no"
+    ports:
+      - "127.0.0.1:${HUB_RESTORE_EDGE_PORT:-8443}:8443"
+    volumes:
+      - ${HUB_R11F_SOURCE_ROOT:?Set the clean exact-r11f source path}/deploy/hub/Caddyfile:/etc/caddy/Caddyfile:ro
+    tmpfs:
+      - /data:size=16m
+      - /config:size=4m
+    depends_on:
+      - bff
+      - static
+    networks: [restore]
+
+networks:
+  restore:
+    external: true
+    name: ${HUB_RESTORE_NETWORK:?Set the unique isolated restore network}

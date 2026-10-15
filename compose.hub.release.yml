@@ -10,6 +10,9 @@ services:
   bff:
     image: ${HUB_RELEASE_BFF_IMAGE:?set by deploy/hub/release.sh}
 
+  maintenance:
+    image: ${HUB_RELEASE_BFF_IMAGE:-thelemartools-hub-bff}
+
   static:
     image: ${HUB_RELEASE_STATIC_IMAGE:?set by deploy/hub/release.sh}
 

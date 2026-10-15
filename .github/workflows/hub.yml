@@ -233,6 +233,17 @@ jobs:
           test/jest/hub/HubInventoryPostgres.test.js
           --runInBand --no-coverage --forceExit
 
+      - name: PostgreSQL recovery compatibility history
+        env:
+          HUB_TEST_POSTGRES_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:5432/hub', env.HUB_RUNTIME_DB_ROLE, env.HUB_RUNTIME_DB_PASSWORD) }}
+          HUB_TEST_OPERATIONS_DATABASE_URL: ${{ format('postgresql://{0}:{1}@127.0.0.1:5432/hub', env.HUB_OPERATIONS_DB_ROLE, env.HUB_OPERATIONS_DB_PASSWORD) }}
+          HUB_DATABASE_SSL: "false"
+        run: >
+          npm run test:unit --
+          test/jest/hub/HubRecoveryCompatibilityPostgres.test.js
+          test/jest/hub/HubOperationsEvidence.test.js
+          --runInBand --no-coverage --forceExit
+
   real-stack-e2e:
     needs: unit-and-supply-chain
     runs-on: ubuntu-latest

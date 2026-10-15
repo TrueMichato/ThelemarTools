@@ -13,7 +13,8 @@ EXPECTED_HOST_UID="${HUB_RELEASE_EXPECTED_HOST_UID:-1001}"
 EXPECTED_HOST_GID="${HUB_RELEASE_EXPECTED_HOST_GID:-1001}"
 MIN_ROOT_FREE_KB="${HUB_RELEASE_MIN_ROOT_FREE_KB:-4194304}"
 MIN_BACKUP_FREE_KB="${HUB_RELEASE_MIN_BACKUP_FREE_KB:-1048576}"
-LOCK_FILE="${HUB_RELEASE_LOCK_FILE:-/run/lock/thelemar-hub-release.lock}"
+SHARED_RELEASE_LOCK_FILE="/run/lock/thelemar-hub-release.lock"
+LOCK_FILE="${HUB_RELEASE_LOCK_FILE:-$SHARED_RELEASE_LOCK_FILE}"
 EVIDENCE_ROOT="${HUB_RELEASE_EVIDENCE_DIR:-${HOME}/.local/state/thelemar-hub/releases}"
 
 TAG=""
@@ -32,6 +33,7 @@ HELPER="$INITIAL_HELPER"
 CURRENT_PHASE="startup"
 PREVIOUS_SHA=""
 PREVIOUS_TAG=""
+CONTROL_SHA=""
 PREVIOUS_BFF_CONTAINER=""
 PREVIOUS_STATIC_CONTAINER=""
 PREVIOUS_BACKUP_IMAGE_ID=""
@@ -42,6 +44,31 @@ PLANNED_MIGRATIONS="none"
 APPLIED_MIGRATIONS="none"
 SCHEMA_HAS_MIGRATION_0011="false"
 BFF_QUIESCED="false"
+QUIESCE_CALL_COUNT=0
+RECOVERY_REQUIRED="false"
+RECOVERY_ACTIVE_STATE="false"
+RECOVERY_B_STARTED="false"
+RECOVERY_B_SOURCE_SHA=""
+RECOVERY_B_SOURCE_TREE_SHA=""
+RECOVERY_B_TAG_NAME=""
+RECOVERY_B_TAG_OBJECT_SHA=""
+RECOVERY_B_PROTOCOL_VERSION=""
+RECOVERY_B_REQUIRED_MIGRATION_VERSION=""
+RECOVERY_B_SCHEMA_COMPATIBLE_THROUGH=""
+RECOVERY_B_BFF_IMAGE_ID=""
+RECOVERY_B_STATIC_IMAGE_ID=""
+RECOVERY_B_OPERATIONS_IMAGE_ID=""
+RECOVERY_B_BFF_IMAGE_REF=""
+RECOVERY_B_STATIC_IMAGE_REF=""
+RECOVERY_B_BACKUP_IMAGE_REF=""
+RECOVERY_B_MAINTENANCE_IMAGE_REF=""
+RECOVERY_B_MANIFEST_SHA256=""
+RECOVERY_B_QUALIFICATION_SHA256=""
+RECOVERY_B_CONFIGURATION_SHA256=""
+EXECUTING_ENGINE_SOURCE_SHA=""
+EXECUTING_ENGINE_TREE_SHA=""
+EXECUTING_ENGINE_SCRIPT_SHA256=""
+EXECUTING_ENGINE_HELPER_SHA256=""
 SOURCE_CHECKED_OUT="false"
 DRY_RUN="false"
 ASSUME_YES="false"
@@ -210,6 +237,26 @@ compose_release () {
 		-f "$ROOT/compose.hub.public.yml" \
 		-f "$ROOT/compose.hub.release.yml" \
 		"$@"
+}
+
+compose_recovery () {
+	env -u HUB_RECOVERY_BFF_IMAGE -u HUB_RECOVERY_BACKUP_IMAGE docker compose \
+		--project-directory "$ROOT" \
+		--env-file "$ENV_FILE" \
+		-f "$ROOT/compose.hub.yml" \
+		-f "$ROOT/compose.hub.public.yml" \
+		-f "$ROOT/compose.hub.recovery-mode.yml" \
+		"$@"
+}
+
+resolve_recovery_configuration_fingerprint () {
+	compose_current config --format json 2>/dev/null \
+		| "$HELPER" configuration-fingerprint --compose-config -
+}
+
+resolve_recovery_image_references () {
+	compose_recovery config --format json 2>/dev/null \
+		| "$HELPER" recovery-image-references --compose-config -
 }
 
 normalize_origin () {
@@ -512,6 +559,7 @@ configure_previous_release_identity () {
 			|| fail "first-release candidate checkout does not match ${TARGET_SHA}"
 		PREVIOUS_SHA="$FIRST_USE_PREVIOUS_SHA"
 		PREVIOUS_TAG="$FIRST_USE_PREVIOUS_TAG"
+		CONTROL_SHA="$FIRST_USE_PREVIOUS_SHA"
 		[[ "$PREVIOUS_SHA" != "$TARGET_SHA" ]] || fail "first-release previous SHA matches the candidate"
 		[[ "$(git -C "$ROOT" cat-file -t "refs/tags/${PREVIOUS_TAG}")" == "tag" ]] \
 			|| fail "first-release rollback tag ${PREVIOUS_TAG} is not annotated"
@@ -519,11 +567,41 @@ configure_previous_release_identity () {
 			|| fail "first-release rollback tag does not resolve to ${PREVIOUS_SHA}"
 		git -C "$ROOT" merge-base --is-ancestor "$PREVIOUS_SHA" "$TARGET_SHA" \
 			|| fail "first-release candidate does not descend from ${PREVIOUS_SHA}"
+		CONTROL_SHA="$PREVIOUS_SHA"
 		SOURCE_CHECKED_OUT="true"
 		return 0
 	fi
 
-	PREVIOUS_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+	CONTROL_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+	local active_state="${HOME}/.local/state/thelemar-hub/recovery/active-fallback.tsv"
+	if [[ -e "$active_state" ]]; then
+		[[ "$RECOVERY_REQUIRED" == "true" ]] \
+			|| fail "active full-workflow fallback state requires an A7-compatible release"
+		local target_protocol target_migration state_binding
+		target_protocol="$(git -C "$ROOT" show "${TARGET_SHA}:js/hub/hub-capabilities.js" \
+			| sed -nE 's/.*HUB_PROTOCOL_VERSION = "([0-9]+)".*/\1/p' | head -n 1)"
+		target_migration="$(git -C "$ROOT" show "${TARGET_SHA}:server/src/migration-version.js" \
+			| sed -nE 's/.*HUB_REQUIRED_MIGRATION_VERSION = "([0-9]{4})".*/\1/p' | head -n 1)"
+		state_binding="${RELEASE_DIR}/active-recovery-state.tsv"
+		"$HELPER" recovery-state \
+			--state "$active_state" \
+			--git-root "$ROOT" \
+			--current-sha "$CONTROL_SHA" \
+			--candidate-sha "$TARGET_SHA" \
+			--candidate-protocol "$target_protocol" \
+			--candidate-migration "$target_migration" \
+			--configuration-sha256 "$RECOVERY_B_CONFIGURATION_SHA256" >"$state_binding" \
+			|| fail "active qualified fallback state does not support this forward release"
+		RECOVERY_ACTIVE_STATE="true"
+		PREVIOUS_SHA="$(awk -F '\t' '$1 == "source_sha" {print $2}' "$state_binding")"
+		PREVIOUS_TAG="$(awk -F '\t' '$1 == "source_tag_name" {print $2}' "$state_binding")"
+		[[ "$(awk -F '\t' '$1 == "source_tag_object_sha" {print $2}' "$state_binding")" == \
+			"$(git -C "$ROOT" rev-parse "refs/tags/${PREVIOUS_TAG}")" ]] \
+			|| fail "active fallback annotated tag object changed"
+		return 0
+	fi
+
+	PREVIOUS_SHA="$CONTROL_SHA"
 	PREVIOUS_TAG="$(git -C "$ROOT" describe --tags --exact-match "$PREVIOUS_SHA" 2>/dev/null || true)"
 	[[ -n "$PREVIOUS_TAG" ]] || fail "current deployment HEAD must have an exact rollback tag"
 	[[ "$(git -C "$ROOT" cat-file -t "refs/tags/${PREVIOUS_TAG}")" == "tag" ]] \
@@ -643,8 +721,14 @@ print(",".join(after) or "none")
 rollback_application () {
 	replace_record rollback_attempted true
 	trace "rollback"
-	log "Rolling the application back to ${PREVIOUS_TAG} (${PREVIOUS_SHA}); the database is not changed."
-	git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null || return 1
+	local rollback_checkout_sha="$PREVIOUS_SHA"
+	if [[ "$RECOVERY_ACTIVE_STATE" == "true" ]]; then
+		log "Restoring the active qualified fallback application from ${PREVIOUS_TAG} (${PREVIOUS_SHA}) while retaining release engine ${CONTROL_SHA}; the database is not changed."
+		restore_control_engine_checkout || return 1
+	else
+		log "Rolling the application back to ${PREVIOUS_TAG} (${PREVIOUS_SHA}); the database is not changed."
+		git -C "$ROOT" checkout --detach "$rollback_checkout_sha" >/dev/null || return 1
+	fi
 	SOURCE_CHECKED_OUT="false"
 	restore_candidate_image_tags || return 1
 	if remove_candidate_image_preservation_tags; then
@@ -664,6 +748,15 @@ rollback_application () {
 	replace_record rollback_result succeeded || return 1
 }
 
+restore_control_engine_checkout () {
+	trace "rollback-control-engine-restore"
+	git -C "$ROOT" checkout --detach "$CONTROL_SHA" >/dev/null || return 1
+	[[ "$(git -C "$ROOT" rev-parse HEAD)" == "$CONTROL_SHA" ]] || return 1
+	[[ "$(sha256_file "$ROOT/deploy/hub/release.sh")" == "$EXECUTING_ENGINE_SCRIPT_SHA256" ]] || return 1
+	[[ "$(sha256_file "$ROOT/deploy/hub/release-helper.py")" == "$EXECUTING_ENGINE_HELPER_SHA256" ]] || return 1
+	SOURCE_CHECKED_OUT="false"
+}
+
 is_bff_quiesced () {
 	local container_ids
 	container_ids="$(compose_current ps -q --all bff 2>/dev/null)" || return 1
@@ -679,11 +772,22 @@ is_bff_quiesced () {
 
 quiesce_bff_writes () {
 	if [[ "$SIMULATE" == "1" ]]; then
+		QUIESCE_CALL_COUNT=$((QUIESCE_CALL_COUNT + 1))
 		local mode="${HUB_RELEASE_TEST_QUIESCE_MODE:-success}"
 		[[ "${HUB_RELEASE_TEST_QUIESCE_FAIL:-false}" != "true" ]] || mode="all-fail"
 		trace "rollback-quiesce-attempt-1"
 		case "$mode" in
 			success) BFF_QUIESCED="true"; return 0 ;;
+			first-success-rest-fail)
+				if ((QUIESCE_CALL_COUNT == 1)); then
+					BFF_QUIESCED="true"
+					return 0
+				fi
+				trace "rollback-quiesce-attempt-2"
+				trace "rollback-quiesce-fallback"
+				BFF_QUIESCED="false"
+				return 1
+				;;
 			first-fail-second-success)
 				trace "rollback-quiesce-attempt-2"
 				BFF_QUIESCED="true"
@@ -765,6 +869,475 @@ except Exception:
 PY
 }
 
+classify_recovery_preflight () {
+	local file="$1"
+	local status="$2"
+	python3 - "$file" "$status" <<'PY'
+import json
+import sys
+
+try:
+	status = int(sys.argv[2])
+	with open(sys.argv[1], encoding="utf-8") as handle:
+		result = json.load(handle)
+	if result.get("target") != "qualified-full-workflow-fallback" or not isinstance(result.get("blockers"), list):
+		raise ValueError("invalid recovery preflight shape")
+	if status == 0 and result.get("compatible") is True and result["blockers"] == []:
+		print("compatible")
+	elif status == 2 and result.get("compatible") is False and result["blockers"]:
+		print("history-incompatible")
+	else:
+		print("recovery-preflight-failed")
+except Exception:
+	print("recovery-preflight-failed")
+PY
+}
+
+read_recovery_binding () {
+	local binding="$1"
+	RECOVERY_B_SOURCE_SHA="$(awk -F '\t' '$1 == "source_sha" {print $2}' "$binding")"
+	RECOVERY_B_SOURCE_TREE_SHA="$(awk -F '\t' '$1 == "source_tree_sha" {print $2}' "$binding")"
+	RECOVERY_B_TAG_NAME="$(awk -F '\t' '$1 == "source_tag_name" {print $2}' "$binding")"
+	RECOVERY_B_TAG_OBJECT_SHA="$(awk -F '\t' '$1 == "source_tag_object_sha" {print $2}' "$binding")"
+	RECOVERY_B_PROTOCOL_VERSION="$(awk -F '\t' '$1 == "protocol_version" {print $2}' "$binding")"
+	RECOVERY_B_REQUIRED_MIGRATION_VERSION="$(awk -F '\t' '$1 == "required_migration_version" {print $2}' "$binding")"
+	RECOVERY_B_SCHEMA_COMPATIBLE_THROUGH="$(awk -F '\t' '$1 == "schema_compatible_through" {print $2}' "$binding")"
+	RECOVERY_B_BFF_IMAGE_ID="$(awk -F '\t' '$1 == "bff_image_id" {print $2}' "$binding")"
+	RECOVERY_B_STATIC_IMAGE_ID="$(awk -F '\t' '$1 == "static_image_id" {print $2}' "$binding")"
+	RECOVERY_B_OPERATIONS_IMAGE_ID="$(awk -F '\t' '$1 == "operations_image_id" {print $2}' "$binding")"
+	RECOVERY_B_MANIFEST_SHA256="$(awk -F '\t' '$1 == "manifest_sha256" {print $2}' "$binding")"
+	RECOVERY_B_QUALIFICATION_SHA256="$(awk -F '\t' '$1 == "qualification_evidence_sha256" {print $2}' "$binding")"
+	RECOVERY_B_CONFIGURATION_SHA256="$(awk -F '\t' '$1 == "configuration_sha256" {print $2}' "$binding")"
+}
+
+write_recovery_mode () {
+	local status="$1"
+	local state_dir="${HOME}/.local/state/thelemar-hub/recovery"
+	local state_file="${state_dir}/active-fallback.tsv"
+	local env_file="${state_dir}/active-fallback.env"
+	local blocked_file="${state_dir}/active-fallback.blocked"
+	local image_refs bff_ref static_ref backup_ref maintenance_ref
+	local temporary_state="" temporary_env="" temporary_blocked=""
+	local reference image_id index
+	local -a resolved_image_refs=()
+	local -a image_ids=("$RECOVERY_B_BFF_IMAGE_ID" "$RECOVERY_B_STATIC_IMAGE_ID" "$RECOVERY_B_OPERATIONS_IMAGE_ID")
+	[[ "$status" == "starting" || "$status" == "active" || "$status" == "blocked" ]] || {
+		log "ERROR: invalid recovery-mode state"
+		return 1
+	}
+	trace "recovery-mode-status:${status}"
+	image_refs="$(resolve_recovery_image_references)" || {
+		log "ERROR: could not resolve recovery-mode image references"
+		return 1
+	}
+	local image_ref
+	while IFS= read -r image_ref; do
+		resolved_image_refs[${#resolved_image_refs[@]}]="$image_ref"
+	done <<<"$image_refs"
+	((${#resolved_image_refs[@]} == 4)) || {
+		log "ERROR: recovery-mode Compose did not resolve all four image references"
+		return 1
+	}
+	bff_ref="${resolved_image_refs[0]}"
+	static_ref="${resolved_image_refs[1]}"
+	backup_ref="${resolved_image_refs[2]}"
+	maintenance_ref="${resolved_image_refs[3]}"
+	[[ "$maintenance_ref" == "$bff_ref" ]] || {
+		log "ERROR: maintenance image does not resolve to the qualified fallback BFF"
+		return 1
+	}
+	[[ "${#CANDIDATE_IMAGE_IDS[@]}" -ge 5 ]] || {
+		log "ERROR: control release-engine images are incomplete for recovery mode"
+		return 1
+	}
+	[[ "$EXECUTING_ENGINE_SOURCE_SHA" == "$CONTROL_SHA" \
+		&& "$EXECUTING_ENGINE_TREE_SHA" == "$(git -C "$ROOT" rev-parse "${CONTROL_SHA}^{tree}")" ]] || {
+		log "ERROR: the executing release engine does not match the preserved control checkout"
+		return 1
+	}
+	mkdir -p "$state_dir" && chmod 700 "$state_dir" || {
+		log "ERROR: could not secure recovery-mode state directory"
+		return 1
+	}
+	if [[ "$status" == "starting" || "$status" == "blocked" ]]; then
+		[[ ! -d "$blocked_file" && ! -L "$blocked_file" ]] || {
+			log "CRITICAL: the recovery job fence path is not a regular file"
+			return 1
+		}
+		temporary_blocked="$(mktemp "${blocked_file}.tmp.XXXXXX")" || {
+			log "CRITICAL: could not prepare the recovery job fence"
+			return 1
+		}
+		printf '%s\n' "$status" >"$temporary_blocked" || {
+			rm -f -- "$temporary_blocked"
+			log "CRITICAL: could not write the recovery job fence"
+			return 1
+		}
+		chmod 600 "$temporary_blocked" && mv -f -- "$temporary_blocked" "$blocked_file" || {
+			rm -f -- "$temporary_blocked"
+			log "CRITICAL: could not persist the recovery job fence"
+			return 1
+		}
+	fi
+	for reference in "$state_file" "$env_file"; do
+		[[ ! -d "$reference" && ! -L "$reference" ]] || {
+			log "CRITICAL: recovery-mode state or job environment path is not a regular file"
+			return 1
+		}
+	done
+	for index in 0 1 2; do
+		image_id="${image_ids[$index]}"
+		case "$index" in
+			0) reference="$bff_ref" ;;
+			1) reference="$static_ref" ;;
+			2) reference="$backup_ref" ;;
+		esac
+		docker image tag "$image_id" "$reference" || {
+			log "ERROR: could not bind qualified fallback image ${reference}"
+			return 1
+		}
+		local resolved_image_id
+		resolved_image_id="$(docker image inspect --format '{{.Id}}' "$reference")" || {
+			log "ERROR: could not inspect qualified fallback image ${reference}"
+			return 1
+		}
+		[[ "$resolved_image_id" == "$image_id" ]] || {
+			log "ERROR: qualified fallback image reference did not resolve to its pinned ID"
+			return 1
+		}
+	done
+
+	temporary_state="$(mktemp "${state_file}.tmp.XXXXXX")" || {
+		log "ERROR: could not prepare recovery-mode state"
+		return 1
+	}
+	temporary_env="$(mktemp "${env_file}.tmp.XXXXXX")" || {
+		rm -f -- "$temporary_state"
+		log "ERROR: could not prepare recovery-mode job environment"
+		return 1
+	}
+	{
+		printf 'status\t%s\n' "$status"
+		printf 'source_sha\t%s\n' "$RECOVERY_B_SOURCE_SHA"
+		printf 'source_tree_sha\t%s\n' "$RECOVERY_B_SOURCE_TREE_SHA"
+		printf 'source_tag_name\t%s\n' "$RECOVERY_B_TAG_NAME"
+		printf 'source_tag_object_sha\t%s\n' "$RECOVERY_B_TAG_OBJECT_SHA"
+		printf 'protocol_version\t%s\n' "$RECOVERY_B_PROTOCOL_VERSION"
+		printf 'required_migration_version\t%s\n' "$RECOVERY_B_REQUIRED_MIGRATION_VERSION"
+		printf 'schema_compatible_through\t%s\n' "$RECOVERY_B_SCHEMA_COMPATIBLE_THROUGH"
+		printf 'bff_image_id\t%s\n' "$RECOVERY_B_BFF_IMAGE_ID"
+		printf 'static_image_id\t%s\n' "$RECOVERY_B_STATIC_IMAGE_ID"
+		printf 'operations_image_id\t%s\n' "$RECOVERY_B_OPERATIONS_IMAGE_ID"
+		printf 'bff_image_ref\t%s\n' "$bff_ref"
+		printf 'static_image_ref\t%s\n' "$static_ref"
+		printf 'backup_image_ref\t%s\n' "$backup_ref"
+		printf 'maintenance_image_ref\t%s\n' "$maintenance_ref"
+		printf 'configuration_sha256\t%s\n' "$RECOVERY_B_CONFIGURATION_SHA256"
+		printf 'manifest_sha256\t%s\n' "$RECOVERY_B_MANIFEST_SHA256"
+		printf 'qualification_evidence_sha256\t%s\n' "$RECOVERY_B_QUALIFICATION_SHA256"
+		printf 'executing_engine_source_sha\t%s\n' "$EXECUTING_ENGINE_SOURCE_SHA"
+		printf 'executing_engine_tree_sha\t%s\n' "$EXECUTING_ENGINE_TREE_SHA"
+		printf 'control_source_sha\t%s\n' "$CONTROL_SHA"
+		printf 'control_tree_sha\t%s\n' "$EXECUTING_ENGINE_TREE_SHA"
+		printf 'control_release_script_sha256\t%s\n' "$EXECUTING_ENGINE_SCRIPT_SHA256"
+		printf 'control_helper_sha256\t%s\n' "$EXECUTING_ENGINE_HELPER_SHA256"
+		printf 'control_migrate_image_id\t%s\n' "${CANDIDATE_IMAGE_IDS[0]}"
+		printf 'control_grant_roles_image_id\t%s\n' "${CANDIDATE_IMAGE_IDS[1]}"
+	} >"$temporary_state" || {
+		rm -f -- "$temporary_state" "$temporary_env"
+		log "ERROR: could not write recovery-mode state"
+		return 1
+	}
+	{
+		printf 'HUB_RECOVERY_BFF_IMAGE=%s\n' "$RECOVERY_B_BFF_IMAGE_ID"
+		printf 'HUB_RECOVERY_BACKUP_IMAGE=%s\n' "$RECOVERY_B_OPERATIONS_IMAGE_ID"
+	} >"$temporary_env" || {
+		rm -f -- "$temporary_state" "$temporary_env"
+		log "ERROR: could not write recovery-mode job environment"
+		return 1
+	}
+	if ! chmod 600 "$temporary_state" "$temporary_env"; then
+		rm -f -- "$temporary_state" "$temporary_env"
+		log "ERROR: could not secure recovery-mode state files"
+		return 1
+	fi
+	if ! mv -f -- "$temporary_env" "$env_file"; then
+		rm -f -- "$temporary_state" "$temporary_env"
+		log "ERROR: could not commit recovery-mode job environment"
+		return 1
+	fi
+	if ! mv -f -- "$temporary_state" "$state_file"; then
+		rm -f -- "$temporary_state"
+		log "CRITICAL: recovery-mode job environment changed but its state was not committed; scheduled jobs remain fenced"
+		return 1
+	fi
+	if [[ "$status" == "active" ]]; then
+		rm -f -- "$blocked_file" || {
+			log "CRITICAL: fallback is active but scheduled recovery jobs remain fenced"
+			return 1
+		}
+	fi
+	return 0
+}
+
+validate_recovery_fallback () {
+	if [[ "$SIMULATE" == "1" ]]; then
+		RECOVERY_REQUIRED="${HUB_RELEASE_TEST_RECOVERY_REQUIRED:-false}"
+		[[ "$RECOVERY_REQUIRED" == "true" || "$RECOVERY_REQUIRED" == "false" ]] \
+			|| fail "invalid simulated recovery requirement"
+		if [[ "$RECOVERY_REQUIRED" == "true" ]]; then
+			[[ "${HUB_RELEASE_TEST_RECOVERY_QUALIFIED:-false}" == "true" ]] \
+				|| fail "simulated protocol-6 release lacks an independently qualified full-workflow fallback"
+			record recovery_fallback_required true
+			record recovery_fallback_qualification_sha256 simulated
+		fi
+		return 0
+	fi
+
+	local target_protocol target_migration active_state_file
+	target_protocol="$(git -C "$ROOT" show "${TARGET_SHA}:js/hub/hub-capabilities.js" \
+		| sed -nE 's/.*HUB_PROTOCOL_VERSION = "([0-9]+)".*/\1/p' | head -n 1)"
+	target_migration="$(git -C "$ROOT" show "${TARGET_SHA}:server/src/migration-version.js" \
+		| sed -nE 's/.*HUB_REQUIRED_MIGRATION_VERSION = "([0-9]{4})".*/\1/p' | head -n 1)"
+	[[ "$target_protocol" =~ ^[0-9]+$ && "$target_migration" =~ ^[0-9]{4}$ ]] \
+		|| fail "candidate protocol or migration identity cannot be verified"
+	active_state_file="${HOME}/.local/state/thelemar-hub/recovery/active-fallback.tsv"
+	if ((target_protocol < 6)); then
+		[[ ! -e "$active_state_file" ]] \
+			|| fail "an active full-workflow fallback requires an A7-compatible forward release"
+		return 0
+	fi
+	if [[ "$target_protocol" != "6" ]]; then
+		fail "protocol ${target_protocol} requires a newly qualified full-workflow fallback"
+		return 1
+	fi
+	RECOVERY_REQUIRED="true"
+
+	local recovery_dir="${HOME}/.local/state/thelemar-hub/recovery"
+	local manifest="${recovery_dir}/qualified-fallback.json"
+	local qualification="${recovery_dir}/qualified-fallback-evidence.json"
+	local binding="${RELEASE_DIR}/recovery-fallback-binding.tsv"
+	local source_migration
+	source_migration="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["source"]["requiredMigrationVersion"])' "$manifest")" \
+		|| fail "qualified fallback required migration declaration is missing"
+	"$HELPER" recovery-manifest \
+		--manifest "$manifest" \
+		--evidence "$qualification" \
+		--git-root "$ROOT" \
+		--candidate-sha "$TARGET_SHA" \
+		--protocol "$target_protocol" \
+		--source-migration "$source_migration" \
+		--migration "$target_migration" >"$binding" \
+		|| fail "a successful exact-binary HW/LoH-aware fallback qualification is required before protocol-6 promotion"
+
+	read_recovery_binding "$binding"
+	local remote_fallback_pair
+	remote_fallback_pair="$(resolve_remote_tag "$ROOT" "$RECOVERY_B_TAG_NAME")"
+	[[ "$remote_fallback_pair" == "${RECOVERY_B_TAG_OBJECT_SHA}"$'\t'"${RECOVERY_B_SOURCE_SHA}" ]] \
+		|| fail "qualified fallback tag identity does not match origin"
+	git -C "$ROOT" merge-base --is-ancestor "$RECOVERY_B_SOURCE_SHA" "origin/${EXPECTED_BRANCH}" \
+		|| fail "qualified fallback source is not reachable from origin/${EXPECTED_BRANCH}"
+	for image_id in "$RECOVERY_B_BFF_IMAGE_ID" "$RECOVERY_B_OPERATIONS_IMAGE_ID"; do
+		docker image inspect "$image_id" >/dev/null || fail "qualified fallback image is not present locally"
+	done
+	[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+		"$RECOVERY_B_BFF_IMAGE_ID")" == "$RECOVERY_B_SOURCE_SHA" ]] \
+		|| fail "qualified fallback BFF revision label does not match its source"
+	[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+		"$RECOVERY_B_STATIC_IMAGE_ID")" == "$RECOVERY_B_SOURCE_SHA" ]] \
+		|| fail "qualified fallback static revision label does not match its source"
+	[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+		"$RECOVERY_B_OPERATIONS_IMAGE_ID")" == "$RECOVERY_B_SOURCE_SHA" ]] \
+		|| fail "qualified fallback operations image revision label does not match its source"
+	for image_id in "$RECOVERY_B_BFF_IMAGE_ID" "$RECOVERY_B_STATIC_IMAGE_ID" "$RECOVERY_B_OPERATIONS_IMAGE_ID"; do
+		[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$image_id")" \
+			== "https://github.com/${EXPECTED_REPOSITORY}" ]] \
+			|| fail "qualified fallback image source label does not match the repository"
+	done
+	record recovery_fallback_required true
+	record recovery_fallback_candidate_sha "$TARGET_SHA"
+	record recovery_fallback_source_sha "$RECOVERY_B_SOURCE_SHA"
+	record recovery_fallback_source_tree_sha "$RECOVERY_B_SOURCE_TREE_SHA"
+	record recovery_fallback_source_tag "$RECOVERY_B_TAG_NAME"
+	record recovery_fallback_source_tag_object_sha "$RECOVERY_B_TAG_OBJECT_SHA"
+	record recovery_fallback_protocol_version "$RECOVERY_B_PROTOCOL_VERSION"
+	record recovery_fallback_required_migration_version "$RECOVERY_B_REQUIRED_MIGRATION_VERSION"
+	record recovery_fallback_bff_image_id "$RECOVERY_B_BFF_IMAGE_ID"
+	record recovery_fallback_static_image_id "$RECOVERY_B_STATIC_IMAGE_ID"
+	record recovery_fallback_operations_image_id "$RECOVERY_B_OPERATIONS_IMAGE_ID"
+	record recovery_fallback_configuration_sha256 "$RECOVERY_B_CONFIGURATION_SHA256"
+	record recovery_fallback_manifest_sha256 "$RECOVERY_B_MANIFEST_SHA256"
+	record recovery_fallback_qualification_sha256 "$RECOVERY_B_QUALIFICATION_SHA256"
+}
+
+revalidate_recovery_fallback_binding () {
+	local recovery_dir="${HOME}/.local/state/thelemar-hub/recovery"
+	local binding="${RELEASE_DIR}/recovery-boundary-binding.tsv"
+	local manifest="${recovery_dir}/qualified-fallback.json"
+	local qualification="${recovery_dir}/qualified-fallback-evidence.json"
+	local candidate_protocol candidate_migration
+	local resolved_configuration configuration_sha256
+	candidate_protocol="$(git -C "$ROOT" show "${TARGET_SHA}:js/hub/hub-capabilities.js" \
+		| sed -nE 's/.*HUB_PROTOCOL_VERSION = "([0-9]+)".*/\1/p' | head -n 1)"
+	candidate_migration="$(git -C "$ROOT" show "${TARGET_SHA}:server/src/migration-version.js" \
+		| sed -nE 's/.*HUB_REQUIRED_MIGRATION_VERSION = "([0-9]{4})".*/\1/p' | head -n 1)"
+	resolved_configuration="$(resolve_recovery_configuration_fingerprint)" || return 1
+	configuration_sha256="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])' <<<"$resolved_configuration")" \
+		|| return 1
+	"$HELPER" recovery-manifest \
+		--manifest "$manifest" \
+		--evidence "$qualification" \
+		--git-root "$ROOT" \
+		--candidate-sha "$TARGET_SHA" \
+		--protocol "$RECOVERY_B_PROTOCOL_VERSION" \
+		--source-migration "$RECOVERY_B_REQUIRED_MIGRATION_VERSION" \
+		--migration "$candidate_migration" \
+		--configuration-sha256 "$configuration_sha256" >"$binding" || return 1
+	local field expected actual
+	for field in source_sha source_tag_object_sha manifest_sha256 qualification_evidence_sha256 configuration_sha256; do
+		case "$field" in
+			source_sha) expected="$RECOVERY_B_SOURCE_SHA" ;;
+			source_tag_object_sha) expected="$RECOVERY_B_TAG_OBJECT_SHA" ;;
+			manifest_sha256) expected="$RECOVERY_B_MANIFEST_SHA256" ;;
+			qualification_evidence_sha256) expected="$RECOVERY_B_QUALIFICATION_SHA256" ;;
+			configuration_sha256) expected="$RECOVERY_B_CONFIGURATION_SHA256" ;;
+		esac
+		actual="$(awk -F '\t' -v key="$field" '$1 == key {print $2}' "$binding")"
+		[[ "$actual" == "$expected" ]] || return 1
+	done
+	local remote_fallback_pair
+	remote_fallback_pair="$(resolve_remote_tag "$ROOT" "$RECOVERY_B_TAG_NAME")" || return 1
+	[[ "$remote_fallback_pair" == "${RECOVERY_B_TAG_OBJECT_SHA}"$'\t'"${RECOVERY_B_SOURCE_SHA}" ]] || return 1
+	git -C "$ROOT" merge-base --is-ancestor "$RECOVERY_B_SOURCE_SHA" "origin/${EXPECTED_BRANCH}" || return 1
+	[[ "$candidate_protocol" == "$RECOVERY_B_PROTOCOL_VERSION" ]] || return 1
+}
+
+recover_to_qualified_fallback () {
+	local preflight="${RELEASE_DIR}/recovery-fallback-preflight.json"
+	local preflight_status classification
+	if [[ "$SIMULATE" == "1" ]]; then
+		trace "rollback-recovery-check"
+		if [[ "${HUB_RELEASE_TEST_RECOVERY_PREFLIGHT_FAILURE:-false}" == "true" ]]; then
+			classification="recovery-preflight-failed"
+		elif [[ "${HUB_RELEASE_TEST_RECOVERY_COMPATIBLE:-false}" == "true" ]]; then
+			classification="compatible"
+		else
+			classification="history-incompatible"
+		fi
+	else
+		[[ "$RECOVERY_REQUIRED" == "true" \
+			&& -n "$RECOVERY_B_SOURCE_SHA" \
+			&& -n "$RECOVERY_B_BFF_IMAGE_ID" \
+			&& -n "$RECOVERY_B_STATIC_IMAGE_ID" ]] || {
+				log "ERROR: qualified fallback identity is incomplete"
+				return 1
+			}
+		trace "rollback-recovery-check"
+		compose_release run --rm --no-deps bff node server/scripts/check-recovery-compatibility.mjs \
+			>"$preflight" 2>"${RELEASE_DIR}/recovery-fallback-preflight.stderr"
+		preflight_status="$?"
+		classification="$(classify_recovery_preflight "$preflight" "$preflight_status")"
+		record recovery_fallback_preflight_status "$preflight_status"
+		record recovery_fallback_preflight_sha256 "$(sha256_file "$preflight")"
+	fi
+
+	if [[ "$classification" != "compatible" ]]; then
+		log "ERROR: full recovery compatibility preflight rejected fallback classification ${classification}"
+		replace_record recovery_fallback_result "$classification"
+		return 1
+	fi
+	replace_record recovery_fallback_preflight compatible
+	trace "rollback-qualified-fallback"
+	if [[ "$SIMULATE" == "1" ]]; then
+		replace_record recovery_fallback_result simulated-compatible
+		if [[ "${HUB_RELEASE_TEST_RECOVERY_FAILURE_AFTER_START:-false}" == "true" ]]; then
+			BFF_QUIESCED="false"
+			RECOVERY_B_STARTED="true"
+			return 1
+		fi
+		return 0
+	fi
+
+	revalidate_recovery_fallback_binding || {
+		log "ERROR: qualified fallback source or release binding changed during recovery"
+		return 1
+	}
+	local image_refs
+	local -a resolved_image_refs=()
+	image_refs="$(resolve_recovery_image_references)" || {
+		log "ERROR: qualified fallback Compose image resolution failed"
+		return 1
+	}
+	local image_ref
+	while IFS= read -r image_ref; do
+		resolved_image_refs[${#resolved_image_refs[@]}]="$image_ref"
+	done <<<"$image_refs"
+	((${#resolved_image_refs[@]} == 4)) || {
+		log "ERROR: fallback image resolution did not return all four required service references"
+		return 1
+	}
+	RECOVERY_B_BFF_IMAGE_REF="${resolved_image_refs[0]}"
+	RECOVERY_B_STATIC_IMAGE_REF="${resolved_image_refs[1]}"
+	RECOVERY_B_BACKUP_IMAGE_REF="${resolved_image_refs[2]}"
+	RECOVERY_B_MAINTENANCE_IMAGE_REF="${resolved_image_refs[3]}"
+	[[ "$RECOVERY_B_MAINTENANCE_IMAGE_REF" == "$RECOVERY_B_BFF_IMAGE_REF" ]] || {
+		log "ERROR: fallback maintenance image does not match the qualified BFF image"
+		return 1
+	}
+
+	[[ "$(docker image inspect --format '{{.Id}}' "$RECOVERY_B_BFF_IMAGE_ID" 2>/dev/null)" == "$RECOVERY_B_BFF_IMAGE_ID" ]] || {
+		log "ERROR: qualified fallback BFF image ID is unavailable"
+		return 1
+	}
+	[[ "$(docker image inspect --format '{{.Id}}' "$RECOVERY_B_STATIC_IMAGE_ID" 2>/dev/null)" == "$RECOVERY_B_STATIC_IMAGE_ID" ]] || {
+		log "ERROR: qualified fallback static image ID is unavailable"
+		return 1
+	}
+	[[ "$(docker image inspect --format '{{.Id}}' "$RECOVERY_B_OPERATIONS_IMAGE_ID" 2>/dev/null)" == "$RECOVERY_B_OPERATIONS_IMAGE_ID" ]] || {
+		log "ERROR: qualified fallback operations image ID is unavailable"
+		return 1
+	}
+
+	export HUB_RELEASE_BFF_IMAGE="$RECOVERY_B_BFF_IMAGE_ID"
+	export HUB_RELEASE_STATIC_IMAGE="$RECOVERY_B_STATIC_IMAGE_ID"
+	export HUB_RELEASE_BACKUP_IMAGE="$RECOVERY_B_OPERATIONS_IMAGE_ID"
+	export HUB_IMAGE_VERSION="$RECOVERY_B_TAG_NAME"
+	export HUB_VCS_REF="$RECOVERY_B_SOURCE_SHA"
+	write_recovery_mode starting || {
+		log "ERROR: recovery-mode state transition was rejected before fallback startup"
+		return 1
+	}
+	BFF_QUIESCED="false"
+	RECOVERY_B_STARTED="true"
+	compose_release up -d --no-deps --pull never --force-recreate --wait bff static 2>/dev/null || {
+		log "ERROR: qualified fallback BFF/static services failed to start"
+		return 1
+	}
+	compose_release up -d --no-deps --force-recreate edge 2>/dev/null || {
+		log "ERROR: public edge failed to route to the qualified fallback"
+		return 1
+	}
+	export_monitor_environment || {
+		log "ERROR: fallback monitor environment could not be prepared"
+		return 1
+	}
+	wait_for_public_ready || {
+		log "ERROR: qualified fallback did not pass public readiness"
+		return 1
+	}
+	"$ROOT/deploy/hub/monitor-host.sh" || {
+		log "ERROR: qualified fallback host monitor failed"
+		return 1
+	}
+	replace_record recovery_fallback_result succeeded
+	replace_record recovery_fallback_deployed_source_sha "$RECOVERY_B_SOURCE_SHA"
+	replace_record recovery_fallback_deployed_bff_image_id "$RECOVERY_B_BFF_IMAGE_ID"
+	replace_record recovery_fallback_deployed_static_image_id "$RECOVERY_B_STATIC_IMAGE_ID"
+	replace_record recovery_fallback_deployed_operations_image_id "$RECOVERY_B_OPERATIONS_IMAGE_ID"
+	restore_control_engine_checkout || return 1
+	write_recovery_mode active || return 1
+}
+
 handle_failure () {
 	local status="$1"
 	trap - ERR
@@ -777,7 +1350,8 @@ handle_failure () {
 	}
 	if [[ "$TRAFFIC_MUTATED" == "true" \
 		&& "$ROLLBACK_COMPATIBLE" == "true" \
-		&& "$SCHEMA_HAS_MIGRATION_0011" == "true" ]] \
+		&& "$SCHEMA_HAS_MIGRATION_0011" == "true" \
+		&& "$RECOVERY_REQUIRED" != "true" ]] \
 		&& previous_application_is_pre_0011; then
 		trace "rollback-quiesce"
 		if ! quiesce_bff_writes; then
@@ -820,7 +1394,67 @@ handle_failure () {
 			fi
 		fi
 	fi
-	if [[ "$SIMULATE" == "1" ]]; then
+	if [[ "$TRAFFIC_MUTATED" == "true" && "$RECOVERY_REQUIRED" == "true" ]]; then
+		if [[ "$BFF_QUIESCED" != "true" ]]; then
+			trace "rollback-quiesce"
+			if ! quiesce_bff_writes; then
+				replace_record rollback_incompatibility full-workflow-quiesce-failed
+				replace_record rollback_result quiesce-failed-candidate-may-be-live
+				trace "rollback-quiesce-failed"
+				log "CRITICAL: the candidate BFF could not be stopped; do not start any fallback image."
+			else
+				replace_record rollback_candidate_quiesced true
+			fi
+		fi
+		if [[ "$BFF_QUIESCED" == "true" ]]; then
+			if recover_to_qualified_fallback; then
+				replace_record rollback_result qualified-full-workflow-fallback
+				replace_record rollback_compatible false
+				replace_record rollback_incompatibility qualified-full-workflow-fallback-selected
+			else
+				replace_record rollback_result forbidden-full-workflow-fallback
+				replace_record rollback_compatible false
+				replace_record rollback_incompatibility full-workflow-fallback-not-proven
+				if [[ "$RECOVERY_B_STARTED" == "true" ]]; then
+					trace "fallback-quiesce"
+					if ! quiesce_bff_writes; then
+						replace_record fallback_b_quiesced false
+						replace_record fallback_b_may_still_accept_writes true
+						replace_record rollback_result fallback-b-may-still-accept-writes
+						replace_record rollback_incompatibility fallback-b-quiesce-failed
+						trace "fallback-quiesce-failed"
+						log "CRITICAL: the qualified fallback BFF may still accept writes; do not claim isolation. Preserve the database and evidence and fence traffic through the incident procedure."
+					else
+						replace_record fallback_b_quiesced true
+						if [[ "$SIMULATE" != "1" ]]; then
+							if ! restore_control_engine_checkout; then
+								replace_record recovery_control_engine_restored false
+								replace_record recovery_jobs_blocked false
+								replace_record rollback_result fallback-quiesced-control-engine-unrestored
+								trace "fallback-control-engine-restore-failed"
+								log "CRITICAL: the qualified fallback BFF was stopped, but the release-engine checkout was not restored; scheduled jobs remain fenced by the starting marker. Do not claim complete recovery."
+							elif write_recovery_mode blocked; then
+								replace_record recovery_control_engine_restored true
+								replace_record recovery_jobs_blocked true
+								trace "isolate"
+								log "The qualified fallback BFF was stopped and its scheduled jobs were durably fenced. Preserve the database and evidence for authorized forward recovery."
+							else
+								replace_record recovery_control_engine_restored true
+								replace_record recovery_jobs_blocked false
+								replace_record rollback_result fallback-b-quiesced-job-fence-unconfirmed
+								log "CRITICAL: the fallback BFF was stopped, but scheduled-job fencing could not be confirmed. Do not claim complete isolation; preserve the database and evidence and use the incident procedure."
+							fi
+						fi
+					fi
+				else
+					trace "isolate"
+					if [[ "$SIMULATE" != "1" ]]; then
+						log "The candidate was stopped and the exact qualified fallback could not be proven healthy. Preserve the database and evidence for authorized forward recovery."
+					fi
+				fi
+			fi
+		fi
+	elif [[ "$SIMULATE" == "1" ]]; then
 		if [[ "$TRAFFIC_MUTATED" == "true" && "$ROLLBACK_COMPATIBLE" == "true" ]]; then
 			trace "rollback"
 			[[ -f "$STATE_FILE" ]] && replace_record rollback_result simulated-compatible
@@ -864,7 +1498,7 @@ handle_failure () {
 			log "The database was not reversed or restored. Correct the release and move forward."
 		fi
 		local pretraffic_recovered="false"
-		if git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1; then
+		if git -C "$ROOT" checkout --detach "$CONTROL_SHA" >/dev/null 2>&1; then
 			SOURCE_CHECKED_OUT="false"
 			if candidate_image_tags_are_preserved; then
 				restore_candidate_image_tags_and_cleanup >/dev/null 2>&1 && pretraffic_recovered="true"
@@ -905,8 +1539,8 @@ early_first_use_cleanup () {
 	if [[ "$status" -ne 0 \
 		&& "$FIRST_USE" == "1" \
 		&& -n "$ROOT" \
-		&& "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-		git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1 || true
+		&& "$CONTROL_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+		git -C "$ROOT" checkout --detach "$CONTROL_SHA" >/dev/null 2>&1 || true
 	fi
 	exit "$status"
 }
@@ -925,6 +1559,8 @@ phase_preflight () {
 	ROOT="$(cd "$ROOT" && pwd -P)"
 	ENV_FILE="$ROOT/.env.hub"
 	[[ "$(pwd -P)" == "$ROOT" ]] || fail "run this command from the deployment repository root: ${ROOT}"
+	[[ "$TEST_MODE" == "1" || "$LOCK_FILE" == "$SHARED_RELEASE_LOCK_FILE" ]] \
+		|| fail "production release lock must match the scheduled-job admission lock"
 	assert_no_peer_source_cost_ambient_override
 	assert_no_multi_target_ambient_override
 	assert_no_account_entitlement_ambient_override
@@ -945,9 +1581,12 @@ phase_preflight () {
 		compose.hub.yml \
 		compose.hub.public.yml \
 		compose.hub.release.yml \
+		compose.hub.recovery-mode.yml \
 		deploy/hub/Caddyfile.public \
 		deploy/hub/monitor-host.sh \
-		deploy/hub/migration-policy.json; do
+		deploy/hub/migration-policy.json \
+		deploy/hub/systemd/thelemar-hub-maintenance.service \
+		deploy/hub/systemd/thelemar-hub-backup.service; do
 		[[ -f "$ROOT/$required" ]] || fail "required release file is missing: ${required}"
 	done
 	for required in git docker curl openssl python3 flock df stat awk sed; do
@@ -994,6 +1633,7 @@ phase_preflight () {
 	git -C "$ROOT" merge-base --is-ancestor "$TARGET_SHA" "origin/${EXPECTED_BRANCH}" \
 		|| fail "${TAG} is not reachable from origin/${EXPECTED_BRANCH}"
 	TAG_IDENTITY="$(git -C "$ROOT" for-each-ref --format='%(taggername) <%(taggeremail)>: %(contents:subject)' "refs/tags/${TAG}")"
+	validate_recovery_fallback
 	if [[ "${HUB_RELEASE_REQUIRE_SIGNED_TAG:-0}" == "1" ]]; then
 		git -C "$ROOT" verify-tag "$TAG"
 	fi
@@ -1094,6 +1734,11 @@ phase_checkout () {
 	git -C "$ROOT" checkout --detach "$TARGET_SHA" >/dev/null
 	SOURCE_CHECKED_OUT="true"
 	assert_clean_root
+	if [[ "$RECOVERY_REQUIRED" == "true" && "$SIMULATE" != "1" ]]; then
+		revalidate_recovery_fallback_binding \
+			|| fail "candidate exact-version configuration does not match the independently qualified fallback binding"
+		record recovery_fallback_candidate_configuration_sha256 "$RECOVERY_B_CONFIGURATION_SHA256"
+	fi
 	[[ "$(git -C "$ROOT" rev-parse HEAD)" == "$TARGET_SHA" ]] || fail "candidate checkout SHA drifted"
 	[[ "$(git -C "$ROOT" rev-parse "refs/tags/${TAG}^{}")" == "$TARGET_SHA" ]] || fail "candidate tag drifted"
 	[[ -f "$ROOT/deploy/hub/migration-policy.json" ]] || fail "candidate is missing migration policy"
@@ -1149,7 +1794,7 @@ phase_approval () {
 	assert_clean_root
 	if [[ "$DRY_RUN" == "true" ]]; then
 		log "DRY RUN complete: no backup, migration, role, or service mutation was performed."
-		git -C "$ROOT" checkout --detach "$PREVIOUS_SHA" >/dev/null
+		git -C "$ROOT" checkout --detach "$CONTROL_SHA" >/dev/null
 		restore_candidate_image_tags_and_cleanup
 		SOURCE_CHECKED_OUT="false"
 		return 0
@@ -1271,6 +1916,15 @@ phase_verify () {
 }
 
 phase_finalize () {
+	if [[ "$DRY_RUN" != "true" && "$RECOVERY_ACTIVE_STATE" == "true" ]]; then
+		local recovery_dir="${HOME}/.local/state/thelemar-hub/recovery"
+		rm -f -- \
+			"${recovery_dir}/active-fallback.tsv" \
+			"${recovery_dir}/active-fallback.env" \
+			"${recovery_dir}/active-fallback.blocked" \
+			|| fail "could not clear active recovery-mode state and job fence"
+		replace_record recovery_mode_cleared true
+	fi
 	replace_record status "$([[ "$DRY_RUN" == "true" ]] && printf dry-run || printf succeeded)"
 	replace_record completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	render_evidence
@@ -1283,6 +1937,9 @@ run_phase () {
 	if [[ "$SIMULATE" == "1" ]]; then
 		if [[ "$CURRENT_PHASE" == "preflight" && -n "${HUB_RELEASE_TEST_HOLD_LOCK_SECONDS:-}" ]]; then
 			sleep "$HUB_RELEASE_TEST_HOLD_LOCK_SECONDS"
+		fi
+		if [[ "$CURRENT_PHASE" == "preflight" ]]; then
+			validate_recovery_fallback
 		fi
 		if [[ "$CURRENT_PHASE" == "migration-plan" ]]; then
 			ROLLBACK_COMPATIBLE="${HUB_RELEASE_TEST_ROLLBACK_COMPATIBLE:-true}"
@@ -1360,14 +2017,14 @@ main () {
 		ROOT="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel)"
 		ROOT="$(cd "$ROOT" && pwd -P)"
 		PREVIOUS_SHA="$FIRST_USE_PREVIOUS_SHA"
+		CONTROL_SHA="$FIRST_USE_PREVIOUS_SHA"
 		PREVIOUS_TAG="$FIRST_USE_PREVIOUS_TAG"
 		SOURCE_CHECKED_OUT="true"
 		trap early_first_use_cleanup EXIT
 	fi
 	validate_first_use_environment
 	if [[ "$SIMULATE" == "1" && "$TEST_MODE" != "1" ]]; then
-		fail "HUB_RELEASE_SIMULATE is available only with HUB_RELEASE_TEST_MODE=1"
-		exit 2
+		fail "HUB_RELEASE_SIMULATE is available only with HUB_RELEASE_TEST_MODE=1" || exit 2
 	fi
 	mkdir -p "$(dirname "$LOCK_FILE")"
 	if [[ "$FIRST_USE" != "1" ]]; then
@@ -1389,6 +2046,7 @@ main () {
 		exit 1
 	fi
 
+	# Scheduled-job wrappers use this same admission lock through their foreground Compose command.
 	RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-${TAG//[^A-Za-z0-9._-]/_}-$$"
 	mkdir -p "$EVIDENCE_ROOT"
 	RELEASE_DIR="${EVIDENCE_ROOT}/${RELEASE_ID}"
@@ -1397,9 +2055,20 @@ main () {
 	TRACE_FILE="${RELEASE_DIR}/phases.log"
 	: >"$STATE_FILE"
 	: >"$TRACE_FILE"
+	local engine_root
+	engine_root="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel)"
+	EXECUTING_ENGINE_SOURCE_SHA="$(git -C "$engine_root" rev-parse HEAD)"
+	EXECUTING_ENGINE_TREE_SHA="$(git -C "$engine_root" rev-parse 'HEAD^{tree}')"
+	EXECUTING_ENGINE_SCRIPT_SHA256="$("$INITIAL_HELPER" sha256 --file "$SCRIPT_DIR/release.sh")"
+	EXECUTING_ENGINE_HELPER_SHA256="$("$INITIAL_HELPER" sha256 --file "$INITIAL_HELPER")"
+	record release_engine_source_sha "$EXECUTING_ENGINE_SOURCE_SHA"
+	record release_engine_source_tree_sha "$EXECUTING_ENGINE_TREE_SHA"
+	record release_engine_script_sha256 "$EXECUTING_ENGINE_SCRIPT_SHA256"
 	cp "$INITIAL_HELPER" "${RELEASE_DIR}/release-helper.py"
 	chmod 700 "${RELEASE_DIR}/release-helper.py"
 	HELPER="${RELEASE_DIR}/release-helper.py"
+	record release_engine_helper_sha256 "$EXECUTING_ENGINE_HELPER_SHA256"
+	record release_engine_helper_snapshot before-candidate-checkout
 	record release_id "$RELEASE_ID"
 	record requested_tag "$TAG"
 	record started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

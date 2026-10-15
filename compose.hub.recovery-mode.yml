@@ -1,0 +1,8 @@
+# Scheduled jobs use the identities in the durable recovery-mode environment when present.
+services:
+  maintenance:
+    image: ${HUB_RECOVERY_BFF_IMAGE:-thelemartools-hub-bff}
+
+  backup:
+    image: ${HUB_RECOVERY_BACKUP_IMAGE:-thelemartools-hub-backup}
+    build: !reset null
