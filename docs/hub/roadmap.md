@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-10-14
+> **Last reviewed:** 2026-10-15
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -364,9 +364,18 @@ Implemented slice:
 - memory/PostgreSQL parity, authorization/idempotency/contention/event ordering, rendered UI, and real-stack
   coverage.
 
-Remaining T4 scope includes a unified first-class DM/party inventory experience and policy-complete
-capacity-warning/recovery UX across every future move and award path. The shipped character/stash transfer and DM
-award slices do not claim that broader experience is complete.
+The local B1/B2 candidate presents searchable authorized stash stacks, all denomination balances,
+informational shared weight and recent authorized inventory activity. DM/co-DM links focus the existing
+move, award and approval controls; players continue from owned Sheets and spectators remain read-only.
+One Sheet composer handles Deposit, approval-required Request and Pass, including currency-only commands.
+Independent review and full local qualification are complete. This candidate is not committed,
+published or deployed; [the exact-delta evidence](testing.md#b1b2-local-qualification--2026-10-15)
+retains the failed samples and subsequent clean run separately.
+
+Remaining T4 scope includes B3 award/stash extensions, [ADR 0021](adr/0021-opted-in-self-service-stash-withdrawals.md)
+self-service authority and the full B4 repeated-use/recovery acceptance gate. The workspace and composer
+do not complete policy/capacity UX for every future move or award, authorize a withdrawal, or establish
+physical acceptance. Existing campaign approval behavior stays unchanged.
 
 ### V2-T5 — whole-site campaign context per browser/device (**shipped**)
 

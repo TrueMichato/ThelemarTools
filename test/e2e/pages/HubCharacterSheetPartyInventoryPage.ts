@@ -335,6 +335,108 @@ export class HubCharacterSheetPartyInventoryPage {
 		await expect(this.root().locator("[data-party-inventory-live]")).toContainText("Request sent");
 	}
 
+	async requestStashItemDuringProjectionRevalidation ({
+		campaignId,
+		itemName,
+		quantity,
+		onProposalHeld,
+	}: {
+		campaignId: string;
+		itemName: string;
+		quantity: number;
+		onProposalHeld: () => Promise<void>;
+	}): Promise<void> {
+		await this.hub.waitForCharacterRealtimeLive();
+		await expect.poll(() => this.page.evaluate(() => {
+			const inventory = (globalThis as any).charSheet?._partyInventory;
+			return !!inventory?._hasTransferAuthority?.() && !inventory?._refreshPromise && !inventory?._isLoading;
+		})).toBe(true);
+		const events: string[] = [];
+		let holdSnapshots = false;
+		let heldSnapshotCount = 0;
+		let proposalCount = 0;
+		let resolutionCount = 0;
+		let transferId: string | null = null;
+		let releaseProposal: () => void = () => {};
+		const proposalRelease = new Promise<void>(resolve => releaseProposal = resolve);
+		let releaseSnapshots: () => void = () => {};
+		const snapshotsRelease = new Promise<void>(resolve => releaseSnapshots = resolve);
+		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
+		const snapshotMatcher = `**/api/campaigns/${campaignId}/snapshot`;
+		const onRequest = (request: Request) => {
+			if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/resolve")) resolutionCount++;
+		};
+		const transferHandler = async (route: Route) => {
+			if (route.request().method() !== "POST") return route.continue();
+			proposalCount++;
+			const response = await route.fetch();
+			expect(response.ok(), await response.text()).toBe(true);
+			transferId = (await response.json()).transfer.id;
+			events.push("proposal committed; response held");
+			await proposalRelease;
+			events.push("proposal acknowledgement released");
+			await route.fulfill({response});
+		};
+		const snapshotHandler = async (route: Route) => {
+			if (holdSnapshots) {
+				heldSnapshotCount++;
+				events.push("authorized snapshot read held");
+				await snapshotsRelease;
+			}
+			await route.continue();
+		};
+		await this.page.route(transferMatcher, transferHandler);
+		await this.page.route(snapshotMatcher, snapshotHandler);
+		this.page.on("request", onRequest);
+		let submission: Promise<Error | null> | null = null;
+		try {
+			submission = this.requestStashItem({itemName, quantity}).then(() => null, error => error);
+			await expect.poll(() => transferId).not.toBeNull();
+			holdSnapshots = true;
+			await onProposalHeld();
+			await expect.poll(() => heldSnapshotCount).toBeGreaterThan(0);
+			await expect.poll(() => this.page.evaluate(() => {
+				const inventory = (globalThis as any).charSheet?._partyInventory;
+				return {pending: inventory?._isAuthorityPending, role: inventory?._role, canTransfer: inventory?._hasTransferAuthority?.()};
+			})).toEqual({pending: true, role: "player", canTransfer: false});
+			events.push("projection authority pending; player role retained");
+			releaseProposal();
+			await expect.poll(() => this.page.evaluate(() =>
+				(globalThis as any).charSheet?._partyInventory?._draft?.transfer?.id)).toBe(transferId);
+			const error = await this.page.evaluate(() => (globalThis as any).charSheet?._partyInventory?._error);
+			expect(error || "").not.toContain("role is read-only");
+			holdSnapshots = false;
+			events.push("fresh authorized reads released");
+			releaseSnapshots();
+			const submissionError = await submission;
+			if (submissionError) throw submissionError;
+			expect(proposalCount, "Revalidation must not re-propose the acknowledged request").toBe(1);
+			expect(resolutionCount, "Revalidation must not accept the player's stash request").toBe(0);
+		} catch (error) {
+			const product = await this.page.evaluate(() => {
+				const inventory = (globalThis as any).charSheet?._partyInventory;
+				return {
+					role: inventory?._role,
+					pending: inventory?._isAuthorityPending,
+					isSubmitting: inventory?._isSubmitting,
+					transferStatus: inventory?._draft?.transfer?.status,
+					error: inventory?._error,
+					refreshFlags: inventory?._refreshFlags,
+					hasRefresh: !!inventory?._refreshPromise,
+				};
+			});
+			throw new Error(`${error instanceof Error ? error.message : error}\nControlled B2 authority interleaving: ${JSON.stringify({events, proposalCount, resolutionCount, heldSnapshotCount, product})}`);
+		} finally {
+			holdSnapshots = false;
+			releaseProposal();
+			releaseSnapshots();
+			await submission;
+			this.page.off("request", onRequest);
+			await this.page.unroute(transferMatcher, transferHandler);
+			await this.page.unroute(snapshotMatcher, snapshotHandler);
+		}
+	}
+
 	async expectStashQuantity ({itemName, quantity}: {itemName: string; quantity: number}): Promise<void> {
 		const row = this.root().getByRole("listitem").filter({hasText: itemName});
 		await expect(row).toContainText(itemName, {timeout: 15_000});

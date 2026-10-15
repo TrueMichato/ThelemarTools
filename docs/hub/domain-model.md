@@ -219,7 +219,7 @@ stateDiagram-v2
 `proposed` is persisted only for a player request from party inventory to that player's own character. The
 request stores normalized quantities and a server-derived preview, but the shared source remains untouched
 until a DM/co-DM accepts. Acceptance locks both participants, rechecks the live source, and transfers the
-fresh canonical escrow in one transaction. The unshipped GD-FIND-009 correction also terminalizes other
+fresh canonical escrow in one transaction. The GD-FIND-009 correction, deployed in r11f, also terminalizes other
 `proposed` requests from the same stash when the resulting source cannot fund them, with a
 `source_insufficient` cancellation reason and one targeted event per loser; direct DM stash moves and
 stash-backed awards use the same invariant. Requests that remain affordable stay proposed. An already

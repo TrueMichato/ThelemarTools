@@ -333,7 +333,7 @@ export class HubCampaignPage {
 			await this.page.context().setOffline(false);
 		}
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Back online · reload to refresh");
-		const reload = this.page.getByRole("button", {name: "Reload campaign"});
+		const reload = this.page.locator("#hub-error").getByRole("button", {name: "Reload campaign"});
 		await expect(reload).toBeVisible();
 		await reload.click();
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText(/(?:Campaign data|Live updates) connected/);
@@ -3488,6 +3488,163 @@ export class HubCampaignPage {
 		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/party-inventory`);
 		expect(response.ok()).toBe(true);
 		return (await response.json()).partyInventory;
+	}
+
+	async expectInventoryWorkspace ({
+		role, itemName, quantity, ownedNames = [], gold,
+	}: {
+		role: "dm" | "co_dm" | "player" | "spectator";
+		itemName?: string;
+		quantity?: number;
+		ownedNames?: string[];
+		gold?: number;
+	}): Promise<void> {
+		const root = this.page.locator("#campaign-inventory-workspace");
+		await expect(root).toBeVisible();
+		await expect(root).toHaveAttribute("aria-busy", "false");
+		await expect(root.locator("[data-inventory-status]")).toHaveText("Shared supplies are up to date.");
+		const actions = root.locator("[data-inventory-actions]");
+		if (role === "dm" || role === "co_dm") {
+			await expect(actions.getByRole("link", {name: "Move items or currency", exact: true})).toBeVisible();
+			await expect(actions.getByRole("link", {name: "Award items", exact: true})).toBeVisible();
+			await expect(actions.getByRole("link", {name: /Review transfers/})).toBeVisible();
+		} else {
+			await expect(actions.getByRole("link", {name: "Move items or currency", exact: true})).toHaveCount(0);
+			await expect(actions.getByRole("link", {name: "Award items", exact: true})).toHaveCount(0);
+			await expect(actions.getByRole("link")).toHaveCount(role === "player" ? ownedNames.length : 0);
+			for (const name of ownedNames) await expect(actions.getByRole("link", {name: `Open ${name} Sheet`, exact: true})).toBeVisible();
+		}
+		if (itemName && quantity != null) await expect(root.locator("[data-inventory-items] .hub-data-row", {hasText: itemName})).toContainText(`${quantity} × ${itemName}`);
+		if (gold != null) await expect(root.locator("[data-inventory-currency]")).toContainText(`${gold} GP`);
+		await expect(root).not.toContainText("Withdraw");
+	}
+
+	async moveInventoryWorkspaceItem ({
+		sourceName, targetName, itemName, quantity, currency = {},
+	}: {
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+		currency?: Partial<Record<"cp" | "sp" | "ep" | "gp" | "pp", number>>;
+	}): Promise<void> {
+		await this.page.locator("[data-inventory-actions]").getByRole("link", {name: "Move items or currency", exact: true}).click();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const option = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		await this.page.locator("#campaign-transfer-entry").selectOption(await option.getAttribute("value") || "");
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+		for (const type of ["cp", "sp", "ep", "gp", "pp"]) await this.page.locator(`#campaign-transfer-${type}`).fill(`${currency[type] || 0}`);
+		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
+	}
+
+	async expectInventoryWorkspaceDraftSurvives (trigger: () => Promise<void>): Promise<void> {
+		const search = this.page.locator("#campaign-inventory-search");
+		await search.fill("Rations");
+		await this.page.locator("[data-inventory-actions]").getByRole("link", {name: "Move items or currency", exact: true}).click();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: "Party inventory"});
+		const option = this.page.locator("#campaign-transfer-entry option", {hasText: "Rations"}).first();
+		await this.page.locator("#campaign-transfer-entry").selectOption(await option.getAttribute("value") || "");
+		await this.page.locator("#campaign-transfer-quantity").fill("2");
+		await this.page.locator("#campaign-transfer-gp").fill("3");
+		await this.page.locator("#campaign-transfer-quantity").focus();
+		await trigger();
+		await expect(this.page.locator("[data-inventory-items] .hub-data-row", {hasText: "Rations"})).toContainText("6 × Rations");
+		await expect(search).toHaveValue("Rations");
+		await expect(this.page.locator("#campaign-transfer-quantity")).toHaveValue("2");
+		await expect(this.page.locator("#campaign-transfer-gp")).toHaveValue("3");
+		await expect(this.page.locator("#campaign-transfer-quantity")).toBeFocused();
+	}
+
+	async approveInventoryWorkspaceRequest (characterName: string): Promise<void> {
+		await this.page.locator("[data-inventory-actions]").getByRole("link", {name: /Review transfers/}).click();
+		const request = this.page.locator("#campaign-pending-transfers .hub-data-row", {hasText: characterName});
+		await expect(request).toContainText("requests");
+		await expect(request).toContainText("DM approval");
+		await request.getByRole("button", {name: "Approve", exact: true}).click();
+		await expect(request).toHaveCount(0);
+	}
+
+	async openInventoryWorkspaceSheet (characterName: string): Promise<void> {
+		await this.page.locator("[data-inventory-actions]").getByRole("link", {name: `Open ${characterName} Sheet`, exact: true}).click();
+		await expect(this.page.locator("#charsheet-campaign")).toContainText("Online · changes sync to this campaign", {timeout: 30_000});
+	}
+
+	watchInventoryWorkspaceCharacterReads (): {paths: string[]; stop: () => void} {
+		const paths: string[] = [];
+		const listener = (request: Request) => {
+			const path = new URL(request.url()).pathname;
+			if (request.method() === "GET" && /^\/api\/characters\/[^/]+$/.test(path)) paths.push(path);
+		};
+		this.page.on("request", listener);
+		return {paths, stop: () => this.page.off("request", listener)};
+	}
+
+	async expectInventoryWorkspaceAccessLoss ({
+		campaignId, startRefresh, revokeAccess,
+	}: {
+		campaignId: string;
+		startRefresh: () => Promise<void>;
+		revokeAccess: () => Promise<void>;
+	}): Promise<void> {
+		const matcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let isHeld = false;
+		let isReleased = false;
+		let release = () => {};
+		const gate = new Promise<void>(resolve => release = resolve);
+		const holdRead = async (route: Route) => {
+			const response = await route.fetch();
+			isHeld = true;
+			await gate;
+			await route.fulfill({response}).catch(() => undefined);
+			isReleased = true;
+		};
+		await this.page.route(matcher, holdRead);
+		try {
+			await startRefresh();
+			await expect.poll(() => isHeld).toBe(true);
+			await revokeAccess();
+			await expect(this.page.locator("#campaign-content")).toBeHidden();
+			await expect(this.page.locator("#campaign-content")).toBeEmpty();
+			release();
+			await expect.poll(() => isReleased).toBe(true);
+			await expect(this.page.locator("body")).not.toContainText("Rations");
+			await expect(this.page.locator("[data-inventory-actions] a")).toHaveCount(0);
+		} finally {
+			release();
+			await this.page.unroute(matcher, holdRead);
+		}
+	}
+
+	async expectInventoryWorkspaceInitialReadRetry (campaignId: string): Promise<void> {
+		const matcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let shouldFail = true;
+		const mutations: string[] = [];
+		const onRequest = (request: Request) => {
+			const path = new URL(request.url()).pathname;
+			if (request.method() !== "GET" && /\/(?:transfers|item-awards)(?:\/|$)/.test(path)) mutations.push(path);
+		};
+		const failRead = (route: Route) => shouldFail
+			? route.fulfill({status: 503, contentType: "application/json", body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}})})
+			: route.continue();
+		this.page.on("request", onRequest);
+		await this.page.route(matcher, failRead);
+		try {
+			await this.gotoCampaign(campaignId);
+			await expect(this.page.locator("[data-inventory-status]")).toContainText("Shared supplies could not be loaded");
+			await expect(this.page.locator("[data-inventory-actions] a")).toHaveCount(0);
+			shouldFail = false;
+			await this.page.locator("[data-inventory-retry]").click();
+			await this.expectInventoryWorkspace({role: "dm", itemName: "Rations", quantity: 2});
+			await this.page.locator("[data-inventory-actions]").getByRole("link", {name: "Move items or currency", exact: true}).click();
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+			await expect(this.page.locator("#campaign-transfer-form-status")).not.toContainText("could not be loaded");
+			expect(mutations).toEqual([]);
+		} finally {
+			this.page.off("request", onRequest);
+			await this.page.unroute(matcher, failRead);
+		}
 	}
 
 	async moveCharacterItemToPartyViaApi ({

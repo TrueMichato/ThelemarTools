@@ -21,7 +21,7 @@ else arrives through the module graph, which is deliberate and budgeted — see 
 | DM workspaces | `hub-http-dm-workspace-repository.js`, `hub-dm-workspace-repository.js` |
 | Active campaign context | `hub-active-campaign-store.js`, `-record.js`, `-channel.js`, `-coordinator.js`, `-switcher.js`, `hub-campaign-context.js`, `hub-site-context.js`, `hub-surface-defaults.js`, `hub-route-policy.js` |
 | Rules, content, carry | `hub-campaign-rules.js`, `hub-campaign-rule-evaluator.js`, `hub-rules-policy-manager.js`, `hub-content-policy.js`, `hub-carry-authority.js`, `hub-carry-contract.js`, `hub-brew-context.js` |
-| Inventory and awards | `hub-inventory-contract.js`, `hub-inventory-equivalence.js`, `hub-item-award.js`, `hub-item-catalog.js`, `hub-source-costs.js` |
+| Inventory and awards | `hub-inventory-workspace.js`, `hub-inventory-contract.js`, `hub-inventory-equivalence.js`, `hub-item-award.js`, `hub-item-catalog.js`, `hub-source-costs.js` |
 | Semantic targeting | `hub-multi-target-operations.js`, `hub-healing-word-spells.js`, `hub-lay-on-hands.js`; shared Sheet source/incoming controllers |
 | Presentation | `hub-activity-render.js`, `hub-event-presentation.js`, `hub-effect-presentation.js`, `hub-character-view.js`, `hub-condition-catalog.js`, `hub-semantic-hp.js` |
 | Cross-tab and local bridging | `hub-broadcast-sync.js`, `hub-local-character-adapter.js`, `hub-roll-log-adapter.js`, `hub-auth-providers.js` |
@@ -40,6 +40,14 @@ Treat it as a standing design constraint rather than a backlog item. When you ad
 work out what the other entry path does and make any difference deliberate and explainable. The active-context
 modules (`hub-active-campaign-*`, `hub-site-context.js`, `hub-surface-defaults.js`, `hub-route-policy.js`) exist
 to give ordinary pages the same campaign awareness; use them rather than special-casing the campaign page.
+
+The B1 inventory workspace is a lazy, read-only presenter over existing authorized stash/roster/history
+reads, not another ledger or mutation controller. DM/co-DM entry links focus the existing workbench;
+players continue from owned Sheets and spectators have no mutation entry points. Nonterminal projection
+concealment clears authoritative rows/activity but retains the locally typed search query; terminal
+access loss clears both. Offline supplies remain labeled stale/read-only until explicit campaign reload.
+Activity is limited to already-authorized inventory events in the loaded history window. B1/B2 local
+qualification does not implement ADR 0021 self-service, publication or deployment.
 
 ## Contracts the UI must keep
 

@@ -520,6 +520,22 @@ A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cur
 
 ## Inventory Item Format
 
+### Campaign transfer composer
+
+`CharacterSheetPartyInventory._setDraftIntent()` resets editable Deposit/Request/Pass contents explicitly;
+`_getDraftValidation()` checks the current stack and each coin denomination without conversion.
+Ordinary refresh preserves raw drafts/focus; sent recovery retains the exact command even if its source
+stack has disappeared. Membership changes conceal shared details, while projection revalidation conceals
+peer labels and blocks submission. Confirmed outcomes remain distinct from failed balance refresh.
+Known terminal recovery bypasses expired-unknown-proposal delegation; fresh sends recheck connection
+readiness after the awaited source save, preserving an unsent draft rather than auto-sending it later.
+Positive ACKs during projection revalidation retain `draft.awaitingAuthorityRefresh` read-only demand.
+`_settleAcknowledgedAuthorityDraft()` closes only after fresh authorized status and successful serialized
+owner catch-up; role/scope/missing-status/unresolved-decision fences remain, with no new command sent.
+See `js/charactersheet/charactersheet-party-inventory.js` and
+[the component contract](../../../../docs/charactersheet/03-components-reference.md#charactersheetpartyinventory).
+This B2 source slice does not implement ADR 0021 self-service withdrawals.
+
 ### Items (`_data.inventory[]`)
 ```javascript
 {

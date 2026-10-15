@@ -68,7 +68,9 @@
 
 .charsheet__party-inventory-header-controls {
 	flex: 0 0 auto;
+	flex-wrap: wrap;
 	gap: var(--cs-space-sm);
+	max-width: 100%;
 }
 
 .charsheet__party-inventory-caption {
@@ -259,6 +261,26 @@
 	font-weight: var(--cs-weight-semibold);
 	letter-spacing: var(--cs-tracking-wide);
 	text-transform: uppercase;
+	min-width: 0;
+}
+
+.charsheet__party-inventory-currency {
+	grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+	margin-top: var(--cs-space-md);
+}
+
+.charsheet__party-inventory-outgoing {
+	margin-top: var(--cs-space-lg);
+}
+
+.charsheet__party-inventory-outgoing h5 {
+	margin: 0 0 var(--cs-space-sm);
+	color: var(--cs-text-primary);
+	font-size: var(--cs-text-sm);
+}
+
+.charsheet__party-inventory-outgoing button {
+	margin-top: var(--cs-space-sm);
 }
 
 .charsheet__party-inventory-fixed-destination strong {
@@ -350,21 +372,15 @@
 	}
 }
 
-/* Advisory carry impact of a proposed transfer. Never a blocker: encumbrance is not an
-   enforced rule, and refusing a transfer on weight would let a rejection disclose a peer's
-   hidden load. */
+/* Advisory carry impact never substitutes for server authority or infers a peer's hidden load. */
 .charsheet__party-inventory-carry-delta {
-	margin: 0.35rem 0 0;
-	font-size: 0.85em;
-	opacity: 0.85;
+	margin: var(--cs-space-sm) 0 0;
+	color: var(--cs-text-secondary);
+	font-size: var(--cs-text-sm);
+	line-height: var(--cs-leading-normal);
 }
 
 .charsheet__party-inventory-carry-delta--warn {
-	color: #c0392b;
-	opacity: 1;
-	font-weight: 600;
-}
-
-.night-mode .charsheet__party-inventory-carry-delta--warn {
-	color: #ff8a80;
+	color: var(--cs-warning-text);
+	font-weight: var(--cs-weight-semibold);
 }

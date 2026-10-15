@@ -2,6 +2,44 @@
 
 This document provides a detailed reference for each component in the character sheet system.
 
+## CharacterSheetPartyInventory
+
+**File:** `js/charactersheet/charactersheet-party-inventory.js`
+
+An owned campaign Sheet uses one composer for Deposit, approval-required Request, and Pass.
+The item picker supports safe partial stacks or a currency-only command; CP/SP/EP/GP/PP remain
+separate denominations without conversion. A player Request always targets the open owned character.
+Existing direct DM/co-DM and same-owner moves retain server-derived authority; selecting an intent
+does not grant direct withdrawal permission. Local, signed-out, detached and non-owner Sheets do not
+activate this integration.
+
+`_setDraftIntent()` explicitly resets the previous source, recipient and quantities. Ordinary
+authoritative refresh retains editable raw values and focus instead of silently clamping quantities
+or choosing a replacement recipient. Changed item metadata requires explicit reselection. Carry
+previews use current authorized profiles and preserve lower-bound/unavailable states; they never
+infer a peer's hidden capacity or allocate shared stash weight to a character.
+
+Sent commands retain their exact body, rules pin and idempotency identity. Pending outgoing
+rows reuse the authorized transfer listing and existing cancellation/recovery handler. A confirmed
+commit or cancellation remains confirmed if balance refresh fails; retrying that refresh reads
+authority rather than issuing another transfer. A known terminal transfer remains recoverable after
+its proposal replay deadline; proposal-expiry delegation applies only while transfer identity is unknown.
+Fresh commands recheck connection readiness after the awaited source save and remain unsent until
+another explicit submission if transport becomes unavailable or reconnecting. Terminal changes schedule owner catch-up through
+the serialized repository path. Projection revalidation conceals peer labels and blocks submission;
+membership/scope changes conceal shared details and discard editable drafts. Existing Share...
+focus/scroll/announcement, return focus and incoming Accept/Reject notice remain available.
+
+If a positive proposal acknowledgement arrives during projection revalidation, the controller retains
+only same-draft read/settlement demand in `awaitingAuthorityRefresh`. Fresh authorized transfer/stash
+reads and successful serialized owner catch-up must finish before the acknowledged composer closes.
+Failed reads keep that demand for a later refresh; missing exact status, actual role loss, scope changes
+and unresolved decisions block settlement. No automatic proposal, acceptance or save is introduced.
+Temporary revalidation is explained as an authority check, not falsely reported as a role demotion.
+
+These are local B2 source changes, not a deployed or physically accepted inventory release.
+See the [Hub transfer contract](../hub/api-reference.md#party-inventory-and-transfer-routes).
+
 ## CharacterSheetRollHistory
 
 **File:** `js/charactersheet/charactersheet-rollhistory.js`

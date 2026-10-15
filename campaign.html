@@ -178,6 +178,7 @@
 						<section class="hub-rail-section">
 							<h3 class="hub-rail-section__title">Party inventory</h3>
 							<p id="campaign-party-inventory-status" class="hub-rail-section__description">Loading shared supplies...</p>
+							<a class="hub-button" href="#campaign-inventory-workspace">Open shared supplies</a>
 						</section>
 						<section class="hub-rail-section">
 							<h3 class="hub-rail-section__title">Setup health</h3>
@@ -198,6 +199,37 @@
 						</section>
 					</aside>
 				</div>
+
+				<section id="campaign-inventory-workspace" class="hub-campaign-section hub-inventory" aria-labelledby="campaign-inventory-title" aria-busy="true">
+					<div class="hub-section-heading">
+						<div>
+							<h3 id="campaign-inventory-title" class="hub-campaign-section__title">Party inventory &amp; awards</h3>
+							<p data-inventory-guidance class="hub-campaign-section__description">Shared supplies and authorized inventory actions for this campaign.</p>
+						</div>
+					</div>
+					<div data-inventory-actions class="hub-button-row hub-inventory__actions"></div>
+					<div class="hub-inventory__state">
+						<p data-inventory-status class="hub-inline-status" role="status" aria-live="polite">Loading shared supplies...</p>
+						<button data-inventory-retry class="hub-button" type="button" hidden>Retry shared supplies</button>
+					</div>
+					<div class="hub-inventory__columns">
+						<div class="hub-inventory__supplies">
+							<label class="hub-label" for="campaign-inventory-search">Find shared items</label>
+							<input id="campaign-inventory-search" class="hub-input" type="search" autocomplete="off" placeholder="Item name or source">
+							<ul data-inventory-items class="hub-data-list hub-data-list--flush hub-inventory__items" aria-label="Shared item stacks" tabindex="0"></ul>
+							<p data-inventory-empty class="hub-empty hub-empty--compact" hidden></p>
+							<h4 class="hub-subheading">Shared currency</h4>
+							<div data-inventory-currency class="hub-inventory__currency" aria-label="Shared currency balances"></div>
+							<p data-inventory-weight class="hub-form-hint"></p>
+						</div>
+						<div class="hub-inventory__recent">
+							<h4 class="hub-subheading">Recent inventory activity</h4>
+							<p class="hub-form-hint">Up to five authorized changes from the loaded activity window. Other members' private transfers stay private.</p>
+							<div data-inventory-activity class="hub-activity-list"></div>
+							<p data-inventory-activity-empty class="hub-empty hub-empty--compact">No inventory activity is visible in this window.</p>
+						</div>
+					</div>
+				</section>
 
 				<section id="campaign-activity-panel" class="hub-campaign-section">
 					<div class="hub-section-heading">

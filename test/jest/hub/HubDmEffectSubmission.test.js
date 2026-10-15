@@ -57,6 +57,7 @@ function createSubmission ({refreshError = null, changed = true, isRefreshCurren
 		}),
 		deferMutationUi: jest.fn(),
 		concealCampaignAuthorization: jest.fn(conceal),
+		concealInventoryAuthorization: jest.fn(conceal),
 		showSignedOutAfterSessionExpiry: jest.fn(conceal),
 		stopCampaignLiveUpdates: jest.fn(),
 		renderError: jest.fn(),
@@ -88,6 +89,7 @@ describe("Campaign DM effect post-commit refresh", () => {
 			const fixture = createSubmission({refreshError: error});
 			await fixture.submit();
 			expect(fixture.context.api.pCreateStructuredAction).toHaveBeenCalledTimes(1);
+			expect(fixture.context.concealInventoryAuthorization).toHaveBeenCalledTimes(code === "AUTH_REQUIRED" ? 1 : 0);
 			expect(fixture.context.stopCampaignLiveUpdates).toHaveBeenCalledTimes(1);
 			expect(fixture.context.renderError).toHaveBeenCalledWith(error, {isAuthorizationHandled: true});
 			expect(fixture.isPrivateVisible()).toBe(false);

@@ -190,6 +190,22 @@ describe("campaign hub pages", () => {
 		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
 	});
 
+	it("extends shared inventory through a lazy role-adaptive read workspace, not new authority", () => {
+		const source = read("js/hub/hub-page.js");
+		const workspace = read("js/hub/hub-inventory-workspace.js");
+		for (const id of ["campaign-inventory-workspace", "campaign-inventory-search"]) expect(campaignHtml).toContain(`id="${id}"`);
+		expect(source).toContain(`import("./hub-inventory-workspace.js")`);
+		expect(source).toContain("campaignInventoryWorkspace?.replace({partyInventory, characters})");
+		expect(source).toContain("campaignInventoryWorkspace?.conceal({isTerminal: true})");
+		expect(source).toContain("campaignInventoryWorkspace?.conceal()");
+		expect(source).toContain("if (!fnIsCurrentAtAdmission()) return {pendingTransferIds: [], isFenced: true}");
+		expect(workspace).toContain("getInventoryWeightSummary");
+		expect(workspace).toContain("renderHubActivityRows");
+		for (const forbidden of ["pGetCharacter", "pProposeTransfer", "pResolveTransfer", "pAwardItems", "innerHTML", "Withdraw"]) expect(workspace).not.toContain(forbidden);
+		expect(workspace).toContain("campaign.status === \"active\"");
+		expect(workspace).toContain("getProjectionOwnerAccountId(character) === accountId");
+		expect(workspace).toContain("[\"dm\", \"co_dm\"].includes(campaign.role)");
+	});
 	it("keeps transfer submission recoverable after a successful mutation outlives its refresh", () => {
 		const source = read("js/hub/hub-page.js");
 		expect(source).toContain("HubTransferProposalDrafts");
@@ -432,9 +448,10 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/pRefreshLiveViews = async \(\) => \{[\s\S]*fillCharacterSelect\([\s\S]*"campaign-action-target"[\s\S]*setFormAvailability\(\{[\s\S]*formId: "campaign-action-form"/);
 		expect(source).toContain("Effect recorded; the character was already in that state.");
 		expect(source).toContain("const handleCampaignAuthorizationError = error =>");
-		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{\s*stopCampaignLiveUpdates\(\);\s*showSignedOutAfterSessionExpiry\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);\s*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
+		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{\s*concealInventoryAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*showSignedOutAfterSessionExpiry\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);\s*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
 		const sessionExpiryBranch = source.match(/if \(error.code === "AUTH_REQUIRED"\) \{([\s\S]*?)\n\t\t\}/)?.[1];
 		expect(sessionExpiryBranch).toBeDefined();
+		expect(sessionExpiryBranch).toContain("concealInventoryAuthorization()");
 		expect(sessionExpiryBranch).not.toContain("concealCampaignAuthorization()");
 		expect(source.match(/showSignedOutAfterSessionExpiry\(\)/g)).toHaveLength(1);
 		expect(source).toContain("isPreserveSelection: true");

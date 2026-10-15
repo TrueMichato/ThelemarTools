@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last updated:** 2026-10-14
+> **Last updated:** 2026-10-15
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -19,6 +19,7 @@
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
 | Integration seams | `CharacterSheetRealtime.test.js`, `CharacterSheetHubTeardown.test.js`, `CharacterSheetCampaign.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, archive/move/demotion concealment, character-scoped sharing refresh, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
+| B1/B2 inventory workspace/composer | `inventory-workspace-dom.spec.ts`, `inventory-workspace.spec.ts`, `CharacterSheetPartyInventory.test.js`, `CharacterSheetTransferCarryDelta.test.js`, existing inventory/recovery journeys | Role-adaptive entry points, safe stash text, raw draft/focus preservation, explicit denomination/intent validation, default approval custody, authoritative replacement, confirmed-vs-refresh-failed recovery, no hidden convenience reads and access-loss fences |
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
 | Multi-target Wave A0/A3 contract | `HubMultiTargetOperationAdr.test.js`, `HubMultiTargetOperations*.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0011 authority after A2's migration 0010, additive migration-0012 owner-recovery index, fixed-set/response/finalization/leg constraints, participant recovery, privacy, event sequence, hazards, fairness, and A1-A5 handoff |
@@ -56,6 +57,101 @@ confirmed commit remains visible when refresh fails, then recovers by reads with
 The existing real-stack inventory and refresh-recovery journeys assert known terminal feedback plus a failed
 refresh notice, no false "up to date" claim, and one resolution command through the successful refresh retry.
 The `HubPerformanceBudget` gate still enforces the original signed-out 16-module ceiling.
+
+The local B1/B2 candidate uses real Chromium DOM tests for workspace role states, keyboard scrolling,
+mobile/day-night reflow and draft/focus retention, plus independent DM/player/spectator contexts on
+the disposable PostgreSQL stack. The new workspace stack journey retains complete item metadata and
+repeated item/currency moves, checks approval-required owned-Sheet requests, holds an authorized stash
+read through member removal and proves an initial read retry sends no mutation.
+
+The first combined stack passed all 372 runtime-role PostgreSQL checks and 20 of 21 browser tests,
+then failed the new ordinary-invalidation search-draft assertion. Nonterminal concealment cleared
+the local search query even though only authoritative rows/activity needed concealing. The bounded
+correction retains that local query during same-scope revalidation and still clears it on terminal
+access loss; the original failing sample is retained. That first run is not reported as a PASS.
+The initial full Hub run also exposed a VM fixture missing the new inventory-concealment binding;
+the corrected fixture preserves its assertions and additionally checks the exact AUTH_REQUIRED call.
+These initial results remain separate from the later independent closure and final qualification below.
+
+Independent B1/B2 review subsequently found two Sheet counterexamples: expired retained proposal
+evidence recursively delegated between submit/cancel for a known terminal transfer, and transport
+loss during the awaited source save still allowed a fresh proposal. Four real-handler regressions
+reproduced both failures. The fixes bound terminal status/balance recovery and recheck connection
+readiness immediately before freezing a fresh request. Isolated copied-source controls pass; removing
+either actual callsite guard restores its two failures without modifying the reviewed working tree.
+The retained reviewer independently closed both fixes and the search-query correction.
+
+The first complete canonical run then passed 372 PostgreSQL checks and 74 of 75 browser tests,
+with no retries. The remaining lifecycle failure was a strict locator ambiguity: the global and
+new inventory workspace both legitimately offer **Reload campaign**. The page object now scopes the
+existing role/name visibility assertion and click to the global error surface; it does not select an
+arbitrary first match, relax the assertion or increase a timeout. That failed sample is retained
+separately from later lifecycle and complete-suite evidence.
+
+The scoped reconnect-selector correction passed the complete private-V1 lifecycle. The next
+canonical run passed 372 PostgreSQL checks and 74 of 75 browser tests, but exposed a different
+cross-device Sheet failure: an active player's request existed on the DM view while the owner
+composer remained open with a read-only-role message. The existing closed-composer assertion
+was not relaxed and the sample is retained. A controlled real-stack red reproduced a compatible
+interleaving: the request POST committed, a separate DM operation emitted a real projection invalidation,
+the authorized snapshot GET was held, and the HTTP ACK arrived while the controller still had role
+`player` but pending authority. This establishes the defect without claiming to reconstruct the
+unrecorded original timing.
+
+The bounded correction retains positive-ACK read/settlement demand until current authorized
+transfer/stash reads and serialized owner catch-up succeed. It never resends the proposal or adds
+an acceptance. Failed reads retain demand; actual role loss, missing exact status, unresolved decisions
+and detach fence settlement. Five unit regressions and two isolated callsite mutants cover the ACK
+barrier and later successful read drain; the existing three-journey Sheet inventory spec passes with
+the controlled real invalidation/ACK ordering and original assertions/budgets. The retained reviewer
+closed the four-file delta. Earlier 74/75 full runs remain failed evidence; the subsequent complete
+qualification is recorded below.
+
+### B1/B2 local qualification — 2026-10-15
+
+Source is the **uncommitted** B1/B2 delta on `multiplayer-hub` at base
+`25df6289ce2d08d090bfa5f664755202af6dd636`, not a newly committed release.
+The independently closed 15-file code/test/style manifest has SHA-256
+`b44e22fa0a206fbf7ac9625b020c8a855e231464718e3b962cd95d02dad96be6`.
+Those bytes remained frozen through final gates. Documentation updates are separate from that runtime manifest.
+
+| Gate | Newly executed final result |
+|---|---|
+| `npm run test:hub -- --runInBand --silent` | 122 suites / 2,021 passed; 7 suites / 285 optional PostgreSQL checks skipped, not credited as passes |
+| Affected Sheet seams plus composer/carry, DM-effect and documentation suites (command below) | 13 suites / 476 passed |
+| `npm run test:hub:e2e:stack` | 9 suites / 372 checks in the runtime-role PostgreSQL phase, including selected Memory/PostgreSQL authority coverage; all 75 browser tests passed in 8.8 minutes, with no retries, skips or flaky cases |
+| Focused JavaScript/CSS lint | Changed Hub and Sheet JavaScript/Jest files, `scss/hub.scss` and `css/charactersheet-party-inventory.css` passed |
+| Independent correctness closure | Original expiry/offline counterexamples, nonterminal query retention, scoped reconnect selector and the controlled positive-ACK settlement delta closed; review itself ran no tests |
+
+The exact affected-seam command was:
+
+```bash
+npm run test:unit -- \
+  test/jest/charactersheet/CharacterSheetPersistenceBackend.test.js \
+  test/jest/charactersheet/CharacterSheetRepositorySeam.test.js \
+  test/jest/charactersheet/CharacterSheetCampaignRules.test.js \
+  test/jest/charactersheet/CharacterSheetHubTeardown.test.js \
+  test/jest/charactersheet/CharacterSheetRollHistory.test.js \
+  test/jest/charactersheet/CharacterSheetHubRollHistory.test.js \
+  test/jest/charactersheet/CharacterSheetRealtime.test.js \
+  test/jest/charactersheet/CharacterSheetMagicItemCategorization.test.js \
+  test/jest/charactersheet/CharacterSheetItemRepairLoadOrder.test.js \
+  test/jest/charactersheet/CharacterSheetPartyInventory.test.js \
+  test/jest/charactersheet/CharacterSheetTransferCarryDelta.test.js \
+  test/jest/hub/HubDmEffectSubmission.test.js \
+  test/jest/hub/HubDocumentationContract.test.js \
+  --runInBand --no-coverage --forceExit --silent
+```
+
+Final disposable run `97433-39438dd6` emitted its cleanup-complete notice. A separate resource check found
+that this task's seven runs had each left an unused `hub-backups` volume; their exact project labels and
+zero container references were verified, then only those seven named disposable volumes were removed.
+No production/shared resource was touched, and the notices alone are not proof of complete volume cleanup.
+The controlled red samples,
+isolated callsite controls, raw logs and desktop/mobile day/night screenshots are retained privately.
+Jest's configured force-exit warnings remain; this is not a universal open-handle cleanup claim.
+Counts overlap between commands and are not an aggregate unique-test total. No remote CI, commit,
+publication, deployment, campaign opt-in, private-launch GO or physical/OAuth/device acceptance is implied.
 
 The A4 journey uses the existing disposable real-PG harness, five synthetic account profiles (source, two target
 owners, unrelated player, DM), and two identically named characters for one owner. It starts capability-disabled,

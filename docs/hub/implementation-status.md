@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-10-14
+> **Last updated:** 2026-10-15
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -18,8 +18,12 @@ preserving drafts, focus, both entry paths and saved peer projections. Combined 
 the follow-up was published as `339ddf24c39317312a6ae8eb91408ae7f942cf0d`. It is not deployed and does not
 change #289's PR state. The commit also bounds completed hook Jest runs with `--forceExit`, preserving test
 selection and failing exit statuses after an observed open-handle pre-commit hang.
-Wave B has started with shared transfer status wording and truthful terminal-outcome/failed-refresh recovery;
-its role-adaptive workspace, unified composer and award/stash work remain pending. Wave D remains unstarted.
+Wave B's B0 shared transfer wording and truthful terminal-outcome/failed-refresh recovery are published.
+The local B1/B2 candidate adds a role-adaptive Hub workspace and one owned-Sheet composer over the existing
+ledger and approval rules. Independent correctness review and complete local qualification are finished,
+including controlled acknowledgement/revalidation recovery. It has not been
+committed, published or deployed. B3 atomic award/stash extensions, ADR 0021 self-service authority and broader
+B4 completion remain pending. Wave D remains unstarted.
 B0 was published as `32e876239`; its four-job CI passed with 57 first-attempt browser passes and one Lay on
 Hands acquisition retry, not 58 clean first attempts. The retained failure led to a separately reproduced
 focused-name draft-loss bug: a late render erased the edit before blur could save. Source fix `54cc1fa37`
@@ -27,6 +31,13 @@ preserves that exact character/load-scoped draft; its real acquisition regressio
 pass without retry. Exact-published-head verification remains separate from this local evidence.
 New gameplay is not deployed or enabled: A7 must separately qualify
 migrations 0010-0014, the index-build window, rollback, exact release and campaign enrollment.
+
+B1/B2 qualification is against the uncommitted delta on
+`25df6289ce2d08d090bfa5f664755202af6dd636`, not a new release SHA. The independently reviewed 15-file
+code/test/style manifest is `b44e22fa0a206fbf7ac9625b020c8a855e231464718e3b962cd95d02dad96be6`.
+The final canonical stack passed its 372-check runtime-role phase and all 75 browser tests without retries;
+full Hub and affected Sheet seam evidence is recorded in [testing](testing.md#b1b2-local-qualification--2026-10-15).
+Earlier failed samples remain separate, and this is not remote CI or physical acceptance.
 
 The reviewed **A4 workflow** extends the existing shared Character Sheet source-targeting and incoming-effects
 controllers with fixed-set multi-target collection, independent per-character consent, deselectable source-owned
@@ -295,22 +306,22 @@ An unshipped GD-FIND-003 correction preserves an expanded peer shared-profile di
 across ordinary realtime roster refetches. Authorization invalidation still clears the roster before a new
 projection is shown. This local change is **not** part of the deployed r11e image or physical evidence.
 
-An unshipped GD-FIND-006 Character Sheet improvement makes inventory **Share...** reveal the next
+A GD-FIND-006 Character Sheet improvement, deployed in r11f, makes inventory **Share...** reveal the next
 Quantity/Destination step by focusing and scrolling to its composer. A live announcement explains that
 nothing has moved until confirmation; Cancel restores focus to Share. This does not alter transfer authority
-or the deployed r11e inventory experience.
+or other transfer authority.
 
-An unshipped GD-FIND-007 correction adds an owner-only incoming transfer notice and Accept/Reject controls
+A GD-FIND-007 correction, deployed in r11f, adds an owner-only incoming transfer notice and Accept/Reject controls
 to the open Character Sheet, backed by the existing authorization-scoped transfer list and resolution API.
 The notice refetches on realtime/reconnect, fails closed on incomplete transfer status, conceals stale
 source details before projection/membership revalidation, and fences decisions when the sheet detaches.
-The deployed r11e Sheet does not yet include this recipient workflow.
+The deployed r11f Sheet includes this recipient workflow; the later B0 wording/recovery follow-up is not deployed.
 
-An unshipped GD-FIND-009 correction cancels pending stash requests that become definitively unfundable
+A GD-FIND-009 correction, deployed in r11f, cancels pending stash requests that become definitively unfundable
 when another request, direct DM stash move, or stash-backed award consumes the source. Memory/PostgreSQL
 authority records one bounded cancellation reason, audit and audience-scoped event per loser in the
 winning transaction; affordable requests remain pending. Open losing-player Sheets announce the terminal
-outcome instead of leaving an actionable stale draft. This candidate is not deployed on r11e.
+outcome instead of leaving an actionable stale draft. Later inventory workspace work does not change this authority.
 
 - Lifecycle includes invite list/revoke, owner role changes, owner/co-DM member removal, voluntary leave,
   session/device revocation, immediate socket closure, workspace archive/restore, character detachment,

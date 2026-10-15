@@ -534,13 +534,13 @@ reservation exists. Other character-source commands remove the requested value i
 the source exactly once. A player party-source command is allowed only when the destination is that player's own
 character. It stores a server-derived metadata preview and normalized request as `proposed` but does not debit or
 reserve the stash. DM/co-DM acceptance rechecks the live stack and atomically removes its current canonical
-metadata and writes it to the character. On the current unshipped GD-FIND-009 candidate, any same-stash
+metadata and writes it to the character. The r11f GD-FIND-009 correction makes any same-stash
 `proposed` requests made definitively insufficient by that debit become terminal `cancelled` with bounded
 `payload.cancellationReason: "source_insufficient"` in the same transaction, with a targeted event and audit
 per loser. The same check follows direct DM stash moves and stash-backed awards; still-affordable requests
 remain proposed. No escrow exists for a proposed loser, so nothing is restored; a later attempt to approve
 one returns `TRANSFER_NOT_FOUND`. A newly requested unfunded transfer still fails with
-`TRANSFER_INSUFFICIENT` without committing a row. This candidate is not deployed in r11e.
+`TRANSFER_INSUFFICIENT` without committing a row. This correction is deployed in r11f.
 Reusing an idempotency key with the same command replays its stored result rather than repeating either mutation.
 Transfer mutation responses and their replay receipts use the same viewer projection as the transfer collection:
 DM/co-DM viewers receive the full authority record, while non-DM viewers receive only owned character endpoint
@@ -598,6 +598,19 @@ direct-authority wording and treats `committed` proposal responses as complete. 
 authority or applies an inventory mutation to either document. Character updates are adopted through the HTTP
 character repository's authoritative reconciliation queue. Local, signed-out, detached, and non-owner sheets do
 not activate this integration.
+
+The local B1 workspace reuses these reads and commands; it adds no route, capability, policy or event
+audience. Searchable shared stacks, denomination balances and informational shared item weight are
+read-only presentation. DM/co-DM entry points focus existing move/award/approval controls; player entry
+points open owned Sheets. The incumbent workbench transfer composer remains available for compatibility.
+Recent inventory activity includes only already-authorized transfer/item-grant events from the loaded
+history window, not a new campaign-wide withdrawal log.
+
+The local B2 Sheet composer keeps Deposit/Request/Pass intent explicit and supports items plus
+CP/SP/EP/GP/PP or currency alone. Changing editable intent resets its contents; ordinary refresh retains
+raw quantities and focus rather than silently choosing another recipient or clamping unavailable stock.
+Confirmed outcomes and failed balance refresh are separate claims. These UI changes do not implement
+[ADR 0021](adr/0021-opted-in-self-service-stash-withdrawals.md), change approval custody, or imply deployment.
 
 ## Campaign content routes
 

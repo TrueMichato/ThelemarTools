@@ -68,6 +68,7 @@ const pendingIdentityLinks = new Map();
 const pendingIdentityUnlinks = new Map();
 const profileDisclosureCharacterIds = new WeakMap();
 let campaignAuthorizationErrorHandler = null;
+let campaignInventoryWorkspace = null;
 
 function getAwardDraftStorageKey ({accountId, campaignId}) {
 	return `hub-item-award-draft:${accountId}:${campaignId}`;
@@ -166,7 +167,7 @@ function showSignedOutAfterSessionExpiry () {
 	const title = signedOut?.querySelector(".hub-state__title");
 	const description = signedOut?.querySelector(".hub-state__description");
 	if (title) title.textContent = "Session expired";
-	if (description) description.textContent = "Sign in again to reconnect. Your last loaded campaign remains available read only.";
+	if (description) description.textContent = "Sign in again to reconnect. Inventory details are concealed; the rest of your last loaded campaign remains available read only.";
 	void pRenderSignedOutProviders().catch(error => renderError(error));
 }
 
@@ -431,10 +432,12 @@ function initCampaignNetworkAwareness () {
 	if (document.body.dataset.hubView !== "campaign") return;
 	window.addEventListener("offline", () => {
 		isCampaignReloadRequired = true;
+		campaignInventoryWorkspace?.setOnline(false);
 		setCampaignConnectionStatus({label: "Offline · shown data may be stale", state: "offline"});
 		renderError("You are offline. The campaign data already on screen is retained, but changes cannot be saved until the connection returns.");
 	});
 	window.addEventListener("online", () => {
+		campaignInventoryWorkspace?.setOnline(true);
 		setCampaignConnectionStatus({label: "Back online · reload to refresh", state: "warning"});
 		renderError("The connection is back. Reload the campaign before making changes so you have the latest data.", {
 			actionLabel: "Reload campaign",
@@ -605,7 +608,10 @@ function setTransferProposalControls ({form, proposalRequest, characters, partyI
 		for (const [control, wasDisabled] of form._hubTransferControlStates) control.disabled = wasDisabled;
 		form._hubTransferControlStates.clear();
 		const latestState = form._hubTransferLatestState;
-		if (latestState) syncTransferItemPicker(latestState);
+		if (latestState) {
+			syncTransferItemPicker(latestState);
+			delete form._hubTransferLatestState;
+		}
 		return;
 	}
 	form._hubTransferLatestState = {characters, partyInventory};
@@ -2120,11 +2126,12 @@ async function pInitCampaign ({session}) {
 	// An archived campaign still renders read-only, but never becomes the active selection.
 	await activeCampaign.adoptVerified({session, campaign});
 	await pRenderActiveCampaignSwitcher();
-	const [members, characters, snapshot, inventoryContract] = await Promise.all([
+	const [members, characters, snapshot, inventoryContract, inventoryWorkspaceModule] = await Promise.all([
 		api.pListMembers({campaignId}),
 		api.pListCharacters({campaignId}),
 		api.pGetCampaignSnapshot({campaignId}),
 		import("./hub-inventory-contract.js"),
+		import("./hub-inventory-workspace.js"),
 	]);
 	const [contextInitial, eventPage] = await Promise.all([
 		api.pGetCampaignContext({campaignId}),
@@ -2174,6 +2181,24 @@ async function pInitCampaign ({session}) {
 	renderCampaignContext(context);
 	applyCampaignRoleLayout({campaign, characters});
 	initCampaignWorkbenchLinks();
+	campaignInventoryWorkspace = inventoryWorkspaceModule.createHubInventoryWorkspace({
+		root: document.getElementById("campaign-inventory-workspace"),
+		campaign,
+		accountId: session.account.id,
+		pRefresh: async () => {
+			if (campaign.status === "active") return pRefreshLiveViews();
+			const generation = projectionAuthorizationGeneration;
+			try {
+				const partyInventory = await api.pGetPartyInventory({campaignId});
+				if (isCampaignReloadRequired || generation !== projectionAuthorizationGeneration) return;
+				campaignInventoryWorkspace?.replace({partyInventory, characters: []});
+			} catch (error) {
+				if (generation !== projectionAuthorizationGeneration) return;
+				if (!handleCampaignAuthorizationError(error)) campaignInventoryWorkspace?.setError();
+			}
+		},
+	});
+	campaignInventoryWorkspace?.setActivity({events, characters: snapshot.characters, members});
 	let liveEvents = events;
 	let activityHistory = eventPage.history;
 	let liveMembers = members;
@@ -2207,6 +2232,8 @@ async function pInitCampaign ({session}) {
 		});
 	};
 	const concealCampaignAuthorization = ({isLoading = false} = {}) => {
+		projectionAuthorizationGeneration++;
+		campaignInventoryWorkspace?.conceal({isTerminal: true});
 		concealActivityAuthorization({isLoading});
 		liveRoster = [];
 		context = null;
@@ -2223,6 +2250,7 @@ async function pInitCampaign ({session}) {
 	};
 	const concealCampaignProjectionAuthorization = () => {
 		projectionAuthorizationGeneration++;
+		campaignInventoryWorkspace?.conceal();
 		concealActivityAuthorization({isLoading: true});
 		liveRoster = [];
 		captureCampaignTransferDraft();
@@ -2273,11 +2301,22 @@ async function pInitCampaign ({session}) {
 		}
 		realtime.close();
 	};
+	const concealInventoryAuthorization = () => {
+		projectionAuthorizationGeneration++;
+		campaignInventoryWorkspace?.conceal({isTerminal: true});
+		concealActivityAuthorization();
+		for (const id of ["campaign-pending-transfers", "campaign-transfer-form", "campaign-item-form"]) {
+			document.getElementById(id)?.replaceChildren();
+		}
+		const partyStatus = document.getElementById("campaign-party-inventory-status");
+		if (partyStatus) partyStatus.textContent = "Sign in again to view shared supplies.";
+	};
 	const handleCampaignAuthorizationError = error => {
 		if (!(error instanceof HubApiError)) return false;
 		if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error.code)) return false;
 		isCampaignReloadRequired = true;
 		if (error.code === "AUTH_REQUIRED") {
+			concealInventoryAuthorization();
 			stopCampaignLiveUpdates();
 			showSignedOutAfterSessionExpiry();
 			renderError(error, {isAuthorizationHandled: true});
@@ -2324,6 +2363,12 @@ async function pInitCampaign ({session}) {
 		setHidden(document.getElementById("campaign-jump-transfer"), true);
 		const partyStatus = document.getElementById("campaign-party-inventory-status");
 		if (partyStatus) partyStatus.textContent = "Shared inventory is read-only while this campaign is archived.";
+		try {
+			const archivedPartyInventory = await api.pGetPartyInventory({campaignId});
+			campaignInventoryWorkspace?.replace({partyInventory: archivedPartyInventory, characters: []});
+		} catch (error) {
+			if (!handleCampaignAuthorizationError(error)) campaignInventoryWorkspace?.setError();
+		}
 		setCampaignConnectionStatus({label: "Archived · read only", state: "neutral"});
 		setHidden(document.getElementById("campaign-loading"), true);
 		setHidden(document.getElementById("campaign-content"), false);
@@ -3000,6 +3045,7 @@ function renderRecentActivity ({
 }) {
 	const list = document.getElementById("campaign-activity-list");
 	if (!list) return;
+	campaignInventoryWorkspace?.setActivity({events, characters, members});
 	const rows = renderHubActivityRows({
 		list,
 		events,
@@ -3162,6 +3208,7 @@ async function renderPendingTransfers ({
 	delete list._hubTransferInboxRecovery;
 	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 	const pendingTransferIds = pending.map(transfer => transfer.id);
+	campaignInventoryWorkspace?.setPending(pending.length);
 	transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
 	updateInboxCount({kind: "transfers", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-transfers-empty"), !!pending.length);
@@ -3577,7 +3624,7 @@ async function pInitCampaignForms ({
 	setHidden(dmControls, !isDm);
 	const dmScreenLink = document.getElementById("campaign-open-dm-screen");
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
-	let partyInventory = await api.pGetPartyInventory({campaignId});
+	let partyInventory = null;
 	const itemAward = await pInitItemAwardComposer({context, partyInventory, targetCharacters, events});
 	const itemAwardForm = document.getElementById("campaign-item-form");
 	const itemAwardDraftStorageKey = getAwardDraftStorageKey({
@@ -3622,6 +3669,7 @@ async function pInitCampaignForms ({
 		refresh = {},
 		fnIsCurrentAtAdmission = refresh.fnIsCurrent || captureProjectionAuthorization(),
 	) => transferRefreshQueue.pRun(async () => {
+		if (!fnIsCurrentAtAdmission()) return {pendingTransferIds: [], isFenced: true};
 		let {
 			charactersNxt = null,
 			targetCharactersNxt = null,
@@ -3741,6 +3789,7 @@ async function pInitCampaignForms ({
 			fnIsCurrent,
 		});
 		if (!fnIsCurrent() || transferState.isFenced) return {pendingTransferIds: [], isFenced: true};
+		campaignInventoryWorkspace?.replace({partyInventory, characters});
 		const restoreTransferControlState = () => {
 			if (!fnIsCurrent()) return false;
 			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
@@ -3778,6 +3827,10 @@ async function pInitCampaignForms ({
 			}
 			delete form?._hubProjectionTransferDraft;
 			applyTransferRefreshRecoverySuccess({form});
+			const status = document.getElementById("campaign-transfer-form-status");
+			if (status?.textContent === "Shared supplies could not be loaded. Retry shared supplies before starting a transfer.") {
+				setFormStatus({formId: "campaign-transfer-form", message: "Shared supplies loaded. You can start a transfer."});
+			}
 			return true;
 		};
 		if (!isProjectionControlRestoreDeferred) {
@@ -3790,6 +3843,9 @@ async function pInitCampaignForms ({
 			...transferState,
 			restoreTransferControlState,
 		};
+	}).catch(error => {
+		if (fnIsCurrentAtAdmission()) campaignInventoryWorkspace?.setError();
+		throw error;
 	});
 
 	await renderPendingActions({
@@ -3801,12 +3857,20 @@ async function pInitCampaignForms ({
 		roster: rosterRef.current,
 		fnIsCurrent: captureProjectionAuthorization(),
 	});
-	await pRefreshTransferState({
-		charactersNxt: characters,
-		targetCharactersNxt: targetCharacters,
-		membersNxt: members,
-		partyInventoryNxt: partyInventory,
-	});
+	try {
+		await pRefreshTransferState({
+			charactersNxt: characters,
+			targetCharactersNxt: targetCharacters,
+			membersNxt: members,
+		});
+	} catch (error) {
+		if (campaignAuthorizationErrorHandler?.(error)) throw error;
+		setFormAvailability({
+			formId: "campaign-transfer-form",
+			isAvailable: false,
+			message: "Shared supplies could not be loaded. Retry shared supplies before starting a transfer.",
+		});
+	}
 
 	fillCharacterSelect(document.getElementById("campaign-action-target"), getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}));
 	fillCharacterSelect(document.getElementById("campaign-xp-target"), characters);
@@ -3826,8 +3890,10 @@ async function pInitCampaignForms ({
 	});
 	setFormAvailability({
 		formId: "campaign-transfer-form",
-		isAvailable: !!document.getElementById("campaign-transfer-source")?.options.length,
-		message: "Add one of your characters before starting a transfer.",
+		isAvailable: !!partyInventory && !!document.getElementById("campaign-transfer-source")?.options.length,
+		message: partyInventory
+			? "Add one of your characters before starting a transfer."
+			: "Shared supplies could not be loaded. Retry shared supplies before starting a transfer.",
 	});
 	const pendingTransferProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 	if (pendingTransferProposal) {

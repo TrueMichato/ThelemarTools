@@ -291,7 +291,12 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 		await player.expectCharacterQuantity({characterId: sourceCharacter.id, itemName: "Rations", quantity: 6});
 		await player.expectStashQuantity({itemName: "Rations", quantity: 2});
 
-		await player.requestStashItem({itemName: "Rations", quantity: 1});
+		await player.requestStashItemDuringProjectionRevalidation({
+			campaignId,
+			itemName: "Rations",
+			quantity: 1,
+			onProposalHeld: () => dm.hub.applyDamage({campaignId, characterName: "Rowan", amount: 1}),
+		});
 		await dm.hub.resolveFirstPendingTransferAfterLostResponse({
 			campaignId,
 			expectedText: ["Rowan", "requests", "1 × Rations · PHB", "Party inventory"],
