@@ -780,7 +780,6 @@ describe("Campaign Hub deliberate release automation", () => {
 		const dir = makeTempDir();
 		const releaseDir = path.join(dir, "release-evidence");
 		fs.mkdirSync(releaseDir);
-		const canary = "compose-secret-canary-do-not-persist";
 		const candidateSha = runGit(["rev-parse", "HEAD"], {cwd: repoRoot, encoding: "utf8"}).stdout.trim();
 		const validConfig = {
 			services: {
@@ -791,11 +790,12 @@ describe("Campaign Hub deliberate release automation", () => {
 						HUB_AUTH_PROVIDERS: "github",
 						HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS: "",
 						HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS: "github",
-						HUB_COOKIE_SECRET: canary,
+						HUB_COOKIE_SECRET: crypto.randomBytes(32).toString("hex"),
 					},
 				},
 			},
 		};
+		const canary = validConfig.services.bff.environment.HUB_COOKIE_SECRET;
 		const revalidate = config => spawnSync("bash", ["-c", [
 			`source ${JSON.stringify(releaseScript)}`,
 			`HELPER=${JSON.stringify(helper)}`,
