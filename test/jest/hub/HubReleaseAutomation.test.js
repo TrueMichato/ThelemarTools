@@ -2035,11 +2035,13 @@ describe("Campaign Hub deliberate release automation", () => {
 			"test/jest/hub/HubReleaseAutomation.test.js",
 			"test/jest/hub/HubReleaseHelper.test.js",
 			"test/jest/hub/git-test-utils.js",
+			"test/jest/hub/HubDeploymentContract.test.js",
+			"test/jest/hub/HubFirstRelease.test.js",
 			"docs/hub/runbooks/deploy-promote.md",
 			"docs/hub/runbooks/oracle-operations.md",
 			"docs/hub/runbooks/rollback.md",
 		]) expect(promotionRunbook).toContain(asset);
-		expect(promotionRunbook).toContain("These twelve paths are the complete D-to-E source-preparation allowlist");
+		expect(promotionRunbook).toContain("These fourteen paths are the complete D-to-E source-preparation allowlist");
 		expect(promotionRunbook).toContain("All other D paths must remain byte- and mode-identical.");
 		expect(promotionRunbook).toContain("Keep all five required release-image");
 		expect(promotionRunbook).toContain("backup.build: !reset null");
