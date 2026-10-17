@@ -77,7 +77,12 @@ portion is:
 11. `docs/hub/runbooks/oracle-operations.md`; and
 12. `docs/hub/runbooks/rollback.md`.
 
-These twelve paths are the complete D-to-E source-preparation allowlist; they do not authorize construction,
+The additional test-only CI contract closure is:
+
+13. `test/jest/hub/HubDeploymentContract.test.js`; and
+14. `test/jest/hub/HubFirstRelease.test.js`.
+
+These fourteen paths are the complete D-to-E source-preparation allowlist; they do not authorize construction,
 tagging, or release. All other D paths must remain byte- and mode-identical. In particular, preserve D's
 `deploy/hub/migration-policy.json` and migration files 0001-0009 byte-for-byte; they are fixed profile inputs,
 not E deltas. Do not add A7 product behavior, runtime code, package/dependency or lockfile changes, or

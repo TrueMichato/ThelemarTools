@@ -196,6 +196,7 @@ describe("Campaign Hub first initialized release", () => {
 				`source ${JSON.stringify(releaseScript)}`,
 				`ROOT=${JSON.stringify(checkout)}`,
 				`PREVIOUS_SHA=${JSON.stringify(previousSha)}`,
+				`CONTROL_SHA=${JSON.stringify(previousSha)}`,
 				"SOURCE_CHECKED_OUT=true",
 				"TRAFFIC_MUTATED=false",
 				"SCHEMA_MUTATED=false",
@@ -233,6 +234,7 @@ describe("Campaign Hub first initialized release", () => {
 				"FIRST_USE=1",
 				`ROOT=${JSON.stringify(checkout)}`,
 				`PREVIOUS_SHA=${JSON.stringify(previousSha)}`,
+				`CONTROL_SHA=${JSON.stringify(previousSha)}`,
 				"trap early_first_use_cleanup EXIT",
 				"false",
 			].join("\n")], {encoding: "utf8", env: getIsolatedGitEnv()});
