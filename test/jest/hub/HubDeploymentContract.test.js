@@ -12,6 +12,7 @@ describe("Hub portable deployment contract", () => {
 	const dockerignore = read("server/Dockerfile.dockerignore");
 	const compose = read("compose.hub.yml");
 	const publicCompose = read("compose.hub.public.yml");
+	const recoveryModeCompose = read("compose.hub.recovery-mode.yml");
 	const caddy = read("deploy/hub/Caddyfile");
 	const publicCaddy = read("deploy/hub/Caddyfile.public");
 	const staticDockerfile = read("deploy/hub/static.Dockerfile");
@@ -308,9 +309,11 @@ describe("Hub portable deployment contract", () => {
 
 	it("ships persistent Oracle maintenance, backup, and monitoring timers", () => {
 		for (const timer of [backupTimer, maintenanceTimer, monitorTimer]) expect(timer).toContain("Persistent=true");
+		expect(recoveryModeCompose).toContain("build: !reset null");
 		for (const {
 			source,
 			image,
+			imageVariable,
 			lock,
 			profile,
 			service,
@@ -318,6 +321,7 @@ describe("Hub portable deployment contract", () => {
 				{
 					source: maintenanceService,
 					image: "thelemartools-hub-bff",
+					imageVariable: "HUB_RECOVERY_BFF_IMAGE",
 					lock: "maintenance.lock",
 					profile: "maintenance",
 					service: "maintenance",
@@ -325,17 +329,31 @@ describe("Hub portable deployment contract", () => {
 				{
 					source: backupService,
 					image: "thelemartools-hub-backup",
+					imageVariable: "HUB_RECOVERY_BACKUP_IMAGE",
 					lock: "backup.lock",
 					profile: "backup",
 					service: "backup",
 				},
 			]) {
 			expect(source).toContain("RuntimeDirectory=thelemar-hub");
-			expect(source).toContain(`ExecStartPre=/usr/bin/docker image inspect --format={{.Id}} ${image}`);
+			expect(source).not.toMatch(/^ExecStartPre=\/usr\/bin\/docker image inspect\b/m);
+			expect(recoveryModeCompose).toContain(`image: \${${imageVariable}:-${image}}`);
 			const execStart = source.match(/^ExecStart=(.+)$/m)?.[1];
-			expect(execStart).toBe(
-				`/usr/bin/flock -n /run/thelemar-hub/${lock} /usr/bin/docker compose --env-file .env.hub -f compose.hub.yml -f compose.hub.public.yml --profile ${profile} run --interactive=false -T --rm --no-deps --pull never ${service}`,
-			);
+			expect(execStart).toBe([
+				"/usr/bin/python3 /home/ubuntu/ThelemarTools/deploy/hub/release-helper.py recovery-job-run",
+				"--state /home/ubuntu/.local/state/thelemar-hub/recovery/active-fallback.tsv",
+				"--env /home/ubuntu/.local/state/thelemar-hub/recovery/active-fallback.env",
+				"--blocked /home/ubuntu/.local/state/thelemar-hub/recovery/active-fallback.blocked",
+				"--admission-lock /run/lock/thelemar-hub-release.lock",
+				`--job-lock /run/thelemar-hub/${lock}`,
+				"-- /usr/bin/docker compose",
+				"--project-directory /home/ubuntu/ThelemarTools",
+				"--env-file .env.hub",
+				"-f compose.hub.yml",
+				"-f compose.hub.public.yml",
+				"-f /etc/thelemar-hub/compose.hub.recovery-mode.yml",
+				`--profile ${profile} run --interactive=false -T --rm --no-deps --pull never ${service}`,
+			].join(" "));
 			expect(execStart).not.toMatch(/\s--build(?:\s|$)/);
 		}
 		expect(monitor).toMatch(/curl --silent --show-error --fail --max-time 15 "\$\{base_url\}\/api\/ready"/);
