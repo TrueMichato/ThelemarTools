@@ -37,6 +37,104 @@ that the remote tag object is annotated and its peeled commit is the approved SH
 `git ls-remote --tags origin 'refs/tags/<proposed-tag>' 'refs/tags/<proposed-tag>^{}'`.
 Tagging does not authorize a shared-host dry run or promotion.
 
+## A7 release-engine maintenance transition
+
+This is the only tag-policy exception to the ordinary reviewed-head rule. It exists because the deployed r11f
+engine executes its own in-memory release helper; checking out a candidate does not make the candidate engine
+execute the first transition.
+
+Let **D** be deployed r11f at `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, **A** the existing A7 line beginning
+at `5b6c1a7dff2ae96ff23c82b491c0189979d07487`, **E** a narrowly reviewed engine-maintenance commit, and **M**
+the later normal merge containing both A7 and E. Build E in a separate clean worktree based on exact D. The six
+operational source assets in this preparation boundary are:
+
+1. `deploy/hub/release.sh`;
+2. `deploy/hub/release-helper.py`;
+3. `compose.hub.release.yml`, limited to the reviewed three-line `services.maintenance.image` binding;
+4. `compose.hub.recovery-mode.yml`;
+5. `deploy/hub/systemd/thelemar-hub-backup.service`; and
+6. `deploy/hub/systemd/thelemar-hub-maintenance.service`.
+
+Keep all five required release-image `${...:?}` bindings and `backup.build: !reset null` intact. The only
+permitted hunk in `compose.hub.release.yml` is the reviewed three-line maintenance-image binding:
+
+```yaml
+services:
+  maintenance:
+    image: ${HUB_RELEASE_BFF_IMAGE:-thelemartools-hub-bff}
+```
+
+The test-source portion of the preparation allowlist is:
+
+7. `test/jest/hub/HubReleaseAutomation.test.js`;
+8. `test/jest/hub/HubReleaseHelper.test.js`; and
+9. `test/jest/hub/git-test-utils.js`.
+
+`git-test-utils.js` is a test-only dependency, not a production or package dependency. The documentation
+portion is:
+
+10. `docs/hub/runbooks/deploy-promote.md`;
+11. `docs/hub/runbooks/oracle-operations.md`; and
+12. `docs/hub/runbooks/rollback.md`.
+
+These twelve paths are the complete D-to-E source-preparation allowlist; they do not authorize construction,
+tagging, or release. All other D paths must remain byte- and mode-identical. In particular, preserve D's
+`deploy/hub/migration-policy.json` and migration files 0001-0009 byte-for-byte; they are fixed profile inputs,
+not E deltas. Do not add A7 product behavior, runtime code, package/dependency or lockfile changes, or
+migrations to E.
+
+The release tests identify the actual checked-out tree from its protocol declaration, required migration
+version, policy bytes, and migration files; no environment variable selects a profile. The D/E-compatible
+profile is protocol 5, required migration 0009, the exact D policy, and exact D migration bytes 0001-0009.
+The current A7 engineering M profile is protocol 6, required migration 0014, files 0001-0014, and migration
+0011's schema-before-use policy with its irreversible usage-marker and marker-aware rollback checks.
+Unsupported or mismatched combinations fail closed. These are test-source profiles only: the M profile does
+not select M as the release target or establish an E commit.
+The M-only marker checker, its npm command, and migration-0010-through-0014 rollback examples in `rollback.md`
+are for a later M/qualified-image context; they are not available in E's inherited D package.
+
+The recovery overlay and units are operational assets because fallback returns the checkout to E while the
+qualified B application and scheduled-job images remain active.
+The systemd units use a root-owned overlay installed under `/etc/thelemar-hub`, outside the source checkout,
+so it remains available after the checkout returns to E. Their job-state precheck rejects incomplete,
+starting, blocked, or explicitly fenced fallback state; install the overlay and revised units only through
+the separately authorized `oracle-operations.md` procedure. Merge E normally into A; do not
+publish an r11f application-tree downgrade or rewrite reviewed history. Re-review M's exact tree to prove both
+A7 content and E's release-engine delta are present.
+
+Before any candidate migration or traffic change, E's engine checks the actual M Compose rendering after
+checking out M. Its private binding includes only the normalized campaign/provider fields; full rendered
+Compose output is streamed to the helper and must never be persisted in release evidence. A failed binding
+stops before migration and traffic. At fallback activation, the engine pins B's BFF/static/operations image
+IDs and matching maintenance/backup references in the private state/environment pair. A durable transition
+marker keeps scheduled jobs fenced until both files are committed and B has passed readiness; if state,
+environment, tag, or marker operations fail, the release must report the failure and may not claim complete
+recovery. On fallback failure, quiesce B and restore E before recording the blocked job state. Do not claim
+jobs remain fenced unless the blocked state is confirmed.
+
+Only after a fresh remote read identifies M as the reviewed `multiplayer-hub` head may an explicitly approved,
+annotated `hub-maintenance-*` tag point to exact E. The private preparation record must bind E and M SHAs,
+ancestry, the exact annotated tag object and peeled SHA, E's CI and operational qualification evidence hashes,
+and the human approval. E must be a reachable ancestor of M; it is not represented as the remote head. The
+existing release engine still enforces the exact remote tag object, peeled SHA, branch reachability, and normal
+deployment checks. Never override `HUB_RELEASE_EXPECTED_BRANCH`, tag A or M as the maintenance exception, or
+use an unqualified `first-release.sh`/process-substitution handoff. If E is not reachable from fresh M, its
+r11f equivalence is not proven, or any evidence/approval is missing, stop without tagging.
+
+The first transition is executed by D's already-running in-memory release engine/helper; checking out E does
+not replace the process executing that transition. D's engine executes E once using the ordinary release path.
+Its existing evidence predates explicit
+release-engine fields, so independently bind this invocation to the deployed D release record and verify the
+engine/helper bytes against D's exact source tree; do not infer its identity from candidate E. After
+independent verification that E is now the installed source and its release engine is present, E's engine
+must execute M/A7. New release records bind the executing engine's source commit/tree and the SHA-256 digests
+of its `release.sh` and helper. The helper snapshot is made before candidate checkout; therefore E-to-M/A7
+evidence identifies E's engine, not the M candidate. Before E-to-M/A7, verify a fresh invocation records E as
+its engine source and the reviewed E script/helper digests. A candidate SHA or image revision label is not
+release-engine identity. The maintenance-tag exception does not weaken the ordinary A7 release rule: the A7
+tag must still identify the reviewed remote head exactly. No tag, shared-host dry run, or promotion is
+authorized by this procedure text.
+
 ## Procedure
 
 ### First initialized release only

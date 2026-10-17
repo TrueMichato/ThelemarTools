@@ -81,9 +81,15 @@ differs, edit the copied units—not the repository copies—before enabling the
 ```bash
 cd /home/ubuntu/ThelemarTools
 chmod 750 deploy/hub/monitor-host.sh deploy/hub/pull-backups.sh
+sudo install -d -o root -g root -m 0755 /etc/thelemar-hub
+sudo install -o root -g root -m 0644 compose.hub.recovery-mode.yml \
+  /etc/thelemar-hub/compose.hub.recovery-mode.yml
+sha256sum compose.hub.recovery-mode.yml
+sudo sha256sum /etc/thelemar-hub/compose.hub.recovery-mode.yml
 sha256sum deploy/hub/systemd/thelemar-hub-*
-sudo cp deploy/hub/systemd/thelemar-hub-* /etc/systemd/system/
-sha256sum /etc/systemd/system/thelemar-hub-*
+sudo install -o root -g root -m 0644 deploy/hub/systemd/thelemar-hub-* /etc/systemd/system/
+sudo sha256sum /etc/systemd/system/thelemar-hub-backup.service \
+  /etc/systemd/system/thelemar-hub-maintenance.service
 sudo systemctl daemon-reload
 systemctl list-timers 'thelemar-hub-*' --all
 sudo systemctl enable --now thelemar-hub-maintenance.timer
@@ -94,15 +100,43 @@ sudo systemctl enable --now thelemar-hub-monitor.timer
 systemctl list-timers 'thelemar-hub-*' --all
 ```
 
+Both services invoke `release-helper.py recovery-job-run`. That invocation is the admission boundary, not an
+unlocked precheck: it takes the same `/run/lock/thelemar-hub-release.lock` used by `release.sh`, then the
+existing per-job lock, validates the complete active state and exact image IDs while both locks are held, selects
+recovery environment values only after locking, and retains both locks until the foreground Compose command
+exits. Do not move state or image validation ahead of the shared lock. The release holds the shared lock
+throughout its transition, so an already-running job makes release admission fail before mutation; a job
+triggered during a release fails closed without disabling its timer or killing another process.
+
+The recovery overlay's three-line maintenance binding is:
+
+```yaml
+services:
+  maintenance:
+    image: ${HUB_RECOVERY_BFF_IMAGE:-thelemartools-hub-bff}
+```
+
+In a validated active fallback state this uses B's pinned BFF image; the default is only the normal,
+non-fallback Compose value. The separate backup binding uses B's pinned operations image. Neither binding
+establishes that an M image is qualified or makes its migration/checker package available in E.
+
+Review and install the helper, overlay, and both units as one operational closure before using this path. Confirm
+the unit hashes, `ExecStart` commands, and absence of an `EnvironmentFile` for recovery state after
+`daemon-reload`. The overlay remains root-owned and outside the source checkout so it survives restoring the
+narrow E control commit. The job runner clears inherited recovery image variables in normal mode, preventing
+stale systemd-manager values from selecting an image. A timer invocation that fails admission is a failed job,
+not a completed backup or maintenance run; inspect it and perform any needed operator-approved retry explicitly.
+Overlay/helper/unit installation, timer enablement, and job starts are separate operator-approved actions. Source
+review or E preparation does not authorize any of them; a release does not install or enable them.
+
 The timers run maintenance around 01:15 UTC, backup around 02:15 UTC, and monitoring every five minutes.
 Inspect `LastTriggerUSec`, `NextElapseUSecRealtime`, and the service journal after each enable. `Persistent=true`
 may immediately catch up a missed daily run after a reboot or first installation; this is expected, but it must
-not be mistaken for the next genuine scheduled run. The checked-in `flock` lock prevents overlapping duplicate
-jobs.
-The maintenance and backup services first require their released image to exist, then run noninteractively with
-dependency startup and image pulls disabled. Maintenance reuses the released BFF image because both execute the
-same server runtime. If an image is missing, stop and repair the release image catalog; do not let scheduled work
-build replacement images from the checkout.
+not be mistaken for the next genuine scheduled run. The checked-in per-job locks still prevent duplicate backup
+or maintenance instances. Both services run noninteractively with dependency startup and image pulls disabled.
+Maintenance reuses the released BFF image because both execute the same server runtime. If an image is missing,
+the job fails closed; stop and repair the release image catalog rather than letting scheduled work build
+replacement images from the checkout.
 
 ## 3. Drill each job now
 
