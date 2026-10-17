@@ -204,33 +204,54 @@ Detailed redacted evidence remains private; served hashes do not prove preexisti
 Correction delivery is complete. Continue held Wave A engineering without inferring a hold lift,
 private-launch GO or another campaign's enrollment.
 
-## M14 first-delivery source and non-image qualification — 2026-10-17
+## M14/E first-delivery source and local qualification — 2026-10-17
 
 The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path as the
-first delivery. The local lineage is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E
-`4172b926e66764542e9017b96c7a292e0f94b59e`; A7 component
+first delivery. The local lineage is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E base
+`4172b926e66764542e9017b96c7a292e0f94b59e` -> E test-only follow-up
+`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41`; A7 component
 `035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
-`b9fea164a75952c6b4d196a142f312c9b2f519ca` with ordered parents A7 then E -> test-only repair
-`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`. The source-qualified profile is protocol 6, required
-migration 0014, migrations 0001-0014.
+`b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7 then E base) -> test-only repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` -> records commit
+`b835e9c8cbc4a5c5439bb44a35afdfa105561467` -> integrated M
+`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` (ordered parents records commit then E follow-up).
+The M profile remains protocol 6, required migration 0014, migrations 0001-0014.
 
-The read-only lint, targeted two-suite run, full Hub run, and complete 17-selector run passed on M plus
-the exact two-test repair; those same test bytes and modes were committed at a35. The full Hub result was
-125 suites and 2,049 tests passed, with 8 optional PostgreSQL suites and 287 tests skipped. This is not
-PostgreSQL, SQL/ACK, or a fresh full-Hub run on a35; exact counts and the normal a35 hook result are in the
-[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17). The earlier full-Hub sample
-with three failures remains separate: the repair changed the obsolete deployment-contract assertion and
-initialized `CONTROL_SHA` in the two first-release fixtures only. Do not combine those failed counts with
-the later passes. The b9 empty-merge hook had no staged files and ran no substantive checks.
+The original E 12-path standalone 71-test result is retained as a narrow historical sample. The later
+14-path D-to-E delta and E follow-up were independently reviewed and locally qualified separately:
+E's full Hub run passed 1,683 tests with 71 skipped; the affected 17 selectors passed 471 tests, the
+focused target set passed 28 tests, and its normal hook passed 92 tests across 3 suites without source
+drift. Source-preservation checks fenced the batch before and after execution, not after each command.
+An immutable clarification recovers per-command whole-second UTC times from a timestamp-format defect;
+no subsecond precision is claimed. The earlier E publication-test
+blocker is closed by the test-only follow-up; it was not a failed E full-suite run or a production-engine
+defect. E remains unpublished, unbuilt and undeployed, and exact-source remote CI remains open.
 
-This is source/test qualification only. The last verified live state remains the dated r11f/schema-9
-observation above; no new health claim follows from M14 work. M images, real PostgreSQL and role/SQL-ACK
-proof, the migration-0014 transactional index-build window, complete B-aware recovery and static-image
-label/driver, restore, provider, physical, operator, publication, CI, immutable tag, and enablement gates
-remain **OPEN**. Private-pilot expansion remains **NO-GO**, all existing GD-FIND records/dependencies
-remain in force, and this selection does not cancel other approved work scheduled for later delivery.
-B was not selected; the same application source is not by itself a qualified regression or rollback
-fallback.
+The integrated M merge `fbc91b` passed the exact five-suite targeted gate (106 tests). Its normal merge
+hook passed ESLint and related Jest (1 suite, 64 tests) without changing the frozen tree. The earlier
+M full-Hub evidence (125 suites / 2,049 tests passed; 8 optional PostgreSQL suites / 287 tests skipped)
+and affected-17 result (481 tests) belong to the earlier M-plus-two-test-repair candidate; a full Hub
+suite was not rerun on `fbc91b`. PostgreSQL skips do not establish SQL/ACK proof. The earlier three-failure
+sample remains separate, as does b9's empty merge hook, which ran no substantive checks.
+
+The decision owner separately selected A7 source at `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` for B
+preparation only. B is not a built image, qualified release candidate, regression hedge or rollback
+fallback. Static labels, exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK,
+scheduled-job compatibility and the next-release path remain unqualified. Separate Q engineering
+preparation is approved for nine paths; Q0 design review is the only current phase, no Q implementation
+has started, and E/B source is unchanged by that scope.
+
+This source/test record does not refresh the live environment. The last recorded live observation remains
+r11f/protocol 5/schema 9, dated 2026-10-15; no fresh host inspection was made and newer host evidence may
+exist. As of 2026-10-17, the recorded off-machine backup/RPO and restore evidence have exceeded their
+24-hour and 35-day freshness thresholds. M image, exact-source remote CI, real PostgreSQL/roles/SQL-ACK,
+migration-0014 transactional index window, complete B-aware recovery/static-image-label driver,
+fresh backup/restore, provider, operator, immutable-tag, publication and enablement gates remain **OPEN**.
+Separate promotion preconditions from post-deployment campaign enablement and hands-on provider/device
+acceptance; do not make those later checks a circular prerequisite to deployment. Private-pilot expansion
+remains **NO-GO**, all GD-FIND records/dependencies remain in force, and the first-delivery decision does
+not cancel later Brew, privacy-15, named-modifier-16, B3/B4, Wave D, physical-game-day or decision-owner
+work.
 
 ## Prioritized findings
 

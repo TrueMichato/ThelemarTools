@@ -44,25 +44,37 @@ The subsequent normal local commit preserves all 26 candidate files byte-for-byt
 ### M14 first-delivery source and qualification — 2026-10-17
 
 The decision owner selected the protocol-6/schema-0014 application plus A7/E release-engine work as the
-first delivery. The local chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E
-`4172b926e66764542e9017b96c7a292e0f94b59e`; A7 component
+first delivery. The local chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E base
+`4172b926e66764542e9017b96c7a292e0f94b59e` -> E test-only follow-up
+`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41`; A7 component
 `035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
-`b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, E) -> test-only repair
-`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`. E is based on D; A7 is based on `5b6c1a7`. The M
-profile requires protocol 6 and migration 0014.
+`b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, E base) -> test repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` -> records commit
+`b835e9c8cbc4a5c5439bb44a35afdfa105561467` -> integrated M
+`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` (ordered parents records commit, E follow-up). M remains
+protocol 6 with required migration 0014.
 
-The local non-image gates qualified M plus the exact two-test repair later committed unchanged at a35;
-the full Hub suite was not rerun on the new commit. The a35 normal hook passed ESLint and the two related
-suites (28 tests), while b9's empty merge hook ran no substantive checks. See the
-[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17) for exact results and the
-separate earlier three-failure sample.
+The E follow-up closes the earlier source-level publication-test blocker with test-only changes; E's
+local full Hub and affected-selector gates passed, but exact-source remote CI remains open and E has not
+been built, published or deployed. The integrated M commit passed its five-suite targeted gate and normal
+related-test hook. Earlier full-Hub and affected-selector M evidence was on the preceding candidate,
+not a fresh full-Hub run on `fbc91b`. Exact counts, the earlier narrow E sample, and timing/source-fence
+limits are in the [testing guide](testing.md#m14-non-image-local-qualification--2026-10-17).
 
-This does not establish images, real PostgreSQL/roles/SQL-ACK, the migration-0014 index-build window,
-full B-aware recovery or static-image-label/driver, restore, provider, physical, operator, publication,
-CI, tag, or enablement readiness. The last verified runtime remains the dated r11f/schema-9 observation
-below; local M14 evidence is not fresh health. B was not selected and is not an automatic fallback just
-because its application source may overlap. Other approved program work remains active or sequenced for
-later delivery, not cancelled; the V1 private-launch verdict remains NO-GO.
+The decision owner separately selected A7 source at `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` for B
+preparation only. B is not a qualified image, regression hedge or rollback fallback; static labels,
+exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK, scheduled-job compatibility and
+next-release path remain open. Nine-path Q engineering preparation is separately approved, but Q0 design
+review is the only current phase and no Q implementation has started; E and B remain unchanged by it.
+
+Local evidence does not refresh the last recorded r11f/protocol-5/schema-9 live observation, dated
+2026-10-15; no fresh host check was made and newer evidence may exist. As of 2026-10-17, prior
+off-machine backup/RPO and restore evidence exceeded the 24-hour and 35-day freshness thresholds.
+M images, exact-source remote CI, real PostgreSQL/roles/SQL-ACK, migration-0014 index window, complete
+B-aware recovery/static-image-label driver, fresh backup/restore, provider, operator, immutable-tag,
+publication and enablement gates remain open. Keep promotion preconditions separate from post-deployment
+campaign enablement and hands-on provider/participant/device acceptance. The V1 private-launch verdict
+and existing game-day findings/dependencies remain NO-GO/open; other approved later work is not cancelled.
 
 The reviewed **A4 workflow** extends the existing shared Character Sheet source-targeting and incoming-effects
 controllers with fixed-set multi-target collection, independent per-character consent, deselectable source-owned

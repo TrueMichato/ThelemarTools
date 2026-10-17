@@ -383,39 +383,67 @@ The held Wave A stack, draft #289, remaining design decisions and campaign-enrol
 ### M14 non-image local qualification — 2026-10-17
 
 This is local source/test evidence for the selected protocol-6/schema-0014 first delivery, not release,
-image, database, or operational qualification. The tested source was M `b9fea164a75952c6b4d196a142f312c9b2f519ca`
-plus the exact test-only changes in `HubDeploymentContract.test.js` and `HubFirstRelease.test.js`. Those
-same bytes and modes were committed as `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`; no full Hub run was
-performed again on a35.
+image, database, or operational qualification. The source lineage is D
+`4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E base
+`4172b926e66764542e9017b96c7a292e0f94b59e` -> E test-only follow-up
+`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41`; A7 component
+`035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
+`b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7 then E base) -> test-only repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` -> records commit
+`b835e9c8cbc4a5c5439bb44a35afdfa105561467` -> integrated M
+`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` (ordered parents records commit then E follow-up).
+The integrated M tree remains protocol 6 and required migration 0014.
 
-| Gate | Result |
+The later E gate batch ran on E base plus the exact four follow-up changes subsequently committed
+unchanged at `055a285`; its full suite was not rerun after that commit.
+
+| Source and gate | Result |
 |---|---|
-| Read-only ESLint on the two repaired test files | Passed, exit 0 |
-| Targeted deployment-contract and first-release suites | 2 suites / 28 tests passed |
-| Full Hub unit suite | 125 suites / 2,049 tests passed; 8 optional PostgreSQL suites / 287 tests skipped |
-| Complete affected-selector set | 17 suites / 481 tests passed |
-| Normal a35 pre-commit hook | lint-staged ESLint and related Jest passed; 2 suites / 28 tests; no source drift |
+| Initial M candidate: read-only ESLint on two repaired tests | Passed, exit 0 |
+| Initial M candidate: deployment-contract and first-release tests | 2 suites / 28 tests passed |
+| Initial M candidate: full Hub suite | 125 suites / 2,049 tests passed; 8 optional PostgreSQL suites / 287 tests skipped |
+| Initial M candidate: complete affected-selector set | 17 suites / 481 tests passed |
+| Normal a35 test-repair hook | lint-staged ESLint and related Jest passed; 2 suites / 28 tests; no source drift |
+| E follow-up `055a285`: full Hub selector | 1,683 tests passed; 71 skipped |
+| E follow-up: affected selector set | 17 suites / 471 tests passed |
+| E follow-up: focused target set | 28 tests passed |
+| Normal E follow-up hook | 3 suites / 92 tests passed; no source drift |
+| Integrated M pending-tree targeted gate | 5 suites / 106 tests passed |
+| Normal `fbc91b` merge hook | lint-staged ESLint and related Jest passed; 1 suite / 64 tests; frozen tree unchanged |
 
-The optional PostgreSQL skips are not database, SQL, or acknowledgement proof. The earlier full-Hub sample
-with three failures is retained as a separate failed run: the deployment test expected an obsolete unlocked
-`ExecStartPre` path, and two first-release fixtures lacked `CONTROL_SHA`. The test-only correction asserts
-the current locked recovery-job path and initializes fixture `CONTROL_SHA`; it does not change the release
-engine/helper. Do not add the earlier failures to later pass totals. The b9 merge commit's hook reported no
-staged files and performed no substantive lint or Jest checks.
+The initial M full-Hub and affected-selector results apply to the earlier M-plus-two-test-repair candidate,
+not the integrated `fbc91b` tree; a full Hub run was not repeated on `fbc91b`. PostgreSQL skips are not
+real-PostgreSQL, role, or SQL/ACK proof. The first full-Hub sample with three failures remains a separate
+failed run: it contained an obsolete unlocked `ExecStartPre` expectation and two first-release fixtures
+without `CONTROL_SHA`. The authorized test-only repair updated the locked recovery-job contract and set
+fixture `CONTROL_SHA`; it did not change the release engine/helper. Do not combine failed and passing
+sample counts. The b9 empty-merge hook ran no substantive checks.
 
-The local M lineage is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, E
-`4172b926e66764542e9017b96c7a292e0f94b59e`, A7 component
-`035e838ad28455d5d70b8ee06989edc65709913b`, M merge `b9fea164a75952c6b4d196a142f312c9b2f519ca`
-(ordered parents A7 then E), and test repair a35 (parent M). This local evidence does not refresh the
-dated r11f/schema-9 live observation or establish any image, real PostgreSQL/role, SQL-ACK, migration-0014
-index-window, full B recovery, restore, provider, physical, operator, publication, CI, tag, or enablement
-gate. Private launch remains NO-GO.
+The earlier E 12-path standalone 71-test result remains a narrow historical sample. A later 14-path
+D-to-E source delta and the test-only E follow-up were independently reviewed and locally qualified.
+That follow-up closed the E source-level publication-test blocker; it was not an executed E full-suite
+failure or a production-engine defect. The E run's source-preservation checks fenced the batch before and
+after execution, not after each command. An immutable clarification recovers per-command whole-second
+UTC times from a timestamp-format defect; no subsecond precision is claimed.
+E remains unpublished, unbuilt and undeployed; exact-source remote CI and all release/operator gates
+remain open.
 
-E4172's 71-test standalone result is narrower than its own CI's full Hub selector. Source review found
-that E still selects the two old deployment/first-release fixture contracts repaired in M. That is an
-E publication-test blocker, not an executed E full-suite failure or a production-engine defect.
-A proposed test-only E descendant, synchronized scope records, independent review and full exact-E
-checks require a new approval; no such descendant or publication is implied by the M results above.
+The decision owner separately selected A7 source at `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` for B
+preparation only. This does not select a B image or qualify a regression/rollback hedge. Static image
+labels, exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK, scheduled-job compatibility
+and next-release path remain open. Nine-path Q engineering preparation is separately approved, but Q0
+design review is the only current phase; no Q implementation has started, and E/B source is unchanged.
+
+The latest recorded live observation remains r11f/protocol 5/schema 9, dated 2026-10-15. No fresh host
+inspection was made for this update; newer host evidence may exist. As of 2026-10-17, previously recorded
+off-machine backup/RPO and restore evidence had exceeded the 24-hour and 35-day freshness thresholds.
+M images, exact-source remote CI, real PostgreSQL/roles/SQL-ACK, migration-0014 transactional index
+window, complete B-aware recovery/static-image-label driver, fresh backup/restore, provider, operator,
+immutable tag, publication, campaign enablement and hands-on provider/participant/device acceptance
+remain separate open gates. Keep promotion preconditions separate from post-deployment enrollment and
+hands-on acceptance; neither is evidence before deployment. Private launch remains NO-GO, and the
+selected first delivery does not cancel later Brew, privacy-15, named-modifier-16, B3/B4, Wave D,
+physical-game-day or decision-owner work.
 
 ## Current commands
 

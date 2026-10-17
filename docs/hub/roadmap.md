@@ -40,7 +40,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
 | **active** | r10 game-day remediation | R11e deployed late-reapply/JSON-wire corrections; physical Campaign -> Local -> Return and Back/Forward reload made no lease/write, but actual BFCache was not observed and fresh-tab lease evidence expired (gap accepted to continue testing). Campaign A-only Cure Wounds targeting is enabled; participant-reported XPHB/PHB consent and self-target canaries passed, natural expiry remained automated-only. Private-launch NO-GO remains; [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) is a separate draft. |
 | **shipped** | R11f correction delivery | GD-FIND-003/004/005/006/007/009/013 and account-action startup/supply-chain corrections are committed, published, tagged and deployed. The decision owner's physical-retest waiver permits engineering continuation, not private-pilot expansion or gameplay hold lift. |
-| **active** | Wave A first delivery — M14 schema 14 | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path first; it is locally source- and non-image-test-qualified only. A7 release, migrations 0010-0014, rollback and exact-campaign enablement remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. Other approved program work remains active or sequenced for later delivery, not cancelled. |
+| **active** | Wave A first delivery — M14 schema 14 | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path first. Local E and M source/test evidence is recorded below; exact-source remote CI, images and operational gates remain open. A7 release and migrations 0010-0014 remain separately gated; campaign enrollment and hands-on acceptance follow verified deployment and remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. Other approved program work remains active or sequenced for later delivery, not cancelled. |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
@@ -53,29 +53,45 @@ The last independently verified Oracle source is annotated release `hub-staging-
 `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; the existing Campaign A-only targeting configuration
 is unchanged, and private launch remains NO-GO. Draft PRs and later repository changes are not
 target-environment evidence until separately reviewed, merged, tagged, approved, and promoted.
-The recorded deployed release remains r11f/schema 9; local M14 source and unit evidence does not
-refresh runtime health.
+The latest recorded live observation is dated 2026-10-15 and identifies r11f/protocol 5/schema 9. No fresh
+host observation was made for this update, so local M14 source and unit evidence does not refresh runtime
+health. As of 2026-10-17, the previously recorded off-machine backup/RPO evidence and isolated-restore
+evidence have exceeded their 24-hour and 35-day freshness limits; current host evidence was not inspected.
 
 ## Selected M14 first delivery — source-only status
 
 The decision owner selected the schema-14 application with the A7/E release-engine work as the first
-delivery. The local source chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; E
-`4172b926e66764542e9017b96c7a292e0f94b59e` (parent D); A7 component
+delivery. The local source chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; E base
+`4172b926e66764542e9017b96c7a292e0f94b59e` (parent D); E follow-up
+`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41` (parent E base); A7 component
 `035e838ad28455d5d70b8ee06989edc65709913b` (parent `5b6c1a7dff2ae96ff23c82b491c0189979d07487`);
-M merge `b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, then E); and test-only repair
-`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` (parent M). M selects protocol 6 and required migration
-0014. The test qualification applies to M plus its exact two-test repair, later committed unchanged at
-a35; it does not claim a new full-Hub run on a35. Results and skipped-test limits are recorded in the
-[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17).
+M merge `b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, then E base); test repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`; records commit
+`b835e9c8cbc4a5c5439bb44a35afdfa105561467`; and integrated M commit
+`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` (ordered parents records commit, then E follow-up).
+M remains protocol 6 with required migration 0014.
 
-This selection is one first delivery, not cancellation or reprioritization of the other already-approved
-program work. B was not selected, and sharing application source with M does not make B an automatically
-qualified regression or rollback fallback. M is **not ready for promotion**: its image,
-real-PostgreSQL/role/SQL-ACK, migration-0014 index-window, full B-recovery and static-image-label/driver,
-restore, operator, publication, CI and immutable-tag gates remain open. Separately approved campaign
-enablement and hands-on provider/participant/device acceptance follow verified deployment; they are not
-evidence that can be claimed before deployment. The V1 private-launch NO-GO and all existing game-day
-findings/dependencies remain unchanged.
+E's follow-up closed the earlier source-level publication-test blocker with test-only changes. Local
+qualification and the bounded M integration results are recorded in the
+[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17). E remains unpublished,
+unbuilt and undeployed; exact-source remote CI is still open. The 12-path E preparation evidence is
+historical and remains distinct from the later 14-path D-to-E source delta and follow-up qualification.
+
+The decision owner separately selected A7 application source at `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`
+for B preparation only. B is not an image, qualified release candidate, regression hedge or rollback
+fallback. Its static labels, exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK and
+scheduled-job compatibility, and next-release path remain unqualified. Separate Q engineering preparation
+is approved for nine paths, with Q0 design review as the only current Q phase; no Q implementation has
+started. E and B source remain unchanged by that Q scope.
+
+This first-delivery selection does not cancel or demote other approved program work, including later Brew,
+privacy-15, named-modifier-16, B3/B4, Wave D, physical-game-day and decision-owner work. M is **not ready
+for promotion**: exact-source remote CI, images, real-PostgreSQL/roles/SQL-ACK, migration-0014 index-window,
+full B-aware recovery and static-image-label/driver, fresh backup/restore, provider, operator and immutable
+tag gates remain open. Keep promotion preconditions separate from post-deployment exact-campaign
+enablement and hands-on provider/participant/device acceptance; those later checks do not make pre-deployment
+promotion circular. The V1 private-launch NO-GO and all existing game-day findings/dependencies remain
+unchanged.
 
 ## V1 launch closeout
 
