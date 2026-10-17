@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-10-15
+> **Last reviewed:** 2026-10-17
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -40,7 +40,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
 | **active** | r10 game-day remediation | R11e deployed late-reapply/JSON-wire corrections; physical Campaign -> Local -> Return and Back/Forward reload made no lease/write, but actual BFCache was not observed and fresh-tab lease evidence expired (gap accepted to continue testing). Campaign A-only Cure Wounds targeting is enabled; participant-reported XPHB/PHB consent and self-target canaries passed, natural expiry remained automated-only. Private-launch NO-GO remains; [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) is a separate draft. |
 | **shipped** | R11f correction delivery | GD-FIND-003/004/005/006/007/009/013 and account-action startup/supply-chain corrections are committed, published, tagged and deployed. The decision owner's physical-retest waiver permits engineering continuation, not private-pilot expansion or gameplay hold lift. |
-| **next** | Wave A gameplay delivery | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. A7 release, migrations 0010-0014, rollback and exact-campaign enablement remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. |
+| **active** | Wave A first delivery — M14 schema 14 | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path first; it is locally source- and non-image-test-qualified only. A7 release, migrations 0010-0014, rollback and exact-campaign enablement remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. Other approved program work remains active or sequenced for later delivery, not cancelled. |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
@@ -53,6 +53,29 @@ The last independently verified Oracle source is annotated release `hub-staging-
 `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; the existing Campaign A-only targeting configuration
 is unchanged, and private launch remains NO-GO. Draft PRs and later repository changes are not
 target-environment evidence until separately reviewed, merged, tagged, approved, and promoted.
+The recorded deployed release remains r11f/schema 9; local M14 source and unit evidence does not
+refresh runtime health.
+
+## Selected M14 first delivery — source-only status
+
+The decision owner selected the schema-14 application with the A7/E release-engine work as the first
+delivery. The local source chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; E
+`4172b926e66764542e9017b96c7a292e0f94b59e` (parent D); A7 component
+`035e838ad28455d5d70b8ee06989edc65709913b` (parent `5b6c1a7dff2ae96ff23c82b491c0189979d07487`);
+M merge `b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, then E); and test-only repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` (parent M). M selects protocol 6 and required migration
+0014. The test qualification applies to M plus its exact two-test repair, later committed unchanged at
+a35; it does not claim a new full-Hub run on a35. Results and skipped-test limits are recorded in the
+[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17).
+
+This selection is one first delivery, not cancellation or reprioritization of the other already-approved
+program work. B was not selected, and sharing application source with M does not make B an automatically
+qualified regression or rollback fallback. M is **not ready for promotion**: its image,
+real-PostgreSQL/role/SQL-ACK, migration-0014 index-window, full B-recovery and static-image-label/driver,
+restore, operator, publication, CI and immutable-tag gates remain open. Separately approved campaign
+enablement and hands-on provider/participant/device acceptance follow verified deployment; they are not
+evidence that can be claimed before deployment. The V1 private-launch NO-GO and all existing game-day
+findings/dependencies remain unchanged.
 
 ## V1 launch closeout
 

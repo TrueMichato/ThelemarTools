@@ -1,7 +1,7 @@
 # Campaign Hub game-day backlog and delivery plan
 
 > **Status:** Prioritized follow-up; private-pilot expansion is **NO-GO**
-> **Last reviewed:** 2026-10-15
+> **Last reviewed:** 2026-10-17
 > **Owner:** Campaign Hub maintainers
 
 This is the sanitized repository tracking record for the 2026-09-28 r10 physical game day and its
@@ -203,6 +203,34 @@ worker consistency. The new encrypted prerelease archive matches the trusted off
 Detailed redacted evidence remains private; served hashes do not prove preexisting browser cache state.
 Correction delivery is complete. Continue held Wave A engineering without inferring a hold lift,
 private-launch GO or another campaign's enrollment.
+
+## M14 first-delivery source and non-image qualification — 2026-10-17
+
+The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path as the
+first delivery. The local lineage is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E
+`4172b926e66764542e9017b96c7a292e0f94b59e`; A7 component
+`035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
+`b9fea164a75952c6b4d196a142f312c9b2f519ca` with ordered parents A7 then E -> test-only repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`. The source-qualified profile is protocol 6, required
+migration 0014, migrations 0001-0014.
+
+The read-only lint, targeted two-suite run, full Hub run, and complete 17-selector run passed on M plus
+the exact two-test repair; those same test bytes and modes were committed at a35. The full Hub result was
+125 suites and 2,049 tests passed, with 8 optional PostgreSQL suites and 287 tests skipped. This is not
+PostgreSQL, SQL/ACK, or a fresh full-Hub run on a35; exact counts and the normal a35 hook result are in the
+[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17). The earlier full-Hub sample
+with three failures remains separate: the repair changed the obsolete deployment-contract assertion and
+initialized `CONTROL_SHA` in the two first-release fixtures only. Do not combine those failed counts with
+the later passes. The b9 empty-merge hook had no staged files and ran no substantive checks.
+
+This is source/test qualification only. The last verified live state remains the dated r11f/schema-9
+observation above; no new health claim follows from M14 work. M images, real PostgreSQL and role/SQL-ACK
+proof, the migration-0014 transactional index-build window, complete B-aware recovery and static-image
+label/driver, restore, provider, physical, operator, publication, CI, immutable tag, and enablement gates
+remain **OPEN**. Private-pilot expansion remains **NO-GO**, all existing GD-FIND records/dependencies
+remain in force, and this selection does not cancel other approved work scheduled for later delivery.
+B was not selected; the same application source is not by itself a qualified regression or rollback
+fallback.
 
 ## Prioritized findings
 

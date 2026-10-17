@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-10-15
+> **Last updated:** 2026-10-17
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -40,6 +40,29 @@ full Hub and affected Sheet seam evidence is recorded in [testing](testing.md#b1
 Earlier failed samples remain separate, and this is not remote CI or physical acceptance.
 The subsequent normal local commit preserves all 26 candidate files byte-for-byte and excludes the
 16 unrelated modified/untracked files. Its normal hooks passed; publication remains separately gated.
+
+### M14 first-delivery source and qualification — 2026-10-17
+
+The decision owner selected the protocol-6/schema-0014 application plus A7/E release-engine work as the
+first delivery. The local chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E
+`4172b926e66764542e9017b96c7a292e0f94b59e`; A7 component
+`035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
+`b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, E) -> test-only repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`. E is based on D; A7 is based on `5b6c1a7`. The M
+profile requires protocol 6 and migration 0014.
+
+The local non-image gates qualified M plus the exact two-test repair later committed unchanged at a35;
+the full Hub suite was not rerun on the new commit. The a35 normal hook passed ESLint and the two related
+suites (28 tests), while b9's empty merge hook ran no substantive checks. See the
+[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17) for exact results and the
+separate earlier three-failure sample.
+
+This does not establish images, real PostgreSQL/roles/SQL-ACK, the migration-0014 index-build window,
+full B-aware recovery or static-image-label/driver, restore, provider, physical, operator, publication,
+CI, tag, or enablement readiness. The last verified runtime remains the dated r11f/schema-9 observation
+below; local M14 evidence is not fresh health. B was not selected and is not an automatic fallback just
+because its application source may overlap. Other approved program work remains active or sequenced for
+later delivery, not cancelled; the V1 private-launch verdict remains NO-GO.
 
 The reviewed **A4 workflow** extends the existing shared Character Sheet source-targeting and incoming-effects
 controllers with fixed-set multi-target collection, independent per-character consent, deselectable source-owned

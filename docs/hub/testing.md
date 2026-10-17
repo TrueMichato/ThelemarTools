@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last updated:** 2026-10-15
+> **Last updated:** 2026-10-17
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -379,6 +379,43 @@ Detailed redacted evidence remains private, mode 0600.
 
 Another physical game day is waived for r11f, not reported as a measured PASS or private-launch GO.
 The held Wave A stack, draft #289, remaining design decisions and campaign-enrollment limits are unchanged.
+
+### M14 non-image local qualification — 2026-10-17
+
+This is local source/test evidence for the selected protocol-6/schema-0014 first delivery, not release,
+image, database, or operational qualification. The tested source was M `b9fea164a75952c6b4d196a142f312c9b2f519ca`
+plus the exact test-only changes in `HubDeploymentContract.test.js` and `HubFirstRelease.test.js`. Those
+same bytes and modes were committed as `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`; no full Hub run was
+performed again on a35.
+
+| Gate | Result |
+|---|---|
+| Read-only ESLint on the two repaired test files | Passed, exit 0 |
+| Targeted deployment-contract and first-release suites | 2 suites / 28 tests passed |
+| Full Hub unit suite | 125 suites / 2,049 tests passed; 8 optional PostgreSQL suites / 287 tests skipped |
+| Complete affected-selector set | 17 suites / 481 tests passed |
+| Normal a35 pre-commit hook | lint-staged ESLint and related Jest passed; 2 suites / 28 tests; no source drift |
+
+The optional PostgreSQL skips are not database, SQL, or acknowledgement proof. The earlier full-Hub sample
+with three failures is retained as a separate failed run: the deployment test expected an obsolete unlocked
+`ExecStartPre` path, and two first-release fixtures lacked `CONTROL_SHA`. The test-only correction asserts
+the current locked recovery-job path and initializes fixture `CONTROL_SHA`; it does not change the release
+engine/helper. Do not add the earlier failures to later pass totals. The b9 merge commit's hook reported no
+staged files and performed no substantive lint or Jest checks.
+
+The local M lineage is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`, E
+`4172b926e66764542e9017b96c7a292e0f94b59e`, A7 component
+`035e838ad28455d5d70b8ee06989edc65709913b`, M merge `b9fea164a75952c6b4d196a142f312c9b2f519ca`
+(ordered parents A7 then E), and test repair a35 (parent M). This local evidence does not refresh the
+dated r11f/schema-9 live observation or establish any image, real PostgreSQL/role, SQL-ACK, migration-0014
+index-window, full B recovery, restore, provider, physical, operator, publication, CI, tag, or enablement
+gate. Private launch remains NO-GO.
+
+E4172's 71-test standalone result is narrower than its own CI's full Hub selector. Source review found
+that E still selects the two old deployment/first-release fixture contracts repaired in M. That is an
+E publication-test blocker, not an executed E full-suite failure or a production-engine defect.
+A proposed test-only E descendant, synchronized scope records, independent review and full exact-E
+checks require a new approval; no such descendant or publication is implied by the M results above.
 
 ## Current commands
 
