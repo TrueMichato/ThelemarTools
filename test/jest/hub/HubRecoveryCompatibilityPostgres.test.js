@@ -12,6 +12,12 @@ import {pGetRecoveryCompatibility} from "../../../server/scripts/check-recovery-
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
 const checkerScript = fileURLToPath(new URL("../../../server/scripts/check-recovery-compatibility.mjs", import.meta.url));
 
+function getUnavailableDatabaseUrl (databaseUrl, databaseName) {
+	const unavailableDatabaseUrl = new URL(databaseUrl);
+	unavailableDatabaseUrl.pathname = `/hub_missing_${databaseName}`;
+	return unavailableDatabaseUrl;
+}
+
 function acquiredLayOnHandsData (level = 3) {
 	const state = new globalThis.CharacterSheetState();
 	const book = JSON.parse(fs.readFileSync("data/class/class-paladin.json", "utf8"));
@@ -295,19 +301,39 @@ describePostgres("Campaign Hub recovery compatibility (real PostgreSQL)", () => 
 			query: async () => { throw new Error("simulated database query failure"); },
 		})).rejects.toThrow("simulated database query failure");
 
-		const unavailableDatabaseUrl = new URL(process.env.HUB_TEST_POSTGRES_URL);
-		unavailableDatabaseUrl.pathname = `/hub_missing_${crypto.randomUUID().replaceAll("-", "")}`;
+		const missingDatabaseName = crypto.randomUUID().replaceAll("-", "");
 		const queryFailure = spawnSync(process.execPath, [checkerScript], {
 			encoding: "utf8",
 			timeout: 15_000,
 			env: {
 				...process.env,
-				DATABASE_URL: unavailableDatabaseUrl.toString(),
+				DATABASE_URL: getUnavailableDatabaseUrl(process.env.HUB_TEST_POSTGRES_URL, missingDatabaseName).toString(),
 				HUB_DATABASE_SSL: "false",
 			},
 		});
 		expect(queryFailure.status).not.toBe(0);
 		expect(queryFailure.stdout).toBe("");
 		expect(queryFailure.stderr).toContain("RECOVERY_COMPATIBILITY_QUERY_FAILED");
+	});
+});
+
+describe("Campaign Hub recovery compatibility URL fixture", () => {
+	it("changes only the database path when constructing an unavailable database URL", () => {
+		const databaseUrl = "postgresql://hub_test:example%2Dfixture@example.invalid:5433/hub?sslmode=verify-full&application_name=recovery-test&options=-c%20role%3Dhub_test#fixture-fragment";
+		const originalUrl = new URL(databaseUrl);
+		const originalHref = originalUrl.href;
+
+		const unavailableDatabaseUrl = getUnavailableDatabaseUrl(databaseUrl, "0123456789abcdef0123456789abcdef");
+
+		expect(unavailableDatabaseUrl.href).toBe("postgresql://hub_test:example%2Dfixture@example.invalid:5433/hub_missing_0123456789abcdef0123456789abcdef?sslmode=verify-full&application_name=recovery-test&options=-c%20role%3Dhub_test#fixture-fragment");
+		expect(unavailableDatabaseUrl.username).toBe(originalUrl.username);
+		expect(unavailableDatabaseUrl.password).toBe(originalUrl.password);
+		expect(unavailableDatabaseUrl.password).not.toBe("");
+		expect(unavailableDatabaseUrl.host).toBe(originalUrl.host);
+		expect(unavailableDatabaseUrl.port).toBe(originalUrl.port);
+		expect(unavailableDatabaseUrl.search).toBe(originalUrl.search);
+		expect(unavailableDatabaseUrl.hash).toBe(originalUrl.hash);
+		expect(unavailableDatabaseUrl.hash).not.toBe("");
+		expect(originalUrl.href).toBe(originalHref);
 	});
 });

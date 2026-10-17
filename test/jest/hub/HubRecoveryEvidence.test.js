@@ -142,7 +142,7 @@ function runBaseline ({phase = "before", collision = false, migrationVersions, c
 			encoding: "utf8",
 			env: {
 				...process.env,
-				DATABASE_URL: "postgresql://restore.invalid/hub",
+				DATABASE_URL: "postgresql://example.invalid/hub",
 				PATH: `${binDir}:${process.env.PATH}`,
 			},
 		});
@@ -342,7 +342,7 @@ describe("Campaign Hub recovery evidence", () => {
 				encoding: "utf8",
 				env: {
 					...process.env,
-					DATABASE_URL: "postgresql://restore.invalid/hub",
+					DATABASE_URL: "postgresql://example.invalid/hub",
 					PATH: `${binDir}:${process.env.PATH}`,
 				},
 			});
