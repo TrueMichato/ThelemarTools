@@ -208,38 +208,58 @@ private-launch GO or another campaign's enrollment.
 
 The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path as the
 first delivery. The local lineage is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef` -> E base
-`4172b926e66764542e9017b96c7a292e0f94b59e` -> E test-only follow-up
-`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41`; A7 component
-`035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
+`4172b926e66764542e9017b96c7a292e0f94b59e` -> E test follow-up
+`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41` -> E test-only correction
+`aef1090ea871eb46cdf550db3944ca5305c07fce` (parent `055a285`, one Auto test);
+A7 component `035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
 `b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7 then E base) -> test-only repair
 `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` -> records commit
 `b835e9c8cbc4a5c5439bb44a35afdfa105561467` -> integrated M
-`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` (ordered parents records commit then E follow-up).
-The M profile remains protocol 6, required migration 0014, migrations 0001-0014.
+`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` -> docs commit
+`6d8c71070f4fb16a9955d3013a7fa8471029920c` -> selected B/M source
+`2c03c17a26fcecf5f1f53abbefef471741b938b0` (ordered parents `6d8c710`, `aef1090`).
+M remains protocol 6, required migration 0014, migrations 0001-0014. A separate docs-only M descendant
+is approved; it will not change B's selected source SHA.
 
-The original E 12-path standalone 71-test result is retained as a narrow historical sample. The later
-14-path D-to-E delta and E follow-up were independently reviewed and locally qualified separately:
-E's full Hub run passed 1,683 tests with 71 skipped; the affected 17 selectors passed 471 tests, the
-focused target set passed 28 tests, and its normal hook passed 92 tests across 3 suites without source
-drift. Source-preservation checks fenced the batch before and after execution, not after each command.
-An immutable clarification recovers per-command whole-second UTC times from a timestamp-format defect;
-no subsecond precision is claimed. The earlier E publication-test
-blocker is closed by the test-only follow-up; it was not a failed E full-suite run or a production-engine
-defect. E remains unpublished, unbuilt and undeployed, and exact-source remote CI remains open.
+The original E 12-path standalone 71-test result remains a narrow historical sample. The later 14-path
+D-to-E gates ran on E base plus four exact follow-up working changes later committed unchanged as
+`055a285`: full Hub 1,683 passed/71 skipped; affected 17 selectors/471 passed; focused target set/28
+passed; normal hook 3 suites/92 passed. They were not rerun after `055a285` or the later one-test E
+correction `aef1090`. Source-preservation checks fenced the earlier batch before and after execution,
+not after each command. Per-command times are recoverable only at whole-second UTC precision.
 
-The integrated M merge `fbc91b` passed the exact five-suite targeted gate (106 tests). Its normal merge
-hook passed ESLint and related Jest (1 suite, 64 tests) without changing the frozen tree. The earlier
-M full-Hub evidence (125 suites / 2,049 tests passed; 8 optional PostgreSQL suites / 287 tests skipped)
-and affected-17 result (481 tests) belong to the earlier M-plus-two-test-repair candidate; a full Hub
-suite was not rerun on `fbc91b`. PostgreSQL skips do not establish SQL/ACK proof. The earlier three-failure
-sample remains separate, as does b9's empty merge hook, which ran no substantive checks.
+The first exact-source E publication CI run `39053045735`, at published E `055a285`, failed its source
+secret scan on the synthetic `HUB_COOKIE_SECRET` canary alias in the release-automation test. Affected
+regressions and migration/roles passed; the dependent stack job was skipped, and missing-files artifact
+upload was secondary. A separate later local M scan found the environment-derived missing-database URL
+and two password-free fake-`psql` URL fixtures in M-only tests; those were not findings from that E CI
+run. Neither sample exposed a live credential or required rotation, and the fake `psql` never connected.
+Preserve the two failed samples separately. Corrected E `aef1090` passed
+local ESLint, full-source secret scan (3,435 text and 101 binary inputs), four suites/83 tests, and its
+normal one-suite/64-test hook. The earlier E `055a285` and M `6d8c710` sources were published;
+corrected E `aef1090` and M `2c03c17a` remain local, with no qualified release image or deployment.
+Corrected publication and serial new CI are approved but have not run.
 
-The decision owner separately selected A7 source at `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` for B
-preparation only. B is not a built image, qualified release candidate, regression hedge or rollback
-fallback. Static labels, exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK,
-scheduled-job compatibility and the next-release path remain unqualified. Separate Q engineering
-preparation is approved for nine paths; Q0 design review is the only current phase, no Q implementation
-has started, and E/B source is unchanged by that scope.
+The integrated M merge `fbc91b` passed its five-suite gate/106 tests and normal merge hook/one suite/
+64 tests. Selected M/B source `2c03c17a` adds only the Auto, recovery-compatibility PostgreSQL, and
+recovery-evidence tests to its first parent. Its local three-file ESLint and full-source secret scan
+passed; the eight-suite gate passed 116 tests with one skipped (the PostgreSQL test), and its pure
+non-database URL regression ran. Its normal commit hook passed three related suites/69 tests with one
+skipped. This is not real-PostgreSQL proof or a fresh full-Hub run on `2c03c17a`; earlier M full-Hub
+evidence (125 suites/2,049 passed; 8 optional PostgreSQL suites/287 skipped) and affected-17 result/481
+passed belong to earlier candidates. The earlier three-failure sample remains separate, as does b9's
+empty merge hook, which ran no substantive checks. PostgreSQL skips do not establish SQL/ACK proof.
+
+The decision owner superseded B source selection `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` and
+selected `2c03c17a26fcecf5f1f53abbefef471741b938b0` as B. It represents intended M gameplay, not a
+gameplay-regression hedge; B remains unqualified with no tag, image, drill, or fallback evidence.
+Static labels, exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK, scheduled-job
+compatibility, and next-release path remain open. This docs refresh will be a distinct M descendant
+of B. Separate Q source-only work covers seven paths and remains under review; Q has no accepted
+executable qualification or evidence export, and no full configuration mapping is accepted.
+An isolated-fixture profile cannot qualify a different intended deployment's exact five-field
+configuration merely through an identifier mapping. No Q, E or B production
+change is implied.
 
 This source/test record does not refresh the live environment. The last recorded live observation remains
 r11f/protocol 5/schema 9, dated 2026-10-15; no fresh host inspection was made and newer host evidence may

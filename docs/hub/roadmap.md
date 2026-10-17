@@ -40,7 +40,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V1 physical game-day remediation | The 2026-09-28 r10 physical rerun ended **NO-GO** for P1 refresh-persistent Character Sheet context divergence and disabled player targeting. See the [prioritized findings and re-entry gate](game-day-backlog.md). |
 | **active** | r10 game-day remediation | R11e deployed late-reapply/JSON-wire corrections; physical Campaign -> Local -> Return and Back/Forward reload made no lease/write, but actual BFCache was not observed and fresh-tab lease evidence expired (gap accepted to continue testing). Campaign A-only Cure Wounds targeting is enabled; participant-reported XPHB/PHB consent and self-target canaries passed, natural expiry remained automated-only. Private-launch NO-GO remains; [PR #289](https://github.com/TrueMichato/ThelemarTools/pull/289) is a separate draft. |
 | **shipped** | R11f correction delivery | GD-FIND-003/004/005/006/007/009/013 and account-action startup/supply-chain corrections are committed, published, tagged and deployed. The decision owner's physical-retest waiver permits engineering continuation, not private-pilot expansion or gameplay hold lift. |
-| **active** | Wave A first delivery — M14 schema 14 | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. The decision owner selected the protocol-6/schema-0014 A7 application plus E release-engine path first. Local E and M source/test evidence is recorded below; exact-source remote CI, images and operational gates remain open. A7 release and migrations 0010-0014 remain separately gated; campaign enrollment and hands-on acceptance follow verified deployment and remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. Other approved program work remains active or sequenced for later delivery, not cancelled. |
+| **active** | Wave A first delivery — M14 schema 14 | A0-A6 engineering/review/integration/publication completed at `4d9a7220`; exact-source four-job CI passed with one Cure Wounds retry caveat. The decision owner selected protocol-6/schema-0014 A7 plus E; B source is now selected at `2c03c17a`, but remains unqualified and is not a regression hedge. Corrected E/M local evidence is recorded below; corrected exact-source publication and serial CI are approved but not yet run. Images and operational gates remain open. A7 release/migrations 0010-0014 remain separately gated; campaign enrollment and hands-on acceptance follow verified deployment and remain separately gated. #285 merged; #286-#288 remain historical open drafts awaiting disposition. Other approved program work remains active or sequenced for later delivery, not cancelled. |
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
@@ -61,28 +61,42 @@ evidence have exceeded their 24-hour and 35-day freshness limits; current host e
 ## Selected M14 first delivery — source-only status
 
 The decision owner selected the schema-14 application with the A7/E release-engine work as the first
-delivery. The local source chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; E base
-`4172b926e66764542e9017b96c7a292e0f94b59e` (parent D); E follow-up
-`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41` (parent E base); A7 component
-`035e838ad28455d5d70b8ee06989edc65709913b` (parent `5b6c1a7dff2ae96ff23c82b491c0189979d07487`);
-M merge `b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, then E base); test repair
-`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`; records commit
-`b835e9c8cbc4a5c5439bb44a35afdfa105561467`; and integrated M commit
-`fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4` (ordered parents records commit, then E follow-up).
-M remains protocol 6 with required migration 0014.
+delivery. The local chain is D `4578c8671a7b05066fb9a19411cb8a31cdd753ef`; E base
+`4172b926e66764542e9017b96c7a292e0f94b59e`; E test follow-up
+`055a285ea9cc576dab8ff4b0aac4a3a5d3736d41`; and E test-only correction
+`aef1090ea871eb46cdf550db3944ca5305c07fce` (parent `055a285`, one release-automation test).
+A7 component `035e838ad28455d5d70b8ee06989edc65709913b` -> M merge
+`b9fea164a75952c6b4d196a142f312c9b2f519ca` (ordered parents A7, E base) -> test repair
+`a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` -> records commit
+`b835e9c8cbc4a5c5439bb44a35afdfa105561467` -> integrated M `fbc91bbe33d00b9af48644cac9eb3e5e2bd663d4`
+-> docs commit `6d8c71070f4fb16a9955d3013a7fa8471029920c` -> selected B source
+`2c03c17a26fcecf5f1f53abbefef471741b938b0` (ordered parents `6d8c710`, `aef1090`).
+M remains protocol 6 with required migration 0014. The approved four-document update will be a separate
+docs-only M descendant of selected B; it does not change B's selected source identity.
 
-E's follow-up closed the earlier source-level publication-test blocker with test-only changes. Local
-qualification and the bounded M integration results are recorded in the
-[testing guide](testing.md#m14-non-image-local-qualification--2026-10-17). E remains unpublished,
-unbuilt and undeployed; exact-source remote CI is still open. The 12-path E preparation evidence is
-historical and remains distinct from the later 14-path D-to-E source delta and follow-up qualification.
+The earlier exact-source E publication run `39053045735`, at published E `055a285`, failed source
+scanning on the synthetic `HUB_COOKIE_SECRET` canary alias in the release-automation test. The
+affected-regression and migration/roles jobs passed; the dependent stack job was skipped, and a
+missing-files artifact-upload failure was secondary. A separate later local M scan flagged an
+environment-derived missing-database URL and two password-free fake-`psql` URL fixtures in M-only tests.
+These were not live credentials, and the fake `psql` never connected. The E CI and local M failed
+samples remain distinct. The test-only E correction `aef1090` and selected M source
+`2c03c17a` subsequently passed their local scans and targeted gates, but no corrected E publication or
+new serial CI has run; those steps are approved and remain pending. Earlier E `055a285` and M
+`6d8c710` sources were published; the corrected heads remain local, without qualified release images
+or deployment. The 12-path E preparation result remains a narrow historical sample, distinct from the later
+14-path D-to-E delta and the post-`055a` correction.
 
-The decision owner separately selected A7 application source at `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3`
-for B preparation only. B is not an image, qualified release candidate, regression hedge or rollback
-fallback. Its static labels, exact-B authorization, Linux entry path, full recovery matrix, SQL/ACK and
-scheduled-job compatibility, and next-release path remain unqualified. Separate Q engineering preparation
-is approved for nine paths, with Q0 design review as the only current Q phase; no Q implementation has
-started. E and B source remain unchanged by that Q scope.
+The decision owner superseded the prior B selection `a35af555a1d1cd25e2ba9d2d98b11677ca5917c3` and
+selected `2c03c17a26fcecf5f1f53abbefef471741b938b0` as B source. This is the same gameplay as intended M,
+not a gameplay-regression hedge. B is not a qualified image, release candidate or rollback fallback:
+static labels, exact-B authorization, Linux entry path, complete recovery matrix, SQL/ACK,
+scheduled-job compatibility and next-release path remain open. The docs-only M descendant will be
+distinct from B. Separate Q source-only work covers seven paths and remains under review; Q has no
+accepted executable qualification or evidence export, and no accepted full configuration mapping.
+An isolated-fixture profile cannot qualify a different intended deployment's exact five-field
+configuration merely through an identifier mapping. No Q, E or B
+production change is implied.
 
 This first-delivery selection does not cancel or demote other approved program work, including later Brew,
 privacy-15, named-modifier-16, B3/B4, Wave D, physical-game-day and decision-owner work. M is **not ready
