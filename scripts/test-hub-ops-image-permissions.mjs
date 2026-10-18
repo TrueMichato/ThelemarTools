@@ -27,9 +27,15 @@ function run (command, args, {capture = false, expectFailure = false} = {}) {
 function copyRestrictiveScripts () {
 	const serverDir = path.join(tempDir, "server");
 	const scriptsDir = path.join(serverDir, "scripts");
+	const srcDir = path.join(serverDir, "src");
 	fs.mkdirSync(serverDir, {recursive: true});
+	fs.mkdirSync(srcDir, {recursive: true});
 	fs.copyFileSync(path.join(repoRoot, "server", "ops.Dockerfile"), path.join(serverDir, "ops.Dockerfile"));
 	fs.cpSync(path.join(repoRoot, "server", "scripts"), scriptsDir, {recursive: true});
+	fs.copyFileSync(
+		path.join(repoRoot, "server", "src", "recovery-evidence.js"),
+		path.join(srcDir, "recovery-evidence.js"),
+	);
 
 	const makeRestrictive = filePath => {
 		const stat = fs.lstatSync(filePath);

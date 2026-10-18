@@ -25,7 +25,7 @@ function acquiredLayOnHandsData (level = 3) {
 	state.addClass({name: "Paladin", source: "XPHB", level});
 	globalThis.CharacterSheetClassUtils.updateClassResources(state, state.getClasses()[0], level, cls);
 	globalThis.CharacterSheetClassUtils.reconcileClassFeatures(state, {getClassData: () => cls, classFeatures: book.classFeature});
-	return state.toJson();
+	return JSON.parse(JSON.stringify(state.toJson()));
 }
 
 function withLayOnHandsIdentity ({resourceId, featureUid}) {
