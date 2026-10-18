@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {spawnSync} from "node:child_process";
+import {pathToFileURL} from "node:url";
 import {
 	R11F_MIGRATION_LEDGER_SHA256,
 	validateCompletedRestoreDrill,
@@ -21,6 +22,18 @@ const R11F_MIGRATIONS = [
 	["0008", "0008_invite_gated_first_access.sql", "83eaab54c6f34c84ad4672681c1ac017ec0e0dfc3a9cae1bb5d59a3c45ee3771"],
 	["0009", "0009_account_entitlements.sql", "7894877510e44a73efcc84d32eb0df95013add0b593ab15756e5952caee8c5128"],
 ].map(([version, filename, checksum]) => ({version, filename, checksum}));
+
+const FAKE_PSQL_DIAGNOSTIC_PREFIX = "HUB_TEST_FAKE_PSQL ";
+const SAFE_PSQL_ERROR_CODES = [
+	"EACCES", "EAGAIN", "EBADF", "EBUSY", "EEXIST", "EFAULT", "EINTR", "EINVAL",
+	"EIO", "EISDIR", "EMFILE", "ENFILE", "ENOENT", "ENOMEM", "ENOTDIR",
+	"ENOTEMPTY", "ENOSPC", "ENOSYS", "EPERM", "EPIPE", "EROFS", "ESPIPE",
+	"ETIMEDOUT", "ETXTBSY", "E2BIG", "ENOEXEC",
+];
+const SAFE_PSQL_SIGNALS = [
+	"SIGABRT", "SIGALRM", "SIGBUS", "SIGFPE", "SIGHUP", "SIGILL", "SIGINT",
+	"SIGKILL", "SIGPIPE", "SIGQUIT", "SIGSEGV", "SIGTERM", "SIGTRAP",
+];
 
 function getRestoreEvidence () {
 	const migrationLedgerSha256 = R11F_MIGRATION_LEDGER_SHA256;
@@ -121,6 +134,117 @@ function getRestoreEvidence () {
 	};
 }
 
+function getFakePsqlDiagnostics (stderr) {
+	if (typeof stderr !== "string") return [];
+	return stderr.split("\n")
+		.filter(line => line.startsWith(FAKE_PSQL_DIAGNOSTIC_PREFIX))
+		.map(line => {
+			try {
+				const record = JSON.parse(line.slice(FAKE_PSQL_DIAGNOSTIC_PREFIX.length));
+				if (!record || typeof record !== "object" || Array.isArray(record)) return {event: "parse-failure"};
+				if (![
+					"after",
+					"before",
+					"emission-failure",
+					"threw",
+				].includes(record.event)) return {event: "parse-failure"};
+				if (record.event === "emission-failure") {
+					const isSafeCode = code => code === null || code === "OTHER" || SAFE_PSQL_ERROR_CODES.includes(code);
+					if (!isSafeCode(record.beforeErrorCode) || !isSafeCode(record.afterErrorCode)) return {event: "parse-failure"};
+					const isSafeSignal = signal => signal === null || signal === "OTHER" || SAFE_PSQL_SIGNALS.includes(signal);
+					if (!(record.status === null || Number.isInteger(record.status))) return {event: "parse-failure"};
+					if (!isSafeSignal(record.signal) || !isSafeCode(record.errorCode)) return {event: "parse-failure"};
+					return {
+						event: "emission-failure",
+						beforeErrorCode: record.beforeErrorCode,
+						afterErrorCode: record.afterErrorCode,
+						status: record.status,
+						signal: record.signal,
+						errorCode: record.errorCode,
+					};
+				}
+				if (record.operation !== "restore-baseline-query") return {event: "parse-failure"};
+				if (![
+					"baseline-after",
+					"baseline-before",
+					"fixture-collision-check",
+					"migration-version-check",
+				].includes(record.stage)) return {event: "parse-failure"};
+				if (record.preparedFixtureType !== "posix-shell-script") return {event: "parse-failure"};
+				if (!Number.isInteger(record.preparedFixtureMode) || record.preparedFixtureMode < 0 || record.preparedFixtureMode > 0o777) {
+					return {event: "parse-failure"};
+				}
+				if (record.event === "before") {
+					return {
+						event: record.event,
+						operation: record.operation,
+						stage: record.stage,
+						preparedFixtureType: record.preparedFixtureType,
+						preparedFixtureMode: record.preparedFixtureMode,
+					};
+				}
+				const isSafeSignal = signal => signal === null || signal === "OTHER" || SAFE_PSQL_SIGNALS.includes(signal);
+				const isSafeCode = code => code === null || code === "OTHER" || SAFE_PSQL_ERROR_CODES.includes(code);
+				if (!(record.status === null || Number.isInteger(record.status))) return {event: "parse-failure"};
+				if (!isSafeSignal(record.signal) || !isSafeCode(record.errorCode)) return {event: "parse-failure"};
+				return {
+					event: record.event,
+					operation: record.operation,
+					stage: record.stage,
+					preparedFixtureType: record.preparedFixtureType,
+					preparedFixtureMode: record.preparedFixtureMode,
+					status: record.status,
+					signal: record.signal,
+					errorCode: record.errorCode,
+				};
+			} catch {
+				return {event: "parse-failure"};
+			}
+		});
+}
+
+function expectFakePsqlDiagnostics (result, stage) {
+	const diagnostics = result.fakePsqlDiagnostics;
+	if (!Array.isArray(diagnostics)) {
+		throw new Error("Fake psql diagnostic capture failed: no diagnostic records were captured.");
+	}
+	if (diagnostics.some(({event}) => event === "parse-failure")) {
+		throw new Error("Fake psql diagnostic capture failed: malformed diagnostic record.");
+	}
+	const emissionFailure = diagnostics.find(({event}) => event === "emission-failure");
+	if (emissionFailure) {
+		throw new Error(
+			`Fake psql diagnostic emission failed (before=${emissionFailure.beforeErrorCode ?? "none"}, after=${emissionFailure.afterErrorCode ?? "none"}, status=${emissionFailure.status ?? "null"}, signal=${emissionFailure.signal ?? "none"}, delegatedError=${emissionFailure.errorCode ?? "none"}).`,
+		);
+	}
+	if (diagnostics.length !== 2) {
+		throw new Error("Fake psql diagnostic capture failed: expected one before and one after record.");
+	}
+	expect(diagnostics[0]).toEqual({
+		event: "before",
+		operation: "restore-baseline-query",
+		stage,
+		preparedFixtureType: "posix-shell-script",
+		preparedFixtureMode: 0o700,
+	});
+	expect(diagnostics[1]).toMatchObject({
+		event: "after",
+		operation: "restore-baseline-query",
+		stage,
+		preparedFixtureType: "posix-shell-script",
+		preparedFixtureMode: 0o700,
+	});
+	const completion = diagnostics[1];
+	expect(Object.hasOwn(completion, "status")).toBe(true);
+	expect(completion.status === null || Number.isInteger(completion.status)).toBe(true);
+	expect(completion.signal === null || completion.signal === "OTHER" || SAFE_PSQL_SIGNALS.includes(completion.signal)).toBe(true);
+	expect(
+		completion.errorCode === null
+		|| completion.errorCode === "OTHER"
+		|| SAFE_PSQL_ERROR_CODES.includes(completion.errorCode),
+	).toBe(true);
+}
+
 function runBaseline ({phase = "before", collision = false, migrationVersions, counts = {accounts: 2}} = {}) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-restore-baseline-"));
 	try {
@@ -138,14 +262,94 @@ function runBaseline ({phase = "before", collision = false, migrationVersions, c
 		const fakePsql = path.join(binDir, "psql");
 		fs.writeFileSync(fakePsql, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(snapshot)}'\n`);
 		fs.chmodSync(fakePsql, 0o700);
-		return spawnSync("node", [restoreBaseline, phase], {
+		const fixtureMode = fs.statSync(fakePsql).mode & 0o777;
+		const stage = collision
+			? "fixture-collision-check"
+			: migrationVersions
+				? "migration-version-check"
+				: phase === "before" ? "baseline-before" : "baseline-after";
+		const diagnosticPreload = path.join(binDir, "fake-psql-diagnostics.mjs");
+		fs.writeFileSync(diagnosticPreload, `
+import fs from "node:fs";
+import childProcess from "node:child_process";
+import {syncBuiltinESMExports} from "node:module";
+
+const originalSpawnSync = childProcess.spawnSync;
+const safeErrorCodes = new Set(${JSON.stringify(SAFE_PSQL_ERROR_CODES)});
+const safeSignals = new Set(${JSON.stringify(SAFE_PSQL_SIGNALS)});
+const diagnostic = ${JSON.stringify({
+		operation: "restore-baseline-query",
+		stage,
+		preparedFixtureType: "posix-shell-script",
+		preparedFixtureMode: fixtureMode,
+	})};
+
+function writeDiagnostic (record) {
+	try {
+		const line = ${JSON.stringify(FAKE_PSQL_DIAGNOSTIC_PREFIX)} + JSON.stringify(record) + "\\n";
+		if (fs.writeSync(2, line) !== Buffer.byteLength(line)) return "EIO";
+		return null;
+	} catch (error) {
+		return safeErrorCodes.has(error?.code) ? error.code : "OTHER";
+	}
+}
+
+function getResultMetadata (result) {
+	return {
+		status: Number.isInteger(result?.status) ? result.status : null,
+		signal: safeSignals.has(result?.signal) ? result.signal : result?.signal ? "OTHER" : null,
+		errorCode: safeErrorCodes.has(result?.error?.code)
+			? result.error.code
+			: result?.error ? "OTHER" : null,
+	};
+}
+
+childProcess.spawnSync = function (...args) {
+	if (args[0] !== "psql") return Reflect.apply(originalSpawnSync, this, args);
+	const beforeErrorCode = writeDiagnostic({...diagnostic, event: "before"});
+	let result;
+	let delegatedError;
+	try {
+		result = Reflect.apply(originalSpawnSync, this, args);
+	} catch (error) {
+		delegatedError = error;
+	}
+	const resultMetadata = delegatedError
+		? {status: null, signal: null, errorCode: safeErrorCodes.has(delegatedError?.code) ? delegatedError.code : "OTHER"}
+		: getResultMetadata(result);
+	const afterErrorCode = writeDiagnostic({
+		...diagnostic,
+		event: delegatedError ? "threw" : "after",
+		...resultMetadata,
+	});
+	if (beforeErrorCode || afterErrorCode) {
+		writeDiagnostic({
+			...diagnostic,
+			event: "emission-failure",
+			beforeErrorCode,
+			afterErrorCode,
+			...resultMetadata,
+		});
+	}
+	if (delegatedError) throw delegatedError;
+	return result;
+};
+syncBuiltinESMExports();
+`);
+		const nodeOptions = [
+			process.env.NODE_OPTIONS,
+			`--import=${pathToFileURL(diagnosticPreload).href}`,
+		].filter(Boolean).join(" ");
+		const result = spawnSync("node", [restoreBaseline, phase], {
 			encoding: "utf8",
 			env: {
 				...process.env,
 				DATABASE_URL: "postgresql://example.invalid/hub",
 				PATH: `${binDir}:${process.env.PATH}`,
+				NODE_OPTIONS: nodeOptions,
 			},
 		});
+		return {...result, fakePsqlDiagnostics: getFakePsqlDiagnostics(result.stderr)};
 	} finally {
 		fs.rmSync(dir, {recursive: true, force: true});
 	}
@@ -309,11 +513,13 @@ describe("Campaign Hub recovery evidence", () => {
 			fixtureCollision: false,
 			structuralCounts: {accounts: 2, campaigns: 1},
 		});
+		expectFakePsqlDiagnostics(ready, "baseline-before");
 
 		const collision = runBaseline({collision: true});
 		expect(collision.status).not.toBe(0);
 		expect(collision.stderr).toMatch(/collides with fixed r11f test fixtures/i);
 		expect(collision.stdout).toBe("");
+		expectFakePsqlDiagnostics(collision, "fixture-collision-check");
 	});
 
 	it("rejects non-r11f schemas before reporting restore readiness", () => {
@@ -321,6 +527,7 @@ describe("Campaign Hub recovery evidence", () => {
 		expect(result.status).not.toBe(0);
 		expect(result.stderr).toMatch(/not exactly at r11f migrations 0001-0009/i);
 		expect(result.stdout).toBe("");
+		expectFakePsqlDiagnostics(result, "migration-version-check");
 	});
 
 	it("rejects altered r11f migration checksums before reporting restore readiness", () => {
