@@ -19,6 +19,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - RHW Reanimator R2a State and Ownership
 - Fixed Proficiency with Fallback Transactions
 - Feature-Companion Acquisition and Setup
+- Actor-Backed Companion Snapshots
 - EFA Steel Defender Lifecycle Surfaces
 - Feat Ability Alternatives and Owned Receipts
 
@@ -1071,6 +1072,44 @@ Load migration adopts only exact owner evidence. A resolved exact-owner
 translated; a markerless save that already contains the fixed proficiency is
 left as a pending fallback rather than guessing whether that proficiency was
 pre-existing or feature-owned.
+
+## Actor-Backed Companion Snapshots
+
+Simulacrum milestone 1 adds a State-only foundation, **not playable spell UI**.
+`prepareSimulacrumSnapshot({spellSource, creatorActorId?, exporter?})` returns
+`{ok:true, companionData}`; pass that to existing `addCompanion`. Preparation
+deep-copies raw `_data` with companions/roster ID omitted before traversal,
+copies runtime catalogs directly (no acquisition setters), and tears down
+effects/items only on the detached copy. Never use live `toJson()` as an
+immutability boundary: it reconciles.
+
+`companion.actorSnapshot` is envelope version 1 with `revision`, `kind`,
+`actorId`, `creatorActorId`, `origin`, exact `spell`, edition-specific `policy`,
+`frozen:{normalMaxHp,level,proficiencyBonus}`, `lifecycle`, and authoritative
+raw `state`. Summary/statblock fields are derived; do not create independent
+slot/innate/resource counters. Preparation fills pools once. Hydration skips
+`loadFromJson`/migrations and preserves zero. The duplicate has no roster ID.
+
+`hydrateCompanionActor(id)` returns `{ok:true,actor,actorId,revision}`.
+Mutate that actor and call `commitCompanionActor(id, {actor,revision,exporter?})`.
+Success is `{ok:true,revision}` after validation/projection and atomic in-memory
+replacement; the controller still awaits normal owner persistence. Stale
+identity/revision is `actor-commit-conflict`; core build edits are
+`actor-build-frozen`. Failures have `ok:false,reason,message,issues`. Pure
+`validateCompanionActorSnapshot` never repairs or refills; load retains invalid
+envelopes with `actorUnavailable` diagnostics, and roll helpers refuse fallback.
+
+Generic companion HP/temp-HP/conditions use this bridge. Owner recalculation
+and rest never rebuild/refill it. Export with `profile:"companion"` to avoid
+NPC caps/compaction and retain exact numeric statistics, structured defenses,
+full feature entries, and source/ordinary/Pact casting routes.
+
+Recovery/repair/destruction/forbidden-cast enforcement and the actor-scoped
+casting controller are **later milestones**. Envelope policy is not yet a
+guard; do not expose the foundation in gameplay UI. Nested companion state is
+forbidden; future actor-created summons need owner-managed storage.
+Full envelope, failure, and export contracts:
+`docs/charactersheet/18-npc-export.md`, "Actor-backed companion foundation".
 
 ## Feature-Companion Acquisition and Setup
 

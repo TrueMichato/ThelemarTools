@@ -10,6 +10,18 @@ While the character sheet has extensive functionality and test coverage, several
 
 ## Implementation Status
 
+### Simulacrum: internal foundation only
+
+Milestone 1 provides isolated, item-free own-character snapshots, versioned
+canonical actor persistence, and full-fidelity companion statblocks. There is
+no creation/casting UI, specific-creature picker, paid repair, or lifecycle/
+recovery enforcement yet. PHB/XPHB policy fields record the intended rules;
+they do not currently block direct actor heal/rest/cast APIs. Do not expose
+this foundation as a playable companion until later milestones add the
+authoritative guards and controller. See
+[NPC export: actor-backed companion foundation](18-npc-export.md#actor-backed-companion-foundation)
+for exact contracts and boundaries.
+
 ### Implemented and Partial Subclasses
 
 The following classes have substantial mechanical calculations. Entries marked

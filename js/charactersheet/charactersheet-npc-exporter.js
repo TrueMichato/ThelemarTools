@@ -240,7 +240,7 @@ class CharacterSheetNpcExporter {
 	}
 
 	static getSanitizedExportOptions (opts = {}) {
-		const defenseMode = String(opts.defenseMode || "persistent").toLowerCase() === "active" ? "active" : "persistent";
+		const defenseMode = String(opts.defenseMode || (opts.profile === "companion" ? "active" : "persistent")).toLowerCase() === "active" ? "active" : "persistent";
 		const includeUnarmedRaw = String(opts.includeUnarmed || "auto").toLowerCase();
 		const includeUnarmed = ["auto", "always", "never"].includes(includeUnarmedRaw) ? includeUnarmedRaw : "auto";
 		const includeFeaturesRaw = String(opts.includeFeatures || "auto").toLowerCase();
@@ -258,6 +258,7 @@ class CharacterSheetNpcExporter {
 		const nameSuffix = nameSuffixRaw.slice(0, 32);
 
 		return {
+			profile: opts.profile === "companion" ? "companion" : "npc",
 			defenseMode,
 			includeUnarmed,
 			includeFeatures,
@@ -337,7 +338,7 @@ class CharacterSheetNpcExporter {
 		const npcName = this._getNpcReferenceName(name);
 		const totalLevel = state.getTotalLevel?.() || 0;
 		const hp = state.getHp?.() || {current: 0, max: 1};
-		const maxHp = Math.max(1, hp.max || 1);
+		const maxHp = exportOpts.profile === "companion" ? Math.max(0, hp.max ?? 0) : Math.max(1, hp.max || 1);
 		const ac = Math.max(1, state.getArmorClass?.() ?? state.getAc?.() ?? 10);
 		const acFrom = this._getAcFromLabels(state);
 
@@ -356,6 +357,13 @@ class CharacterSheetNpcExporter {
 		const speed = this._getSpeedObject(state);
 		const saves = this._getSaveBlock(state);
 		const {skills, uniform: uniformSkillBonus} = this._getSkillBlockDetail(state);
+		if (exportOpts.profile === "companion") {
+			for (const abv of Parser.ABIL_ABVS) saves[abv] = this._toSignedStr(state.getSaveMod(abv));
+			for (const {key, label} of this._getKnownSkillKeys(state)) {
+				const source = this._NON_CORE_SKILL_SOURCES[key];
+				skills[source ? `${label}|${source}` : label] = this._toSignedStr(state.getSkillMod(key));
+			}
+		}
 		const senses = this._getSensesBlock(state);
 		const passive = state.getPassivePerception?.() ?? 10;
 		const languages = this._getSafeStringList(state.getLanguages?.(), {maxLen: 40});
@@ -420,11 +428,14 @@ class CharacterSheetNpcExporter {
 		const armorUpgradeBlock = this._getArmorTraitBlock(state, {claimedInstabilityMaterials});
 		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
 		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName, claimedMaterialPowerIds, claimedInstabilityMaterials});
-		const spellcastingBlocks = this._getSpellcastingBlocks(state, {npcName});
+		const spellcastingBlocks = exportOpts.profile === "companion"
+			? this._getCompanionSpellcastingBlocks(state, {npcName})
+			: this._getSpellcastingBlocks(state, {npcName});
 
 		const featureBlocks = this._getFeatureBlocks(state, {
 			npcName,
 			includeFeatures: exportOpts.includeFeatures,
+			isCompanion: exportOpts.profile === "companion",
 			selectedFeatureIds: exportOpts.selectedFeatureIds,
 			suppressExtraAttack: !!multiattackAction,
 			// An attack line that says "plus 1d8 damage against Constructs" is meaningless
@@ -452,7 +463,7 @@ class CharacterSheetNpcExporter {
 			});
 		}
 		const customAbilityBlocks = exportOpts.includeCustomAbilities
-			? this._getCustomAbilityBlocks(state, {npcName})
+			? this._getCustomAbilityBlocks(state, {npcName, isCompanion: exportOpts.profile === "companion"})
 			: {trait: [], action: [], bonus: [], reaction: []};
 
 		// Ability names that already carry limited-use pools → suppress Class Resources rows.
@@ -462,7 +473,7 @@ class CharacterSheetNpcExporter {
 			itemUseBlocks,
 			methodsBlock,
 		});
-		const classResourcesBlock = this._getClassResourcesBlock(state, {npcName, coveredPoolNames});
+		const classResourcesBlock = this._getClassResourcesBlock(state, {npcName, coveredPoolNames, isCompanion: exportOpts.profile === "companion"});
 
 		const representedAbilityNames = this._collectRepresentedAbilityNames({
 			featureBlocks,
@@ -608,6 +619,12 @@ class CharacterSheetNpcExporter {
 		if ((defenses.conditionImmune || []).length) out.conditionImmune = defenses.conditionImmune;
 
 		if (spellcastingBlocks.length) out.spellcasting = spellcastingBlocks;
+		if (exportOpts.profile === "companion") {
+			out.initiative = state.getInitiative();
+			this._resolveDerivedNumbers(out, state, calculations);
+			this._resolveScaledFeatureDice(out, calculations);
+			return out;
+		}
 
 		if (legendaryActions?.length) {
 			out.legendaryActions = exportOpts.legendaryActions;
@@ -5860,7 +5877,7 @@ class CharacterSheetNpcExporter {
 		const features = [
 			...(state.getFeatures?.() || [])
 				.filter(f => f?.name && f?.description)
-				.filter(f => !(typeof CharacterSheetClassUtils !== "undefined" && CharacterSheetClassUtils.isCombatMethod?.(f))),
+				.filter(f => isCompanion || !(typeof CharacterSheetClassUtils !== "undefined" && CharacterSheetClassUtils.isCombatMethod?.(f))),
 			...(state.getFeats?.() || [])
 				.filter(f => f?.name && f?.description)
 				.map(f => ({...f, featureType: f.featureType || "Feat"})),
@@ -8512,7 +8529,18 @@ class CharacterSheetNpcExporter {
 		"SATO", "DSotDQ", "KFTGV", "PABTSO", "LOX", "DODK", "QFTIS", "VEOR", "AATM", "SCREEN",
 	]);
 
-	static _getClassResourcesBlock (state, {npcName = "The NPC", coveredPoolNames = new Set()} = {}) {
+	static _getClassResourcesBlock (state, {npcName = "The NPC", coveredPoolNames = new Set(), isCompanion = false} = {}) {
+		if (isCompanion) {
+			const resources = [...state.getResources(), ...state.getSyntheticCombatResources()];
+			if (state.getStaminaMax() > 0) {
+				resources.push({
+					name: "Stamina", current: state.getStaminaCurrent(), max: state.getStaminaMax(), recharge: "short",
+				});
+			}
+			const entries = resources.map(resource =>
+				`${resource.name}: ${resource.current}/${resource.max} remaining (${resource.recharge || "manual"} recovery).`);
+			return entries.length ? {name: "Class Resources", entries} : null;
+		}
 		const pools = [];
 		const seen = new Set();
 		const covered = coveredPoolNames instanceof Set
@@ -10979,6 +11007,110 @@ class CharacterSheetNpcExporter {
 		return blocks;
 	}
 
+	/** Keep exact spell editions, abilities, and ordinary/Pact routes distinct. */
+	static _getCompanionSpellcastingBlocks (state, {npcName}) {
+		const blocks = [];
+		const cantrips = state.getCantripsKnown();
+		const known = state.getSpellsKnown();
+		const prepared = state.getPreparedSpells();
+		const slots = state.getSpellSlots();
+		const pact = state.getPactSlots();
+		const cards = state.getSpellcastingClassBreakdown();
+		const isPrepared = spell => prepared.some(row => (row.id != null && row.id === spell.id)
+			|| (row.name === spell.name && row.source === spell.source && row.sourceClass === spell.sourceClass
+				&& row.sourceClassSource === spell.sourceClassSource));
+		const groups = new Map();
+		for (const spell of [...cantrips, ...known]) {
+			const cls = state.getClasses().find(row => row.name === spell.sourceClass
+				&& (!spell.sourceClassSource || row.source === spell.sourceClassSource));
+			const ability = spell.spellcastingAbility || state.getSpellcastingAbilityForClass(cls)
+				|| state.getSpellcastingAbility() || "int";
+			const key = `${spell.sourceClass || "Character"}|${spell.sourceClassSource || cls?.source || ""}|${ability}`;
+			if (!groups.has(key)) {
+				groups.set(key, {
+					name: spell.sourceClass || "Character",
+					ability,
+					card: cards.find(card => card.className === cls?.name && card.classSource === cls?.source),
+					spells: [],
+				});
+			}
+			groups.get(key).spells.push(spell);
+		}
+		for (const group of groups.values()) {
+			const {dc, atk} = this._getSpellDcAndAttack(state, group.ability);
+			const statistics = group.card?.isRolledPrepared
+				? `${npcName}'s spell save DC is ${group.card.saveDcFormula} and spell attack modifier is ${group.card.attackBonusFormula}, rolled per cast.`
+				: `${npcName}'s spellcasting ability is ${Parser.attAbvToFull(group.ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`;
+			const header = `${statistics} Slot pools are shared across class lists, not additional pools.`;
+			const block = {type: "spellcasting", name: `Spellcasting (${group.name})`, ability: group.ability, headerEntries: [header]};
+			if (group.card?.isRolledPrepared) delete block.ability;
+			const will = group.spells.filter(spell => spell.level === 0).map(spell => this._formatSpellTag(spell));
+			if (will.length) block.will = [...new Set(will)];
+			const spells = {};
+			for (const [level, pool] of Object.entries(slots)) {
+				const tags = group.spells.filter(spell => spell.level === Number(level)
+					&& isPrepared(spell))
+					.map(spell => this._formatSpellTag(spell));
+				if (pool.max > 0) spells[level] = {slots: pool.current, spells: [...new Set(tags)]};
+			}
+			if (Object.keys(spells).length) block.spells = spells;
+			const unprepared = group.spells.filter(spell => spell.level > 0 && !isPrepared(spell));
+			if (unprepared.length) block.footerEntries = [`Known but not prepared: ${unprepared.map(spell => this._formatSpellTag(spell)).join(", ")}.`];
+			if (block.will || block.spells || block.footerEntries) blocks.push(block);
+			if (pact.max > 0) {
+				blocks.push({
+					type: "spellcasting",
+					name: `Pact Magic (${group.name})`,
+					...(group.card?.isRolledPrepared ? {} : {ability: group.ability}),
+					headerEntries: [header],
+					spells: {[pact.level]: {
+						lower: 1,
+						slots: pact.current,
+						spells: [...new Set(group.spells.filter(spell => spell.level > 0 && spell.level <= pact.level
+							&& isPrepared(spell))
+							.map(spell => this._formatSpellTag(spell)))],
+					}},
+				});
+			}
+		}
+		for (const spell of state.getInnateSpells()) {
+			const {ability, dc, atk} = this._getSpellDcAndAttack(state, spell.spellcastingAbility);
+			const block = {
+				type: "spellcasting",
+				name: `Innate Spellcasting (${spell.sourceFeature || spell.name})`,
+				ability,
+				headerEntries: [`${npcName}'s spellcasting ability is ${Parser.attAbvToFull(ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`],
+			};
+			const tag = this._formatSpellTag(spell);
+			if (spell.atWill) block.will = [tag];
+			else {
+				const resource = spell.linkedResourceId ? state.getResource(spell.linkedResourceId) : null;
+				block.headerEntries.push(`${resource?.current ?? spell.uses?.current ?? 0} uses remaining; ${spell.recharge || spell.uses?.recharge || "manual"} recovery.`);
+				block.daily = {[Math.max(1, resource?.max ?? spell.uses?.max ?? 1)]: [tag]};
+			}
+			blocks.push(block);
+		}
+		const mastery = state.getSpellMasterySpells();
+		if (mastery.length) {
+			blocks.push({
+				type: "spellcasting",
+				name: "Spell Mastery",
+				will: mastery.map(spell => this._formatSpellTag(spell)),
+			});
+		}
+		for (const spell of state.getSignatureSpells()) {
+			blocks.push({
+				type: "spellcasting",
+				name: `Signature Spell (${spell.name})`,
+				headerEntries: [`${spell.usesCurrent} free uses remaining; ${spell.recharge || "short"} recovery.`],
+				daily: {[spell.usesMax]: [this._formatSpellTag(spell)]},
+			});
+		}
+		const powers = this._getPsionicPowersBlock(state, {npcName});
+		if (powers) blocks.push(powers);
+		return blocks;
+	}
+
 	/**
 	 * The roster half of the psionics split. Every one of the book's 27 psionic
 	 * statblocks routes its utility powers through a `spellcasting` block named
@@ -11642,6 +11774,7 @@ class CharacterSheetNpcExporter {
 			selectedFeatureIds = [],
 			suppressExtraAttack = false,
 			protectedFeatureNames = [],
+			isCompanion = false,
 		} = {},
 	) {
 		const protectedKeys = new Set(protectedFeatureNames.map(name => this._normalizeFeatureKey(name)).filter(Boolean));
@@ -11661,12 +11794,12 @@ class CharacterSheetNpcExporter {
 			...(state.getFeatures?.() || [])
 				// Utility powers are rostered in the "Powers" spellcasting block; only
 				// powers that resolve in combat earn an entry of their own.
-				.filter(f => !(f?._entityType === "psionicPower" && !this._isSignaturePsionicPower(f)))
+				.filter(f => isCompanion || !(f?._entityType === "psionicPower" && !this._isSignaturePsionicPower(f)))
 				.map(f => this._expandPsionicPower(f, psionicCalc))
-				.filter(f => f?.name && f?.description)
+				.filter(f => f?.name && (f?.description || (isCompanion && f?.entries?.length)))
 				.filter(f => !(typeof CharacterSheetClassUtils !== "undefined" && CharacterSheetClassUtils.isCombatMethod?.(f))),
 			...(state.getFeats?.() || [])
-				.filter(f => f?.name && f?.description)
+				.filter(f => f?.name && (f?.description || (isCompanion && f?.entries?.length)))
 				.map(f => ({
 					...f,
 					featureType: f.featureType || "Feat",
@@ -11685,6 +11818,7 @@ class CharacterSheetNpcExporter {
 				resourceIndex,
 			}))
 			.filter(({feature, classification}) => {
+				if (isCompanion) return true;
 				if (suppressExtraAttack && /\bextra attacks?\b/i.test(String(feature?.name || ""))) return false;
 				if (includeFeatures === "manual") {
 					const id = String(feature.id || feature.name || "");
@@ -11699,7 +11833,7 @@ class CharacterSheetNpcExporter {
 		// deleted a fifth of Phirse's class features.
 		const totalLevel = Number(state.getTotalLevel?.()) || 0;
 		const autoCap = includeFeatures === "manual" ? 24 : Math.min(26, 18 + Math.max(0, totalLevel - 12));
-		const deduped = this._dedupeClassifiedFeatures(classified);
+		const deduped = isCompanion ? classified : this._dedupeClassifiedFeatures(classified);
 		// A feature that owns a limited-use pool is exempt from the cap: dropping it leaves
 		// the pool orphaned in Class Resources with nothing on the block to explain it.
 		// The same holds for a feature another line already points at by name.
@@ -11711,23 +11845,25 @@ class CharacterSheetNpcExporter {
 			.filter(row => !poolOwners.has(row))
 			.sort((a, b) => this._getFeatureRowPriority(b, resourceIndex) - this._getFeatureRowPriority(a, resourceIndex));
 		const keep = new Set([...poolOwners, ...ranked.slice(0, Math.max(0, autoCap - poolOwners.size))]);
-		const capped = deduped.filter(row => keep.has(row));
+		const capped = isCompanion ? deduped : deduped.filter(row => keep.has(row));
 
 		capped.forEach(({feature, analysis}) => {
 			const templated = this._getTemplatedFeatureText(feature, {npcName, analysis, state});
-			let entries = templated
-				? [templated]
-				: this._prepareFeatureEntriesForNpc(feature.description, {npcName});
+			let entries = isCompanion
+				? (feature.entries?.length ? MiscUtil.copyFast(feature.entries) : [this._stripHtmlTags(feature.description)])
+				: templated
+					? [templated]
+					: this._prepareFeatureEntriesForNpc(feature.description, {npcName});
 			const uses = this._resolveFeatureUses(feature, resourceIndex);
 			const usesShort = this._formatUsesShort(uses);
 			// Drop trailing long-form uses from body when name carries them
-			if (usesShort) {
+			if (usesShort && !isCompanion) {
 				entries = entries.map(text => String(text || "")
 					.replace(/\s*\(\s*\d+\s*\/\s*(?:Long Rest|Short Rest|Short or Long Rest|LR|SR|SR or LR|Day)\s*\)\s*\.?$/i, "")
 					.replace(/\s*\(\s*\d+\s*\/\s*(?:LR|SR)\s*\)\s*\.?$/i, "")
 					.trim());
 			}
-			const baseName = this._getSafeInlineText(this._normalizeFeatureDisplayName(feature.name), {maxLen: 72}) || "Feature";
+			const baseName = isCompanion ? feature.name : this._getSafeInlineText(this._normalizeFeatureDisplayName(feature.name), {maxLen: 72}) || "Feature";
 			const name = usesShort ? `${baseName} ${usesShort}` : baseName;
 			const attackLine = this._getSynthesizedFeatureAttackLine(feature, {state, npcName});
 			const entry = {
@@ -12748,15 +12884,15 @@ class CharacterSheetNpcExporter {
 		return `(${max}; recharges on ${this._getSafeInlineText(uses.recharge, {maxLen: 24})})`;
 	}
 
-	static _getCustomAbilityBlocks (state, {npcName = "The NPC"} = {}) {
+	static _getCustomAbilityBlocks (state, {npcName = "The NPC", isCompanion = false} = {}) {
 		const out = {trait: [], action: [], bonus: [], reaction: []};
 		const abilities = state.getCustomAbilities?.() || [];
 		if (!abilities.length) return out;
 
 		const passiveEntries = [];
 		abilities.forEach(ability => {
-			const safeName = this._getSafeInlineText(ability?.name || "Custom Ability", {maxLen: 80}) || "Custom Ability";
-			const description = this._prepareFeatureTextForNpc(ability?.description || "", {npcName});
+			const safeName = isCompanion ? ability.name : this._getSafeInlineText(ability?.name || "Custom Ability", {maxLen: 80}) || "Custom Ability";
+			const description = isCompanion ? this._stripHtmlTags(ability.description || "") : this._prepareFeatureTextForNpc(ability?.description || "", {npcName});
 			const mode = this._getSafeInlineText(ability?.mode || "passive", {maxLen: 24}) || "passive";
 			const uses = ability?.uses;
 			const usesText = uses && Number.isFinite(Number(uses.max))
@@ -12787,7 +12923,7 @@ class CharacterSheetNpcExporter {
 		if (passiveEntries.length) {
 			out.trait.push({
 				name: "Custom Abilities",
-				entries: passiveEntries.slice(0, 12),
+				entries: isCompanion ? passiveEntries : passiveEntries.slice(0, 12),
 			});
 		}
 

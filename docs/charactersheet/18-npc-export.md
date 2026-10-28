@@ -13,10 +13,10 @@ Convert a live character sheet into a 5etools bestiary-shaped homebrew monster f
 ## Architecture
 
 ```
-CharacterSheetState (read-only)
+CharacterSheetState (getter-based projection)
         │
         ▼
-CharacterSheetNpcExporter.convertStateToMonster(state, options)   // pure
+CharacterSheetNpcExporter.convertStateToMonster(state, options)   // no DOM
         │  monster JSON
         ▼
 CharacterSheetExport dialog
@@ -28,6 +28,103 @@ CharacterSheetExport dialog
 
 - **Converter** (`js/charactersheet/charactersheet-npc-exporter.js`): all static, no DOM. Prefer state getters (`getSpellSaveDc`, `getInnateSpells`, `getPactSlots`, `getAcBreakdown`, `getFeatureCalculations`, …) over re-deriving rules.
 - **Dialog** (`js/charactersheet/charactersheet-export.js`): UX shell only. Options sanitized through `getSanitizedExportOptions`.
+
+State getters can reconcile lazy grants, pools, and generated equipment. Conversion
+is not a raw-data immutability boundary: callers needing an untouched original
+must project a detached copy, not serialize/remove/restore the live character.
+
+### Actor-backed companion foundation
+
+The internal Simulacrum foundation is available without a creation/casting UI.
+It does not create a second roster character. The authoritative gameplay store
+is `companion.actorSnapshot.state`; `statblock`, summary HP, conditions, and PB
+are derived presentation. Do not introduce editable companion-level slot or
+resource stores.
+
+```js
+const prepared = owner.prepareSimulacrumSnapshot({spellSource: "PHB"});
+if (!prepared.ok) return showUnavailable(prepared);
+const companionId = owner.addCompanion(prepared.companionData);
+const hydrated = owner.hydrateCompanionActor(companionId);
+if (!hydrated.ok) return showUnavailable(hydrated);
+// Apply gameplay operations to hydrated.actor, never to the live owner's State.
+const committed = owner.commitCompanionActor(companionId, hydrated);
+if (!committed.ok) return showUnavailable(committed);
+// The controller must still await normal owner persistence.
+```
+
+Public contracts:
+
+| API | Contract |
+|-----|----------|
+| `new CharacterSheetState({isDetached: true})` | Does not replace `globalThis.__csState`; does not register a roster character. |
+| `owner.prepareSimulacrumSnapshot({spellSource, creatorActorId?, exporter?})` | Exact PHB/XPHB source required. Creator defaults to the owner's persisted ID; exporter defaults to `globalThis.CharacterSheetNpcExporter`. Returns `{ok: true, companionData}` without adding, paying, or persisting. Never calls live `toJson` or reconciling live getters. |
+| `CharacterSheetState.validateCompanionActorSnapshot(snapshot)` | Pure `{ok: true}` or structured failure; no migrations or resource initialization. |
+| `owner.hydrateCompanionActor(companionId)` | Returns `{ok: true, actor, actorId, revision}` using independent raw State/catalog copies. Skips `loadFromJson`, acquisition, and full-pool initialization. |
+| `owner.commitCompanionActor(companionId, {actor, revision, exporter?})` | Atomically replaces only that companion's canonical state and projection, then returns `{ok: true, revision}`. Wrong identity/stale revision gives `actor-commit-conflict`; core build edits give `actor-build-frozen`. In-memory only; not a persistence or multi-actor/payment transaction. |
+
+Failures are `{ok: false, reason, message, issues: [{path, message}]}`. Invalid
+saved envelopes are retained unchanged and exposed as `actorUnavailable` with
+an actionable warning. Roll helpers throw that error rather than use the
+original's statistics. `addCompanion` rejects invalid actor envelopes by
+throwing an Error carrying the same diagnostic fields.
+
+Envelope version 1:
+
+```js
+{
+  version: 1,
+  revision: 0, // Incremented on every successful actor commit.
+  kind: "simulacrum",
+  actorId: "<distinct duplicate identity>",
+  creatorActorId: "<creator identity>",
+  origin: {actorId: "<original identity>", name: "<original name>"},
+  spell: {uid: "simulacrum|phb", source: "PHB"}, // Or xphb / XPHB.
+  policy: {
+    recovery: "no-slot-recovery", // XPHB: "no-rests".
+    hpRestoration: "paid-repair-only",
+    canCastSimulacrum: true // XPHB: false.
+  },
+  frozen: {normalMaxHp: 45, level: 8, proficiencyBonus: 3},
+  lifecycle: "active", // Or "destroyed".
+  state: {/* complete raw CharacterSheetState data */}
+}
+```
+
+Preparation omits recursive companions and roster identity before copying,
+tears down copied effects and every inventory wrapper through normal APIs,
+clears item caches/provenance, and suppresses automatic replacement equipment.
+It retains intrinsic abilities, history, earned increases, and source-qualified
+grants. Sanitized ordinary/Pact slots, innate pools, limited uses, and supported
+synthetic counters start full **once**; hydration/reload preserves spent zeros.
+The duplicate is a Construct with fresh HP at `floor(normalMaxHp / 2)` and a
+matching flat statblock HP formula. A zero result is terminal, never clamped
+to one. Subsequent local max-HP effects are added to the reduced baseline.
+
+Existing companion HP/temp-HP/condition mutations route through hydration and
+commit; direct `updateCompanion` edits are restricted to `customName`/`active`.
+Owner rest and companion recalculation do not refresh this frozen build.
+Save/skill/initiative/ability-check helpers use actual actor getters.
+
+The opt-in exporter `profile: "companion"` preserves complete feature entries
+(including nested entries), uncapped custom abilities/resources, current pool
+values, exact all-save/all-skill totals, initiative, active defenses, spell
+editions, per-class casting statistics, and separate ordinary/Pact routes even
+at the same level. Slot blocks across class lists describe shared pools, not
+additional pools. Ordinary NPC export defaults and compaction remain unchanged.
+
+**Not yet playable:** creation/target UI, shared-caster controller, policy
+enforcement, paid repairs, replacement/destruction cleanup, and async cast
+reservations belong to later milestones. Policy fields are metadata here, not
+guards: direct actor rest/heal/cast calls are not yet restricted. An actor must
+not be exposed to gameplay UI until those guards exist. Future summons must
+live in the owner's managed roster; actor snapshots reject nested companions.
+The revision guard protects actor commits, not arbitrary out-of-band raw writes.
+
+`CharacterSheetSimulacrumSnapshot.test.js` exercises this foundation with real
+State/exporter instances, source immutability, equipment/effect teardown,
+creation-only initialization, zero-preserving save/load, frozen owner changes,
+canonical mutation routing, invalid envelopes, and statblock fidelity.
 
 Brew package shape:
 
