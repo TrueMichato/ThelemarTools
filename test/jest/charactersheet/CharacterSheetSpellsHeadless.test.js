@@ -36,10 +36,9 @@ describe("actor-scoped headless spell service", () => {
 		jest.restoreAllMocks();
 	});
 
-	function createService (options) {
-		const state = new State();
+	function createService (options, {state = new State(), page = {}} = {}) {
 		const hook = jest.spyOn(state, "registerCommittedSpellCastHook");
-		const service = new Spells({getState: () => state}, options);
+		const service = new Spells({getState: () => state, ...page}, options);
 		return {state, service, hook};
 	}
 
@@ -89,5 +88,44 @@ describe("actor-scoped headless spell service", () => {
 		service._setSpellViewMode("prepared");
 		expect(localStorage.getItem(storageKey)).toBe("prepared");
 		expect(document.getElementById).toHaveBeenCalledWith("charsheet-spell-lists");
+	});
+
+	it("resolves a real self-buff cast and spends only the supplied actor's slot", async () => {
+		const owner = new State();
+		owner.addClass({name: "Wizard", source: "PHB", level: 1});
+		owner.calculateSpellSlots();
+		const ownerAc = owner.getAc();
+		const state = new State();
+		state.addClass({name: "Wizard", source: "PHB", level: 1});
+		state.calculateSpellSlots();
+		const shield = {
+			name: "Shield",
+			source: "PHB",
+			level: 1,
+			school: "A",
+			time: [{number: 1, unit: "reaction"}],
+			range: {type: "point", distance: {type: "self"}},
+			components: {v: true, s: true},
+			duration: [{type: "timed", duration: {type: "round", amount: 1}}],
+			entries: ["Until the start of your next turn, you have a +5 bonus to AC."],
+			prepared: true,
+		};
+		state.addSpell(shield, true);
+		const spellId = state.getSpells().find(spell => spell.name === "Shield" && spell.source === "PHB").id;
+		const saveCharacter = jest.fn();
+		const {service} = createService({isHeadless: true}, {
+			state,
+			page: {saveCharacter, _renderQuickSpells: jest.fn()},
+		});
+		service.setSpells([shield]);
+		const actorAc = state.getAc();
+		await service._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true}});
+		expect(state.getAc()).toBe(actorAc + 5);
+		expect(state.getSpellSlotsCurrent(1)).toBe(1);
+		expect(owner.getAc()).toBe(ownerAc);
+		expect(owner.getSpellSlotsCurrent(1)).toBe(2);
+		expect(saveCharacter).toHaveBeenCalled();
+		expect(document.addEventListener).not.toHaveBeenCalled();
+		expect(document.getElementById).not.toHaveBeenCalled();
 	});
 });
