@@ -15,6 +15,14 @@
 
 ## Module Map
 
+The Spells service supports `new CharacterSheetSpells(actorPage, {isHeadless:
+true})` for detached actors. Gameplay hooks bind to `actorPage.getState()`,
+but player document listeners, spell-panel rendering, slot recalculation on
+render, and shared spell-view preferences are suppressed. Supply catalogs
+with `setSpells()` and keep the actor page adapter's state-sensitive callbacks,
+rendering, and persistence isolated; this option is not a license to reuse
+the player's page or swap its `_state`.
+
 ```
 CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Entry point & orchestrator. Loads all data, initializes modules,

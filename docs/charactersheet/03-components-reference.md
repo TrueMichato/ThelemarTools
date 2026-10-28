@@ -464,6 +464,14 @@ _modifyStamina(delta)
 **Lines**: ~2,661  
 **Role**: Spellcasting Management
 
+`new CharacterSheetSpells(actorPage, {isHeadless: true})` reuses casting and
+actor-owned committed-cast hooks without installing the player's delegated
+listeners, reading/writing their saved spell view, or rendering into their
+spell panels. The caller must supply an isolated actor page adapter and its
+own rendering/persistence; headless construction alone does not isolate a
+page adapter that still reads the original character. `setSpells(catalog)`
+supplies the same source-qualified catalog used by ordinary casting.
+
 ### Key Methods
 
 ```javascript

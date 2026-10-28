@@ -118,9 +118,10 @@ class CharacterSheetSpells {
 		return PLAYER_CHOSEN_SPELL_FEATURES.has(spell.sourceFeature);
 	}
 
-	constructor (page) {
+	constructor (page, {isHeadless = false} = {}) {
 		this._page = page;
 		this._state = page.getState();
+		this._isHeadless = isHeadless;
 		this._allSpells = [];
 		this._filteredSpells = [];
 		this._spellFilter = "";
@@ -128,11 +129,11 @@ class CharacterSheetSpells {
 		// BUG 5: spells-tab view mode (current | prepared | known). Stored purely in this
 		// module + localStorage — no state.js / _data / loadFromJson touch. Defaults to
 		// "current" (today's layout) and is loaded from localStorage below.
-		this._spellViewMode = this._getSpellViewMode();
+		this._spellViewMode = isHeadless ? "current" : this._getSpellViewMode();
 		this._registerCommittedSpellCastHooks();
 
 		this._registerAlchemicalEruptionHook();
-		this._init();
+		if (!isHeadless) this._init();
 	}
 
 	// ========================================================================
@@ -156,7 +157,7 @@ class CharacterSheetSpells {
 			return this._spellViewMode;
 		}
 		try {
-			if (typeof localStorage !== "undefined") {
+			if (!this._isHeadless && typeof localStorage !== "undefined") {
 				const stored = localStorage.getItem(CharacterSheetSpells._SPELL_VIEW_MODE_STORAGE_KEY);
 				if (stored && CharacterSheetSpells.SPELL_VIEW_MODES.includes(stored)) return stored;
 			}
@@ -173,7 +174,7 @@ class CharacterSheetSpells {
 		if (!CharacterSheetSpells.SPELL_VIEW_MODES.includes(mode)) return;
 		this._spellViewMode = mode;
 		try {
-			if (typeof localStorage !== "undefined") {
+			if (!this._isHeadless && typeof localStorage !== "undefined") {
 				localStorage.setItem(CharacterSheetSpells._SPELL_VIEW_MODE_STORAGE_KEY, mode);
 			}
 		} catch (e) { /* ignore storage errors */ }
@@ -221,6 +222,7 @@ class CharacterSheetSpells {
 	}
 
 	_renderMetamagic () {
+		if (this._isHeadless) return;
 		CharacterSheetCombat.renderMetamagicDashboard(
 			this._state,
 			this._page,
@@ -8754,6 +8756,7 @@ class CharacterSheetSpells {
 
 	// #region Rendering
 	renderSlots () {
+		if (this._isHeadless) return;
 		const container = document.getElementById("charsheet-spell-slots");
 		if (!container) return;
 
@@ -8935,6 +8938,7 @@ class CharacterSheetSpells {
 	}
 
 	_renderSpellList () {
+		if (this._isHeadless) return;
 		// BUG 5: refresh the Current/Prepared/Known toggle (lives above the list) and the
 		// Arcane Recovery status (BUG 7) every render so both stay in sync after casts,
 		// prepares, and post-rest full re-renders.
@@ -9167,6 +9171,7 @@ class CharacterSheetSpells {
 	}
 
 	_renderSpellViewToggle () {
+		if (this._isHeadless) return;
 		const host = document.getElementById("charsheet-spell-view-toggle");
 		if (!host) return;
 		const active = this._getSpellViewMode();
@@ -9220,6 +9225,7 @@ class CharacterSheetSpells {
 	 * short-rest menu ("Recover slots on a Short Rest") and shows Used vs Available.
 	 */
 	_renderArcaneRecoveryStatus () {
+		if (this._isHeadless) return;
 		const host = document.getElementById("charsheet-arcane-recovery-status");
 		if (!host) return;
 		host.innerHTML = "";
@@ -10090,6 +10096,7 @@ class CharacterSheetSpells {
 	}
 
 	render () {
+		if (this._isHeadless) return;
 		this._pruneImprovedPotentOffers();
 		// Calculate spell slots based on class/level before rendering
 		this._state.calculateSpellSlots();
@@ -10123,6 +10130,7 @@ class CharacterSheetSpells {
 	 * classes. Clicking a count opens a class-scoped Add-Spell modal.
 	 */
 	_renderSpellTrackingUI () {
+		if (this._isHeadless) return;
 		const container = document.getElementById("charsheet-spellcasting-stats");
 		if (!container) return;
 		container.innerHTML = "";
