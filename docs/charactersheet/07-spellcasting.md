@@ -15,6 +15,79 @@ The `CharacterSheetSpells` module handles all spellcasting functionality:
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661
 
+## Detached companion casting
+
+`CharacterSheetCompanionActor.hydrate({ownerPage, companionId})` returns
+`{ok, runtime}` using the companion's persisted actor snapshot, never the current
+original's build. The runtime exposes `getState()`, `getSpells()`,
+`castSpell(id, options)`, `castInnateSpell(id, options)`, `castRitual(id)`,
+`takeDamage(amount, options)`, `run(async (actor, spells) => ...)`, `commit()`,
+and `dispose()`. UI code must await these operations and recreate the runtime
+after a revision conflict. Conversions, recovery, concentration controls, and
+other actor changes belong inside `run`; do not swap a player module's State.
+
+The adapter supplies actor-bound Page roll helpers and a headless Combat/Spells
+service without player document listeners or player panel rendering.
+Per-actor exclusivity and live identity/revision checks cover asynchronous
+prompts and delayed effect buttons. Persistence failure rolls back only the
+affected companion/target fields rather than restoring the original's entire
+state. Detached actors never become selectable roster characters.
+
+`castSpell` preserves `decision: {slotLevel, isPact}` so ordinary and Pact
+slots of the same level remain separate choices. An optional `targetActorId`
+selects the original's character ID or another managed actor's snapshot ID for
+supported beneficial effects. Self-only spells always mean the duplicate.
+Unmanaged recipients and spell effects unsupported by the existing engine
+still require manual resolution; this runtime is not a new spell rules engine.
+
+Material/focus requirements are confirmed for each applicable cast, including
+their actual wording, cost and consumption. This external supply confirmation
+does not create items, borrow original inventory, or grant item bonuses.
+Normal player material enforcement and Spell-Storing Item holder behavior
+remain unchanged.
+
+`getManualResolutionNotice()` supplies the explanation for the companion UI:
+unsupported effects, hostile-target damage, creature-type eligibility, and
+external component bookkeeping remain manual. The snapshot envelope identifies
+the duplicate as a Construct; its copied original race is not its creature type.
+This milestone supplies the runtime, not creation or management dialogs.
+
+### Simulacrum policy boundaries
+
+Hydrated actors carry their envelope policy separately from serializable State.
+The ordinary HP setters, healing helpers, spell healing, slot setters, recovery
+conversions, and rest entrypoints enforce it. Commit independently rejects raw
+unpaid HP increases, PHB slot increases, and frozen-build/learned-spell edits.
+Normal non-slot resource spending/recovery, metamagic, and new temporary buffs
+remain actor-local.
+
+PHB duplicates cannot regain ordinary or Pact slots, but may take rests for
+legal non-slot benefits. XPHB duplicates cannot rest or cast Simulacrum from
+another edition/route; non-rest slot conversion remains legal. Both versions
+restore HP only by paid repair and melt irreversibly at current or maximum HP
+zero. Terminal records remain in the roster until dismissed. Destruction,
+dismissal, concentration replacement, and creator-qualified replacement remove
+only that actor's effects/summons, never unrelated original concentration.
+
+The owning State exposes:
+
+```js
+owner.getSimulacrumRepairQuote(id, {
+  amount, laboratoryConfirmed, ownerLongRest, withinFiveFeet,
+}); // {ok:true, actualHp, costGp, revision} or {ok:false, reason, message}
+owner.repairSimulacrum(id, options); // {ok:true, actualHp, costGp, revision}
+owner.destroySimulacrum(id, {reason});
+owner.destroySimulacrumsByCreator(creatorActorId, {exceptCompanionId});
+```
+
+PHB repair requires a suitable laboratory confirmation. XPHB repair requires
+the creator's Long Rest and proximity within 5 feet. Quotes cap the amount at
+actual missing HP and check funds. Repair deducts `100 * actualHp` gp with
+`deductGold`, commits the actor/projection, and restores exact original currency
+denominations if projection/commit fails. The caller owns persistence and Undo
+Rest. Repair/rest confirmations are caller assertions, not a calendar or
+distance-simulation system.
+
 ## Cleric Potent Spellcasting and Damage Follow-Ups
 
 On an XPHB or TGTT Cleric, the source-owned level-7 Blessed Strikes choice

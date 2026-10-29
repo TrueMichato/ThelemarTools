@@ -1104,10 +1104,25 @@ and rest never rebuild/refill it. Export with `profile:"companion"` to avoid
 NPC caps/compaction and retain exact numeric statistics, structured defenses,
 full feature entries, and source/ordinary/Pact casting routes.
 
-Recovery/repair/destruction/forbidden-cast enforcement and the actor-scoped
-casting controller are **later milestones**. Envelope policy is not yet a
-guard; do not expose the foundation in gameplay UI. Nested companion state is
-forbidden; future actor-created summons need owner-managed storage.
+Milestone 2 adds `CharacterSheetCompanionActor.hydrate({ownerPage,companionId})`
+and actor-bound headless Spells/Combat. Await `castSpell`, `castInnateSpell`,
+`castRitual`, `takeDamage`, or `run((actor,spells)=>...)`; never impersonate the
+original State. Normal/Pact selection uses `decision:{slotLevel,isPact}`.
+Supported beneficial targets use `targetActorId`; unsupported rules remain
+manual via `getManualResolutionNotice()`. Actor-owned summons live in the
+owner roster, not nested snapshots. Per-actor locks and live revisions guard
+prompts/callbacks; persistence failure rolls back only affected fields.
+
+HP/slot/rest/cast APIs now enforce envelope policy. PHB cannot regain normal or
+Pact slots; XPHB cannot rest/cast Simulacrum but may recover slots without rests.
+Both have repair-only HP and terminal melting at current/max zero. Use
+`getSimulacrumRepairQuote(id,{amount,laboratoryConfirmed,ownerLongRest,withinFiveFeet})`
+and `repairSimulacrum(id,options)`; success reports `actualHp`, `costGp`, `revision`.
+The State charges 100 gp/actual HP, atomically commits, and restores exact
+currency on failure; UI/Rest owns persistence and Undo. Lifecycle APIs are
+`destroySimulacrum` and `destroySimulacrumsByCreator`. Creation/management UI
+remains a separate milestone. Underlying actor race is original; eligibility
+must use envelope kind/Construct projection instead.
 Full envelope, failure, and export contracts:
 `docs/charactersheet/18-npc-export.md`, "Actor-backed companion foundation".
 

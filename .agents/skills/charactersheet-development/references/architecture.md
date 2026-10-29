@@ -31,6 +31,14 @@ The manager hydrates the persisted actor and lazily loads the actor bridge
 after Page/Spells/Combat are available. Corrupt snapshots surface diagnostics,
 not an original-character fallback; destroyed snapshots remain dismissible.
 
+`CharacterSheetCompanionActor` is the explicit actor-page adapter. Hydrate it
+with `{ownerPage, companionId}`, invoke its cast methods or `run(operation)`,
+and await commit/persistence. It allowlists actor-bound Page helpers rather
+than delegating unknown mutable callbacks to the owner. Combat also accepts
+`{isHeadless: true}` to omit listener installation; the bridge suppresses its
+player-facing renderers. Managed ally effects use a separate `targetState`
+parameter on the shared effect application path, never a State swap.
+
 ```
 CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Entry point & orchestrator. Loads all data, initializes modules,

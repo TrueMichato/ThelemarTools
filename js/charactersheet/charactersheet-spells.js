@@ -260,7 +260,10 @@ class CharacterSheetSpells {
 
 	async _pPublishCommittedSpellCast (input) {
 		this._registerCommittedSpellCastHooks();
-		const receipt = await this._state.pPublishCommittedSpellCast?.(input);
+		const actorContext = this._page?.getActorCastContext?.();
+		const receipt = await this._state.pPublishCommittedSpellCast?.(actorContext
+			? {...input, cast: {...input.cast, actorId: actorContext.actorId, suppliedComponents: actorContext.suppliedComponents}}
+			: input);
 		if (receipt?.followUpFailed) {
 			const failures = receipt.followUps.filter(it => !it.ok).map(it => it.error).filter(Boolean);
 			JqueryUtil.doToast({
@@ -2640,6 +2643,12 @@ class CharacterSheetSpells {
 			releaseReservation();
 			return {ok: false, committed: false, reason: "spell-identity-unresolved"};
 		}
+		const actorBlock = this._state.getCompanionSpellCastBlock?.(storage.spell, spellData);
+		if (actorBlock) {
+			releaseReservation();
+			JqueryUtil.doToast({type: "warning", content: actorBlock});
+			return {ok: false, committed: false, reason: "actor-cast-forbidden"};
+		}
 		const selfHolderUid = this._state.getEfaSpellStoringItemSelfHolder?.().uid;
 		const holderConcentrations = (this._state.getConcentrations?.() || [])
 			.filter(concentration => String(concentration?.holderUid || selfHolderUid) === String(holder.uid));
@@ -3398,7 +3407,8 @@ class CharacterSheetSpells {
 		// upcast choice from the cast-options context menu — revalidated against current slots).
 		let selectedSlot;
 		if (decision && decision.slotLevel != null) {
-			selectedSlot = castOptions.find(s => !s.isWizardCapstone && !s.isNoSlotResource && !s.isPact && s.level === decision.slotLevel);
+			selectedSlot = castOptions.find(s => !s.isWizardCapstone && !s.isNoSlotResource
+				&& !!s.isPact === (decision.isPact === true) && s.level === decision.slotLevel);
 			if (!selectedSlot) {
 				JqueryUtil.doToast({type: "warning", content: `No level ${decision.slotLevel} slot available.`});
 				return;
@@ -3530,7 +3540,7 @@ class CharacterSheetSpells {
 			if (selectedSlot.capstoneType === "signature" && !this._state.useSignatureSpell?.(spell)) {
 				this._rollbackSpellCastingEconomy(economyTransaction);
 				JqueryUtil.doToast({type: "warning", content: `${spell.name}'s Signature Spell cast has already been used. Cast it with a spell slot instead.`});
-				return;
+				return {ok: true, committed: true, gamblerResolution: gamblerCastResolution};
 			}
 		} else if (selectedSlot.isNoSlotResource) {
 			const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
@@ -3769,7 +3779,7 @@ class CharacterSheetSpells {
 
 		this._state.consumeStatesEndingOnSpellCast?.();
 		this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
-		const receipt = await this._state.pPublishCommittedSpellCast?.({
+		const receipt = await this._pPublishCommittedSpellCast({
 			spell,
 			spellData,
 			focusInventoryRow: focusSelection.focusInventoryRow,
@@ -3864,7 +3874,7 @@ class CharacterSheetSpells {
 		if (!confirmed) return;
 
 		// Cast Moonbeam normally: auto-slot, no metamagic / component / ritual prompts.
-		await this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
+		const receipt = await this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 
 		// _castSpell doesn't report success; if no slot was consumed the cast was cancelled
 		// (e.g. the player declined the break-concentration prompt) — don't spend the use.
@@ -3881,6 +3891,7 @@ class CharacterSheetSpells {
 
 		this._page.saveCharacter();
 		this._renderSpellList();
+		return receipt;
 	}
 
 	/**
@@ -3913,6 +3924,8 @@ class CharacterSheetSpells {
 			JqueryUtil.doToast({type: "warning", content: block});
 			return false;
 		}
+		if (this._page?.pConfirmSpellSupplies
+			&& !await this._page.pConfirmSpellSupplies({spell, spellData, ...opts})) return false;
 		if (checks.length) {
 			// TGTT gives no DC for these condition checks; the sheet's minimum
 			// concentration DC (zero damage) is 10. One check covers all conditions.
@@ -3977,11 +3990,13 @@ class CharacterSheetSpells {
 	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring one concentration check
 	 */
 	_checkCastingConstraints (spell, spellData, appliedMetamagic = null, opts = {}) {
+		const policyBlock = this._state.getCompanionSpellCastBlock?.(spell, spellData);
+		if (policyBlock) return {block: policyBlock, checks: []};
 		// Advanced opt-in escape hatch: when enabled, skip every condition/component
 		// casting gate (incapacitated, verbal/somatic banned-or-check, wild shape).
 		// This intentionally does NOT affect slot/sorcery-point/charge spending or
 		// concentration bookkeeping — those are handled in `_castSpell`, not here.
-		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) {
+		if (!this._state._companionActorId && this._state.getSettings?.()?.ignoreSpellcastingRestrictions) {
 			return {block: null, checks: []};
 		}
 
@@ -4036,7 +4051,7 @@ class CharacterSheetSpells {
 
 		// Material component requirement (only when the caller opts in — i.e. normal/ritual
 		// slot/cantrip casting, never innate/item casting which ignores materials).
-		if (opts.enforceMaterial && !componentWaivers.has("m")) {
+		if (opts.enforceMaterial && !componentWaivers.has("m") && !this._page?.pConfirmSpellSupplies) {
 			const matBlock = this._getMaterialComponentBlock(spell, spellData);
 			if (matBlock) return {block: matBlock, checks: []};
 		}
@@ -4154,6 +4169,9 @@ class CharacterSheetSpells {
 	}
 
 	async _pResolveSpellCastFocus ({spell, castMeta = null, decision = null} = {}) {
+		if (this._page?.pConfirmSpellSupplies) {
+			return {cancelled: false, requirement: null, focusInventoryRow: null, focusReference: null};
+		}
 		if (this._state.getSettings?.().ignoreSpellcastingRestrictions) {
 			return {cancelled: false, requirement: null, focusInventoryRow: null, focusReference: null};
 		}
@@ -4223,6 +4241,7 @@ class CharacterSheetSpells {
 	 * @returns {Promise<{consumed: (null|{id:string, name:string, value:number})}>}
 	 */
 	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false}) {
+		if (this._page?.pConfirmSpellSupplies) return {consumed: null, supplied: true};
 		if (variantUsed) return {consumed: null};
 		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) return {consumed: null};
 		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return {consumed: null};
@@ -5063,6 +5082,7 @@ class CharacterSheetSpells {
 
 	_getNormalizedCastMeta ({spell = null, spellData = null, slotLevel = null, castMeta = null} = {}) {
 		const normalized = {
+			...(this._page?.getActorCastContext?.() || {}),
 			...(castMeta || {}),
 			appliedMetamagic: castMeta?.appliedMetamagic || null,
 		};
@@ -5578,6 +5598,7 @@ class CharacterSheetSpells {
 
 			// Determine if we should ask for a target
 			const selfTargetMode = CharacterSheetSpells.resolveSelfTargetingMode(targetInfo, effects);
+			const managedTarget = this._page.getActorSpellTarget?.({...targetInfo, selfTargetMode}) || null;
 			const actingHolder = normalizedCastMeta.targetingMeta?.actingHolder || null;
 			const isExternalActingHolder = !!actingHolder && actingHolder.isSelf !== true;
 
@@ -5585,7 +5606,14 @@ class CharacterSheetSpells {
 			// instead of a blocking pre-roll target prompt. Beneficial, non-self-only spells
 			// resolve immediately; the player opts into applying the effect to themselves via
 			// a bright button in the result toast (which rolls/applies the payload ONCE).
-			if (isExternalActingHolder && ["offer", "auto"].includes(selfTargetMode)) {
+			if (managedTarget && ["offer", "auto"].includes(selfTargetMode)) {
+				effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel, {
+					committedRolls,
+					castingStats: {ability: castingAbility, abilityMod: spellcastingMod},
+					effectOwner: normalizedCastMeta.effectOwner || null,
+					targetState: managedTarget,
+				});
+			} else if (isExternalActingHolder && ["offer", "auto"].includes(selfTargetMode)) {
 				externalResolution = {
 					kind: "external-holder-effect",
 					holderUid: actingHolder.uid,
@@ -5881,7 +5909,7 @@ class CharacterSheetSpells {
 				evt.stopPropagation();
 				if (applyToSelfBtn.disabled) return;
 				applyToSelfBtn.disabled = true;
-				const applied = await this._applySpellEffectsToSelf(
+				const applyEffect = () => this._applySpellEffectsToSelf(
 					offerApplyToSelf.spell,
 					offerApplyToSelf.spellData,
 					offerApplyToSelf.effects,
@@ -5892,6 +5920,16 @@ class CharacterSheetSpells {
 						effectOwner: offerApplyToSelf.effectOwner,
 					},
 				);
+				let applied;
+				try {
+					applied = this._page.pRunActorEffect
+						? await this._page.pRunActorEffect(applyEffect)
+						: await applyEffect();
+				} catch (error) {
+					applyToSelfBtn.disabled = false;
+					JqueryUtil.doToast({type: "danger", content: error.message});
+					return;
+				}
 				applyToSelfBtn.textContent = applied.length ? "✓ Applied to Self" : "✓ Done";
 				this._page._renderActiveStates?.();
 				this._page._combat?.renderCombatStates?.();
@@ -7602,6 +7640,7 @@ class CharacterSheetSpells {
 		rollReceipt = null,
 		castingStats = null,
 		effectOwner = null,
+		targetState = this._state,
 	} = {}) {
 		// A conjured weapon is created only after the cast commits and concentration
 		// replaces the previous spell. The raw damage dice belong to its item, not
@@ -7627,10 +7666,10 @@ class CharacterSheetSpells {
 			const formula = `${healingResult.dice || ""}${healingResult.modifier ? ` ${healingResult.modifier >= 0 ? "+" : "-"} ${Math.abs(healingResult.modifier)}` : ""}`.trim();
 
 			if (healAmount > 0) {
-				const hp = this._state.getHp();
+				const hp = targetState.getHp();
 				const newHp = Math.min(hp.max, hp.current + healAmount);
-				const actualHealing = newHp - hp.current;
-				this._state.setHp(newHp, hp.max); // Fixed: setHp(current, max)
+				targetState.setHp(newHp, hp.max);
+				const actualHealing = targetState.getHp().current - hp.current;
 				appliedEffects.push(`Healed ${actualHealing} HP`);
 
 				const receiptRoll = rollReceipt || {
@@ -7674,10 +7713,10 @@ class CharacterSheetSpells {
 				}
 			}
 
-			const granted = this._state.grantTempHp(tempHpAmount);
+			const granted = targetState.grantTempHp(tempHpAmount);
 			appliedEffects.push(granted
 				? `${tempHpAmount} temp HP`
-				: `retained ${this._state.getTempHp()} temp HP (offered ${tempHpAmount})`);
+				: `retained ${targetState.getTempHp()} temp HP (offered ${tempHpAmount})`);
 		}
 
 		// Check if spell grants conditions - if so, apply the condition itself
@@ -7694,7 +7733,7 @@ class CharacterSheetSpells {
 				// "invisible" is a beneficial condition when cast on self
 				if (!hostileConditions.includes(conditionLower)) {
 					const conditionName = condition.charAt(0).toUpperCase() + condition.slice(1);
-					this._state.addCondition(conditionName);
+					targetState.addCondition(conditionName);
 					conditionsToApply.push(conditionName);
 					appliedEffects.push(`${conditionName} condition applied`);
 				}
@@ -7704,7 +7743,7 @@ class CharacterSheetSpells {
 		// For condition-granting spells, create an active state to track duration/concentration
 		// but DON'T add customEffects (the condition itself provides the effects)
 		if (conditionsToApply.length > 0 && (effects.duration || effects.concentration)) {
-			this._state.addActiveState("custom", {
+			targetState.addActiveState("custom", {
 				name: spell.name,
 				icon: effects.concentration ? "🔮" : "✨",
 				description: `Grants: ${conditionsToApply.join(", ")}`,
@@ -7760,7 +7799,7 @@ class CharacterSheetSpells {
 			}
 
 			// Use activateState to trigger side effects like _applyTempHpFromState
-			const stateId = this._state.activateState("custom", {
+			const stateId = targetState.activateState("custom", {
 				name: spell.name,
 				icon: effects.concentration ? "🔮" : "✨",
 				description: `Spell effect: ${spell.name}`,

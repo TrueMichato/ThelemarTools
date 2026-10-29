@@ -316,7 +316,7 @@ describe("Simulacrum snapshot foundation", () => {
 		expect(state.hydrateCompanionActor(id).actor.getMaxHp()).toBe(0);
 	});
 
-	it("preserves zero pools, local effects and HP across commit and two real owner save/load cycles", () => {
+	it("preserves zero pools without refilling and persists terminal teardown across two real owner save/load cycles", () => {
 		let state = makeCaster();
 		const {id} = addSnapshot(state);
 		const hydrated = state.hydrateCompanionActor(id);
@@ -338,8 +338,9 @@ describe("Simulacrum snapshot foundation", () => {
 			expect(actor.getResource("intrinsic-pool").current).toBe(0);
 			expect(actor.getInnateSpells()[0].uses.current).toBe(0);
 			expect(actor.getCurrentHp()).toBe(0);
-			expect(actor.isConcentrating()).toBe(true);
-			expect(actor.getArmorClass()).toBe(14);
+			expect(actor.isConcentrating()).toBe(false);
+			expect(actor.getActiveStates()).toEqual([]);
+			expect(state.getCompanion(id).actorSnapshot.lifecycle).toBe("destroyed");
 			expect(actor._data.companions).toEqual([]);
 		}
 	});

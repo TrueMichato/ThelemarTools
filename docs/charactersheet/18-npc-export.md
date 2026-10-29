@@ -113,13 +113,12 @@ editions, per-class casting statistics, and separate ordinary/Pact routes even
 at the same level. Slot blocks across class lists describe shared pools, not
 additional pools. Ordinary NPC export defaults and compaction remain unchanged.
 
-**Not yet playable:** creation/target UI, shared-caster controller, policy
-enforcement, paid repairs, replacement/destruction cleanup, and async cast
-reservations belong to later milestones. Policy fields are metadata here, not
-guards: direct actor rest/heal/cast calls are not yet restricted. An actor must
-not be exposed to gameplay UI until those guards exist. Future summons must
-live in the owner's managed roster; actor snapshots reject nested companions.
-The revision guard protects actor commits, not arbitrary out-of-band raw writes.
+Milestone 2 now supplies the isolated shared-caster controller, authoritative
+policy guards, paid-repair State APIs, and actor-qualified lifecycle cleanup.
+See [Detached companion casting](07-spellcasting.md#detached-companion-casting).
+Creation/target/management UI remains separate. Actor-created summons live in
+the owner's managed roster; persisted actor snapshots reject nested companions.
+The revision guard protects API commits, not arbitrary out-of-band raw writes.
 
 `CharacterSheetSimulacrumSnapshot.test.js` exercises this foundation with real
 State/exporter instances, source immutability, equipment/effect teardown,
