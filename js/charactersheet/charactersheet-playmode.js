@@ -10,6 +10,7 @@
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetSimulacrum} from "./charactersheet-simulacrum.js";
 
 function csRestoreModalFocus (trigger) {
 	if (trigger?.isConnected && typeof trigger.focus === "function") {
@@ -3521,6 +3522,10 @@ export class CharacterSheetPlayMode {
 		}
 
 		companions.forEach(comp => {
+			if (CharacterSheetSimulacrum.isSimulacrum(comp)) {
+				CharacterSheetSimulacrum.renderCard({ownerPage: this._page, companion: comp, parent: container, mode: "play"});
+				return;
+			}
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
 			card.setAttribute("data-companion-id", comp.id);
 			const featureOperationModel = this._page.getFeatureCompanionOperationSurfaceModel?.(comp) || null;
@@ -5090,6 +5095,11 @@ export class CharacterSheetPlayMode {
 	// ─── Phase B4: Companion HP prompts and Statblock modal ──────
 
 	_promptCompanionHpChange (comp, mode, container) {
+		if (CharacterSheetSimulacrum.isSimulacrum(comp)) {
+			const operation = mode === "heal" ? CharacterSheetSimulacrum.pRepair : CharacterSheetSimulacrum.pDamage;
+			return operation.call(CharacterSheetSimulacrum, {ownerPage: this._page, companionId: comp.id})
+				.catch(error => CharacterSheetSimulacrum._notifyError(error.message));
+		}
 		const overlay = this._ce("div", "pm-modal-overlay");
 		const panel = this._ce("div", "pm-modal", overlay);
 
@@ -5143,6 +5153,9 @@ export class CharacterSheetPlayMode {
 	}
 
 	_showCompanionStatblockModal (comp) {
+		if (CharacterSheetSimulacrum.isSimulacrum(comp)) {
+			return CharacterSheetSimulacrum.pShow({ownerPage: this._page, companionId: comp.id});
+		}
 		const overlay = this._ce("div", "pm-modal-overlay");
 		const panel = this._ce("div", "pm-modal pm-modal--statblock", overlay);
 

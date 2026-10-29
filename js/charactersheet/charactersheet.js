@@ -14,6 +14,7 @@ import {CharacterSheetLayout} from "./charactersheet-layout.js";
 import {CharacterSheetNotes} from "./charactersheet-notes.js";
 import {CharacterSheetRollHistory} from "./charactersheet-rollhistory.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetSimulacrum} from "./charactersheet-simulacrum.js";
 import {CharacterSheetCustomAbilities} from "./charactersheet-customabilities.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 import {CharacterSheetQuickBuild} from "./charactersheet-quickbuild.js";
@@ -8138,6 +8139,10 @@ class CharacterSheetPage {
 		}
 
 		companions.forEach(companion => {
+			if (CharacterSheetSimulacrum.isSimulacrum(companion)) {
+				CharacterSheetSimulacrum.renderCard({ownerPage: this, companion, parent: list});
+				return;
+			}
 			// Check if this is a grouped companion (conjured creatures)
 			if (companion.count > 1 && companion.hpArray) {
 				this._renderGroupedCompanion(companion, list);
@@ -8749,6 +8754,9 @@ class CharacterSheetPage {
 	}
 
 	async _showCompanionStatBlock (companion) {
+		if (CharacterSheetSimulacrum.isSimulacrum(companion)) {
+			return CharacterSheetSimulacrum.pShow({ownerPage: this, companionId: companion.id});
+		}
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `📋 ${companion.customName || companion.name}`,
 			isMinHeight0: true,

@@ -458,6 +458,37 @@ _modifyStamina(delta)
 
 ---
 
+## CharacterSheetSimulacrum
+
+**File**: `js/charactersheet/charactersheet-simulacrum.js`
+
+**Role**: Shared actor-backed companion UI
+
+Desktop and Play Mode route Simulacrum records to `renderCard()` and `pShow()`,
+not to generic editable companion HP or partial statblock dialogs. The manager
+reads the duplicate's current actor state and offers source-qualified ordinary,
+Pact, innate and ritual casting; per-spell slot selection preserves same-level
+ordinary/Pact identity. Conditions, concentration, feature pools and Font of
+Magic use the actor runtime, never the player's mutable action handlers.
+
+`pPrepareCreation()` is a pure, cancellable preview: it returns staged companion
+data and replacement identities without adding a companion, spending a slot,
+destroying an existing copy or saving. The casting transaction owns that commit.
+Changing the original or switching characters invalidates the preview.
+Specific-creature targeting remains visibly disabled.
+
+`pRepair()` uses the authoritative State quote/payment APIs. PHB repair requires
+laboratory confirmation and awaits persistence; XPHB repair opens the owner's
+Long Rest staging flow. Destroyed copies remain viewable and dismissible but
+cannot act or be repaired. Corrupt envelopes show explicit unavailable/backup
+recovery guidance rather than falling back to the original character.
+
+The companion runtime module is loaded lazily at the first live interaction,
+after Page, Spells and Combat are initialized. All writes still require the
+selected owner/generation to match.
+
+---
+
 ## CharacterSheetSpells
 
 **File**: `js/charactersheet/charactersheet-spells.js`  

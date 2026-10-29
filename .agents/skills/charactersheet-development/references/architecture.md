@@ -23,6 +23,14 @@ with `setSpells()` and keep the actor page adapter's state-sensitive callbacks,
 rendering, and persistence isolated; this option is not a license to reuse
 the player's page or swap its `_state`.
 
+`CharacterSheetSimulacrum` owns the shared desktop/Play Mode actor card and
+manager. Its creation preview only stages data; the spell transaction owns
+payment/replacement/commit. Actor-backed records must never fall through to
+generic editable HP, partial creature renderers or fabricated bestiary links.
+The manager hydrates the persisted actor and lazily loads the actor bridge
+after Page/Spells/Combat are available. Corrupt snapshots surface diagnostics,
+not an original-character fallback; destroyed snapshots remain dismissible.
+
 ```
 CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Entry point & orchestrator. Loads all data, initializes modules,

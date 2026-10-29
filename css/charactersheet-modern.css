@@ -3,6 +3,141 @@
    A modern, accessible, and beautiful D&D 5e character sheet design
    ======================================================================== */
 
+.cs-simulacrum {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	min-width: 0;
+	color: var(--cs-text-primary);
+}
+
+.cs-simulacrum p {
+	max-width: 72ch;
+	margin: 0 0 0.5rem;
+}
+
+.cs-simulacrum__targets,
+.cs-simulacrum__field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.cs-simulacrum__targets legend {
+	font-size: 1rem;
+	font-weight: 600;
+	color: inherit;
+}
+
+.cs-simulacrum__targets label,
+.cs-simulacrum__confirmation {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	min-height: 2.75rem;
+	margin: 0;
+}
+
+.cs-simulacrum__hint,
+.cs-simulacrum__unavailable {
+	color: var(--cs-text-secondary);
+}
+
+.cs-simulacrum__warning {
+	padding: 0.75rem;
+	color: var(--cs-warning-text);
+	background: var(--cs-warning-light);
+	border: 1px solid var(--cs-border-control);
+	border-radius: var(--cs-radius-md);
+}
+
+.cs-simulacrum__status {
+	min-height: 1.5em;
+	color: var(--cs-text-secondary);
+}
+
+.cs-simulacrum__footer {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 0.5rem;
+}
+
+.cs-simulacrum button,
+.cs-simulacrum input[type="number"] {
+	min-height: 2.75rem;
+}
+
+.cs-simulacrum__statblock {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.cs-simulacrum__content,
+.cs-simulacrum__section {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.cs-simulacrum__content {
+	gap: 1.5rem;
+}
+
+.cs-simulacrum__card {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	padding: 1rem;
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-md);
+	background: var(--cs-bg-surface);
+}
+
+.cs-simulacrum__card h4,
+.cs-simulacrum__card p {
+	margin: 0;
+}
+
+.cs-simulacrum__section h4 {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+}
+
+.cs-simulacrum__toolbar,
+.cs-simulacrum__spell,
+.cs-simulacrum__resource {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.cs-simulacrum__spell,
+.cs-simulacrum__resource {
+	padding-block: 0.5rem;
+	border-bottom: 1px solid var(--cs-border);
+}
+
+.cs-simulacrum__spell-name {
+	display: flex;
+	flex: 1 1 14rem;
+	flex-direction: column;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.cs-simulacrum__spell-name span {
+	color: var(--cs-text-secondary);
+}
+
+.cs-simulacrum__slot {
+	flex: 0 1 14rem;
+	min-width: 0;
+}
+
 /* ========================================================================
    CSS Custom Properties (Design Tokens)
    ======================================================================== */
