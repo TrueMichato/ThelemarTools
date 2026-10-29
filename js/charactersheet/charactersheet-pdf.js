@@ -1393,6 +1393,7 @@ class CharacterSheetPdf {
 	}
 
 	_getCompanionPdfPresentation (companion) {
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._getActorCompanionPdfPresentation(companion);
 		const efaResolved = this._getExactEfaSteelDefenderResolution(companion);
 		if (efaResolved) return this._getEfaSteelDefenderPdfPresentation(companion, efaResolved);
 
@@ -1414,6 +1415,127 @@ class CharacterSheetPdf {
 			actions: companion.actions || [],
 			reactions: companion.reactions || [],
 		};
+	}
+
+	_getActorCompanionPdfPresentation (companion) {
+		const snapshot = companion.actorSnapshot;
+		const validation = this._state.constructor.validateCompanionActorSnapshot(snapshot);
+		const block = companion.statblock;
+		const name = companion.customName || companion.name || "Simulacrum";
+		if (!validation.ok || !block || !Array.isArray(block.ac) || block.ac.some(entry => !Number.isFinite(typeof entry === "number" ? entry : entry?.ac)) || !block.hp
+			|| ABILITIES.some(ability => !Number.isFinite(block[ability]))
+			|| ["senses", "languages"].some(key => block[key] != null && !Array.isArray(block[key]))
+			|| ["trait", "action", "bonus", "reaction", "spellcasting"].some(key => block[key] != null && (!Array.isArray(block[key]) || block[key].some(entry => !entry || typeof entry !== "object")))
+			|| (snapshot.state.concentrations != null && (!Array.isArray(snapshot.state.concentrations) || snapshot.state.concentrations.some(entry => !entry || typeof entry !== "object")))) {
+			return {
+				kind: "simulacrum",
+				name,
+				unavailableMessage: "Simulacrum actor unavailable. Restore a valid character export or backup, or recreate this copy. The original character's statistics were not substituted.",
+			};
+		}
+		const data = snapshot.state;
+		const casting = data.spellcasting;
+		const resourceRows = [];
+		const addPool = (label, pool) => {
+			if (pool?.max > 0) resourceRows.push([label, `${pool.current}/${pool.max}`]);
+		};
+		for (const [level, pool] of Object.entries(casting.spellSlots)) addPool(`Level ${level} slots`, pool);
+		addPool(`Pact Magic (level ${casting.pactSlots.level})`, casting.pactSlots);
+		for (const resource of data.resources) addPool(resource.name || resource.id, resource);
+		for (const spell of casting.innateSpells) {
+			if (spell.atWill) {
+				resourceRows.push([`${spell.name} (${spell.source})`, "At will"]);
+				continue;
+			}
+			const pool = data.resources.find(row => row.id === spell.linkedResourceId) || spell.uses;
+			addPool(`${spell.name} (${spell.source})`, pool);
+		}
+		for (const spell of casting.signatureSpells) {
+			addPool(`Signature Spell: ${spell.name} (${spell.source})`, {current: spell.usesCurrent, max: spell.usesMax});
+		}
+		for (const entry of [...data.features, ...data.feats, ...data.customAbilities]) addPool(entry.name, entry.uses);
+		for (const [die, pool] of Object.entries(data.hitDice)) addPool(`Hit Dice (${die})`, pool);
+		if (data.staminaMax > 0) addPool("Stamina", {current: data.staminaCurrent, max: data.staminaMax});
+
+		const formatBonuses = (values, labels = {}) => Object.entries(values || {})
+			.map(([key, value]) => `${labels[key] || key.split("|")[0].toTitleCase()} ${this._fmtMod(Number(value))}`).join(", ");
+		const entries = values => (values || []).map(entry => ({
+			name: entry.name,
+			description: this._getActorCompanionEntryText(entry.entries || entry.description || []),
+		}));
+		const spellcasting = (block.spellcasting || []).map(entry => {
+			const lines = [this._getActorCompanionEntryText(entry.headerEntries)];
+			if (entry.will?.length) lines.push(`At will: ${this._getActorCompanionEntryText(entry.will)}`);
+			for (const [period, spells] of Object.entries(entry.daily || {})) {
+				lines.push(`${period.replace(/e$/, " each")}/day: ${this._getActorCompanionEntryText(spells)}`);
+			}
+			for (const [level, band] of Object.entries(entry.spells || {})) {
+				const pool = entry.name?.startsWith("Pact Magic") ? casting.pactSlots : casting.spellSlots[level];
+				const label = Number(level) === 0 ? "Cantrips" : `Level ${level} (${pool?.current ?? band.slots ?? 0} slots remaining)`;
+				lines.push(`${label}: ${this._getActorCompanionEntryText(band.spells)}`);
+			}
+			lines.push(this._getActorCompanionEntryText(entry.footerEntries));
+			return {name: entry.name, description: lines.filter(Boolean).join(" ")};
+		});
+		const concentrations = (data.concentrations || (data.concentrating ? [data.concentrating] : []))
+			.map(entry => entry.name || entry.spellName).filter(Boolean).join(", ");
+		const conditions = data.conditions.map(condition => typeof condition === "string" ? condition : condition?.name || condition?.condition).filter(Boolean).join(", ");
+		const source = snapshot.spell.source;
+		return {
+			kind: "simulacrum",
+			name,
+			identity: `Simulacrum • ${source}`,
+			type: "construct",
+			size: Array.isArray(block.size) ? block.size.join("/") : block.size,
+			ac: block.ac.map(entry => typeof entry === "number" ? entry : entry.ac).join(", "),
+			hpMax: data.hp.max,
+			hpCurrent: data.hp.current,
+			speed: this._getCompanionSpeedString(block),
+			abilities: Object.fromEntries(ABILITIES.map(ability => [ability, block[ability]])),
+			metaRows: [
+				["Lifecycle", snapshot.lifecycle === "destroyed" ? "Destroyed" : companion.active === false ? "Inactive" : "Active"],
+				["Frozen level", String(snapshot.frozen.level)],
+				["Frozen proficiency bonus", this._fmtMod(snapshot.frozen.proficiencyBonus)],
+				["Saving Throws", formatBonuses(block.save, ABILITY_ABBR)],
+				["Skills", formatBonuses(block.skill)],
+				["Initiative", block.initiative == null ? "" : this._fmtMod(block.initiative)],
+				["Temporary HP", String(data.hp.temp)],
+				["Conditions", conditions || "None"],
+				["Concentration", concentrations || "None"],
+				["Exhaustion", String(data.exhaustion || 0)],
+				["Senses", [...(block.senses || []), block.passive == null ? "" : `passive Perception ${block.passive}`].filter(Boolean).join(", ")],
+				["Languages", (block.languages || []).join(", ")],
+			].filter(([, value]) => value),
+			resourceRows,
+			notesTitle: "Simulacrum Restrictions",
+			notes: [
+				"Frozen duplicate: it cannot gain levels or become more powerful. These are this copy's saved pools, not the original character's current resources.",
+				"Only paid repair restores HP, at 100 gp per HP actually restored. At 0 HP the copy is destroyed.",
+				source === "XPHB"
+					? "This copy cannot take Short or Long Rests or cast Simulacrum. Repair is available only during its original caster's Long Rest while the copy is within 5 feet; this does not restore any other pools."
+					: "This copy never regains expended spell slots. Paid repairs require an alchemical laboratory; the original caster's Long Rest does not repair it.",
+			],
+			traits: entries(block.trait),
+			actions: entries(block.action),
+			bonusActions: entries(block.bonus),
+			reactions: entries(block.reaction),
+			spellcasting,
+		};
+	}
+
+	_getActorCompanionEntryText (entry) {
+		if (typeof entry === "string") {
+			const withSpellSources = entry.replace(/\{@spell ([^|}]+)(?:\|([^|}]*))?(?:\|([^}]*))?\}/g, (match, name, source, display) => `${display || name} (${source || "PHB"})`);
+			return globalThis.Renderer?.stripTags ? Renderer.stripTags(withSpellSources) : this._stripTags(withSpellSources);
+		}
+		if (typeof entry === "number") return String(entry);
+		if (!entry || typeof entry !== "object") return "";
+		if (Array.isArray(entry)) return entry.map(value => this._getActorCompanionEntryText(value)).filter(Boolean).join("; ");
+		const parts = [
+			entry.name,
+			this._getActorCompanionEntryText(entry.entries || entry.entry || entry.items || entry.rows || []),
+		];
+		return parts.filter(Boolean).join(": ");
 	}
 
 	_getExactEfaSteelDefenderResolution (companion) {
@@ -1580,6 +1702,9 @@ class CharacterSheetPdf {
 	}
 
 	_renderCompanionBlock (presentation) {
+		if (presentation.unavailableMessage) {
+			return `<div class="pdf-companion"><div class="pdf-companion__name">${this._esc(presentation.name)}</div><p>${this._esc(presentation.unavailableMessage)}</p></div>`;
+		}
 		const abilityRow = ABILITIES.map(ability => {
 			const score = Number(presentation.abilities?.[ability] ?? 10);
 			const modifier = Math.floor((score - 10) / 2);
@@ -1594,8 +1719,10 @@ class CharacterSheetPdf {
 		const traits = renderEntries(presentation.traits);
 		const actions = renderEntries(presentation.actions);
 		const reactions = renderEntries(presentation.reactions);
+		const bonusActions = renderEntries(presentation.bonusActions);
+		const spellcasting = renderEntries(presentation.spellcasting);
 		const notes = presentation.notes?.length
-			? `<div class="pdf-comp__notes"><strong>Command &amp; Action Economy</strong><ul>${presentation.notes.map(note => `<li>${this._esc(note)}</li>`).join("")}</ul></div>`
+			? `<div class="pdf-comp__notes"><strong>${presentation.notesTitle ? this._esc(presentation.notesTitle) : "Command &amp; Action Economy"}</strong><ul>${presentation.notes.map(note => `<li>${this._esc(note)}</li>`).join("")}</ul></div>`
 			: "";
 
 		return `<div class="pdf-companion${presentation.kind === "efa-steel-defender" ? " pdf-companion--efa-steel-defender" : ""}">
@@ -1617,7 +1744,9 @@ class CharacterSheetPdf {
 				${renderRows(presentation.resourceRows, "pdf-comp__resources")}
 				${notes}
 				${traits ? `<div class="pdf-comp__section"><strong>Traits</strong>${traits}</div>` : ""}
+				${spellcasting ? `<div class="pdf-comp__section"><strong>Spellcasting</strong>${spellcasting}</div>` : ""}
 				${actions ? `<div class="pdf-comp__section"><strong>Actions</strong>${actions}</div>` : ""}
+				${bonusActions ? `<div class="pdf-comp__section"><strong>Bonus Actions</strong>${bonusActions}</div>` : ""}
 				${reactions ? `<div class="pdf-comp__section pdf-comp__section--reactions"><strong>Reactions</strong>${reactions}</div>` : ""}
 			</div>`;
 	}

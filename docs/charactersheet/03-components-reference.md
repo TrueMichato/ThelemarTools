@@ -458,11 +458,62 @@ _modifyStamina(delta)
 
 ---
 
+## CharacterSheetSimulacrum
+
+**File**: `js/charactersheet/charactersheet-simulacrum.js`
+
+**Role**: Shared actor-backed companion UI
+
+Desktop and Play Mode route Simulacrum records to `renderCard()` and `pShow()`,
+not to generic editable companion HP or partial statblock dialogs. The manager
+reads the duplicate's current actor state and offers source-qualified ordinary,
+Pact, innate and ritual casting; per-spell slot selection preserves same-level
+ordinary/Pact identity. Conditions, concentration, feature pools and Font of
+Magic use the actor runtime, never the player's mutable action handlers.
+Start combat / next turn / end combat use the actor's existing combat clock,
+so timed effects expire without advancing the original's turn. PHB actors
+can take their own rests to recover eligible non-slot uses; neither HP nor
+ordinary/Pact slots recover. XPHB actors have no rest controls. The manager
+also shows the runtime's explicit manual-resolution/component warning.
+
+`pPrepareCreation()` is a pure, cancellable preview: it returns staged companion
+data and replacement identities without adding a companion, spending a slot,
+destroying an existing copy or saving. The casting transaction owns that commit.
+Changing the original or switching characters invalidates the preview.
+Specific-creature targeting remains visibly disabled.
+
+`pRepair()` uses the authoritative State quote/payment APIs. PHB repair requires
+laboratory confirmation and awaits persistence; XPHB repair opens the owner's
+Long Rest staging flow. Failed laboratory saves compensate captured raw fields
+and persisted old-owner snapshots using the exact repair transaction receipt,
+not the pre-existing companion ID. Newer unrelated edits are preserved; an
+irreconcilable newer repair produces explicit backup/recovery guidance.
+Destroyed copies remain viewable and dismissible but
+cannot act or be repaired. Corrupt envelopes show explicit unavailable/backup
+recovery guidance rather than falling back to the original character.
+
+The companion runtime module is loaded lazily at the first live interaction,
+after Page, Spells and Combat are initialized. All writes still require the
+selected owner/generation to match.
+Closing a manager during an in-flight actor save defers runtime disposal until
+the operation finishes. PHB repair compensates only its HP/payment on save
+failure, preserving unrelated notes, newer slot spending and subsequent damage.
+
+---
+
 ## CharacterSheetSpells
 
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661  
 **Role**: Spellcasting Management
+
+`new CharacterSheetSpells(actorPage, {isHeadless: true})` reuses casting and
+actor-owned committed-cast hooks without installing the player's delegated
+listeners, reading/writing their saved spell view, or rendering into their
+spell panels. The caller must supply an isolated actor page adapter and its
+own rendering/persistence; headless construction alone does not isolate a
+page adapter that still reads the original character. `setSpells(catalog)`
+supplies the same source-qualified catalog used by ordinary casting.
 
 ### Key Methods
 
@@ -638,7 +689,7 @@ _showShortRestDialog()
 _performShortRest(hitDiceSpent)
 
 // Long Rest
-_showLongRestDialog()
+_showLongRestDialog({focusAdventurersAtlas = false, focusSimulacrum = null} = {})
 _performLongRest()
 ```
 
@@ -655,6 +706,28 @@ _performLongRest()
 3. Recover all spell slots
 4. Recover all class features
 5. Reset death saves
+
+### XPHB Simulacrum repair during the owner's Long Rest
+
+The optional **Simulacrum - Optional Paid Repair** fieldset stages an HP amount
+and confirmation that each active XPHB copy is within 5 feet. Zero skips repair;
+opening, editing, or cancelling the dialog changes neither HP nor gold. The live
+State quote caps healing at missing HP and charges **100 gp per HP actually
+restored**. Missing proximity, invalid amounts, insufficient combined funds,
+foreign creator identity, and changed actor revisions prevent confirmation.
+
+`focusSimulacrum` is a companion ID, not an actor State. The parent repair action
+opens this ordinary owner Long Rest dialog and focuses that copy's amount input.
+PHB copies use their separate alchemical laboratory repair flow, not this fieldset.
+The owner's recovery completes first, then `repairSimulacrum` commits only paid HP
+before the normal awaited owner save. The copy never rests or refills its pools.
+Payment/projection/save failures roll back the whole rest; **Undo Rest** restores
+pre-rest companion snapshots and the exact currency denominations together.
+Duplicate confirmation and stale character identity/navigation are guarded.
+
+Focused coverage: `CharacterSheetSimulacrumRest.test.js` drives the actual dialog
+confirmation with real State snapshot/repair APIs; it does not substitute a
+second repair implementation.
 
 ---
 
@@ -759,6 +832,17 @@ reconciled companion overlay and State APIs: setup choices, saves/skills,
 senses/immunities/languages, Hit Dice, Repair, command policy, Arcane Jolt, and
 Improved Deflection. Name-only, TCE, RHW, and generic companions do not enter
 the EFA-specific path.
+
+Actor-backed Simulacra instead validate their saved envelope and read current
+HP, ordinary/Pact slots, innate and limited-use counters, conditions and
+concentration from `actorSnapshot.state`. Frozen level/PB and saved statblock
+saves/skills, actions, bonus actions, reactions and source-qualified spellcasting
+are printed with PHB/XPHB recovery/repair restrictions and active/destroyed
+lifecycle. PDF generation does not hydrate, initialize, or refill the actor, and
+never substitutes the original character's current statistics. Invalid snapshots
+or a missing statblock print an explicit unavailable/backup-recovery message.
+`CharacterSheetSimulacrumPdf.test.js` covers this saved-actor path alongside the
+unchanged generic/EFA controls in `CharacterSheetPdf.test.js`.
 
 ### Key Methods
 

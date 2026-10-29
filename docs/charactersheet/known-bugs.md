@@ -512,6 +512,24 @@ issue numbers stay stable.
 
 ## Resolved
 
+### CS-BUG-180 — Simulacrum cards, capped laboratory submission, and terminal visibility — FIXED
+
+**Status**: Fixed during Simulacrum integration on top of `e0834d4e0`.
+**Reproduction**: Cast Simulacrum from a real saved Wizard, open Companions,
+damage the copy by 3 HP, request a laboratory repair of 20 HP, then recast or
+deal lethal damage.
+**Root causes**: The card supplied multiple root elements to `e_({outer})`,
+which rejects fragments; a native number-input maximum blocked submission even
+though the authoritative quote correctly capped restoration/cost; the shared
+lifecycle surface filtered terminal Simulacrums as inactive ordinary companions.
+**Fix**: Render the card fragment inside one explicit element, let the live
+State quote cap the request, and retain actor-backed records for inspection
+and dismissal. Native statblock disclosure also omits `open` for living copies
+instead of emitting the truthy HTML attribute `open="false"`.
+**Regression coverage**: `CharacterSheetSimulacrumUi.test.js`,
+`CharacterSheetSimulacrumCreation.test.js`, and both actual-browser PHB/XPHB
+workflows in `test/e2e/specs/simulacrum.spec.ts`; no expected-failure/skip.
+
 ### CS-BUG-177 — Builder Bard starting spells lost their level-1 ownership — FIXED
 
 **Status**: Fixed in `78373c276`.

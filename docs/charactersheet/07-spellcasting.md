@@ -15,6 +15,134 @@ The `CharacterSheetSpells` module handles all spellcasting functionality:
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661
 
+## Player Simulacrum creation
+
+The Spells tab, Overview/favorites quick casts, and Play Mode route Simulacrum
+through `CharacterSheetSpells._castSpell(id, options)`. This opens
+`CharacterSheetSimulacrum.pPrepareCreation({ownerPage, spellSource})` before
+spending. The own-character statblock preview is mandatory; Specific creature
+is unavailable. The prepared, item-free build is frozen at confirmation, with
+independent full initial pools and the exact casting spell's PHB/XPHB policy.
+
+Result and material choices finish before any slot, metamagic, component or
+casting-economy expenditure. The shared engine then pays the selected casting
+vehicle and metamagic, consumes the selected component, adds the prepared
+record, destroys prior active copies with the same creator, and applies normal
+on-cast state triggers. Replacement uses exact actor-owned effect/summon
+cleanup, not a blanket break of the original's unrelated concentration.
+Normal Simulacrum's twelve-hour casting time does not consume an action pip.
+
+The priced material must be ruby, not another valuable or the snow/hair named
+elsewhere in PHB's description. Multiple ruby matches require a selection;
+cancelling or choosing manual tracking cancels this creation. Selecting a
+valid variant component still uses the shared substitution rules.
+`ignoreSpellcastingRestrictions` remains an explicit manual-bookkeeping
+opt-out; creation never separately deducts another 1,500 gp from currency.
+
+Creation awaits `_saveCurrentCharacter({isReturnStatus: true,
+expectedCharacterId, expectedLoadGeneration})` before publishing a committed
+cast or refreshing the companion UI. A per-State lock excludes duplicate
+simultaneous creation. Raw-data identity, selected character, and load-generation
+guards reject stale prompts. `CharacterSheetSimulacrumCast` journals only
+synchronous creation-owned writes; failure in payment, projection, replacement
+or persistence reverses those field/row deltas, preserving unrelated concurrent
+notes, currency, inventory rows and resource edits. It never swaps live State or
+restores an entire owner snapshot. The narrow Page compensation hook also fixes
+the rescue mirror and any old-owner canonical write completed during a switch.
+Conflicting newer creation-owned records surface a recovery error rather than
+being silently overwritten.
+
+Gambler-sourced Simulacrum creation is explicitly unsupported (including delayed
+and failed Gambling Table outcomes) and refused before spending or rolling a
+receipt. A PHB duplicate is a Construct and cannot duplicate itself; XPHB's
+authoritative no-Simulacrum policy also blocks the cast. Specific-creature
+targeting remains unavailable. These limitations are not success-shaped casts.
+
+`CharacterSheetSimulacrumCreation.test.js` runs the real State, NPC exporter,
+Spells transaction and guarded Page storage path, replacing only interactive
+preview/picker boundaries. It covers payment/replacement, cancellation, stale
+owners, concurrent edits, projection/save failures and write-time switching.
+
+## Detached companion casting
+
+`CharacterSheetCompanionActor.hydrate({ownerPage, companionId})` returns
+`{ok, runtime}` using the companion's persisted actor snapshot, never the current
+original's build. The runtime exposes `getState()`, `getSpells()`,
+`castSpell(id, options)`, `castInnateSpell(id, options)`, `castRitual(id)`,
+`takeDamage(amount, options)`, `run(async (actor, spells) => ...)`, `commit()`,
+and `dispose()`. UI code must await these operations and recreate the runtime
+after a revision conflict. Conversions, recovery, concentration controls, and
+other actor changes belong inside `run`; do not swap a player module's State.
+
+The adapter supplies actor-bound Page roll helpers and a headless Combat/Spells
+service without player document listeners or player panel rendering.
+Per-actor exclusivity and live identity/revision checks cover asynchronous
+prompts and delayed effect buttons. Persistence failure rolls back only the
+affected companion/target fields rather than restoring the original's entire
+state. Detached actors never become selectable roster characters.
+
+`castSpell` preserves `decision: {slotLevel, isPact}` so ordinary and Pact
+slots of the same level remain separate choices. An optional `targetActorId`
+selects the original's character ID or another managed actor's snapshot ID for
+supported beneficial effects. Self-only spells always mean the duplicate.
+Unmanaged recipients and spell effects unsupported by the existing engine
+still require manual resolution; this runtime is not a new spell rules engine.
+
+Material/focus requirements are confirmed for each applicable cast, including
+their actual wording, cost and consumption. This external supply confirmation
+does not create items, borrow original inventory, or grant item bonuses.
+Normal player material enforcement and Spell-Storing Item holder behavior
+remain unchanged.
+
+`getManualResolutionNotice()` supplies the explanation for the companion UI:
+unsupported effects, hostile-target damage, creature-type eligibility, and
+external component bookkeeping remain manual. The snapshot envelope identifies
+the duplicate as a Construct; its copied original race is not its creature type.
+Creation is handled by the player transaction above, not by the detached actor
+adapter.
+
+### Simulacrum policy boundaries
+
+Hydrated actors carry their envelope policy separately from serializable State.
+The ordinary HP setters, healing helpers, spell healing, slot setters, recovery
+conversions, and rest entrypoints enforce it. Commit independently rejects raw
+unpaid HP increases, PHB slot increases, and frozen-build/learned-spell edits.
+Normal non-slot resource spending/recovery, metamagic, and new temporary buffs
+remain actor-local.
+
+PHB duplicates cannot regain ordinary or Pact slots, but may take rests for
+legal non-slot benefits. XPHB duplicates cannot rest or cast Simulacrum from
+another edition/route; non-rest slot conversion remains legal. Both versions
+restore HP only by paid repair and melt irreversibly at current or maximum HP
+zero. Terminal records remain in the roster until dismissed. Destruction,
+dismissal, concentration replacement, and creator-qualified replacement remove
+only that actor's effects/summons, never unrelated original concentration.
+
+The owning State exposes:
+
+```js
+owner.getSimulacrumRepairQuote(id, {
+  amount, laboratoryConfirmed, ownerLongRest, withinFiveFeet,
+}); // {ok:true, actualHp, costGp, revision} or {ok:false, reason, message}
+owner.repairSimulacrum(id, options); // {ok:true, actualHp, costGp, revision, transactionId}
+owner.destroySimulacrum(id, {reason});
+owner.destroySimulacrumsByCreator(creatorActorId, {exceptCompanionId});
+```
+
+PHB repair requires a suitable laboratory confirmation. XPHB repair requires
+the creator's Long Rest and proximity within 5 feet. Quotes cap the amount at
+actual missing HP and check funds. Repair deducts `100 * actualHp` gp with
+`deductGold`, commits the actor/projection, and restores exact original currency
+denominations if projection/commit fails. The caller owns persistence and Undo
+Rest. Successful repair stores `companion.repairTransactionId`, a transaction
+identity only, not a second HP/currency store. Laboratory save compensation
+matches this receipt in rescue/canonical snapshots before undoing payment and
+HP; an existing companion ID or unrelated actor revision is not proof of an
+applied repair. Newer actor spending/damage and unrelated owner edits survive.
+Conflicting newer paid repairs require explicit recovery rather than an
+overwrite. Repair/rest confirmations are caller assertions, not a calendar or
+distance-simulation system.
+
 ## Cleric Potent Spellcasting and Damage Follow-Ups
 
 On an XPHB or TGTT Cleric, the source-owned level-7 Blessed Strikes choice

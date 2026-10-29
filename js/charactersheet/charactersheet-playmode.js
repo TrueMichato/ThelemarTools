@@ -10,6 +10,8 @@
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetSimulacrum} from "./charactersheet-simulacrum.js";
+import {CharacterSheetSimulacrumCast} from "./charactersheet-simulacrum-cast.js";
 
 function csRestoreModalFocus (trigger) {
 	if (trigger?.isConnected && typeof trigger.focus === "function") {
@@ -2485,6 +2487,7 @@ export class CharacterSheetPlayMode {
 	_renderSpellRow (parent, spell, {showPreparedToggle = false} = {}) {
 		const wrapper = this._ce("div", "pm-spell-wrapper", parent);
 		const row = this._ce("div", "pm-spell", wrapper);
+		if (spell.id) row.dataset.spellId = spell.id;
 
 		// Prepared toggle (for drawer only)
 		if (showPreparedToggle && spell.level > 0 && !spell.alwaysPrepared) {
@@ -2515,6 +2518,7 @@ export class CharacterSheetPlayMode {
 		if (spell.school) parts.push(spell.school);
 		if (spell.concentration) parts.push("conc.");
 		if (spell.ritual) parts.push("ritual");
+		if (CharacterSheetSimulacrumCast.isSpell(spell) && spell.source) parts.push(spell.source);
 		meta.textContent = parts.join(" · ");
 
 		// Info button → full spell info modal (B1)
@@ -3521,6 +3525,10 @@ export class CharacterSheetPlayMode {
 		}
 
 		companions.forEach(comp => {
+			if (CharacterSheetSimulacrum.isSimulacrum(comp)) {
+				CharacterSheetSimulacrum.renderCard({ownerPage: this._page, companion: comp, parent: container, mode: "play"});
+				return;
+			}
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
 			card.setAttribute("data-companion-id", comp.id);
 			const featureOperationModel = this._page.getFeatureCompanionOperationSurfaceModel?.(comp) || null;
@@ -4212,6 +4220,9 @@ export class CharacterSheetPlayMode {
 	// ─── Spell Casting ──────────────────────────────────────────
 
 	_castSpell (spell) {
+		if (CharacterSheetSimulacrumCast.isSpell(spell)) {
+			return this._page._spells._castSpell(spell.id, {decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
+		}
 		if (spell.level === 0) {
 			// Cantrip concentration check
 			if (spell.concentration && this._state.isConcentrating?.()) {
@@ -5090,6 +5101,11 @@ export class CharacterSheetPlayMode {
 	// ─── Phase B4: Companion HP prompts and Statblock modal ──────
 
 	_promptCompanionHpChange (comp, mode, container) {
+		if (CharacterSheetSimulacrum.isSimulacrum(comp)) {
+			const operation = mode === "heal" ? CharacterSheetSimulacrum.pRepair : CharacterSheetSimulacrum.pDamage;
+			return operation.call(CharacterSheetSimulacrum, {ownerPage: this._page, companionId: comp.id})
+				.catch(error => CharacterSheetSimulacrum._notifyError(error.message));
+		}
 		const overlay = this._ce("div", "pm-modal-overlay");
 		const panel = this._ce("div", "pm-modal", overlay);
 
@@ -5143,6 +5159,9 @@ export class CharacterSheetPlayMode {
 	}
 
 	_showCompanionStatblockModal (comp) {
+		if (CharacterSheetSimulacrum.isSimulacrum(comp)) {
+			return CharacterSheetSimulacrum.pShow({ownerPage: this._page, companionId: comp.id});
+		}
 		const overlay = this._ce("div", "pm-modal-overlay");
 		const panel = this._ce("div", "pm-modal pm-modal--statblock", overlay);
 

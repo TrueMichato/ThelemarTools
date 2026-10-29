@@ -4851,7 +4851,8 @@ class CharacterSheetState {
 		return definition ? {...definition} : null;
 	}
 
-	constructor () {
+	constructor ({isDetached = false} = {}) {
+		this._isDetached = isDetached;
 		this._data = this._getDefaultState();
 		// Runtime-only seam for deterministic Gambler tests. Never serialized.
 		this._gamblerRollSource = null;
@@ -4873,7 +4874,7 @@ class CharacterSheetState {
 		// `charactersheet-class-utils.js`, which are invoked from a dozen render sites. Mirrors
 		// the existing `__csMaterialCatalog` / `__csResonanceCatalog` handles. `window.charSheet`
 		// looks like an alternative but is explicitly a debugging affordance.
-		globalThis.__csState = this;
+		if (!isDetached) globalThis.__csState = this;
 	}
 
 	/**
@@ -6086,6 +6087,583 @@ class CharacterSheetState {
 
 	// Alias for compatibility with export module
 	toJSON () { return this.toJson(); }
+
+	static COMPANION_ACTOR_VERSION = 1;
+
+	/** Clone catalogs without invoking acquisition setters or replacing live global handles. */
+	_createDetachedActorState (data, context = null) {
+		const actor = new CharacterSheetState({isDetached: true});
+		for (const key of [
+			"_allSpells", "_allItems", "_classCatalog", "_classFeatureCatalog",
+			"_subclassFeatureCatalog", "_optionalFeatureCatalog", "_combatMethodCatalog",
+			"_itemMaterialCatalog", "_draconicResonanceCatalog", "_divineFavorCatalog",
+			"_classSummonTemplateCatalog",
+		]) {
+			if (this[key]) actor[key] = MiscUtil.copyFast(this[key]);
+		}
+		if (this._psionicCatalog) {
+			actor._psionicCatalog = new Map(
+				[...this._psionicCatalog].map(([key, value]) => [key, MiscUtil.copyFast(value)]),
+			);
+		}
+		actor._data = MiscUtil.copyFast(data);
+		actor._companionActorContext = context ? MiscUtil.copyFast(context) : null;
+		actor._suppressAutomaticEquipment = true;
+		return actor;
+	}
+
+	static _companionActorFailure (reason, issues = []) {
+		return {
+			ok: false,
+			reason,
+			message: "Companion actor unavailable. Restore a valid character export or recreate the snapshot; no player state was substituted.",
+			issues,
+		};
+	}
+
+	/**
+	 * Pure validation: no migrations, resource initialization, or repairs on a read.
+	 * An invalid envelope is retained verbatim so it can be diagnosed/recovered.
+	 */
+	static validateCompanionActorSnapshot (snapshot) {
+		const fail = (path, message) => ({path, message});
+		const object = value => value && typeof value === "object" && !Array.isArray(value);
+		if (!object(snapshot)) return this._companionActorFailure("actor-snapshot-missing");
+		if (snapshot.version !== this.COMPANION_ACTOR_VERSION) {
+			return this._companionActorFailure("actor-version-unsupported", [
+				fail("version", `Expected ${this.COMPANION_ACTOR_VERSION}; received ${snapshot.version}.`),
+			]);
+		}
+		const issues = [];
+		if (snapshot.kind !== "simulacrum") issues.push(fail("kind", "Unsupported actor kind."));
+		for (const key of ["actorId", "creatorActorId"]) {
+			if (typeof snapshot[key] !== "string" || !snapshot[key].trim()) issues.push(fail(key, "A distinct actor identity is required."));
+		}
+		if (snapshot.actorId === snapshot.creatorActorId) issues.push(fail("actorId", "The duplicate cannot use the creator's identity."));
+		if (!["PHB", "XPHB"].includes(snapshot.spell?.source)
+			|| snapshot.spell?.uid !== `simulacrum|${snapshot.spell?.source?.toLowerCase()}`) issues.push(fail("spell", "An exact PHB/XPHB Simulacrum UID is required."));
+		if (!["active", "destroyed"].includes(snapshot.lifecycle)) issues.push(fail("lifecycle", "Unknown lifecycle state."));
+		if (!object(snapshot.origin) || typeof snapshot.origin.actorId !== "string") issues.push(fail("origin", "Original actor provenance is required."));
+		if (!object(snapshot.frozen) || !Number.isInteger(snapshot.frozen.normalMaxHp) || snapshot.frozen.normalMaxHp < 1) issues.push(fail("frozen.normalMaxHp", "A sanitized HP baseline is required."));
+		for (const key of ["level", "proficiencyBonus"]) {
+			if (!Number.isInteger(snapshot.frozen?.[key]) || snapshot.frozen[key] < 0) issues.push(fail(`frozen.${key}`, "Expected a frozen non-negative integer."));
+		}
+		if (!Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) issues.push(fail("revision", "Expected a non-negative revision."));
+		if (snapshot.policy?.recovery !== (snapshot.spell?.source === "PHB" ? "no-slot-recovery" : "no-rests")
+			|| snapshot.policy?.hpRestoration !== "paid-repair-only"
+			|| snapshot.policy?.canCastSimulacrum !== (snapshot.spell?.source === "PHB")) issues.push(fail("policy", "Policy must match the exact spell edition."));
+		const data = snapshot.state;
+		if (!object(data)) issues.push(fail("state", "Missing persisted actor state."));
+		else {
+			if (data.id != null || data.companions?.length || data.actorSnapshot) issues.push(fail("state", "Roster identity and recursive actors are forbidden."));
+			for (const key of ["classes", "features", "feats", "resources", "inventory", "attacks", "conditions", "activeStates", "customAbilities", "companions", "namedModifiers", "acFormulas"]) {
+				if (!Array.isArray(data[key])) issues.push(fail(`state.${key}`, "Expected an array."));
+			}
+			for (const key of ["abilities", "abilityBonuses", "ac", "customModifiers", "settings", "hitDice"]) {
+				if (!object(data[key])) issues.push(fail(`state.${key}`, "Expected calculation state."));
+			}
+			for (const key of ["classes", "features", "feats", "inventory", "attacks", "activeStates", "customAbilities", "namedModifiers", "acFormulas"]) {
+				for (const [index, value] of (Array.isArray(data[key]) ? data[key] : []).entries()) {
+					if (!object(value)) issues.push(fail(`state.${key}.${index}`, "Expected a structured record."));
+				}
+			}
+			for (const ability of ["str", "dex", "con", "int", "wis", "cha"]) {
+				if (!Number.isFinite(data.abilities?.[ability])) issues.push(fail(`state.abilities.${ability}`, "Expected a finite ability score."));
+			}
+			const pool = (value, path) => {
+				if (!object(value) || !Number.isInteger(value.max) || value.max < 0
+					|| !Number.isInteger(value.current) || value.current < 0) issues.push(fail(path, "Expected non-negative integer current/max values (zero is valid)."));
+			};
+			pool(data.hp, "state.hp");
+			if (!Number.isInteger(data.hp?.temp) || data.hp.temp < 0) issues.push(fail("state.hp.temp", "Expected non-negative temporary HP."));
+			if (!object(data.spellcasting) || !object(data.spellcasting.spellSlots)) issues.push(fail("state.spellcasting", "Missing spellcasting state."));
+			else {
+				for (const [level, value] of Object.entries(data.spellcasting.spellSlots)) pool(value, `state.spellcasting.spellSlots.${level}`);
+				pool(data.spellcasting.pactSlots, "state.spellcasting.pactSlots");
+				for (const key of ["spellsKnown", "cantripsKnown", "innateSpells", "signatureSpells"]) {
+					if (!Array.isArray(data.spellcasting[key])) issues.push(fail(`state.spellcasting.${key}`, "Expected a spell list."));
+					else {
+						for (const [index, spell] of data.spellcasting[key].entries()) {
+							if (!spell?.name || !spell?.source) issues.push(fail(`state.spellcasting.${key}.${index}`, "A source-qualified spell is required."));
+							if (spell?.uses) pool(spell.uses, `state.spellcasting.${key}.${index}.uses`);
+							if (key === "signatureSpells" && (!Number.isInteger(spell?.usesCurrent) || spell.usesCurrent < 0
+								|| !Number.isInteger(spell?.usesMax) || spell.usesMax < 0)) issues.push(fail(`state.spellcasting.${key}.${index}`, "Expected signature-spell use counters."));
+						}
+					}
+				}
+			}
+			for (const [key, value] of Object.entries(object(data.hitDice) ? data.hitDice : {})) pool(value, `state.hitDice.${key}`);
+			for (const [index, value] of (Array.isArray(data.resources) ? data.resources : []).entries()) pool(value, `state.resources.${index}`);
+			for (const key of ["features", "feats", "customAbilities"]) {
+				for (const [index, value] of (Array.isArray(data[key]) ? data[key] : []).entries()) {
+					if (value?.uses) pool(value.uses, `state.${key}.${index}.uses`);
+				}
+			}
+		}
+		return issues.length ? this._companionActorFailure("actor-snapshot-invalid", issues) : {ok: true};
+	}
+
+	/**
+	 * Prepare only; does not add a companion, spend a cast, or touch the live original.
+	 * `state` in the envelope is the sole mutable gameplay store.
+	 */
+	prepareSimulacrumSnapshot ({spellSource, creatorActorId = this._data.id, exporter = globalThis.CharacterSheetNpcExporter} = {}) {
+		const source = typeof spellSource === "string" ? spellSource.toUpperCase() : "";
+		if (!["PHB", "XPHB"].includes(source)) return CharacterSheetState._companionActorFailure("simulacrum-spell-source-required");
+		if (typeof creatorActorId !== "string" || !creatorActorId || !this._data.id) return CharacterSheetState._companionActorFailure("simulacrum-actor-identity-required");
+		if (typeof exporter?.convertStateToMonster !== "function") return CharacterSheetState._companionActorFailure("npc-exporter-unavailable");
+
+		try {
+			// Omit the recursive tree BEFORE copying, not after traversing its snapshots.
+			const raw = {...this._data, companions: [], id: null, actorSnapshot: undefined};
+			const actor = this._createDetachedActorState(raw);
+			actor._clearInheritedCompanionActorRuntime();
+			const race = actor.getRace();
+			const types = race?.creatureTypes || ["humanoid"];
+			if (!types.some(type => ["beast", "humanoid"].includes(typeof type === "string" ? type.toLowerCase() : type?.type))) {
+				return CharacterSheetState._companionActorFailure("simulacrum-target-type-ineligible");
+			}
+			actor._removeCompanionActorEquipment();
+			actor.recalculateHp();
+			actor.calculateSpellSlots();
+			actor.recalculateResourceMaximums();
+			actor.syncDerivedResourceMaxes();
+			actor._initializeCompanionActorPools();
+			const normalMaxHp = actor.getMaxHp();
+			const maxHp = Math.floor(normalMaxHp / 2);
+			actor._data.hp = {...actor._data.hp, max: maxHp, current: maxHp, temp: 0, tempOwner: null};
+			actor._companionActorContext = {normalMaxHp};
+			const snapshot = {
+				version: CharacterSheetState.COMPANION_ACTOR_VERSION,
+				revision: 0,
+				kind: "simulacrum",
+				actorId: CryptUtil.uid(),
+				creatorActorId,
+				origin: {actorId: this._data.id, name: this._data.name},
+				spell: {uid: `simulacrum|${source.toLowerCase()}`, source},
+				policy: {
+					recovery: source === "PHB" ? "no-slot-recovery" : "no-rests",
+					hpRestoration: "paid-repair-only",
+					canCastSimulacrum: source === "PHB",
+				},
+				frozen: {normalMaxHp, level: actor.getTotalLevel(), proficiencyBonus: actor.getProficiencyBonus()},
+				lifecycle: maxHp > 0 ? "active" : "destroyed",
+				state: null,
+			};
+			const statblock = exporter.convertStateToMonster(actor, {profile: "companion", nameSuffix: " (Simulacrum)"});
+			snapshot.state = actor.toJson();
+			const validation = CharacterSheetState.validateCompanionActorSnapshot(snapshot);
+			if (!validation.ok) return validation;
+			statblock.type = {type: "construct"};
+			statblock.hp = {average: maxHp, formula: `${maxHp}`};
+			const companionData = actor._parseBestiaryCreatureToBeastRecord(statblock);
+			return {
+				ok: true,
+				companionData: {
+					...companionData,
+					type: CharacterSheetState.COMPANION_TYPES.SUMMON,
+					origin: `Simulacrum (${source})`,
+					active: snapshot.lifecycle === "active",
+					actorSnapshot: snapshot,
+					statblock,
+				},
+			};
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet State] Simulacrum snapshot preparation failed:", error);
+			return CharacterSheetState._companionActorFailure("simulacrum-preparation-failed", [{path: "state", message: error.message}]);
+		}
+	}
+
+	_clearInheritedCompanionActorRuntime () {
+		this._data.inCombat = false; // Do not preserve Lingering Spell when breaking concentration.
+		this.breakConcentration();
+		this.deactivateWildShape();
+		this.endAllManifestations();
+		for (const ability of this._data.customAbilities) {
+			if (ability.isActive && ability.mode !== "passive") {
+				ability.isActive = false;
+				this._unregisterCustomAbilityEffects(ability.id);
+			}
+		}
+		for (const state of [...this._data.activeStates]) {
+			this._deactivateStateInstance(state, {reason: "isolated snapshot"});
+			this.removeActiveState(state.id);
+		}
+		this.clearTemporaryAttacks();
+		const defaults = this._getDefaultState();
+		for (const key of [
+			"spawn", "notes", "stickyNotes", "appearance", "favorites", "companions",
+			"featureCompanionSetups", "pendingEfaCannonDetonation", "activeCombatMethodEffects",
+			"combatMethodWeaponChoices", "activeStance", "conditions", "exhaustion",
+			"combatRound", "combatTurnOrder", "pendingStateEndSaves", "targetEffects",
+			"concentrating", "concentrations", "deathSaves", "currency", "selectedAmmo",
+			"ammunitionConsumed", "pendingDamageMaximization", "pendingSpellDamageBonus",
+			"psionicStrain", "psionicStrainIgnored", "wickedWitch",
+			"generatedFeatureItemLifecycle", "generatedClassSummonRevisions",
+		]) this._data[key] = MiscUtil.copyFast(defaults[key]);
+		for (const key of ["activeResourceCastSpells", "chainedFuryTargets"]) delete this._data[key];
+		this._data.primalFocus.quarryTargetId = null;
+		this._data.focusPool.lucidFocusActive = false;
+		this._data.spellcasting.gamblerPendingCastResolutions = [];
+		this._data.spellcasting.gamblerCastHistory = [];
+		this._clearEfaMagicItemTinkerDrainSlot();
+		delete this._data.actorSnapshot;
+		delete this._data._pendingZeroHpIntervention;
+		delete this._data.massiveDamageDeath;
+		this._data.hp.maxHpReduction = 0;
+		this.setTempHp(0);
+		this.resetTurnEconomy({round: null});
+	}
+
+	_removeCompanionActorEquipment () {
+		const itemIds = new Set(this._data.inventory.map(row => row.id));
+		const itemOwned = row => row && (
+			["item", "itemUpgrade", "itemMaterial"].includes(row.sourceType)
+			|| row.sourceItem != null
+			|| itemIds.has(row.itemId) || itemIds.has(row.sourceItemId)
+			|| (typeof row.sourceFeatureId === "string" && row.sourceFeatureId.startsWith("item:"))
+			|| (typeof row.grantId === "string" && row.grantId.startsWith("item:"))
+		);
+		for (const itemId of itemIds) this.removeItem(itemId);
+		for (const ability of [...this._data.customAbilities]) {
+			if (itemOwned(ability)) this.removeCustomAbility(ability.id);
+		}
+		for (const feature of [...this._data.features]) {
+			if (itemOwned(feature)) this.removeFeature(feature, undefined, {preserveUnattributedModifiers: true});
+		}
+		// Some old saves retain cached item attacks/grants outside inventory. Ownership,
+		// not spell/feature name, distinguishes an intrinsic grant of the same identity.
+		for (const key of ["attacks", "resources", "features", "customAbilities"]) {
+			this._data[key] = this._data[key].filter(row => !itemOwned(row));
+		}
+		for (const key of ["spellsKnown", "cantripsKnown", "innateSpells"]) {
+			this._data.spellcasting[key] = this._data.spellcasting[key].filter(row => !itemOwned(row));
+		}
+		for (const modifier of [...this._data.namedModifiers]) {
+			if (itemOwned(modifier)) this.removeNamedModifier(modifier.id);
+		}
+		const defaults = this._getDefaultState();
+		for (const key of [
+			"itemBonuses", "itemDefenses", "itemMentalProtection", "itemAbilityOverrides",
+			"itemGrantedSpells", "iounBonds", "inventoryItemBindings", "efaArmorer",
+		]) this._data[key] = MiscUtil.copyFast(defaults[key]);
+		this.setItemSenses(null);
+		this.setItemSenseBonuses(null);
+		delete this._data._manualItemBonuses;
+		this._data.ac.armor = null;
+		this._data.ac.shield = false;
+		this._data.ac.itemBonus = 0;
+		this._data.acFormulas = this._data.acFormulas.filter(row => !itemOwned(row));
+		this._recalculateItemBonuses();
+		this._recalculateEquipmentModifiers();
+		this._recalculateMaterialModifiers();
+		this.ensureUnarmedStrike();
+	}
+
+	_initializeCompanionActorPools () {
+		// Creation-only initialization. Never call from hydration or a load migration.
+		this.getResources();
+		this.getSyntheticCombatResources();
+		this.getInnateSpells();
+		this.recalculateResourceMaximums();
+		this.syncDerivedResourceMaxes();
+		for (const pool of [...this._data.resources, ...Object.values(this._data.hitDice), ...Object.values(this._data.spellcasting.spellSlots), this._data.spellcasting.pactSlots]) pool.current = pool.max;
+		for (const entry of [...this._data.features, ...this._data.feats, ...this._data.customAbilities, ...this._data.spellcasting.innateSpells]) {
+			if (entry.uses) entry.uses.current = entry.uses.max;
+		}
+		this.restoreSignatureSpells();
+		this.restoreSecondWind();
+		this.restoreActionSurge();
+		this.restoreIndomitable();
+		this.restoreArcaneShot();
+		this.restoreSeals();
+		this.restoreInfernalConduit();
+		this.restoreFocusPool();
+		this.restorePrimalFocus();
+		this.resetSuperiorInterdict();
+		this.resetRelentlessRageDc();
+		this.resetForkedTongueSwap();
+		this.restoreCartographerMappingMagicUses();
+		this.restoreCrownOfSpellfire();
+		this.resetSpellfireBurstTurn();
+		this.restoreUmbralFormUse();
+		this.resetPactTransformationUses();
+		this._data.lunarFreeCastsUsed = [];
+		this.resetMysticArcanum();
+		this.resetGamblerDailyResources();
+		this._data.staminaMax = this._data.combatTraditions.length ? 2 * this.getProficiencyBonus() : 0;
+		this._data.staminaCurrent = this._data.staminaMax;
+		this._data.efaArtificerTinker = this._getDefaultState().efaArtificerTinker;
+	}
+
+	hydrateCompanionActor (companionId) {
+		const companion = this.getCompanion(companionId);
+		const validation = CharacterSheetState.validateCompanionActorSnapshot(companion?.actorSnapshot);
+		if (!validation.ok) return validation;
+		const snapshot = companion.actorSnapshot;
+		const actor = this._createDetachedActorState(snapshot.state, snapshot.frozen);
+		actor._companionActorId = snapshot.actorId;
+		actor._companionActorPolicy = {kind: snapshot.kind, ...MiscUtil.copyFast(snapshot.policy), lifecycle: snapshot.lifecycle};
+		return {ok: true, actor, actorId: snapshot.actorId, revision: snapshot.revision ?? 0};
+	}
+
+	_companionPolicyFailure (reason, message) {
+		// eslint-disable-next-line no-console
+		console.warn("[CharSheet State] Companion policy refused:", reason, message);
+		return {ok: false, reason, message};
+	}
+
+	getCompanionSpellCastBlock (spell, spellData = null) {
+		const policy = this._companionActorPolicy;
+		if (!policy) return null;
+		if (policy.lifecycle !== "active" || this.getCurrentHp() <= 0 || this.getMaxHp() <= 0) return "This duplicate has melted and cannot cast spells.";
+		if (!policy.canCastSimulacrum && [spell?.name, spellData?.name].some(name => /^simulacrum$/i.test(String(name || "").trim()))) {
+			return "This XPHB duplicate cannot cast Simulacrum, regardless of the spell's source or casting route.";
+		}
+		return null;
+	}
+
+	_isCompanionSlotRecoveryBlocked () {
+		const policy = this._companionActorPolicy;
+		return !!policy && (policy.lifecycle !== "active" || policy.recovery === "no-slot-recovery");
+	}
+
+	_isCompanionHealingBlocked (current) {
+		const policy = this._companionActorPolicy;
+		if (!policy || current <= this._data.hp.current) return false;
+		this._companionPolicyFailure("actor-repair-only", "Simulacrum HP can only be restored by a paid repair.");
+		return true;
+	}
+
+	_enforceCompanionHpLifecycle () {
+		const policy = this._companionActorPolicy;
+		if (!policy || this._isTerminatingCompanion) return;
+		if (policy.lifecycle === "active" && this._data.hp.current > 0 && this.getMaxHp() > 0) return;
+		this._isTerminatingCompanion = true;
+		try {
+			policy.lifecycle = "destroyed";
+			this._data.hp.current = 0;
+			this._data.inCombat = false;
+			this.breakConcentration();
+			for (const state of [...this._data.activeStates]) this.removeActiveState(state.id);
+			this.setTempHp(0);
+			delete this._data._pendingZeroHpIntervention;
+		} finally {
+			this._isTerminatingCompanion = false;
+		}
+	}
+
+	_cleanupCompanionActorOwnership (actorId, {concentrationOnly = false, concentrationSpellNames = null} = {}) {
+		for (const state of [...(this._data.activeStates || [])]) {
+			if (state.effectOwnerId !== actorId || (concentrationOnly && !state.concentration)) continue;
+			if (concentrationSpellNames && !concentrationSpellNames.includes(state.spellName || state.name)) continue;
+			for (const condition of state.grantsConditions || []) this.removeCondition(condition);
+			this.removeActiveState(state.id);
+		}
+		this._data.companions = (this._data.companions || []).filter(companion =>
+			companion.creatorActorId !== actorId || (concentrationOnly && !companion.concentrationLinked));
+		for (const companion of this._data.companions) {
+			const snapshot = companion.actorSnapshot;
+			if (!snapshot || snapshot.actorId === actorId) continue;
+			const owned = snapshot.state.activeStates?.some(state =>
+				state.effectOwnerId === actorId && (!concentrationOnly || state.concentration)
+				&& (!concentrationSpellNames || concentrationSpellNames.includes(state.spellName || state.name)));
+			if (!owned) continue;
+			const hydrated = this.hydrateCompanionActor(companion.id);
+			if (!hydrated.ok) throw new Error(hydrated.message);
+			hydrated.actor._cleanupCompanionActorOwnership(actorId, {concentrationOnly, concentrationSpellNames});
+			const result = this.commitCompanionActor(companion.id, hydrated);
+			if (!result.ok) throw new Error(result.message);
+		}
+	}
+
+	destroySimulacrum (companionId, {reason = "destroyed"} = {}) {
+		const companion = this.getCompanion(companionId);
+		if (companion?.actorSnapshot?.kind !== "simulacrum") return this._companionPolicyFailure("actor-not-simulacrum", "This is not a Simulacrum.");
+		if (companion.actorSnapshot.lifecycle === "destroyed") return {ok: true, alreadyDestroyed: true};
+		const hydrated = this.hydrateCompanionActor(companionId);
+		if (!hydrated.ok) return hydrated;
+		hydrated.actor.setHp(0);
+		const result = this.commitCompanionActor(companionId, hydrated);
+		if (result.ok) companion.destructionReason = reason;
+		return result;
+	}
+
+	destroySimulacrumsByCreator (creatorActorId, {exceptCompanionId = null} = {}) {
+		const ids = this.getCompanions().filter(companion =>
+			companion.id !== exceptCompanionId
+			&& companion.actorSnapshot?.kind === "simulacrum"
+			&& companion.actorSnapshot.creatorActorId === creatorActorId
+			&& companion.actorSnapshot.lifecycle === "active").map(companion => companion.id);
+		const candidate = this._createDetachedActorState(this._data);
+		for (const id of ids) {
+			const result = candidate.destroySimulacrum(id, {reason: "replaced"});
+			if (!result.ok) return result;
+		}
+		for (const [key, value] of Object.entries(candidate._data)) {
+			if (JSON.stringify(value) === JSON.stringify(this._data[key])) continue;
+			if (key !== "companions") this._data[key] = value;
+			else {
+				const live = new Map(this._data.companions.map(row => [row.id, row]));
+				this._data.companions = value.map(row => Object.assign(live.get(row.id) || {}, row));
+			}
+		}
+		return {ok: true, companionIds: ids};
+	}
+
+	getSimulacrumRepairQuote (companionId, {amount, laboratoryConfirmed = false, ownerLongRest = false, withinFiveFeet = false} = {}) {
+		const companion = this.getCompanion(companionId);
+		const snapshot = companion?.actorSnapshot;
+		if (snapshot?.kind !== "simulacrum" || snapshot.lifecycle !== "active") return {ok: false, reason: "actor-repair-unavailable", message: "Only an active Simulacrum can be repaired."};
+		if (!Number.isInteger(amount) || amount <= 0) return {ok: false, reason: "invalid-repair-amount", message: "Choose a positive whole number of HP."};
+		if (snapshot.spell.source === "PHB" && !laboratoryConfirmed) return {ok: false, reason: "repair-laboratory-required", message: "PHB repairs require a suitable laboratory."};
+		if (snapshot.spell.source === "XPHB" && (!ownerLongRest || !withinFiveFeet || snapshot.creatorActorId !== this._data.id)) return {ok: false, reason: "repair-long-rest-proximity-required", message: "XPHB repairs require the creator's Long Rest and the duplicate within 5 feet."};
+		const hydrated = this.hydrateCompanionActor(companionId);
+		if (!hydrated.ok) return hydrated;
+		const hp = hydrated.actor.getHp();
+		if (hp.current <= 0 || hp.max <= 0) return {ok: false, reason: "actor-repair-unavailable", message: "A melted duplicate cannot be repaired."};
+		const actualHp = Math.min(amount, Math.max(0, hp.max - hp.current));
+		const costGp = actualHp * 100;
+		if (!actualHp) return {ok: false, reason: "repair-no-missing-hp", message: "No HP are missing."};
+		if (this.getTotalGold() < costGp) return {ok: false, reason: "repair-insufficient-funds", message: `Repair requires ${costGp} gp.`, actualHp, costGp};
+		return {ok: true, actualHp, costGp, revision: hydrated.revision};
+	}
+
+	repairSimulacrum (companionId, options = {}) {
+		const quote = this.getSimulacrumRepairQuote(companionId, options);
+		if (!quote.ok) return this._companionPolicyFailure(quote.reason, quote.message);
+		const hydrated = this.hydrateCompanionActor(companionId);
+		if (!hydrated.ok) return hydrated;
+		const currency = MiscUtil.copyFast(this._data.currency);
+		const payment = this.deductGold(quote.costGp);
+		if (!payment.success) return this._companionPolicyFailure("repair-payment-failed", payment.error);
+		// Only this boundary mints a repair permit. Ordinary setters cannot heal.
+		hydrated.actor._data.hp.current += quote.actualHp;
+		hydrated.actor._paidCompanionRepair = {revision: hydrated.revision, actualHp: quote.actualHp};
+		const committed = this.commitCompanionActor(companionId, {...hydrated, exporter: options.exporter});
+		if (!committed.ok) {
+			this._data.currency = currency;
+			return committed;
+		}
+		const transactionId = CryptUtil.uid();
+		this.getCompanion(companionId).repairTransactionId = transactionId;
+		return {...committed, actualHp: quote.actualHp, costGp: quote.costGp, transactionId};
+	}
+
+	/** Atomic in-memory commit only; the owning controller must still await persistence. */
+	commitCompanionActor (companionId, {actor, revision, exporter = globalThis.CharacterSheetNpcExporter} = {}) {
+		const companion = this.getCompanion(companionId);
+		const validation = CharacterSheetState.validateCompanionActorSnapshot(companion?.actorSnapshot);
+		if (!validation.ok) return validation;
+		const prior = companion.actorSnapshot;
+		if (!(actor instanceof CharacterSheetState) || actor._companionActorId !== prior.actorId
+			|| revision !== (prior.revision ?? 0)) return CharacterSheetState._companionActorFailure("actor-commit-conflict");
+		if (prior.lifecycle !== "active") return this._companionPolicyFailure("actor-destroyed", "A melted duplicate cannot be changed or restored.");
+		if (typeof exporter?.convertStateToMonster !== "function") return CharacterSheetState._companionActorFailure("npc-exporter-unavailable");
+		try {
+			const repair = actor._paidCompanionRepair;
+			if (actor.getCurrentHp() > prior.state.hp.current
+				&& !(repair?.revision === revision && actor.getCurrentHp() === prior.state.hp.current + repair.actualHp)) {
+				return this._companionPolicyFailure("actor-repair-only", "Simulacrum HP can only be restored by a paid repair.");
+			}
+			if (prior.policy.recovery === "no-slot-recovery") {
+				const slots = actor._data.spellcasting;
+				if (Object.entries(slots.spellSlots).some(([level, slot]) => slot.current > (prior.state.spellcasting.spellSlots[level]?.current || 0))
+					|| slots.pactSlots.current > prior.state.spellcasting.pactSlots.current) {
+					return this._companionPolicyFailure("actor-slot-recovery-forbidden", "PHB Simulacrums cannot regain expended spell slots.");
+				}
+			}
+			actor._enforceCompanionHpLifecycle();
+			const statblock = exporter.convertStateToMonster(actor, {profile: "companion", nameSuffix: " (Simulacrum)"});
+			actor._data.hp.max = actor.getMaxHp();
+			const state = actor.toJson();
+			for (const key of ["classes", "race", "subrace", "background", "abilities", "abilityBonuses", "abilityScoreMaximums", "directAbilityBonuses", "levelHistory", "characterBase", "proficiencies", "expertise"]) {
+				if (JSON.stringify(state[key]) !== JSON.stringify(prior.state[key])) return CharacterSheetState._companionActorFailure("actor-build-frozen", [{path: `state.${key}`, message: "Underlying build changes require a new snapshot."}]);
+			}
+			for (const key of ["spellsKnown", "cantripsKnown"]) {
+				const identities = data => (data.spellcasting[key] || []).map(spell => `${spell.id}|${spell.name}|${spell.source}`);
+				if (JSON.stringify(identities(state)) !== JSON.stringify(identities(prior.state))) return this._companionPolicyFailure("actor-build-frozen", "A duplicate cannot learn or forget spells.");
+			}
+			for (const key of ["feats", "features", "customAbilities"]) {
+				const build = data => (data[key] || []).map(({uses, isActive, current, ...entry}) => entry);
+				if (JSON.stringify(build(state)) !== JSON.stringify(build(prior.state))) return this._companionPolicyFailure("actor-build-frozen", "A duplicate cannot acquire or change feats, features, or custom abilities.");
+			}
+			const next = {...prior, state, revision: revision + 1, lifecycle: actor._companionActorPolicy?.lifecycle || prior.lifecycle};
+			const nextValidation = CharacterSheetState.validateCompanionActorSnapshot(next);
+			if (!nextValidation.ok) return nextValidation;
+			statblock.type = {type: "construct"};
+			statblock.hp = {average: actor.getMaxHp(), formula: `${actor.getMaxHp()}`};
+			const presentation = actor._parseBestiaryCreatureToBeastRecord(statblock);
+			let cleanup = null;
+			const endedConcentrations = (prior.state.concentrations || [])
+				.filter(old => !(state.concentrations || []).some(current => current.id === old.id
+					&& current.actorConcentrationId === old.actorConcentrationId));
+			if (next.lifecycle === "destroyed" || endedConcentrations.length) {
+				const candidate = this._createDetachedActorState(this._data);
+				candidate._cleanupCompanionActorOwnership(next.actorId, {
+					concentrationOnly: next.lifecycle !== "destroyed",
+					concentrationSpellNames: next.lifecycle === "destroyed" ? null : endedConcentrations.map(entry => entry.spellName || entry.name),
+				});
+				cleanup = Object.entries(candidate._data)
+					.filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(this._data[key]));
+			}
+			// Commit after every potentially failing calculation/conversion.
+			Object.assign(companion, presentation, {actorSnapshot: next, statblock});
+			this._syncCompanionActorSummary(companion);
+			companion.active = next.lifecycle === "active";
+			for (const [key, value] of cleanup || []) {
+				if (key !== "companions") this._data[key] = value;
+				else {
+					const live = new Map(this._data.companions.map(row => [row.id, row]));
+					this._data.companions = value.map(row => row.id === companionId ? companion : Object.assign(live.get(row.id) || {}, row));
+				}
+			}
+			delete actor._paidCompanionRepair;
+			return {ok: true, revision: next.revision};
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet State] Companion actor commit failed:", error);
+			return CharacterSheetState._companionActorFailure("actor-commit-failed", [{path: "state", message: error.message}]);
+		}
+	}
+
+	_syncCompanionActorSummary (companion) {
+		const validation = CharacterSheetState.validateCompanionActorSnapshot(companion.actorSnapshot);
+		if (!validation.ok) {
+			companion.actorUnavailable = validation;
+			return;
+		}
+		delete companion.actorUnavailable;
+		const snapshot = companion.actorSnapshot;
+		companion.hp = {...snapshot.state.hp};
+		companion.conditions = MiscUtil.copyFast(snapshot.state.conditions);
+		companion.exhaustion = snapshot.state.exhaustion;
+		companion.profBonus = snapshot.frozen.proficiencyBonus;
+	}
+
+	_getCompanionActorOrThrow (companionId) {
+		const result = this.hydrateCompanionActor(companionId);
+		if (!result.ok) {
+			const error = new Error(result.message);
+			error.reason = result.reason;
+			error.issues = result.issues;
+			throw error;
+		}
+		return result.actor;
+	}
+
+	_mutateCompanionActor (companionId, mutation) {
+		const hydrated = this.hydrateCompanionActor(companionId);
+		if (!hydrated.ok) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet State] Companion mutation refused:", hydrated);
+			return hydrated;
+		}
+		const value = mutation(hydrated.actor);
+		const committed = this.commitCompanionActor(companionId, hydrated);
+		return committed.ok ? {...committed, value} : committed;
+	}
 
 	loadFromJson (json) {
 		// Handle string input (parse if needed)
@@ -8168,6 +8746,18 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.companions)) return;
 		for (const c of this._data.companions) {
 			if (!c) continue;
+			if (Object.hasOwn(c, "actorSnapshot")) {
+				const validation = CharacterSheetState.validateCompanionActorSnapshot(c.actorSnapshot);
+				if (!validation.ok) {
+					c.actorUnavailable = validation;
+					// eslint-disable-next-line no-console
+					console.warn("[CharSheet State] Companion actor requires repair:", c.id, validation);
+				} else {
+					delete c.actorUnavailable;
+					this._syncCompanionActorSummary(c);
+				}
+				continue;
+			}
 			// Generated ownership is an envelope-first classification. Never rewrite
 			// its type here; reconciliation must reject malformed compact records
 			// explicitly instead of converting them into generic custom companions.
@@ -11641,6 +12231,7 @@ class CharacterSheetState {
 	}
 
 	useEternalWarEruption ({restoreSlotLevel = null, switchSides = false} = {}) {
+		if (restoreSlotLevel != null && this._isCompanionSlotRecoveryBlocked()) return false;
 		const cls = this.getDaemonologistClass();
 		if (!cls || (cls.level || 0) < 14) return false;
 		const resource = this._getFeatureResourceByName("Eternal War Eruption");
@@ -14311,6 +14902,7 @@ class CharacterSheetState {
 
 	// #region HP
 	setCurrentHp (hp) {
+		if (this._isCompanionHealingBlocked(hp)) return false;
 		this._data.hp.current = Math.max(0, Math.min(hp, this.getMaxHp()));
 		if (this._data.hp.current > 0) delete this._data._pendingZeroHpIntervention;
 		if (this._data.hp.current === 0) this._deactivateStatesForEndCondition({isIncapacitated: true});
@@ -14381,6 +14973,10 @@ class CharacterSheetState {
 	}
 
 	getMaxHp () {
+		if (this._companionActorContext) {
+			const {normalMaxHp} = this._companionActorContext;
+			return Math.max(0, Math.floor(normalMaxHp / 2) + this._calculateMaxHp() - normalMaxHp);
+		}
 		const base = this._data.hp.max > 0 ? this._data.hp.max : this._calculateMaxHp();
 		let itemBonus = 0;
 		for (const item of this.getItems()) {
@@ -14665,12 +15261,13 @@ class CharacterSheetState {
 	_recalculateMaxHp () {
 		const calculated = this._calculateMaxHp();
 		// Always update max HP when recalculated (level up, class added/removed, etc.)
-		this._data.hp.max = calculated;
+		this._data.hp.max = this._companionActorContext ? this.getMaxHp() : calculated;
 		// If current HP exceeds max, cap it
 		const effectiveMax = this.getMaxHp();
 		if (this._data.hp.current > effectiveMax) {
 			this._data.hp.current = effectiveMax;
 		}
+		this._enforceCompanionHpLifecycle();
 	}
 
 	/**
@@ -14681,7 +15278,7 @@ class CharacterSheetState {
 	 */
 	recalculateHp ({syncCurrent = false} = {}) {
 		this._recalculateMaxHp();
-		if (syncCurrent) {
+		if (syncCurrent && !this._companionActorPolicy) {
 			this._data.hp.current = this.getMaxHp();
 			this._updateBloodiedCondition();
 		}
@@ -14806,6 +15403,7 @@ class CharacterSheetState {
 	 *   other supernatural effect. Psionic soul strain (Talent, 7+) halves such healing.
 	 */
 	heal (amount, {supernatural = false} = {}) {
+		if (this._isCompanionHealingBlocked(this._data.hp.current + amount)) return false;
 		const maxHp = this.getMaxHp();
 		const wasAtZero = this._data.hp.current === 0;
 		const effective = supernatural && this._getActiveStrainState()?.halveSupernaturalHealing
@@ -15970,6 +16568,7 @@ class CharacterSheetState {
 	 * ownership unless `options.tempHpOwner` is explicitly supplied for snapshot restore.
 	 */
 	setHp (current, max, temp, options = {}) {
+		if (this._isCompanionHealingBlocked(current)) current = this._data.hp.current;
 		this._data.hp.current = Math.max(0, current);
 		if (max !== undefined) this._data.hp.max = max;
 		if (temp !== undefined) {
@@ -15988,6 +16587,7 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_updateBloodiedCondition () {
+		this._enforceCompanionHpLifecycle();
 		const current = this._data.hp.current;
 		const max = this.getMaxHp();
 		if (max <= 0) return;
@@ -21246,6 +21846,9 @@ class CharacterSheetState {
 	 * @param {object} slots - Object with current, max, and level properties
 	 */
 	setPactSlots (slots) {
+		if (this._isCompanionSlotRecoveryBlocked() && (slots.current ?? slots.max ?? 0) > this.getPactSlots().current) {
+			return this._companionPolicyFailure("actor-slot-recovery-forbidden", "This duplicate cannot regain Pact slots.");
+		}
 		this._data.spellcasting.pactSlots = {
 			current: slots.current ?? slots.max ?? 0,
 			max: slots.max ?? 0,
@@ -21254,6 +21857,9 @@ class CharacterSheetState {
 	}
 
 	setPactSlotsCurrent (current) {
+		if (this._isCompanionSlotRecoveryBlocked() && current > this.getPactSlots().current) {
+			return this._companionPolicyFailure("actor-slot-recovery-forbidden", "This duplicate cannot regain Pact slots.");
+		}
 		if (this._data.spellcasting.pactSlots) {
 			this._data.spellcasting.pactSlots.current = Math.max(0, Math.min(current, this._data.spellcasting.pactSlots.max));
 		}
@@ -21292,6 +21898,10 @@ class CharacterSheetState {
 		const slot = this._data.spellcasting.spellSlots[level];
 		if (!slot) return null;
 		const previous = Math.max(0, Number(slot.current) || 0);
+		if (this._isCompanionSlotRecoveryBlocked() && current > previous && !this._isRefundingCompanionSlot) {
+			this._companionPolicyFailure("actor-slot-recovery-forbidden", "PHB Simulacrums cannot regain expended spell slots.");
+			return null;
+		}
 		const next = Math.max(0, isAllowAboveMax ? current : Math.min(current, slot.max));
 		const didClearDrainSlotAvailable = !!(
 			isExpenditure
@@ -21679,11 +22289,16 @@ class CharacterSheetState {
 				|| expectedModifierIds.some((id, ix) => id !== currentModifierIds[ix])
 			) return false;
 		}
-		this._setOrdinarySpellSlotCurrent(
-			level,
-			receipt.currentBefore,
-			{isExpenditure: false, isAllowAboveMax: receipt.currentBefore > slot.max},
-		);
+		this._isRefundingCompanionSlot = true;
+		try {
+			this._setOrdinarySpellSlotCurrent(
+				level,
+				receipt.currentBefore,
+				{isExpenditure: false, isAllowAboveMax: receipt.currentBefore > slot.max},
+			);
+		} finally {
+			this._isRefundingCompanionSlot = false;
+		}
 		if (receipt.didClearDrainSlotAvailable) this._data.efaArtificerTinker.drainSlotAvailable = true;
 		return true;
 	}
@@ -40063,6 +40678,9 @@ class CharacterSheetState {
 	}
 
 	advanceRestTime (restType, options = {}) {
+		if (this._companionActorPolicy && (this._companionActorPolicy.lifecycle !== "active" || this._companionActorPolicy.recovery === "no-rests")) {
+			return this._companionPolicyFailure("actor-rest-forbidden", "This duplicate cannot take Short or Long Rests.");
+		}
 		if (!options || typeof options !== "object" || Array.isArray(options)) {
 			return this._getGameTimeFailureReceipt({
 				code: "invalid-rest-time-options",
@@ -43993,6 +44611,7 @@ class CharacterSheetState {
 	}
 
 	getEfaSpellStoringItemSelfHolder () {
+		if (this._companionActorId) return {uid: this._companionActorId, label: this.getName(), kind: "companionActor", characterId: null};
 		const id = String(this.getId?.() || "").trim();
 		const name = String(this.getName?.() || "").trim() || "This character";
 		return {
@@ -54262,8 +54881,14 @@ class CharacterSheetState {
 		cast = {},
 		pCommit = null,
 	} = {}) {
-		const castingClass = this.resolveSpellCastingClassIdentity(spell);
+		const castingClass = this.resolveSpellCastingClassIdentity(spell)
+			|| (this._companionActorId ? {uid: null} : null);
 		if (!castingClass) return null;
+		const suppliedComponents = this._companionActorId
+			&& cast.actorId === this._companionActorId
+			&& cast.suppliedComponents?.confirmed === true
+			&& cast.suppliedComponents.spellUid === `${spell.name}|${spell.source}`
+			? MiscUtil.copyFast(cast.suppliedComponents) : null;
 
 		const normalizedFocusRequirement = focusRequirement
 			? this._normalizeExplicitSpellCastFocusRequirement({raw: focusRequirement, castingClass})
@@ -54272,7 +54897,7 @@ class CharacterSheetState {
 		if (normalizedFocusRequirement?.hasInvalidSourceFeatureUid) return null;
 
 		let focus = null;
-		if (normalizedFocusRequirement) {
+		if (normalizedFocusRequirement && !suppliedComponents) {
 			const legalRows = this.getEligibleSpellCastFocusInventoryRows(normalizedFocusRequirement);
 			const selectedId = focusInventoryRow?.id || cast?.focusInventoryItemId || null;
 			const selectedRow = legalRows.find(row => row.id === selectedId) || null;
@@ -54287,6 +54912,7 @@ class CharacterSheetState {
 		const spellEntryId = spell?.id || cast?.spellEntryId || null;
 		const spellUid = `${spellName}|${spellSource}`;
 		const castDescriptor = {
+			...(this._companionActorId ? {actorId: this._companionActorId, suppliedComponents} : {}),
 			type: cast?.type || (Number(spellData?.level ?? spell?.level) === 0 ? "cantrip" : "spell"),
 			slotLevel: cast?.slotLevel == null ? null : Number(cast.slotLevel),
 			isRitual: cast?.isRitual === true,
@@ -54322,6 +54948,7 @@ class CharacterSheetState {
 		}
 
 		const receipt = {
+			...(this._companionActorId ? {actorId: this._companionActorId} : {}),
 			receiptVersion: 1,
 			receiptId: `spell-cast-${CryptUtil.uid()}`,
 			ok: true,
@@ -54373,7 +55000,7 @@ class CharacterSheetState {
 			});
 		}
 		const hookGroups = [
-			this._committedSpellCastHooks.get(castingClass.uid.toLowerCase()),
+			castingClass.uid ? this._committedSpellCastHooks.get(castingClass.uid.toLowerCase()) : null,
 			this._committedSpellCastHooks.get("*"),
 		].filter(Boolean);
 		for (const hooks of hookGroups) {
@@ -79699,6 +80326,13 @@ class CharacterSheetState {
 	 * @returns {string} The unique ID of the new state
 	 */
 	addActiveState (stateTypeId, options = {}) {
+		if (this._companionActorId) {
+			options = {
+				...options,
+				effectOwnerId: options.effectOwnerId || this._companionActorId,
+				effectHolderUid: options.effectHolderUid || this._companionActorId,
+			};
+		}
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
 
 		// Handle custom states that aren't in ACTIVE_STATE_TYPES
@@ -80057,7 +80691,7 @@ class CharacterSheetState {
 		this._recalculateMaxHp();
 		const newMax = this.getMaxHp();
 		const delta = newMax - oldMax;
-		if (delta > 0) {
+		if (delta > 0 && !this._companionActorPolicy) {
 			this._data.hp.current = Math.min(this._data.hp.current + delta, newMax);
 		}
 		// On negative delta, _recalculateMaxHp already capped current to newMax.
@@ -82451,6 +83085,7 @@ class CharacterSheetState {
 	}
 
 	_reconcileEfaArmorerGeneratedRows ({armorer, model}) {
+		if (this._suppressAutomaticEquipment) return;
 		if (!armorer) {
 			this._removeEfaArmorerGeneratedRows();
 			return;
@@ -83825,6 +84460,7 @@ class CharacterSheetState {
 	}
 
 	_reconcileChainedFuryChainItem () {
+		if (this._suppressAutomaticEquipment && !this.isStateTypeActive("manifestChains")) return null;
 		const cls = this._getChainedFuryClass();
 		if (!cls || (Number(cls.level) || 0) < 3) {
 			this._cleanupChainedFuryChainItem();
@@ -85007,6 +85643,15 @@ class CharacterSheetState {
 	 * @returns {{added: *, dropped: Array<*>}}
 	 */
 	addConcentration (entry, {replaceId = null} = {}) {
+		if (this._companionActorId) {
+			entry = {
+				...entry,
+				actorId: this._companionActorId,
+				actorConcentrationId: CryptUtil.uid(),
+				holderUid: this._companionActorId,
+				effectOwnerId: this._companionActorId,
+			};
+		}
 		const list = this.getConcentrations();
 		const kind = entry?.kind === "power" ? "power" : (entry?.kind || "spell");
 		const name = entry?.name || entry?.spellName || "unknown";
@@ -91641,7 +92286,11 @@ class CharacterSheetState {
 	 */
 	getCompanions () {
 		return (this._data.companions || [])
-			.filter(companion => !CharacterSheetState._isGeneratedClassSummonRecord(companion));
+			.filter(companion => !CharacterSheetState._isGeneratedClassSummonRecord(companion))
+			.map(companion => {
+				if (Object.hasOwn(companion, "actorSnapshot")) this._syncCompanionActorSummary(companion);
+				return companion;
+			});
 	}
 
 	/**
@@ -91772,6 +92421,14 @@ class CharacterSheetState {
 	}
 
 	addCompanion (companionData) {
+		if (Object.hasOwn(companionData, "actorSnapshot")) {
+			const validation = CharacterSheetState.validateCompanionActorSnapshot(companionData.actorSnapshot);
+			if (!validation.ok) {
+				const error = new Error(validation.message);
+				Object.assign(error, validation);
+				throw error;
+			}
+		}
 		if (!this._data.companions) this._data.companions = [];
 
 		// Defensive: a caller that passes an object where a string `type` is expected
@@ -91785,6 +92442,7 @@ class CharacterSheetState {
 		const companion = {
 			id,
 			name: companionData.name,
+			...(this._companionActorId ? {creatorActorId: this._companionActorId} : {}),
 			source: companionData.source || null,
 			type: normType,
 			origin: normOrigin,
@@ -91803,7 +92461,7 @@ class CharacterSheetState {
 			// Hit points
 			hp: {
 				...(companionData.hp || {}),
-				max: companionData.hp?.max || 1,
+				max: companionData.hp?.max ?? 1,
 				current: companionData.hp?.current ?? companionData.hp?.max ?? 1,
 				temp: companionData.hp?.temp || 0,
 			},
@@ -91811,6 +92469,7 @@ class CharacterSheetState {
 			// Combat stats
 			ac: companionData.ac || 10,
 			speed: {
+				...MiscUtil.copyFast(companionData.speed || {}),
 				walk: companionData.speed?.walk ?? 30,
 				fly: companionData.speed?.fly || 0,
 				swim: companionData.speed?.swim || 0,
@@ -91828,6 +92487,10 @@ class CharacterSheetState {
 			actions: CharacterSheetState._withStructuredAttackActions(companionData.actions, companionData.attacks),
 			reactions: companionData.reactions || [],
 			bonusActions: companionData.bonusActions || [],
+			spellcasting: MiscUtil.copyFast(companionData.spellcasting || []),
+			statblock: companionData.statblock ? MiscUtil.copyFast(companionData.statblock) : null,
+			...(Object.hasOwn(companionData, "actorSnapshot") ? {actorSnapshot: MiscUtil.copyFast(companionData.actorSnapshot)} : {}),
+			exactStatistics: MiscUtil.copyFast(companionData.exactStatistics || null),
 
 			// Proficiencies
 			profBonus: companionData.profBonus ?? this.getProficiencyBonus(),
@@ -91838,6 +92501,7 @@ class CharacterSheetState {
 			resistances: companionData.resistances || [],
 			immunities: companionData.immunities || [],
 			conditionImmunities: companionData.conditionImmunities || [],
+			vulnerabilities: MiscUtil.copyFast(companionData.vulnerabilities || []),
 
 			// Metadata
 			size: companionData.size || "M",
@@ -91877,6 +92541,7 @@ class CharacterSheetState {
 		};
 
 		this._data.companions.push(companion);
+		if (companion.actorSnapshot) this._syncCompanionActorSummary(companion);
 		return id;
 	}
 
@@ -91888,6 +92553,10 @@ class CharacterSheetState {
 	removeCompanion (companionId) {
 		const companion = (this._data.companions || []).find(it => it.id === companionId);
 		if (!companion || CharacterSheetState._isGeneratedClassSummonRecord(companion)) return false;
+		if (companion.actorSnapshot?.kind === "simulacrum" && companion.actorSnapshot.lifecycle === "active") {
+			const destroyed = this.destroySimulacrum(companionId, {reason: "dismissed"});
+			if (!destroyed.ok) return false;
+		}
 		const before = this._data.companions.length;
 		this._data.companions = this._data.companions.filter(c => c.id !== companionId);
 		return this._data.companions.length < before;
@@ -91900,8 +92569,12 @@ class CharacterSheetState {
 	 */
 	removeCompanionsByType (type) {
 		const before = this._data.companions.length;
+		for (const companion of [...this._data.companions]) {
+			if (companion.type === type && companion.actorSnapshot) this.removeCompanion(companion.id);
+		}
 		this._data.companions = this._data.companions.filter(companion =>
 			companion.type !== type
+			|| !!companion.actorSnapshot
 			|| CharacterSheetState._isGeneratedClassSummonRecord(companion),
 		);
 		return before - this._data.companions.length;
@@ -91916,6 +92589,16 @@ class CharacterSheetState {
 	updateCompanion (companionId, updates) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return false;
+		if (companion.actorSnapshot?.lifecycle === "destroyed" && updates.active === true) {
+			this._companionPolicyFailure("actor-destroyed", "A melted duplicate cannot be reactivated.");
+			return false;
+		}
+		if (Object.hasOwn(updates, "actorSnapshot") || (Object.hasOwn(companion, "actorSnapshot")
+			&& Object.keys(updates).some(key => !["customName", "active"].includes(key)))) {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet State] Use commitCompanionActor to update actor-backed companions.");
+			return false;
+		}
 
 		// Apply updates (shallow merge for top-level, deep merge for nested objects)
 		for (const [key, value] of Object.entries(updates)) {
@@ -91971,6 +92654,7 @@ class CharacterSheetState {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
 		if (typeof hp !== "number" || !Number.isFinite(hp)) return;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._mutateCompanionActor(companionId, actor => actor.setHp(Math.max(0, Math.min(hp, actor.getMaxHp()))));
 		const lifecycleBlock = CharacterSheetState._getFeatureCompanionLifecycleBlock(companion);
 		if (lifecycleBlock && hp > 0) return;
 		const priorHp = Math.max(0, Number(companion.hp.current) || 0);
@@ -91997,6 +92681,21 @@ class CharacterSheetState {
 			};
 		}
 		const normalizedAmount = amount;
+		if (Object.hasOwn(companion, "actorSnapshot")) {
+			const result = this._mutateCompanionActor(companionId, actor => {
+				const before = actor.getHp();
+				const tempAbsorbed = actor.consumeTempHp(amount);
+				const hpLost = Math.min(before.current, amount - tempAbsorbed);
+				actor.setHp(before.current - hpLost);
+				return {
+					remaining: Math.max(0, amount - tempAbsorbed - hpLost),
+					tempAbsorbed,
+					hpLost,
+					droppedToZero: before.current > 0 && actor.getCurrentHp() === 0,
+				};
+			});
+			return result.ok ? result.value : result;
+		}
 
 		let remaining = normalizedAmount;
 		let tempAbsorbed = 0;
@@ -92039,6 +92738,14 @@ class CharacterSheetState {
 		if (CharacterSheetState._getFeatureCompanionLifecycleBlock(companion)) return 0;
 		if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return 0;
 		const normalizedAmount = amount;
+		if (Object.hasOwn(companion, "actorSnapshot")) {
+			const result = this._mutateCompanionActor(companionId, actor => {
+				const before = actor.getCurrentHp();
+				actor.setHp(Math.min(actor.getMaxHp(), before + normalizedAmount));
+				return actor.getCurrentHp() - before;
+			});
+			return result.ok ? result.value : 0;
+		}
 
 		const before = companion.hp.current;
 		companion.hp.current = Math.min(companion.hp.max, companion.hp.current + normalizedAmount);
@@ -92968,6 +93675,7 @@ class CharacterSheetState {
 		const companion = this.getCompanion(companionId);
 		const grant = Math.floor(Number(amount));
 		if (!companion || !Number.isFinite(grant) || grant <= companion.hp.temp) return false;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._mutateCompanionActor(companionId, actor => actor.grantTempHp(grant)).ok;
 		companion.hp.temp = grant;
 		return true;
 	}
@@ -92979,6 +93687,12 @@ class CharacterSheetState {
 	fullHealCompanion (companionId) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
+		if (Object.hasOwn(companion, "actorSnapshot")) {
+			return this._mutateCompanionActor(companionId, actor => {
+				actor.setHp(actor.getMaxHp(), undefined, 0);
+				actor._data.conditions = [];
+			});
+		}
 		companion.hp.current = companion.hp.max;
 		companion.hp.temp = 0;
 		companion.conditions = [];
@@ -92994,6 +93708,7 @@ class CharacterSheetState {
 	addCompanionCondition (companionId, condition) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._mutateCompanionActor(companionId, actor => actor.addCondition(condition));
 		if (!companion.conditions.includes(condition)) {
 			companion.conditions.push(condition);
 		}
@@ -93007,6 +93722,7 @@ class CharacterSheetState {
 	removeCompanionCondition (companionId, condition) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._mutateCompanionActor(companionId, actor => actor.removeCondition(condition));
 		companion.conditions = companion.conditions.filter(c => c !== condition);
 	}
 
@@ -93060,6 +93776,7 @@ class CharacterSheetState {
 	getCompanionAbilityMod (companionId, ability) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getAbilityMod(ability);
 		return Math.floor((companion.abilities[ability] - 10) / 2);
 	}
 
@@ -93069,6 +93786,9 @@ class CharacterSheetState {
 	 * @returns {number} The companion's Dexterity modifier
 	 */
 	getCompanionInitiative (companionId) {
+		const companion = this.getCompanion(companionId);
+		if (companion && Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getInitiative();
+		if (Number.isFinite(companion?.exactStatistics?.initiative)) return companion.exactStatistics.initiative;
 		return this.getCompanionAbilityMod(companionId, "dex");
 	}
 
@@ -93081,8 +93801,11 @@ class CharacterSheetState {
 	getCompanionSaveMod (companionId, ability) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getSaveMod(ability);
 		const resolved = companion.scaling?.resolved?.statistics?.savingThrows?.[ability];
 		if (Number.isFinite(Number(resolved))) return Number(resolved);
+		const exact = companion.exactStatistics?.savingThrows?.[ability];
+		if (Number.isFinite(exact)) return exact;
 		const abilMod = Math.floor((companion.abilities[ability] - 10) / 2);
 		const proficient = companion.saveProficiencies.includes(ability);
 		return abilMod + (proficient ? companion.profBonus : 0);
@@ -93091,6 +93814,7 @@ class CharacterSheetState {
 	getCompanionAbilityCheckMod (companionId, ability) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getAbilityCheckBreakdown(ability).total;
 		const resolved = companion.scaling?.resolved?.statistics?.abilityChecks?.[ability];
 		if (Number.isFinite(Number(resolved))) return Number(resolved);
 		return Math.floor(((Number(companion.abilities?.[ability]) || 10) - 10) / 2);
@@ -93105,6 +93829,7 @@ class CharacterSheetState {
 	getCompanionSkillMod (companionId, skill) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
+		if (Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getSkillMod(skill);
 
 		const skillAbilities = {
 			acrobatics: "dex",
@@ -93133,6 +93858,8 @@ class CharacterSheetState {
 		if (Number.isFinite(Number(resolvedSkill))) return Number(resolvedSkill);
 		const resolvedCheck = resolvedStatistics?.abilityChecks?.[ability];
 		if (Number.isFinite(Number(resolvedCheck))) return Number(resolvedCheck);
+		const exact = companion.exactStatistics?.skills?.[skill.toLowerCase().replace(/\s+/g, "")];
+		if (Number.isFinite(exact)) return exact;
 		const abilMod = Math.floor((companion.abilities[ability] - 10) / 2);
 		const profLevel = companion.skillProficiencies[skill] || 0;
 		return abilMod + (profLevel * companion.profBonus);
@@ -93149,6 +93876,10 @@ class CharacterSheetState {
 	recalculateCompanion (companionId) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
+		if (Object.hasOwn(companion, "actorSnapshot")) {
+			this._syncCompanionActorSummary(companion);
+			return;
+		}
 
 		const calculations = this.getFeatureCalculations();
 		const profBonus = this.getProficiencyBonus();
@@ -93230,7 +93961,7 @@ class CharacterSheetState {
 
 			default:
 				// Custom/summon companions don't auto-scale
-				companion.profBonus = profBonus;
+				companion.profBonus = companion.exactStatistics?.proficiencyBonus ?? profBonus;
 				break;
 		}
 	}
@@ -93625,7 +94356,7 @@ class CharacterSheetState {
 		if (creature.hp) {
 			if (typeof creature.hp === "number") {
 				hpMax = creature.hp;
-			} else if (creature.hp.average) {
+			} else if (creature.hp.average != null) {
 				hpMax = creature.hp.average;
 			} else if (creature.hp.special) {
 				// Special formula (e.g., "5 + five times your ranger level")
@@ -93641,6 +94372,7 @@ class CharacterSheetState {
 			if (typeof creature.speed === "number") {
 				speed.walk = creature.speed;
 			} else {
+				Object.assign(speed, MiscUtil.copyFast(creature.speed));
 				speed.walk = creature.speed.walk || 0;
 				speed.fly = creature.speed.fly || 0;
 				speed.swim = creature.speed.swim || 0;
@@ -93685,25 +94417,12 @@ class CharacterSheetState {
 		const languages = creature.languages || [];
 
 		// Parse immunities/resistances
-		const resistances = [];
-		const immunities = [];
-		const conditionImmunities = [];
-
-		if (creature.resist) {
-			creature.resist.forEach(r => {
-				if (typeof r === "string") resistances.push(r);
-			});
-		}
-		if (creature.immune) {
-			creature.immune.forEach(r => {
-				if (typeof r === "string") immunities.push(r);
-			});
-		}
-		if (creature.conditionImmune) {
-			creature.conditionImmune.forEach(r => {
-				if (typeof r === "string") conditionImmunities.push(r);
-			});
-		}
+		const resistances = MiscUtil.copyFast(creature.resist || []);
+		const immunities = MiscUtil.copyFast(creature.immune || []);
+		const conditionImmunities = MiscUtil.copyFast(creature.conditionImmune || []);
+		const numbers = entries => Object.fromEntries(Object.entries(entries || {})
+			.filter(([, value]) => value != null && Number.isFinite(Number(value)))
+			.map(([key, value]) => [key.toLowerCase().replace(/\s+/g, ""), Number(value)]));
 
 		// Parse attacks from actions
 		const attacks = [];
@@ -93750,11 +94469,21 @@ class CharacterSheetState {
 			actions: creature.action || [],
 			reactions: creature.reaction || [],
 			bonusActions: creature.bonus || [],
+			spellcasting: MiscUtil.copyFast(creature.spellcasting || []),
+			statblock: MiscUtil.copyFast(creature),
+			profBonus: Number.isFinite(Number(creature.pbNote)) ? Number(creature.pbNote) : undefined,
+			exactStatistics: {
+				proficiencyBonus: Number.isFinite(Number(creature.pbNote)) ? Number(creature.pbNote) : undefined,
+				savingThrows: numbers(creature.save),
+				skills: numbers(creature.skill),
+				initiative: typeof creature.initiative === "number" ? creature.initiative : creature.initiative?.initiative,
+			},
 			saveProficiencies,
 			skillProficiencies,
 			resistances,
 			immunities,
 			conditionImmunities,
+			vulnerabilities: MiscUtil.copyFast(creature.vulnerable || []),
 			size,
 			creatureType,
 			attacks,
@@ -93920,6 +94649,7 @@ class CharacterSheetState {
 	restCompanions (restType) {
 		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
 		(this._data.companions || []).forEach(companion => {
+			if (Object.hasOwn(companion, "actorSnapshot")) return;
 			if (CharacterSheetState._isGeneratedClassSummonRecord(companion)) return;
 			const descriptor = rules?.getDescriptor(companion?.featureGrant?.uid);
 			const ownerUid = CharacterSheetState._getFeatureCompanionDescriptorOwnerUid(descriptor);
@@ -94375,9 +95105,7 @@ class CharacterSheetState {
 		this.recoverGemstoneResources("short");
 
 		// Warlock pact slots
-		if (this._data.spellcasting.pactSlots.max > 0) {
-			this._data.spellcasting.pactSlots.current = this._data.spellcasting.pactSlots.max;
-		}
+		this.setPactSlotsCurrent(this._data.spellcasting.pactSlots.max);
 
 		// Recover short rest innate spells
 		this.restoreInnateSpells("short");
@@ -94414,7 +95142,7 @@ class CharacterSheetState {
 		this.resetTurnEconomy({round: null});
 
 		// Recover all HP
-		this._data.hp.current = this.getMaxHp();
+		if (!this._companionActorPolicy) this._data.hp.current = this.getMaxHp();
 
 		// Optionally clear temp HP (house rule)
 		if (options.clearTempHp) {
@@ -94431,9 +95159,7 @@ class CharacterSheetState {
 		this.recoverSpellSlots();
 
 		// Recover pact slots (Warlock)
-		if (this._data.spellcasting.pactSlots.max > 0) {
-			this._data.spellcasting.pactSlots.current = this._data.spellcasting.pactSlots.max;
-		}
+		this.setPactSlotsCurrent(this._data.spellcasting.pactSlots.max);
 
 		// Recover all resources and source feature use pools
 		const recoveredFeatureIds = new Set([
@@ -94675,6 +95401,9 @@ class CharacterSheetState {
 	 * Start a long rest (for tracking interruptions)
 	 */
 	startLongRest () {
+		if (this._companionActorPolicy?.recovery === "no-rests" || this._companionActorPolicy?.lifecycle === "destroyed") {
+			return this._companionPolicyFailure("actor-rest-forbidden", "This duplicate cannot take a Long Rest.");
+		}
 		this._data.restState = {
 			inProgress: true,
 			type: "long",
@@ -94739,6 +95468,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful
 	 */
 	useArcaneRecovery (slotsToRecover) {
+		if (this._isCompanionSlotRecoveryBlocked()) return false;
 		// Check if we have the feature and it has uses
 		const feature = this.getFeature("Arcane Recovery");
 		if (!feature) return false;
@@ -96758,6 +97488,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful
 	 */
 	convertSorceryPointsToSlot (slotLevel) {
+		if (this._isCompanionSlotRecoveryBlocked()) return false;
 		if (!this.hasFontOfMagic()) return false;
 
 		// Validate slot level
@@ -96851,6 +97582,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if successful
 	 */
 	useNaturalRecovery (slotsToRecover) {
+		if (this._isCompanionSlotRecoveryBlocked()) return false;
 		// Check if we have the feature
 		const calc = this.getFeatureCalculations();
 		if (!calc.hasNaturalRecovery) return false;
@@ -99050,7 +99782,8 @@ class CharacterSheetState {
 			// Apply to target
 			const hp = target.getHp();
 			const newCurrent = Math.min(hp.max, hp.current + result.amount);
-			target._data.hp.current = newCurrent;
+			if (target._companionActorPolicy) target.setCurrentHp(newCurrent);
+			else target._data.hp.current = newCurrent;
 		}
 
 		// Damage
@@ -99071,7 +99804,8 @@ class CharacterSheetState {
 			// Apply to target
 			const hp = target.getHp();
 			const newCurrent = Math.max(0, hp.current - totalDamage);
-			target._data.hp.current = newCurrent;
+			if (target._companionActorPolicy) target.setCurrentHp(newCurrent);
+			else target._data.hp.current = newCurrent;
 		}
 
 		// Conditions
@@ -99091,6 +99825,8 @@ class CharacterSheetState {
 	 * @returns {object} Complete cast result
 	 */
 	static executeSpellCast (spell, caster, options = {}) {
+		const blocked = caster.getCompanionSpellCastBlock?.(spell);
+		if (blocked) return caster._companionPolicyFailure("actor-cast-forbidden", blocked);
 		const result = {success: true};
 		const parsed = CharacterSheetState.parseSpellEffects(spell);
 
@@ -99126,7 +99862,8 @@ class CharacterSheetState {
 			if (options.target === "self") {
 				const hp = caster.getHp();
 				const newCurrent = Math.min(hp.max, hp.current + healing.total);
-				caster._data.hp.current = newCurrent;
+				if (caster._companionActorPolicy) caster.setCurrentHp(newCurrent);
+				else caster._data.hp.current = newCurrent;
 			}
 		}
 

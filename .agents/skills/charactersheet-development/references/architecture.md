@@ -15,6 +15,43 @@
 
 ## Module Map
 
+The Spells service supports `new CharacterSheetSpells(actorPage, {isHeadless:
+true})` for detached actors. Gameplay hooks bind to `actorPage.getState()`,
+but player document listeners, spell-panel rendering, slot recalculation on
+render, and shared spell-view preferences are suppressed. Supply catalogs
+with `setSpells()` and keep the actor page adapter's state-sensitive callbacks,
+rendering, and persistence isolated; this option is not a license to reuse
+the player's page or swap its `_state`.
+
+`CharacterSheetSimulacrum` owns the shared desktop/Play Mode actor card and
+manager. Its creation preview only stages data; the spell transaction owns
+payment/replacement/commit. Actor-backed records must never fall through to
+generic editable HP, partial creature renderers or fabricated bestiary links.
+The manager hydrates the persisted actor and lazily loads the actor bridge
+after Page/Spells/Combat are available. Corrupt snapshots surface diagnostics,
+not an original-character fallback; destroyed snapshots remain dismissible.
+
+`CharacterSheetSimulacrumCast` wraps only the shared player `_castSpell`
+Simulacrum route; Play Mode delegates that spell to the same entrypoint. Resolve
+all prompts before recording synchronous payment/replacement deltas, then await
+guarded owner persistence before publishing/refreshing. Journal scopes must not
+cross an `await`: that would attribute unrelated concurrent edits to the cast.
+Compensation targets captured raw data and ID-keyed records, never a State swap
+or full-owner rollback. Page's narrow compensation hook repairs rescue/canonical
+storage after failure, including a selection switch during the async write.
+Laboratory repair reuses that hook with an exact `repairTransactionId` applied-
+write predicate and field-scoped compensation on detached persisted data.
+Do not treat an existing companion ID or actor revision as a payment receipt.
+Gambler-sourced creation is explicitly refused before payment/receipt creation.
+
+`CharacterSheetCompanionActor` is the explicit actor-page adapter. Hydrate it
+with `{ownerPage, companionId}`, invoke its cast methods or `run(operation)`,
+and await commit/persistence. It allowlists actor-bound Page helpers rather
+than delegating unknown mutable callbacks to the owner. Combat also accepts
+`{isHeadless: true}` to omit listener installation; the bridge suppresses its
+player-facing renderers. Managed ally effects use a separate `targetState`
+parameter on the shared effect application path, never a State swap.
+
 ```
 CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   Entry point & orchestrator. Loads all data, initializes modules,

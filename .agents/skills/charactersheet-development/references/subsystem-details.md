@@ -19,6 +19,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - RHW Reanimator R2a State and Ownership
 - Fixed Proficiency with Fallback Transactions
 - Feature-Companion Acquisition and Setup
+- Actor-Backed Companion Snapshots
 - EFA Steel Defender Lifecycle Surfaces
 - Feat Ability Alternatives and Owned Receipts
 
@@ -1071,6 +1072,66 @@ Load migration adopts only exact owner evidence. A resolved exact-owner
 translated; a markerless save that already contains the fixed proficiency is
 left as a pending fallback rather than guessing whether that proficiency was
 pre-existing or feature-owned.
+
+## Actor-Backed Companion Snapshots
+
+Simulacrum's playable creation and shared desktop/Play Mode manager use this
+State-only foundation rather than a second roster character.
+`prepareSimulacrumSnapshot({spellSource, creatorActorId?, exporter?})` returns
+`{ok:true, companionData}`; pass that to existing `addCompanion`. Preparation
+deep-copies raw `_data` with companions/roster ID omitted before traversal,
+copies runtime catalogs directly (no acquisition setters), and tears down
+effects/items only on the detached copy. Never use live `toJson()` as an
+immutability boundary: it reconciles.
+
+`companion.actorSnapshot` is envelope version 1 with `revision`, `kind`,
+`actorId`, `creatorActorId`, `origin`, exact `spell`, edition-specific `policy`,
+`frozen:{normalMaxHp,level,proficiencyBonus}`, `lifecycle`, and authoritative
+raw `state`. Summary/statblock fields are derived; do not create independent
+slot/innate/resource counters. Preparation fills pools once. Hydration skips
+`loadFromJson`/migrations and preserves zero. The duplicate has no roster ID.
+
+`hydrateCompanionActor(id)` returns `{ok:true,actor,actorId,revision}`.
+Mutate that actor and call `commitCompanionActor(id, {actor,revision,exporter?})`.
+Success is `{ok:true,revision}` after validation/projection and atomic in-memory
+replacement; the controller still awaits normal owner persistence. Stale
+identity/revision is `actor-commit-conflict`; core build edits are
+`actor-build-frozen`. Failures have `ok:false,reason,message,issues`. Pure
+`validateCompanionActorSnapshot` never repairs or refills; load retains invalid
+envelopes with `actorUnavailable` diagnostics, and roll helpers refuse fallback.
+
+Generic companion HP/temp-HP/conditions use this bridge. Owner recalculation
+and rest never rebuild/refill it. Export with `profile:"companion"` to avoid
+NPC caps/compaction and retain exact numeric statistics, structured defenses,
+full feature entries, and source/ordinary/Pact casting routes.
+
+Milestone 2 adds `CharacterSheetCompanionActor.hydrate({ownerPage,companionId})`
+and actor-bound headless Spells/Combat. Await `castSpell`, `castInnateSpell`,
+`castRitual`, `takeDamage`, or `run((actor,spells)=>...)`; never impersonate the
+original State. Normal/Pact selection uses `decision:{slotLevel,isPact}`.
+Supported beneficial targets use `targetActorId`; unsupported rules remain
+manual via `getManualResolutionNotice()`. Actor-owned summons live in the
+owner roster, not nested snapshots. Per-actor locks and live revisions guard
+prompts/callbacks; persistence failure rolls back only affected fields.
+
+HP/slot/rest/cast APIs now enforce envelope policy. PHB cannot regain normal or
+Pact slots; XPHB cannot rest/cast Simulacrum but may recover slots without rests.
+Both have repair-only HP and terminal melting at current/max zero. Use
+`getSimulacrumRepairQuote(id,{amount,laboratoryConfirmed,ownerLongRest,withinFiveFeet})`
+and `repairSimulacrum(id,options)`; success reports `actualHp`, `costGp`, `revision`,
+and `transactionId`. The companion's `repairTransactionId` is payment-write
+identity metadata, not gameplay state. Laboratory rollback matches that exact
+receipt before compensating persisted old-owner data; companion ID/revision
+alone cannot distinguish an applied repair from an unrelated cast.
+The State charges 100 gp/actual HP, atomically commits, and restores exact
+currency on failure; UI/Rest owns persistence and Undo. Lifecycle APIs are
+`destroySimulacrum` and `destroySimulacrumsByCreator`. Creation/management uses
+`CharacterSheetSimulacrum`; payment/replacement uses its shared casting
+transaction. Keep terminal actor records in the lifecycle surface so they
+remain inspectable and dismissible. Underlying actor race is original; eligibility
+must use envelope kind/Construct projection instead.
+Full envelope, failure, and export contracts:
+`docs/charactersheet/18-npc-export.md`, "Actor-backed companion foundation".
 
 ## Feature-Companion Acquisition and Setup
 
@@ -4612,6 +4673,30 @@ Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog va
 `CharacterSheetNpcExporter.test.js` + `CharacterSheetNpcExporter.matrix.test.js` (class × special-system matrix) + `.realsaves.test.js` (932 contract tests against the 24-save corpus; auto-skips when absent; 999 across all three files).
 
 ## Rest Mechanics
+
+### Optional XPHB Simulacrum Paid Repair
+
+Rest's `_showLongRestDialog({focusSimulacrum: companionId})` stages optional
+whole-HP repair amounts and within-5-feet confirmation for active XPHB actor-backed
+copies. Use State's `getSimulacrumRepairQuote`/`repairSimulacrum` with
+`{amount, ownerLongRest:true, withinFiveFeet}`; never mutate summary HP or create
+another resource store. Quotes enforce original creator identity and funds.
+Rest also binds each staged request to actor ID/revision, checks combined cost,
+and prevents stale-owner/navigation or duplicate confirmation. PHB laboratory
+repair stays outside the owner's Long Rest.
+
+Repair commits after owner recovery/time advancement but before awaited owner
+persistence inside the existing whole-rest rollback. Failure restores currency
+denominations and actor snapshots with the rest; Undo Rest restores both again
+without replenishing any duplicate pools. Cancelling leaves all state untouched.
+`CharacterSheetSimulacrumRest.test.js` exercises the real dialog and State APIs.
+
+The PDF companion presentation validates the persisted envelope, reads raw saved
+actor pools/HP/conditions/concentration and frozen level/PB, and uses the saved
+statblock for numeric saves/skills and complete action/reaction/spellcasting
+sections. It never hydrates or initializes the actor and prints recovery guidance
+instead of original-character fallback for corrupt data. Generic/EFA presentation
+is unchanged; see `CharacterSheetSimulacrumPdf.test.js`.
 
 ### Source-Owned Temporary HP
 

@@ -337,7 +337,7 @@ class CharacterSheetCombat {
 	 */
 	static FIGHTER_OWNED_COMBAT_FEATURES = ["second wind", "action surge", "tactical mind", "stamina enthusiast"];
 
-	constructor (page) {
+	constructor (page, {isHeadless = false} = {}) {
 		this._page = page;
 		this._state = page.getState();
 		this._allItems = [];
@@ -379,7 +379,7 @@ class CharacterSheetCombat {
 		this._pendingSpellRider = null;
 		this._channelCantripsCache = null; // per-render cache of known weapon-channel cantrips
 
-		this._init();
+		if (!isHeadless) this._init();
 	}
 
 	_init () {

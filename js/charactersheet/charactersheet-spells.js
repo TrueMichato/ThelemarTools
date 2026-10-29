@@ -1,6 +1,7 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
+import {CharacterSheetSimulacrumCast} from "./charactersheet-simulacrum-cast.js";
 import {ListVirtualRenderer} from "../list2/list2-virtual.js";
 
 /**
@@ -118,9 +119,10 @@ class CharacterSheetSpells {
 		return PLAYER_CHOSEN_SPELL_FEATURES.has(spell.sourceFeature);
 	}
 
-	constructor (page) {
+	constructor (page, {isHeadless = false} = {}) {
 		this._page = page;
 		this._state = page.getState();
+		this._isHeadless = isHeadless;
 		this._allSpells = [];
 		this._filteredSpells = [];
 		this._spellFilter = "";
@@ -128,11 +130,11 @@ class CharacterSheetSpells {
 		// BUG 5: spells-tab view mode (current | prepared | known). Stored purely in this
 		// module + localStorage — no state.js / _data / loadFromJson touch. Defaults to
 		// "current" (today's layout) and is loaded from localStorage below.
-		this._spellViewMode = this._getSpellViewMode();
+		this._spellViewMode = isHeadless ? "current" : this._getSpellViewMode();
 		this._registerCommittedSpellCastHooks();
 
 		this._registerAlchemicalEruptionHook();
-		this._init();
+		if (!isHeadless) this._init();
 	}
 
 	// ========================================================================
@@ -156,7 +158,7 @@ class CharacterSheetSpells {
 			return this._spellViewMode;
 		}
 		try {
-			if (typeof localStorage !== "undefined") {
+			if (!this._isHeadless && typeof localStorage !== "undefined") {
 				const stored = localStorage.getItem(CharacterSheetSpells._SPELL_VIEW_MODE_STORAGE_KEY);
 				if (stored && CharacterSheetSpells.SPELL_VIEW_MODES.includes(stored)) return stored;
 			}
@@ -173,7 +175,7 @@ class CharacterSheetSpells {
 		if (!CharacterSheetSpells.SPELL_VIEW_MODES.includes(mode)) return;
 		this._spellViewMode = mode;
 		try {
-			if (typeof localStorage !== "undefined") {
+			if (!this._isHeadless && typeof localStorage !== "undefined") {
 				localStorage.setItem(CharacterSheetSpells._SPELL_VIEW_MODE_STORAGE_KEY, mode);
 			}
 		} catch (e) { /* ignore storage errors */ }
@@ -221,6 +223,7 @@ class CharacterSheetSpells {
 	}
 
 	_renderMetamagic () {
+		if (this._isHeadless) return;
 		CharacterSheetCombat.renderMetamagicDashboard(
 			this._state,
 			this._page,
@@ -258,7 +261,10 @@ class CharacterSheetSpells {
 
 	async _pPublishCommittedSpellCast (input) {
 		this._registerCommittedSpellCastHooks();
-		const receipt = await this._state.pPublishCommittedSpellCast?.(input);
+		const actorContext = this._page?.getActorCastContext?.();
+		const receipt = await this._state.pPublishCommittedSpellCast?.(actorContext
+			? {...input, cast: {...input.cast, actorId: actorContext.actorId, suppliedComponents: actorContext.suppliedComponents}}
+			: input);
 		if (receipt?.followUpFailed) {
 			const failures = receipt.followUps.filter(it => !it.ok).map(it => it.error).filter(Boolean);
 			JqueryUtil.doToast({
@@ -2638,6 +2644,12 @@ class CharacterSheetSpells {
 			releaseReservation();
 			return {ok: false, committed: false, reason: "spell-identity-unresolved"};
 		}
+		const actorBlock = this._state.getCompanionSpellCastBlock?.(storage.spell, spellData);
+		if (actorBlock) {
+			releaseReservation();
+			JqueryUtil.doToast({type: "warning", content: actorBlock});
+			return {ok: false, committed: false, reason: "actor-cast-forbidden"};
+		}
 		const selfHolderUid = this._state.getEfaSpellStoringItemSelfHolder?.().uid;
 		const holderConcentrations = (this._state.getConcentrations?.() || [])
 			.filter(concentration => String(concentration?.holderUid || selfHolderUid) === String(holder.uid));
@@ -3076,6 +3088,16 @@ class CharacterSheetSpells {
 	}
 
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
+		const spell = this._state.getSpells().find(row => row.id === spellId);
+		if (CharacterSheetSimulacrumCast.isSpell(spell)) {
+			return CharacterSheetSimulacrumCast.run(this, spell,
+				creation => this._pCastSpell(spellId, {withMetamagic, decision, creation}));
+		}
+		return this._pCastSpell(spellId, {withMetamagic, decision});
+	}
+
+	async _pCastSpell (spellId, {withMetamagic, decision = null, creation = null} = {}) {
+		creation?.assertCurrent();
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
 		// (combat / overview / favourites quick-cast surfaces).
@@ -3091,6 +3113,7 @@ class CharacterSheetSpells {
 
 		// Get full spell data for component/constraint checks
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
+		if (creation && (!spellData || spellData.level !== 7)) throw new Error("The full Simulacrum spell data is unavailable. Reload the spell catalog before casting.");
 
 		// Check if spell requires concentration - use spellData (authoritative source)
 		// Do NOT use spell.concentration as it may have been set incorrectly by migrations
@@ -3396,7 +3419,8 @@ class CharacterSheetSpells {
 		// upcast choice from the cast-options context menu — revalidated against current slots).
 		let selectedSlot;
 		if (decision && decision.slotLevel != null) {
-			selectedSlot = castOptions.find(s => !s.isWizardCapstone && !s.isNoSlotResource && !s.isPact && s.level === decision.slotLevel);
+			selectedSlot = castOptions.find(s => !s.isWizardCapstone && !s.isNoSlotResource
+				&& !!s.isPact === (decision.isPact === true) && s.level === decision.slotLevel);
 			if (!selectedSlot) {
 				JqueryUtil.doToast({type: "warning", content: `No level ${decision.slotLevel} slot available.`});
 				return;
@@ -3423,11 +3447,15 @@ class CharacterSheetSpells {
 			if (!selectedSlot) return;
 		}
 
+		creation?.assertCurrent();
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
+		creation?.assertCurrent();
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
+		creation?.assertCurrent();
 		// Variant spell component selection
 		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
+		creation?.assertCurrent();
 		if (variantComponentChoice?.cancelled) return;
 
 		const castMeta = this._getNormalizedCastMeta({
@@ -3435,6 +3463,7 @@ class CharacterSheetSpells {
 			spellData,
 			slotLevel: selectedSlot.level,
 			castMeta: {
+				...(creation ? {simulacrumCreation: true} : {}),
 				...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 				...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
 				...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
@@ -3447,9 +3476,14 @@ class CharacterSheetSpells {
 			return;
 		}
 		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+		creation?.assertCurrent();
 		if (focusSelection.cancelled) return;
 		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
 		const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
+		creation?.assertCurrent();
+		if (creation && isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting) {
+			throw new Error("Simulacrum creation with Gambler's Spellcasting is not automated, including delayed and failed results. No cast costs were spent.");
+		}
 		let gamblerCastResolution = null;
 		if (isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting && !selectedSlot.isWizardCapstone) {
 			gamblerCastResolution = this._state.createGamblerCastResolution?.({
@@ -3473,6 +3507,26 @@ class CharacterSheetSpells {
 			castMeta.gamblerCastResolution = gamblerCastResolution;
 		}
 		const deferGamblerCast = !!gamblerResolutionDecision.deferCast;
+		let creationMaterial;
+		let creationResult;
+		if (creation) {
+			creation.assertCurrent();
+			creationResult = await this._showCastResult(spell, selectedSlot.level, selectedSlot.isPact, false, castMeta);
+			creation.assertCurrent();
+			if (creationResult?.cancelled) return;
+			creationMaterial = await this._pConsumeMaterialComponent({
+				spell,
+				spellData,
+				decision,
+				variantUsed: !!variantComponentChoice?.variantComponent,
+				isPrepareOnly: true,
+				isRequired: true,
+				assertCurrent: () => creation.assertCurrent(),
+			});
+			creation.assertCurrent();
+			if (creationMaterial.cancelled) return;
+		}
+		creation?.beginMutation();
 		const economyTransaction = this._commitSpellCastingEconomy({spellData, castMeta});
 		if (!economyTransaction.ok) {
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
@@ -3489,7 +3543,7 @@ class CharacterSheetSpells {
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			return;
 		}
-		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+		if (activeMetamagicChoice?.metamagic && !creation) this._refreshSorceryPointUI();
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
 		let skipSlotConsumption = false;
@@ -3528,7 +3582,7 @@ class CharacterSheetSpells {
 			if (selectedSlot.capstoneType === "signature" && !this._state.useSignatureSpell?.(spell)) {
 				this._rollbackSpellCastingEconomy(economyTransaction);
 				JqueryUtil.doToast({type: "warning", content: `${spell.name}'s Signature Spell cast has already been used. Cast it with a spell slot instead.`});
-				return;
+				return {ok: true, committed: true, gamblerResolution: gamblerCastResolution};
 			}
 		} else if (selectedSlot.isNoSlotResource) {
 			const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
@@ -3540,9 +3594,12 @@ class CharacterSheetSpells {
 			this._state.setResourceCurrent(selectedSlot.resourceId, res.current - 1);
 		} else if (!skipSlotConsumption) {
 			if (selectedSlot.isPact) {
-				this._state.setPactSlotsCurrent(pactSlots.current - 1);
+				const current = this._state.getPactSlots().current;
+				if (creation && current <= 0) throw new Error("The selected Pact slot is no longer available.");
+				this._state.setPactSlotsCurrent(current - 1);
 			} else {
 				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+				if (creation && current <= 0) throw new Error("The selected spell slot is no longer available.");
 				ordinarySlotExpenditure = this._state.setSpellSlots(
 					selectedSlot.level,
 					this._state.getSpellSlotsMax(selectedSlot.level),
@@ -3553,6 +3610,7 @@ class CharacterSheetSpells {
 		}
 
 		const refundCastPayment = () => {
+			if (creation) return; // The creation journal refunds the captured owner, never a newly loaded character.
 			this._rollbackSpellCastingEconomy(economyTransaction);
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
@@ -3578,11 +3636,12 @@ class CharacterSheetSpells {
 				}
 			}
 		};
+		creation?.endMutation();
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
 		let castResult;
 		try {
-			castResult = deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
+			castResult = creation ? creationResult : deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
 				? {cancelled: false}
 				: await this._showCastResult(
 					spell,
@@ -3605,6 +3664,56 @@ class CharacterSheetSpells {
 		if (castResult?.cancelled) {
 			refundCastPayment();
 			return;
+		}
+		if (creation) {
+			creation.assertCurrent();
+			creation.mutate(() => {
+				creationMaterial.commit?.();
+				if (variantComponentChoice?.variantComponent) {
+					for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+						if (!this._state.consumeVariantComponent(id)) throw new Error("The selected variant component is no longer available.");
+					}
+				}
+				creation.addPreparedCompanion();
+				this._state.consumeStatesEndingOnSpellCast?.();
+				this._state.applyCommittedSpellCastTriggers?.(spell);
+			});
+			await creation.save();
+			const receipt = await this._pPublishCommittedSpellCast({
+				spell,
+				spellData,
+				focusInventoryRow: focusSelection.focusInventoryRow,
+				focusRequirement: focusSelection.requirement,
+				cast: {
+					type: selectedSlot.isNoSlotResource ? "noSlotResource" : selectedSlot.isWizardCapstone ? "classFeature" : "slot",
+					slotLevel: selectedSlot.level,
+					isPactSlot: !!selectedSlot.isPact,
+					resourceId: selectedSlot.isNoSlotResource ? selectedSlot.resourceId : null,
+					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+					rolls: castResult?.rolls || [],
+				},
+			});
+			creation.assertCurrent();
+			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+			this.renderSlots();
+			this._page._renderQuickSpells?.();
+			this._page._renderResources?.();
+			this._page._renderActiveStates?.();
+			this._page._updateAllCalculations?.();
+			this._page._renderCompanions?.();
+			this._page._inventory?.render?.();
+			this._page._combat?.renderCombatActionEconomy?.();
+			if (this._state.getViewMode?.() === "play") this._page._playMode?.render();
+			if (castMeta.feywildShard) {
+				const surge = this._rollPhbWildMagicSurge();
+				JqueryUtil.doToast({type: "info", content: `Feywild Shard: ${surge.roll} - ${surge.effect}`});
+			}
+			if (castMeta.variantComponent?.componentCount > 1) {
+				const surge = this._rollVariantWildMagicSurge(castMeta.variantComponent.componentCount);
+				JqueryUtil.doToast({type: "info", content: `Variant component Wild Magic: ${surge.roll} - ${surge.surged ? surge.effect : "no surge"}`});
+			}
+			JqueryUtil.doToast({type: "success", content: `Created ${spell.source} Simulacrum. Its companion record has been saved.`});
+			return {...receipt, ok: true, committed: true, companionId: creation.companionId};
 		}
 		if (variantComponentChoice?.variantComponent) {
 			for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
@@ -3767,7 +3876,7 @@ class CharacterSheetSpells {
 
 		this._state.consumeStatesEndingOnSpellCast?.();
 		this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
-		const receipt = await this._state.pPublishCommittedSpellCast?.({
+		const receipt = await this._pPublishCommittedSpellCast({
 			spell,
 			spellData,
 			focusInventoryRow: focusSelection.focusInventoryRow,
@@ -3862,7 +3971,7 @@ class CharacterSheetSpells {
 		if (!confirmed) return;
 
 		// Cast Moonbeam normally: auto-slot, no metamagic / component / ritual prompts.
-		await this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
+		const receipt = await this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 
 		// _castSpell doesn't report success; if no slot was consumed the cast was cancelled
 		// (e.g. the player declined the break-concentration prompt) — don't spend the use.
@@ -3879,6 +3988,7 @@ class CharacterSheetSpells {
 
 		this._page.saveCharacter();
 		this._renderSpellList();
+		return receipt;
 	}
 
 	/**
@@ -3911,6 +4021,8 @@ class CharacterSheetSpells {
 			JqueryUtil.doToast({type: "warning", content: block});
 			return false;
 		}
+		if (this._page?.pConfirmSpellSupplies
+			&& !await this._page.pConfirmSpellSupplies({spell, spellData, ...opts})) return false;
 		if (checks.length) {
 			// TGTT gives no DC for these condition checks; the sheet's minimum
 			// concentration DC (zero damage) is 10. One check covers all conditions.
@@ -3975,11 +4087,13 @@ class CharacterSheetSpells {
 	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring one concentration check
 	 */
 	_checkCastingConstraints (spell, spellData, appliedMetamagic = null, opts = {}) {
+		const policyBlock = this._state.getCompanionSpellCastBlock?.(spell, spellData);
+		if (policyBlock) return {block: policyBlock, checks: []};
 		// Advanced opt-in escape hatch: when enabled, skip every condition/component
 		// casting gate (incapacitated, verbal/somatic banned-or-check, wild shape).
 		// This intentionally does NOT affect slot/sorcery-point/charge spending or
 		// concentration bookkeeping — those are handled in `_castSpell`, not here.
-		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) {
+		if (!this._state._companionActorId && this._state.getSettings?.()?.ignoreSpellcastingRestrictions) {
 			return {block: null, checks: []};
 		}
 
@@ -4034,7 +4148,7 @@ class CharacterSheetSpells {
 
 		// Material component requirement (only when the caller opts in — i.e. normal/ritual
 		// slot/cantrip casting, never innate/item casting which ignores materials).
-		if (opts.enforceMaterial && !componentWaivers.has("m")) {
+		if (opts.enforceMaterial && !componentWaivers.has("m") && !this._page?.pConfirmSpellSupplies) {
 			const matBlock = this._getMaterialComponentBlock(spell, spellData);
 			if (matBlock) return {block: matBlock, checks: []};
 		}
@@ -4114,8 +4228,7 @@ class CharacterSheetSpells {
 		}
 		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return null;
 
-		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
-			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		const info = this._getCastMaterialComponentInfo(spell, spellData);
 		if (!info) return null;
 
 		// A weapon-channel cantrip's material component IS the melee weapon used to make
@@ -4152,6 +4265,9 @@ class CharacterSheetSpells {
 	}
 
 	async _pResolveSpellCastFocus ({spell, castMeta = null, decision = null} = {}) {
+		if (this._page?.pConfirmSpellSupplies) {
+			return {cancelled: false, requirement: null, focusInventoryRow: null, focusReference: null};
+		}
 		if (this._state.getSettings?.().ignoreSpellcastingRestrictions) {
 			return {cancelled: false, requirement: null, focusInventoryRow: null, focusReference: null};
 		}
@@ -4197,6 +4313,13 @@ class CharacterSheetSpells {
 		};
 	}
 
+	_getCastMaterialComponentInfo (spell, spellData) {
+		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
+			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		// The priced portion is ruby, not the snow/hair also named in PHB's description.
+		return info && CharacterSheetSimulacrumCast.isSpell(spell) ? {...info, text: "ruby"} : info;
+	}
+
 	/**
 	 * Consume a gold-cost material component on a committed cast, when the spell
 	 * consumes it. No-op when: the escape-hatch setting is on, the material has no
@@ -4218,19 +4341,25 @@ class CharacterSheetSpells {
 	 * @param {object} args.spellData
 	 * @param {object|null} [args.decision]
 	 * @param {boolean} [args.variantUsed]
-	 * @returns {Promise<{consumed: (null|{id:string, name:string, value:number})}>}
+	 * @param {boolean} [args.isPrepareOnly] Stage the selection without consuming it.
+	 * @param {boolean} [args.isRequired] Cancellation aborts the cast, rather than manual bookkeeping.
+	 * @param {Function|null} [args.assertCurrent] Validate the owner before staged consumption.
 	 */
-	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false}) {
+	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false, isPrepareOnly = false, isRequired = false, assertCurrent = null}) {
+		if (this._page?.pConfirmSpellSupplies) return {consumed: null, supplied: true};
 		if (variantUsed) return {consumed: null};
 		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) return {consumed: null};
 		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return {consumed: null};
 
-		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
-			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		const info = this._getCastMaterialComponentInfo(spell, spellData);
+		if (isRequired && (!info || info.requiresFocus || !info.consume)) throw new Error("The required Simulacrum material component data is unavailable.");
 		if (!info || info.requiresFocus || !info.consume) return {consumed: null};
 
 		const candidates = this._state.getGoldComponentCandidates?.(info.cost, info.text) || [];
-		if (!candidates.length) return {consumed: null}; // the gate should have blocked; be safe
+		if (!candidates.length) {
+			if (isRequired) throw new Error("The required ruby component is no longer available.");
+			return {consumed: null}; // Preserve manual bookkeeping for other casts.
+		}
 
 		// Every candidate is a name match now (value-only items are not accepted as
 		// "the component"). Consume a single unambiguous match directly; prompt only
@@ -4248,13 +4377,20 @@ class CharacterSheetSpells {
 				candidates,
 				isOptional,
 			});
-			if (!chosen) return {consumed: null};
+			if (!chosen) return {consumed: null, ...(isRequired ? {cancelled: true} : {})};
 		}
 
-		this._state.consumeItem(chosen.id);
-		const gpStr = chosen.value ? ` (${Math.floor(chosen.value / 100)} gp)` : "";
-		JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name}${gpStr} casting ${spell.name}.`});
-		return {consumed: {id: chosen.id, name: chosen.name, value: chosen.value}};
+		const commit = () => {
+			assertCurrent?.();
+			const current = this._state.getGoldComponentCandidates?.(info.cost, info.text)?.find(row => row.id === chosen.id);
+			if (!current || !this._state.consumeItem(chosen.id)) throw new Error("The selected material component is no longer available.");
+			if (!isPrepareOnly) {
+				const gpStr = chosen.value ? ` (${Math.floor(chosen.value / 100)} gp)` : "";
+				JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name}${gpStr} casting ${spell.name}.`});
+			}
+			return {consumed: {id: chosen.id, name: chosen.name, value: chosen.value}};
+		};
+		return isPrepareOnly ? {commit} : commit();
 	}
 
 	/**
@@ -4308,6 +4444,9 @@ class CharacterSheetSpells {
 	}
 
 	async _showCastResult (spell, slotLevel = null, isPactSlot = false, isRitual = false, castMeta = null) {
+		// Creation has its own staged statblock and durable outcome. Do not publish a
+		// premature cast toast or route the touch spell through familiar delivery.
+		if (castMeta?.simulacrumCreation) return {cancelled: false, rolls: []};
 		// Delegate to the enhanced spell effects handler
 		return this._handleSpellEffects(spell, slotLevel, isPactSlot, isRitual, castMeta);
 	}
@@ -5061,6 +5200,7 @@ class CharacterSheetSpells {
 
 	_getNormalizedCastMeta ({spell = null, spellData = null, slotLevel = null, castMeta = null} = {}) {
 		const normalized = {
+			...(this._page?.getActorCastContext?.() || {}),
 			...(castMeta || {}),
 			appliedMetamagic: castMeta?.appliedMetamagic || null,
 		};
@@ -5576,6 +5716,7 @@ class CharacterSheetSpells {
 
 			// Determine if we should ask for a target
 			const selfTargetMode = CharacterSheetSpells.resolveSelfTargetingMode(targetInfo, effects);
+			const managedTarget = this._page.getActorSpellTarget?.({...targetInfo, selfTargetMode}) || null;
 			const actingHolder = normalizedCastMeta.targetingMeta?.actingHolder || null;
 			const isExternalActingHolder = !!actingHolder && actingHolder.isSelf !== true;
 
@@ -5583,7 +5724,14 @@ class CharacterSheetSpells {
 			// instead of a blocking pre-roll target prompt. Beneficial, non-self-only spells
 			// resolve immediately; the player opts into applying the effect to themselves via
 			// a bright button in the result toast (which rolls/applies the payload ONCE).
-			if (isExternalActingHolder && ["offer", "auto"].includes(selfTargetMode)) {
+			if (managedTarget && ["offer", "auto"].includes(selfTargetMode)) {
+				effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel, {
+					committedRolls,
+					castingStats: {ability: castingAbility, abilityMod: spellcastingMod},
+					effectOwner: normalizedCastMeta.effectOwner || null,
+					targetState: managedTarget,
+				});
+			} else if (isExternalActingHolder && ["offer", "auto"].includes(selfTargetMode)) {
 				externalResolution = {
 					kind: "external-holder-effect",
 					holderUid: actingHolder.uid,
@@ -5879,7 +6027,7 @@ class CharacterSheetSpells {
 				evt.stopPropagation();
 				if (applyToSelfBtn.disabled) return;
 				applyToSelfBtn.disabled = true;
-				const applied = await this._applySpellEffectsToSelf(
+				const applyEffect = () => this._applySpellEffectsToSelf(
 					offerApplyToSelf.spell,
 					offerApplyToSelf.spellData,
 					offerApplyToSelf.effects,
@@ -5890,6 +6038,16 @@ class CharacterSheetSpells {
 						effectOwner: offerApplyToSelf.effectOwner,
 					},
 				);
+				let applied;
+				try {
+					applied = this._page.pRunActorEffect
+						? await this._page.pRunActorEffect(applyEffect)
+						: await applyEffect();
+				} catch (error) {
+					applyToSelfBtn.disabled = false;
+					JqueryUtil.doToast({type: "danger", content: error.message});
+					return;
+				}
 				applyToSelfBtn.textContent = applied.length ? "✓ Applied to Self" : "✓ Done";
 				this._page._renderActiveStates?.();
 				this._page._combat?.renderCombatStates?.();
@@ -7600,6 +7758,7 @@ class CharacterSheetSpells {
 		rollReceipt = null,
 		castingStats = null,
 		effectOwner = null,
+		targetState = this._state,
 	} = {}) {
 		// A conjured weapon is created only after the cast commits and concentration
 		// replaces the previous spell. The raw damage dice belong to its item, not
@@ -7625,10 +7784,10 @@ class CharacterSheetSpells {
 			const formula = `${healingResult.dice || ""}${healingResult.modifier ? ` ${healingResult.modifier >= 0 ? "+" : "-"} ${Math.abs(healingResult.modifier)}` : ""}`.trim();
 
 			if (healAmount > 0) {
-				const hp = this._state.getHp();
+				const hp = targetState.getHp();
 				const newHp = Math.min(hp.max, hp.current + healAmount);
-				const actualHealing = newHp - hp.current;
-				this._state.setHp(newHp, hp.max); // Fixed: setHp(current, max)
+				targetState.setHp(newHp, hp.max);
+				const actualHealing = targetState.getHp().current - hp.current;
 				appliedEffects.push(`Healed ${actualHealing} HP`);
 
 				const receiptRoll = rollReceipt || {
@@ -7672,10 +7831,10 @@ class CharacterSheetSpells {
 				}
 			}
 
-			const granted = this._state.grantTempHp(tempHpAmount);
+			const granted = targetState.grantTempHp(tempHpAmount);
 			appliedEffects.push(granted
 				? `${tempHpAmount} temp HP`
-				: `retained ${this._state.getTempHp()} temp HP (offered ${tempHpAmount})`);
+				: `retained ${targetState.getTempHp()} temp HP (offered ${tempHpAmount})`);
 		}
 
 		// Check if spell grants conditions - if so, apply the condition itself
@@ -7692,7 +7851,7 @@ class CharacterSheetSpells {
 				// "invisible" is a beneficial condition when cast on self
 				if (!hostileConditions.includes(conditionLower)) {
 					const conditionName = condition.charAt(0).toUpperCase() + condition.slice(1);
-					this._state.addCondition(conditionName);
+					targetState.addCondition(conditionName);
 					conditionsToApply.push(conditionName);
 					appliedEffects.push(`${conditionName} condition applied`);
 				}
@@ -7702,7 +7861,7 @@ class CharacterSheetSpells {
 		// For condition-granting spells, create an active state to track duration/concentration
 		// but DON'T add customEffects (the condition itself provides the effects)
 		if (conditionsToApply.length > 0 && (effects.duration || effects.concentration)) {
-			this._state.addActiveState("custom", {
+			targetState.addActiveState("custom", {
 				name: spell.name,
 				icon: effects.concentration ? "🔮" : "✨",
 				description: `Grants: ${conditionsToApply.join(", ")}`,
@@ -7758,7 +7917,7 @@ class CharacterSheetSpells {
 			}
 
 			// Use activateState to trigger side effects like _applyTempHpFromState
-			const stateId = this._state.activateState("custom", {
+			const stateId = targetState.activateState("custom", {
 				name: spell.name,
 				icon: effects.concentration ? "🔮" : "✨",
 				description: `Spell effect: ${spell.name}`,
@@ -8754,6 +8913,7 @@ class CharacterSheetSpells {
 
 	// #region Rendering
 	renderSlots () {
+		if (this._isHeadless) return;
 		const container = document.getElementById("charsheet-spell-slots");
 		if (!container) return;
 
@@ -8935,6 +9095,7 @@ class CharacterSheetSpells {
 	}
 
 	_renderSpellList () {
+		if (this._isHeadless) return;
 		// BUG 5: refresh the Current/Prepared/Known toggle (lives above the list) and the
 		// Arcane Recovery status (BUG 7) every render so both stay in sync after casts,
 		// prepares, and post-rest full re-renders.
@@ -9167,6 +9328,7 @@ class CharacterSheetSpells {
 	}
 
 	_renderSpellViewToggle () {
+		if (this._isHeadless) return;
 		const host = document.getElementById("charsheet-spell-view-toggle");
 		if (!host) return;
 		const active = this._getSpellViewMode();
@@ -9220,6 +9382,7 @@ class CharacterSheetSpells {
 	 * short-rest menu ("Recover slots on a Short Rest") and shows Used vs Available.
 	 */
 	_renderArcaneRecoveryStatus () {
+		if (this._isHeadless) return;
 		const host = document.getElementById("charsheet-arcane-recovery-status");
 		if (!host) return;
 		host.innerHTML = "";
@@ -10090,6 +10253,7 @@ class CharacterSheetSpells {
 	}
 
 	render () {
+		if (this._isHeadless) return;
 		this._pruneImprovedPotentOffers();
 		// Calculate spell slots based on class/level before rendering
 		this._state.calculateSpellSlots();
@@ -10123,6 +10287,7 @@ class CharacterSheetSpells {
 	 * classes. Clicking a count opens a class-scoped Add-Spell modal.
 	 */
 	_renderSpellTrackingUI () {
+		if (this._isHeadless) return;
 		const container = document.getElementById("charsheet-spellcasting-stats");
 		if (!container) return;
 		container.innerHTML = "";
