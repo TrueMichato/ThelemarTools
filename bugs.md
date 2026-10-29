@@ -3,7 +3,72 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 70 - Casting, combat, companions, and site resilience
+
+The orchestrator alone owns this file. All four sessions start from the same
+tracking commit on `character-sheet-wip`; implementation requires plan approval.
+Each group owns its named regions, not every region of a shared file.
+
+**S1 - Casting and material lifecycle (bugs 1, 2, 3, 6).**
+
+- **1. Simulacrum creation:** Pressing Cast must reach the existing target and
+  creation workflow and add the confirmed copy to Companions. Investigate the
+  material gate before replacing the already-implemented creation subsystem.
+- **2. Required spell components:** Add missing specific materials to the
+  Components item picker, including powdered ruby worth at least 1,500 gp.
+  Preserve priced/consumed versus reusable requirements and distinguish ordinary
+  spell requirements from optional Arcadia 8 variant effects.
+- **3. DM-approved material override:** Offer an explicit, per-cast override
+  when a material is missing, clearly labelled as requiring the DM's permission.
+  Do not bypass unrelated casting restrictions or invent inventory/payment.
+- **6. Shield display:** Refresh visible AC immediately after casting Shield,
+  without requiring the player to open the AC breakdown.
+- **Ownership:** `charactersheet-spells.js`; material catalog, matching and
+  payment; component sourcing in `CharacterSheet._pLoadData`; existing
+  Simulacrum creation transaction integration. Own cast-completion refresh,
+  using the existing page render API. Declare any companion-record contract
+  changes before S3 builds on it.
+
+**S2 - Combat eligibility and concentration (bugs 4, 5).**
+
+- **4. Beaver reaction:** Surface the Zodiac Druid's Beaver reaction only while
+  its required form is active, including after switching, expiration and reload.
+- **5. War Caster:** Carry the actual feat's eligible concentration advantage
+  and attribution through calculation, the modal and the dice roll.
+- **Ownership:** Active-form eligibility, concentration aggregation,
+  `FEATURE_CLASSIFICATION_OVERRIDES`, Zodiac/reaction regions of
+  `charactersheet-combat.js`, and the page's concentration modal and conditional
+  roll picker where needed. S1 alone edits spell-casting consumers; request
+  coordinated changes there rather than editing them independently.
+
+**S3 - Companion roll controls (bug 7).**
+
+- **7. Companion rolls:** Make skills, saves, attacks, initiative and related
+  rolls directly accessible on the Companions surface, using the companion's
+  own statistics and existing roll/history conventions.
+- **Ownership:** Companion UI and roll methods on the page, companion actor/rules
+  roll APIs, scoped companion controls/styles. Validate existing ordinary and
+  Simulacrum record shapes; preserve owner/companion resource isolation.
+  Do not change creation/payment transactions or generic roll handlers.
+
+**S4 - Site resilience and diagnostics (bugs 8, 9).**
+
+- **8. Homebrew update report:** Keep large update/warning/error toasts readable
+  and scrollable, retain accessible close controls, and log the complete report
+  to the console as a backup.
+- **9. Creature templates:** Identify the actual failing template boundary,
+  skip and warn about individual invalid templates, and keep valid templates
+  usable in bestiary and encounter editing. Preserve unrelated copy errors.
+- **Ownership:** Shared toast and template regions of `js/utils.js`, homebrew
+  update reporting, toast styles, and shared bestiary/encounter template
+  catalog/editor consumers. If generic copy resolution changes, cover a
+  non-bestiary consumer as well.
+
+**Integration gate:** Regression tests for every bug, meaningful production
+negative controls, full ESLint, Stylelint and repository Jest. Preserve existing
+skipped-test signatures; do not treat expected failures as fixed behavior.
+Merge all child tips with ancestry preserved in a separate integration worktree,
+reconcile shared contracts, then publish PRs before advancing the base.
 
 ## Closed Bugs
 
