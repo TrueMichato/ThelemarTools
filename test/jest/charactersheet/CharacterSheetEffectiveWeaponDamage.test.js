@@ -158,4 +158,20 @@ describe("getEffectiveWeaponDamage", () => {
 
 		expect(state.getEffectiveWeaponDamage(id).display).not.toContain("9d99");
 	});
+
+	it.each(["1d8 lightning", "1d8+2 lightning"])("leaves an unstructured legacy display opaque rather than stripping its type or adding its bonus again (%s)", damage => {
+		const state = mkState();
+		const id = addSword(state, {source: "Custom", dmg1: undefined, dmg2: undefined, dmgType: undefined, damage, bonusWeapon: 2});
+		const before = JSON.stringify(state.getItemRaw(id));
+		expect(state.getEffectiveWeaponDamage(id)).toBeNull();
+		expect(state.getEffectiveWeaponDamageProfile(state.getItems().find(item => item.id === id)).dmg1).toBe(damage.split(" ")[0]);
+		expect(JSON.stringify(state.getItemRaw(id))).toBe(before);
+	});
+
+	it("still derives source-qualified base-item dice when canonical damage is absent", () => {
+		const state = mkState();
+		state.setItemCatalog([{name: "Quarterstaff", source: "PHB", dmg1: "1d6", dmg2: "1d8"}]);
+		const id = addSword(state, {dmg1: undefined, dmg2: undefined, dmgType: "B", baseItem: "quarterstaff|PHB", damage: "1d4 bludgeoning"});
+		expect(state.getEffectiveWeaponDamage(id)).toMatchObject({dice: "1d6", diceVersatile: "1d8", display: "1d6 (1d8) bludgeoning"});
+	});
 });

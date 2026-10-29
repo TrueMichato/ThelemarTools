@@ -17667,7 +17667,7 @@ class CharacterSheetState {
 		// Fury of the Wise (Ferocious Bond, 3rd): Intimidation checks gain the
 		// beastheart's Wisdom modifier on top of the usual Charisma-based total.
 		if (skill === "intimidation") {
-			const furyBonus = this.getFeatureCalculations().furyOfTheWiseBonus || 0;
+			const furyBonus = this._getFuryOfTheWiseBonus();
 			if (furyBonus) out.push({name: "Fury of the Wise", value: furyBonus});
 		}
 
@@ -17680,8 +17680,8 @@ class CharacterSheetState {
 	 * @returns {number} The stance bonus
 	 */
 	_getStanceSkillBonus (skill) {
-		const calculations = this.getFeatureCalculations();
-		return calculations.stanceSkillBonuses?.[skill] || 0;
+		if (!this.usesCombatSystem?.()) return 0;
+		return this._getActiveStanceEffects()?.skillBonuses?.[skill] || 0;
 	}
 
 	/**
@@ -19640,7 +19640,8 @@ class CharacterSheetState {
 		// Read the PROJECTED item — a material rewrites `dmg1` at read time and never touches
 		// the raw entry.
 		const item = this.getItems().find(i => i.id === itemId) || invItem.item || invItem;
-		if (!item.dmg1) return null;
+		const profile = this.getEffectiveWeaponDamageProfile(item, {allowLegacyDisplay: false});
+		if (!profile.dmg1) return null;
 
 		const eff = this.getEffectiveItemBonuses(itemId) || {};
 		// `getEffectiveItemBonuses` coerces and folds; `num` here only guards the empty object it
@@ -19654,8 +19655,8 @@ class CharacterSheetState {
 			? CharacterSheetUpgrades.increaseDamageDie(die, step)
 			: die);
 
-		const dice = bump(String(item.dmg1));
-		const diceVersatile = item.dmg2 ? bump(String(item.dmg2)) : null;
+		const dice = bump(String(profile.dmg1));
+		const diceVersatile = profile.dmg2 ? bump(String(profile.dmg2)) : null;
 		const flat = num(eff.totalDamageBonus);
 		const damageType = item.dmgType
 			? (Parser.dmgTypeToFull?.(item.dmgType) || item.dmgType)
@@ -22582,6 +22583,21 @@ class CharacterSheetState {
 		return [...new Set(keys)];
 	}
 
+	_isSpellAttributedToClass (spell, cls) {
+		const keys = this._getClassMatchKeys(cls);
+		return [
+			[spell.sourceClass, spell.sourceClassSource || spell.classSource],
+			[spell.sourceSubclass, spell.sourceSubclassSource || spell.subclassSource],
+		].some(([ref, source]) => {
+			if (!ref) return false;
+			const [name, uidSource] = String(typeof ref === "object" ? ref.name || "" : ref).split("|");
+			if (!keys.includes(name.trim().toLowerCase())) return false;
+			const actualSource = name.trim().toLowerCase() === String(cls.name).toLowerCase() ? cls.source : cls.subclass?.source || cls.source;
+			const expectedSource = (typeof ref === "object" ? ref.source : null) || source || uidSource;
+			return !expectedSource || String(expectedSource).toLowerCase() === String(actualSource).toLowerCase();
+		});
+	}
+
 	/**
 	 * Resolve the player-facing heading name for a caster class. Subclass-derived
 	 * casters (Gambler, Eldritch Knight, Arcane Trickster, Architect of Ruin) are
@@ -22623,10 +22639,7 @@ class CharacterSheetState {
 			if (!info) continue;
 
 			const matchKeys = this._getClassMatchKeys(cls);
-			const belongs = (entry) => {
-				const k = [entry.sourceClass, entry.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
-				return k.some(x => matchKeys.includes(x));
-			};
+			const belongs = entry => this._isSpellAttributedToClass(entry, cls);
 
 			// Leveled spells attributed to this class, split chosen vs granted.
 			const classSpells = allSpells.filter(s => s.level > 0 && belongs(s));
@@ -22695,13 +22708,8 @@ class CharacterSheetState {
 	 */
 	getUnattributedSpellCounts () {
 		const cards = this.getSpellcastingClassBreakdown();
-		const allKeys = new Set();
-		for (const c of cards) for (const k of c.matchKeys) allKeys.add(k);
-
-		const isAttributed = (entry) => {
-			const k = [entry.sourceClass, entry.sourceSubclass].filter(Boolean).map(s => s.toLowerCase());
-			return k.some(x => allKeys.has(x));
-		};
+		const classes = this.getClasses().filter(cls => cards.some(card => card.className === cls.name && card.classSource === (cls.source || null)));
+		const isAttributed = entry => classes.some(cls => this._isSpellAttributedToClass(entry, cls));
 
 		const spellsCount = (this._data.spellcasting.spellsKnown || []).filter(s => s.level > 0 && !isAttributed(s)).length;
 		const cantripsCount = (this._data.spellcasting.cantripsKnown || []).filter(c => !isAttributed(c)).length;
@@ -43993,11 +44001,16 @@ class CharacterSheetState {
 	 * and 1d12 … with two").
 	 *
 	 * @param {object} item An inventory item / `attack.sourceItem`.
+	 * @param {object} [options]
+	 * @param {boolean} [options.allowLegacyDisplay=true] Allow the frozen damage string as a last resort.
 	 * @returns {{dmg1: string|null, dmg2: string|null}}
 	 */
-	getEffectiveWeaponDamageProfile (item) {
-		const dmg1 = item?.dmg1 || (item?.damage ? String(item.damage).split(" ")[0] : null) || null;
-		let dmg2 = item?.dmg2 || null;
+	getEffectiveWeaponDamageProfile (item, {allowLegacyDisplay = true} = {}) {
+		const [baseName, baseSource = "PHB"] = String(item?.baseItem || "").toLowerCase().split("|");
+		const base = baseName ? this._allItems.find(candidate => candidate.name?.toLowerCase() === baseName
+			&& candidate.source?.toLowerCase() === baseSource) : null;
+		const dmg1 = item?.dmg1 || base?.dmg1 || (allowLegacyDisplay && item?.damage ? String(item.damage).split(" ")[0] : null) || null;
+		let dmg2 = item?.dmg2 || ((!item?.dmg1 || item.dmg1 === base?.dmg1) ? base?.dmg2 : null) || null;
 
 		// Cheap name gate FIRST — `getNimbleLancerLanceDamage` reaches
 		// `getFeatureCalculations()`, and this helper runs once per rendered weapon row.
@@ -44021,6 +44034,7 @@ class CharacterSheetState {
 		const profile = this.getEffectiveWeaponDamageProfile(item);
 		const oneHanded = profile.dmg1 || "1d4";
 		if (!profile.dmg2) return oneHanded;
+		if (this._data.ac.shield && this._data.ac.shield.equipped !== false) return oneHanded;
 
 		const parsedHands = Math.floor(Number(item.handsUsed));
 		const handsUsed = Number.isFinite(parsedHands) && parsedHands >= 1 ? parsedHands : 1;
@@ -45210,6 +45224,18 @@ class CharacterSheetState {
 			if (!hasType(effect.type)) effects.push(effect);
 		}
 		const text = CharacterSheetState._getItemEntryText(item?.entries);
+		for (const sentence of CharacterSheetState._getPassiveClauses(text).split(/(?<=[.;])\s+/)) {
+			for (const match of sentence.matchAll(/\b(?:you have|you gain|grants you)\s+(advantage|disadvantage)\s+on\s+(?:your\s+)?initiative(?:\s+rolls?)?\b/gi)) {
+				const gates = [...sentence.matchAll(/\b(?:if|unless|when|while|until)\b.*?(?=\b(?:if|unless|when|while|until)\b|[.,;]|$)/gi)];
+				if (gates.some(gate => !CharacterSheetState._RE_ITEM_BASELINE_CONDITION.test(gate[0].trim()))) continue;
+				const conditional = FeatureModifierParser._extractCondition(sentence, match.index);
+				if (conditional && !CharacterSheetState._RE_ITEM_BASELINE_CONDITION.test(conditional)) continue;
+				const flag = match[1].toLowerCase();
+				if (!effects.some(effect => effect.type === "initiative" && effect[flag])) {
+					effects.push({type: "initiative", value: 0, [flag]: true, name: "Initiative"});
+				}
+			}
+		}
 		const conditionalAcMatch = text.match(/gain\s+a\s+\+(\d+)\s+bonus\s+to\s+(?:armor class|ac)\s+if\s+you\s+are\s+wearing\s+no\s+armor\s+and\s+using\s+no\s+[^.]*shield/i);
 		if (conditionalAcMatch && !hasType("acBonusConditional")) {
 			effects.push({
@@ -51071,7 +51097,10 @@ class CharacterSheetState {
 
 		const overrides = weapon.attackOverrides || {};
 		const properties = overrides.properties ?? weapon.property ?? weapon.properties ?? [];
-		const typeBase = String(weapon.type || "").split("|")[0].toUpperCase();
+		const rawType = String(weapon.type || "").split("|")[0].toUpperCase();
+		const typeBase = ["M", "R", "MW", "RW"].includes(rawType)
+			? rawType
+			: String(weapon.typeCode || weapon.type || "").split("|")[0].toUpperCase();
 		const isAlwaysThrown = this.isWeaponAlwaysThrown(weapon);
 		const isRanged = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "A")
 			|| ["R", "RW"].includes(typeBase)
@@ -66743,10 +66772,7 @@ class CharacterSheetState {
 	 * @returns {number}
 	 */
 	getJesterPerformanceBonus () {
-		const chaMod = this.getAbilityMod("cha");
-		const profBonus = this.getProficiencyBonus();
-		const profLevel = this.getSkillProficiency("performance") || 0;
-		return chaMod + (profLevel >= 1 ? profBonus : 0) + (profLevel === 2 ? profBonus : 0);
+		return this.getSkillMod("performance");
 	}
 
 	/**
@@ -68473,14 +68499,14 @@ class CharacterSheetState {
 		return out;
 	}
 
-	_getDefenseBreakdownForKind (kind) {
+	_getDefenseBreakdownForKind (kind, {includeActiveStates = true} = {}) {
 		const baseProp = kind;
 		const itemProp = {
 			resistances: "resist",
 			immunities: "immune",
 			vulnerabilities: "vulnerable",
 		}[kind];
-		const stateValues = kind === "resistances"
+		const stateValues = !includeActiveStates ? [] : kind === "resistances"
 			? this._getResistancesFromStates()
 			: kind === "immunities"
 				? this._getImmunitiesFromStates()
@@ -68514,11 +68540,11 @@ class CharacterSheetState {
 		});
 	}
 
-	getDefenseBreakdown () {
+	getDefenseBreakdown (options = {}) {
 		return {
-			resistances: this._getDefenseBreakdownForKind("resistances"),
-			immunities: this._getDefenseBreakdownForKind("immunities"),
-			vulnerabilities: this._getDefenseBreakdownForKind("vulnerabilities"),
+			resistances: this._getDefenseBreakdownForKind("resistances", options),
+			immunities: this._getDefenseBreakdownForKind("immunities", options),
+			vulnerabilities: this._getDefenseBreakdownForKind("vulnerabilities", options),
 		};
 	}
 
@@ -72537,7 +72563,7 @@ class CharacterSheetState {
 	 * NOT gate the bonus behind a per-roll opt-in. See the call site in
 	 * {@link _getItemConditionalModifiers} for why this distinction matters.
 	 */
-	static _RE_ITEM_BASELINE_CONDITION = /^(?:while|when|as\s+long\s+as)\s+(?:you\s+(?:are\s+|,\s*)?)?(?:it\s+)?(?:this\s+)?(?:wear|wearing|wield|wielding|hold|holding|carry|carrying|attuned|equipped|orbit|orbits|orbiting)\b/i;
+	static _RE_ITEM_BASELINE_CONDITION = /^(?:while|when|as\s+long\s+as)\s+(?:you\s+(?:are\s+|,\s*)?)?(?:it\s+)?(?:this\s+)?(?:wear|wearing|wield|wielding|hold|holding|carry|carrying|attuned|equipped|orbit|orbits|orbiting)\b|^(?:while|when)\s+(?:[\w'-]+\s+){0,8}(?:orbits|orbiting)\s+your head[.,]?$/i;
 
 	/**
 	 * Does `itemData` already carry a structured prop covering `modType`?
@@ -93064,6 +93090,12 @@ class CharacterSheetState {
 		return (this._data.classes || []).find(cls => (cls.name || "").toLowerCase() === "beastheart") || null;
 	}
 
+	_getFuryOfTheWiseBonus (cls = this._getBeastheartClass(), level = Number(cls?.level) || 0) {
+		if (!cls || level < 3) return 0;
+		const subclass = this.getEffectiveSubclassForClass(cls);
+		return /ferocious/i.test(subclass?.shortName || subclass?.name || "") ? this.getAbilityMod("wis") : 0;
+	}
+
 	/** The active Beastheart companion record, or null. */
 	getBeastheartCompanion () {
 		return (this._data.companions || [])
@@ -93177,7 +93209,7 @@ class CharacterSheetState {
 		if (/ferocious/i.test(bond)) {
 			calculations.hasFrenziedCharge = true;
 			calculations.hasFuryOfTheWise = true;
-			calculations.furyOfTheWiseBonus = wisMod;
+			calculations.furyOfTheWiseBonus = this._getFuryOfTheWiseBonus(cls, level);
 			// A rampage normally zeroes ferocity; Energizing Rampage leaves a floor.
 			calculations.rampageFerocityFloor = level >= 7 ? 4 : 0;
 			// Rampage signature attacks deal half ferocity, or all of it from 11th.

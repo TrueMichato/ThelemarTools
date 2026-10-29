@@ -121,7 +121,7 @@ describe("v20 — the sanitizer produces a schema-legal item", () => {
 		expect(out.bonusWeapon).toBeUndefined();
 		expect(out.value).toBeUndefined();
 		expect(out.weight).toBeUndefined();
-		expect(out.bonusAc).toBe(2);
+		expect(out.bonusAc).toBe("2");
 		// `charges: 0` is not a bonus slot — a spent wand is still a wand with 0 charges.
 		expect(out.charges).toBe(0);
 	});

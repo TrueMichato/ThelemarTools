@@ -26,14 +26,16 @@ function _getValidator (schemaPath) {
 
 	const ajv = UtilAjv.getValidator();
 	const selfRelative = path.relative(UTILS_SCHEMA_DIR, schemaPath).replace(/\\/g, "/");
+	const schemaRoot = "https://npc-export.schema/site/";
 	for (const filePath of Uf.listJsonFiles(UTILS_SCHEMA_DIR)) {
 		const relativeFilePath = path.relative(UTILS_SCHEMA_DIR, filePath).replace(/\\/g, "/");
-		if (relativeFilePath === selfRelative) continue;
-		ajv.addSchema(JSON.parse(fs.readFileSync(filePath, "utf8")), relativeFilePath);
+		const schema = JSON.parse(fs.readFileSync(filePath, "utf8"));
+		schema.$id = new URL(relativeFilePath, schemaRoot).href;
+		ajv.addSchema(schema);
 	}
 
-	const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
-	_VALIDATORS[schemaPath] = ajv.compile(schema);
+	_VALIDATORS[schemaPath] = ajv.getSchema(new URL(selfRelative, schemaRoot).href);
+	if (!_VALIDATORS[schemaPath]) throw new Error(`NPC export schema was not registered: ${selfRelative}`);
 	return _VALIDATORS[schemaPath];
 }
 

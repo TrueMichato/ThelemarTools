@@ -536,7 +536,7 @@ describe("Companion statblock fidelity", () => {
 		expect(companion.bonusActions).toEqual(creature.bonus);
 	});
 
-	it("preserves nested entries and uncapped custom abilities without changing ordinary export defaults", () => {
+	it("preserves nested entries and uncapped custom abilities independently of ordinary compact presentation", () => {
 		const state = makeCaster();
 		const nested = {type: "list", items: ["A complete nested ability.", {type: "item", name: "Afterward", entry: "Preserve the final clause."}]};
 		state._data.features.push({
@@ -555,8 +555,9 @@ describe("Companion statblock fidelity", () => {
 		const {data} = addSnapshot(state);
 		expect(data.statblock.trait.find(row => row.name.startsWith("Nested Feature")).entries).toContainEqual(nested);
 		for (let i = 0; i < 16; i++) expect(JSON.stringify(data.statblock)).toContain(`Final custom clause ${i}`);
-		const ordinary = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const ordinary = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(JSON.stringify(ordinary)).not.toContain("Final custom clause 15");
+		expect(JSON.stringify(CharacterSheetNpcExporter.convertStateToMonster(state))).toContain("Final custom clause 15");
 		expect(CharacterSheetNpcExporter.getSanitizedExportOptions({}).profile).toBe("npc");
 	});
 
@@ -578,7 +579,7 @@ describe("Companion statblock fidelity", () => {
 		for (let i = 0; i < 19; i++) expect(JSON.stringify(statblock)).toContain(`Gift Pool ${i}: 2/2 remaining`);
 	});
 
-	it("keeps every meaningful feature beyond NPC caps, full descriptions, exact spell editions and separate same-level ordinary/Pact routes", () => {
+	it("keeps every meaningful feature beyond former NPC caps, full descriptions, exact spell editions and separate same-level ordinary/Pact routes", () => {
 		const state = makeCaster();
 		for (let i = 0; i < 35; i++) {
 			state.addFeature({
@@ -604,8 +605,8 @@ describe("Companion statblock fidelity", () => {
 		expect(text).toContain("{@spell Shield|PHB}");
 		expect(text).toContain("{@spell Shield|XPHB}");
 		expect(text).not.toContain("regains expended spell slots");
-		const normal = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const normal = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(normal.name).toBe("Snapshot Caster (NPC)");
-		expect(normal.action.filter(row => row.name.startsWith("Ice Ability")).length).toBeLessThan(35);
+		expect(normal.action.filter(row => row.name.startsWith("Ice Ability"))).toHaveLength(35);
 	});
 });

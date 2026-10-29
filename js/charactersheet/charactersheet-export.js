@@ -317,9 +317,16 @@ class CharacterSheetExport {
 		if (this._npcExportSpellIndex !== undefined) return this._npcExportSpellIndex;
 		try {
 			const data = await DataUtil.spell.pLoadAll();
-			this._npcExportSpellIndex = CharacterSheetNpcExporter.buildSpellThreatIndex(data?.spell || []);
+			const spells = Array.isArray(data) ? data : data?.spell;
+			if (!Array.isArray(spells) || !spells.length) throw new Error("Spell loader returned no usable spell catalog.");
+			const byUid = new Map([...spells, ...(this._state?._allSpells || []), ...(this._page?._spellsData || [])]
+				.filter(spell => spell?.name && spell?.source)
+				.map(spell => [`${spell.name}|${spell.source}`.toLowerCase(), spell]));
+			this._npcExportSpellIndex = CharacterSheetNpcExporter.buildSpellThreatIndex([...byUid.values()]);
 		} catch (e) {
-			// A missing index only costs precision — the school-weighted fallback still runs.
+			// eslint-disable-next-line no-console
+			console.warn("NPC export spell-threat data unavailable:", e);
+			JqueryUtil.doToast({type: "warning", content: "Spell data could not be loaded. The CR report will identify unmodeled spell damage."});
 			this._npcExportSpellIndex = null;
 		}
 		return this._npcExportSpellIndex;
@@ -331,8 +338,9 @@ class CharacterSheetExport {
 			let exportOptions = await this._pGetNpcExportOptions();
 			const spellIndex = await this._pGetNpcExportSpellIndex();
 			let monster = null;
+			let exportBundle = null;
 			let companionItems = [];
-			let companionItemWarnings = [];
+			let companionItemErrors = [];
 			let sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
 
 			const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
@@ -370,20 +378,33 @@ class CharacterSheetExport {
 			</select>`});
 			selUnarmed.value = exportOptions.includeUnarmed;
 
+			const selPresentation = e_({outer: `<select class="ve-form-control ve-input-sm" aria-label="Export presentation">
+				<option value="complete">Complete mechanics (default)</option>
+				<option value="compact">Compact with omission warnings</option>
+			</select>`});
+			selPresentation.value = exportOptions.presentationMode;
+
 			const selFeatures = e_({outer: `<select class="ve-form-control ve-input-sm">
-				<option value="auto">Features: Auto (important)</option>
-				<option value="allImportant">Features: All important</option>
+				<option value="auto">Features: Automatic</option>
+				<option value="allImportant">Features: Expanded automatic</option>
 				<option value="manual">Features: Manual pick</option>
 			</select>`});
 			selFeatures.value = exportOptions.includeFeatures;
 
-			const selCrMode = e_({outer: `<select class="ve-form-control ve-input-sm">
+			const selCrMode = e_({outer: `<select class="ve-form-control ve-input-sm" aria-label="CR mode">
 				<option value="auto">CR: Auto estimate</option>
 				<option value="manual">CR: Manual</option>
 			</select>`});
 			selCrMode.value = exportOptions.crMode;
 
+			const selCrEstimator = e_({outer: `<select class="ve-form-control ve-input-sm" aria-label="CR estimator">
+				<option value="dmg">DMG-style (default)</option>
+				<option value="legacy">Legacy blended</option>
+			</select>`});
+			selCrEstimator.value = exportOptions.crEstimator;
+
 			const iptCrManual = e_({tag: "input", clazz: "ve-form-control ve-input-sm"});
+			iptCrManual.setAttribute("aria-label", "Manual CR");
 			iptCrManual.placeholder = "5";
 			iptCrManual.value = exportOptions.crManual || "1";
 			iptCrManual.style.maxWidth = "80px";
@@ -416,22 +437,27 @@ class CharacterSheetExport {
 			const wrpFeaturePicker = e_({tag: "div", clazz: "mb-2"});
 			const wrpPreviewMeta = e_({tag: "p", clazz: "ve-muted mb-0"});
 			const wrpValidation = e_({tag: "div", clazz: "mb-2"});
+			const wrpReport = e_({tag: "div", clazz: "mb-2"});
 			const wrpPreviewStatblock = e_({tag: "div", clazz: "ve-overflow-x-auto", style: "max-height: 50vh; overflow-y: auto;"});
 
 			const featureChecks = new Map();
-			const exportableFeatures = CharacterSheetNpcExporter.listExportableFeatures(this._state);
+			const exportableFeatures = CharacterSheetNpcExporter.listExportableFeatures(this._state._createDetachedActorState(this._state._data));
 			const recommendedIds = new Set(
 				exportableFeatures
 					.filter(f => f.classification === "important")
 					.map(f => f.id),
 			);
 			const initialSelected = new Set(
-				(exportOptions.selectedFeatureIds || []).length
+				exportOptions.includeFeatures === "manual"
 					? exportOptions.selectedFeatureIds
 					: [...recommendedIds],
 			);
 
 			const renderFeaturePicker = () => {
+				if (featureChecks.size) {
+					initialSelected.clear();
+					featureChecks.forEach((cb, id) => { if (cb.checked) initialSelected.add(id); });
+				}
 				wrpFeaturePicker.innerHTML = "";
 				featureChecks.clear();
 				if (selFeatures.value !== "manual") {
@@ -482,11 +508,13 @@ class CharacterSheetExport {
 					defenseMode: String(selDefenseMode.value || "persistent"),
 					includeUnarmed: String(selUnarmed.value || "auto"),
 					includeFeatures: String(selFeatures.value || "auto"),
+					presentationMode: selPresentation.value,
 					selectedFeatureIds,
 					includeCustomModifiers: !!cbCustomMods.checked,
 					includeCustomAbilities: !!cbCustomAbs.checked,
 					includeCombatMethods: !!cbMethods.checked,
 					crMode: String(selCrMode.value || "auto"),
+					crEstimator: selCrEstimator.value,
 					crManual: String(iptCrManual.value || "1"),
 					legendaryEnabled: !!cbLegendary.checked,
 					legendaryActions: Number(iptLegendaryActions.value) || 0,
@@ -496,31 +524,27 @@ class CharacterSheetExport {
 				});
 			};
 
-			// A sheet-authored item resolves nowhere on its own, so it ships with the
-			// statblock. Homebrew documents already carry `item`; we simply never populated it.
-			// Rebuilt whenever the monster is, since the export source is part of an item's
-			// identity and the user can change it from this very dialog.
-			const rebuildCompanionItems = () => {
-				companionItemWarnings = [];
-				try {
-					companionItems = CharacterSheetNpcExporter.buildCompanionItems(monster, this._state, {sourceJson: monster?.source, warnings: companionItemWarnings});
-				} catch (e) {
-					// eslint-disable-next-line no-console
-					console.error("Failed to build companion items for NPC export:", e);
-					companionItems = [];
-				}
-				this._registerCompanionItemHovers(companionItems);
+			const getValidation = () => {
+				const validation = exportBundle?.validation || CharacterSheetNpcExporter.getValidationIssues(monster);
+				return {
+					...validation,
+					errors: [...validation.errors, ...companionItemErrors],
+				};
 			};
-			const getCompanionItems = () => companionItems;
+			const canExport = () => {
+				const validation = getValidation();
+				if (!validation.errors.length) return true;
+				JqueryUtil.doToast({type: "danger", content: this._getValidationErrorMessage(validation)});
+				return false;
+			};
 
 			const renderValidation = (validation) => {
-				// The bundle is built after validation runs, so anything it learned about an
-				// item has to be merged in here rather than discovered by `getValidationIssues`.
-				if (companionItemWarnings.length) validation = {...validation, warnings: [...(validation.warnings || []), ...companionItemWarnings]};
 				const notes = [...(validation.notes || [])];
 				const nBundled = companionItems.length;
 				if (nBundled) notes.unshift(`Bundling ${nBundled} custom item${nBundled === 1 ? "" : "s"} so their links resolve.`);
-				const noteHtml = notes.slice(0, 4).map(n => `<div class="ve-muted">• ${this._escapeHtml(n)}</div>`).join("");
+				const nCompanions = (exportBundle?.document.monster.length || 1) - 1;
+				if (nCompanions) notes.unshift(`Including ${nCompanions} linked companion creature${nCompanions === 1 ? "" : "s"} in every export destination.`);
+				const noteHtml = notes.map(n => `<div class="ve-muted">• ${this._escapeHtml(n)}</div>`).join("");
 
 				if (!validation.errors.length && !validation.warnings.length) {
 					wrpValidation.innerHTML = `
@@ -532,14 +556,44 @@ class CharacterSheetExport {
 				}
 				const errHtml = validation.errors.slice(0, 4).map(e => `<div class="text-danger">• ${this._escapeHtml(e)}</div>`).join("");
 				const warnHtml = validation.warnings.slice(0, 4).map(w => `<div class="text-warning">• ${this._escapeHtml(w)}</div>`).join("");
-				const extraE = Math.max(0, validation.errors.length - 4);
-				const extraW = Math.max(0, validation.warnings.length - 4);
+				const extraE = validation.errors.slice(4);
+				const extraW = validation.warnings.slice(4);
 				wrpValidation.innerHTML = `
 					<div style="font-size: 0.85rem;">
-						${errHtml}${extraE ? `<div class="text-danger">(+${extraE} more errors)</div>` : ""}
-						${warnHtml}${extraW ? `<div class="text-warning">(+${extraW} more warnings)</div>` : ""}
+						${errHtml}${extraE.length ? `<details><summary style="display: list-item;">${extraE.length} more errors</summary>${extraE.map(e => `<div class="text-danger">${this._escapeHtml(e)}</div>`).join("")}</details>` : ""}
+						${warnHtml}${extraW.length ? `<details><summary style="display: list-item;">${extraW.length} more warnings</summary>${extraW.map(w => `<div class="text-warning">${this._escapeHtml(w)}</div>`).join("")}</details>` : ""}
 						${noteHtml}
 					</div>`;
+			};
+
+			const renderReport = () => {
+				wrpReport.innerHTML = "";
+				const report = CharacterSheetNpcExporter.getExportReport(monster);
+				if (!report.omissions.length && !report.crEstimate) return;
+				const details = e_({tag: "details"});
+				const method = {dmg: "DMG-style", legacy: "Legacy blended", manual: "Manual"}[report.crEstimate?.estimator];
+				const limits = report.crEstimate?.limitations?.length || 0;
+				details.append(e_({tag: "summary", style: "display: list-item;", txt: `${method ? `${method} CR report${limits ? ` (${limits} limitations)` : ""}` : "Export report"}${report.omissions.length ? `; ${report.omissions.length} source rules omitted or rewritten` : ""}`}));
+				details.append(e_({tag: "p", txt: "Inspect the estimate, round-by-round costs, assumptions, and any omitted source rules here. Download JSON includes this separate report. It remains available after saving to Homebrew."}));
+				details.append(e_({tag: "button",
+					clazz: "ve-btn ve-btn-default ve-btn-xs mr-2",
+					txt: "Copy report",
+					click: async () => {
+						if (!await pRefreshPreview()) return;
+						await MiscUtil.pCopyTextToClipboard(JSON.stringify(CharacterSheetNpcExporter.getExportReport(monster), null, 2));
+					}}));
+				details.append(e_({tag: "button",
+					clazz: "ve-btn ve-btn-default ve-btn-xs",
+					txt: "Download report",
+					click: async () => {
+						if (!await pRefreshPreview()) return;
+						DataUtil.userDownload("npc-export-report", CharacterSheetNpcExporter.getExportReport(monster));
+					}}));
+				const full = e_({tag: "pre", txt: JSON.stringify(report, null, 2)});
+				full.style.whiteSpace = "pre-wrap";
+				full.style.overflowWrap = "anywhere";
+				details.append(full);
+				wrpReport.append(details);
 			};
 
 			const pApplySourceConfig = async () => {
@@ -560,7 +614,9 @@ class CharacterSheetExport {
 				selDefenseMode.value = exportOptions.defenseMode;
 				selUnarmed.value = exportOptions.includeUnarmed;
 				selFeatures.value = exportOptions.includeFeatures;
+				selPresentation.value = exportOptions.presentationMode;
 				selCrMode.value = exportOptions.crMode;
+				selCrEstimator.value = exportOptions.crEstimator;
 				iptCrManual.value = exportOptions.crManual;
 				cbCustomMods.checked = exportOptions.includeCustomModifiers;
 				cbCustomAbs.checked = exportOptions.includeCustomAbilities;
@@ -577,30 +633,64 @@ class CharacterSheetExport {
 				await this._pSetNpcExportSourceConfig(sourceConfig);
 				await this._pSetNpcExportOptions(exportOptions);
 
-				monster = CharacterSheetNpcExporter.convertStateToMonster(this._state, {
+				sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
+				const creatureIndex = await this._pGetNpcCompanionCreatures();
+				exportBundle = CharacterSheetNpcExporter.buildExportDocument(this._state, {
 					sourceJson: sourceConfig.sourceJson,
 					...exportOptions,
 					spellIndex,
+					creatureIndex,
+					sourceMeta,
 				});
-				sourceMeta = CharacterSheetNpcExporter.getDefaultSourceMeta(sourceConfig);
+				monster = exportBundle.document.monster[0];
+				companionItems = exportBundle.document.item || [];
+				companionItemErrors = [];
+				this._registerCompanionItemHovers(companionItems);
+				this._registerNpcCreatureHovers(exportBundle.document.monster);
 
-				// Must precede the render: the preview's `{@item}` links are resolved on
-				// hover against the DataLoader cache, and a bundled item is in no other store.
-				rebuildCompanionItems();
-
-				const rendered = Renderer.monster.getCompactRenderedString(monster, {isShowScalers: false});
+				const rendered = exportBundle.document.monster.map((creature, index) => {
+					const table = Renderer.monster.getCompactRenderedString(creature, {isShowScalers: false});
+					const content = `<table class="ve-w-100 ve-stats"><tbody>${table}</tbody></table>`;
+					return index ? `<details class="mt-3"><summary style="display: list-item;">${this._escapeHtml(creature.name)}</summary>${content}</details>` : content;
+				}).join("");
 				const safeName = this._escapeHtml(monster.name);
 				const safeSource = this._escapeHtml(monster.source);
 				const safeCr = this._escapeHtml(monster.cr);
 				const actionCount = (monster.action || []).length;
 				const spellBlocks = (monster.spellcasting || []).length;
 
-				wrpPreviewMeta.innerHTML = `CR: <strong>${safeCr}</strong> • Source: <strong>${safeSource}</strong> • Name: <strong>${safeName}</strong> • Actions: ${actionCount} • Spellcasting blocks: ${spellBlocks}`;
-				wrpPreviewStatblock.innerHTML = `<table class="ve-w-100 ve-stats"><tbody>${rendered}</tbody></table>`;
+				const method = exportOptions.crMode === "manual" ? "Manual" : exportOptions.crEstimator === "legacy" ? "Legacy blended" : "DMG-style";
+				wrpPreviewMeta.innerHTML = `CR: <strong>${safeCr}</strong> (${method}) • Source: <strong>${safeSource}</strong> • Name: <strong>${safeName}</strong> • Actions: ${actionCount} • Spellcasting blocks: ${spellBlocks}`;
+				wrpPreviewStatblock.innerHTML = rendered;
 				Renderer.statblockCollapse.apply(wrpPreviewStatblock);
-				renderValidation(CharacterSheetNpcExporter.getValidationIssues(monster));
+				renderValidation(getValidation());
+				renderReport();
 			};
 
+			let refreshTask = Promise.resolve();
+			const pRefreshPreview = () => refreshTask = refreshTask.then(async () => {
+				try {
+					await pApplySourceConfig();
+					return true;
+				} catch (error) {
+					// eslint-disable-next-line no-console
+					console.error("NPC export preview failed:", error);
+					monster = null;
+					exportBundle = null;
+					companionItems = [];
+					companionItemErrors = [`Failed to build NPC statblock: ${error.message}`];
+					wrpPreviewMeta.textContent = "Preview unavailable.";
+					wrpPreviewStatblock.textContent = "Correct the export options or character data, then refresh the preview.";
+					wrpReport.innerHTML = "";
+					renderValidation(getValidation());
+					JqueryUtil.doToast({type: "danger", content: companionItemErrors[0]});
+					return false;
+				}
+			});
+
+			selPresentation.addEventListener("change", pRefreshPreview);
+			selCrEstimator.addEventListener("change", pRefreshPreview);
+			selCrMode.addEventListener("change", pRefreshPreview);
 			selFeatures.addEventListener("change", () => {
 				renderFeaturePicker();
 			});
@@ -610,6 +700,7 @@ class CharacterSheetExport {
 					<p class="ve-muted mb-1"><strong>Statblock Preview</strong> — Uses the standard bestiary compact format.</p>
 					${wrpPreviewMeta}
 					${wrpValidation}
+					${wrpReport}
 				</div>
 				<div class="mb-3 p-2" style="border: 1px solid var(--bs-border-color); border-radius: 4px;">
 					<div class="mb-2"><strong>Source Metadata</strong></div>
@@ -632,6 +723,11 @@ class CharacterSheetExport {
 				</div>
 				<div class="mb-3 p-2" style="border: 1px solid var(--bs-border-color); border-radius: 4px;">
 					<div class="mb-2"><strong>Export Options</strong></div>
+					<div class="ve-flex-v-center mb-2" style="gap: 8px; flex-wrap: wrap;">
+						<label class="ve-muted no-shrink" style="min-width: 110px;">Presentation</label>
+						${selPresentation}
+					</div>
+					<p class="ve-muted">Complete retains full rules in the selected scope. Manual picks are an explicit restriction. Compact includes a separate report of omitted or rewritten source rules.</p>
 					<div class="ve-flex-v-center mb-2" style="gap: 8px;">
 						<label class="ve-muted no-shrink" style="min-width: 110px;">Defenses</label>
 						${selDefenseMode}
@@ -648,6 +744,7 @@ class CharacterSheetExport {
 					<div class="ve-flex-v-center mb-2" style="gap: 8px; flex-wrap: wrap;">
 						<label class="ve-muted no-shrink" style="min-width: 110px;">CR</label>
 						${selCrMode}
+						${selCrEstimator}
 						${iptCrManual}
 						<label class="ve-flex-v-center ve-muted" style="gap: 4px; font-size: 0.85rem;">${cbCrBreakdown} Show CR breakdown</label>
 						<label class="ve-flex-v-center ve-muted" style="gap: 4px; font-size: 0.85rem;" title="Adds an out-of-fiction &quot;Level Signal&quot; trait naming the source character's level and classes">${cbLevelSignal} Level signal</label>
@@ -672,28 +769,23 @@ class CharacterSheetExport {
 			</div>`.appendTo(modalInner);
 
 			renderFeaturePicker();
-			await pApplySourceConfig();
+			await pRefreshPreview();
 
 			const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Close", click: () => doClose(false)});
 
 			const btnRefresh = e_({tag: "button",
 				clazz: "ve-btn ve-btn-default",
 				click: async () => {
-					await pApplySourceConfig();
+					await pRefreshPreview();
 				}});
 			btnRefresh.innerHTML = `<span class="glyphicon glyphicon-refresh"></span> Refresh Preview`;
 
-			const getBrewPayload = () => {
-				const payload = {_meta: {sources: [sourceMeta]}, monster: [monster]};
-				const items = getCompanionItems();
-				if (items.length) payload.item = items;
-				return payload;
-			};
+			const getBrewPayload = () => exportBundle.document;
 
 			const btnCopy = e_({tag: "button",
 				clazz: "ve-btn ve-btn-default",
 				click: async () => {
-					await pApplySourceConfig();
+					if (!await pRefreshPreview() || !canExport()) return;
 					const payload = getBrewPayload();
 					await MiscUtil.pCopyTextToClipboard(JSON.stringify(payload, null, 2));
 					const nItems = payload.item?.length || 0;
@@ -709,9 +801,9 @@ class CharacterSheetExport {
 			const btnDownload = e_({tag: "button",
 				clazz: "ve-btn ve-btn-default",
 				click: async () => {
-					await pApplySourceConfig();
+					if (!await pRefreshPreview() || !canExport()) return;
 
-					const validation = CharacterSheetNpcExporter.getValidationIssues(monster);
+					const validation = getValidation();
 					if (validation.errors.length || validation.warnings.length) {
 						const details = this._getValidationIssueSummary(validation, {maxErrors: 2, maxWarnings: 2});
 						JqueryUtil.doToast({
@@ -728,6 +820,8 @@ class CharacterSheetExport {
 						payload,
 						{fileType: "homebrew"},
 					);
+					const report = CharacterSheetNpcExporter.getExportReport(monster);
+					if (report.omissions.length || report.crEstimate) DataUtil.userDownload(`${basename}_export_report`, report);
 					const nItems = payload.item?.length || 0;
 					JqueryUtil.doToast({
 						type: "success",
@@ -741,8 +835,8 @@ class CharacterSheetExport {
 			const btnSave = e_({tag: "button",
 				clazz: "ve-btn ve-btn-primary",
 				click: async () => {
-					await pApplySourceConfig();
-					await this._pSaveNpcToEditableBrew(monster, {sourceMeta, companionItems: getCompanionItems()});
+					if (!await pRefreshPreview() || !canExport()) return;
+					await this._pSaveNpcToEditableBrew(monster, {sourceMeta, companionItems, companionMonsters: exportBundle.document.monster.slice(1)});
 				}});
 			btnSave.innerHTML = `<span class="glyphicon glyphicon-floppy-disk"></span> Save to Homebrew`;
 
@@ -836,6 +930,22 @@ class CharacterSheetExport {
 	 * Registering under the *current* export source is why this reruns whenever the
 	 * monster is rebuilt: changing the source in this dialog changes the item's hash.
 	 */
+	async _pGetNpcCompanionCreatures () {
+		const references = CharacterSheetNpcExporter.getCompanionSourceUids(this._state);
+		return Promise.all(references.map(async reference => {
+			const hash = UrlUtil.URL_TO_HASH_BUILDER[UrlUtil.PG_BESTIARY](reference);
+			const creature = await DataLoader.pCacheAndGet(UrlUtil.PG_BESTIARY, reference.source, hash);
+			if (!creature) throw new Error(`Companion source ${reference.name}|${reference.source} is unavailable. Load its source book and refresh the preview.`);
+			return creature;
+		}));
+	}
+
+	_registerNpcCreatureHovers (monsters) {
+		if (typeof DataLoader === "undefined" || typeof DataLoader._pCache_addToCache !== "function") return;
+		const forCache = monsters.map(monster => ({...MiscUtil.copyFast(monster), __prop: "monster"}));
+		DataLoader._pCache_addToCache({allDataMerged: {monster: forCache}, propAllowlist: new Set(["monster"])});
+	}
+
 	_registerCompanionItemHovers (items) {
 		if (!items?.length) return;
 		if (typeof DataLoader === "undefined" || typeof DataLoader._pCache_addToCache !== "function") return;
@@ -852,26 +962,31 @@ class CharacterSheetExport {
 	}
 
 	_getNpcCopyName ({name, existingMonsters}) {
-		const usedNames = new Set((existingMonsters || []).map(it => it?.name).filter(Boolean));
-		if (!usedNames.has(name)) return name;
+		const usedNames = new Set((existingMonsters || []).map(it => it?.name?.toLowerCase()).filter(Boolean));
+		if (!usedNames.has(name.toLowerCase())) return name;
 		const base = `${name} (Copy)`;
-		if (!usedNames.has(base)) return base;
+		if (!usedNames.has(base.toLowerCase())) return base;
 
 		for (let i = 2; i < 1000; i++) {
 			const candidate = `${name} (Copy ${i})`;
-			if (!usedNames.has(candidate)) return candidate;
+			if (!usedNames.has(candidate.toLowerCase())) return candidate;
 		}
 
 		return `${name} (Copy ${CryptUtil.uid().slice(0, 6)})`;
 	}
 
-	async _pSaveNpcToEditableBrew (monster, {sourceMeta = null, companionItems = []} = {}) {
+	async _pSaveNpcToEditableBrew (monster, {sourceMeta = null, companionItems = [], companionMonsters = []} = {}) {
 		if (typeof BrewUtil2 === "undefined") {
 			JqueryUtil.doToast({type: "danger", content: "Homebrew utilities are not available."});
 			return;
 		}
 
 		const validation = CharacterSheetNpcExporter.getValidationIssues(monster);
+		for (const companion of companionMonsters) {
+			const issues = CharacterSheetNpcExporter.getValidationIssues(companion, {isCompanion: true});
+			validation.errors.push(...issues.errors.map(error => `${companion.name}: ${error}`));
+			validation.warnings.push(...issues.warnings.map(warning => `${companion.name}: ${warning}`));
+		}
 		if (validation.errors.length) {
 			const details = this._getValidationIssueSummary(validation, {maxErrors: 3, maxWarnings: 0});
 			JqueryUtil.doToast({type: "danger", content: `${this._getValidationErrorMessage(validation)} ${details}`.trim()});
@@ -890,14 +1005,8 @@ class CharacterSheetExport {
 			const sourceJson = monster.source || CharacterSheetNpcExporter.SOURCE_JSON_DEFAULT;
 			sourceMeta ||= CharacterSheetNpcExporter.getDefaultSourceMeta({sourceJson});
 
-			const sources = MiscUtil.getOrSet(brew, "body", "_meta", "sources", []);
-			if (!sources.some(src => src.json === sourceJson)) {
-				sources.push(sourceMeta);
-				await BrewUtil2.pSetEditableBrewDoc(brew);
-			}
-
 			const brewMonsters = brew.body?.monster || [];
-			const existing = brewMonsters.find(it => it.name === monster.name && it.source === monster.source);
+			const existing = brewMonsters.find(it => it.name?.toLowerCase() === monster.name.toLowerCase() && it.source?.toLowerCase() === monster.source.toLowerCase());
 
 			let isOverwrite = true;
 			let finalName = monster.name;
@@ -917,31 +1026,48 @@ class CharacterSheetExport {
 				}
 			}
 
-			const toSave = {
-				...monster,
-				name: finalName,
-				uniqueId: isOverwrite ? (existing?.uniqueId || monster.uniqueId || CryptUtil.uid()) : (monster.uniqueId || CryptUtil.uid()),
-			};
-
-			await BrewUtil2.pPersistEditableBrewEntity("monster", toSave);
-
-			// The statblock's `{@item}` tags point at these, so saving the monster without
-			// them would persist the dead hover we are trying to fix.
-			let nItemsSaved = 0;
-			for (const item of companionItems) {
-				const existingItem = (brew.body?.item || []).find(it => it.name === item.name && it.source === item.source);
-				await BrewUtil2.pPersistEditableBrewEntity("item", {
-					...item,
-					uniqueId: existingItem?.uniqueId || CryptUtil.uid(),
-				});
-				nItemsSaved++;
+			const next = MiscUtil.copyFast(await BrewUtil2.pGetOrCreateEditableBrewDoc());
+			const sources = (next.body._meta ||= {}).sources ||= [];
+			if (!sources.some(src => src.json === sourceJson)) sources.push(sourceMeta);
+			const stored = next.body.monster ||= [];
+			const sameSource = stored.filter(entry => entry.source?.toLowerCase() === sourceJson.toLowerCase());
+			if (!isOverwrite) finalName = this._getNpcCopyName({name: monster.name, existingMonsters: sameSource});
+			const names = new Map([[`${monster.name}|${monster.source}`.toLowerCase(), finalName]]);
+			const toSave = [{...MiscUtil.copyFast(monster), name: finalName, uniqueId: isOverwrite ? (existing?.uniqueId || CryptUtil.uid()) : CryptUtil.uid()}];
+			const ownerLink = `{@creature ${monster.name}|${monster.source}}`;
+			for (const companion of companionMonsters) {
+				const desiredName = companion.name.startsWith(`${monster.name} - `) ? `${finalName}${companion.name.slice(monster.name.length)}` : companion.name;
+				const owned = sameSource.filter(entry =>
+					entry.name.slice(0, desiredName.length).toLowerCase() === desiredName.toLowerCase()
+					&& /^(?: \(Copy(?: \d+)?\))?$/i.test(entry.name.slice(desiredName.length))
+					&& entry.trait?.some(trait => trait.name === "Owner" && JSON.stringify(trait.entries).includes(ownerLink)));
+				const previous = isOverwrite && owned.length === 1 ? owned[0] : null;
+				const isOwned = !!previous;
+				const name = isOwned ? previous.name : this._getNpcCopyName({name: desiredName, existingMonsters: [...sameSource, ...toSave]});
+				names.set(`${companion.name}|${companion.source}`.toLowerCase(), name);
+				toSave.push({...MiscUtil.copyFast(companion), name, uniqueId: isOwned ? (previous.uniqueId || CryptUtil.uid()) : CryptUtil.uid()});
 			}
+			for (const entity of toSave) {
+				const rewritten = CharacterSheetNpcExporter._mapExportEntryStrings(entity, value => value.replace(/\{@creature ([^|}]+)\|([^|}]+)([^}]*)\}/g, (tag, name, source, tail) => {
+					const renamed = names.get(`${name}|${source}`.toLowerCase());
+					return renamed ? `{@creature ${renamed}|${source}${tail}}` : tag;
+				}));
+				const index = stored.findIndex(entry => entry.uniqueId === rewritten.uniqueId);
+				if (index < 0) stored.push(rewritten);
+				else stored[index] = rewritten;
+			}
+			for (const item of companionItems) {
+				const items = next.body.item ||= [];
+				const index = items.findIndex(entry => entry.name === item.name && entry.source === item.source);
+				const value = {...item, uniqueId: items[index]?.uniqueId || CryptUtil.uid()};
+				if (index < 0) items.push(value);
+				else items[index] = value;
+			}
+			await BrewUtil2.pSetEditableBrewDoc(next);
 
 			JqueryUtil.doToast({
 				type: "success",
-				content: nItemsSaved
-					? `Saved ${toSave.name} to editable homebrew, with ${nItemsSaved} custom item${nItemsSaved === 1 ? "" : "s"}.`
-					: `Saved ${toSave.name} to editable homebrew.`,
+				content: `Saved ${finalName} to editable homebrew${companionMonsters.length ? ` with ${companionMonsters.length} linked companion creature(s)` : ""}${companionItems.length ? ` and ${companionItems.length} custom item(s)` : ""}.`,
 			});
 		} catch (e) {
 			// eslint-disable-next-line no-console

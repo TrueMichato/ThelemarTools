@@ -187,14 +187,30 @@ describeCorpus("v20.3 — the reported failing corpus normalizes and validates e
 	);
 
 	(hasRealSchema ? it : it.skip)(
-		"validates the 24 monsters against the real installed bestiary schema",
+		"reports the deliberate TGTT skill exception and validates every other monster field",
 		() => {
-			const errors = getNpcExportSchemaErrors({
-				data: {monster: raw.monster},
+			const before = JSON.stringify(raw.monster);
+			const check = monster => getNpcExportSchemaErrors({
+				data: {monster},
 				filePath: ATTACHMENT_PATH,
 				kind: "bestiary",
 			});
-			expect(errors).toEqual([]);
+			expect(check(raw.monster).length).toBeGreaterThan(0);
+			const monsters = JSON.parse(before);
+			const customSkills = new Set(["culture|TGTT", "endurance|TGTT", "linguistics|TGTT", "might|TGTT"]);
+			const exceptions = [];
+			for (const monster of monsters) {
+				for (const skill of Object.keys(monster.skill || {})) {
+					if (!customSkills.has(skill)) continue;
+					exceptions.push(`${monster.name}: ${skill}`);
+					delete monster.skill[skill];
+				}
+			}
+			expect(exceptions.length).toBeGreaterThan(0);
+			expect(check(monsters)).toEqual([]);
+			expect(check([{...monsters[0], unexpectedExportField: true}]).length).toBeGreaterThan(0);
+			expect(check([{...monsters[0], skill: {"unknown|SOURCE": "+2"}}]).length).toBeGreaterThan(0);
+			expect(JSON.stringify(raw.monster)).toBe(before);
 		},
 	);
 });

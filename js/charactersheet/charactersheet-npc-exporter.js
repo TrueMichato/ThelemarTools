@@ -1,3 +1,5 @@
+import "./charactersheet-companion-rules.js";
+
 class CharacterSheetNpcExporter {
 	static SOURCE_JSON_DEFAULT = "CSHEET";
 	static SOURCE_FULL_DEFAULT = "Character Sheet NPC Exports";
@@ -81,6 +83,19 @@ class CharacterSheetNpcExporter {
 		{cr: "21", dpr: 158}, {cr: "22", dpr: 176}, {cr: "23", dpr: 194}, {cr: "24", dpr: 212},
 		{cr: "25", dpr: 230}, {cr: "26", dpr: 248}, {cr: "27", dpr: 266}, {cr: "28", dpr: 284},
 		{cr: "29", dpr: 302}, {cr: "30", dpr: 320},
+	];
+
+	// AC, attack bonus, save DC; same CR order as data/msbcr.json.
+	static _CR_DMG_BENCHMARKS = [
+		[13, 3, 13], [13, 3, 13], [13, 3, 13], [13, 3, 13],
+		[13, 3, 13], [13, 3, 13], [13, 4, 13], [14, 5, 14],
+		[15, 6, 15], [15, 6, 15], [15, 6, 15], [16, 7, 16],
+		[16, 7, 16], [17, 7, 16], [17, 8, 17], [17, 8, 18],
+		[18, 8, 18], [18, 8, 18], [18, 8, 18], [18, 9, 18],
+		[19, 10, 19], [19, 10, 19], [19, 10, 19], [19, 10, 19],
+		[19, 11, 20], [19, 11, 20], [19, 11, 20], [19, 11, 21],
+		[19, 12, 21], [19, 12, 21], [19, 13, 22], [19, 13, 22],
+		[19, 13, 22], [19, 14, 23],
 	];
 
 	/**
@@ -240,6 +255,7 @@ class CharacterSheetNpcExporter {
 	}
 
 	static getSanitizedExportOptions (opts = {}) {
+		const presentationMode = String(opts.presentationMode || "").toLowerCase() === "compact" ? "compact" : "complete";
 		const defenseMode = String(opts.defenseMode || (opts.profile === "companion" ? "active" : "persistent")).toLowerCase() === "active" ? "active" : "persistent";
 		const includeUnarmedRaw = String(opts.includeUnarmed || "auto").toLowerCase();
 		const includeUnarmed = ["auto", "always", "never"].includes(includeUnarmedRaw) ? includeUnarmedRaw : "auto";
@@ -248,9 +264,10 @@ class CharacterSheetNpcExporter {
 			? (includeFeaturesRaw === "allimportant" ? "allImportant" : includeFeaturesRaw)
 			: "auto";
 		const selectedFeatureIds = Array.isArray(opts.selectedFeatureIds)
-			? opts.selectedFeatureIds.map(it => String(it || "").trim()).filter(Boolean).slice(0, 64)
+			? opts.selectedFeatureIds.map(it => String(it || "").trim()).filter(Boolean)
 			: [];
 		const crMode = String(opts.crMode || "auto").toLowerCase() === "manual" ? "manual" : "auto";
+		const crEstimator = String(opts.crEstimator || "").toLowerCase() === "legacy" ? "legacy" : "dmg";
 		const crManual = this._normalizeCrString(opts.crManual) || "1";
 		const legendaryActions = Math.max(0, Math.min(5, Number(opts.legendaryActions) || 3));
 		const legendaryResistances = Math.max(0, Math.min(5, Number(opts.legendaryResistances) || 0));
@@ -259,6 +276,7 @@ class CharacterSheetNpcExporter {
 
 		return {
 			profile: opts.profile === "companion" ? "companion" : "npc",
+			presentationMode,
 			defenseMode,
 			includeUnarmed,
 			includeFeatures,
@@ -269,9 +287,10 @@ class CharacterSheetNpcExporter {
 			includeCustomAbilities: opts.includeCustomAbilities !== false,
 			includeCombatMethods: opts.includeCombatMethods !== false,
 			crMode,
+			crEstimator,
 			crManual,
-			// Built by the caller from the site's spell data; absent in tests and headless
-			// use, where the school-weighted fallback takes over.
+			// DMG-style excludes unavailable spell damage with a report limitation.
+			// Only Legacy retains the historical school-weighted fallback.
 			spellIndex: (opts.spellIndex && typeof opts.spellIndex === "object") ? opts.spellIndex : null,
 			legendaryEnabled: !!opts.legendaryEnabled,
 			legendaryActions,
@@ -314,12 +333,381 @@ class CharacterSheetNpcExporter {
 		const exportOpts = this.getSanitizedExportOptions(options);
 		this._activeSpellVocabulary = this._getSpellVocabulary(state);
 		this._activeLevelContext = this._getLevelContext(state);
+		this._activeSpellCatalog = new Map();
+		this._activeSpellDiagnostics = new Map();
+		this._activeRestrictedSpellFeatures = new Map();
+		this._activeItemRules = new Map();
+		this._activeItemDiagnostics = new Map();
+		this._activeWeaponRuleItemIds = new Set();
+		for (const spell of state._allSpells || []) {
+			const key = String(spell.name || "").trim().toLowerCase();
+			if (!this._activeSpellCatalog.has(key)) this._activeSpellCatalog.set(key, []);
+			this._activeSpellCatalog.get(key).push(spell);
+		}
 		try {
-			return this._convertStateToMonsterInner(state, options, exportOpts);
+			const monster = this._convertStateToMonsterInner(state, options, exportOpts);
+			if (exportOpts.profile !== "companion") this._retainRestrictedCastingRules(monster, state, exportOpts);
+			if (exportOpts.profile !== "companion") this._retainItemRuleEntries(monster, state);
+			for (const section of ["trait", "action", "bonus", "reaction", "legendary", "spellcasting"]) {
+				for (const entry of monster[section] || []) {
+					for (const key of Object.keys(entry)) {
+						if (key === "name" || key === "type") continue;
+						entry[key] = this._mapExportEntryStrings(entry[key], text => this._resolveEntrySpellReferences(text));
+					}
+				}
+			}
+			for (const section of ["trait", "action", "bonus", "reaction", "legendary"]) {
+				if (Array.isArray(monster[section]) && !monster[section].length) delete monster[section];
+			}
+			this._EXPORT_REPORTS.set(monster, {
+				name: monster.name,
+				source: monster.source,
+				presentationMode: exportOpts.presentationMode,
+				crEstimate: this._CR_REPORTS.get(monster),
+				omissions: [...(exportOpts.profile !== "companion" && exportOpts.presentationMode === "compact"
+					? this._getCompactFeatureOmissions(state, monster, exportOpts)
+					: []), ...this._activeSpellDiagnostics.values(), ...this._activeItemDiagnostics.values()],
+			});
+			return monster;
 		} finally {
 			this._activeSpellVocabulary = null;
 			this._activeLevelContext = null;
+			this._activeSpellCatalog = null;
+			this._activeSpellDiagnostics = null;
+			this._activeRestrictedSpellFeatures = null;
+			this._activeItemRules = null;
+			this._activeItemDiagnostics = null;
+			this._activeWeaponRuleItemIds = null;
 		}
+	}
+
+	static _EXPORT_REPORTS = new WeakMap();
+	static _CR_REPORTS = new WeakMap();
+	static _ENTRY_RESOURCES = new WeakMap();
+	static _ENTRY_FEATURES = new WeakMap();
+
+	static getExportReport (monster) {
+		return MiscUtil.copyFast(this._EXPORT_REPORTS.get(monster) || {presentationMode: "complete", omissions: []});
+	}
+
+	static getCompanionSourceUids (state) {
+		const detached = state._createDetachedActorState(state._data);
+		const rules = globalThis.CharacterSheetCompanionRules;
+		const references = new Map();
+		for (const companion of this._getDocumentCompanionRecords(detached, () => {})) {
+			if (Object.hasOwn(companion, "actorSnapshot")) continue;
+			const descriptor = rules?.getDescriptor(this._getDocumentCompanionFeatureUid(detached, companion));
+			if (descriptor) references.set(descriptor.identity.companionUid.toLowerCase(), descriptor.identity);
+		}
+		return [...references.values()].map(identity => {
+			const [name, source] = identity.companionUid.split("|");
+			return {name, source};
+		});
+	}
+
+	static _getDocumentCompanionFeatureUid (state, companion) {
+		if (companion.featureGrant?.uid) return companion.featureGrant.uid;
+		const source = state._getLegacySteelDefenderSource(companion);
+		return source ? `Steel Defender|Artificer|${source}|Battle Smith|${source}|3` : null;
+	}
+
+	static _getDocumentCompanionRecords (detached, diagnostics) {
+		const rules = globalThis.CharacterSheetCompanionRules;
+		const allRecords = detached.getCompanions();
+		const records = allRecords.filter(record => record.active !== false);
+		const represented = new Set();
+		for (const companion of allRecords) {
+			const descriptor = rules?.getDescriptor(this._getDocumentCompanionFeatureUid(detached, companion));
+			if (descriptor) represented.add(descriptor.identity.featureUid.toLowerCase());
+		}
+		for (const feature of detached.getFeatures()) {
+			const uid = detached.constructor.getSourceAwareFeatureUid(feature);
+			const descriptor = rules?.getDescriptor(uid);
+			if (!descriptor || represented.has(descriptor.identity.featureUid.toLowerCase())) continue;
+			represented.add(descriptor.identity.featureUid.toLowerCase());
+			const definition = detached.constructor.getFeatureCompanionGrantDefinition(uid);
+			if (definition && definition.featureUid.toLowerCase() === uid.toLowerCase()) {
+				const missing = detached.getFeatureCompanionSetupMissingChoices(uid);
+				if (missing.length) {
+					diagnostics(feature.name, feature.source, `Companion setup is incomplete: finish ${missing.join(", ")} in Companions, then export again.`, this._getCompleteFeatureEntries(feature));
+					continue;
+				}
+			}
+			const setupRecord = definition ? detached.getFeatureCompanionSetupRecord(uid) : null;
+			records.push({
+				name: descriptor.identity.name,
+				source: descriptor.identity.source,
+				featureGrant: {uid},
+				setup: setupRecord?.choices || null,
+				customName: setupRecord?.choices?.nickname || null,
+			});
+		}
+		return records.filter(companion => {
+			if (Object.hasOwn(companion, "actorSnapshot")) return true;
+			const uid = this._getDocumentCompanionFeatureUid(detached, companion);
+			const descriptor = rules?.getDescriptor(uid);
+			if (!descriptor?.modifications || companion.setup?.choices?.modifications || Array.isArray(companion.setup?.modifications)) return true;
+			const context = detached.getFeatureCompanionSummonerContext(uid);
+			const provisional = detached.resolveFeatureCompanionRules(uid, context, null, {deferSetupChoices: true});
+			if (!provisional.modifications.requiredCount) return true;
+			diagnostics(companion.name, companion.source, "Companion modification setup is missing. Record its required choices in Companions, then export again.");
+			return false;
+		});
+	}
+
+	/** All lazy normalization and companion projection happens on a detached State. */
+	static buildExportDocument (state, options = {}) {
+		const detached = state._createDetachedActorState(state._data);
+		const owner = this.convertStateToMonster(detached, options);
+		const monsters = [owner];
+		const itemOwners = [[owner, detached]];
+		const report = this.getExportReport(owner);
+		const warnings = [];
+		const usedNames = new Set([owner.name.toLowerCase()]);
+		const diagnostics = (entity, source, reason, entries = []) => {
+			warnings.push(`${entity}: ${reason}`);
+			report.omissions.push({entity, source, reason, entries});
+		};
+		const rules = globalThis.CharacterSheetCompanionRules;
+		const records = this._getDocumentCompanionRecords(detached, diagnostics);
+		for (const companion of records) {
+			const featureUid = this._getDocumentCompanionFeatureUid(detached, companion);
+			const descriptor = rules?.getDescriptor(featureUid);
+			let monster;
+			if (Object.hasOwn(companion, "actorSnapshot")) {
+				const hydrated = detached.hydrateCompanionActor(companion.id);
+				if (!hydrated.ok) throw new Error(`Companion actor snapshot for ${companion.name} is invalid: ${hydrated.reason}. ${hydrated.message}`);
+				monster = this.convertStateToMonster(hydrated.actor, {...options, profile: "companion", nameSuffix: ""});
+				monster.type = "construct";
+				monster.hp = {average: hydrated.actor.getMaxHp(), formula: String(hydrated.actor.getMaxHp())};
+				itemOwners.push([monster, hydrated.actor]);
+				report.omissions.push(...this.getExportReport(monster).omissions);
+			} else {
+				const context = descriptor ? detached.getFeatureCompanionSummonerContext(featureUid) : null;
+				const resolved = descriptor ? detached.resolveFeatureCompanionRules(featureUid, context, companion.setup) : null;
+				const sourceCreature = resolved && (options.creatureIndex || []).find(entity =>
+					`${entity.name}|${entity.source}`.toLowerCase() === resolved.identity.companionUid.toLowerCase());
+				if (resolved && !sourceCreature) throw new Error(`Load the source creature ${resolved.identity.companionUid} before exporting its complete companion rules.`);
+				if (!resolved && companion.scaling) detached.recalculateCompanion(companion.id);
+				monster = this._getDocumentCompanionMonster(detached, companion, {resolved, sourceCreature, owner});
+				if (featureUid && !resolved) diagnostics(companion.name, companion.source, `No source-qualified scaling rules resolve ${featureUid}; exported stored statistics only.`);
+			}
+			const baseName = this._getSafeName(`${owner.name} - ${companion.customName || companion.name}`);
+			let name = baseName;
+			for (let n = 2; usedNames.has(name.toLowerCase()); n++) name = `${baseName} (${n})`;
+			usedNames.add(name.toLowerCase());
+			monster.name = name;
+			monster.source = owner.source;
+			(monster.trait ||= []).push({name: "Owner", entries: [`Companion of {@creature ${owner.name}|${owner.source}}.`]});
+			(owner.trait ||= []).push({name: `Companion: ${companion.customName || companion.name}`, entries: [`See {@creature ${name}|${owner.source}} for its separate statistics, commands, and resources.`]});
+			monsters.push(monster);
+		}
+		const items = new Map();
+		for (const [monster, itemState] of itemOwners) {
+			for (const item of this.buildCompanionItems(monster, itemState, {sourceJson: owner.source, warnings})) {
+				const uid = `${item.name}|${item.source}`.toLowerCase();
+				if (items.has(uid) && JSON.stringify(items.get(uid)) !== JSON.stringify(item)) throw new Error(`Conflicting bundled item identity: ${item.name}|${item.source}.`);
+				items.set(uid, item);
+			}
+		}
+		const document = {
+			_meta: {sources: [options.sourceMeta || this.getDefaultSourceMeta({sourceJson: owner.source})]},
+			monster: monsters,
+			...(items.size ? {item: [...items.values()]} : {}),
+		};
+		const validation = {errors: [], warnings, notes: []};
+		for (const [index, monster] of monsters.entries()) {
+			const issues = this.getValidationIssues(monster, {isCompanion: index > 0});
+			for (const key of ["errors", "warnings", "notes"]) validation[key].push(...issues[key].map(issue => `${monster.name}: ${issue}`));
+		}
+		this._EXPORT_REPORTS.set(owner, report);
+		return {document, report, validation};
+	}
+
+	static _getDocumentCompanionMonster (state, companion, {resolved, sourceCreature, owner}) {
+		const statistics = resolved?.statistics;
+		const base = MiscUtil.copyFast(sourceCreature || companion.scaling?.scaledStatblock || companion.statblock || {});
+		const abilities = statistics?.abilityScores || companion.abilities;
+		const maximum = statistics?.maxHp ?? companion.hp?.max;
+		if (!abilities || !Number.isFinite(maximum) || !Number.isFinite(statistics?.ac ?? companion.ac)) throw new Error(`Companion ${companion.name} is missing resolved ability, HP, or AC statistics.`);
+		const monster = {
+			...base,
+			name: companion.name,
+			source: owner.source,
+			size: statistics?.size || [companion.size || "M"],
+			type: statistics?.creatureType || companion.creatureType || base.type,
+			ac: [{ac: statistics?.ac ?? companion.ac}],
+			hp: {average: maximum, formula: String(maximum)},
+			speed: MiscUtil.copyFast(statistics?.speed || companion.speed),
+			...abilities,
+			passive: statistics?.passivePerception ?? companion.passive ?? 10,
+			pbNote: this._toSignedStr(resolved?.summonerContext.proficiencyBonus ?? companion.profBonus),
+		};
+		for (const key of ["summonedByClass", "summonedBySpell", "summonedBySpellLevel", "otherSources", "reprintedAs", "hasToken", "hasFluff", "hasFluffImages", "actionNote"]) delete monster[key];
+		for (const [key, values] of Object.entries({
+			resist: statistics?.damageResistances || companion.resistances,
+			immune: statistics?.damageImmunities || companion.immunities,
+			conditionImmune: statistics?.conditionImmunities || companion.conditionImmunities,
+			senses: statistics ? Object.entries(statistics.senses || {}).map(([sense, feet]) => `${sense} ${feet} ft.`) : companion.senses,
+		})) {
+			if (values?.length) monster[key] = MiscUtil.copyFast(values);
+			else delete monster[key];
+		}
+		if (statistics?.languages?.understands === "summonerKnownLanguages") {
+			const known = state.getLanguages();
+			monster.languages = [`understands ${known.length ? known.join(", ") : `the languages known by ${owner.name}`}${statistics.languages.canSpeak === false ? " but can't speak" : ""}`];
+		} else if (companion.languages?.length) monster.languages = MiscUtil.copyFast(companion.languages);
+		const saves = statistics?.savingThrows || Object.fromEntries((companion.saveProficiencies || []).map(ability => [ability, state.getCompanionSaveMod(companion.id, ability)]));
+		const skills = statistics?.proficiencyPolicy?.abilityChecks === "all"
+			? Object.fromEntries(Object.entries(Parser.SKILL_TO_ATB_ABV).map(([skill, ability]) => [skill, statistics.abilityChecks[ability]]))
+			: statistics?.skills || Object.fromEntries(Object.keys(companion.skillProficiencies || {}).map(skill => [skill, state.getCompanionSkillMod(companion.id, skill)]));
+		for (const [key, values] of Object.entries({save: saves, skill: skills})) {
+			if (Object.keys(values).length) monster[key] = Object.fromEntries(Object.entries(values).map(([name, value]) => [name, this._toSignedStr(value)]));
+			else delete monster[key];
+		}
+		if (resolved) this._applyDocumentCompanionRules(monster, resolved, sourceCreature, owner);
+		else {
+			for (const [section, key] of Object.entries({trait: "traits", action: "actions", bonus: "bonusActions", reaction: "reactions"})) {
+				if (companion[key]?.length) monster[section] = companion[key].map(entry => ({name: entry.name, entries: this._getSanitizedExportEntry(entry.entries || [])}));
+			}
+		}
+		if (companion.hp) {
+			const uses = Object.entries(companion.uses || {}).map(([name, pool]) => `${name}: ${pool.current ?? "unknown"}/${pool.max} uses (${pool.recharge || "recovery unspecified"})`);
+			(monster.trait ||= []).push({name: "Current State",
+				entries: [
+					`${companion.hp.current}/${maximum} HP; ${companion.hp.temp || 0} temporary HP${companion.lifecycle?.status ? `; ${companion.lifecycle.status}` : ""}.`,
+					...(uses.length ? [uses.join("; ")] : []),
+				]});
+		}
+		for (const section of ["trait", "action", "bonus", "reaction"]) if (!monster[section]?.length) delete monster[section];
+		return monster;
+	}
+
+	static _applyDocumentCompanionRules (monster, resolved, sourceCreature, owner) {
+		const dice = damage => `${damage.dice}${damage.flat ? ` ${damage.flat >= 0 ? "+" : "-"} ${Math.abs(damage.flat)}` : ""}`;
+		monster.action = Object.entries(resolved.actions).map(([key, action]) => {
+			const entries = [];
+			if (action.attackBonus != null) {
+				entries.push(`{@atk mw} {@hit ${action.attackBonus}} to hit, reach ${action.reachFeet} ft., one target${resolved.identity.source === "TCE" ? " it can see" : ""}. {@h}{@damage ${dice(action.damage)}} ${action.damage.type} damage.${action.damage.ignoresResistance ? " This damage ignores resistance." : ""}`);
+				for (const rider of action.riders || []) {
+					if (rider.effect === "targetCannotTakeOpportunityAttacks") entries.push("The target can't take opportunity attacks until the start of its next turn.");
+					if (rider.effect === "push") entries.push(`A target of size ${rider.maximumTargetSize} or smaller is pushed up to ${rider.distanceFeet} feet away.`);
+				}
+			} else if (action.healing) {
+				const visibility = JSON.stringify(sourceCreature.action).match(/can see/i) ? " that it can see" : "";
+				entries.push(`The companion restores {@dice ${dice(action.healing)}} HP to itself or one Construct or object${visibility} within ${action.rangeFeet} feet.`);
+			} else throw new Error(`Unsupported companion action ${key}; preserve its source procedure before exporting.`);
+			if (action.uses) entries.push(`${action.uses.max} uses; ${action.uses.recharge === "longRest" ? "all uses recover on a long rest" : action.uses.recharge}.`);
+			return {name: action.name, entries};
+		});
+		monster.reaction = Object.entries(resolved.reactions || {}).map(([key, reaction]) => {
+			if (reaction.effect?.attackRollMode !== "disadvantage") throw new Error(`Unsupported companion reaction ${key}.`);
+			return {name: reaction.name,
+				entries: [
+					`When an attacker the companion can see within ${reaction.rangeFeet} feet makes an attack roll against a creature other than the companion, that attack roll has disadvantage.${reaction.improvedDamage ? ` The attacker also takes {@damage ${dice(reaction.improvedDamage)}} ${reaction.improvedDamage.type} damage.` : ""}`,
+				]};
+		});
+		for (const section of ["action", "reaction"]) {
+			const represented = new Set(monster[section].map(entry => entry.name.toLowerCase()));
+			monster[section].push(...MiscUtil.copyFast(sourceCreature[section] || []).filter(entry => !represented.has(entry.name.toLowerCase())));
+		}
+		monster.trait ||= [];
+		const policy = resolved.commandPolicy;
+		const command = [
+			policy.turnTiming === "duringSummonerTurn" ? "Acts during its owner's turn." : "Shares its owner's initiative and takes its turn immediately after its owner's turn.",
+			"It can move and use its reaction on its own. Without a command its only action is Dodge.",
+			...policy.commandMethods.map(method => method.cost === "bonusAction"
+				? "Its owner can use a bonus action to command it to take another action."
+				: `Its owner can replace one attack of the Attack action to command ${resolved.actions[method.permits]?.name || method.permits}.`),
+			"When its owner is incapacitated, it acts on its own without the Dodge-only restriction.",
+		];
+		monster.trait.push({name: "Commands", entries: command});
+		const jolt = resolved.arcaneJolt;
+		if (jolt?.available) {
+			monster.trait.push({name: "Arcane Jolt (shared owner resource)",
+				entries: [
+					`Once per turn, when the companion hits or its owner hits with a magic weapon, the owner can expend one use from its shared ${jolt.uses.max}-use Arcane Jolt pool (long-rest recovery) to deal an extra {@damage ${jolt.damage.dice}} force damage to the target or restore {@dice ${jolt.healing.dice}} HP to one creature or object within ${jolt.healing.rangeFeet} feet of the target. This is the owner's pool, not additional companion uses.`,
+				]});
+		}
+		const lifecycle = resolved.lifecycle;
+		const lifecycleEntries = [];
+		const burst = resolved.traits?.deathBurst;
+		if (burst) {
+			monster.trait = monster.trait.filter(entry => ![burst.name, resolved.traits.lightningAbsorption.name].includes(entry.name));
+			monster.trait.push({name: burst.name,
+				entries: [
+					`When the companion dies, each creature in its ${burst.area.radiusFeet}-foot emanation makes a Dexterity saving throw ({@dc ${burst.save.dc}}), taking {@damage ${dice(burst.damage)}} ${burst.damage.type} damage on a failure or half as much on a success.${burst.damage.ignoresResistance ? " This damage ignores resistance." : ""}`,
+				]}, {name: resolved.traits.lightningAbsorption.name,
+				entries: [
+					"When subjected to lightning damage, the companion instead regains HP equal to the lightning damage dealt.",
+				]});
+		}
+		for (const effect of Object.values(resolved.modifications?.effects || {})) {
+			const entries = [];
+			if (effect.castingOrigin) entries.push(`The owner can cast spells from the companion's space, using the owner's senses. Once per turn, if the companion is within ${effect.damageRider.requiresCompanionWithinFeet} feet when an Artificer (${resolved.identity.classUid.split("|")[1]}) ${effect.damageRider.spellSchools.join(" or ")} spell deals damage, the owner can add ${effect.damageRider.damageRollBonus} to one damage roll.`);
+			if (effect.climbing) entries.push(`It can climb difficult surfaces, including ceilings, without an ability check. A chosen creature starting its turn in its ${effect.fearAura.area.radiusFeet}-foot emanation must succeed on a Wisdom save ({@dc ${effect.fearAura.save.dc}}) or be frightened until the start of that creature's next turn.`);
+			if (effect.squeeze) entries.push(`It can move through a space as narrow as ${effect.squeeze.minimumSpaceInches} inch without extra movement. When an attack roll hits it, an attacker within ${effect.acidRetaliation.attackerMaximumRangeFeet} feet takes ${effect.acidRetaliation.damage.flat} acid damage.`);
+			if (entries.length) monster.trait.push({name: effect.name, entries});
+		}
+		if (lifecycle.onSummonerDeath === "vanishes" || lifecycle.onSummonerDeath === "perishes") lifecycleEntries.push(`When its owner dies, the companion ${lifecycle.onSummonerDeath}.`);
+		if (lifecycle.onSummonerDeath?.outcome === "dies") lifecycleEntries.push("When its owner dies, it drops to 0 HP and dies, triggering Death Burst.");
+		if (lifecycle.duration?.until === "finishLongRest") lifecycleEntries.push("The companion expires when its owner finishes a long rest.");
+		if (lifecycle.earlyDismissal) lifecycleEntries.push("Its owner can dismiss it with a Magic action; this harmless collapse does not trigger Death Burst.");
+		if (resolved.creationPolicy) {
+			const creation = resolved.creationPolicy;
+			lifecycleEntries.push(`Its owner can create it with a Magic action in an unoccupied space within ${creation.manifest.rangeFeet} feet, using a proficient artisan's tool. Creation is available ${creation.freeCreation.uses} time per long rest, or by expending a spell slot of level ${creation.alternatePayment.spellSlot.minimumLevel} or higher. Only ${creation.maximumActive} can be active; it cannot be created while one is already active.`);
+		}
+		if (lifecycle.mending) lifecycleEntries.push(`Mending restores {@dice ${lifecycle.mending.healingDice}} HP to the companion.`);
+		if (lifecycle.revival) {
+			const revival = lifecycle.revival;
+			lifecycleEntries.push(`Within ${revival.deathWindow} of its death, its owner can use ${revival.actionType === "magicAction" ? "a Magic action" : "an action"}, ${revival.requiresTouch ? "touch it" : `remain within ${revival.rangeFeet} feet`}${revival.requiresToolUid ? ` with ${revival.requiresToolUid.split("|")[0]}` : ""}, and expend a spell slot of level ${revival.spellSlot.minimumLevel} or higher. It returns after ${revival.returnDelay} with all HP restored.`);
+		}
+		if (lifecycle.replacement) {
+			const replacement = lifecycle.replacement;
+			lifecycleEntries.push(`When its owner finishes a long rest with ${replacement.requiresToolUid.split("|")[0]} ${replacement.toolRequirement === "inHand" ? "in hand" : "carried"}, the owner can create a replacement. The previous companion ${replacement.previousDefenderFate}.`);
+		}
+		if (lifecycleEntries.length) monster.trait.push({name: "Lifecycle", entries: lifecycleEntries});
+		monster.trait = this._mapExportEntryStrings(monster.trait, value => value.replace(/\byour\b/gi, `${owner.name}'s`), {isContentOnly: true});
+	}
+
+	static _getCompleteFeatureEntries (feature) {
+		if (feature?._entityType === "psionicPower" && feature.modes?.length) {
+			return this._getSanitizedExportEntry([
+				...(feature.entries || []),
+				...feature.modes.map(mode => ({
+					type: "entries",
+					name: mode.name,
+					entries: [...this._getPsionicConcentrationEntries(mode), ...(mode.entries || [])],
+				})),
+			]);
+		}
+		if (feature?.entries?.length) return this._getSanitizedExportEntry(feature.entries);
+		return String(feature?.description || "")
+			.replace(/<\/(?:p|div|li|h[1-6]|tr)>/gi, "\n\n")
+			.replace(/<\/t[hd]>/gi, " | ")
+			.split(/\n\s*\n/)
+			.map(text => this._stripHtmlTags(text))
+			.filter(Boolean);
+	}
+
+	static _getCompactFeatureOmissions (state, monster, options) {
+		const selected = new Set(options.selectedFeatureIds);
+		const candidates = [
+			...(state.getFeatures?.() || []),
+			...(state.getFeats?.() || []),
+		].filter(feature => feature?.name && (options.includeFeatures !== "manual" || selected.has(String(feature.id || feature.name)) || selected.has(feature.name)));
+		if (options.includeCustomAbilities) candidates.push(...(state.getCustomAbilities?.() || []));
+		const emitted = JSON.stringify(monster).toLowerCase().replace(/\s+/g, " ");
+		return candidates.flatMap(feature => {
+			const entries = this._getCompleteFeatureEntries(feature);
+			if (!entries.length || entries.every(entry => emitted.includes(JSON.stringify(entry).toLowerCase().replace(/\s+/g, " ").slice(1, -1)))) return [];
+			return [{
+				entity: feature.name,
+				source: feature.source || "",
+				reason: "Compact output omits or rewrites part of this source rule. Review the retained full rule before use.",
+				entries,
+			}];
+		});
 	}
 
 	/** Class levels keyed by lowercased class name, plus the total, for table row selection. */
@@ -387,7 +775,9 @@ class CharacterSheetNpcExporter {
 		// attack row, so the block printed a phantom weapon whose damage is really an extra
 		// die on every other attack. The rider now rides those attacks; the row is a ghost.
 		const riderAttackNames = new Set(damageRiders
-			.filter(rider => rider.wholeFeature && rider.sourceName)
+			.filter(rider => (rider.wholeFeature || rider.replacesAttack) && rider.sourceName)
+			.filter(rider => attacks.some(attack => this._normalizeFeatureKey(attack?.name) !== this._normalizeFeatureKey(rider.sourceName)
+				&& this._riderAppliesToAttack(rider, attack) && !this._weaponReplacesDamage(attack)))
 			.map(rider => this._normalizeFeatureKey(rider.sourceName)));
 		const realAttacks = riderAttackNames.size
 			? attacks.filter(attack => !riderAttackNames.has(this._normalizeFeatureKey(attack?.name)))
@@ -397,8 +787,9 @@ class CharacterSheetNpcExporter {
 		// suppression on emission rather than on a shared predicate makes it impossible to
 		// drop a rider whose weapon produced no attack line at all.
 		const claimedMaterialPowerIds = new Set();
+		const emittedDamageRiders = new Set();
 		const weaponActions = [
-			...this._getActionEntriesFromAttacks(realAttacks, state, {damageRiders, claimedMaterialPowerIds, npcName}),
+			...this._getActionEntriesFromAttacks(realAttacks, state, {damageRiders, emittedDamageRiders, claimedMaterialPowerIds, npcName}),
 			...this._getFeatureWeaponActions(state, {npcName}),
 			...this._getFeatureGrantedAttacks(state, calculations, {npcName}),
 		];
@@ -411,6 +802,7 @@ class CharacterSheetNpcExporter {
 			// so Multiattack named the weaker sword.
 			renderedAttacks: weaponActions,
 			attacksPerAction,
+			calculations,
 		});
 		const actions = [
 			...(multiattackAction ? [multiattackAction] : []),
@@ -426,7 +818,7 @@ class CharacterSheetNpcExporter {
 		// entry below can see what was actually printed rather than assume it.
 		const claimedInstabilityMaterials = new Set();
 		const armorUpgradeBlock = this._getArmorTraitBlock(state, {claimedInstabilityMaterials});
-		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state);
+		const gemstoneNotesBlock = this._getGemstoneNotesBlock(state, {npcName});
 		const itemUseBlocks = this._getMagicItemUseBlocks(state, {npcName, claimedMaterialPowerIds, claimedInstabilityMaterials});
 		const spellcastingBlocks = exportOpts.profile === "companion"
 			? this._getCompanionSpellcastingBlocks(state, {npcName})
@@ -436,12 +828,12 @@ class CharacterSheetNpcExporter {
 			npcName,
 			includeFeatures: exportOpts.includeFeatures,
 			isCompanion: exportOpts.profile === "companion",
+			isComplete: exportOpts.presentationMode === "complete",
 			selectedFeatureIds: exportOpts.selectedFeatureIds,
 			suppressExtraAttack: !!multiattackAction,
 			// An attack line that says "plus 1d8 damage against Constructs" is meaningless
 			// if the cap evicts the feature that grants it, so referenced features are
 			// exempt for the same reason limited-use pool owners are.
-			protectedFeatureNames: damageRiders.map(rider => rider.sourceName).filter(Boolean),
 		});
 		// A rider that reproduces its feature in full makes the feature's own trait pure
 		// duplication of the attack line it now sits on. Deletion is available only to
@@ -450,12 +842,13 @@ class CharacterSheetNpcExporter {
 		const referenceGraph = this._buildFeatureReferenceGraph(featureBlocks);
 		// Residue first: an entry that still says something the line does not carry has
 		// earned its place, even when the rider claimed the whole feature.
-		const reducedNames = this._reduceRiderSourcesToResidue(featureBlocks, damageRiders, referenceGraph);
-		const riderReplacedNames = new Set(damageRiders
+		const preserveFeatureRules = exportOpts.profile !== "companion" && exportOpts.presentationMode === "complete";
+		const reducedNames = preserveFeatureRules ? new Set() : this._reduceRiderSourcesToResidue(featureBlocks, [...emittedDamageRiders], referenceGraph);
+		const riderReplacedNames = new Set([...emittedDamageRiders]
 			.filter(rider => rider.wholeFeature && rider.sourceName && !this._isReferencedAnchor(rider.sourceName, referenceGraph))
 			.map(rider => this._normalizeFeatureKey(rider.sourceName))
 			.filter(key => !reducedNames.has(key)));
-		if (riderReplacedNames.size) {
+		if (!preserveFeatureRules && riderReplacedNames.size) {
 			["trait", "action", "bonus", "reaction"].forEach(section => {
 				if (!featureBlocks[section]?.length) return;
 				featureBlocks[section] = featureBlocks[section]
@@ -463,7 +856,7 @@ class CharacterSheetNpcExporter {
 			});
 		}
 		const customAbilityBlocks = exportOpts.includeCustomAbilities
-			? this._getCustomAbilityBlocks(state, {npcName, isCompanion: exportOpts.profile === "companion"})
+			? this._getCustomAbilityBlocks(state, {npcName, isCompanion: exportOpts.profile === "companion", isComplete: preserveFeatureRules})
 			: {trait: [], action: [], bonus: [], reaction: []};
 
 		// Ability names that already carry limited-use pools → suppress Class Resources rows.
@@ -472,8 +865,9 @@ class CharacterSheetNpcExporter {
 			customAbilityBlocks,
 			itemUseBlocks,
 			methodsBlock,
+			spellcastingBlocks,
 		});
-		const classResourcesBlock = this._getClassResourcesBlock(state, {npcName, coveredPoolNames, isCompanion: exportOpts.profile === "companion"});
+		const classResourcesBlock = this._getClassResourcesBlock(state, {npcName, coveredPoolNames, isCompanion: exportOpts.profile === "companion", isComplete: preserveFeatureRules});
 
 		const representedAbilityNames = this._collectRepresentedAbilityNames({
 			featureBlocks,
@@ -493,18 +887,33 @@ class CharacterSheetNpcExporter {
 			: [];
 
 		const crInfo = exportOpts.crMode === "manual"
-			? {cr: exportOpts.crManual, defensiveCr: null, offensiveCr: null, breakdown: `Manual CR ${exportOpts.crManual}`}
-			: this._estimateCr({
-				totalLevel,
-				hp: maxHp,
-				ac,
-				attacks,
-				attacksPerAction,
-				spellcastingBlocks,
-				state,
-				defenses,
-				spellIndex: exportOpts.spellIndex,
-			});
+			? {estimator: "manual", cr: exportOpts.crManual, defensiveCr: null, offensiveCr: null, limitations: [], breakdown: `Manual CR ${exportOpts.crManual}`}
+			: exportOpts.crEstimator === "dmg"
+				? this._estimateDmgCr({
+					hp: maxHp,
+					ac,
+					weaponActions,
+					attacks: realAttacks,
+					attacksPerAction,
+					spellcastingBlocks,
+					state,
+					defenses,
+					calculations,
+					exportOpts,
+					featureBlocks,
+					additionalBlocks: [customAbilityBlocks, itemUseBlocks, ...(methodsBlock ? [{trait: [methodsBlock]}] : [])],
+				})
+				: this._estimateCr({
+					totalLevel,
+					hp: maxHp,
+					ac,
+					attacks,
+					attacksPerAction,
+					spellcastingBlocks,
+					state,
+					defenses,
+					spellIndex: exportOpts.spellIndex,
+				});
 
 		const levelSignalEntries = [
 			`Built from a level ${Math.max(0, totalLevel)} character (${this._getSafeInlineText(state.getClassSummary?.() || "No Class", {maxLen: 120})}).`,
@@ -596,6 +1005,7 @@ class CharacterSheetNpcExporter {
 			...(itemUseBlocks.bonus || []),
 			...promotedBonusActions,
 		];
+		this._CR_REPORTS.set(out, crInfo);
 		const reactionAll = [
 			...(featureBlocks.reaction || []),
 			...(customAbilityBlocks.reaction || []),
@@ -630,6 +1040,15 @@ class CharacterSheetNpcExporter {
 			out.legendaryActions = exportOpts.legendaryActions;
 			out.legendary = legendaryActions;
 		}
+		if (preserveFeatureRules) {
+			this._applyCrossEntryQuantityUpgrades(out);
+			["trait", "action", "bonus", "reaction", "legendary"].forEach(section => {
+				(out[section] || []).forEach(entry => {
+					entry.entries = this._mapExportEntryStrings(entry.entries, text => this._resolveAbilityFormulas(this._resolveSaveDcFormulas(text, state), state));
+				});
+			});
+			return out;
+		}
 
 		this._dedupeStatblockEntries(out);
 		this._compactStatblockProse(out);
@@ -643,7 +1062,6 @@ class CharacterSheetNpcExporter {
 		this._stripBlockRestatedSentences(out, state);
 		this._stripRestatedNumericSentences(out, state);
 		this._dropRedundantSpellGrantEntries(out, state);
-		this._dropResourcesCoveredBySpellcasting(out);
 		this._splitMultiBenefitEntries(out);
 		this._absorbOrphanRiderEntries(out);
 		this._dropUseCountImprovementEntries(out);
@@ -721,7 +1139,7 @@ class CharacterSheetNpcExporter {
 		// but never names reads, on the block, as an arithmetic error.
 		this._explainSaveBonusesOnResilience(out, state, {npcName});
 		// After the resilience merge exists to receive the form's advantage claims.
-		this._foldFormTraitOntoLines(out, {npcName});
+		this._foldFormTraitOntoLines(out, {npcName, state});
 		// Before the trait ordering and the hover pass: both key off entry names.
 		this._consolidateCostedOptionMenus(out);
 		this._annotateResourceCostsOnNames(out);
@@ -777,7 +1195,7 @@ class CharacterSheetNpcExporter {
 					if (typeof line !== "string") return line;
 					// A resolved distance carries its own abbreviating period, so a
 					// substitution at a sentence end leaves "30 ft..".
-					const tidied = line.replace(/\b(ft|in|lb|sq)\.\.(?!\.)/g, "$1.");
+					const tidied = line.replace(/\b(ft|in|lb|sq)\.\.(?!\.)/g, "$1.").replace(/;\s*$/, ".");
 					const trimmed = tidied.trim();
 					if (!trimmed || /[.!?:;)"\]}•]$/.test(trimmed)) return tidied;
 					return `${trimmed}.`;
@@ -1578,19 +1996,12 @@ class CharacterSheetNpcExporter {
 			(out[section] || []).forEach(entry => {
 				const body = (entry.entries || []).filter(it => typeof it === "string");
 				if (!body.length) return;
-				const sentence = this._getPlainMatchTextCased(this._splitIntoClauses(body[0])[0] || "");
-				// "When it uses its action to Dash, it can use a bonus action to…" names two
-				// economies: the trigger and the cost. Only the cost decides where the entry
-				// lives, so a leading subordinate clause is dropped before matching.
-				const lead = sentence.replace(/^\s*(?:when|whenever|if|after|while|once)\b[^,]{0,120},\s*/i, "");
-				const kinds = new Set();
-				if (/\(no action required\)/i.test(lead)) kinds.add("trait");
-				if (/\bas a bonus action\b|\bas part of the bonus action\b|\b(?:use[sd]?|takes?) a bonus action\b/i.test(lead)) kinds.add("bonus");
-				if (/\bas a reaction\b|\buse[sd]? its reaction\b/i.test(lead)) kinds.add("reaction");
-				if (/\bas an? (?!bonus\b)[a-z]* ?action\b|\buse[sd]? (?:its|an) action\b|\btakes? an? (?!bonus\b)(?:[a-z]+ )?action\b/i.test(lead)) kinds.add("action");
-				// Two economies in one lead is an ambiguity, not a correction.
-				if (kinds.size !== 1) return;
-				const [stated] = [...kinds];
+				if (body.some(line => /\{@atk\b/.test(line))) return;
+				const sourceFeature = this._ENTRY_FEATURES.get(entry);
+				const stated = sourceFeature
+					? this._getFeatureActivationSection(sourceFeature)
+					: this._getActivationSectionFromText(this._splitIntoClauses(body[0])[0] || "");
+				if (!stated) return;
 				if (stated === section) return;
 				moves.push({entry, from: section, to: stated});
 			});
@@ -1680,6 +2091,8 @@ class CharacterSheetNpcExporter {
 		["trait", "action", "bonus", "reaction"].forEach(section => {
 			if (!out[section]) return;
 			out[section] = out[section].filter(entry => {
+				if (entry.name === "Special Equipment") return true;
+				if ((entry.entries || []).some(value => value && typeof value === "object")) return true;
 				const body = (entry.entries || []).filter(it => typeof it === "string").join(" ").trim();
 				if (!body) return false;
 				if (/:\s*$/.test(body)) return false;
@@ -1879,6 +2292,11 @@ class CharacterSheetNpcExporter {
 				if (!Array.isArray(entry?.entries)) return;
 				const joined = entry.entries.filter(it => typeof it === "string").join(" ");
 				if (!NEGATED.test(this._getPlainMatchTextCased(joined))) return;
+				const applicable = this._splitIntoClauses(joined).some(clause => {
+					const plain = this._getPlainMatchTextCased(clause);
+					return NEGATED.test(plain) && !/\b\d+(?:st|nd|rd|th)?(?:[- ]level|\s+level)\b/i.test(plain);
+				});
+				if (!applicable) return;
 				entry.entries = entry.entries
 					.map(line => {
 						if (typeof line !== "string") return line;
@@ -1905,7 +2323,7 @@ class CharacterSheetNpcExporter {
 		if (!text.trim()) return false;
 		// Anything that states duration, permission, obligation or a lasting sense is
 		// rules text however plainly it is written.
-		if (/\b(?:until|as long as|whenever|unless|instead|automatically|no roll|can|can't|cannot|must|may|advantage|disadvantage|resistance|immunity|lasts?|ends?|knows the direction)\b/.test(text)) return false;
+		if (/\b(?:until|as long as|whenever|unless|instead|automatically|no roll|can|can't|cannot|must|may|advantage|disadvantage|resistance|immunity|lasts?|ends?|knows the direction|rolls? percentile dice)\b/.test(text)) return false;
 		return /\b(?:determines?|decides?) (?:the|its|their|his|her)\b[^.]{0,40}\bappearance\b/.test(text)
 			|| /\bthe dm (?:chooses|decides|determines|describes)\b/.test(text)
 			|| /^describe\b/.test(text.trim())
@@ -1926,7 +2344,7 @@ class CharacterSheetNpcExporter {
 			(out[section] || []).forEach(entry => {
 				const bare = String(entry?.name || "").replace(/\s*\([^)]*\)\s*$/, "").trim();
 				const key = this._normalizeFeatureKey(bare);
-				if (key && !index.has(key)) index.set(key, entry);
+				if (key) index.set(key, index.has(key) ? null : entry);
 			});
 		});
 		if (!index.size) return;
@@ -1945,7 +2363,9 @@ class CharacterSheetNpcExporter {
 						if (!m) return true;
 						const target = index.get(this._normalizeFeatureKey(m[1]));
 						if (!target || target === entry || this._normalizeFeatureKey(m[1]) === self) return true;
-						return !this._rewriteStatedQuantity(target, m[2]);
+						if (!this._rewriteStatedQuantity(target, m[2])) return true;
+						// Another benefit or condition can share the announcing sentence.
+						return !/^(?:the )?(?:extra |bonus )?(?:damage|die|dice) of [\w'’ ]+ increases to (?:\d*d\d+|\+?\d+)\.?$/i.test(this._getPlainMatchTextCased(sentence).trim());
 					});
 					if (surviving.length) kept.push(surviving.join(" "));
 				});
@@ -1965,16 +2385,18 @@ class CharacterSheetNpcExporter {
 	static _rewriteStatedQuantity (entry, value) {
 		const isDie = /^\d*d\d+$/i.test(value);
 		const re = isDie ? /\b\d*d\d+\b/g : /\b\d+\b/g;
+		const candidates = [];
 		for (let i = (entry.entries || []).length - 1; i >= 0; --i) {
 			const line = entry.entries[i];
 			if (typeof line !== "string") continue;
+			if (!/\bdamage\b/i.test(this._getPlainMatchTextCased(line))) continue;
 			const hits = [...line.matchAll(re)].filter(m => m[0].toLowerCase() !== String(value).toLowerCase());
-			if (!hits.length) continue;
-			const hit = hits[hits.length - 1];
-			entry.entries[i] = `${line.slice(0, hit.index)}${value}${line.slice(hit.index + hit[0].length)}`;
-			return true;
+			hits.forEach(hit => candidates.push({i, line, hit}));
 		}
-		return false;
+		if (candidates.length !== 1) return false;
+		const {i, line, hit} = candidates[0];
+		entry.entries[i] = `${line.slice(0, hit.index)}${value}${line.slice(hit.index + hit[0].length)}`;
+		return true;
 	}
 
 	/**
@@ -2892,47 +3314,9 @@ class CharacterSheetNpcExporter {
 			.trim();
 	}
 
-	/**
-	 * Once a roster entry's name is hoverable, the full book paragraph underneath it is
-	 * reference material the DM already has one click away — and eight of them turn a
-	 * scannable roster into three thousand characters of prose. Keep enough to choose the
-	 * option at the table (what triggers it, what it does, what the target rolls) and let
-	 * the hover carry the rest.
-	 *
-	 * Sentences that carry a save, a DC, a condition or a number are always kept; the
-	 * remainder is capped so no single clause outgrows the roster it belongs to.
-	 *
-	 * @param {string} text prepared clause body
-	 * @param {number} maxSentences sentences to keep beyond the mandatory mechanical ones
-	 * @return {string} condensed body
-	 */
-	static _condenseRosterClause (text, maxSentences = 2) {
-		const str = String(text || "").trim();
-		if (!str) return str;
-
-		// Split on sentence boundaries without breaking inside a `{@tag ...}` span.
-		const sentences = [];
-		let depth = 0;
-		let buf = "";
-		for (let i = 0; i < str.length; ++i) {
-			const ch = str[i];
-			buf += ch;
-			if (ch === "{") depth++;
-			else if (ch === "}") depth = Math.max(0, depth - 1);
-			else if (!depth && ch === "." && (i + 1 >= str.length || /\s/.test(str[i + 1]))) {
-				sentences.push(buf.trim());
-				buf = "";
-			}
-		}
-		if (buf.trim()) sentences.push(buf.trim());
-		if (sentences.length <= maxSentences) return str;
-
-		const MECHANICAL = /\{@(?:dc|damage|dice|condition)\b|saving throw|\bAdvantage\b|\bDisadvantage\b/;
-		const kept = [];
-		sentences.forEach((sentence, idx) => {
-			if (idx < maxSentences || MECHANICAL.test(sentence)) kept.push(sentence);
-		});
-		return (kept.length ? kept : sentences.slice(0, maxSentences)).join(" ");
+	/** Roster links never substitute for later procedural sentences. */
+	static _condenseRosterClause (text) {
+		return String(text || "").trim();
 	}
 
 	/**
@@ -3144,6 +3528,9 @@ class CharacterSheetNpcExporter {
 
 				out.action = out.action || [];
 				out.action.push({name: `${shortName} (Replaces One Attack)`, entries: [`${line}.`.replace(/\.\.$/, "."), residue].filter(Boolean)});
+				if (parent.entries.some(it => it?.type === "entries" && it.name === "Weapon Rules (including effects summarized above)")) {
+					this._activeItemRules?.delete(this._normalizeFeatureKey(name));
+				}
 				entry._npcRemove = true;
 			});
 			if (out[section]) out[section] = out[section].filter(it => !it._npcRemove);
@@ -3348,7 +3735,7 @@ class CharacterSheetNpcExporter {
 				if (safe && !names.includes(safe)) names.push(safe);
 			});
 		}));
-		return names;
+		return names.sort((a, b) => a.localeCompare(b));
 	}
 
 	/** Retires "it can instead convert <weapon> (see X)" once the converted attack exists. */
@@ -3785,6 +4172,7 @@ class CharacterSheetNpcExporter {
 				// been rewritten to third person by now but not yet de-imperativised, so both
 				// "add" and "it adds" have to be accepted.
 				withoutRider = withoutRider.replace(/(^|\.\s+)If (?:it hits|you hit), (?:it adds |add )the Superiority Die to the attack['’]?s damage(?: roll)?\.\s*/gi, "$1");
+				withoutRider = withoutRider.replace(/(^|\.\s+)If that attack hits, add the Superiority Die to the attack['’]?s damage(?: roll)?\.\s*/gi, "$1");
 				// Trip Attack states it mid-sentence, carrying the on-hit trigger the clause
 				// that follows depends on — so the rider goes and the trigger is joined to it.
 				withoutRider = withoutRider.replace(/,? (?:it can |you can )?add the die to the attack['’]?s damage roll\.\s+If /gi, ", if ");
@@ -4281,59 +4669,23 @@ class CharacterSheetNpcExporter {
 	 *
 	 * @param {Object} out monster object being assembled (mutated)
 	 */
-	static _dropResourcesCoveredBySpellcasting (out) {
-		const idx = (out.trait || []).findIndex(it => /^class resources$/i.test(String(it?.name || "")));
-		if (!~idx) return;
-
-		const spellNames = new Set();
-		const collect = (value) => {
-			if (!value) return;
-			if (typeof value === "string") {
-				const re = /\{@spell ([^|}]+)/g;
-				let m;
-				while ((m = re.exec(value))) spellNames.add(this._normalizeFeatureKey(m[1]));
-				return;
-			}
-			if (Array.isArray(value)) return value.forEach(collect);
-			if (typeof value === "object") return Object.values(value).forEach(collect);
-		};
-		(out.spellcasting || []).forEach(collect);
-		if (!spellNames.size) return;
-
-		const entry = out.trait[idx];
-		const text = (entry.entries || []).filter(it => typeof it === "string").join(" ");
-		const lead = /^(.*?limited-use pools:)/i.exec(text)?.[1];
-		if (!lead) return;
-
-		const rows = text.slice(lead.length).split(/[;.]\s+|\.\s*$/).map(it => it.trim()).filter(Boolean);
-		const kept = rows.filter(row => {
-			const label = row.replace(/\s+\S+\/\S+.*$/, "").trim();
-			const tokens = new Set(this._normalizeFeatureKey(label).split(" ").filter(Boolean));
-			// Covered when every word of a printed spell name appears in the pool label.
-			return ![...spellNames].some(spell => {
-				const parts = spell.split(" ").filter(Boolean);
-				return parts.length && parts.every(p => tokens.has(p));
-			});
-		});
-
-		if (kept.length === rows.length) return;
-		if (!kept.length) out.trait.splice(idx, 1);
-		else entry.entries = [`${lead} ${kept.join("; ")}.`];
-		if (!out.trait.length) delete out.trait;
-	}
-
 	/**
 	 * Pull the sentences of `entry` whose stated activation is not `section`.
 	 * @returns {Array<{section: string, entries: Array<string>}>}
 	 */
 	static _extractForeignActivations (entry, section) {
+		const source = this._ENTRY_FEATURES.get(entry);
+		if (section === "trait" && source && this._getFeatureActivationSection(source) === "trait") return [];
 		const strings = (entry.entries || []).filter(it => typeof it === "string");
 		if (strings.length !== (entry.entries || []).length) return [];
 
-		const sentences = strings.join(" ").split(/(?<=[.!?])\s+/).filter(it => it.trim());
+		const sentences = this._splitIntoClauses(strings.join(" "));
 		if (sentences.length < 2) return [];
 
-		const classified = sentences.map(sentence => this._getActivationSectionFromText(sentence));
+		const classified = sentences.map(sentence => {
+			const inferred = this._getActivationSectionFromText(sentence);
+			return inferred === "trait" ? null : inferred;
+		});
 
 		// A feat whose text opens with standing benefits and only later states its
 		// activation (War Caster: two passive benefits, then a reaction) gets filed wholly
@@ -4599,28 +4951,6 @@ class CharacterSheetNpcExporter {
 		addDie("[Pp]sionic [Ee]nergy [Dd]i(?:e|ce)", calculations.psionicEnergyDie);
 		addDie("[Mm]anifestation [Dd]i(?:e|ce)", calculations.manifestationDie);
 
-		// "the DC equals 8 plus its Dexterity modifier and Proficiency Bonus (+14)" makes
-		// the DM do the addition the sheet already did.
-		const dcPb = Number(state?.getProficiencyBonus?.()) || 0;
-		rules.push([
-			/\bthe (?:save )?DC equals 8 plus [^.]*?\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier and (?:its )?Proficiency Bonus(?:\s*\(\+\d+\))?/gi,
-			(m, ability) => {
-				const mod = Number(state?.getAbilityMod?.(ability.slice(0, 3).toLowerCase()));
-				if (!Number.isFinite(mod) || !dcPb) return m;
-				return `the save DC is {@dc ${8 + mod + dcPb}}`;
-			},
-		]);
-
-		// "the DC equals the spell save DC from this class's Spellcasting feature" asks the
-		// reader to go and find a number the block already knows.
-		const spellDc = this._getSpellDcAndAttack(state)?.dc;
-		if (Number.isFinite(Number(spellDc))) {
-			rules.push([
-				/\bthe (?:save )?DC equals (?:your|its|their|the) spell save DC[^.]*/gi,
-				`the save DC is {@dc ${spellDc}}`,
-			]);
-		}
-
 		// "against your talent power save DC" is a lookup the statblock cannot perform.
 		if (Number.isFinite(Number(calculations.powerSaveDc))) {
 			rules.push([/\b(?:its |their )?(?:talent )?power save DC\b(?!\s*\()/g, `power save {@dc ${calculations.powerSaveDc}}`]);
@@ -4691,21 +5021,13 @@ class CharacterSheetNpcExporter {
 
 		// A "DC equal to 8 + its proficiency bonus + its Strength modifier" is the book
 		// telling the player how to compute a number the sheet already knows. Collapse it.
-		const pb = Number(state.getProficiencyBonus?.()) || 0;
-		const ABBR = {strength: "str", dexterity: "dex", constitution: "con", intelligence: "int", wisdom: "wis", charisma: "cha"};
-		const formulaRe = /\b(?:a |the )?DC(?: for [\w' ]{1,24})?\s*(?:equal to|of|equals)?\s*8\s*(?:\+|plus)\s*(?:its )?(?:proficiency bonus\s*(?:\+|plus|and)\s*(?:its )?(\w+) modifier|(\w+) modifier\s*(?:\+|plus|and)\s*(?:its )?proficiency bonus)/gi;
-		const resolveFormula = txt => String(txt || "").replace(formulaRe, (m, a, b) => {
-			const abbr = ABBR[String(a || b || "").toLowerCase()];
-			if (!abbr) return m;
-			const mod = Number(state.getAbilityMod?.(abbr));
-			if (!Number.isFinite(mod)) return m;
-			return `{@dc ${8 + pb + mod}}`;
-		})
+		const resolveFormula = txt => this._resolveSaveDcFormulas(txt, state)
 			// Feat text defers to "the ability modifier used for the spell" because the feat
 			// does not know which class granted it. The sheet does — it is the character's
 			// spell save DC.
-			.replace(/\b(?:a |the )?DC(?: for [\w' ]{1,24})?\s*(?:equal to|of|equals)?\s*8\s*(?:\+|plus)\s*(?:its )?proficiency bonus(?:\s*\(\+?\d+\))?\s*(?:\+|plus|and)\s*the ability modifier (?:used (?:for|to cast) (?:the|this) spell|of the (?:ability )?score increased by this feat)/gi, m => {
-				const dc = Number(state.getSpellSaveDC?.());
+			.replace(/\b(?:a |the )?DC(?: for [\w' ]{1,24})?\s*(?:equal to|of|equals)?\s*8\s*(?:\+|plus)\s*(?:its )?proficiency bonus(?:\s*\(\+?\d+\))?\s*(?:\+|plus|and)\s*the ability modifier used (?:for|to cast) (?:the|this) spell/gi, m => {
+				const abilities = new Set((state.getClasses?.() || []).map(cls => cls.spellcastingAbility).filter(Boolean));
+				const dc = abilities.size === 1 ? Number(state.getSpellSaveDC?.([...abilities][0])) : NaN;
 				return Number.isFinite(dc) && dc > 0 ? `{@dc ${dc}}` : m;
 			})
 			// The formula usually sits in its own sentence ("The DC for the saving throw
@@ -4722,8 +5044,10 @@ class CharacterSheetNpcExporter {
 		["trait", "action", "bonus", "reaction", "legendary"].forEach(section => {
 			(out[section] || []).forEach(entry => {
 				if (!Array.isArray(entry?.entries)) return;
-				entry.entries = entry.entries.map(it => (typeof it === "string" ? this._collapseScalingBonusSentences(resolve(it), charLevel) : it));
-				this._resolveLevelGatedUpgrades(entry, charLevel);
+				const feature = this._ENTRY_FEATURES.get(entry);
+				const level = feature ? this._getFeatureExportLevel(state, feature) : charLevel;
+				entry.entries = entry.entries.map(it => (typeof it === "string" ? this._collapseScalingBonusSentences(resolve(it), level) : it));
+				this._resolveLevelGatedUpgrades(entry, level);
 				this._dedupeDerivedAnnotations(entry);
 				this._injectMissingSaveDc(entry, dcIndex);
 			});
@@ -4821,6 +5145,7 @@ class CharacterSheetNpcExporter {
 			str = str.replace(new RegExp(`${pattern}${MIN}(?!\\s*\\()`, "gi"), (m, ...rest) => {
 				const offset = rest[rest.length - 2];
 				const whole = rest[rest.length - 1];
+				if (!this._isBearerFormula(whole, offset, m)) return m;
 				const value = valueOf(rest.slice(0, -2));
 				if (value == null || !Number.isFinite(value)) return m;
 				// The clause exists to stop the formula going below a floor. Once the real
@@ -4844,11 +5169,11 @@ class CharacterSheetNpcExporter {
 		});
 		const classAlt = [...classLevels.keys()].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "(?!)";
 
-		compound(String.raw`\b(?:its )?(${ABL}) modifier (?:\+|plus|and) (?:its )?[Pp]roficiency [Bb]onus\b`, ([abl]) => {
+		compound(String.raw`\b(?:your |its )?(${ABL}) modifier (?:\+|plus|and) (?:your |its )?[Pp]roficiency [Bb]onus\b`, ([abl]) => {
 			const mod = modOf(abl);
 			return mod == null ? null : mod + pb;
 		});
-		compound(String.raw`\b(?:its )?[Pp]roficiency [Bb]onus (?:\+|plus|and) (?:its )?(${ABL}) modifier\b`, ([abl]) => {
+		compound(String.raw`\b(?:your |its )?[Pp]roficiency [Bb]onus (?:\+|plus|and) (?:your |its )?(${ABL}) modifier\b`, ([abl]) => {
 			const mod = modOf(abl);
 			return mod == null ? null : mod + pb;
 		});
@@ -4858,38 +5183,81 @@ class CharacterSheetNpcExporter {
 		// printing "equal to its Hemocraft modifier (minimum of 1)" instead of the number.
 		const named = this._getNamedModifierValues(state);
 		const namedAlt = [...named.keys()].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "(?!)";
-		compound(String.raw`\btwice (?:its )?(${namedAlt}) modifier\b`, ([nm]) => {
+		compound(String.raw`\btwice (?:your |its )?(${namedAlt}) modifier\b`, ([nm]) => {
 			const mod = named.get(String(nm).toLowerCase());
 			return mod == null ? null : 2 * mod;
 		});
-		compound(String.raw`\b(?:its )?(${namedAlt}) modifier\b`, ([nm]) => named.get(String(nm).toLowerCase()) ?? null);
+		compound(String.raw`\b(?:your |its )?(${namedAlt}) modifier\b`, ([nm]) => named.get(String(nm).toLowerCase()) ?? null);
 
-		compound(String.raw`\b(?:its )?(${ABL}) modifier and (?:its )?(${classAlt}) level\b`, ([abl, cls]) => {
+		compound(String.raw`\b(?:your |its )?(${ABL}) modifier and (?:your |its )?(${classAlt}) level\b`, ([abl, cls]) => {
 			const mod = modOf(abl);
 			const lvl = classLevels.get(String(cls).toLowerCase());
 			return mod == null || !lvl ? null : mod + lvl;
 		});
-		compound(String.raw`\b(?:1|one) \+ twice (?:its )?(${ABL}) modifier\b`, ([abl]) => {
+		compound(String.raw`\b(?:1|one) \+ twice (?:your |its )?(${ABL}) modifier\b`, ([abl]) => {
 			const mod = modOf(abl);
 			return mod == null ? null : 1 + (2 * mod);
 		});
-		compound(String.raw`\btwice (?:its )?(${ABL}) modifier\b`, ([abl]) => {
+		compound(String.raw`\btwice (?:your |its )?(${ABL}) modifier\b`, ([abl]) => {
 			const mod = modOf(abl);
 			return mod == null ? null : 2 * mod;
 		});
 		// "its AC equals 13 plus its Wisdom modifier" — the DM needs the total, not the
 		// two operands. The lookbehind keeps dice expressions out ("1d10 plus its
 		// Dexterity modifier" must annotate the modifier, not sum 10 into it).
-		compound(String.raw`(?<![\dd])(\d{1,2}) (?:plus|\+) (?:its )?(${ABL}) modifier\b`, ([base, abl]) => {
+		compound(String.raw`(?<![\dd])(\d{1,2}) (?:plus|\+) (?:your |its )?(${ABL}) modifier\b`, ([base, abl]) => {
 			const mod = modOf(abl);
 			return mod == null ? null : Number(base) + mod;
 		}, {restate: true, unsigned: true});
-		compound(String.raw`\b(?:its )?[Pp]roficiency [Bb]onus\s*(?:×|x|\*)\s*(\d+)\b`, ([mult]) => (pb ? pb * Number(mult) : null));
+		compound(String.raw`\b(?:your |its )?[Pp]roficiency [Bb]onus\s*(?:×|x|\*)\s*(\d+)\b`, ([mult]) => (pb ? pb * Number(mult) : null));
 
-		compound(String.raw`\b(?:its )?(${ABL}) modifier\b`, ([abl]) => modOf(abl));
-		compound(String.raw`\b(?:its )?[Pp]roficiency [Bb]onus\b`, () => pb || null);
+		compound(String.raw`\b(?:your |its )?(${ABL}) modifier\b`, ([abl]) => modOf(abl));
+		compound(String.raw`\b(?:your |its )?[Pp]roficiency [Bb]onus\b`, () => pb || null);
 
 		return str.replace(/\uE000(\d+)\uE000/g, (_m, idx) => stash[Number(idx)]);
+	}
+
+	static _isBearerFormula (text, offset, formula) {
+		const before = text.slice(0, offset).split(/[.!?]/).at(-1) || "";
+		// An unresolved DC may contain additional operands. Never label a partial sum
+		// as the value of its last operand.
+		if (/\bDC\b[^.!?{}]*$/i.test(before)) return false;
+		if (/\byour\b/i.test(formula)) return true;
+		return !/\b(?:target|creature|enemy|ally|wearer|wielder|recipient)['\u2019]s\b/i.test(before)
+			&& !/\b(?:target|creature|wearer|wielder|recipient)\s+(?:has|gains|adds|uses)\s+(?:an? |the |its )?(?:AC|armor class|ability|score|modifier|bonus)\b/i.test(before);
+	}
+
+	static _resolveSaveDcFormulas (text, state, {feature = null, npcName = null} = {}) {
+		const name = npcName || this._getNpcReferenceName(this._getSafeName(state.getName?.()) || "Unnamed Character");
+		const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const possessive = String.raw`(?:your |its |${escapedName}['\u2019]s? )`;
+		const owner = `${possessive}?`;
+		const ability = String.raw`((?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier|(?:STR|DEX|CON|INT|WIS|CHA)(?: modifier)?)`;
+		const proficiency = String.raw`${owner}(?:proficiency bonus|PB|\{@variantrule Proficiency\|[^}]+\})(?:\s*\(\+?\d+\))?`;
+		const plus = String.raw`\s*(?:\+|plus|and)\s*`;
+		const formula = new RegExp(String.raw`\b(?:the |a )?(?:save )?DC(?: for (?:the |this )?saving throw)?\s*(?:equal to|equals|is|of|=)?\s*8${plus}(?:${proficiency}${plus}${owner}${ability}|${owner}${ability}${plus}${proficiency})(?!\s*(?:modifier\b|\+|plus\b))`, "gi");
+		const pb = Number(state.getProficiencyBonus?.());
+		const featChoice = feature?.choices?.ability;
+		const chosenAbilities = typeof featChoice === "string" ? [featChoice] : Array.isArray(featChoice) ? featChoice : Object.keys(featChoice || {});
+		const featAbility = chosenAbilities.length === 1 && Parser.ABIL_ABVS.includes(chosenAbilities[0]) ? chosenAbilities[0] : null;
+		return String(text || "")
+			.replace(new RegExp(String.raw`\bDC\s*(?:equal to|equals|is|of|=)?\s*8${plus}${proficiency}${plus}the ability modifier of the (?:ability )?score increased by this feat(?!\s*(?:\+|plus\b))`, "gi"), (match, offset, whole) => {
+				if (!featAbility || !this._isBearerFormula(whole, offset, match)) return match;
+				const mod = Number(state.getAbilityMod?.(featAbility));
+				return Number.isFinite(pb) && Number.isFinite(mod) ? `{@dc ${8 + pb + mod}}` : match;
+			})
+			.replace(formula, (match, a, b, offset, whole) => {
+				if (!this._isBearerFormula(whole, offset, match)) return match;
+				const mod = Number(state.getAbilityMod?.(String(a || b).slice(0, 3).toLowerCase()));
+				return Number.isFinite(pb) && Number.isFinite(mod) ? `{@dc ${8 + pb + mod}}` : match;
+			})
+			.replace(new RegExp(String.raw`\b(?:${possessive}|the )spell save DC(?: from this class['\u2019]s Spellcasting feature)?\b`, "gi"), match => {
+				const classes = (state.getClasses?.() || []).filter(cls => cls.spellcastingAbility || /^(?:bard|cleric|druid|paladin|ranger|sorcerer|warlock|wizard|artificer)$/i.test(cls.name || ""));
+				const ownerClass = feature?.className || (classes.length === 1 ? classes[0].name : null);
+				if (!ownerClass) return match;
+				const dc = Number(state.getSpellSaveDC?.(ownerClass));
+				return Number.isFinite(dc) && dc > 0 ? `spell save {@dc ${dc}}` : match;
+			});
 	}
 
 	/**
@@ -4971,14 +5339,24 @@ class CharacterSheetNpcExporter {
 	static _resolveLevelGatedUpgrades (entry, charLevel) {
 		if (!charLevel || !Array.isArray(entry?.entries)) return;
 		const lines = entry.entries;
-		if (!lines.some(it => typeof it === "string" && /\breach(?:es)?\b|\bbecomes?\b/i.test(it))) return;
+		lines.forEach(line => {
+			if (!line || typeof line !== "object") return;
+			if (Array.isArray(line.items)) {
+				const group = {entries: line.items};
+				this._resolveLevelGatedUpgrades(group, charLevel);
+				line.items = group.entries;
+			}
+			this._resolveLevelGatedUpgrades(line, charLevel);
+		});
+		if (!lines.some(it => typeof it === "string" && /\breach(?:es)?\b|\bbecomes?\b|\bincreases?\b/i.test(it))) return;
 
 		const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 		// Guarded on both sides so a size never matches inside a longer word ("smaller").
-		const VALUE = String.raw`(?<![A-Za-z])(?:\d*d\d+|\d+\s*(?:feet|foot|ft\.)|Tiny|Small|Medium|Large|Huge|Gargantuan)(?![A-Za-z])`;
+		const VALUE = String.raw`(?<![A-Za-z])(?:(?:one|two|three|four|five|six|seven|\d+)\s+(?:dice|d\d+s)|\d*d\d+|\d+\s*(?:feet|foot|ft\.)|Tiny|Small|Medium|Large|Huge|Gargantuan)(?![A-Za-z])`;
 		const kindOf = value => {
 			const v = String(value).trim().toLowerCase();
 			if (/^\d*d\d+$/.test(v)) return "die";
+			if (/\s(?:dice|d\d+s)$/.test(v)) return "pool";
 			if (/feet|foot|ft\./.test(v)) return "distance";
 			return SIZES.includes(v) ? "size" : null;
 		};
@@ -4987,7 +5365,8 @@ class CharacterSheetNpcExporter {
 			if (SIZES.includes(v)) return SIZES.indexOf(v);
 			const die = /^(\d*)d(\d+)$/.exec(v);
 			if (die) return (Number(die[1]) || 1) * Number(die[2]);
-			return Number((/\d+/.exec(v) || [0])[0]);
+			const word = {one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7}[v.split(" ")[0]];
+			return word || Number((/\d+/.exec(v) || [0])[0]);
 		};
 
 		// A level must be written as a level — an ordinal ("6th level") or an explicit list
@@ -5011,20 +5390,17 @@ class CharacterSheetNpcExporter {
 			const unit = units[i];
 			if (unit.opaque) continue;
 			const plain = this._getPlainMatchTextCased(unit.text);
-			const gated = /\breach(?:es)?\b[^.]{0,40}\blevels?\b/i.test(plain);
-			// A progression that lost its level clauses in conversion ("this extra damage
-			// becomes 1d10, and it becomes 1d12") states upgrades with no gate at all. The
-			// character's own level already decided the answer, so take the best one.
-			const ungated = /\b(?:damage|bonus|die|distance)\b[^.]{0,40}\bbecomes?\b/i.test(plain) && /becomes?\s+(?:\d*d\d+|\+?\d+)/i.test(plain);
-			if (!gated && !ungated) continue;
+			const gated = /\breach(?:es)?\b[^.]{0,40}\blevels?\b|\bat \d+(?:st|nd|rd|th) level\b/i.test(plain);
+			if (!gated) continue;
 
 			const steps = [];
-			if (!gated) {
-				[...plain.matchAll(new RegExp(String.raw`becomes?\s+(${VALUE})`, "gi"))].forEach(m => steps.push({at: 0, value: m[1]}));
-			} else {
+			{
 				PAIRED.lastIndex = 0;
 				let m;
 				while ((m = PAIRED.exec(plain)) !== null) steps.push({at: Number(m[1]), value: m[2]});
+				for (const match of plain.matchAll(new RegExp(String.raw`(${VALUE})\s+at\s+(\d+)(?:st|nd|rd|th)\s+level`, "gi"))) {
+					steps.push({at: Number(match[2]), value: match[1]});
+				}
 				// "When it reaches 7th level in this class, the leap's distance can total up to
 				// 30 feet instead." — one gate, and the new value closes the sentence.
 				if (!steps.length) {
@@ -5036,22 +5412,27 @@ class CharacterSheetNpcExporter {
 
 			const reached = steps.filter(s => s.at <= charLevel && kindOf(s.value));
 			if (!reached.length) continue;
-			const best = reached.reduce((a, b) => (rank(b.value) > rank(a.value) ? b : a));
+			const best = reached.reduce((a, b) => (b.at >= a.at ? b : a));
 			const kind = kindOf(best.value);
 
 			// Write the winning value over the most recent same-kind value stated before it.
 			let applied = false;
 			for (let j = i - 1; j >= 0 && !applied; --j) {
 				if (units[j].opaque) continue;
+				const basePlain = this._getPlainMatchTextCased(units[j].text);
+				if (kind === "distance" && /\brange\b/i.test(plain) && !/\b(?:range|spell attack|target[^.]*within)\b/i.test(basePlain)) continue;
+				if (kind === "die" && /\bdamage\b/i.test(plain) && !/\bdamage\b/i.test(basePlain)) continue;
 				const base = [...units[j].text.matchAll(new RegExp(`(${VALUE})`, "gi"))]
 					.filter(m => kindOf(m[1]) === kind && rank(m[1]) !== rank(best.value));
-				if (!base.length) continue;
-				const target = base[base.length - 1];
-				units[j].text = `${units[j].text.slice(0, target.index)}${best.value}${units[j].text.slice(target.index + target[1].length)}`;
+				if (base.length !== 1) continue;
+				const target = base[0];
+				const faces = kind === "pool" ? /\bd(\d+)s\b/i.exec(target[1])?.[1] : null;
+				const replacement = faces ? `{@dice ${rank(best.value)}d${faces}}` : best.value;
+				units[j].text = `${units[j].text.slice(0, target.index)}${replacement}${units[j].text.slice(target.index + target[1].length)}`;
 				applied = true;
 			}
 			if (!applied) continue;
-			units.splice(i, 1);
+			if (!/\b(?:and (?:you|it|your|its)|also|in addition)\b/i.test(plain)) units.splice(i, 1);
 			changed = true;
 		}
 		if (!changed) return;
@@ -5089,9 +5470,8 @@ class CharacterSheetNpcExporter {
 
 	/**
 	 * Maps each of the character's feature names to the save DC that feature would impose.
-	 * `state.getFeatureSaveDc()` already resolves this correctly for multiclass characters
-	 * (owning class's DC, falling back to the global spell save DC), so this is only an
-	 * index over it keyed by the name the statblock entry will carry.
+	 * Explicit source formulas are resolved before this fallback is used. Martial and
+	 * skill-based DCs precede the generic spell-save getter.
 	 *
 	 * @param {Object} state character sheet state
 	 * @returns {Map<string, number>} normalized feature name -> DC
@@ -5106,12 +5486,42 @@ class CharacterSheetNpcExporter {
 			rogue: calculations.roguishSaveDc,
 		};
 
+		const features = state.getFeatures?.() || [];
+		const referencedDcs = new Map();
+		const featureKey = feature => [feature.name, feature.className, feature.classSource || "PHB", feature.level].join("|").toLowerCase();
+		for (const parent of features) {
+			const resolved = this._resolveSaveDcFormulas(this._flattenEntriesValue(parent.entries || parent.description), state, {feature: parent});
+			const dcs = [...new Set([...resolved.matchAll(/\{@dc (\d+)\}/g)].map(match => Number(match[1])))];
+			if (dcs.length !== 1) continue;
+			const visit = value => {
+				if (Array.isArray(value)) return value.forEach(visit);
+				if (!value || typeof value !== "object") return;
+				if (value.type === "refClassFeature") {
+					const [name, className, classSource, level] = String(value.classFeature || "").split("|");
+					const key = featureKey({name, className, classSource, level});
+					const known = referencedDcs.get(key);
+					referencedDcs.set(key, known === undefined || known === dcs[0] ? dcs[0] : null);
+				}
+				Object.values(value).forEach(visit);
+			};
+			visit(parent.entries);
+		}
 		const index = new Map();
-		(state.getFeatures?.() || []).forEach(feature => {
+		const ambiguous = new Set();
+		features.forEach(feature => {
 			const name = this._normalizeFeatureKey(feature?.name);
-			if (!name || index.has(name)) return;
-			const dc = Number(state.getFeatureSaveDc?.(feature)) || Number(BY_CLASS[String(feature?.className || "").toLowerCase()]);
-			if (Number.isFinite(dc) && dc > 0) index.set(name, dc);
+			if (!name) return;
+			const jesterDc = feature.optionalFeatureTypes?.includes("JA") && state.hasJesterActs?.()
+				? state.getJesterActBaseDc?.()
+				: null;
+			const dc = Number(referencedDcs.get(featureKey(feature))) || Number(jesterDc) || Number(BY_CLASS[String(feature?.className || "").toLowerCase()]) || Number(state.getFeatureSaveDc?.(feature));
+			if (!Number.isFinite(dc) || dc <= 0) return;
+			if (feature.id) index.set(`id:${feature.id}`, dc);
+			if (ambiguous.has(name)) return;
+			if (index.has(name) && index.get(name) !== dc) {
+				index.delete(name);
+				ambiguous.add(name);
+			} else index.set(name, dc);
 		});
 		return index;
 	}
@@ -5130,11 +5540,11 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} entry statblock entry (mutated)
 	 * @param {Map<string, number>} dcIndex feature name -> DC
 	 */
-	static _injectMissingSaveDc (entry, dcIndex) {
+	static _injectMissingSaveDc (entry, dcIndex, {feature = null} = {}) {
 		if (!Array.isArray(entry?.entries)) return;
 
-		const joined = entry.entries.filter(it => typeof it === "string").join(" ");
-		if (!joined || /\{@dc |\bDC\s*\d/i.test(joined)) return;
+		const joined = this._flattenEntriesValue(entry.entries);
+		if (!joined || /\{@dc |\bDC\b/i.test(joined)) return;
 
 		// The save must be forced on someone else. "an effect that allows it to make a
 		// Dexterity saving throw" (Evasion) is a save the NPC *makes*, governed by a DC the
@@ -5146,12 +5556,12 @@ class CharacterSheetNpcExporter {
 		if (!matches(joined)) return;
 
 		// The entry name may carry a "(3/SR)" suffix the feature name does not.
-		const dc = dcIndex.get(this._normalizeFeatureKey(String(entry.name || "").replace(/\s*\([^)]*\)\s*$/, "")));
+		const dc = dcIndex.get(`id:${feature?.id}`) ?? dcIndex.get(this._normalizeFeatureKey(String(entry.name || "").replace(/\s*\([^)]*\)\s*$/, "")));
 		if (!Number.isFinite(dc)) return;
 
 		let done = false;
-		entry.entries = entry.entries.map(it => {
-			if (done || typeof it !== "string" || !matches(it)) return it;
+		entry.entries = this._mapExportEntryStrings(entry.entries, it => {
+			if (done || !matches(it)) return it;
 			const hit = FORCED.exec(it) || FORCED_ALT.exec(it);
 			if (!hit) return it;
 			done = true;
@@ -5462,6 +5872,7 @@ class CharacterSheetNpcExporter {
 			if (ch === "(" || ch === "{") ++depth;
 			else if (ch === ")" || ch === "}") depth = Math.max(0, depth - 1);
 			else if (depth === 0 && /[.!?;]/.test(ch) && /\s/.test(raw[i + 1] || " ")) {
+				if (ch === "." && /\b(?:vs|ft|lb|lbs|in|sq|e\.g|i\.e|mr|mrs|ms|dr|st)\.$/i.test(raw.slice(start, i + 1))) continue;
 				const piece = raw.slice(start, i + 1).trim();
 				if (piece) out.push(piece);
 				start = i + 1;
@@ -5606,6 +6017,7 @@ class CharacterSheetNpcExporter {
 		if (/\{@(?:dice|damage|dc|hit|atk|condition|skill|spell|scaledamage|recharge|item|chance)\b/.test(raw)) return true;
 		const text = this._getPlainMatchText(raw);
 		if (/\d/.test(text)) return true;
+		if (/\brolls? percentile dice\b/.test(text)) return true;
 		if (/\bwhile\b|\bunless\b|\bwhenever\b|\bwhen (?:it|you|a|an|the)\b|\bif it\b|\bif you\b/.test(text)) return true;
 		// Flavour describes; mechanics permit or oblige. A modal is the most reliable
 		// signal available without a vocabulary that has to be extended per feature.
@@ -5796,7 +6208,7 @@ class CharacterSheetNpcExporter {
 			if (!out[section]?.length) return;
 			out[section] = out[section].filter(entry => {
 				const key = this._getStatblockDedupeKey(entry?.name);
-				return !/^(?:[a-z]+\s+)?(?:spellcasting|pact magic)$/.test(key || "");
+				return !/^(?:(?:bard|cleric|druid|paladin|ranger|sorcerer|warlock|wizard|artificer)\s+)?(?:spellcasting|pact magic)$/.test(key || "");
 			});
 			if (!out[section].length && section !== "trait") delete out[section];
 		});
@@ -5870,16 +6282,17 @@ class CharacterSheetNpcExporter {
 	}
 
 	/** Classify features for the export dialog feature picker (non-mutating). */
-	static listExportableFeatures (state) {
+	static listExportableFeatures (state, options = {}) {
+		const isCompanion = this.getSanitizedExportOptions(options).profile === "companion";
 		const sourceFeatureIds = new Set((state.getNamedModifiers?.() || [])
 			.map(mod => mod?.sourceFeatureId)
 			.filter(Boolean));
 		const features = [
 			...(state.getFeatures?.() || [])
-				.filter(f => f?.name && f?.description)
+				.filter(f => f?.name && (f?.description || f?.entries?.length))
 				.filter(f => isCompanion || !(typeof CharacterSheetClassUtils !== "undefined" && CharacterSheetClassUtils.isCombatMethod?.(f))),
 			...(state.getFeats?.() || [])
-				.filter(f => f?.name && f?.description)
+				.filter(f => f?.name && (f?.description || f?.entries?.length))
 				.map(f => ({...f, featureType: f.featureType || "Feat"})),
 		];
 
@@ -5912,9 +6325,10 @@ class CharacterSheetNpcExporter {
 		} else {
 			const baseData = state?._data || {};
 			const itemDefenses = baseData.itemDefenses || {};
-			resist = [...(baseData.resistances || []), ...(itemDefenses.resist || []).map(it => it?.type)];
-			immune = [...(baseData.immunities || []), ...(itemDefenses.immune || []).map(it => it?.type)];
-			vulnerable = [...(baseData.vulnerabilities || []), ...(itemDefenses.vulnerable || []).map(it => it?.type)];
+			const persistent = state.getDefenseBreakdown?.({includeActiveStates: false});
+			resist = persistent?.resistances?.map(entry => entry.type) ?? [...(baseData.resistances || []), ...(itemDefenses.resist || []).map(it => it?.type)];
+			immune = persistent?.immunities?.map(entry => entry.type) ?? [...(baseData.immunities || []), ...(itemDefenses.immune || []).map(it => it?.type)];
+			vulnerable = persistent?.vulnerabilities?.map(entry => entry.type) ?? [...(baseData.vulnerabilities || []), ...(itemDefenses.vulnerable || []).map(it => it?.type)];
 			conditionImmune = [...(baseData.conditionImmunities || []), ...(itemDefenses.conditionImmune || []).map(it => it?.type)];
 		}
 
@@ -6898,7 +7312,7 @@ class CharacterSheetNpcExporter {
 		return phrases;
 	}
 
-	static getValidationIssues (monster) {
+	static getValidationIssues (monster, {isCompanion = false} = {}) {
 		const errors = [];
 		const warnings = [];
 		// Informational, never a defect. Kept apart from `warnings` so a dependency notice
@@ -6910,12 +7324,20 @@ class CharacterSheetNpcExporter {
 		if (!monster || typeof monster !== "object") {
 			return {errors: ["Monster export payload is missing or invalid."], warnings, notes};
 		}
+		this.getExportReport(monster).omissions.forEach(omission => warnings.push(`${omission.entity}: ${omission.reason}`));
+		const nonCoreSkills = Object.keys(monster.skill || {}).filter(skill => !Object.hasOwn(Parser.SKILL_TO_ATB_ABV, skill));
+		if (nonCoreSkills.length) warnings.push(`Custom skills are preserved for renderer compatibility but are outside the strict bestiary schema: ${nonCoreSkills.join(", ")}.`);
+		for (const section of ["trait", "action", "bonus", "reaction"]) {
+			for (const entry of monster[section] || []) {
+				if (/\bDC\b[^.]{0,180}\bscore increased by this feat\b/i.test(this._flattenEntriesValue(entry.entries))) warnings.push(`${entry.name}: the chosen feat ability is missing or ambiguous; its save DC formula is preserved rather than guessed.`);
+			}
+		}
 
 		if (!monster.name || typeof monster.name !== "string") errors.push("Missing required field: name.");
 		if (!monster.source || typeof monster.source !== "string") errors.push("Missing required field: source.");
 		if (!Array.isArray(monster.size) || !monster.size.length) errors.push("Missing required field: size.");
 		if (!monster.type) errors.push("Missing required field: type.");
-		if (!Array.isArray(monster.alignment) || !monster.alignment.length) errors.push("Missing required field: alignment.");
+		if (!isCompanion && (!Array.isArray(monster.alignment) || !monster.alignment.length)) errors.push("Missing required field: alignment.");
 		if (!Array.isArray(monster.ac) || !monster.ac.length) {
 			errors.push("Missing required field: ac.");
 		} else {
@@ -6924,18 +7346,19 @@ class CharacterSheetNpcExporter {
 			if (!Number.isFinite(Number(acValue)) || Number(acValue) < 1) errors.push("Armor Class must be a positive number.");
 		}
 
-		if (!monster.hp?.average || !monster.hp?.formula) {
+		if (monster.hp?.average == null || !monster.hp?.formula) {
 			errors.push("Missing required field: hp.");
 		} else {
-			if (!Number.isFinite(Number(monster.hp.average)) || Number(monster.hp.average) < 1) errors.push("HP average must be a positive number.");
-			if (!/^\d+d\d+(?:\s*[+-]\s*\d+)?$/i.test(String(monster.hp.formula).trim())) {
+			if (!Number.isFinite(Number(monster.hp.average)) || Number(monster.hp.average) < (isCompanion ? 0 : 1)) errors.push("HP average is outside the supported range.");
+			const formula = String(monster.hp.formula).trim();
+			if (!/^\d+d\d+(?:\s*[+-]\s*\d+)?$/i.test(formula) && !(isCompanion && /^\d+$/.test(formula))) {
 				errors.push("HP formula must use dice notation (for example: 8d8 + 16).");
 			}
 		}
 
 		if (!monster.speed || typeof monster.speed !== "object") errors.push("Missing required field: speed.");
-		if (!monster.cr) errors.push("Missing required field: cr.");
-		if (!Array.isArray(monster.action) || !monster.action.length) errors.push("Missing required field: action.");
+		if (!isCompanion && !monster.cr) errors.push("Missing required field: cr.");
+		if (!isCompanion && (!Array.isArray(monster.action) || !monster.action.length)) errors.push("Missing required field: action.");
 
 		if (monster.type) {
 			const isTypeString = typeof monster.type === "string" && monster.type.trim();
@@ -6966,8 +7389,9 @@ class CharacterSheetNpcExporter {
 				if (typeof action.name !== "string" || !action.name.trim()) errors.push(`Action #${ix + 1} is missing a name.`);
 				if (!Array.isArray(action.entries) || !action.entries.length) {
 					errors.push(`Action #${ix + 1} is missing entries.`);
-				} else if (action.entries.some(it => typeof it !== "string")) {
-					errors.push(`Action #${ix + 1} entries must be strings.`);
+				} else if (action.entries.some(it => typeof it !== "string" && !(typeof it === "number" && Number.isFinite(it))
+					&& (!it || Array.isArray(it) || typeof it !== "object" || typeof it.type !== "string"))) {
+					errors.push(`Action #${ix + 1} entries must be text, numbers, or typed entry objects.`);
 				}
 			});
 		}
@@ -7033,7 +7457,7 @@ class CharacterSheetNpcExporter {
 				}
 				if (block.type !== "spellcasting") warnings.push(`Spellcasting block #${ix + 1} should set type "spellcasting".`);
 				if (!block.name) warnings.push(`Spellcasting block #${ix + 1} is missing a name.`);
-				const hasContent = !!(block.will?.length || block.daily || block.spells);
+				const hasContent = !!(block.will?.length || block.daily || block.rest || block.ritual?.length || block.spells || block.footerEntries?.length);
 				if (!hasContent) warnings.push(`Spellcasting block #${ix + 1} has no spells.`);
 			});
 		}
@@ -7175,7 +7599,7 @@ class CharacterSheetNpcExporter {
 		return head.length >= 3 ? head : raw;
 	}
 
-	static _getMultiattackAction (state, {npcName = "The NPC", attacks = [], renderedAttacks = [], attacksPerAction = 1} = {}) {
+	static _getMultiattackAction (state, {npcName = "The NPC", attacks = [], renderedAttacks = [], attacksPerAction = 1, calculations = {}} = {}) {
 		if (attacksPerAction < 2) return null;
 		// Prefer the rendered action when one exists for this row: `attack.damage` holds only
 		// the weapon's own die, while the rendered line holds every clause that actually
@@ -7204,10 +7628,24 @@ class CharacterSheetNpcExporter {
 		const attackName = this._getSafeInlineText(this._getShortAttackName(primary?.name) || "weapon attack", {maxLen: 48}) || "weapon attack";
 
 		const countWord = this._numberToWord(attacksPerAction);
+		const alternatives = (calculations.attackActionAllowances || []).flatMap(allowance => {
+			if (!(allowance.count > attacksPerAction) || !allowance.sourceFeature) return [];
+			const eligible = attacks.filter(attack => [
+				attack.sourceFeature,
+				attack._sourceItem?.sourceFeature,
+				attack._sourceItem?._generatedItemProvenance?.sourceFeature,
+			].some(source => source === allowance.sourceFeature));
+			if (!eligible.length) return [];
+			const names = [...new Set(eligible.map(attack => this._getSafeInlineText(attack.name, {maxLen: 80})))].join(" or ");
+			const requirements = allowance.requiresStates || (allowance.requiresState ? [allowance.requiresState] : []);
+			const states = requirements.map(id => state.constructor.ACTIVE_STATE_TYPES?.[id]?.name || id).join(" and ");
+			return [`Alternatively, ${npcName} makes ${this._numberToWord(allowance.count)} ${names} attacks (${allowance.label || allowance.sourceFeature})${states ? ` while ${states} are active` : ""}. All ${this._numberToWord(allowance.count)} attacks must use ${names}.`];
+		});
 		return {
 			name: "Multiattack",
 			entries: [
 				`${npcName} makes ${countWord} ${attackName} attacks.`,
+				...alternatives,
 			],
 		};
 	}
@@ -7252,16 +7690,13 @@ class CharacterSheetNpcExporter {
 	 * @returns {?number} average value, or `null` when unparseable
 	 */
 	static _estimateAverageDice (formula) {
-		const raw = String(formula || "").trim();
-		if (!raw) return null;
-		const m = raw.match(/^(\d+)d(\d+)\s*(?:([+-])\s*(\d+))?$/i);
-		if (m) {
-			const avg = Number(m[1]) * (Number(m[2]) + 1) / 2;
-			const bonus = m[4] ? (m[3] === "-" ? -Number(m[4]) : Number(m[4])) : 0;
-			return avg + bonus;
-		}
-		const flat = Number(raw);
-		return Number.isFinite(flat) ? flat : null;
+		const raw = String(formula ?? "").replace(/\s+/g, "");
+		if (!/^[+-]?(?:\d+d[1-9]\d*|\d+(?:\.\d+)?)(?:[+-](?:\d+d[1-9]\d*|\d+(?:\.\d+)?))*$/i.test(raw)) return null;
+		return [...raw.matchAll(/([+-]?)(\d+d[1-9]\d*|\d+(?:\.\d+)?)/gi)].reduce((sum, match) => {
+			const dice = /^(\d+)d(\d+)$/i.exec(match[2]);
+			const value = dice ? Number(dice[1]) * (Number(dice[2]) + 1) / 2 : Number(match[2]);
+			return sum + (match[1] === "-" ? -value : value);
+		}, 0);
 	}
 
 	static _numberToWord (n) {
@@ -7390,21 +7825,16 @@ class CharacterSheetNpcExporter {
 	 * @returns {number|Object|null}
 	 */
 	static _getInitiativeValue (state) {
-		let total = null;
-		try {
-			const breakdown = state.getInitiativeBreakdown?.();
-			if (breakdown && Number.isFinite(Number(breakdown.total))) total = Number(breakdown.total);
-		} catch (ignored) { /* fall through to the modifier comparison below */ }
+		const breakdown = state.getInitiativeBreakdown?.();
+		const total = breakdown && Number.isFinite(Number(breakdown.total)) ? Number(breakdown.total) : null;
 
 		const dexMod = Number(state.getAbilityMod?.("dex"));
 		const isNotableBonus = total != null && !(Number.isFinite(dexMod) && total === dexMod);
 
 		let advantageMode = null;
-		try {
-			const aggregate = state.aggregateModifiers?.("initiative");
-			if (aggregate?.advantage && !aggregate?.disadvantage) advantageMode = "adv";
-			else if (aggregate?.disadvantage && !aggregate?.advantage) advantageMode = "dis";
-		} catch (ignored) { /* advantage is optional detail */ }
+		const aggregate = state.getInitiativeRollMode?.() ?? state.aggregateModifiers?.("initiative");
+		if (aggregate?.advantage && !aggregate?.disadvantage) advantageMode = "adv";
+		else if (aggregate?.disadvantage && !aggregate?.advantage) advantageMode = "dis";
 
 		if (!isNotableBonus && !advantageMode) return null;
 		if (!advantageMode) return total;
@@ -7712,12 +8142,9 @@ class CharacterSheetNpcExporter {
 				: (inheritedMastery ? [`${inheritedMastery}|${Parser.SRC_XPHB}`] : []);
 			const masteryProperty = this._getMasteryName(itemMastery[0]);
 			const props = item.property || item.properties || derived.properties || [];
-			const typeAbv = String(item.type || "").split("|")[0];
-			const isRangedType = typeAbv === "R" || typeAbv === "RW";
-			const isThrown = props.some(p => p === "T" || String(p).startsWith("T|"));
+			const isThrown = derived.isThrown || props.some(p => p === "T" || String(p).startsWith("T|"));
 			attacks.push({
 				...derived,
-				isMelee: !isRangedType,
 				properties: props,
 				attackBonus: Number(derived.attackBonus) || 0,
 				// Already carries the ability modifier and every standing bonus.
@@ -7791,23 +8218,16 @@ class CharacterSheetNpcExporter {
 
 	static _isWeaponItem (item) {
 		if (item.dmg1) return true;
-		if (item.weaponCategory) return true;
-		return ["M", "R", "MW", "RW"].includes(item.type);
+		if (item.weapon || item.weaponCategory || this._getBaseWeaponRecord(item)) return true;
+		return ["M", "R", "MW", "RW"].includes(String(item.typeCode || item.type || "").split("|")[0]);
 	}
 
 	static _isMagicItem (item) {
-		const rarity = String(item?.rarity || "").toLowerCase();
-		const hasMeaningfulRarity = rarity && !["none", "unknown", "common"].includes(rarity);
 		return !!(
-			hasMeaningfulRarity
-			|| item?.requiresAttunement
+			globalThis.CharacterSheetItemUtils?.isMagicItem(item)
 			|| item?.charges
 			|| item?.attachedSpells
 			|| item?.activation?.length
-			|| item?.bonusAc
-			|| item?.bonusSavingThrow
-			|| item?.bonusWeaponAttack
-			|| item?.bonusWeaponDamage
 		);
 	}
 
@@ -7964,8 +8384,25 @@ class CharacterSheetNpcExporter {
 
 	static _getSanitizedItemValue (key, value) {
 		if (key === "entries" || key === "additionalEntries") return this._getSanitizedItemEntries(value);
+		if (/^bonus/.test(key) && typeof value === "number") return String(value);
 		if (typeof value === "string") return this._stripHtmlTags(value).trim();
 		return value;
+	}
+
+	static _getSanitizedExportEntry (entry) {
+		return this._mapExportEntryStrings(entry, text => this._stripHtmlTags(text));
+	}
+
+	static _mapExportEntryStrings (entry, mapper, {isContentOnly = false} = {}) {
+		if (typeof entry === "string") return mapper(entry);
+		if (Array.isArray(entry)) return entry.map(value => this._mapExportEntryStrings(value, mapper, {isContentOnly}));
+		if (!entry || typeof entry !== "object") return entry;
+		return Object.fromEntries(Object.entries(entry).map(([key, value]) => [
+			key,
+			isContentOnly && !["entries", "entry", "items", "rows", "row"].includes(key)
+				? value
+				: this._mapExportEntryStrings(value, mapper, {isContentOnly}),
+		]));
 	}
 
 	static _getSanitizedItemEntries (entries) {
@@ -7973,14 +8410,14 @@ class CharacterSheetNpcExporter {
 		const out = [];
 		entries.forEach(entry => {
 			if (typeof entry !== "string") {
-				if (entry != null) out.push(entry);
+				if (entry != null) out.push(this._getSanitizedExportEntry(entry));
 				return;
 			}
 			// A blank line is authored paragraph structure, but `\n` means nothing to the
 			// renderer and `_stripHtmlTags` collapses it away — a 800-word magic item would
 			// arrive as one unbroken wall. One array element per paragraph is both the
 			// idiomatic shape and the only one that actually renders as paragraphs.
-			// `{@tag}`s are preserved verbatim; only stray HTML is removed.
+			// Supported tags survive; export-only material references become site links.
 			String(entry)
 				.split(/\n\s*\n/)
 				.map(para => this._stripHtmlTags(para).trim())
@@ -8529,7 +8966,7 @@ class CharacterSheetNpcExporter {
 		"SATO", "DSotDQ", "KFTGV", "PABTSO", "LOX", "DODK", "QFTIS", "VEOR", "AATM", "SCREEN",
 	]);
 
-	static _getClassResourcesBlock (state, {npcName = "The NPC", coveredPoolNames = new Set(), isCompanion = false} = {}) {
+	static _getClassResourcesBlock (state, {npcName = "The NPC", coveredPoolNames = new Set(), isCompanion = false, isComplete = false} = {}) {
 		if (isCompanion) {
 			const resources = [...state.getResources(), ...state.getSyntheticCombatResources()];
 			if (state.getStaminaMax() > 0) {
@@ -8547,26 +8984,16 @@ class CharacterSheetNpcExporter {
 			? coveredPoolNames
 			: new Set([...(coveredPoolNames || [])].map(n => String(n).toLowerCase()));
 
-		const isCovered = (name) => {
-			const key = String(name || "").toLowerCase().trim();
-			if (!key) return false;
-			if (covered.has(key)) return true;
-			// "Stone's Endurance" covers pool "Stone's Endurance"; also fuzzy includes
-			for (const c of covered) {
-				if (!c) continue;
-				if (key === c || key.includes(c) || c.includes(key)) return true;
-			}
-			return false;
-		};
+		const isCovered = resource => covered.has(`id:${resource.id}`) || covered.has(this._normalizeFeatureKey(resource.name));
 
 		const poolNames = [];
 		const pushPool = (raw) => {
 			if (!raw?.name) return;
 			const max = Number(raw.max);
 			if (!Number.isFinite(max) || max <= 0) return;
-			const key = String(raw.name).toLowerCase();
+			const key = raw.id || `${this._normalizeFeatureKey(raw.name)}|${raw.sourceDecisionKey || raw.featureId || raw.classSource || ""}|${max}|${raw.recharge || ""}`;
 			if (seen.has(key)) return;
-			if (isCovered(raw.name)) return;
+			if (isCovered(raw)) return;
 			// Stamina is summarized on the Combat Methods trait header when methods exist.
 			if (/^stamina(\s+points)?$/i.test(String(raw.name)) && (state.getCombatMethods?.() || []).length) return;
 			seen.add(key);
@@ -8580,14 +9007,14 @@ class CharacterSheetNpcExporter {
 			pools.push(`${name} ${displayMax}/${rechargeBit}`);
 		};
 
-		const generic = state.getGenericPoolResources?.() || state.getResources?.() || [];
-		generic.forEach(pushPool);
-
-		const synthetic = state.getSyntheticCombatResources?.() || [];
-		synthetic.forEach(pushPool);
+		const index = this._buildResourceIndex(state);
+		for (const rows of index.values()) {
+			rows.filter(row => row.synthetic || !rows.some(other => other.synthetic && other.featureId === row.featureId))
+				.forEach(pushPool);
+		}
 
 		const staminaMax = Number(state.getStaminaMax?.() || 0);
-		if (staminaMax > 0 && !seen.has("stamina") && !seen.has("stamina points")) {
+		if (staminaMax > 0 && !index.has("stamina") && !index.has("stamina points")) {
 			const cur = Number.isFinite(Number(state.getStaminaCurrent?.()))
 				? Number(state.getStaminaCurrent())
 				: staminaMax;
@@ -8609,7 +9036,7 @@ class CharacterSheetNpcExporter {
 				],
 			};
 		}
-		const list = pools.slice(0, 16).join("; ");
+		const list = (isComplete ? pools : pools.slice(0, 16)).join("; ");
 		return {
 			name: "Class Resources",
 			entries: [
@@ -8624,7 +9051,7 @@ class CharacterSheetNpcExporter {
 			.replace(/\brest\b/gi, "Rest");
 	}
 
-	static _collectCoveredResourceNames (state, {featureBlocks, customAbilityBlocks, itemUseBlocks, methodsBlock} = {}) {
+	static _collectCoveredResourceNames (_state, {featureBlocks, customAbilityBlocks, itemUseBlocks, methodsBlock, spellcastingBlocks = []} = {}) {
 		const names = new Set();
 		const add = (n) => {
 			const key = this._normalizeFeatureKey(n);
@@ -8636,6 +9063,12 @@ class CharacterSheetNpcExporter {
 		const walk = (blocks) => {
 			["trait", "action", "bonus", "reaction"].forEach(sec => {
 				(blocks?.[sec] || []).forEach(entry => {
+					const resource = this._ENTRY_RESOURCES.get(entry);
+					if (resource?.id) {
+						names.add(`id:${resource.id}`);
+						return;
+					}
+					if (!/\(\d+\/[^)]+\)\s*$/i.test(String(entry?.name || ""))) return;
 					const name = String(entry?.name || "").replace(/\s*\(\d+\/[^)]+\)\s*$/i, "").trim();
 					if (name) add(name);
 				});
@@ -8644,11 +9077,10 @@ class CharacterSheetNpcExporter {
 		walk(featureBlocks);
 		walk(customAbilityBlocks);
 		walk(itemUseBlocks);
-
-		// Features/feats with uses on the state also cover their pools even if classified away
-		[...(state.getFeatures?.() || []), ...(state.getFeats?.() || [])].forEach(f => {
-			if (f?.uses?.max > 0 && f?.name) add(f.name);
-		});
+		for (const block of spellcastingBlocks) {
+			const resource = this._ENTRY_RESOURCES.get(block);
+			if (resource?.id) names.add(`id:${resource.id}`);
+		}
 
 		if (methodsBlock) add("Stamina");
 		return names;
@@ -8777,9 +9209,9 @@ class CharacterSheetNpcExporter {
 	static _getSpecialEquipmentBlock (state) {
 		const carried = this.getInventoryItemsForNpcExport(state).filter(it => !!it);
 		const magic = carried.filter(it => this._isMagicItem(it));
-		const poisonLine = this._getCarriedPoisonEntries(carried);
+		const poisonLines = this._getCarriedPoisonEntries(carried, {npcName: this._getNpcReferenceName(state.getName?.() || "The NPC")});
 
-		if (!magic.length && !poisonLine) return null;
+		if (!magic.length && !poisonLines.length) return null;
 
 		const consumables = magic.filter(it => this._isConsumableItem(it));
 		// A dozen Ioun Stones would eat the whole equipment list one bullet at a time, and
@@ -8796,15 +9228,12 @@ class CharacterSheetNpcExporter {
 				// Ioun stones only confer benefits while orbiting (equipped).
 				if (this._isIounStoneItem(item)) notes.push(item.equipped ? "orbiting" : "stowed");
 				else if (!item.equipped) notes.push("carried");
-				if (Number.isFinite(Number(item.charges)) && Number(item.charges) > 0) {
-					const current = Number.isFinite(Number(item.chargesCurrent)) ? Number(item.chargesCurrent) : Number(item.charges);
-					notes.push(`${current}/${Number(item.charges)} charges`);
-				}
+				const chargeLabel = this._getItemChargeLabel(item);
+				if (chargeLabel) notes.push(chargeLabel);
 				// Deliberately no `activation:` note — it is the sheet's internal field name,
 				// and the item's own ability block already lands in the right action section.
 				return `• ${tag}${notes.length ? ` (${notes.join("; ")})` : ""}`;
-			})
-			.slice(0, 14);
+			});
 
 		if (stones.length > 2) {
 			const orbiting = stones.filter(it => it.equipped);
@@ -8819,7 +9248,7 @@ class CharacterSheetNpcExporter {
 			if (counted) entries.push(`• {@b Consumables:} ${counted}.`);
 		}
 
-		if (poisonLine) entries.push(poisonLine);
+		entries.push(...poisonLines);
 
 		if (!entries.length) return null;
 
@@ -8901,7 +9330,7 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} opts
 	 * @param {string} opts.npcName creature name
 	 */
-	static _foldFormTraitOntoLines (out, {npcName = "The NPC"} = {}) {
+	static _foldFormTraitOntoLines (out, {npcName = "The NPC", state = null} = {}) {
 		const form = (out.trait || []).find(it => /\b(?:hybrid|wild|avatar|beast)\s+form$/i.test(String(it?.name || "").trim()));
 		if (!form || !Array.isArray(form.entries)) return;
 		const labelName = String(form.name).trim();
@@ -8936,7 +9365,7 @@ class CharacterSheetNpcExporter {
 					return;
 				}
 				if (/\bunarmed strikes?\b/i.test(this._getPlainMatchText(unit)) && /(?:\{@damage |\b\d*d\d+\b)/.test(unit)) {
-					const minted = this._mintFormUnarmedStrike(unit, labelName, out, npcName);
+					const minted = this._mintFormUnarmedStrike(unit, labelName, state, npcName);
 					if (minted) {
 						out.action = out.action || [];
 						if (!out.action.some(it => it.name === minted.name)) out.action.push(minted);
@@ -9042,20 +9471,32 @@ class CharacterSheetNpcExporter {
 
 	/**
 	 * Build the attack entry a form's unarmed-strike clause describes, reusing the
-	 * creature's best melee attack bonus so the line is usable without cross-referencing.
+	 * form's own attack calculation, never another weapon's magical accuracy.
 	 *
 	 * @param {string} clause the form clause
 	 * @param {string} label form name
-	 * @param {Object} out monster object
+	 * @param {Object} state character state
 	 * @param {string} npcName creature name
 	 * @returns {Object|null} attack entry, or `null` when the clause is not specific enough
 	 */
-	static _mintFormUnarmedStrike (clause, label, out, npcName) {
+	static _mintFormUnarmedStrike (clause, label, state, npcName) {
+		if (/\bhybrid\b/i.test(label)) {
+			const hybrid = this._getHybridUnarmedStrike(state);
+			if (hybrid) return hybrid;
+		}
 		const dice = /\{@damage ([^}]+)\}/.exec(clause)?.[1] || /\b(\d*d\d+)\b/.exec(clause)?.[1];
 		if (!dice) return null;
 		const type = /(?:\}|\d)\s*([a-z]+(?:\s+or\s+[a-z]+)?)\s+damage/i.exec(clause)?.[1] || "bludgeoning";
-		const hit = /\{@hit \\?"?([+-]?\d+)/.exec(JSON.stringify(out.action || []))?.[1];
-		if (!hit) return null;
+		if (!state) return null;
+		const attack = {
+			isUnarmedStrike: true,
+			isMelee: true,
+			abilityMod: /\buse Dexterity instead of Strength\b/i.test(clause) ? "finesse" : "str",
+			damage: dice,
+			damageType: type,
+		};
+		const hit = this._toSignedStr(this._getAttackToHit(attack, state));
+		const damage = this._getAttackDamageText(attack, state);
 
 		const notes = [];
 		if (/\bone additional unarmed strike as a bonus action\b/i.test(clause)) notes.push(`${npcName} can make one additional unarmed strike as a bonus action.`);
@@ -9065,7 +9506,25 @@ class CharacterSheetNpcExporter {
 		const extra = notes.length ? ` ${notes.join(" ")}` : "";
 		return {
 			name: `Unarmed Strike (${label})`,
-			entries: [`{@atk mw} {@hit ${hit}} to hit, reach 5 ft., one target. {@h} {@damage ${dice}} ${type} damage.${extra}`],
+			entries: [`{@atk mw} {@hit ${hit}} to hit, reach 5 ft., one target. {@h} ${damage}.${extra}`],
+		};
+	}
+
+	static _getHybridUnarmedStrike (state) {
+		const effects = state?.getBloodHunterHybridEffects?.() || [];
+		const natural = effects.filter(effect => effect.type === "attack");
+		if (!natural.length) return null;
+		const calculations = state.getFeatureCalculations();
+		const attack = {
+			...natural[0],
+			damageType: [...new Set(natural.map(effect => effect.damageType))].join(" or "),
+			damageBonus: (Number(natural[0].damageBonus) || 0) + (Number(calculations.hybridDamageBonus) || 0),
+			range: "5 ft.",
+		};
+		const hit = this._toSignedStr(this._getAttackToHit(attack, state));
+		return {
+			name: "Unarmed Strike (Hybrid Form)",
+			entries: [`Only while in Hybrid Form. {@atk mw} {@hit ${hit}} to hit, reach 5 ft., one target. {@h} ${this._getAttackDamageText(attack, state)}. Its Crimson Rite can be applied to these strikes.`],
 		};
 	}
 
@@ -9078,10 +9537,10 @@ class CharacterSheetNpcExporter {
 		"carrion crawler mucus": {dc: 13, fail: "", success: ""},
 		"assassin's blood": {dc: 10, fail: "6", success: "3"},
 		"malice": {dc: 15, fail: "", success: ""},
-		"midnight tears": {dc: 17, fail: "31d6", success: "15d6"},
+		"midnight tears": {dc: 17, fail: "9d6", success: "half"},
 		"oil of taggit": {dc: 13, fail: "", success: ""},
 		"pale tincture": {dc: 16, fail: "1d6", success: ""},
-		"torpor": {dc: 15, fail: "", success: ""},
+		"torpor": {dc: 15, fail: "", success: "", effect: "On a failed save, the creature is {@condition poisoned} for {@dice 4d6} hours and is {@condition incapacitated} while poisoned"},
 		"truth serum": {dc: 11, fail: "", success: ""},
 		"burnt othur fumes": {dc: 13, fail: "3d6", success: ""},
 		"essence of ether": {dc: 15, fail: "", success: ""},
@@ -9100,7 +9559,7 @@ class CharacterSheetNpcExporter {
 	 * @param {Array} items inventory items
 	 * @returns {string} a bullet line, or `""` when the creature carries no poison
 	 */
-	static _getCarriedPoisonEntries (items) {
+	static _getCarriedPoisonEntries (items, {npcName = "The NPC"} = {}) {
 		const seen = new Map();
 		(items || []).forEach(item => {
 			const name = String(item?.name || "").trim();
@@ -9111,21 +9570,32 @@ class CharacterSheetNpcExporter {
 			if (!this._POISON_FACTS[key] && !/poison|venom/i.test(name)) return;
 			seen.set(key, {item, count: (seen.get(key)?.count || 0) + (Number(item.quantity) || 1)});
 		});
-		if (!seen.size) return "";
+		if (!seen.size) return [];
 
 		const parts = [...seen.values()].map(({item, count}) => {
 			const tag = this._getItemTag(item);
-			const facts = this._POISON_FACTS[String(item.name || "").toLowerCase()];
 			const qty = count > 1 ? ` ×${count}` : "";
+			const rules = this._getItemRuleParagraphs(item).map(row => row.text).filter(Boolean);
+			if (rules.length) {
+				const body = this._normalizeAbilityTextForNpc(rules.join(" "), {npcName, maxLen: Number.POSITIVE_INFINITY, featureLevel: null, preserveRules: true});
+				return `${tag}${qty}: ${this._enrichNpcTags(body)}`;
+			}
+			const facts = !item.source || String(item.source).toUpperCase() === "DMG"
+				? this._POISON_FACTS[String(item.name || "").toLowerCase()]
+				: null;
 			if (!facts) return `${tag}${qty}`;
 			// Nested parentheses read badly and trip the balance check, so the whole fact
 			// stays inside one pair.
 			const damage = facts.fail
 				? `, {@damage ${facts.fail}} poison damage${facts.success ? `, half as much on a success` : ""}`
 				: "";
-			return `${tag}${qty} ({@dc ${facts.dc}} Constitution save${damage})`;
+			return `${tag}${qty} ({@dc ${facts.dc}} Constitution save${damage}${facts.effect ? `; ${facts.effect}` : ""})`;
 		});
-		return `• {@b Poisons:} ${parts.join("; ")}. Coating a weapon or piece of ammunition with an injury poison takes an action, and the coating lasts until it hits or 1 minute passes.`;
+		return [
+			"• {@b Poisons:}",
+			...parts.map(part => `• ${part.replace(/\.\s*$/, "")}.`),
+			"Coating a weapon or piece of ammunition with an injury poison takes an action, and the coating lasts until it hits or 1 minute passes.",
+		];
 	}
 
 	/**
@@ -9188,7 +9658,6 @@ class CharacterSheetNpcExporter {
 			counts.set(tag, (counts.get(tag) || 0) + qty);
 		});
 		return [...counts.entries()]
-			.slice(0, 10)
 			.map(([tag, n]) => (n > 1 ? `${tag} x${n}` : tag))
 			.join(", ");
 	}
@@ -9273,15 +9742,68 @@ class CharacterSheetNpcExporter {
 		return out;
 	}
 
-	static _getGemstoneNotesBlock (state) {
+	static _getGemstoneNotesBlock (state, {npcName = "The NPC"} = {}) {
+		const effects = state.getGemstoneEffects?.() || [];
+		if (effects.length) {
+			const entries = effects.map(effect => {
+				const source = effect.entries?.length ? effect.entries : [effect.summary, ...(effect.notes || [])].filter(Boolean);
+				if (!effect.entries?.length) {
+					this._activeItemDiagnostics?.set(`${effect.hostItemId}|${effect.name}`, {
+						entity: `${effect.hostItem.name} — ${effect.name}`,
+						source: effect.source || "TGTT",
+						reason: "Full gemstone source rules are unavailable; only the available summary is exported. Load the source catalog before relying on this procedure.",
+						entries: this._getSanitizedItemEntries(source),
+					});
+				}
+				return {
+					type: "entries",
+					name: `${effect.hostItem.name} — ${effect.name}${effect.gemName ? ` (${effect.gemName})` : ""}`,
+					entries: this._normalizeItemRuleEntries(this._getSanitizedItemEntries(source), state, {npcName}),
+				};
+			});
+			const block = {name: "Gemstone Effects", entries};
+			this._activeItemRules?.set("gemstone effects", {section: "trait", entry: this._getSanitizedExportEntry(block)});
+			return block;
+		}
 		const passiveNotes = (state.getGemstonePassiveNotes?.() || [])
-			.map(n => this._getSafeInlineText(String(n || ""), {maxLen: 240}))
+			.map(n => this._normalizeAbilityTextForNpc(String(n || ""), {npcName, maxLen: Number.POSITIVE_INFINITY, preserveRules: true}))
 			.filter(Boolean);
 		if (!passiveNotes.length) return null;
+		this._activeItemDiagnostics?.set("gemstone effects", {
+			entity: "Gemstone Effects",
+			source: "",
+			reason: "Only legacy gemstone summaries are available; full host-qualified procedures could not be recovered.",
+			entries: passiveNotes,
+		});
 		return {
 			name: "Gemstone Effects",
 			entries: passiveNotes,
 		};
+	}
+
+	static _retainItemRuleEntries (monster, state) {
+		const npcName = this._getNpcReferenceName(state.getName?.() || "The NPC");
+		for (const {section, entry} of this._activeItemRules.values()) {
+			const key = this._getStatblockDedupeKey(this._getPlainMatchTextCased(entry.name));
+			for (const otherSection of ["trait", "action", "bonus", "reaction"]) {
+				monster[otherSection] = (monster[otherSection] || []).filter(other => this._getStatblockDedupeKey(this._getPlainMatchTextCased(other.name)) !== key);
+			}
+			entry.entries = this._normalizeItemRuleEntries(entry.entries, state, {npcName});
+			this._stripItemSelfEcho({[section]: [entry]});
+			(monster[section] ||= []).push(entry);
+		}
+		this._orderTraitsForReading(monster);
+	}
+
+	static _normalizeItemRuleEntries (entries, state, {npcName}) {
+		const projected = this._mapExportEntryStrings(entries, text => this._enrichNpcTags(this._resolveSaveDcFormulas(this._normalizeAbilityTextForNpc(text, {
+			npcName, maxLen: Number.POSITIVE_INFINITY, featureLevel: null, preserveRules: true,
+		}), state)), {isContentOnly: true});
+		const surface = {trait: [{entries: projected}]};
+		this._applyResidualGrammar(surface);
+		this._enrichHoverTags(surface, state);
+		this._splitOverlongParagraphs(surface);
+		return surface.trait[0].entries;
 	}
 
 	/**
@@ -9358,7 +9880,8 @@ class CharacterSheetNpcExporter {
 	static _getMaterialPowerSection (power) {
 		const authored = String(power?.actionType || "").toLowerCase();
 		const mapped = {bonus: "bonus", reaction: "reaction", action: "action", attack: "action"}[authored] || null;
-		return mapped || this._getActivationSectionFromText(power?.description || "");
+		const inferred = this._getActivationSectionFromText(power?.description || "");
+		return mapped || (inferred === "trait" ? null : inferred);
 	}
 
 	/**
@@ -9470,16 +9993,17 @@ class CharacterSheetNpcExporter {
 		const seenNames = new Set();
 		const seenBodies = new Set();
 
-		const pushEntry = (section, entry) => {
+		const pushEntry = (section, entry, sourceItem = null) => {
 			const key = this._normalizeFeatureKey(entry?.name);
 			if (key && seenNames.has(key)) return;
-			const bodySig = this._getEntryBodySignature((entry?.entries || [])[0]);
+			const bodySig = sourceItem ? "" : this._getEntryBodySignature((entry?.entries || [])[0]);
 			// Two items granting the same benefit (Robe "Magic Resistance" vs Necklace
 			// "Master Smith's Aegis") should print once.
 			if (bodySig && seenBodies.has(bodySig)) return;
 			if (key) seenNames.add(key);
 			if (bodySig) seenBodies.add(bodySig);
 			(out[section] || out.action).push(entry);
+			if (sourceItem) this._activeItemRules?.set(key, {section, itemId: sourceItem.id, entry: this._getSanitizedExportEntry(entry)});
 		};
 
 		items.forEach(item => {
@@ -9489,13 +10013,16 @@ class CharacterSheetNpcExporter {
 
 			namedKids.forEach(child => {
 				const section = this._getActivationSectionFromText(child.text) || "trait";
+				if (section === "trait" && this._activeWeaponRuleItemIds?.has(item.id)
+					&& !/\bforgo (?:the first attack|one of)|\breplace one of (?:its|your) attacks\b/i.test(child.text)) return;
 				// Skip pure attack restatements already covered by the weapon action line
 				if (this._isItemEntryAttackRestatement(child, item)) return;
 				if (this._isItemEntryAlreadyOnBlock(child)) return;
 				if (this._isItemEntryBearerAgnostic(child)) return;
 				if (this._isItemEntryUnownedVariant(child, item, ownedItemKeys)) return;
 				if (this._isStatOnlyItemSnippet(this._stripHtmlTags(child.text || ""))) return;
-				const usesBit = this._extractUsesFromItemText(child.text);
+				const chargeLabel = this._getItemChargeLabel(item);
+				const usesBit = chargeLabel ? `(${chargeLabel})` : this._extractUsesFromItemText(child.text);
 				// "Ioun Stone #010, Pearly White Spindle — Stone Effect" is nine words of
 				// catalogue index for one ability. The stone's colour is its name.
 				const isStone = this._isIounStoneItem(item);
@@ -9506,10 +10033,10 @@ class CharacterSheetNpcExporter {
 					? `Ioun Stone \u2014 ${itemName.replace(/^ioun stone\s*#?\d*,?\s*/i, "")}`
 					: `${itemName} \u2014 ${child.name}`;
 				const displayName = usesBit ? `${baseName} ${usesBit}` : baseName;
-				const body = this._prepareFeatureEntriesForNpc(child.text, {npcName});
+				const body = this._normalizeItemRuleEntries(this._getSanitizedItemEntries(child.entries), state, {npcName});
 				if (!body.length) return;
 				emittedNamed = true;
-				pushEntry(section, {name: displayName, entries: body});
+				pushEntry(section, {name: displayName, entries: body}, item);
 			});
 
 			// Fallback: structured activation without named children
@@ -9527,7 +10054,7 @@ class CharacterSheetNpcExporter {
 				};
 				if (activationTypes.has("reaction")) pushEntry("reaction", entry);
 				else if (activationTypes.has("bonus")) pushEntry("bonus", entry);
-				else pushEntry("action", entry);
+				else 				pushEntry("action", entry, item);
 			}
 		});
 
@@ -9542,6 +10069,11 @@ class CharacterSheetNpcExporter {
 		const spellsByItem = new Map();
 		spells.forEach(sp => {
 			const itemName = this._getSafeInlineText(sp?.sourceItem || "Magic Item", {maxLen: 80}) || "Magic Item";
+			const ownerItem = items.find(item => sp.itemId ? item.id === sp.itemId : item.name === itemName);
+			const parsed = this._parseSpellUid(sp.name, sp.source);
+			const covered = [...(this._activeItemRules?.values() || [])].some(rule => ownerItem?.id && rule.itemId === ownerItem.id
+				&& [...JSON.stringify(rule.entry.entries).matchAll(/\{@spell ([^|}]+)/g)].some(match => match[1].toLowerCase() === parsed.name.toLowerCase()));
+			if (covered) return;
 			if (!spellsByItem.has(itemName)) spellsByItem.set(itemName, []);
 			spellsByItem.get(itemName).push(sp);
 		});
@@ -9549,10 +10081,10 @@ class CharacterSheetNpcExporter {
 		spellsByItem.forEach((itemSpells, itemName) => {
 			const byUsage = new Map();
 			itemSpells.forEach(sp => {
-				const {name: spellName, source: spellSrc} = this._parseSpellUid(sp?.name, sp?.source);
+				const parsed = this._parseSpellUid(sp?.name, sp?.source);
 				const usage = this._getItemSpellUsageText(sp) || "";
 				if (!byUsage.has(usage)) byUsage.set(usage, []);
-				byUsage.get(usage).push(this._formatSpellTag({name: spellName, source: spellSrc}, {showProvenance: false}));
+				byUsage.get(usage).push(this._formatSpellTag(parsed, {showProvenance: false}));
 			});
 
 			const clauses = [...byUsage.entries()].map(([usage, tags]) => {
@@ -9591,8 +10123,6 @@ class CharacterSheetNpcExporter {
 		if (!text) return true;
 		const hasActionEconomy = /\b(?:an? action|bonus action|reaction|attack roll|damage roll)\b/.test(text);
 
-		// Charge economy is DM bookkeeping; the charge total is already on the item entry.
-		if (/regains?\b[^.]{0,40}\bcharges?\b/.test(text)) return true;
 		// Pure AC restatement — already folded into the block's Armor Class.
 		if (name === "armor" && /\barmor class\b/.test(text)) return true;
 		// Pure caster-stat restatement — already folded into the spellcasting header.
@@ -9671,24 +10201,31 @@ class CharacterSheetNpcExporter {
 
 	static _getNamedItemEntryChildren (item) {
 		const out = [];
-		const walk = (entries) => {
-			if (!Array.isArray(entries)) return;
-			entries.forEach(ent => {
-				if (!ent || typeof ent !== "object") return;
+		const loose = [];
+		const walk = entries => {
+			for (const ent of entries || []) {
+				if (typeof ent === "string") {
+					if (!this._isGenericItemClassPreamble(ent, item)) loose.push(ent);
+					continue;
+				}
+				if (!ent || typeof ent !== "object") continue;
 				if (ent.type === "entries" && ent.name && Array.isArray(ent.entries)) {
-					const text = ent.entries
-						.map(e => (typeof e === "string" ? e : (e?.entries || []).map(x => typeof x === "string" ? x : "").join(" ")))
-						.join(" ");
 					out.push({
 						name: this._getSafeInlineText(ent.name, {maxLen: 80}) || "Property",
-						text: text || "",
+						entries: [...ent.entries],
 					});
+					continue;
 				}
-				if (Array.isArray(ent.entries)) walk(ent.entries);
-			});
+				// Source books often put a procedure's table immediately after its named block.
+				if (ent.type === "table" && out.length) out[out.length - 1].entries.push(ent);
+				else if (Array.isArray(ent.entries)) walk(ent.entries);
+				else loose.push(ent);
+			}
 		};
 		walk(item?.entries);
-		return out.slice(0, 12);
+		walk(item?.additionalEntries);
+		if (loose.some(ent => typeof ent !== "string" || this._hasMechanicalToken(ent))) out.push({name: "Properties", entries: loose});
+		return out.map(child => ({...child, text: this._getItemRuleParagraphs(child).map(row => row.text).join(" ")}));
 	}
 
 	static _isItemEntryAttackRestatement (child, item) {
@@ -9708,9 +10245,23 @@ class CharacterSheetNpcExporter {
 		if (/once per day/i.test(t)) return "(1/Day)";
 		if (/once per long rest/i.test(t)) return "(1/LR)";
 		if (/once per short rest/i.test(t)) return "(1/SR)";
-		const m = t.match(/(\d+)\s*(?:charges?|uses?)\b/i);
-		if (m) return `(${m[1]})`;
+		const m = t.match(/\b(?:has|holds|contains|maximum of)\s+([1-9]\d*)\s*(?:charges?|uses?)\b/i);
+		if (m) return `(${m[1]} charges)`;
 		return "";
+	}
+
+	static _getItemChargeLabel (item) {
+		if (item?.charges == null) return "";
+		const max = Number(item.charges);
+		if (!Number.isFinite(max) || max <= 0) return "";
+		const current = Number(item.chargesCurrent ?? item.charges);
+		const known = Number.isFinite(current) && current >= 0 && current <= max;
+		const isStone = this._isIounStoneItem(item);
+		const remaining = known && isStone && typeof CharacterSheetIoun !== "undefined"
+			? CharacterSheetIoun.getChargesRemaining(item)
+			: known ? current : "unknown";
+		const absorption = isStone && /\babsor[bp]\w*\b[\s\S]{0,80}\bspell levels?\b/i.test(this._flattenEntriesValue(item.entries));
+		return `${remaining}/${max} ${absorption ? "spell levels remaining" : "charges"}`;
 	}
 
 	/**
@@ -9749,8 +10300,12 @@ class CharacterSheetNpcExporter {
 		const parts = String(rawName || "").split("|");
 		const bareName = this._getSafeInlineText(parts[0] || "spell", {maxLen: 80}) || "spell";
 		const uidSource = parts.length > 1 ? parts[1] : "";
-		const source = this._getSafeSourceJson(rawSource || uidSource || Parser.SRC_XPHB) || Parser.SRC_XPHB;
-		return {name: this._toDisplayTitleCase(bareName), source};
+		const suffix = /#([1-9])$/i.exec(uidSource || rawSource || "");
+		// Old item-grant projections stripped "#" before storing the source.
+		const sourceValue = suffix && String(rawSource || "").toLowerCase() === uidSource.replace("#", "").toLowerCase()
+			? uidSource : rawSource || uidSource || Parser.SRC_XPHB;
+		const source = this._getSafeSourceJson(String(sourceValue).split("#")[0]) || Parser.SRC_XPHB;
+		return {name: this._toDisplayTitleCase(bareName), source, ...(suffix ? {castAtLevel: Number(suffix[1])} : {})};
 	}
 
 	static _toDisplayTitleCase (text) {
@@ -9798,7 +10353,7 @@ class CharacterSheetNpcExporter {
 		const joined = (benefit.length ? benefit : paragraphs).join(" ");
 		// The full prose pipeline, not the inline sanitiser: an item benefit is a sentence,
 		// so it must keep its {@spell}/{@dice} markup and be cut on a sentence boundary.
-		const prose = this._prepareFeatureTextForNpc(joined, {npcName, maxLen: 240});
+		const prose = this._normalizeAbilityTextForNpc(joined, {npcName, maxLen: Number.POSITIVE_INFINITY, preserveRules: true});
 		if (prose) return prose;
 
 		if (Number.isFinite(Number(item.charges)) && Number(item.charges) > 0) {
@@ -9936,6 +10491,8 @@ class CharacterSheetNpcExporter {
 	static _getFeatureGrantedAttacks (state, calculations = {}, {npcName = "The NPC"} = {}) {
 		const out = [];
 		const pb = state.getProficiencyBonus?.() || 0;
+		const hybridStrike = this._getHybridUnarmedStrike(state);
+		if (hybridStrike) out.push(hybridStrike);
 
 		(state?._data?.features || []).forEach(feature => {
 			const raw = this._stripHtmlTags(
@@ -10010,11 +10567,11 @@ class CharacterSheetNpcExporter {
 
 	static _getConditionalDamageRiders (state, calculations = {}) {
 		const riders = [];
-		const push = (damage, condition, {meleeOnly = true, sourceName = "", damageType = "", wholeFeature = false, named = false, appliesTo = "", onlyWeapon = "", specificity = 0} = {}) => {
+		const push = (damage, condition, {meleeOnly = true, sourceName = "", damageType = "", wholeFeature = false, replacesAttack = false, named = false, appliesTo = "", onlyWeapon = "", specificity = 0} = {}) => {
 			const value = String(damage ?? "").trim();
 			if (!value || value === "0") return;
-			if (riders.some(r => r.condition === condition && r.onlyWeapon === onlyWeapon)) return;
-			const record = {damage: value, condition, meleeOnly, sourceName, damageType, wholeFeature, named: named || wholeFeature, appliesTo, onlyWeapon, specificity};
+			if (riders.some(r => r.condition === condition && r.onlyWeapon === onlyWeapon && r.sourceName === sourceName && r.damage === value && r.damageType === damageType)) return;
+			const record = {damage: value, condition, meleeOnly, sourceName, damageType, wholeFeature, replacesAttack, named: named || wholeFeature, appliesTo, onlyWeapon, specificity};
 			// One feature can register the same bonus twice under differently-worded
 			// conditionals (Dueling does), which reads as two separate riders on the line.
 			// The copies are not interchangeable: the sub-typed one (`damage:melee:oneHanded`)
@@ -10038,15 +10595,24 @@ class CharacterSheetNpcExporter {
 
 		push(calculations.demolishingMightConstructDamage, "against Constructs", {sourceName: "Demolishing Might"});
 		push(calculations.brutalStrikeDamage, "when forgoing Advantage from Reckless Attack", {sourceName: "Brutal Strike"});
+		push(calculations.divineFuryDamage, "on the first hit on each of its turns while raging", {
+			sourceName: "Divine Fury",
+			damageType: this._getFeatureStatedDamageType(state, "Divine Fury") || "necrotic or radiant",
+			meleeOnly: false,
+			replacesAttack: true,
+			named: true,
+		});
 
 		// Divine Strike and Improved Divine Smite are extra damage on a weapon hit and
 		// nothing else, so a trait restating them is pure duplication of the attack line
 		// they belong on — `wholeFeature` retires the trait once the rider is printed.
 		// The feature's own text is more authoritative about the damage type than the
 		// derived calculation, which can lag behind a subclass rebuild.
-		push(calculations.divineStrikeDamage, "once per turn", {
+		const divineStrike = (calculations.weaponDamageRiders || []).find(rider => rider.id === "clericDivineStrike");
+		push(divineStrike?.dice || calculations.divineStrikeDamage, "once per turn on its turn", {
 			sourceName: "Divine Strike",
-			damageType: this._getFeatureStatedDamageType(state, "Divine Strike") || calculations.divineStrikeType || "",
+			damageType: divineStrike?.damageTypeChoices?.join(" or ") || this._getFeatureStatedDamageType(state, "Divine Strike") || calculations.divineStrikeType || "",
+			meleeOnly: false,
 			wholeFeature: true,
 		});
 		// The 2024 Paladin renamed Improved Divine Smite; same mechanic, same duplication.
@@ -10221,42 +10787,39 @@ class CharacterSheetNpcExporter {
 			if (!item || !weapon) return;
 			const weaponKey = this._normalizeFeatureKey(weapon);
 
-			const candidates = [];
-			(item.entries || []).forEach(entry => {
-				if (typeof entry === "string") candidates.push({label: "", text: entry});
-				else (entry?.entries || []).forEach(line => typeof line === "string" && candidates.push({label: entry.name || "", text: line}));
-			});
+			const candidates = this._getItemRuleParagraphs(item);
 			(item.itemPowers || []).forEach(power => power?.description && candidates.push({label: power.name || "", text: power.description}));
 
 			candidates.forEach(({label, text}) => {
 				if (!this._ITEM_HIT_TRIGGER.test(text)) return;
 				if (this._ITEM_OPTIONAL_RIDER.test(text)) return;
-				const match = this._ITEM_EXTRA_DAMAGE.exec(text);
-				if (!match) return;
-				const damage = match[1];
-				const damageType = String(match[2] || "").toLowerCase();
-				const key = `${weaponKey}|${damage}|${damageType}`;
-				if (seen.has(key)) return;
-				seen.add(key);
+				if (/\b(?:if|unless|while|against|expend|spend|charges?|saving throw|once per)\b/i.test(text)) return;
+				for (const match of text.matchAll(new RegExp(this._ITEM_EXTRA_DAMAGE.source, "gi"))) {
+					const damage = match[1];
+					const damageType = String(match[2] || "").toLowerCase();
+					const key = `${weaponKey}|${damage}|${damageType}`;
+					if (seen.has(key)) continue;
+					seen.add(key);
 
-				const firstTime = this._ITEM_FIRST_TIME.exec(text);
-				const target = firstTime ? this._getSafeInlineText(firstTime[1], {maxLen: 40}) : "";
-				const condition = firstTime
-					? `${target ? `against ${target} creatures, ` : ""}1/turn`
-					: "";
-				const name = this._getSafeInlineText(label, {maxLen: 60});
-				const sourceName = name && this._normalizeFeatureKey(name) !== weaponKey ? name : "";
-				riders.push({
-					damage,
-					damageType,
-					condition,
-					meleeOnly: false,
-					onlyWeapon: weapon,
-					sourceName,
-					named: !!sourceName,
-					wholeFeature: false,
-					appliesTo: "",
-				});
+					const firstTime = this._ITEM_FIRST_TIME.exec(text);
+					const target = firstTime ? this._getSafeInlineText(firstTime[1], {maxLen: 40}) : "";
+					const condition = firstTime
+						? `${target ? `against ${target} creatures, ` : ""}1/turn`
+						: "";
+					const name = this._getSafeInlineText(label, {maxLen: 60});
+					const sourceName = name && this._normalizeFeatureKey(name) !== weaponKey ? name : "";
+					riders.push({
+						damage,
+						damageType,
+						condition,
+						meleeOnly: false,
+						onlyWeapon: weapon,
+						sourceName,
+						named: !!sourceName,
+						wholeFeature: false,
+						appliesTo: "",
+					});
+				}
 			});
 		});
 		return riders;
@@ -10292,9 +10855,11 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} attack
 	 * @returns {string}
 	 */
-	static _formatDamageRidersForAttack (riders, attack) {
+	static _formatDamageRidersForAttack (riders, attack, emittedRiders = null) {
 		if (!riders?.length) return "";
-		const applicable = this._coalesceDamageRiders(riders.filter(rider => this._riderAppliesToAttack(rider, attack)));
+		const matched = riders.filter(rider => this._riderAppliesToAttack(rider, attack));
+		matched.forEach(rider => emittedRiders?.add(rider));
+		const applicable = this._coalesceDamageRiders(matched);
 		if (!applicable.length) return "";
 		return applicable
 			.map(rider => {
@@ -10396,7 +10961,28 @@ class CharacterSheetNpcExporter {
 		return this._isRangedOnlyAttack(attack);
 	}
 
-	static _getActionEntriesFromAttacks (attacks, state, {damageRiders = [], claimedMaterialPowerIds = null, npcName = "The NPC"} = {}) {
+	static _getItemRuleParagraphs (item) {
+		const out = [];
+		const visit = (entry, label = "") => {
+			if (typeof entry === "string") return void out.push({label, text: this._stripHtmlTags(entry)});
+			if (Array.isArray(entry)) return void entry.forEach(child => visit(child, label));
+			if (!entry || typeof entry !== "object") return;
+			const name = entry.name || label;
+			["entries", "entry", "items", "rows", "row"].forEach(key => visit(entry[key], name));
+		};
+		visit(item?.entries);
+		visit(item?.additionalEntries);
+		return out;
+	}
+
+	static _weaponReplacesDamage (attack) {
+		return this._getItemRuleParagraphs(attack?._sourceItem).some(({text}) => {
+			const replacement = /\b(?:when (?:you|it) hits? a creature|on a hit)\b[^.;]*\binstead of (?:dealing|inflicting) damage\b/i.exec(text);
+			return replacement && !/\b(?:can|may|if|unless|against)\b/i.test(replacement[0]);
+		});
+	}
+
+	static _getActionEntriesFromAttacks (attacks, state, {damageRiders = [], emittedDamageRiders = null, claimedMaterialPowerIds = null, npcName = "The NPC"} = {}) {
 		const actions = attacks.map(a => {
 			const toHit = this._toSignedStr(this._getAttackToHit(a, state));
 			const range = this._formatAttackRange(a);
@@ -10404,12 +10990,16 @@ class CharacterSheetNpcExporter {
 			const name = this._getSafeInlineText(a.name || "Attack", {maxLen: 80}) || "Attack";
 			const qualifiers = this._getAttackQualifiers(a, state, {claimedMaterialPowerIds, npcName});
 			const atkTag = this._getAttackTypeTag(a);
-			const riders = this._formatDamageRidersForAttack(damageRiders, a);
+			const replacesDamage = this._weaponReplacesDamage(a);
+			const riders = replacesDamage ? "" : this._formatDamageRidersForAttack(damageRiders, a, emittedDamageRiders);
+			const rules = this._getSanitizedItemEntries([...(a._sourceItem?.entries || []), ...(a._sourceItem?.additionalEntries || [])]);
+			if (rules.length && a._sourceItem?.id) this._activeWeaponRuleItemIds?.add(a._sourceItem.id);
 
 			return {
 				name,
 				entries: [
-					`{@atk ${atkTag}} {@hit ${toHit}} to hit, ${range}. {@h} ${hitDamage}${riders}.${qualifiers ? ` ${qualifiers}` : ""}`,
+					`{@atk ${atkTag}} {@hit ${toHit}} to hit, ${range}. {@h} ${replacesDamage ? "Apply the replacement effect in the weapon rules below instead of damage" : `${hitDamage}${riders}`}.${qualifiers ? ` ${qualifiers}` : ""}`,
+					...(rules.length ? [{type: "entries", name: "Weapon Rules (including effects summarized above)", entries: rules}] : []),
 				],
 			};
 		});
@@ -10549,7 +11139,7 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _isRangedOnlyAttack (attack) {
-		const type = String(attack?._sourceItem?.type || attack?.type || "").split("|")[0];
+		const type = String(attack?._sourceItem?.typeCode || attack?._sourceItem?.type || attack?.type || "").split("|")[0];
 		if (type === "R" || type === "RW") return true;
 		if (attack?.isMelee === false) return true;
 		return false;
@@ -10629,6 +11219,11 @@ class CharacterSheetNpcExporter {
 
 	static _getAttackAbilityMod (attack, state) {
 		if (!attack) return state.getAbilityMod?.("str") || 0;
+		const canonical = state.getAttackAbilityBreakdown?.({
+			...attack,
+			sourceItem: attack._sourceItem || attack.sourceItem,
+		}, {includeActiveStates: false})?.total;
+		if (Number.isFinite(canonical)) return canonical;
 		if (attack.abilityMod === "finesse") {
 			return Math.max(state.getAbilityMod?.("str") || 0, state.getAbilityMod?.("dex") || 0);
 		}
@@ -10674,12 +11269,7 @@ class CharacterSheetNpcExporter {
 			if (eff.bonusDamageDice) parts.push(`Plus {@damage ${eff.bonusDamageDice}} ${eff.bonusDamageType} damage`);
 			for (const note of eff.notes) parts.push(note);
 
-			// Gemstone effect summary
-			const gems = sourceItem.socketedGemstones || [];
-			for (const gem of gems) {
-				const summary = CharacterSheetUpgrades.getGemstoneSummary(gem);
-				if (summary) parts.push(`Gemstone (${gem.gemName || gem.name}): ${summary}`);
-			}
+			if (state.getGemstoneEffects?.({hostItemId: sourceItem.id})?.length) parts.push(`Socketed gemstone procedures: see Gemstone Effects for ${sourceItem.name}`);
 		}
 
 		// The two "unusual numbers" a 5e statblock has no field for. Both change how the
@@ -10725,18 +11315,19 @@ class CharacterSheetNpcExporter {
 			}
 		}
 
-		const masteryEffect = state.getMasteryEffectsForAttack?.(attack);
+		const baseName = String(sourceItem?.baseItem || "").split("|")[0];
+		const masteryAttack = baseName && state.hasWeaponMastery?.(baseName)
+			? {...attack, weaponKey: sourceItem.baseItem}
+			: attack;
+		const masteryEffect = state.getMasteryEffectsForAttack?.(masteryAttack);
 		if (masteryEffect?.name) {
 			const masteryNotes = [];
 			if (masteryEffect.dc) masteryNotes.push(`save {@dc ${masteryEffect.dc}}`);
 			if (Number.isFinite(masteryEffect.grazeDamage)) masteryNotes.push(`${masteryEffect.grazeDamage} graze damage`);
-			const desc = this._getSafeInlineText(masteryEffect.description || "", {maxLen: 180});
+			const desc = this._prepareFeatureTextForNpc(masteryEffect.description || "", {npcName, maxLen: Number.POSITIVE_INFINITY});
 			if (desc) masteryNotes.push(desc);
 			const masteryTag = this._getMasteryTag(attack, masteryEffect.name);
 			parts.push(`Mastery: ${masteryTag}${masteryNotes.length ? ` (${masteryNotes.join("; ")})` : ""}`);
-		} else {
-			const masteryName = this._getMasteryName(attack.masteryProperty || attack.mastery?.[0]);
-			if (masteryName) parts.push(`Mastery: ${this._getMasteryTag(attack, masteryName)}`);
 		}
 
 		if (!parts.length) return "";
@@ -10995,11 +11586,8 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _getSpellcastingBlocks (state, {npcName = "The NPC"} = {}) {
-		const blocks = [];
-		const classBlock = this._getClassSpellcastingBlock(state, {npcName});
-		if (classBlock) blocks.push(classBlock);
-		const innateBlock = this._getInnateSpellcastingBlock(state, {npcName});
-		if (innateBlock) blocks.push(innateBlock);
+		const blocks = this._getClassSpellcastingBlocks(state, {npcName});
+		blocks.push(...this._getInnateSpellcastingBlocks(state, {npcName}));
 		const swappableBlocks = this._getSwappableSpellSetBlocks(state, {npcName});
 		blocks.push(...swappableBlocks);
 		const powersBlock = this._getPsionicPowersBlock(state, {npcName});
@@ -11010,7 +11598,7 @@ class CharacterSheetNpcExporter {
 	/** Keep exact spell editions, abilities, and ordinary/Pact routes distinct. */
 	static _getCompanionSpellcastingBlocks (state, {npcName}) {
 		const blocks = [];
-		const cantrips = state.getCantripsKnown();
+		const cantrips = state.getCantripsKnown().map(spell => ({...spell, level: 0}));
 		const known = state.getSpellsKnown();
 		const prepared = state.getPreparedSpells();
 		const slots = state.getSpellSlots();
@@ -11023,14 +11611,14 @@ class CharacterSheetNpcExporter {
 		for (const spell of [...cantrips, ...known]) {
 			const cls = state.getClasses().find(row => row.name === spell.sourceClass
 				&& (!spell.sourceClassSource || row.source === spell.sourceClassSource));
-			const ability = spell.spellcastingAbility || state.getSpellcastingAbilityForClass(cls)
-				|| state.getSpellcastingAbility() || "int";
+			const card = cards.find(card => card.className === cls?.name && card.classSource === cls?.source);
+			const ability = this._getExportSpellAbility(spell, card || {ability: state.getSpellcastingAbilityForClass(cls) || state.getSpellcastingAbility()});
 			const key = `${spell.sourceClass || "Character"}|${spell.sourceClassSource || cls?.source || ""}|${ability}`;
 			if (!groups.has(key)) {
 				groups.set(key, {
 					name: spell.sourceClass || "Character",
 					ability,
-					card: cards.find(card => card.className === cls?.name && card.classSource === cls?.source),
+					card,
 					spells: [],
 				});
 			}
@@ -11040,10 +11628,12 @@ class CharacterSheetNpcExporter {
 			const {dc, atk} = this._getSpellDcAndAttack(state, group.ability);
 			const statistics = group.card?.isRolledPrepared
 				? `${npcName}'s spell save DC is ${group.card.saveDcFormula} and spell attack modifier is ${group.card.attackBonusFormula}, rolled per cast.`
-				: `${npcName}'s spellcasting ability is ${Parser.attAbvToFull(group.ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`;
+				: group.ability
+					? `${npcName}'s spellcasting ability is ${Parser.attAbvToFull(group.ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`
+					: "The casting ability for these saved spells is unresolved.";
 			const header = `${statistics} Slot pools are shared across class lists, not additional pools.`;
 			const block = {type: "spellcasting", name: `Spellcasting (${group.name})`, ability: group.ability, headerEntries: [header]};
-			if (group.card?.isRolledPrepared) delete block.ability;
+			if (group.card?.isRolledPrepared || !group.ability) delete block.ability;
 			const will = group.spells.filter(spell => spell.level === 0).map(spell => this._formatSpellTag(spell));
 			if (will.length) block.will = [...new Set(will)];
 			const spells = {};
@@ -11061,7 +11651,7 @@ class CharacterSheetNpcExporter {
 				blocks.push({
 					type: "spellcasting",
 					name: `Pact Magic (${group.name})`,
-					...(group.card?.isRolledPrepared ? {} : {ability: group.ability}),
+					...(group.card?.isRolledPrepared || !group.ability ? {} : {ability: group.ability}),
 					headerEntries: [header],
 					spells: {[pact.level]: {
 						lower: 1,
@@ -11074,12 +11664,15 @@ class CharacterSheetNpcExporter {
 			}
 		}
 		for (const spell of state.getInnateSpells()) {
-			const {ability, dc, atk} = this._getSpellDcAndAttack(state, spell.spellcastingAbility);
+			const ability = this._getExportSpellAbility(spell, state.getSpellcastingCardForSpell(spell));
+			const {dc, atk} = ability ? this._getSpellDcAndAttack(state, ability) : {};
 			const block = {
 				type: "spellcasting",
 				name: `Innate Spellcasting (${spell.sourceFeature || spell.name})`,
-				ability,
-				headerEntries: [`${npcName}'s spellcasting ability is ${Parser.attAbvToFull(ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`],
+				...(ability ? {ability} : {}),
+				headerEntries: [ability
+					? `${npcName}'s spellcasting ability is ${Parser.attAbvToFull(ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`
+					: "The casting ability for this innate route is unresolved."],
 			};
 			const tag = this._formatSpellTag(spell);
 			if (spell.atWill) block.will = [tag];
@@ -11246,7 +11839,7 @@ class CharacterSheetNpcExporter {
 			if (!tables || typeof tables !== "object") return;
 			const modes = Object.values(tables).filter(refs => Array.isArray(refs) && refs.length);
 			if (modes.length < 2) return;
-			modes.flat().forEach(ref => keys.add(String(ref).split("|")[0].trim().toLowerCase()));
+			modes.flat().forEach(ref => keys.add(String(ref).trim().toLowerCase()));
 		});
 		return keys;
 	}
@@ -11361,7 +11954,7 @@ class CharacterSheetNpcExporter {
 		this._spellCastingTimes = new Map();
 		this._spellCastingTimeLookup = this._getSpellIndexLookup(spellIndex);
 		(state?.getSpells?.() || []).forEach(spell => {
-			const key = String(spell?.name || "").trim().toLowerCase();
+			const key = this._getSpellIdentity(spell);
 			const time = String(spell?.castingTime || "").trim();
 			if (!key || !time || this._spellCastingTimes.has(key)) return;
 			this._spellCastingTimes.set(key, time);
@@ -11393,74 +11986,102 @@ class CharacterSheetNpcExporter {
 		return !/\b(?:can (?:innately )?cast|always have[^.]{0,40}prepared|always has[^.]{0,40}prepared|know(?:s)? (?:the|this) spell|learn(?:s)?[^.]{0,30}spell|added to your|spell list)\b/.test(body);
 	}
 
-	/**
-	 * The sheet carries edition variants of the same spell two ways: under a "5e "
-	 * display prefix, and as separate printings of one spell reached by two routes
-	 * (a class list and a subclass grant), which differ only by source. Either way
-	 * listing both reads as two spells.
-	 *
-	 * @param {Array<string>} tags formatted spell tags
-	 * @returns {Array<string>} tags with redundant edition variants removed
-	 */
-	static _dropEditionVariantSpellTags (tags, {preferredSource = ""} = {}) {
-		const baseNames = new Set();
-		tags.forEach(tag => {
-			const name = (/\{@spell ([^|}]+)/.exec(tag) || [])[1];
-			if (name && !/^5e /i.test(name)) baseNames.add(name.trim().toLowerCase());
-		});
-		const deprefixed = tags.filter(tag => {
-			const name = (/\{@spell ([^|}]+)/.exec(tag) || [])[1] || "";
-			if (!/^5e /i.test(name)) return true;
-			return !baseNames.has(name.replace(/^5e /i, "").trim().toLowerCase());
-		});
-
-		// Same spell, two printings: keep one. A tag carrying a provenance
-		// parenthetical says where the spell came from, so it outranks a bare one;
-		// otherwise defer to the printing the rest of this character uses.
-		const wanted = String(preferredSource || "").toLowerCase();
-		const byName = new Map();
-		deprefixed.forEach(tag => {
-			const key = ((/\{@spell ([^|}]+)/.exec(tag) || [])[1] || tag).trim().toLowerCase();
-			const prev = byName.get(key);
-			if (prev === undefined) return byName.set(key, tag);
-			byName.set(key, this._pickPreferredSpellTag(prev, tag, wanted));
-		});
-		return [...byName.values()];
+	static _getRestrictedSpellFeature (spell, state) {
+		if (!spell.sourceFeature || spell.prepared || spell.alwaysPrepared || spell.inSpellbook) return null;
+		const feature = [...(state.getFeatures?.() || []), ...(state.getFeats?.() || [])].find(row => this._normalizeFeatureKey(row.name) === this._normalizeFeatureKey(spell.sourceFeature));
+		if (!feature) return null;
+		const text = this._getPlainMatchText(feature.description || this._flattenEntriesValue(feature.entries));
+		if (!/\b(?:short or long rest|short rest|long rest|charges?|points?|ends? at|end of|only|unless|instead|as if)\b/.test(text)) return null;
+		this._activeRestrictedSpellFeatures?.set(String(feature.id || feature.name), feature);
+		return feature;
 	}
 
-	/** @returns {string} whichever of two printings of one spell to keep */
-	static _pickPreferredSpellTag (a, b, wanted) {
-		const provA = /\)\s*$/.test(a);
-		const provB = /\)\s*$/.test(b);
-		if (provA !== provB) return provA ? a : b;
-		if (wanted) {
-			const srcA = ((/\{@spell [^|}]+\|([^|}]+)/.exec(a) || [])[1] || "").toLowerCase();
-			const srcB = ((/\{@spell [^|}]+\|([^|}]+)/.exec(b) || [])[1] || "").toLowerCase();
-			if (srcA !== srcB) {
-				if (srcA === wanted) return a;
-				if (srcB === wanted) return b;
+	/** Restricted casting is a source procedure, not a spell roster covered by compact cleanup. */
+	static _retainRestrictedCastingRules (monster, state, options) {
+		const selected = new Set(options.selectedFeatureIds);
+		const features = [...this._activeRestrictedSpellFeatures.values()].filter(feature => options.includeFeatures !== "manual"
+			|| selected.has(String(feature.id || feature.name)) || selected.has(feature.name));
+		if (!features.length) return;
+		const keys = new Set(features.map(feature => this._normalizeFeatureKey(feature.name)));
+		const npcName = this._getNpcReferenceName(state.getName?.() || "The NPC");
+		const blocks = this._getFeatureBlocks(state, {
+			npcName,
+			isComplete: true,
+			includeFeatures: "manual",
+			selectedFeatureIds: features.map(feature => String(feature.id || feature.name)),
+		});
+		for (const section of ["trait", "action", "bonus", "reaction"]) {
+			const kept = (monster[section] || []).filter(entry => !keys.has(this._getStatblockDedupeKey(this._getPlainMatchTextCased(entry.name))));
+			for (const entry of blocks[section]) {
+				const feature = this._ENTRY_FEATURES.get(entry);
+				entry.entries = this._mapExportEntryStrings(entry.entries, text => this._enrichNpcTags(this._normalizeAbilityTextForNpc(text, {
+					npcName,
+					maxLen: Number.POSITIVE_INFINITY,
+					featureLevel: this._getFeatureExportLevel(state, feature),
+					preserveRules: true,
+				})), {isContentOnly: true});
 			}
+			const entries = [...kept, ...blocks[section]];
+			if (entries.length) monster[section] = entries;
+			else delete monster[section];
 		}
-		return a;
+		this._orderTraitsForReading(monster);
 	}
 
-	/**
-	 * A character's spells come from several books; the one they use most is the
-	 * printing the statblock should speak in.
-	 *
-	 * @returns {string} lowercased source abbreviation, or "" when undecidable
-	 */
-	static _getDominantSpellSource (spells) {
-		const counts = new Map();
-		(spells || []).forEach(s => {
-			const src = String(s?.source || "").trim().toLowerCase();
-			if (src) counts.set(src, (counts.get(src) || 0) + 1);
+	static _getSpellIdentity (spell) {
+		return `${String(spell?.name || "").trim().toLowerCase()}|${String(spell?.source || "").trim().toLowerCase()}`;
+	}
+
+	static _recordSpellDiagnostic (spell, reason) {
+		const row = {entity: spell.name, source: spell.source || "", reason, entries: [`Saved spell reference: ${spell.name}|${spell.source || "(missing source)"}.`]};
+		this._activeSpellDiagnostics?.set(`${this._getSpellIdentity(spell)}|${reason}`, row);
+	}
+
+	/** Resolve a detached projection; never repair the stored spell or guess between editions. */
+	static _resolveExportSpell (spell) {
+		const parsed = this._parseSpellUid(spell.name, spell.source);
+		const candidates = this._activeSpellCatalog?.get(parsed.name.toLowerCase())
+			|| this._activeSpellCatalog?.get(parsed.name.replace(/^5e\s+/i, "").toLowerCase()) || [];
+		const exact = candidates.find(row => String(row.source).toLowerCase() === parsed.source.toLowerCase());
+		const identities = new Map(candidates.map(row => [this._getSpellIdentity(row), row]));
+		const full = exact || (identities.size === 1 ? identities.values().next().value : null);
+		if (!full) {
+			if (candidates.length) {
+				this._recordSpellDiagnostic(spell, `Spell source unresolved: ambiguous loaded catalog matches (${[...identities.values()].map(row => row.source).join(", ")}). No edition was inferred.`);
+				return {...spell, ...parsed, _unresolvedSource: true};
+			}
+			if (this._activeSpellCatalog?.size) this._recordSpellDiagnostic(spell, "Spell entity is not reachable in the loaded catalog; its saved source and level remain unverified.");
+			return {...spell, ...parsed, name: String(spell.name || "").includes("|") ? parsed.name : spell.name, ...(this._activeSpellCatalog?.size ? {_unresolvedSource: true} : {})};
+		}
+		if (!exact) this._recordSpellDiagnostic(spell, `Spell source resolved to ${full.source} using the only identity in the loaded catalog; the saved reference is unchanged.`);
+		return {
+			...spell,
+			...parsed,
+			name: full.name,
+			source: full.source,
+			level: full.level,
+			ritual: !!full.meta?.ritual,
+			castingTime: globalThis.CharacterSheetClassUtils.getSpellCastingTime(full) || spell.castingTime,
+		};
+	}
+
+	static _resolveEntrySpellReferences (text) {
+		if (!this._activeSpellCatalog?.size) return text;
+		return text.replace(/\{@spell ([^{}]+)\}/g, (tag, body) => {
+			const [name, source = "PHB", ...display] = body.split("|");
+			const resolved = this._resolveExportSpell({name, source: source || "PHB"});
+			if (resolved._unresolvedSource) return `${display[0] || name} (unresolved spell source: ${source || "PHB"})`;
+			return `{@spell ${[resolved.name, resolved.source, ...display].join("|")}}`;
 		});
-		let best = ""; let bestN = 0;
-		counts.forEach((n, src) => {
-			if (n > bestN) { bestN = n; best = src; }
-		});
-		return best;
+	}
+
+	static _getExportSpellAbility (spell, card) {
+		if (card?.isRolledPrepared) return null;
+		const explicit = String(spell.spellcastingAbility || "").trim().toLowerCase();
+		const value = explicit && explicit !== "inherit" ? explicit : card?.ability;
+		const ability = Parser.ABIL_ABVS.find(abv => value === abv || String(value || "").toLowerCase() === Parser.attAbvToFull(abv).toLowerCase());
+		if (!ability && value) this._recordSpellDiagnostic(spell, `Casting ability ${value} is invalid/unresolved; no replacement ability was inferred.`);
+		return ability || null;
 	}
 
 	/**
@@ -11531,171 +12152,139 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _formatSpellTag (spell, {showProvenance = true} = {}) {
+		spell = this._resolveExportSpell(spell);
 		const name = this._getSafeInlineText(spell?.name || "spell", {maxLen: 80}) || "spell";
 		const source = this._getSafeSourceJson(spell?.source || Parser.SRC_XPHB || "XPHB");
-		// The economy mark binds tightest to the name, ahead of any provenance
-		// parenthetical — `_pickPreferredSpellTag` reads a *trailing* `)` as "this tag
-		// carries provenance", so a mark placed after the paren would spoof that test.
 		const castingTime = spell?.castingTime
-			|| this._spellCastingTimes.get(String(spell?.name || "").trim().toLowerCase())
+			|| this._spellCastingTimes.get(this._getSpellIdentity(spell))
 			|| this._spellCastingTimeLookup?.(spell)?.castingTime
 			|| "";
-		const tag = `{@spell ${name}|${source}}${this._getEconomyMark(castingTime)}`;
+		const tag = `${spell._unresolvedSource ? `${name} (unresolved source: ${source})` : `{@spell ${name}|${source}}`}${this._getEconomyMark(castingTime)}${spell.castAtLevel ? ` (level ${spell.castAtLevel})` : ""}`;
 		if (!showProvenance) return tag;
 		const provenance = this._getSpellProvenanceDisplay(spell);
 		return provenance ? `${tag} (${provenance})` : tag;
 	}
 
-	static _getClassSpellcastingBlock (state, {npcName = "The NPC"} = {}) {
-		const cantrips = state.getCantripsKnown?.() || [];
-		const spellsKnown = state.getSpellsKnown?.() || [];
+	static _getClassSpellcastingBlocks (state, {npcName = "The NPC"} = {}) {
+		const records = [...(state.getCantripsKnown?.() || []).map(spell => ({...spell, level: 0})), ...(state.getSpellsKnown?.() || [])]
+			.map(spell => this._resolveExportSpell(spell));
 		const pact = state.getPactSlots?.() || {};
-		const pactMax = Number(pact.max) || 0;
-		const pactLevel = Math.max(1, Number(pact.level) || 1);
 		const slots = state.getSpellSlots?.() || {};
-		const hasSlotTable = Object.values(slots).some(s => Number(s?.max) > 0);
-		const hasAnySpells = cantrips.length || spellsKnown.length || pactMax > 0 || hasSlotTable;
-		if (!hasAnySpells) return null;
-
-		const {ability, dc, atk} = this._getSpellDcAndAttack(
-			state,
-			state.getSpellcastingAbility?.() || state.getSpellcasting?.()?.ability || this._getPrimaryCasterAbility(state),
-		);
-		const preparedSpells = state.getPreparedSpells?.() || spellsKnown.filter(s => s.prepared || s.alwaysPrepared);
-		const isPactCaster = pactMax > 0 && !hasSlotTable;
-
-		// Swappable subclass lists get their own block; listing them here too would
-		// imply the character has both modes prepared at once.
+		if (!records.length && !Number(pact.max) && !Object.values(slots).some(pool => Number(pool?.max) > 0)) return [];
+		const cards = state.getSpellcastingClassBreakdown();
+		const groups = new Map();
 		const swappableKeys = this._getSwappableSpellKeys(state);
-		const isSwappable = spell => swappableKeys.has(String(spell?.name || "").trim().toLowerCase())
-			|| this._isSpuriousFeatureSpell(spell, state);
-		const dominantSource = this._getDominantSpellSource([...cantrips, ...spellsKnown]);
-
-		const will = this._dropEditionVariantSpellTags(
-			cantrips
-				.filter(s => !isSwappable(s))
-				.map(s => this._formatSpellTag(s)),
-			{preferredSource: dominantSource},
-		).sort((a, b) => a.localeCompare(b));
-
-		const spells = {};
-
-		if (isPactCaster) {
-			const pactSpells = this._dropEditionVariantSpellTags([...new Set(
-				[...preparedSpells, ...spellsKnown]
-					.filter(s => Number(s.level) >= 1 && Number(s.level) <= pactLevel && !isSwappable(s))
-					.map(s => this._formatSpellTag(s)),
-			)], {preferredSource: dominantSource});
-			if (pactSpells.length || pactMax > 0) {
-				spells[pactLevel] = {
-					lower: 1,
-					slots: pactMax,
-					spells: pactSpells,
-				};
+		for (const spell of records) {
+			if (swappableKeys.has(this._getSpellIdentity(spell)) || this._isSpuriousFeatureSpell(spell, state) || this._getRestrictedSpellFeature(spell, state)) continue;
+			const candidates = cards.filter(card => {
+				if (!spell.sourceClass && !spell.sourceSubclass) return true;
+				const cls = state.getClasses().find(row => row.name === card.className && (row.source || null) === card.classSource);
+				return cls && state._isSpellAttributedToClass(spell, cls);
+			});
+			const card = candidates.length === 1 ? candidates[0] : null;
+			const ability = this._getExportSpellAbility(spell, card);
+			const key = `${card ? `${card.className}|${card.classSource}` : "Unresolved"}|${ability || ""}`;
+			if (!groups.has(key)) groups.set(key, {card, ability, records: []});
+			groups.get(key).records.push(spell);
+			if (!card) this._recordSpellDiagnostic(spell, "Casting class and ability unresolved; no class or preparation permission was inferred.");
+		}
+		if (!groups.size) groups.set("Slots", {card: cards.length === 1 ? cards[0] : null, ability: cards.length === 1 ? cards[0].ability : null, records: []});
+		const blocks = [];
+		for (const group of groups.values()) {
+			const {card, ability} = group;
+			const block = {type: "spellcasting", name: groups.size === 1 ? "Spellcasting" : `Spellcasting (${card?.displayName || "unresolved class"})`, headerEntries: []};
+			if (card?.isRolledPrepared) block.headerEntries.push(`${npcName}'s spell save DC is ${card.saveDcFormula} and spell attack modifier is ${card.attackBonusFormula}, rolled per cast.`);
+			else if (ability) {
+				const {dc, atk} = this._getSpellDcAndAttack(state, ability);
+				block.ability = ability;
+				block.headerEntries.push(`${npcName} is a spellcaster. ${npcName}'s spellcasting ability is ${Parser.attAbvToFull(ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`);
+			} else block.headerEntries.push("The casting class and ability for these saved spells are unresolved.");
+			const castable = group.records.filter(spell => !spell.ritualOnly && (spell.level === 0 || spell.prepared || spell.alwaysPrepared || card?.mechanic === "known"));
+			const unprepared = group.records.filter(spell => !castable.includes(spell));
+			const will = castable.filter(spell => spell.level === 0).map(spell => this._formatSpellTag(spell));
+			if (will.length) block.will = [...new Set(will)];
+			for (const spell of castable.filter(spell => Number(spell.level) > 0)) {
+				block.spells ||= {};
+				block.spells[spell.level] ||= {slots: 0, spells: []};
+				const tag = this._formatSpellTag(spell);
+				if (!block.spells[spell.level].spells.includes(tag)) block.spells[spell.level].spells.push(tag);
 			}
-		} else {
-			Object.entries(slots)
-				.sort((a, b) => Number(a[0]) - Number(b[0]))
-				.forEach(([lvl, slotInfo]) => {
-					const level = Number(lvl);
-					if (!level || !slotInfo?.max) return;
+			const rituals = group.records.filter(spell => card && state.canCastAsRitual(spell)).map(spell => this._formatSpellTag(spell));
+			if (rituals.length) block.ritual = [...new Set(rituals)];
+			if (unprepared.length) block.footerEntries = [`Known but not prepared (not available for normal slot casting): ${unprepared.map(spell => this._formatSpellTag(spell)).join(", ")}. Ritual access, where allowed, is listed separately.`];
+			block.headerEntries.push("All class lists share the slot pools printed once below; list-only levels do not grant additional slots. Pact Magic and ordinary slots can cast eligible spells from either class, using that spell's own casting ability.");
+			group.castable = castable;
+			group.block = block;
+			blocks.push(block);
+		}
+		const primary = [...groups.values()].find(group => group.card && !/^warlock$/i.test(group.card.className)) || [...groups.values()][0];
+		for (const [level, pool] of Object.entries(slots)) {
+			if (!(Number(pool.max) > 0)) continue;
+			primary.block.spells ||= {};
+			primary.block.spells[level] ||= {spells: []};
+			primary.block.spells[level].slots = Number(pool.max);
+		}
+		if (Number(pact.max) > 0) {
+			const pactGroup = [...groups.values()].find(group => /^warlock$/i.test(group.card?.className)) || primary;
+			blocks.push({
+				type: "spellcasting",
+				name: "Pact Magic",
+				...(pactGroup.block.ability ? {ability: pactGroup.block.ability} : {}),
+				headerEntries: [...pactGroup.block.headerEntries, `${npcName} regains this separate pool of expended Pact Magic slots on a short or long rest. These slots can also cast eligible spells from the other class lists.`],
+				spells: {[pact.level]: {lower: 1, slots: Number(pact.max), spells: [...new Set(pactGroup.castable.filter(spell => spell.level > 0 && spell.level <= pact.level).map(spell => this._formatSpellTag(spell)))]}},
+			});
+		}
+		return blocks;
+	}
 
-					const preparedAtLevel = preparedSpells
-						.filter(s => Number(s.level) === level && !isSwappable(s))
-						.map(s => this._formatSpellTag(s));
-					const knownAtLevel = spellsKnown
-						.filter(s => Number(s.level) === level && !isSwappable(s))
-						.map(s => this._formatSpellTag(s));
-					const lvlSpells = this._dropEditionVariantSpellTags(
-						[...new Set([...preparedAtLevel, ...knownAtLevel])],
-						{preferredSource: dominantSource},
-					);
-					if (!lvlSpells.length) return;
-					spells[level] = {slots: slotInfo.max, spells: lvlSpells};
-				});
-
-			// Multiclass warlock: surface pact slots as additional note level if present and not already represented
-			if (pactMax > 0 && !spells[pactLevel]) {
-				const pactSpells = this._dropEditionVariantSpellTags([...new Set(
-					[...preparedSpells, ...spellsKnown]
-						.filter(s => Number(s.level) >= 1 && Number(s.level) <= pactLevel && !isSwappable(s))
-						.map(s => this._formatSpellTag(s)),
-				)], {preferredSource: dominantSource});
-				if (pactSpells.length) {
-					spells[pactLevel] = {lower: 1, slots: pactMax, spells: pactSpells};
+	static _getInnateSpellcastingBlocks (state, {npcName = "The NPC"} = {}) {
+		const innate = (state.getInnateSpells?.() || []).filter(spell => !this._isSpuriousFeatureSpell(spell, state) && !this._getRestrictedSpellFeature(spell, state));
+		const groups = new Map();
+		const cards = innate.length ? state.getSpellcastingClassBreakdown() : [];
+		for (const spell of innate) {
+			const resource = spell.linkedResourceId ? state.getResource(spell.linkedResourceId) : null;
+			const recharge = String(resource?.recharge || spell.recharge || spell.uses?.recharge || "").toLowerCase();
+			const owners = spell.sourceClass || spell.sourceSubclass
+				? cards.filter(card => state.getClasses().some(cls => cls.name === card.className && (cls.source || null) === card.classSource && state._isSpellAttributedToClass(spell, cls)))
+				: [];
+			const ability = this._getExportSpellAbility(spell, owners.length === 1 ? owners[0] : null);
+			const key = `${ability || ""}|${resource?.id || spell.sourceFeature || spell.id || spell.name}|${recharge}`;
+			if (!groups.has(key)) {
+				const block = {type: "spellcasting", name: groups.size ? `Innate Spellcasting (${spell.sourceFeature || spell.name})` : "Innate Spellcasting", headerEntries: []};
+				if (ability) {
+					const {dc, atk} = this._getSpellDcAndAttack(state, ability);
+					block.ability = ability;
+					block.headerEntries.push(`${npcName}'s innate spellcasting ability is ${Parser.attAbvToFull(ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`);
+				} else {
+					block.headerEntries.push("The casting ability for this innate route is not recorded.");
+					this._recordSpellDiagnostic(spell, "Innate casting ability unresolved; no mental ability was inferred.");
+				}
+				block.headerEntries.push("Component exceptions apply only when stated by the source rules.");
+				groups.set(key, block);
+			}
+			const block = groups.get(key);
+			const tag = `${this._formatSpellTag(spell)}${spell.ignoresMaterialComponents ? " (no material components)" : ""}`;
+			if (spell.castExecutionBlocked) {
+				(block.footerEntries ||= []).push(`${tag}: casting is blocked (${this._getSafeInlineText(String(spell.castExecutionBlocked))}).`);
+				this._recordSpellDiagnostic(spell, "This stored casting route is blocked; it was not promoted to usable spell access.");
+			} else if (spell.ritualOnly) (block.ritual ||= []).push(tag);
+			else if (spell.atWill || spell.usageType === "will") (block.will ||= []).push(tag);
+			else {
+				const max = Number(resource?.max ?? spell.uses?.max ?? spell.usesMax);
+				const schedule = /short|long|rest/.test(recharge) ? "rest" : /day|dawn/.test(recharge) ? "daily" : null;
+				if (Number.isInteger(max) && max > 0 && schedule) {
+					const usesKey = `${max}${spell.isEach || spell.uses?.isEach ? "e" : ""}`;
+					block[schedule] ||= {};
+					(block[schedule][usesKey] ||= []).push(tag);
+					if (resource?.id) this._ENTRY_RESOURCES.set(block, resource);
+					if (schedule === "rest" && !block.headerEntries.some(line => /regains expended uses/.test(line))) block.headerEntries.push(`${npcName} regains expended uses after ${/short/.test(recharge) ? "a short or long rest" : "a long rest"}.`);
+				} else {
+					(block.footerEntries ||= []).push(`${tag}: ${Number.isFinite(max) ? `${max} free uses` : "use limit unrecorded"}; recovery ${recharge || "unrecorded"}. No at-will access is granted.`);
+					if (max !== 0) this._recordSpellDiagnostic(spell, "Innate use limit or recovery is unresolved; retained as a restricted source route rather than inventing daily or at-will access.");
 				}
 			}
 		}
-
-		if (!will.length && !Object.keys(spells).length) return null;
-
-		const abilityFull = (typeof Parser !== "undefined" && Parser.attAbvToFull)
-			? Parser.attAbvToFull(ability)
-			: ability.toUpperCase();
-
-		const header = isPactCaster
-			? `${npcName} is a spellcaster. ${npcName}'s spellcasting ability is ${abilityFull} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks). ${npcName} regains expended spell slots on a short or long rest.`
-			: `${npcName} is a spellcaster. ${npcName}'s spellcasting ability is ${abilityFull} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`;
-
-		const out = {
-			type: "spellcasting",
-			name: isPactCaster ? "Spellcasting (Pact Magic)" : "Spellcasting",
-			headerEntries: [header],
-			ability,
-		};
-		if (will.length) out.will = will;
-		if (Object.keys(spells).length) out.spells = spells;
-		return out;
-	}
-
-	static _getInnateSpellcastingBlock (state, {npcName = "The NPC"} = {}) {
-		const innate = state.getInnateSpells?.() || [];
-		if (!innate.length) return null;
-
-		const abilityHint = innate.find(s => s.spellcastingAbility)?.spellcastingAbility
-			|| state.getSpellcastingAbility?.()
-			|| "cha";
-		const {ability, dc, atk} = this._getSpellDcAndAttack(state, abilityHint);
-		const abilityFull = (typeof Parser !== "undefined" && Parser.attAbvToFull)
-			? Parser.attAbvToFull(ability)
-			: ability.toUpperCase();
-
-		const will = [];
-		const daily = {};
-
-		innate.forEach(spell => {
-			const tag = this._formatSpellTag(spell);
-			if (spell.atWill || spell.usageType === "will") {
-				will.push(tag);
-				return;
-			}
-			const maxUses = Number(spell.uses?.max ?? spell.usesMax ?? 0) || 0;
-			const keyBase = Math.max(1, maxUses || 1);
-			const isEach = !!(spell.isEach || spell.uses?.isEach);
-			const key = `${keyBase}${isEach ? "e" : ""}`;
-			if (!daily[key]) daily[key] = [];
-			daily[key].push(tag);
-		});
-
-		const out = {
-			type: "spellcasting",
-			name: "Innate Spellcasting",
-			headerEntries: [
-				`${npcName}'s innate spellcasting ability is ${abilityFull} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks). ${npcName} can innately cast the following spells, requiring no material components:`,
-			],
-			ability,
-		};
-		if (will.length) out.will = [...new Set(will)].sort((a, b) => a.localeCompare(b));
-		if (Object.keys(daily).length) {
-			// Sort keys like 1, 1e, 2, 2e
-			const sorted = {};
-			Object.keys(daily)
-				.sort((a, b) => Number(a) - Number(b) || String(a).localeCompare(String(b)))
-				.forEach(k => { sorted[k] = [...new Set(daily[k])]; });
-			out.daily = sorted;
-		}
-		if (!out.will && !out.daily) return null;
-		return out;
+		return [...groups.values()];
 	}
 
 	static _getCombatMethodsBlock (state, {npcName = "The NPC"} = {}) {
@@ -11773,11 +12362,10 @@ class CharacterSheetNpcExporter {
 			includeFeatures = "auto",
 			selectedFeatureIds = [],
 			suppressExtraAttack = false,
-			protectedFeatureNames = [],
 			isCompanion = false,
+			isComplete = false,
 		} = {},
 	) {
-		const protectedKeys = new Set(protectedFeatureNames.map(name => this._normalizeFeatureKey(name)).filter(Boolean));
 		const out = {trait: [], action: [], bonus: [], reaction: []};
 		const sourceFeatureIds = new Set((state.getNamedModifiers?.() || [])
 			.map(mod => mod?.sourceFeatureId)
@@ -11788,18 +12376,19 @@ class CharacterSheetNpcExporter {
 		const resourceIndex = this._buildResourceIndex(state);
 		// Expensive and not memoized, so read once for the whole feature pass.
 		const psionicCalc = state?.getFeatureCalculations?.() || {};
+		const dcIndex = isCompanion ? null : this._getFeatureSaveDcIndex(state, psionicCalc);
 
 		// Class/race/etc features + feats (feats live on getFeats(), not getFeatures()).
 		const features = [
 			...(state.getFeatures?.() || [])
 				// Utility powers are rostered in the "Powers" spellcasting block; only
 				// powers that resolve in combat earn an entry of their own.
-				.filter(f => isCompanion || !(f?._entityType === "psionicPower" && !this._isSignaturePsionicPower(f)))
+				.filter(f => isCompanion || isComplete || !(f?._entityType === "psionicPower" && !this._isSignaturePsionicPower(f)))
 				.map(f => this._expandPsionicPower(f, psionicCalc))
-				.filter(f => f?.name && (f?.description || (isCompanion && f?.entries?.length)))
+				.filter(f => f?.name && (f?.description || f?.entries?.length))
 				.filter(f => !(typeof CharacterSheetClassUtils !== "undefined" && CharacterSheetClassUtils.isCombatMethod?.(f))),
 			...(state.getFeats?.() || [])
-				.filter(f => f?.name && (f?.description || (isCompanion && f?.entries?.length)))
+				.filter(f => f?.name && (f?.description || f?.entries?.length))
 				.map(f => ({
 					...f,
 					featureType: f.featureType || "Feat",
@@ -11819,59 +12408,66 @@ class CharacterSheetNpcExporter {
 			}))
 			.filter(({feature, classification}) => {
 				if (isCompanion) return true;
-				if (suppressExtraAttack && /\bextra attacks?\b/i.test(String(feature?.name || ""))) return false;
 				if (includeFeatures === "manual") {
 					const id = String(feature.id || feature.name || "");
 					return selectedSet.has(id) || selectedSet.has(String(feature.name || ""));
 				}
+				if (isComplete) return true;
+				if (suppressExtraAttack && /\bextra attacks?\b/i.test(String(feature?.name || ""))) return false;
 				if (includeFeatures === "allImportant") return classification === "important" || feature?.important;
 				return classification === "important";
 			});
 
-		// Prefer activatable / limited-use variants when names collide (e.g. Thunderous Blows + 10th-level upgrade).
-		// A level-20 kit genuinely holds more than a level-8 one; a fixed cap silently
-		// deleted a fifth of Phirse's class features.
-		const totalLevel = Number(state.getTotalLevel?.()) || 0;
-		const autoCap = includeFeatures === "manual" ? 24 : Math.min(26, 18 + Math.max(0, totalLevel - 12));
-		const deduped = isCompanion ? classified : this._dedupeClassifiedFeatures(classified);
-		// A feature that owns a limited-use pool is exempt from the cap: dropping it leaves
-		// the pool orphaned in Class Resources with nothing on the block to explain it.
-		// The same holds for a feature another line already points at by name.
-		const poolOwners = new Set(deduped.filter(row => (
-			this._resolveFeatureUses(row?.feature, resourceIndex)
-			|| protectedKeys.has(this._normalizeFeatureKey(row?.feature?.name))
-		)));
-		const ranked = deduped
-			.filter(row => !poolOwners.has(row))
-			.sort((a, b) => this._getFeatureRowPriority(b, resourceIndex) - this._getFeatureRowPriority(a, resourceIndex));
-		const keep = new Set([...poolOwners, ...ranked.slice(0, Math.max(0, autoCap - poolOwners.size))]);
-		const capped = isCompanion ? deduped : deduped.filter(row => keep.has(row));
+		// Compactness comes from grouping, not a rank cutoff that can discard an
+		// upgrade or trigger when an unrelated feature changes classification.
+		const deduped = isCompanion || isComplete ? classified : this._dedupeClassifiedFeatures(classified);
 
-		capped.forEach(({feature, analysis}) => {
-			const templated = this._getTemplatedFeatureText(feature, {npcName, analysis, state});
+		deduped.forEach(({feature, analysis}) => {
+			const templated = isComplete ? null : this._getTemplatedFeatureText(feature, {npcName, analysis, state});
+			const resolveDc = text => this._resolveSaveDcFormulas(text, state, {feature, npcName});
+			const featureLevel = this._getFeatureExportLevel(state, feature);
 			let entries = isCompanion
 				? (feature.entries?.length ? MiscUtil.copyFast(feature.entries) : [this._stripHtmlTags(feature.description)])
-				: templated
-					? [templated]
-					: this._prepareFeatureEntriesForNpc(feature.description, {npcName});
+				: isComplete
+					? this._mapExportEntryStrings(this._getCompleteFeatureEntries(feature), resolveDc, {isContentOnly: true})
+					: templated
+						? [resolveDc(templated)]
+						: feature.description
+							? this._prepareFeatureEntriesForNpc(feature.description, {npcName, featureLevel}).map(resolveDc)
+							: this._mapExportEntryStrings(this._getCompleteFeatureEntries(feature), resolveDc, {isContentOnly: true});
+			if (!isCompanion) entries = this._mapExportEntryStrings(entries, text => this._resolveFutureLevelClauses(text, featureLevel));
 			const uses = this._resolveFeatureUses(feature, resourceIndex);
 			const usesShort = this._formatUsesShort(uses);
 			// Drop trailing long-form uses from body when name carries them
-			if (usesShort && !isCompanion) {
-				entries = entries.map(text => String(text || "")
+			if (usesShort && !isCompanion && !isComplete) {
+				entries = this._mapExportEntryStrings(entries, text => text
 					.replace(/\s*\(\s*\d+\s*\/\s*(?:Long Rest|Short Rest|Short or Long Rest|LR|SR|SR or LR|Day)\s*\)\s*\.?$/i, "")
 					.replace(/\s*\(\s*\d+\s*\/\s*(?:LR|SR)\s*\)\s*\.?$/i, "")
-					.trim());
+					.trim(), {isContentOnly: true});
 			}
-			const baseName = isCompanion ? feature.name : this._getSafeInlineText(this._normalizeFeatureDisplayName(feature.name), {maxLen: 72}) || "Feature";
+			const baseName = isCompanion || isComplete ? feature.name : this._getSafeInlineText(this._normalizeFeatureDisplayName(feature.name), {maxLen: 72}) || "Feature";
 			const name = usesShort ? `${baseName} ${usesShort}` : baseName;
-			const attackLine = this._getSynthesizedFeatureAttackLine(feature, {state, npcName});
 			const entry = {
 				name,
-				entries: [attackLine, ...entries].filter(Boolean),
+				entries,
 			};
+			this._ENTRY_FEATURES.set(entry, feature);
+			if (!isCompanion) {
+				this._resolveLevelGatedUpgrades(entry, featureLevel);
+				this._applyCurrentFeatureCalculations(entry, feature, state, psionicCalc, {annotateClassLevels: isComplete});
+				if (isComplete || !feature.description) {
+					entry.entries = this._mapExportEntryStrings(entry.entries, text => this._normalizeAbilityTextForNpc(text, {
+						npcName, maxLen: Number.POSITIVE_INFINITY, featureLevel, preserveRules: true,
+					}), {isContentOnly: true});
+				}
+			}
+			const attackLine = this._getSynthesizedFeatureAttackLine(feature, {state, npcName, entries: entry.entries});
+			if (attackLine) entry.entries.unshift(attackLine);
+			if (uses?.id) this._ENTRY_RESOURCES.set(entry, uses);
+			if (dcIndex) this._injectMissingSaveDc(entry, dcIndex, {feature});
 
-			const section = this._getFeatureActivationSection(feature, analysis);
+			const inferredSection = this._getFeatureActivationSection(feature, analysis);
+			const section = attackLine && (!inferredSection || inferredSection === "trait") ? "action" : inferredSection;
 			if (section === "bonus") {
 				out.bonus.push(entry);
 				return;
@@ -11891,6 +12487,62 @@ class CharacterSheetNpcExporter {
 		return out;
 	}
 
+	static _getFeatureExportLevel (state, feature) {
+		if (!feature?.className) return Number(state.getTotalLevel?.()) || null;
+		const named = (state.getClasses?.() || []).filter(cls => String(cls.name).toLowerCase() === String(feature.className).toLowerCase());
+		const exact = named.filter(cls => !feature.classSource || String(cls.source).toLowerCase() === String(feature.classSource).toLowerCase());
+		const owners = exact.length ? exact : named;
+		return owners.length === 1 ? Number(owners[0].level) || null : null;
+	}
+
+	static _resolveFutureLevelClauses (text, level) {
+		if (!Number.isFinite(level) || level <= 0) return text;
+		return this._splitIntoClauses(text).filter(clause => {
+			const plain = this._getPlainMatchTextCased(clause).trim();
+			const gate = /^(?:Also,?\s+)?(?:(?:Starting|Beginning)\s+at|At|When (?:you|it) reach(?:es)?)\s+(?:level\s+(\d+)|(\d+)(?:st|nd|rd|th)\s+level)\b/i.exec(plain);
+			return !gate || Number(gate[1] || gate[2]) <= level;
+		}).join(" ");
+	}
+
+	static _applyCurrentFeatureCalculations (entry, feature, state, calculations, {annotateClassLevels = false} = {}) {
+		const level = this._getFeatureExportLevel(state, feature);
+		const name = this._normalizeFeatureKey(feature.name);
+		const className = String(feature.className || "").toLowerCase();
+		const source = String(feature.source || "").toUpperCase();
+		entry.entries = this._mapExportEntryStrings(entry.entries, text => {
+			let out = text;
+			for (const cls of annotateClassLevels ? state.getClasses?.() || [] : []) {
+				const escaped = String(cls.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+				const pattern = new RegExp(`\\b(?:(half|twice|three times|four times|five times|ten times)\\s+)?(?:your|its) (?:${escaped}|\\{@class ${escaped}\\|[^}]+\\}) level\\b(?!\\s*\\(\\d)`, "gi");
+				out = out.replace(pattern, (match, multiplier, offset, whole) => {
+					if (!this._isBearerFormula(whole, offset, match)) return match;
+					const factor = {half: 0.5, twice: 2, "three times": 3, "four times": 4, "five times": 5, "ten times": 10}[String(multiplier || "").toLowerCase()] ?? 1;
+					return `${match} (${Math.floor(cls.level * factor)})`;
+				});
+			}
+			if (!level) return out;
+			if (source === "XPHB" && className === "monk" && name === "flurry of blows" && calculations.heightenedFlurryAttacks) {
+				out = out.replace(/\bmake two Unarmed Strikes\b/gi, `make ${calculations.heightenedFlurryAttacks} Unarmed Strikes`);
+			}
+			if (source === "XPHB" && className === "barbarian" && name === "brutal strike" && calculations.brutalStrikeDamage) {
+				out = out.replace(/\b1d10\b/g, calculations.brutalStrikeDamage);
+				const upgrade = (state.getFeatures?.() || []).find(candidate => (
+					candidate.name === "Improved Brutal Strike" && candidate.source === "XPHB"
+					&& candidate.className === feature.className && candidate.classSource === feature.classSource
+					&& Number(candidate.level) <= level && /two different Brutal Strike effects/i.test(JSON.stringify(candidate.entries || candidate.description))
+				));
+				if (upgrade) out = out.replace(/\bcause one Brutal Strike effect\b/gi, "cause two different Brutal Strike effects");
+			}
+			if (source === "TGTT" && className === "barbarian" && feature.subclassShortName === "Chained Fury" && calculations.hasManifestChains) {
+				out = out
+					.replace(/\brange of \d+ feet\b/gi, `range of ${calculations.chainRange} feet`)
+					.replace(/(\brange of [^.]{0,60}?chains increases to )\d+ feet\b/gi, `$1${calculations.chainRange} feet`)
+					.replace(/(\bdeal (?:\{@damage )?)\d+d\d+(\}?\s+force damage)/gi, `$1${calculations.chainDamageDie}$2`);
+			}
+			return out;
+		});
+	}
+
 	/**
 	 * Some subclasses grant an attack in prose rather than as a weapon: Arthur's satellites
 	 * are a bonus-action ranged spell attack whose to-hit and damage are buried in two
@@ -11907,15 +12559,15 @@ class CharacterSheetNpcExporter {
 	 * @param {string} opts.npcName
 	 * @returns {string|null} a leading stat line, or null when the feature grants no attack
 	 */
-	static _getSynthesizedFeatureAttackLine (feature, {state = null, npcName = "The NPC"} = {}) {
-		void npcName;
-		const raw = this._stripHtmlTags(feature?.description || "");
+	static _getSynthesizedFeatureAttackLine (feature, {state = null, npcName = "The NPC", entries = null} = {}) {
+		const raw = entries ? this._getPlainMatchTextCased(this._flattenEntriesValue(entries)) : this._stripHtmlTags(feature?.description || "");
 		if (!/\bspell attack\b/i.test(raw)) return null;
 
-		const economy = /\buse (?:a|an) (bonus action|action|reaction) to make a (ranged|melee) spell attack\b/i.exec(raw);
+		const economy = /\buses? (?:a|an) (bonus action|action|reaction) to make a (ranged|melee) spell attack\b/i.exec(raw);
 		if (!economy) return null;
-		const abilityM = /\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) is your ability modifier for this attack\b/i.exec(raw);
-		const damageM = /\bequal to (\d+d\d+) \+ your (Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier\b/i.exec(raw);
+		const abilityM = /\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) is (?:your|its) ability modifier for this attack\b/i.exec(this._stripHtmlTags(feature?.description || ""));
+		const escapedName = npcName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const damageM = new RegExp(`\\bequal to (\\d+d\\d+) \\+ (?:your|its|${escapedName}['\\u2019]s?) (Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier\\b`, "i").exec(raw);
 		if (!abilityM || !damageM) return null;
 
 		const mod = Number(state?.getAbilityMod?.(abilityM[1].slice(0, 3).toLowerCase()));
@@ -11925,9 +12577,9 @@ class CharacterSheetNpcExporter {
 
 		// Prose states the level-3 range and then an upgrade; the block should print the
 		// range this creature actually has.
-		let range = Number(/\bwithin (\d+) feet of you\b/i.exec(raw)?.[1]) || 0;
+		let range = Number(/\bwithin (\d+) feet\b/i.exec(raw)?.[1]) || 0;
 		const upgrade = /\bWhen you reach (\d+)\w* level in this class, the range of this spell attack increases to (\d+) feet\b/i.exec(raw);
-		if (upgrade && (Number(state?.getTotalLevel?.()) || 0) >= Number(upgrade[1])) range = Number(upgrade[2]);
+		if (upgrade && (this._getFeatureExportLevel(state, feature) || 0) >= Number(upgrade[1])) range = Number(upgrade[2]);
 
 		const types = /\bdeals ([a-z]+(?: or [a-z]+)?) damage\b/i.exec(raw)?.[1] || "force";
 		const dmg = dmgMod ? `${damageM[1]}${this._toSignedStr(dmgMod)}` : damageM[1];
@@ -11938,41 +12590,69 @@ class CharacterSheetNpcExporter {
 
 	static _buildResourceIndex (state) {
 		const idx = new Map();
+		const seen = new Set();
 		const add = (raw) => {
 			if (!raw?.name) return;
 			const key = this._normalizeFeatureKey(raw.name);
-			if (!key || idx.has(key)) return;
+			if (!key || raw.max == null || seen.has(raw.id || raw)) return;
 			const max = Number(raw.max);
-			if (!Number.isFinite(max) || max <= 0) return;
-			idx.set(key, {
+			if (!Number.isFinite(max) || max < 0) return;
+			seen.add(raw.id || raw);
+			if (!idx.has(key)) idx.set(key, []);
+			idx.get(key).push({
+				...raw,
 				max,
 				recharge: raw.recharge || raw.recovery || "",
 			});
 		};
-		(state.getGenericPoolResources?.() || state.getResources?.() || []).forEach(add);
-		(state.getSyntheticCombatResources?.() || []).forEach(add);
 		(state.getResources?.() || []).forEach(add);
+		(state.getGenericPoolResources?.() || []).forEach(add);
+		const features = state.getFeatures?.() || [];
+		(state.getSyntheticCombatResources?.() || []).forEach(resource => {
+			const owners = features.filter(feature => this._normalizeFeatureKey(feature.name) === this._normalizeFeatureKey(resource.name));
+			add(owners.length === 1 ? {...resource, featureId: owners[0].id} : resource);
+		});
 		return idx;
 	}
 
 	static _resolveFeatureUses (feature, resourceIndex = new Map()) {
-		if (feature?.uses && Number.isFinite(Number(feature.uses.max)) && Number(feature.uses.max) > 0) {
-			return {max: Number(feature.uses.max), recharge: feature.uses.recharge || ""};
-		}
+		const compatible = resource => ["source", "className", "classSource", "subclassSource"]
+			.every(field => !resource[field] || !feature?.[field] || String(resource[field]).toLowerCase() === String(feature[field]).toLowerCase());
+		const choose = candidates => {
+			const rows = candidates.filter(compatible);
+			const preferred = rows.some(row => row.synthetic) ? rows.filter(row => row.synthetic) : rows;
+			if (!preferred.length) return null;
+			const signatures = new Set(preferred.map(row => `${row.max}|${row.recharge}`));
+			return signatures.size === 1 ? preferred[0] : null;
+		};
+		const all = [...resourceIndex.values()].flat();
+		const owned = all.filter(resource => (
+			(feature?.id && resource.featureId === feature.id)
+			|| (feature?.id && resource.featId === feature.id)
+			|| (feature?.resourceId && resource.id === feature.resourceId)
+			|| ["sourceDecisionKey", "grantId"].some(field => feature?.[field] && resource[field] === feature[field])
+		));
+		if (owned.length) return choose(owned);
 		const key = this._normalizeFeatureKey(feature?.name);
-		if (key && resourceIndex.has(key)) return resourceIndex.get(key);
-		// Fuzzy: resource "Channel Divinity" for feature "Channel Divinity: Destructive Wrath"
-		if (key) {
-			for (const [rk, val] of resourceIndex.entries()) {
-				if (this._featureKeyMatches(key, rk)) return val;
-			}
+		const exact = (resourceIndex.get(key) || []).filter(resource => (
+			(!resource.featureId || resource.featureId === feature?.id)
+			&& (!resource.featId || resource.featId === feature?.id)
+		));
+		const exactMatch = choose(exact);
+		if (exactMatch) return exactMatch;
+		const explicitPool = feature?.resourceName || feature?.uses?.resourceName
+			|| (/[:\u2014]/.test(String(feature?.name || "")) ? String(feature.name).split(/[:\u2014]/)[0] : "");
+		const shared = choose(resourceIndex.get(this._normalizeFeatureKey(explicitPool)) || []);
+		if (shared) return shared;
+		if (feature?.uses?.max != null && Number.isFinite(Number(feature.uses.max)) && Number(feature.uses.max) >= 0) {
+			return {max: Number(feature.uses.max), recharge: feature.uses.recharge || ""};
 		}
 		return null;
 	}
 
 	/** Compact uses marker for ability names: (6/LR), (2/SR), (3/Day). */
 	static _formatUsesShort (uses) {
-		if (!uses || !Number.isFinite(Number(uses.max)) || Number(uses.max) <= 0) return "";
+		if (!uses || uses.max == null || !Number.isFinite(Number(uses.max)) || Number(uses.max) < 0) return "";
 		const max = Number(uses.max);
 		if (max >= 999) return "(∞)";
 		const recharge = String(uses.recharge || "").toLowerCase();
@@ -12031,30 +12711,12 @@ class CharacterSheetNpcExporter {
 			.trim();
 	}
 
-	/** Higher wins a slot under the auto cap. */
-	static _getFeatureRowPriority (row, resourceIndex) {
-		const feature = row?.feature;
-		let score = 0;
-		if (this._resolveFeatureUses?.(feature, resourceIndex)) score += 5;
-		if (Number(feature?.uses?.max || 0) > 0) score += 4;
-		if (this._getFeatureActivationSection(feature, row?.analysis)) score += 3;
-		if (row?.analysis?.isActivatable) score += 2;
-		if (row?.analysis?.hasResourceCost) score += 2;
-		if (feature?.important) score += 1;
-		// A signature ability is the one that does something measurable. Without this,
-		// Phirse's 6d10 Time Pocket lost the cap contest to a passive reroll feature.
-		const body = String(feature?.description || "");
-		if (/\b\d+d\d+\b/.test(body)) score += 3;
-		if (/\bgains? \d+ strain\b|\bexpends? \d+\b|\bspends? \d+\b/i.test(body)) score += 2;
-		return score;
-	}
-
 	static _dedupeClassifiedFeatures (classified) {
 		const byKey = new Map();
 		const rank = (row) => {
 			const section = this._getFeatureActivationSection(row.feature, row.analysis);
 			const uses = Number(row.feature?.uses?.max || 0) > 0 ? 2 : 0;
-			const act = section ? 3 : 0;
+			const act = ["action", "bonus", "reaction"].includes(section) ? 3 : 0;
 			const important = row.feature?.important ? 1 : 0;
 			const len = String(row.feature?.description || "").length;
 			return act + uses + important + Math.min(2, Math.floor(len / 200));
@@ -12178,7 +12840,7 @@ class CharacterSheetNpcExporter {
 	 * @param {{npcName?: string, maxLen?: number}} [opts]
 	 * @returns {Array<string>}
 	 */
-	static _prepareFeatureEntriesForNpc (description, {npcName = "The NPC", maxLen = 900} = {}) {
+	static _prepareFeatureEntriesForNpc (description, {npcName = "The NPC", maxLen = 900, featureLevel = undefined} = {}) {
 		const sections = this._splitFeatureDescriptionSections(description);
 		if (!sections.length) return [];
 
@@ -12189,8 +12851,10 @@ class CharacterSheetNpcExporter {
 			if (label && /^\s*(?:rules? tip|tip|sidebar|design note)\b/i.test(label)) return;
 			const safeLabel = label ? this._getSafeInlineText(label, {maxLen: 64}) : "";
 			let isFirstParagraph = true;
-			this._splitHtmlParagraphs(html).forEach(paragraph => {
-				const body = this._prepareFeatureTextForNpc(paragraph, {npcName, maxLen});
+			const current = {entries: this._splitHtmlParagraphs(html).map(paragraph => this._resolveFutureLevelClauses(this._stripHtmlTags(paragraph), featureLevel))};
+			this._resolveLevelGatedUpgrades(current, featureLevel);
+			current.entries.forEach(paragraph => {
+				const body = this._prepareFeatureTextForNpc(paragraph, {npcName, maxLen, featureLevel});
 				if (!body) return;
 				const prefix = safeLabel && isFirstParagraph ? `{@b ${safeLabel}.} ` : "";
 				const deduped = prefix ? this._stripLeadingLabelEcho(body, safeLabel) : body;
@@ -12268,33 +12932,14 @@ class CharacterSheetNpcExporter {
 		"and", "but", "there", "here", "creature", "damage",
 	]);
 
-	static _prepareFeatureTextForNpc (description, {npcName = "The NPC", maxLen = 900} = {}) {
-		const stripped = this._resolveImperativeVoice(this._stripHtmlTags(description));
-		const normalized = this._normalizeAbilityTextForNpc(stripped, {npcName, maxLen});
+	static _prepareFeatureTextForNpc (description, {npcName = "The NPC", maxLen = 900, featureLevel = undefined} = {}) {
+		const stripped = this._resolveImperativeVoice(this._resolveFutureLevelClauses(this._stripHtmlTags(description), featureLevel));
+		const normalized = this._normalizeAbilityTextForNpc(stripped, {npcName, maxLen, featureLevel});
 		return this._enrichNpcTags(normalized);
 	}
 
 	static _getTemplatedFeatureText (feature, {npcName = "The NPC", analysis = null, state = null} = {}) {
 		const name = String(feature?.name || "").toLowerCase();
-		const plain = this._stripHtmlTags(feature?.description || "").toLowerCase();
-
-		// Templates are authored in second person and pushed through the normal prose
-		// pipeline, so they inherit the same name-then-pronoun and tagging rules.
-		const render = (secondPerson) => this._prepareFeatureTextForNpc(secondPerson, {npcName});
-
-		if (name === "rage" || name === "rage (barbarian)") {
-			// Resistances are annotated on the resist block as "while raging" — keep prose short.
-			return render("You enter a rage as a bonus action (not while wearing heavy armor). While raging, you have advantage on Strength checks and Strength saving throws. The rage ends early if you are knocked unconscious or if your turn ends without you having attacked a hostile creature or taken damage since the last turn.");
-		}
-
-		if (/^stone'?s endurance$/.test(name) || /^stone endurance$/.test(name) || (/shrug off harm|reduce the damage/.test(plain) && /reaction/.test(plain) && /d12/.test(plain))) {
-			const conMod = state?.getAbilityMod?.("con");
-			const conBit = Number.isFinite(Number(conMod))
-				? ` and add your Constitution modifier (${this._toSignedStr(conMod)})`
-				: " and add your Constitution modifier";
-			return render(`When you take damage, you can use a reaction to roll a d12${conBit}, reducing the damage by the total.`);
-		}
-
 		// The Talent's class-rules feature is 28,781 characters of player-facing HTML —
 		// strain tables, "Learning New Powers" tables and designer commentary — which
 		// flattened into an 8,700-character reaction. Everything a DM needs from it is
@@ -12322,40 +12967,9 @@ class CharacterSheetNpcExporter {
 			return sentences.join(" ") || null;
 		}
 
-		if (/^reckless attack$/.test(name)) {
-			return render("At the start of your turn, you can gain advantage on melee weapon attack rolls during that turn, but attack rolls against you have advantage until the start of your next turn.");
-		}
-
-		// High-traffic feats. Rulebook phrasing spends three or four sentences on what a
-		// statblock states in one clause; the numeric halves are already folded into the
-		// block and stripped upstream, so only the behavioural half is templated here.
-		const feats = {
-			"sentinel": "Creatures it hits with an opportunity attack have their speed reduced to 0 for the turn, and it can make an opportunity attack when a creature within 5 feet attacks someone else.",
-			"alert": "It can't be surprised while conscious, and unseen attackers gain no advantage against it.",
-			"savage attacker": "Once per turn it can reroll a melee weapon's damage dice and use either result.",
-			"war caster": "It has advantage on Constitution saves to maintain concentration, can cast with its hands full, and can cast a spell with a casting time of 1 action in place of an opportunity attack.",
-			"shield master": "On a successful Dexterity save it takes no damage instead of half, and it can shove with its shield as a bonus action after the Attack action.",
-			"great weapon master": "On a critical hit or a kill with a melee weapon it can make one melee weapon attack as a bonus action.",
-			"lucky": "It has luck points it can spend to reroll an attack, ability check or save, or to force an attacker to reroll.",
-			"polearm master": "After attacking with a glaive, halberd, quarterstaff or spear it can make a bonus-action attack with the weapon's butt end (1d4 bludgeoning), and it can make an opportunity attack when a creature enters its reach.",
-			"mobile": "Difficult terrain costs it no extra movement when it Dashes, and a creature it makes a melee attack against provokes no opportunity attack from it that turn.",
-		};
-		if (feats[name] && this._isFeatLikeFeature(feature)) return render(feats[name]);
-
-		// Prefer cleaned prose for everything else.
+		// Stored source rules, not bare names, own feat and class mechanics.
 		void analysis;
 		return null;
-	}
-
-	/**
-	 * The template table is keyed on bare names, which a homebrew class feature could
-	 * collide with. Only apply a feat template to something the sheet actually files as
-	 * a feat.
-	 */
-	static _isFeatLikeFeature (feature) {
-		const type = String(feature?.type || feature?.category || feature?.featureType || "").toLowerCase();
-		if (type.includes("feat")) return true;
-		return !feature?.className && !feature?.subclassName && !feature?.source?.includes("class");
 	}
 
 	static _classifyFeatureForStatblock (
@@ -12657,15 +13271,13 @@ class CharacterSheetNpcExporter {
 		const header = (feature.entries || [])
 			.filter(it => typeof it === "string")
 			.map(it => it.replace(/\{@b ([^}]*)\}/g, "$1").trim())
-			.filter(it => !/^manifestation time\s*:/i.test(it))
-			// Concentration is stated in the entry's name, so repeating it here spends a
-			// line on a fact the DM has already read.
-			.map(it => it.replace(/^duration\s*:\s*concentration,?\s*(?:up to\s*)?/i, "Duration: "))
+			.filter(it => !/^manifestation time\s*:/i.test(it) || /reaction[^.]*,/i.test(it))
 			// "Duration: Instantaneous" is the absence of a duration.
 			.filter(it => !/^duration\s*:?\s*(?:instantaneous|concentration)\.?$/i.test(it))
 			// Only standalone measurements: "30-foot line" is the house style and stays.
 			.map(it => it.replace(/(\d+) feet\b/g, "$1 ft."));
-		if (header.length) paragraphs.push(`<p>${header.join(", ").replace(/:/g, "").replace(/\.$/, "")}.</p>`);
+		header.push(...this._getPsionicConcentrationEntries(primary));
+		if (header.length) paragraphs.unshift(`<p>${header.join(". ").replace(/\.$/, "")}.</p>`);
 
 		if (!paragraphs.length) return feature;
 		// "it can make a ranged power attack with the object" is a roll the DM is left to
@@ -12680,6 +13292,15 @@ class CharacterSheetNpcExporter {
 			description: body.join(""),
 			_npcEconomy: this._getPsionicEconomy(feature),
 		};
+	}
+
+	static _getPsionicConcentrationEntries (mode) {
+		const concentration = mode?.concentration;
+		if (!concentration || typeof concentration !== "object") return [];
+		const duration = Number(concentration.duration);
+		const unit = {min: "minute", minute: "minute", hr: "hour", hour: "hour", rnd: "round", round: "round", day: "day"}[concentration.unit] || concentration.unit;
+		if (!Number.isFinite(duration) || duration <= 0 || !unit) return [];
+		return [`Duration: Concentration, up to ${duration} ${unit}${duration === 1 ? "" : "s"}.`];
 	}
 
 	/**
@@ -12809,7 +13430,9 @@ class CharacterSheetNpcExporter {
 	static _getFeatureActivationSection (feature, analysis = null) {
 		// A psionic power states its cost in a header the prose scan cannot see.
 		if (feature?._npcEconomy) return feature._npcEconomy;
-		const textSection = this._getActivationSectionFromText(feature?.description || "");
+		if (feature?._entityType === "psionicPower") return this._getPsionicEconomy(feature);
+		const textSection = this._getActivationSectionFromText(feature?.description || this._flattenEntriesValue(feature.entries));
+		if (textSection) return textSection;
 
 		const info = analysis?.activationInfo;
 		const activationAction = String(info?.activationAction || "").toLowerCase();
@@ -12848,11 +13471,17 @@ class CharacterSheetNpcExporter {
 			// "…and it can move only by ending the effect as a bonus action" states how the
 			// effect stops, not how it starts; matching it filed a reaction as a bonus action.
 			.replace(/\b(?:by |to )?end(?:ing|s)? (?:the effect|it|this|them)\b[^.;]*/gi, " ");
-		if (/\bas a bonus action\b|\b(?:uses?|takes?|spends?) (?:a|your|its) bonus action\b|^\s*bonus action\b/.test(cleaned)) return "bonus";
-		if (/\bas a reaction\b|\b(?:uses?|takes?|spends?|expends?) (?:a|your|its) reaction\b|^\s*reaction\b/.test(cleaned)) return "reaction";
-		// 2024 features spend a named action ("As a Magic action, you summon…"); the
-		// 2014 corpus says "as an action". Both belong in the action section.
-		if (/\bas an action\b|\b(?:uses?|takes?) (?:an|your|its) action\b|^\s*action\b|\b(?:as|takes?) an? (?:magic|attack|utilize|study|influence|search) action\b/.test(cleaned)) return "action";
+		for (const clause of this._splitIntoClauses(cleaned)) {
+			const noCost = /\b(?:no action required|does not use|doesn't use|doesn’t use|without using (?:an? )?(?:additional )?(?:action|bonus action|reaction))\b/.test(clause);
+			const paid = clause
+				.replace(/\b(?:does not|doesn't|doesn’t|without)\s+(?:us(?:e|es|ing)|tak(?:e|es|ing)|spend(?:s|ing)?)\b[^.;]*/g, " ")
+				.replace(/^(?:when|whenever|if|after|while)\b[^,]*,\s*/i, lead => /\buse an action to\b/i.test(lead) ? lead : "");
+			if (/\bas a bonus action\b|\b(?:uses?|takes?|spends?) (?:a|your|its|[\w'-]+'s) bonus action\b|^\s*bonus action\b/.test(paid)) return "bonus";
+			if (/\bas a reaction\b|\b(?:uses?|takes?|spends?|expends?) (?:a|your|its|[\w'-]+'s) reaction\b|^\s*reaction\b/.test(paid)) return "reaction";
+			if (/\bas an action\b|\b(?:uses?|takes?) (?:an|your|its|[\w'-]+'s) action\b|^\s*action\b|\b(?:as|takes?) an? (?:magic|attack|utilize|study|influence|search) action\b/.test(paid)) return "action";
+			if (noCost || /^(?:when|whenever|if|as part of)\b/.test(clause)) return "trait";
+			if (/\b(?:you|it) (?:can|may) use\b/.test(clause)) return "trait";
+		}
 		return null;
 	}
 
@@ -12884,7 +13513,7 @@ class CharacterSheetNpcExporter {
 		return `(${max}; recharges on ${this._getSafeInlineText(uses.recharge, {maxLen: 24})})`;
 	}
 
-	static _getCustomAbilityBlocks (state, {npcName = "The NPC", isCompanion = false} = {}) {
+	static _getCustomAbilityBlocks (state, {npcName = "The NPC", isCompanion = false, isComplete = false} = {}) {
 		const out = {trait: [], action: [], bonus: [], reaction: []};
 		const abilities = state.getCustomAbilities?.() || [];
 		if (!abilities.length) return out;
@@ -12892,7 +13521,7 @@ class CharacterSheetNpcExporter {
 		const passiveEntries = [];
 		abilities.forEach(ability => {
 			const safeName = isCompanion ? ability.name : this._getSafeInlineText(ability?.name || "Custom Ability", {maxLen: 80}) || "Custom Ability";
-			const description = isCompanion ? this._stripHtmlTags(ability.description || "") : this._prepareFeatureTextForNpc(ability?.description || "", {npcName});
+			const description = isCompanion || isComplete ? this._stripHtmlTags(ability.description || "") : this._prepareFeatureTextForNpc(ability?.description || "", {npcName});
 			const mode = this._getSafeInlineText(ability?.mode || "passive", {maxLen: 24}) || "passive";
 			const uses = ability?.uses;
 			const usesText = uses && Number.isFinite(Number(uses.max))
@@ -12923,7 +13552,7 @@ class CharacterSheetNpcExporter {
 		if (passiveEntries.length) {
 			out.trait.push({
 				name: "Custom Abilities",
-				entries: isCompanion ? passiveEntries : passiveEntries.slice(0, 12),
+				entries: isCompanion || isComplete ? passiveEntries : passiveEntries.slice(0, 12),
 			});
 		}
 
@@ -13466,7 +14095,7 @@ class CharacterSheetNpcExporter {
 		return restored.replace(/§§T\d+G\d*(?!\d*§§)/g, "");
 	}
 
-	static _normalizeAbilityTextForNpc (text, {npcName = "The NPC", maxLen = 420} = {}) {
+	static _normalizeAbilityTextForNpc (text, {npcName = "The NPC", maxLen = 420, featureLevel = undefined, preserveRules = false} = {}) {
 		let s = String(text || "");
 		if (!s) return "";
 
@@ -13479,49 +14108,56 @@ class CharacterSheetNpcExporter {
 			.replace(/\s+/g, " ")
 			.trim();
 
-		// Strip player progression / prerequisite fluff
-		s = s
+		// Only strip a feature's level preamble after checking its actual owner.
+		if (featureLevel !== null) {
+			s = s
 			// Trailing scaling qualifiers ("…twice before a rest starting at level 13") are
 			// stale for an export pinned to one level — the printed uses are authoritative.
-			.replace(/,?\s*(?:and|or)?\s*(?:starting|beginning)\s+at (?:level \d+|\d+(?:st|nd|rd|th) level)\b/gi, "")
-			.replace(/\b(?:Also,?\s+)?(?:Starting|Beginning)\s+at (?:level \d+|\d+(?:st|nd|rd|th) level),?\s*/gi, "")
+				.replace(/,?\s*(?:and|or)?\s*(?:starting|beginning)\s+at (?:level \d+|\d+(?:st|nd|rd|th) level)(?:\s+in this class)?\b/gi, "")
+				.replace(/\b(?:Also,?\s+)?(?:Starting|Beginning)\s+at (?:level \d+|\d+(?:st|nd|rd|th) level)(?:\s+in this class)?,?\s*/gi, "")
 			// A scaling chain ("increases to +2 at 11th level and to +3 at 18th level") needs
 			// its level qualifiers to survive this pass; `_collapseScalingBonusSentences`
 			// resolves it later, where the character's level is known.
-			.replace(/\b(?:Also,?\s+)?[Aa]t (?:level \d+|\d+(?:st|nd|rd|th) level),?\s*/gi, (m, offset, str) => (/\b(?:to|by) \+?\d{1,2},?\s*$/.test(str.slice(0, offset)) ? m : ""))
+				.replace(/\b(?:Also,?\s+)?[Aa]t (?:level \d+|\d+(?:st|nd|rd|th) level)(?:\s+in this class)?,?\s*/gi, (m, offset, str) => (/\b(?:to|by) \+?\d{1,2},?\s*$/.test(str.slice(0, offset)) ? m : ""))
+				.replace(/\bWhen you reach(?:es)? (?:level \d+|\d+(?:st|nd|rd|th) level)(?:\s+in this class)?,\s*(?:this (?:ability|feature) (?:grows|improves)[^:.]*[:.]\s*)?/gi, "");
+		}
+		if (!preserveRules) {
+			s = s
 			// Acquisition history — when and how the character picked its options — is
 			// player-facing bookkeeping. A statblock states what the creature has.
-			.replace(/(?:^|(?<=[.;]))\s*[^.;]*\b(?:you|it)\s+learns?\s+(?:one|an|a)\s+additional\b[^.;]*[.;]/gi, " ")
-			.replace(/(?:^|(?<=[.;]))\s*[^.;]*\bEach time\b[^.;]*\breplace it with\b[^.;]*[.;]/gi, " ")
-			.replace(/,?\s*detailed in the\s*"?\s*[^".;]{2,40}\s*"?\s*section at the end of the class description/gi, "")
-			.replace(/\bWhen you (?:choose|gain) this (?:path|feature|subclass)[^.]*\.\s*/gi, "")
+				.replace(/(?:^|(?<=[.;]))\s*[^.;]*\b(?:you|it)\s+learns?\s+(?:one|an|a)\s+additional\b[^.;]*[.;]/gi, " ")
+				.replace(/(?:^|(?<=[.;]))\s*[^.;]*\bEach time\b[^.;]*\breplace it with\b[^.;]*[.;]/gi, " ")
+				.replace(/,?\s*detailed in the\s*"?\s*[^".;]{2,40}\s*"?\s*section at the end of the class description/gi, "")
+				.replace(/\bWhen you (?:choose|gain) this (?:path|feature|subclass)[^.]*\.\s*/gi, "")
 			// "When you reach 9th level, you gain …" / "When you reach 3rd level, this
 			// ability grows:" — the level has already been reached, so only the benefit is
 			// news. Runs before the pronoun rewrite, hence second person here.
-			.replace(/\bWhen you reach(?:es)? (?:level \d+|\d+(?:st|nd|rd|th) level),\s*(?:this (?:ability|feature) (?:grows|improves)[^:.]*[:.]\s*)?/gi, "")
 			// A prerequisite may be its own unterminated paragraph ("Prerequisite: 6th
 			// level"), so the sentence terminator has to be optional.
-			.replace(/\bPrerequisite:\s*[^.\n]*(?:\.|$)\s*/gim, "")
-			.replace(/\bthe number of times shown for your \w+ level in the \w+ column\b[^.]*\.?/gi, "")
-			.replace(/\bshown for your \w+ level\b[^.]*\.?/gi, "")
-			.replace(/\bin the Rages column\b[^.]*\.?/gi, "")
+				.replace(/\bPrerequisite:\s*[^.\n]*(?:\.|$)\s*/gim, "")
+				.replace(/\bthe number of times shown for your \w+ level in the \w+ column\b[^.]*\.?/gi, "")
+				.replace(/\bshown for your \w+ level\b[^.]*\.?/gi, "")
+				.replace(/\bin the Rages column\b[^.]*\.?/gi, "")
 			// Book cross-references ("Rules Tip: Forced Movement p166") are player-facing noise.
-			.replace(/\s*(?:Rules?\s+Tip|See(?:\s+also)?)\s*:?[^.]*?\bp\.?\s*\d+\.?/gi, "")
+				.replace(/\s*(?:Rules?\s+Tip|See(?:\s+also)?)\s*:?[^.]*?\bp\.?\s*\d+\.?/gi, "")
 			// Use-count scaling sentences are redundant once the name carries "(N/LR)",
 			// and become self-contradictory after the level qualifiers are stripped.
-			.replace(/(?:^|(?<=[.;]))\s*[^.;]*\bcan use (?:this feature|this|it)\b[^.;]*\b(?:once|twice|three times|four times|five times|\d+ times)\b[^.;]*[.;]/gi, " ")
+				.replace(/(?:^|(?<=[.;]))\s*[^.;]*\bcan use (?:this feature|this|it)\b[^.;]*\b(?:once|twice|three times|four times|five times|\d+ times)\b[^.;]*[.;]/gi, " ")
 			// Repair punctuation orphaned by the strips above.
-			.replace(/([.;:])\s*[,;]\s*/g, "$1 ")
-			.replace(/\s+([,.;:])/g, "$1")
-			.replace(/^\s*[,;]\s*/, "")
+				.replace(/([.;:])\s*[,;]\s*/g, "$1 ")
+				.replace(/\s+([,.;:])/g, "$1")
+				.replace(/^\s*[,;]\s*/, "")
 			// Run last: earlier clause-strips can leave a dangling "Starting"/"Beginning".
-			.replace(/^\s*(?:Also,?\s+)?(?:Starting|Beginning)[,\s]+(?=[A-Za-z])/, "")
-			.trim();
+				.replace(/^\s*(?:Also,?\s+)?(?:Starting|Beginning)[,\s]+(?=[A-Za-z])/, "")
+				.trim();
+		}
 
 		const possessive = /s$/i.test(npcName) ? `${npcName}'` : `${npcName}'s`;
 		const SUBJ = "§§SUBJ§§";
 		const POSS = "§§POSS§§";
 		const REFL = "§§REFL§§";
+		const hasForeignSubject = (/\b(?:the|that|a|an|each) (?:\w+ ){0,2}(?:creature|target|item|object|ally|companion|defender|familiar|enemy|undead|attacker)\s+(?:also\s+)?(?:can|must|is|has|takes|tries|moves|uses|shares|obeys|fails|succeeds|spends|makes|dies|ends|becomes|remains|returns|perishes)\b/i.test(s)
+			|| /\b(?:friendly to you|obeys your (?:commands|orders))\b/i.test(s));
 
 		// Rewrite second person to neutral tokens first, so pronoun choice and verb
 		// agreement are each decided once, after every substitution has landed.
@@ -13559,8 +14195,9 @@ class CharacterSheetNpcExporter {
 		// reads nothing like a bestiary entry.
 		let isFirstMention = true;
 		s = s.replace(new RegExp(`${SUBJ}|${POSS}|${REFL}`, "g"), (match) => {
-			if (match === REFL) return "itself";
+			if (match === REFL) return hasForeignSubject ? `${npcName} itself` : "itself";
 			const isPossessive = match === POSS;
+			if (hasForeignSubject) return isPossessive ? possessive : npcName;
 			if (isFirstMention) {
 				isFirstMention = false;
 				return isPossessive ? possessive : npcName;
@@ -13635,7 +14272,7 @@ class CharacterSheetNpcExporter {
 		}
 
 		s = this._restoreTags(s, stash.tagStore, stash.prefix);
-		return this._getSafeInlineTextKeepTags(s, {maxLen: maxLen + 80});
+		return this._getSafeInlineTextKeepTags(s, {maxLen: Number.POSITIVE_INFINITY});
 	}
 
 	static _THIRD_PERSON_IRREGULARS = {
@@ -14357,7 +14994,7 @@ class CharacterSheetNpcExporter {
 		return s;
 	}
 
-	/** Strip HTML only; preserve {@tag} wrappers for hoverability. */
+	/** Strip HTML, preserve supported tags, and translate material references. */
 	static _stripHtmlTags (text) {
 		if (!text) return "";
 		const stash = this._stashTags(this._flattenOptionTables(this._collapseLevelTables(this._coerceEntriesDescription(text))));
@@ -14370,7 +15007,14 @@ class CharacterSheetNpcExporter {
 			.replace(/<[^>]*>/g, " ")
 			.replace(/\s+/g, " ")
 			.trim();
-		return this._restoreTags(cleaned, stash.tagStore, stash.prefix);
+		const normalizeMaterialTags = value => value.replace(/\{@itemMaterial(?:\s+([^{}]*))?\}/gi, (match, content = "") => {
+			const [name, source, display] = content.split("|").map(part => part.trim());
+			if (!name) return `${display || "Unknown material"} (unresolved item material reference)`;
+			if (!source) return `${display || name} (item material; source unspecified)`;
+			const hash = `${encodeURIComponent(name.toLowerCase())}_${encodeURIComponent(source.toLowerCase())}`;
+			return `{@5etools ${display || name}|crafting.html#${hash}}`;
+		});
+		return this._restoreTags(normalizeMaterialTags(cleaned), stash.tagStore.map(normalizeMaterialTags), stash.prefix);
 	}
 
 	/**
@@ -14619,10 +15263,382 @@ class CharacterSheetNpcExporter {
 		const cr = this._toCrString(blended);
 
 		return {
+			estimator: "legacy",
 			cr,
 			defensiveCr,
 			offensiveCr,
+			effectiveHp,
+			effectiveAc: this._getEffectiveAcForCr(ac, state),
+			dpr,
+			levelAnchor,
+			assumptions: ["Historical 75% offense/defense mean + 25% character-level anchor; heuristic riders, defenses and spell threat are retained."],
+			limitations: spellcastingBlocks.length && !spellIndex ? ["Spell-threat data unavailable; Legacy uses its school/slot heuristic."] : [],
 			breakdown: `CR estimate: defensive ${defensiveCr} / offensive ${offensiveCr} (effective HP ~${Math.round(effectiveHp)}, DPR ~${Math.round(dpr)}) → ${cr}`,
+		};
+	}
+
+	static _getDmgCrTable () {
+		return this._CR_HP_THRESHOLDS.map((row, i) => ({
+			cr: row.cr,
+			hp: row.hp,
+			dpr: this._CR_DPR_THRESHOLDS[i].dpr,
+			ac: this._CR_DMG_BENCHMARKS[i][0],
+			attackBonus: this._CR_DMG_BENCHMARKS[i][1],
+			saveDc: this._CR_DMG_BENCHMARKS[i][2],
+		}));
+	}
+
+	static _getDmgCrComponent (value, {metric, statistic, statisticKey}) {
+		const table = this._getDmgCrTable();
+		const found = table.findIndex(row => Math.round(value) <= row[metric]);
+		const index = found < 0 ? table.length - 1 : found;
+		const expected = table[index][statisticKey];
+		const difference = statistic == null ? 0 : statistic - expected;
+		const adjustment = Math.sign(difference) * Math.floor(Math.abs(difference) / 2);
+		return {
+			cr: table[Math.max(0, Math.min(table.length - 1, index + adjustment))].cr,
+			baseCr: table[index].cr,
+			value,
+			statistic,
+			statisticKey,
+			expected,
+			adjustment,
+		};
+	}
+
+	static _estimateDmgCr ({
+		hp, ac, weaponActions = [], attacks = [], attacksPerAction = 1, spellcastingBlocks = [],
+		state = null, defenses = {}, calculations = {}, featureBlocks = {}, additionalBlocks = [], exportOpts = {},
+	}) {
+		const limitations = new Set();
+		const assumptions = [
+			exportOpts.profile === "companion"
+				? "Three rounds, no rest or resource recovery; current printed actor pools, with no refill."
+				: "Three rounds, no rest or resource recovery; full printed export pools, not the live actor's remaining uses.",
+			"Average damage on hits/failed saves; area/multi-target spells affect two creatures total. No critical-hit or surprise credit.",
+			"Mixed delivery uses the largest damage share's attack/save statistic, weighted by that share's damage.",
+			"One action and one bonus action per round. A bonus-action spell permits only an action cantrip or a nonspell action (conservative across editions).",
+			"Only initial spell damage is counted; ongoing effects do not stack and recasting replaces concentration. No precast spells, free Shield, or companion damage.",
+			"Mundane/nonconsumed spell components are assumed available; consumed material costs without a verified supply are excluded.",
+			"Conditional defenses, narrow resistances, control/healing, extra actions, hostile-trigger reactions, and unsupported item/psionic procedures have no invented numeric credit.",
+		];
+		const budgets = new Map();
+		const candidates = [];
+		const addBudget = (id, max) => {
+			const n = Number(max);
+			if (Number.isInteger(n) && n >= 0) budgets.set(id, Math.max(budgets.get(id) || 0, n));
+		};
+		const resourceIndex = state ? this._buildResourceIndex(state) : new Map();
+		const parseAttack = entry => this._getDmgAttackProfile(entry, limitations);
+		const rawNames = new Set(attacks.map(attack => String(attack.name).toLowerCase()));
+		for (const entry of weaponActions) {
+			const raw = attacks.find(attack => String(attack.name).toLowerCase() === String(entry.name).toLowerCase());
+			const owner = raw?.sourceFeature && state?.getFeatures?.().find(feature => this._normalizeFeatureKey(feature.name) === this._normalizeFeatureKey(raw.sourceFeature));
+			if (raw?.requiresState || (owner && (["bonus", "reaction"].includes(this._getFeatureActivationSection(owner)) || this._resolveFeatureUses(owner, resourceIndex)))) {
+				limitations.add(`${entry.name}: source-gated attack is not treated as an unlimited Attack-action option.`);
+				continue;
+			}
+			const profile = parseAttack(entry);
+			if (!profile) continue;
+			const isRoutine = rawNames.has(String(entry.name).toLowerCase()) || /^unarmed strike$/i.test(entry.name);
+			const count = isRoutine ? Math.max(1, attacksPerAction) : 1;
+			candidates.push({...profile, name: `${entry.name}${count > 1 ? ` x${count}` : ""}`, perHit: profile.perHit * count, economy: "action", attackAction: isRoutine, costs: {}});
+		}
+		for (const section of ["action", "bonus"]) {
+			for (const entry of [featureBlocks, ...additionalBlocks].flatMap(blocks => blocks[section] || [])) {
+				const feature = this._ENTRY_FEATURES.get(entry);
+				const profile = parseAttack(entry);
+				if (!profile || !feature) continue;
+				const uses = this._resolveFeatureUses(feature, resourceIndex);
+				const text = this._flattenEntriesValue(entry.entries);
+				if (/\b(?:if|when)\b[^.]*\b(?:critical|miss|kill|reduce[ds]? to 0)\b/i.test(text)) {
+					limitations.add(`${entry.name}: contingent activation is not scheduled.`);
+					continue;
+				}
+				if (!uses && /\b(?:expend|spend|charges?|points?|once|rest)\b/i.test(text)) {
+					limitations.add(`${entry.name}: its resource cost/owner is unresolved; no free use was assumed.`);
+					continue;
+				}
+				const id = uses ? `resource:${uses.id || feature.sourceDecisionKey || feature.id || `${feature.name}|${feature.source}`}` : null;
+				if (id) addBudget(id, exportOpts.profile === "companion" ? uses.current ?? uses.max : uses.max);
+				const amounts = {a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6};
+				const costs = [...text.matchAll(/\b(?:expend|spend)s?\s+(\d+|one|two|three|four|five|six|an?)\b/gi)];
+				if (costs.length > 1 || /\bspell slots?\b/i.test(text) || (/\b(?:expend|spend)s?\b/i.test(text) && !costs.length)) {
+					limitations.add(`${entry.name}: variable/compound costs are not scheduled as a single free or cheaper resource.`);
+					continue;
+				}
+				const costToken = costs[0]?.[1].toLowerCase();
+				const cost = costToken ? amounts[costToken] ?? Number(costToken) : 1;
+				candidates.push({...profile, name: entry.name, economy: section, costs: id ? {[id]: cost} : {}, requiresAttack: /\b(?:after|when)[^.]*\b(?:Attack action|attack with)\b/i.test(text)});
+			}
+		}
+		this._getDmgSpellCandidates({spellcastingBlocks, state, exportOpts, budgets, candidates, limitations});
+		for (const allowance of calculations.attackActionAllowances || []) {
+			if (allowance.count > attacksPerAction) limitations.add(`${allowance.label || allowance.sourceFeature}: conditional alternate attack routine is not assumed active.`);
+		}
+		for (const section of ["trait", "action", "bonus", "reaction"]) {
+			for (const entry of [featureBlocks, ...additionalBlocks].flatMap(blocks => blocks[section] || [])) {
+				if (candidates.some(candidate => candidate.name === entry.name)) continue;
+				if (/\{@(?:damage|dice|spell) |\b(?:extra action|additional action|charges?|damage)\b/i.test(JSON.stringify(entry.entries))) limitations.add(`${entry.name}: additional/conditional procedure is not numerically modeled.`);
+			}
+		}
+		if (exportOpts.legendaryEnabled) limitations.add("Legendary actions are not scheduled; the estimate excludes their additional damage.");
+		const routine = this._planDmgRounds(candidates, budgets, limitations);
+		const dpr = routine.rounds.reduce((sum, round) => sum + round.damage, 0) / 3;
+		const deliveries = routine.rounds.flatMap(round => round.deliveries);
+		const weights = Object.fromEntries(["attack", "save", "automatic"].map(kind => [kind, deliveries.filter(it => it.kind === kind).reduce((sum, it) => sum + it.damage, 0)]));
+		const kind = Object.keys(weights).sort((a, b) => weights[b] - weights[a])[0];
+		const relevant = deliveries.filter(it => it.kind === kind);
+		const statistic = kind === "automatic" || !weights[kind] ? null : relevant.reduce((sum, it) => sum + it.statistic * it.damage, 0) / weights[kind];
+		const offense = this._getDmgCrComponent(dpr, {metric: "dpr", statistic, statisticKey: kind === "save" ? "saveDc" : "attackBonus"});
+		const baselineDefense = this._getDmgCrComponent(hp, {metric: "hp", statistic: ac, statisticKey: "ac"});
+		const expectedCr = (this._crStringToNumber(baselineDefense.cr) + this._crStringToNumber(offense.cr)) / 2;
+		const defenseProjection = this._getDmgEffectiveHp(hp, defenses, expectedCr, exportOpts, limitations);
+		const defense = this._getDmgCrComponent(defenseProjection.effectiveHp, {metric: "hp", statistic: ac, statisticKey: "ac"});
+		const average = (this._crStringToNumber(defense.cr) + this._crStringToNumber(offense.cr)) / 2;
+		const cr = this._getDmgCrTable().reduce((best, row) => Math.abs(this._crStringToNumber(row.cr) - average) <= Math.abs(this._crStringToNumber(best.cr) - average) ? row : best).cr;
+		return {
+			estimator: "dmg",
+			cr,
+			defensiveCr: defense.cr,
+			offensiveCr: offense.cr,
+			effectiveHp: defenseProjection.effectiveHp,
+			effectiveAc: ac,
+			dpr,
+			defense: {...defense, ...defenseProjection},
+			offense: {...offense, delivery: kind, weights},
+			rounds: routine.rounds,
+			resources: routine.resources,
+			search: routine.search,
+			assumptions,
+			limitations: [...limitations],
+			breakdown: `DMG-style CR ${cr}: defensive ${defense.cr} (effective HP ${Math.round(defenseProjection.effectiveHp)}, AC ${ac}); offensive ${offense.cr} (${dpr.toFixed(1)} DPR over three rounds). ${limitations.size} estimator limitation(s); see the export report. No level blend.`,
+		};
+	}
+
+	static _getDmgEffectiveHp (hp, defenses, expectedCr, options, limitations) {
+		const getTypes = key => {
+			const rows = defenses?.[key] || [];
+			const types = new Set();
+			const visit = row => {
+				if (typeof row === "string") { types.add(row.toLowerCase()); return; }
+				if (!row || row.cond || row.condition || /\b(?:while|against|nonmagical|if)\b/i.test(`${row.note || ""} ${row.preNote || ""}`)) {
+					limitations.add(`Conditional ${key} defenses are excluded from effective HP.`);
+					return;
+				}
+				(row[key] || []).forEach(visit);
+			};
+			rows.forEach(visit);
+			return types;
+		};
+		const resist = getTypes("resist");
+		const immune = getTypes("immune");
+		const vulnerable = getTypes("vulnerable");
+		const broad = types => types.size >= 3;
+		const resistanceMultiplier = expectedCr <= 4 ? 2 : expectedCr <= 10 ? 1.5 : expectedCr <= 16 ? 1.25 : 1;
+		const immunityMultiplier = expectedCr <= 10 ? 2 : expectedCr <= 16 ? 1.5 : 1.25;
+		const multiplier = Math.max(broad(resist) ? resistanceMultiplier : 1, broad(immune) ? immunityMultiplier : 1) * (vulnerable.size >= 2 ? 0.5 : 1);
+		if ((resist.size && !broad(resist)) || (immune.size && !broad(immune)) || vulnerable.size === 1) limitations.add("Narrow damage defenses/vulnerabilities are not given a broad effective-HP multiplier.");
+		const legendaryHp = options.legendaryEnabled ? (Number(options.legendaryResistances) || 0) * (expectedCr <= 4 ? 10 : expectedCr <= 10 ? 20 : 30) : 0;
+		return {hp, effectiveHp: hp * multiplier + legendaryHp, multiplier, legendaryHp, multiplierBandCr: expectedCr};
+	}
+
+	static _getDmgAttackProfile (entry, limitations) {
+		const line = (entry?.entries || []).find(text => typeof text === "string" && /\{@h\}/.test(text));
+		if (!line) return null;
+		const [lead, hitText] = line.split(/\{@h\}/);
+		if (/\b(?:only while|while in|if)\b/i.test(lead)) {
+			limitations.add(`${entry.name}: conditional attack form is not assumed active.`);
+			return null;
+		}
+		const statistic = Number(/\{@hit ([+-]?\d+)\}/.exec(lead)?.[1]);
+		if (!Number.isFinite(statistic)) {
+			limitations.add(`${entry.name}: unresolved attack accuracy.`);
+			return null;
+		}
+		const first = this._splitIntoClauses(hitText)[0] || "";
+		const tags = [...first.matchAll(/\{@damage ([^}|]+)(?:\|[^}]*)?\}/g)];
+		let perHit = tags.length ? 0 : Number(/^\s*(\d+(?:\.\d+)?)\s+[a-z ]+damage/i.exec(first)?.[1]);
+		const riders = {};
+		for (let i = 0; i < tags.length; ++i) {
+			const tag = tags[i];
+			const tail = first.slice(tag.index + tag[0].length, tags[i + 1]?.index ?? first.length);
+			const damage = this._estimateAverageDice(tag[1]);
+			if (damage == null) {
+				limitations.add(`${entry.name}: unresolved damage formula ${tag[1]}.`);
+				return null;
+			}
+			if (/\b(?:while|against|if|expends?|spends?|charges?|points?|forgoing)\b/i.test(tail)) {
+				limitations.add(`${entry.name}: conditional/paid rider excluded (${this._getPlainMatchTextCased(tail).trim()}).`);
+				continue;
+			}
+			if (/1\/turn|once (?:per|on)|first hit/i.test(tail)) {
+				const label = /\(([^,)]+)/.exec(tail)?.[1] || tag[1];
+				riders[label] = Math.max(riders[label] || 0, damage);
+			} else perHit += damage;
+		}
+		if (!Number.isFinite(perHit)) {
+			limitations.add(`${entry.name}: nondamage/replacement attack has no modeled damage.`);
+			return null;
+		}
+		return {name: entry.name, perHit: Math.max(0, perHit), riders, kind: "attack", statistic};
+	}
+
+	static _getDmgSpellCandidates ({spellcastingBlocks, state, exportOpts, budgets, candidates, limitations}) {
+		if (!spellcastingBlocks.length) return;
+		if (!exportOpts.spellIndex) limitations.add("Spell-threat data unavailable; spell damage is excluded, not inferred from slot level or school.");
+		const ordinary = new Map();
+		const pact = new Map();
+		for (const block of spellcastingBlocks) {
+			for (const [level, row] of Object.entries(block.spells || {})) {
+				if (!(row.slots > 0)) continue;
+				const pool = /^Pact Magic\b/i.test(block.name) ? pact : ordinary;
+				pool.set(Number(level), Math.max(pool.get(Number(level)) || 0, row.slots));
+			}
+		}
+		for (const [label, pool] of [["slots", ordinary], ["pact", pact]]) {
+			for (const [level, max] of pool) budgets.set(`${label}:${level}`, max);
+		}
+		const getIndex = key => exportOpts.spellIndex instanceof Map ? exportOpts.spellIndex.get(key) : exportOpts.spellIndex?.[key];
+		spellcastingBlocks.forEach((block, blockIndex) => {
+			const header = (block.headerEntries || []).join(" ");
+			const dc = Number(/\{@dc (\d+)\}/.exec(header)?.[1]);
+			const attack = Number(/\{@hit ([+-]?\d+)\}/.exec(header)?.[1]);
+			const add = (tag, costs = {}, castLevel = null) => {
+				const match = /\{@spell ([^}|]+)(?:\|([^}|]*))?[^}]*\}/.exec(tag);
+				if (!match) return;
+				const uid = `${match[1]}|${match[2] || "PHB"}`.toLowerCase();
+				const indexed = getIndex(uid);
+				if (!indexed?.dmg) {
+					limitations.add(`${match[1]} (${match[2] || "PHB"}): source-qualified spell threat unavailable.`);
+					return;
+				}
+				const threat = indexed.dmg;
+				if (!threat.damage) {
+					if (threat.reason) limitations.add(`${match[1]}: ${threat.reason}`);
+					return;
+				}
+				if (!["action", "bonus"].includes(threat.economy)) {
+					limitations.add(`${match[1]}: casting time is outside the supported action/bonus routine.`);
+					return;
+				}
+				const statistic = threat.kind === "save" ? dc : threat.kind === "attack" ? attack : null;
+				if (threat.kind !== "automatic" && !Number.isFinite(statistic)) {
+					limitations.add(`${match[1]}: casting accuracy/DC unresolved for this source route.`);
+					return;
+				}
+				const level = Number(state?.getTotalLevel?.()) || 1;
+				const scaling = Object.entries(threat.scaling || {}).filter(([threshold]) => Number(threshold) <= level).sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1];
+				let damage = scaling == null ? threat.damage : scaling;
+				if (threat.beams) damage *= level >= 17 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1;
+				if (threat.abilityDamage) {
+					if (!block.ability || !state) { limitations.add(`${match[1]}: damage ability unresolved.`); return; }
+					damage += state.getAbilityMod(block.ability);
+				}
+				const upcast = Math.max(0, (castLevel ?? indexed.level) - indexed.level);
+				if (upcast && threat.upcastDie != null) {
+					const count = threat.upcastLevels.filter(threshold => threshold <= castLevel).length - 1;
+					damage += Math.max(0, count) * threat.upcastDie;
+				} else if (upcast && threat.upcastProjectile) damage += upcast * threat.projectileDamage;
+				else if (upcast) limitations.add(`${match[1]}: higher slots pay the real cost but no unsupported upcast bonus is credited.`);
+				if (threat.ongoing) limitations.add(`${match[1]}: only initial damage is counted, not later attacks/ticks or concentration synergies.`);
+				candidates.push({
+					name: `${match[1]}${castLevel ? ` (level ${castLevel}, ${Object.keys(costs)[0]})` : ""}`,
+					economy: threat.economy,
+					perHit: damage * (!threat.damageIsTotal && (indexed.isAoe || indexed.isMultiTarget) ? 2 : 1),
+					riders: {},
+					kind: threat.kind,
+					statistic,
+					costs,
+					spellLevel: indexed.level,
+					concentration: threat.concentration ? uid : null,
+				});
+			};
+			(block.will || []).forEach(tag => add(tag));
+			for (const row of Object.values(block.spells || {})) {
+				for (const tag of row.spells || []) {
+					const match = /\{@spell ([^}|]+)(?:\|([^}|]*))?/.exec(tag);
+					const indexed = match ? getIndex(`${match[1]}|${match[2] || "PHB"}`.toLowerCase()) : null;
+					if (!indexed) { add(tag); continue; }
+					for (const [label, pool] of [["slots", ordinary], ["pact", pact]]) {
+						for (const [level] of pool) if (level >= indexed.level) add(tag, {[`${label}:${level}`]: 1}, level);
+					}
+				}
+			}
+			for (const schedule of ["daily", "rest"]) {
+				for (const [key, spells] of Object.entries(block[schedule] || {})) {
+					spells.forEach((tag, index) => {
+						const resource = this._ENTRY_RESOURCES.get(block);
+						const id = resource?.id ? `resource:${resource.id}` : `innate:${blockIndex}:${schedule}:${key}${key.endsWith("e") ? `:${index}` : ""}`;
+						const max = Number((exportOpts.profile === "companion" ? resource?.current : resource?.max) ?? Number.parseInt(key, 10));
+						if (!/^\d+e?$/.test(key) || !Number.isInteger(max) || max < 0) { limitations.add(`${block.name}: invalid innate pool; no uses were invented.`); return; }
+						budgets.set(id, max);
+						add(tag, {[id]: 1});
+					});
+				}
+			}
+		});
+	}
+
+	static _planDmgRounds (candidates, budgets, limitations) {
+		const dominated = new Map();
+		for (const candidate of candidates) {
+			const spellKind = candidate.spellLevel == null ? null : candidate.spellLevel ? "leveled" : "cantrip";
+			const key = JSON.stringify([candidate.economy, candidate.costs, candidate.attackAction, candidate.requiresAttack, spellKind, candidate.riders]);
+			const previous = dominated.get(key);
+			if (!previous || candidate.perHit > previous.perHit) dominated.set(key, candidate);
+		}
+		const actions = [{name: "Dodge", economy: "action", perHit: 0, riders: {}, costs: {}}, ...[...dominated.values()].filter(it => it.economy === "action")].sort((a, b) => b.perHit - a.perHit);
+		const bonuses = [null, ...[...dominated.values()].filter(it => it.economy === "bonus")];
+		const ids = [...budgets.keys()].sort();
+		const initial = ids.map(id => budgets.get(id));
+		let frontier = [{remaining: initial, total: 0, rounds: [], concentration: null}];
+		let limitHit = false;
+		const ceiling = 512;
+		for (let round = 1; round <= 3; ++round) {
+			const next = new Map();
+			for (const node of frontier) {
+				for (const action of actions) {
+					for (const bonus of bonuses) {
+						if (bonus?.spellLevel != null && action.spellLevel > 0) continue;
+						if (bonus?.requiresAttack && !action.attackAction) continue;
+						const used = {};
+						for (const option of [action, bonus].filter(Boolean)) for (const [id, cost] of Object.entries(option.costs)) used[id] = (used[id] || 0) + cost;
+						const remaining = node.remaining.map((value, i) => value - (used[ids[i]] || 0));
+						if (remaining.some(value => value < 0)) continue;
+						const riders = {};
+						const deliveries = [];
+						let damage = 0;
+						for (const option of [action, bonus].filter(Boolean)) {
+							let contribution = option.perHit;
+							for (const [key, value] of Object.entries(option.riders)) {
+								contribution += Math.max(0, value - (riders[key] || 0));
+								riders[key] = Math.max(value, riders[key] || 0);
+							}
+							damage += contribution;
+							if (contribution) deliveries.push({kind: option.kind, statistic: option.statistic, damage: contribution});
+						}
+						const concentration = bonus?.concentration || action.concentration || node.concentration;
+						const candidate = {
+							remaining,
+							total: node.total + damage,
+							concentration,
+							rounds: [...node.rounds, {round, action: action.name, bonus: bonus?.name || null, damage, costs: used, concentration, deliveries}],
+						};
+						const key = remaining.join(",");
+						if (!next.has(key) || next.get(key).total < candidate.total) next.set(key, candidate);
+					}
+				}
+			}
+			frontier = [...next.values()].sort((a, b) => b.total - a.total);
+			if (frontier.length > ceiling) { frontier.length = ceiling; limitHit = true; }
+		}
+		if (limitHit) limitations.add(`Three-round planner reached its ${ceiling}-state ceiling; this is the best found supported routine, not a certified optimum.`);
+		const best = frontier[0];
+		return {
+			rounds: best.rounds,
+			resources: ids.map((id, i) => ({id, maximum: initial[i], spent: initial[i] - best.remaining[i], remaining: best.remaining[i]})),
+			search: {stateCeiling: ceiling, limitHit},
 		};
 	}
 
@@ -14951,11 +15967,64 @@ class CharacterSheetNpcExporter {
 				isAoe,
 				isMultiTarget: !isAoe && areaTags.includes("MT"),
 				conditionInflict: (spell.conditionInflict || []).map(it => String(it).toLowerCase()),
+				dmg: this._buildDmgSpellThreat(spell),
 			};
 			out[`${name}|${source}`] = entry;
 			if (!out[name]) out[name] = entry;
 		});
 		return out;
+	}
+
+	static _buildDmgSpellThreat (spell) {
+		if (!spell.damageInflict?.length) return {damage: 0};
+		if (spell.components?.m?.consume) return {damage: 0, reason: "consumed material supply is not verified; no free damaging cast was assumed."};
+		const paragraphs = [];
+		this._mapExportEntryStrings(spell.entries, text => { paragraphs.push(text); return text; }, {isContentOnly: true});
+		const paragraph = paragraphs.find(text => /\{@damage [^}]+\}/.test(text));
+		if (!paragraph) return {damage: 0, reason: "no supported direct-damage formula; no school-based damage was invented."};
+		const sentence = this._splitIntoClauses(paragraph).find(text => /\{@damage /.test(text)) || "";
+		const formulas = [...sentence.matchAll(/\{@damage ([^}|]+)(?:\|[^}]*)?\}/g)].map(match => match[1]);
+		const averages = formulas.map(formula => this._estimateAverageDice(formula));
+		if (!averages.length || averages.some(value => value == null)) return {damage: 0, reason: "unresolved direct-damage formula."};
+		const allText = paragraphs.join(" ");
+		const instant = spell.duration?.some(duration => duration.type === "instant");
+		if (!instant && !/\bwhen you cast\b/i.test(paragraph)) return {damage: 0, reason: "triggered/ongoing damage is not modeled as an automatic casting hit."};
+		const numberWords = {one: 1, two: 2, three: 3, four: 4};
+		const projectiles = /\b(?:create|conjure)\s+(one|two|three|four|\d+)\s+(?:\w+\s+){0,3}(darts?|rays?)\b/i.exec(allText);
+		const count = projectiles ? numberWords[projectiles[1].toLowerCase()] || Number(projectiles[1]) : 1;
+		const projectileDamage = averages.reduce((sum, value) => sum + value, 0);
+		const kind = spell.spellAttack?.length ? "attack" : spell.savingThrow?.length ? "save" : /\beach dart hits\b/i.test(allText) ? "automatic" : null;
+		if (!kind) return {damage: 0, reason: "damage delivery/target procedure is not safely modeled."};
+		const time = spell.time?.[0];
+		const economy = Number(time?.number) === 1 ? time.unit : null;
+		const scaling = {};
+		const scale = !Array.isArray(spell.scalingLevelDice) ? spell.scalingLevelDice?.scaling : null;
+		if (scale && formulas.length === 1) {
+			for (const [level, formula] of Object.entries(scale)) {
+				const value = this._estimateAverageDice(formula);
+				if (value != null) scaling[level] = value;
+			}
+		}
+		const higher = JSON.stringify(spell.entriesHigherLevel || []);
+		const upcast = /\{@scaledamage [^|}]+\|([^|}]+)\|([^|}]+)\}/.exec(higher);
+		const range = upcast?.[1].split("-").map(Number);
+		const upcastLevels = upcast ? range.length === 2 ? Array.from({length: range[1] - range[0] + 1}, (_, i) => range[0] + i) : upcast[1].split(",").map(Number) : [];
+		const beams = !scale && /\btwo beams at 5th level, three beams at 11th level, and four beams at 17th level\b/i.test(allText);
+		return {
+			damage: projectileDamage * count,
+			kind,
+			economy,
+			scaling,
+			projectileDamage,
+			beams,
+			damageIsTotal: count > 1 || beams,
+			abilityDamage: /spellcasting ability modifier/i.test(sentence),
+			upcastDie: upcast ? this._estimateAverageDice(upcast[2]) : null,
+			upcastLevels,
+			upcastProjectile: !!projectiles && /\bone (?:more|additional) (?:dart|ray)[^.]*each slot level/i.test(higher),
+			concentration: spell.duration?.some(duration => duration.concentration) || false,
+			ongoing: !instant,
+		};
 	}
 
 	static _getLargestDamageDice (entries) {

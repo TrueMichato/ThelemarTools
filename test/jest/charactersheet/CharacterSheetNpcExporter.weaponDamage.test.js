@@ -52,7 +52,7 @@ describe("v21 — a damage-die increase keeps the rest of the formula", () => {
 			appliedUpgrades: [{name: "Superior", source: "TCAH", upgradeType: "WU:2"}],
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const atk = out.action.find(a => a.name === "Cataclysm");
 		expect(atk).toBeDefined();
 
@@ -75,7 +75,7 @@ describe("v21 — a damage-die increase keeps the rest of the formula", () => {
 			appliedUpgrades: [{name: "Superior", source: "TCAH", upgradeType: "WU:2"}],
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const entry = out.action.find(a => a.name === "Frostbrand").entries[0];
 
 		expect(getDamage(entry)).toBe("1d10+6");
@@ -94,7 +94,7 @@ describe("v21 — a damage-die increase keeps the rest of the formula", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(getDamage(out.action.find(a => a.name === "Greatsword").entries[0])).toBe("2d6+5");
 	});
 });
@@ -113,7 +113,7 @@ describe("v21 — the exported flat is the sheet's flat", () => {
 			bonusWeapon: 2,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const item = state.getItems().find(it => it.name === "Longsword");
 		const derived = state.updateAttackFromWeapon(item);
 		const eff = state.getEffectiveItemBonuses(item.id) || {};
@@ -148,7 +148,7 @@ describe("v21 — the exported flat is the sheet's flat", () => {
 		// and nothing but the legacy `updateAttackFromWeapon` reads it.
 		withField._data.customModifiers = {...(withField._data.customModifiers || {}), damageBonus: 6};
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(withField);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(withField, {presentationMode: "compact"});
 		expect(getDamage(out.action.find(a => a.name === "Warhammer").entries[0])).toBe("1d8+5");
 	});
 
@@ -166,7 +166,7 @@ describe("v21 — the exported flat is the sheet's flat", () => {
 			bonusWeapon: 3,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		// str +5 plus a single +3 — a second fold would read 1d8+11.
 		expect(getDamage(out.action.find(a => a.name === "+3 Rapier").entries[0])).toBe("1d8+8");
 	});
@@ -183,7 +183,7 @@ describe("v21 — the exported flat is the sheet's flat", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(getDamage(out.action.find(a => a.name === "Club").entries[0])).toBe("1d4");
 	});
 
@@ -199,7 +199,7 @@ describe("v21 — the exported flat is the sheet's flat", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(getDamage(out.action.find(a => a.name === "Quarterstaff").entries[0])).toBe("1d6-2");
 	});
 });
@@ -221,7 +221,7 @@ describe("v21 — situational damage stays a rider", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(barb);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(barb, {presentationMode: "compact"});
 		const entry = out.action.find(a => a.name === "Greataxe").entries[0];
 
 		// The line carries str only; rage is printed as its own conditional clause so a
@@ -280,7 +280,7 @@ describe("v36 — the rider path's `enabled` gate is pinned, not merely present"
 	};
 
 	const riderTextFor = (state) => {
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		return String(out.action.find(a => a.name === "Longsword").entries[0]);
 	};
 
@@ -351,7 +351,7 @@ describe("v39 — one feature registering twice yields the more specific rider, 
 		const state = makeFighterWithLongsword();
 		state._data.features = [...(state._data.features || []), {id: DUELING_FEATURE_ID, name: "Dueling"}];
 		mods.forEach(m => state._data.namedModifiers.push({...m}));
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		return String(out.action.find(a => a.name === "Longsword").entries[0]);
 	};
 
@@ -413,7 +413,7 @@ describe("v39 — the rider filter's `damage` anchor is the only thing holding b
 			conditional: "while the armor is intact",
 			name: "Adamantine",
 		});
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		return String(out.action.find(a => a.name === "Longsword").entries[0]);
 	};
 

@@ -45,7 +45,7 @@ describe("CharacterSheetNpcExporter", () => {
 	});
 
 	it("should convert a character state to bestiary-compatible NPC JSON", () => {
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 
 		expect(out.name).toBe("Aelar (NPC)");
 		expect(out.source).toBe("CSHEET");
@@ -63,15 +63,23 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(out.save.str).toMatch(/^\+/);
 		expect(out.skill.athletics).toMatch(/^\+/);
 		// Level Signal is out-of-fiction meta and opt-in only.
-		expect(out.trait.some(t => t.name === "Level Signal")).toBe(false);
-		const withSignal = CharacterSheetNpcExporter.convertStateToMonster(state, {includeLevelSignal: true});
+		expect((out.trait || []).some(t => t.name === "Level Signal")).toBe(false);
+		const withSignal = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeLevelSignal: true});
 		expect(withSignal.trait.some(t => t.name === "Level Signal")).toBe(true);
 		expect(Array.isArray(out.action)).toBe(true);
 		expect(out.action.some(a => a.name === "Longsword")).toBe(true);
 		expect(out.cr).toBeDefined();
 	});
 
+	it("F01: lists features for the real export picker without an undefined profile", () => {
+		state.addFeature({name: "Second Wind", description: "As a Bonus Action, regain 1d10 hit points.", source: "PHB"});
+		const features = CharacterSheetNpcExporter.listExportableFeatures(state);
+		expect(features.some(feature => feature.name === "Second Wind")).toBe(true);
+		expect(features.find(feature => feature.name === "Second Wind").section).toBe("bonus");
+	});
+
 	it("should include spellcasting tiers when the character has spells", () => {
+		state.addClass({name: "Wizard", source: "PHB", level: 3});
 		state.setSpellcastingAbility("int");
 		state.setSpellSlots(1, 4, 4);
 		state.setSpellSlots(2, 2, 2);
@@ -80,7 +88,7 @@ describe("CharacterSheetNpcExporter", () => {
 		state.addSpell({name: "sleep", source: "XPHB", level: 1, sourceClass: "Wizard"}, false);
 		state.addSpell({name: "misty step", source: "XPHB", level: 2, sourceClass: "Wizard"}, true);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 
 		expect(out.spellcasting).toBeDefined();
 		expect(out.spellcasting[0].type).toBe("spellcasting");
@@ -89,7 +97,8 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(out.spellcasting[0].spells[1].slots).toBe(4);
 		expect(out.spellcasting[0].spells[2].slots).toBe(2);
 		expect(out.spellcasting[0].spells[1].spells.some(s => s.includes("shield"))).toBe(true);
-		expect(out.spellcasting[0].spells[1].spells.some(s => s.includes("sleep"))).toBe(true);
+		expect(out.spellcasting[0].spells[1].spells.some(s => s.includes("sleep"))).toBe(false);
+		expect(out.spellcasting[0].footerEntries.join(" ")).toContain("sleep");
 	});
 
 	it("should include combat methods grouped by stamina cost", () => {
@@ -116,7 +125,7 @@ describe("CharacterSheetNpcExporter", () => {
 		});
 		state.setStaminaMax(6);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const methodsTrait = out.trait.find(t => t.name === "Combat Methods");
 
 		expect(methodsTrait).toBeDefined();
@@ -140,7 +149,7 @@ describe("CharacterSheetNpcExporter", () => {
 	it("should include weapon attacks derived from equipped inventory weapons", () => {
 		const warrior = new CharacterSheetState();
 		warrior.setName("Weapon Tester");
-		warrior.addClass({name: "Fighter", source: "PHB", level: 5});
+		warrior.addClass({name: "Fighter", source: "XPHB", level: 5});
 		warrior.setAbilityBase("str", 16);
 		warrior.setAbilityBase("dex", 12);
 		warrior.setWeaponMasteries(["Battleaxe|XPHB"]);
@@ -158,7 +167,7 @@ describe("CharacterSheetNpcExporter", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior, {presentationMode: "compact"});
 		expect(out.action.some(a => a.name === "Battleaxe")).toBe(true);
 		const battleaxe = out.action.find(a => a.name === "Battleaxe");
 		expect(battleaxe.entries[0]).toContain("{@hit +8}");
@@ -194,7 +203,7 @@ describe("CharacterSheetNpcExporter", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior, {presentationMode: "compact"});
 		expect(out.action.find(a => a.name === "Spectral Chains").entries[0]).toContain("{@hit +22}");
 	});
 
@@ -234,7 +243,7 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(warrior.getAttackBonusBreakdown(attack).effectiveAbility).toBe(6);
 		expect(warrior.getAttackBonusBreakdown(attack, {includeActiveStates: false}).effectiveAbility).toBe(5);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior, {presentationMode: "compact"});
 		const entry = out.action.find(a => a.name === "Longsword").entries[0];
 		expect(entry).toContain("{@hit +11}"); // CHA +5 (Lies) + PB +6
 		expect(entry).toContain("{@damage 1d8+5}");
@@ -274,7 +283,7 @@ describe("CharacterSheetNpcExporter", () => {
 			{name: "shield", sourceItem: "Wand of Bolts", usageType: "rest", usesMax: 1, isEach: true},
 		]);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const specialEquipment = out.trait.find(t => t.name === "Special Equipment");
 		expect(specialEquipment).toBeDefined();
 		expect(specialEquipment.entries.join(" ")).toContain("Wand of Bolts");
@@ -407,7 +416,7 @@ describe("CharacterSheetNpcExporter", () => {
 			conditionImmune: [{type: "frightened"}],
 		};
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(out.resist || []).toContain("fire");
 		expect(out.conditionImmune || []).toContain("frightened");
 	});
@@ -420,7 +429,7 @@ describe("CharacterSheetNpcExporter", () => {
 			conditionImmunities: ["charmed"],
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {defenseMode: "active"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", defenseMode: "active"});
 		expect(out.resist).toEqual(["cold"]);
 		expect(out.immune).toEqual(["poison"]);
 		expect(out.vulnerable).toEqual(["radiant"]);
@@ -434,7 +443,7 @@ describe("CharacterSheetNpcExporter", () => {
 		bare.setMaxHp(12);
 		bare.setCurrentHp(12);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(bare);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(bare, {presentationMode: "compact"});
 
 		expect(out.save).toBeUndefined();
 		expect(out.skill).toBeUndefined();
@@ -450,7 +459,7 @@ describe("CharacterSheetNpcExporter", () => {
 			creatureTypes: [{type: "fey"}],
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {sourceJson: "my_source*& weird"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", sourceJson: "my_source*& weird"});
 
 		expect(out.source).toBe("MYSOURCE& WEIRD");
 		expect(out.type).toEqual({type: "fey"});
@@ -466,7 +475,7 @@ describe("CharacterSheetNpcExporter", () => {
 			range: "reach 5 ft., <img src=x onerror=alert(1)> one target",
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const spear = out.action.find(a => (a.name || "").includes("Spear"));
 
 		expect(spear).toBeDefined();
@@ -478,7 +487,7 @@ describe("CharacterSheetNpcExporter", () => {
 		state.addLanguage("<img src=x onerror=alert(1)> Giant");
 		state.getClassSummary = () => "<script>alert(1)</script> Fighter";
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeLevelSignal: true});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeLevelSignal: true});
 		expect(out.languages.some(it => it.includes("<"))).toBe(false);
 
 		const levelSignal = out.trait.find(it => it.name === "Level Signal");
@@ -508,7 +517,7 @@ describe("CharacterSheetNpcExporter", () => {
 			important: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const trait = out.trait.find(t => t.name === "Battle Focus");
 
 		expect(trait).toBeDefined();
@@ -533,8 +542,8 @@ describe("CharacterSheetNpcExporter", () => {
 			enabled: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
-		expect(out.trait.some(t => t.name === "Skill Expertise")).toBe(false);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
+		expect((out.trait || []).some(t => t.name === "Skill Expertise")).toBe(false);
 	});
 
 	it("should include configured custom abilities and named modifiers in traits and actions", () => {
@@ -565,7 +574,7 @@ describe("CharacterSheetNpcExporter", () => {
 			enabled: true,
 		});
 
-		const outDefault = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const outDefault = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(outDefault.action.some(a => a.name === "Arc Burst")).toBe(true);
 		const customTrait = outDefault.trait.find(t => t.name === "Custom Abilities");
 		expect(customTrait).toBeDefined();
@@ -579,7 +588,7 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(modifierTrait.entries.join(" ")).not.toContain("Tough (HP)");
 		expect(modifierTrait.entries.join(" ")).not.toMatch(/\bdisabled\b/);
 
-		const outNoMods = CharacterSheetNpcExporter.convertStateToMonster(state, {includeCustomModifiers: false});
+		const outNoMods = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeCustomModifiers: false});
 		expect(outNoMods.trait.some(t => t.name === "Additional Effects" || t.name === "Custom Modifiers")).toBe(false);
 	});
 
@@ -595,7 +604,7 @@ describe("CharacterSheetNpcExporter", () => {
 			description: "As a reaction, you gain +2 AC against one attack.",
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 
 		expect((out.bonus || []).some(it => it.name === "Sudden Step")).toBe(true);
 		expect((out.reaction || []).some(it => it.name === "Riposte Guard")).toBe(true);
@@ -612,7 +621,7 @@ describe("CharacterSheetNpcExporter", () => {
 			important: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect((out.trait || []).some(it => it.name === "Shelter of the Faithful")).toBe(false);
 		expect((out.action || []).some(it => it.name === "Shelter of the Faithful")).toBe(false);
 		expect((out.bonus || []).some(it => it.name === "Shelter of the Faithful")).toBe(false);
@@ -628,7 +637,7 @@ describe("CharacterSheetNpcExporter", () => {
 			important: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect((out.trait || []).some(it => it.name === "Street Runner")).toBe(false);
 		expect((out.action || []).some(it => it.name === "Street Runner")).toBe(false);
 		expect((out.bonus || []).some(it => it.name === "Street Runner")).toBe(false);
@@ -650,7 +659,7 @@ describe("CharacterSheetNpcExporter", () => {
 	});
 
 	it("should be consumable by activateWildShapeFromBestiary", () => {
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const wsState = new CharacterSheetState();
 
 		wsState.activateWildShapeFromBestiary(out);
@@ -664,7 +673,7 @@ describe("CharacterSheetNpcExporter", () => {
 	});
 
 	it("should be consumable by addCompanionFromBestiary", () => {
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const compState = new CharacterSheetState();
 
 		const id = compState.addCompanionFromBestiary(
@@ -682,17 +691,17 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(companion.type).toBe(CharacterSheetState.COMPANION_TYPES.BEAST_COMPANION);
 	});
 
-	it("should omit empty spellcasting sections", () => {
+	it("should retain upcasting slot pools even with only cantrips prepared", () => {
 		const caster = new CharacterSheetState();
 		caster.setName("Cantrip Only");
 		caster.addClass({name: "Wizard", source: "PHB", level: 1});
 		caster.setSpellcastingAbility("int");
 		caster.addCantrip({name: "light", source: "XPHB", level: 0, sourceClass: "Wizard"});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(caster);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(caster, {presentationMode: "compact"});
 		expect(out.spellcasting).toBeDefined();
 		expect(out.spellcasting[0].will).toBeDefined();
-		expect(out.spellcasting[0].spells).toBeUndefined();
+		expect(out.spellcasting[0].spells[1]).toEqual({slots: 2, spells: []});
 	});
 
 	it("should avoid double periods in attack ranges and strip +0 damage", () => {
@@ -712,7 +721,7 @@ describe("CharacterSheetNpcExporter", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior, {presentationMode: "compact"});
 		const bow = out.action.find(a => a.name === "Longbow");
 		expect(bow).toBeDefined();
 		expect(bow.entries[0]).not.toMatch(/ft\.\./);
@@ -739,7 +748,7 @@ describe("CharacterSheetNpcExporter", () => {
 			equipped: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior, {presentationMode: "compact"});
 		const dagger = out.action.find(a => a.name === "Dagger");
 		expect(dagger).toBeDefined();
 		expect(dagger.entries[0]).toContain("{@atk mw,rw}");
@@ -761,7 +770,7 @@ describe("CharacterSheetNpcExporter", () => {
 			range: "reach 5 ft., one target",
 		});
 
-		const fighterOut = CharacterSheetNpcExporter.convertStateToMonster(fighter);
+		const fighterOut = CharacterSheetNpcExporter.convertStateToMonster(fighter, {presentationMode: "compact"});
 		expect(fighterOut.action.some(a => a.name === "Longsword")).toBe(true);
 		expect(fighterOut.action.some(a => a.name === "Unarmed Strike")).toBe(false);
 
@@ -772,7 +781,7 @@ describe("CharacterSheetNpcExporter", () => {
 		monk.setAbilityBase("wis", 14);
 		monk.setMaxHp(38);
 
-		const monkOut = CharacterSheetNpcExporter.convertStateToMonster(monk);
+		const monkOut = CharacterSheetNpcExporter.convertStateToMonster(monk, {presentationMode: "compact"});
 		expect(monkOut.action.some(a => a.name === "Unarmed Strike")).toBe(true);
 		expect(monkOut.ac[0].from.join(" ")).toMatch(/Unarmored Defense/i);
 	});
@@ -785,7 +794,7 @@ describe("CharacterSheetNpcExporter", () => {
 			important: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(out.action.some(a => a.name === "Multiattack")).toBe(true);
 		expect(out.action.find(a => a.name === "Multiattack").entries[0]).toMatch(/two/i);
 		expect((out.trait || []).some(t => t.name === "Extra Attack")).toBe(false);
@@ -803,7 +812,7 @@ describe("CharacterSheetNpcExporter", () => {
 		wiz._recalculateCustomModifiers?.();
 
 		const expectedDc = wiz.getSpellSaveDc();
-		const out = CharacterSheetNpcExporter.convertStateToMonster(wiz);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(wiz, {presentationMode: "compact"});
 		const header = out.spellcasting[0].headerEntries[0];
 		expect(header).toContain("Mira is a spellcaster");
 		expect(header).toContain(`{@dc ${expectedDc}}`);
@@ -820,14 +829,14 @@ describe("CharacterSheetNpcExporter", () => {
 		wiz.addInnateSpell({name: "detect magic", source: "XPHB", level: 1, atWill: true});
 		wiz.addInnateSpell({name: "misty step", source: "XPHB", level: 2, uses: {current: 1, max: 1}, recharge: "long"});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(wiz);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(wiz, {presentationMode: "compact"});
 		expect(out.spellcasting.length).toBeGreaterThanOrEqual(2);
 		const innate = out.spellcasting.find(b => b.name === "Innate Spellcasting");
 		expect(innate).toBeDefined();
 		expect(innate.will.some(s => s.includes("detect magic"))).toBe(true);
-		expect(innate.daily).toBeDefined();
-		const dailyVals = Object.values(innate.daily).flat().join(" ");
-		expect(dailyVals).toContain("misty step");
+		const rest = out.spellcasting.find(block => block.rest);
+		expect(rest.headerEntries.join(" ")).toContain("long rest");
+		expect(Object.values(rest.rest).flat().join(" ")).toContain("misty step");
 	});
 
 	it("should export warlock pact magic slots", () => {
@@ -845,12 +854,12 @@ describe("CharacterSheetNpcExporter", () => {
 		const pact = warlock.getPactSlots();
 		expect(pact.max).toBeGreaterThan(0);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(warlock);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warlock, {presentationMode: "compact"});
 		expect(out.spellcasting).toBeDefined();
-		const block = out.spellcasting[0];
+		const block = out.spellcasting.find(entry => /Pact Magic/.test(entry.name));
 		expect(block.name).toMatch(/Pact Magic/i);
-		expect(block.headerEntries[0]).toMatch(/short or long rest/i);
-		expect(block.will.some(s => s.includes("eldritch blast"))).toBe(true);
+		expect(block.headerEntries.join(" ")).toMatch(/short or long rest/i);
+		expect(out.spellcasting.flatMap(entry => entry.will || []).some(s => s.includes("eldritch blast"))).toBe(true);
 		const slotLevel = String(pact.level || 3);
 		expect(block.spells[slotLevel]).toBeDefined();
 		expect(block.spells[slotLevel].slots).toBe(pact.max);
@@ -865,14 +874,14 @@ describe("CharacterSheetNpcExporter", () => {
 		barb.setMaxHp(125);
 		barb.setCurrentHp(125);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(barb);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(barb, {presentationMode: "compact"});
 		expect(out.hp.average).toBe(125);
 		expect(out.hp.formula).toMatch(/d12/);
 		expect(out.hp.formula).not.toMatch(/d8/);
 	});
 
 	it("should support legendary framing options", () => {
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact",
 			legendaryEnabled: true,
 			legendaryActions: 3,
 			legendaryResistances: 2,
@@ -909,11 +918,11 @@ describe("CharacterSheetNpcExporter", () => {
 	});
 
 	it("should label AC from equipped armor name", () => {
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(out.ac[0].from.join(" ")).toMatch(/Chain Mail|armor|natural/i);
 		// Prefer real armor name when breakdown available
 		state.setArmor({name: "Chain Mail", ac: 16, type: "heavy"});
-		const out2 = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out2 = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(out2.ac[0].from.some(f => /chain mail/i.test(f) || f === "natural armor" || /armor/i.test(f))).toBe(true);
 	});
 
@@ -923,13 +932,13 @@ describe("CharacterSheetNpcExporter", () => {
 			name: "Thunderous Test",
 			source: "TCE",
 			important: true,
-			description: "Starting at 10th level, when you hit a creature while you're raging, you've never felt stronger. You take damage and you hit it again.",
+			description: "Starting at 1st level, when you hit a creature while you're raging, you've never felt stronger. You take damage and you hit it again.",
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeFeatures: "allImportant"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeFeatures: "allImportant"});
 		const blob = JSON.stringify(out);
 		expect(blob).not.toMatch(/Onger've|Onger're|Onger'll/i);
-		expect(blob).not.toMatch(/Starting at 10th level/i);
+		expect(blob).not.toMatch(/Starting at 1st level/i);
 		const trait = [...(out.trait || []), ...(out.action || []), ...(out.bonus || []), ...(out.reaction || [])]
 			.find(t => /Thunderous Test/i.test(t.name));
 		expect(trait).toBeDefined();
@@ -948,7 +957,7 @@ describe("CharacterSheetNpcExporter", () => {
 			description: "You have advantage on saving throws against being {@condition frightened}. You also gain advantage on Wisdom (Perception) checks.",
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeFeatures: "allImportant"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeFeatures: "allImportant"});
 		// v16: standing advantage claims merge into the pinned roll-modifier trait, so the
 		// tags have to survive that merge as well as the prose passes.
 		const trait = out.trait.find(t => t.name === "Brave Presence")
@@ -978,7 +987,7 @@ describe("CharacterSheetNpcExporter", () => {
 			enabled: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		expect(out.conditionImmune || []).toEqual(expect.arrayContaining(["frightened", "paralyzed"]));
 		// Folded defenses / speed must not reappear in residual Additional Effects
 		const modTrait = (out.trait || []).find(t => t.name === "Additional Effects" || t.name === "Custom Modifiers");
@@ -1001,7 +1010,7 @@ describe("CharacterSheetNpcExporter", () => {
 			description: "Starting at 10th level, you can push a creature up to 10 feet when you hit it with a melee attack while you're raging.",
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeFeatures: "allImportant"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeFeatures: "allImportant"});
 		const all = [...(out.trait || []), ...(out.action || []), ...(out.bonus || []), ...(out.reaction || [])]
 			.filter(e => /Thunderous Blows/i.test(e.name));
 		expect(all.length).toBe(1);
@@ -1036,7 +1045,7 @@ describe("CharacterSheetNpcExporter", () => {
 			enabled: true,
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeFeatures: "allImportant"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeFeatures: "allImportant"});
 		const bonus = (out.bonus || []).find(b => /Polearm Master/i.test(b.name));
 		expect(bonus).toBeDefined();
 		expect(bonus.entries.join(" ")).toMatch(/bonus action|opposite end|d4|bludgeoning/i);
@@ -1070,7 +1079,7 @@ describe("CharacterSheetNpcExporter", () => {
 		state.addResource({name: "Stone's Endurance", max: 3, current: 3, recharge: "long"});
 		state.addResource({name: "Orphan Pool", max: 2, current: 2, recharge: "short"});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {includeFeatures: "allImportant"});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", includeFeatures: "allImportant"});
 		const rage = (out.bonus || []).find(b => /^Rage\b/i.test(b.name));
 		expect(rage).toBeDefined();
 		expect(rage.name).toMatch(/\(4\/LR\)/);
@@ -1106,7 +1115,7 @@ describe("CharacterSheetNpcExporter", () => {
 			state.getFeatureCalculations = () => ({hasRage: true});
 		}
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const resist = out.resist || [];
 		const cond = resist.find(r => r && typeof r === "object" && r.cond && /raging/i.test(r.note || ""));
 		expect(cond).toBeDefined();
@@ -1149,8 +1158,10 @@ describe("CharacterSheetNpcExporter", () => {
 			],
 		});
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
-		const never = (out.trait || []).find(t => /Never Unready/i.test(t.name));
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
+		const spear = out.action.find(entry => entry.name === "Gae Bolg");
+		const rules = spear.entries.find(entry => entry?.type === "entries" && /Weapon Rules/.test(entry.name));
+		const never = rules.entries.find(entry => /Never Unready/i.test(entry.name));
 		expect(never).toBeDefined();
 		expect(never.entries.join(" ")).toMatch(/Surprised|truesight|Initiative/i);
 
@@ -1159,9 +1170,10 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(blaze.name).toMatch(/1\/Dawn/);
 		expect(blaze.entries.join(" ")).toMatch(/Blinded|dc 22|Bonus Action/i);
 
-		// Attack restatement skipped when bonusWeapon already covers it
-		const allText = JSON.stringify(out);
-		expect(allText).not.toMatch(/Dragon-Bone Spear/);
+		// The numeric bonus does not cover the independent replacement-damage rule.
+		expect(JSON.stringify(spear)).toMatch(/Dragon-Bone Spear/);
+		expect(JSON.stringify(spear)).toContain("4d10 piercing damage");
+		expect(JSON.stringify(spear)).toContain("instead of its normal damage");
 	});
 
 	it("should expand combat method stance riders in the Combat Methods trait", () => {
@@ -1180,7 +1192,7 @@ describe("CharacterSheetNpcExporter", () => {
 			if (m && !m.isStance) m.isStance = true;
 		}
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state);
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 		const cm = (out.trait || []).find(t => t.name === "Combat Methods");
 		expect(cm).toBeDefined();
 		const text = cm.entries.join(" ");
@@ -1231,7 +1243,7 @@ describe("CharacterSheetNpcExporter — initiative advantage scoping (v32)", () 
 		namedModifiers.forEach(m => st._data.namedModifiers.push({enabled: true, ...m}));
 		return st;
 	};
-	const initiativeOf = st => CharacterSheetNpcExporter.convertStateToMonster(st).initiative ?? null;
+	const initiativeOf = st => CharacterSheetNpcExporter.convertStateToMonster(st, {presentationMode: "compact"}).initiative ?? null;
 
 	it("control: an initiative-scoped advantage does reach the exported block", () => {
 		// Without this the three assertions below are unfalsifiable.
@@ -1262,17 +1274,17 @@ describe("CharacterSheetNpcExporter — initiative advantage scoping (v32)", () 
 	it("skill advantage never perturbs the numeric skill block", () => {
 		// Skills export as a single number from `getSkillMod`; advantage has no
 		// representation there and must not be smuggled in as a bonus.
-		const base = CharacterSheetNpcExporter.convertStateToMonster(makeState()).skill;
+		const base = CharacterSheetNpcExporter.convertStateToMonster(makeState(), {presentationMode: "compact"}).skill;
 		const withAdv = CharacterSheetNpcExporter.convertStateToMonster(makeState([
 			{type: "check:advantage:perception", advantage: true, name: "Keen Senses"},
-		])).skill;
+		]), {presentationMode: "compact"}).skill;
 		expect(withAdv).toEqual(base);
 
 		// Control: a real numeric bonus on the same skill does move it, so the
 		// equality above is a measurement rather than two blind reads.
 		const bumped = makeState();
 		bumped._data.customModifiers.skills.perception = 5;
-		expect(CharacterSheetNpcExporter.convertStateToMonster(bumped).skill)
+		expect(CharacterSheetNpcExporter.convertStateToMonster(bumped, {presentationMode: "compact"}).skill)
 			.not.toEqual(base);
 	});
 });

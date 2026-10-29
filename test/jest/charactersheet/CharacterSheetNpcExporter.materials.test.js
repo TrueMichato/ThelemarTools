@@ -131,7 +131,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			// RESISTANCE; it is an AC mechanic, and that one wrong string propagated into a
 			// design decision. If this wording drifts back, the export is lying to the DM.
 			const state = makeState({items: [weapon({material: "Orichaline"})]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 			const attack = (out.action || []).find(a => /Test Longsword/i.test(a.name || ""));
 
 			expect(attack).toBeTruthy();
@@ -141,9 +141,9 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 
 		it("reaches magical AC only for the material authored to", () => {
 			const orichaline = CharacterSheetNpcExporter.convertStateToMonster(
-				makeState({items: [weapon({material: "Orichaline"})]}), {});
+				makeState({items: [weapon({material: "Orichaline"})]}), {presentationMode: "compact" });
 			const steel = CharacterSheetNpcExporter.convertStateToMonster(
-				makeState({items: [weapon({material: "Steel"})]}), {});
+				makeState({items: [weapon({material: "Steel"})]}), {presentationMode: "compact" });
 
 			const attackOf = out => (out.action || []).find(a => /Test Longsword/i.test(a.name || ""));
 
@@ -154,7 +154,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 
 		it("states a material crit threshold on the attack", () => {
 			const state = makeState({items: [weapon({material: "Orichaline"})]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 			const attack = (out.action || []).find(a => /Test Longsword/i.test(a.name || ""));
 
 			expect(textOf(attack)).toMatch(/critical hit on a roll of 19-20/i);
@@ -162,7 +162,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 
 		it("offers an optional damage type as a choice, not as a silent override", () => {
 			const state = makeState({items: [weapon({material: "Emberglass"})]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 			const attack = (out.action || []).find(a => /Test Longsword/i.test(a.name || ""));
 
 			// Authored `optional: true` — the weapon still deals its own type by default.
@@ -214,7 +214,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 				quantity: 1,
 				equipped: true,
 			}]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 			const resilience = (out.trait || []).find(t => /^resilience$/i.test(t.name || ""));
 
 			expect(resilience).toBeTruthy();
@@ -241,7 +241,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 	describe("material powers", () => {
 		it("gives a material-granted action the economy its prose names", () => {
 			const state = makeState({items: [weapon({name: "Test Bow", material: "Yellowwood"})]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 			const found = findEntry(out, "Yellowwood Flurry");
 
 			expect(found).toBeTruthy();
@@ -253,7 +253,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			// Skyshard's affinity describes the weight and thrown range the projection has
 			// already applied. Printing it would be the same effect in two places.
 			const state = makeState({items: [weapon({material: "Skyshard"})]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 
 			expect(findEntry(out, "Skyshard Affinity")).toBeFalsy();
 		});
@@ -263,7 +263,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 			// surface it is dormant, and a dormant affinity is a fact about the item rather
 			// than something the NPC can do in a fight.
 			const state = makeState({items: [weapon({material: "Stormprism"})]});
-			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 
 			expect(findEntry(out, "Stormprism Affinity")).toBeFalsy();
 		});
@@ -443,7 +443,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 					inventory: [{id: item.id, item, quantity: 1, equipped: true}],
 				});
 				state.setItemMaterialCatalog?.(catalog);
-				return JSON.stringify(CharacterSheetNpcExporter.convertStateToMonster(state, {}));
+				return JSON.stringify(CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" }));
 			};
 
 			// The control runs first and must FAIL to be silent: the same material carrying a
@@ -513,7 +513,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 					inventory: [{id: item.id, item, quantity: 1, equipped: true}],
 				});
 				state.setItemMaterialCatalog?.(catalog);
-				return CharacterSheetNpcExporter.convertStateToMonster(state, {});
+				return CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 			};
 
 			// An entry the material contributed *as its own ability*: the exporter prefixes
@@ -551,7 +551,7 @@ maybeDescribe("NPC export v22 — materials reach the statblock", () => {
 				inventory: [{id: item.id, item, quantity: 1, equipped: true}],
 			});
 			state.setItemMaterialCatalog?.(MATERIALS);
-			return CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			return CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		};
 
 		it("control: a power-declared effect does create its own action-economy entry", () => {
@@ -710,7 +710,7 @@ maybeDescribe("NPC export v23 — the rider says what it does", () => {
 			...extra,
 		});
 		state.setItemMaterialCatalog?.(MATERIALS);
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const action = (out.action || []).find(a => namePattern.test(String(a.name || "")));
 		return {out, action, text: JSON.stringify(action || {})};
 	};
@@ -885,7 +885,7 @@ maybeDescribe("NPC export v24 — the material power lands in the right section"
 		// is visible instead of silent. `_getMaterialPowerSection` prefers the authored value,
 		// so a note that agrees with its data changes nothing; a note that disagrees would.
 		const selfDescribing = authoredEconomies
-			.filter(power => CharacterSheetNpcExporter._getActivationSectionFromText(power.note) != null)
+			.filter(power => ["action", "bonus", "reaction"].includes(CharacterSheetNpcExporter._getActivationSectionFromText(power.note)))
 			.map(power => power.name)
 			.sort();
 		expect(selfDescribing).toEqual(["Yellowwood Flurry"]);
@@ -974,7 +974,7 @@ maybeDescribe("NPC export v25 — the drawback rides with the benefit", () => {
 			inventory: [weapon({name, material})],
 		});
 		state.setItemMaterialCatalog?.(MATERIALS);
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const action = (out.action || []).find(a => new RegExp(name, "i").test(String(a.name || "")));
 		return String((action?.entries || []).join(" "));
 	};
@@ -1218,7 +1218,7 @@ maybeDescribe("NPC export v26b — a projected bonus is counted exactly once", (
 			inventory: [magicSword(bonus)],
 		});
 		state.setItemMaterialCatalog?.(MATERIALS);
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const action = (out.action || []).find(a => /Probe Sword/i.test(String(a.name || "")));
 		const text = String((action?.entries || []).join(" "));
 		return {
@@ -1278,7 +1278,7 @@ maybeDescribe("NPC export v26b — a projected bonus is counted exactly once", (
 	const dieProbe = ({material = null, upgrades = null, dmg1 = "1d4"} = {}) => {
 		const entry = weapon({name: "Die Probe", material, upgrades, dmg1});
 		const state = makeState({items: [entry]});
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const action = (out.action || []).find(a => /Die Probe/i.test(String(a.name || "")));
 		const text = String((action?.entries || []).join(" "));
 		return {
@@ -1398,7 +1398,7 @@ maybeDescribe("NPC export v26c -- damage reduction is stated once, not once per 
 
 	it("prints the reduction exactly once across the whole statblock", () => {
 		const state = makeState({items: [plate()]});
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 
 		expect(String(JSON.stringify(out)).match(DR_SENTENCE) || []).toHaveLength(1);
 	});
@@ -1406,7 +1406,7 @@ maybeDescribe("NPC export v26c -- damage reduction is stated once, not once per 
 	it("puts it on the armour that grants it, so a DM knows what to take off", () => {
 		// Naming the home makes a future move visible in the diff rather than silent.
 		const state = makeState({items: [plate()]});
-		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const armorTraits = (out.trait || []).find(t => /^Armor Traits$/i.test(t.name || ""));
 
 		expect(armorTraits).toBeTruthy();
@@ -1489,7 +1489,7 @@ maybeDescribe("NPC export v27 -- an unresolvable material is reported, not swall
 	});
 
 	const warningsFor = (state) => {
-		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const warnings = [];
 		CharacterSheetNpcExporter.buildCompanionItems(monster, state, {sourceJson: "TEST", warnings});
 		return warnings;
@@ -1538,7 +1538,7 @@ maybeDescribe("NPC export v27 -- an unresolvable material is reported, not swall
 		// A catalog weapon is not a companion item and is never bundled, so the pre-existing
 		// provenance warning could not fire for it at all.
 		const state = makeState({items: [catalogWeapon("Unobtanium")]});
-		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const bundled = CharacterSheetNpcExporter.buildCompanionItems(monster, state, {sourceJson: "TEST", warnings: []});
 
 		expect(bundled.map(b => b.name)).not.toContain("Catalog Longsword");
@@ -1626,7 +1626,7 @@ maybeDescribe("NPC export v28 -- a material attack rider rides the attack", () =
 
 	it("states the rider on the weapon's own attack line and drops the trait", () => {
 		const state = makeState({items: [weapon({name: "Blackwood Greatsword", material: "Stout Blackwood", property: ["2H"], dmg1: "2d6"})]});
-		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const attack = (monster.action || []).find(entry => /Blackwood Greatsword/i.test(String(entry?.name || "")));
 
 		expect(textOf(attack)).toMatch(/Stout Blackwood Shove/i);
@@ -1636,7 +1636,7 @@ maybeDescribe("NPC export v28 -- a material attack rider rides the attack", () =
 	it("gives 'this item' a referent by putting it on the item's line", () => {
 		// The reason this is a correctness fix and not a formatting preference.
 		const state = makeState({items: [weapon({name: "Deathglass Blade", material: "Deathglass", property: ["2H"], dmg1: "2d6"})]});
-		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const attack = (monster.action || []).find(entry => /Deathglass Blade/i.test(String(entry?.name || "")));
 
 		expect(textOf(attack)).toMatch(/damaged by this item/i);
@@ -1647,7 +1647,7 @@ maybeDescribe("NPC export v28 -- a material attack rider rides the attack", () =
 		// `_getSafeInlineText` strips braces, so routing the prose through it would have
 		// silently turned {@damage 2d6} into plain text.
 		const state = makeState({items: [weapon({name: "Deathglass Blade", material: "Deathglass", property: ["2H"], dmg1: "2d6"})]});
-		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const attack = (monster.action || []).find(entry => /Deathglass Blade/i.test(String(entry?.name || "")));
 
 		expect(textOf(attack)).toMatch(/\{@damage 2d6\}/);
@@ -1658,7 +1658,7 @@ maybeDescribe("NPC export v28 -- a material attack rider rides the attack", () =
 			weapon({name: "Blackwood Greatsword", material: "Stout Blackwood", property: ["2H"], dmg1: "2d6"}),
 			weapon({name: "Plain Greatsword", property: ["2H"], dmg1: "2d6"}),
 		]});
-		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+		const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
 		const plain = (monster.action || []).find(entry => /Plain Greatsword/i.test(String(entry?.name || "")));
 
 		expect(textOf(plain)).not.toMatch(/Stout Blackwood Shove/i);
@@ -1739,7 +1739,7 @@ maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
 		const drawback = instabilityOf("Sunprism");
 		expect(drawback).toBeTruthy();
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Sunprism")]}), {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Sunprism")]}), {presentationMode: "compact" });
 		const found = findEntry(out, "Sunprism Affinity");
 		expect(found).toBeTruthy();
 		expect(flatten(textOf(found.entry))).toContain(flatten(drawback).slice(0, 40));
@@ -1750,7 +1750,7 @@ maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
 		// braces, so routing this through the inline helper would print "@damage 1d6".
 		expect(instabilityOf("Stormprism")).toMatch(/\{@damage 1d6\}/);
 
-		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Stormprism")]}), {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Stormprism")]}), {presentationMode: "compact" });
 		const found = findEntry(out, "Stormprism Affinity");
 		expect(textOf(found.entry)).toContain("{@damage 1d6}");
 		expect(textOf(found.entry)).not.toMatch(/[^{]@damage 1d6/);
@@ -1758,7 +1758,7 @@ maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
 
 	it("gives the drawback one home, not one per power the material grants", () => {
 		// Stormprism emits both a granted action and its affinity, in the same section.
-		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Stormprism")]}), {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [focusItem("Stormprism")]}), {presentationMode: "compact" });
 		const surge = findEntry(out, "Stormprism Surge");
 		const affinity = findEntry(out, "Stormprism Affinity");
 		expect(surge).toBeTruthy();
@@ -1772,7 +1772,7 @@ maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
 		// and the affinity entry are live. The claim is recorded where the drawback is actually
 		// emitted, so exactly one of them says it.
 		const drawback = instabilityOf("Tideglass");
-		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [armorItem("Tideglass")]}), {});
+		const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [armorItem("Tideglass")]}), {presentationMode: "compact" });
 		const key = flatten(drawback).slice(0, 26);
 		const entries = ["trait", "action", "bonus", "reaction"].flatMap(section => (out[section] || []));
 		const hits = entries.filter(entry => flatten(textOf(entry)).includes(key));
@@ -1821,7 +1821,7 @@ maybeDescribe("NPC export v29 — an affinity states its off-switch", () => {
 			const key = flatten(instabilityOf(mat.name)).slice(0, 26);
 			if (!key) return;
 			[focusItem, armorItem].forEach(build => {
-				const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [build(mat.name)]}), {});
+				const out = CharacterSheetNpcExporter.convertStateToMonster(makeState({items: [build(mat.name)]}), {presentationMode: "compact" });
 				const entries = ["trait", "action", "bonus", "reaction"].flatMap(s => (out[s] || []));
 				const hits = entries.filter(entry => flatten(textOf(entry)).includes(key));
 				if (hits.length > 1) dupes.push(`${mat.name}/${hits.length}`);

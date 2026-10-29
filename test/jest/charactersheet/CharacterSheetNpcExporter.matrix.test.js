@@ -120,7 +120,7 @@ describe("CharacterSheetNpcExporter — class matrix", () => {
 		if (spec.martial) armMelee(s);
 		if (spec.armor) s.setArmor({name: "Scale Mail", ac: 14, type: "medium"});
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s);
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact"});
 		assertValidMonster(mon, spec.className);
 
 		if (spec.spellAbility) {
@@ -168,7 +168,7 @@ describe("CharacterSheetNpcExporter — class matrix", () => {
 			description: "As an action, you touch a creature and deal necrotic damage or heal, spending Hit Dice.",
 		});
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {includeFeatures: "allImportant"});
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact", includeFeatures: "allImportant"});
 		assertValidMonster(mon, "illrigger");
 		const blob = JSON.stringify(mon);
 		expect(blob).toMatch(/Baleful Interdict|Infernal Conduit|Seals|Class Resources/);
@@ -189,7 +189,7 @@ describe("CharacterSheetNpcExporter — class matrix", () => {
 		armMelee(s);
 		s.setArmor({name: "Chain Mail", ac: 16, type: "heavy"});
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {includeLevelSignal: true});
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact", includeLevelSignal: true});
 		assertValidMonster(mon, "multiclass");
 		expect(mon.action.some(a => a.name === "Multiattack")).toBe(true);
 		expect(mon.action.some(a => a.name === "Longsword")).toBe(true);
@@ -225,7 +225,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 		fighter.addFeature({name: "Action Surge", source: "PHB", description: "On your turn, take one additional action."});
 		armMelee(fighter);
 
-		const monMonk = CharacterSheetNpcExporter.convertStateToMonster(monk);
+		const monMonk = CharacterSheetNpcExporter.convertStateToMonster(monk, {presentationMode: "compact"});
 		assertValidMonster(monMonk, "resources-monk");
 		const resTrait = monMonk.trait.find(t => t.name === "Class Resources");
 		expect(resTrait).toBeDefined();
@@ -235,7 +235,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 		expect(resText).toMatch(/Channel Divinity/);
 		expect(resText).toMatch(/Stamina/);
 
-		const monFighter = CharacterSheetNpcExporter.convertStateToMonster(fighter);
+		const monFighter = CharacterSheetNpcExporter.convertStateToMonster(fighter, {presentationMode: "compact"});
 		assertValidMonster(monFighter, "resources-fighter");
 		// Uses-on-name: Second Wind / Action Surge appear as abilities (not Class Resources wall)
 		const fighterBlob = JSON.stringify(monFighter);
@@ -275,7 +275,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 		});
 		armMelee(s);
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s);
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact"});
 		assertValidMonster(mon, "combat methods");
 		const methods = mon.trait.find(t => t.name === "Combat Methods");
 		expect(methods).toBeDefined();
@@ -316,7 +316,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 		});
 		armMelee(s);
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {includeFeatures: "allImportant"});
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact", includeFeatures: "allImportant"});
 		assertValidMonster(mon, "specialty");
 		const blob = JSON.stringify(mon);
 		// Either the specialty surfaces as bonus action (shove) or is summarized; must not crash and should mention shove/specialty/custom mods
@@ -339,7 +339,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 		addCasterSpells(s, {ability: "wis"});
 		s.setArmor({name: "Scale Mail", ac: 14, type: "medium"});
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {includeFeatures: "allImportant"});
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact", includeFeatures: "allImportant"});
 		assertValidMonster(mon, "divine favor");
 
 		const spellBlob = JSON.stringify(mon.spellcasting || []);
@@ -438,7 +438,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 
 		s._calculateItemBonuses?.();
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s);
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact"});
 		assertValidMonster(mon, "ioun+items");
 
 		const special = mon.trait.find(t => t.name === "Special Equipment");
@@ -481,7 +481,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 		s.addResource({name: "Channel Divinity", max: 1, current: 1, recharge: "short"});
 		s.setArmor({name: "Scale Mail", ac: 14, type: "medium"});
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {includeFeatures: "allImportant"});
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact", includeFeatures: "allImportant"});
 		assertValidMonster(mon, "channel divinity");
 		const blob = JSON.stringify([...(mon.action || []), ...(mon.trait || [])]);
 		expect(blob).toMatch(/Turn Undead|Channel Divinity/);
@@ -508,7 +508,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 			"Socketed Ruby: +1 fire damage on weapon attacks.",
 		]);
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s);
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact"});
 		assertValidMonster(mon, "upgrades");
 		expect(mon.trait.some(t => t.name === "Armor Traits")).toBe(true);
 		expect(mon.trait.some(t => t.name === "Gemstone Effects")).toBe(true);
@@ -537,7 +537,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 			enabled: true,
 		});
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {includeCustomModifiers: true});
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact", includeCustomModifiers: true});
 		assertValidMonster(mon, "custom");
 		expect((mon.bonus || []).some(a => a.name === "Heroic Roar")
 			|| (mon.action || []).some(a => a.name === "Heroic Roar")
@@ -584,7 +584,7 @@ describe("CharacterSheetNpcExporter — special systems matrix", () => {
 			s.setDivineFavorLevel(10);
 		}
 
-		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {
+		const mon = CharacterSheetNpcExporter.convertStateToMonster(s, {presentationMode: "compact",
 			legendaryEnabled: true,
 			legendaryActions: 3,
 			legendaryResistances: 3,

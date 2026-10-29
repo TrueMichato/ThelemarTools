@@ -181,6 +181,7 @@ function _getBuiltInUpgradeDescriptor (upgrade, {appliedRef = upgrade} = {}) {
 	}
 
 	const armor = {};
+	if (isTgtt && name === "blessed") out.effects = [{type: "resistance", damageType: "necrotic"}];
 	if (isTcah || isTgtt) {
 		if (name === "muffled") armor.muffled = true;
 		if (name === "reinforced") {
@@ -436,6 +437,7 @@ export function getGemstoneDescriptor (gem, {catalog = _itemUpgradeCatalog} = {}
 	const structured = _getStructuredGemstoneDescriptor(entity);
 	if (!builtIn && !structured) return null;
 	const out = {..._copy(builtIn || {}), ..._copy(structured || {})};
+	out.entries = _copy(entity?.entries || []);
 	for (const prop of ["effects", "powers", "notes"]) {
 		if (builtIn?.[prop]?.length || structured?.[prop]?.length) out[prop] = _mergeUnique(builtIn?.[prop], structured?.[prop], it => prop === "powers" ? (it.id || it.name) : JSON.stringify(it));
 	}

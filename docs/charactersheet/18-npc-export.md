@@ -8,16 +8,16 @@ Convert a live character sheet into a 5etools bestiary-shaped homebrew monster f
 |---------|-----|
 | Toolbar | `#charsheet-btn-export-npc` |
 | Play mode actions | **NPC Export** |
-| Code | `CharacterSheetExport._showNpcExportDialog()` → `CharacterSheetNpcExporter.convertStateToMonster(state, options)` |
+| Code | `CharacterSheetExport._showNpcExportDialog()` → `CharacterSheetNpcExporter.buildExportDocument(state, options)` |
 
 ## Architecture
 
 ```
-CharacterSheetState (getter-based projection)
+Live CharacterSheetState
         │
         ▼
-CharacterSheetNpcExporter.convertStateToMonster(state, options)   // no DOM
-        │  monster JSON
+CharacterSheetNpcExporter.buildExportDocument(state, options)   // detached, no DOM
+        │  owner + linked companions + bundled items + separate report
         ▼
 CharacterSheetExport dialog
   - source meta + export options (persisted)
@@ -32,6 +32,196 @@ CharacterSheetExport dialog
 State getters can reconcile lazy grants, pools, and generated equipment. Conversion
 is not a raw-data immutability boundary: callers needing an untouched original
 must project a detached copy, not serialize/remove/restore the live character.
+`buildExportDocument` is that boundary; the dialog uses its single assembled
+document for every destination. The standalone converter remains available.
+
+### Source rules and current progression
+
+Feature definitions retain their edition and complete mechanics; name-only feat,
+Rage, and Reckless Attack templates do not replace them. Class progression uses
+the owning class's level, not total multiclass level. An exact class/source match
+wins; a unique class-name match also supports TGTT acquisitions of PHB/XPHB
+definitions. Ambiguous or absent ownership preserves the unresolved level gate.
+
+Resolve gated ranges, dice, and quantities before compact prose normalization,
+within the authored paragraphs and named sections. Choose the latest eligible
+threshold, not the greatest numerical die product. Rewriting an attack's range
+must not rewrite a nearby hostile-proximity exception. Applying an upgrade must
+retain other benefits in its sentence, such as Honed Spellfire's temporary HP.
+Canonical current Flurry, Brutal Strike, and Chained Fury values reconcile stale
+source claims. Below-capstone Divine Intervention retains its percentile roll;
+an unresolved future automatic-success gate cannot cancel that procedure.
+
+### Resource and formula ownership
+
+Ability headings use the current canonical pool's maximum and recharge, not
+stale `feature.uses` or the number of charges remaining. Stable feature/feat,
+resource, and acquisition IDs precede exact-name fallback. Synthetic combat
+pools use their canonical projection. Shared words alone never associate a pool:
+Persistent Rage and Rage of the Wilds do not independently spend Rage uses.
+Independently owned same-name pools remain distinct. A pool is hidden as redundant
+only when an emitted ability actually represents it; otherwise it stays visible,
+including in compact exports.
+
+Explicit save formulas take precedence over generic spell DCs. Jester acts use
+the sheet's actual Performance bonus, including derived skills and active stance
+bonuses; a DC based on a rolled Performance check remains dynamic. Compound DCs
+are resolved as a whole. A multiclass spell-save reference without a unique
+casting owner remains unresolved rather than borrowing another class's DC.
+
+Only bearer-owned formulas are evaluated from the NPC's statistics. For example,
+the Blue Tetragonal Ioun Stone's target AC still uses the target's Dexterity.
+Ioun absorption headings distinguish remaining spell levels from capacity:
+`37/50 spell levels remaining`. Explicit zero is preserved, missing current
+charges follow the sheet's full-capacity convention, and invalid remaining
+values display `unknown`, never an invented zero.
+
+### Weapon projection
+
+Weapon accuracy and ability-dependent damage use the sheet's canonical ability
+resolution, including Battle Ready, for automatic and matching saved attack rows.
+The canonical weapon builder understands UI `type: "weapon"` plus `typeCode`,
+and its ranged/melee decision is not overwritten by an exporter guess. Mastery
+requires both access and a selected weapon; a named magic weapon can use its
+selected base weapon's mastery, but raw item metadata grants no permission.
+
+The shared wielding getter uses the one-handed versatile die while a shield is
+equipped, without changing the saved hand preference. Known source-qualified
+base-item dice fill missing canonical fields before a stale display string;
+explicit custom dice and attack overrides remain authoritative. Companion-item
+profiles retain both base dice, independently of the currently chosen hand mode.
+
+Hybrid strikes use the canonical Lycan effect descriptor and current die/bonuses,
+with an explicit Hybrid Form requirement. They never inherit a magic weapon's
+accuracy. Generic form strikes similarly use their own unarmed calculation.
+
+Inventory dice are not always combat dice: Martial Arts can replace a Monk
+weapon's base die. The corpus gate compares against the real Combat projection,
+including Martial Arts and upgrades, rather than treating inventory-only dice as
+an expected attack result.
+
+### Attack procedures and conditional riders
+
+Weapon actions carry their complete structured source rules, including nested
+lists and tables. The heading identifies these as the source of any effects
+already summarized on the attack line, not additional copies of those effects.
+Mandatory nondamaging hit replacements (such as Sleep Dart) replace ordinary damage and
+its damage riders; optional replacements retain both the ordinary attack and
+the choice's cost and procedure. Only automatic, unambiguously scoped extra
+damage is summarized from prose. Other rules remain in the full weapon entries.
+
+Divine Fury is attributed first-hit damage on the creature's own turns while
+raging, not a separate attack. Divine Strike reads the canonical, source-owned
+Blessed Strikes choice and preserves both damage types and ranged eligibility.
+Catalogs must be loaded when resolving TGTT ownership of XPHB definitions;
+an absent catalog is not evidence that a recorded choice was never made.
+Missing or conflicting choices are not inferred.
+
+Attack-specific allowances come from `attackActionAllowances`. Unchained Fury
+offers three chain attacks only while its required states are active, never
+three arbitrary weapon attacks. Source traits are retired only for riders
+actually emitted on an eligible damaging attack. Conditional modifiers remain
+available rules even when their current toggle is off.
+
+### Complete item procedures
+
+Item powers are discovered from flat prose as well as named sections, lists,
+tables, and `additionalEntries`; a separate activation field is not required.
+There is no named-child or consumable-list cap. A table immediately following a
+named procedure belongs to that procedure, as with Staff of the Magi's
+Retributive Strike. Long procedures can be split into paragraphs, never cut to a
+character budget. Source spell references describe the item; they do not alone
+grant unrestricted casting.
+
+The conversion retains complete usable item rules through compact cleanup,
+including costs, targeting, duration, ending conditions, and recovery. Identical
+first sentences do not establish that two procedures are interchangeable.
+Passive weapon rules already carried by a weapon's full source block are not
+repeated as separate traits; independently actionable powers remain discoverable.
+
+Poison procedures prefer the carried item's actual source and edition over
+fallback facts. Midnight Tears retains midnight timing, 9d6 damage, and half
+damage on success. DMG Torpor incapacitates; XDMG Torpor halves speed instead.
+Neither edition's rule is transplanted into the other.
+
+Gemstone procedures use `getGemstoneEffects()` and the full source entries
+exposed by the shared gemstone descriptor. Each is qualified by its actual host
+item, with attack references pointing to that authoritative procedure rather
+than repeating an incomplete summary. If full source rules are unavailable,
+the export report explicitly identifies the summary-only fallback, even in
+complete mode.
+
+Content-only traversal preserves structural metadata such as entry `type`,
+table labels, and styles while normalizing prose. Do not apply voice rewriting
+indiscriminately to every string in a structured entry.
+
+### Spell identities, preparation, and shared pools
+
+The saved `spellcastingAbility: "inherit"` marker means the exact owning
+class/card's ability, never a schema ability or an Intelligence fallback.
+Explicit valid per-spell choices still win. Missing/invalid ownership remains
+unresolved with a warning. Full procedure spell tags use the same source
+resolver as spellcasting lists, preserving display arguments; unresolved
+references stay readable and reported instead of generating dead hovers.
+
+Ordinary NPC casting uses the canonical per-class casting cards. Each class keeps
+its own casting ability and DC, including spell-specific selected abilities.
+Gambler's rolled DC and attack formulas remain per-cast formulas, not Charisma
+statistics. Object and `Class|Source` attribution use the same source-aware
+ownership test as the sheet's class cards. Ambiguous multiclass attribution is
+reported rather than assigned to whichever mental ability is highest.
+
+Prepared/spellbook casters list only prepared or always-prepared leveled spells
+for ordinary casting; known casters retain their known-spell access. Unprepared
+spellbook entries remain in a clearly noncastable footer. Ritual eligibility
+comes from `canCastAsRitual()`, and eligible rituals are listed separately.
+Innate ritual-only grants do not become ordinary at-will spells.
+
+Ordinary slot counts appear once, even across several class lists. A separate
+Pact Magic block retains its own count and short-rest recovery, including when
+its level collides with an ordinary pool. Empty high-level lists still retain
+their upcasting slots. Other list-only levels use `slots: 0`: omitting `slots`
+would incorrectly make the renderer label them at will. The shared-pool header
+explains that eligible spells from either class can use either pool while
+retaining the spell's own casting ability.
+
+The loaded spell catalog supplies native spell levels and exact `name|source`
+identities. PHB and XPHB printings are not deduplicated by name or majority
+edition. A unique loaded-catalog match can repair a stale source in the detached
+export projection; conflicting matches remain visibly unresolved. These repairs
+and catalog gaps are included in `getExportReport()` and validation warnings.
+Saved spell records are not rewritten. Item UIDs such as `fly|XPHB#5` retain
+`XPHB` as the source and display level 5 as the cast level.
+
+A source feature with a bounded casting procedure is not a free spell grant.
+Its full rules survive compact cleanup, including action, target restrictions,
+duration, costs, and recovery. Thus Ethereal Step retains its bonus action,
+short-rest limit, and end-of-turn duration. Spell feats likewise retain their
+free-cast limits and slot alternative rather than being deleted merely because
+a roster mentions the spell. Explicit manual feature selection still wins.
+
+Innate routes keep distinct abilities and independently owned recovery pools;
+they do not universally waive material components or relabel rests as days.
+Only a spell block linked to a canonical resource can cover that resource.
+A reference in an unprepared-spell footer cannot erase a same-name pool.
+Empty optional action/trait arrays are omitted to satisfy the real schema.
+
+### Initiative and defense sources
+
+Initiative uses the canonical total and roll mode, including item and active-state
+advantage/disadvantage. Passive item prose is normalized by State; ordinary use
+gates such as an attuned Ioun Stone orbiting the head are not optional combat
+conditions. Activated powers and additional gates such as darkness do not become
+permanent initiative advantage. Opposing roll modes cancel normally.
+
+Persistent defenses use `getDefenseBreakdown({includeActiveStates: false})`,
+retaining manual, item, and source-qualified upgrade contributions without baking
+in temporary states. Active mode includes those states. The shared TGTT Blessed
+upgrade grants necrotic resistance while its armor is active. Overlapping
+resistance grants stay resistance; separately granted immunity remains immunity.
+The historical reported resistance-to-immunity escalation was not reproduced
+from an available original save: source-shaped overlap controls protect this
+category boundary without claiming that historical root cause was identified.
 
 ### Actor-backed companion foundation
 
@@ -123,7 +313,9 @@ The opt-in exporter `profile: "companion"` preserves complete feature entries
 values, exact all-save/all-skill totals, initiative, active defenses, spell
 editions, per-class casting statistics, and separate ordinary/Pact routes even
 at the same level. Slot blocks across class lists describe shared pools, not
-additional pools. Ordinary NPC export defaults and compaction remain unchanged.
+additional pools. The runtime companion profile is independent of ordinary
+NPC presentation: complete NPC output does not use companion current-resource
+semantics or actor policies.
 
 The isolated shared-caster controller supplies authoritative policy guards,
 paid-repair State APIs, and actor-qualified lifecycle cleanup.
@@ -146,9 +338,62 @@ Brew package shape:
 ```js
 {
   _meta: { sources: [/* source meta */] },
-  monster: [ /* one monster */ ],
+  monster: [ /* owner, followed by separate linked companions */ ],
+  item: [ /* optional bundled custom equipment */ ],
 }
 ```
+
+### Linked companion documents
+
+The dialog builds one document for preview, clipboard, download, and editable
+homebrew. `CharacterSheetNpcExporter.buildExportDocument(state, options)` returns
+`{document, report, validation}`. The existing single-monster converter remains
+available to runtime callers.
+
+Assembly uses a detached State, including its loaded catalogs. It never calls
+the owner's reconciling serialization or companion getters. Existing active
+records are projected; dismissed records are not recreated from their feature.
+A source-qualified feature without a record can supply a detached projection
+only when its existing rules and recorded choices suffice. Incomplete EFA
+appearance/locomotion/tool setup or RHW modification choices produce actionable
+warnings and report rows, not invented choices. Pending or dismissed companions
+do not require irrelevant source-creature downloads.
+
+EFA and TCE Steel Defenders keep their different HP, AC, saves, skills, damage,
+Repair, command timing, revival, and replacement rules. EFA's eligible
+replace-one-attack command does not leak into TCE. Arcane Jolt is explicitly the
+owner's shared resource, not another companion pool. RHW projections reuse the
+pure Reanimated Companion descriptor, including selected modifications and
+lifecycle; focused RHW controls use a source-shaped template because a real RHW
+bestiary template is not locally available. A required unavailable template
+blocks export instead of producing an incomplete statblock.
+
+Known procedures are scaled without deleting additional source actions or
+reactions. Generic companions use their stored/scaled statistics. Current HP,
+temporary HP, lifecycle, and remaining uses are retained separately from maximum
+statistics; exporting does not refill them. Actor-backed snapshots hydrate on the
+detached owner and preserve frozen statistics and spent slots. Invalid or
+recursive snapshots fail visibly, without an owner/cached-statblock fallback.
+
+Names are deterministic and collision-safe within the selected source. Owner
+and companions link in both directions, and all creatures enter the preview's
+hover cache before rendering. Companion blocks expand below the owner preview.
+Saving stages the creatures, items, and source metadata in one editable-brew
+write. Overwrite preserves owned identities without replacing a foreign
+same-name companion. Save as copy allocates new identities and remaps links in
+both directions; cancellation does not write metadata.
+
+Companion creatures can legitimately omit a CR, alignment, or attack, or have a
+fixed integer HP formula. Local admission recognizes those shapes; the installed
+bestiary schema is unchanged. Existing custom-skill compatibility exceptions
+remain explicit warnings, not silent strict-schema success.
+
+Retained owner rules name the owner explicitly when a defender/familiar is the
+other subject, including command costs and death conditions. Entries-only
+features remain eligible in compact manual scope. Feat DC formulas referring to
+the ability increased by the feat read that feat's recorded `choices.ability`;
+they never borrow the only class's casting ability. Missing/ambiguous choices
+leave the formula intact with a validation warning.
 
 ## Export options
 
@@ -156,14 +401,16 @@ Persisted under `charsheet-npc-export-options` (source meta under `charsheet-npc
 
 | Option | Values | Default | Notes |
 |--------|--------|---------|-------|
+| `presentationMode` | `complete` \| `compact` | `complete` | Missing/legacy preferences use complete mechanics; independent of runtime `profile: "companion"` |
 | `defenseMode` | `persistent` \| `active` | `persistent` | Active merges currently-on effective defenses; **conditional** toggles (Rage B/P/S, stances) always annotate the block with `{note, cond:true}` |
 | `includeUnarmed` | `auto` \| `always` \| `never` | `auto` | Auto keeps monk/enhanced unarmed; drops plain unarmed when other weapons exist |
-| `includeFeatures` | `auto` \| `allImportant` \| `manual` | `auto` | Manual uses `selectedFeatureIds` from the feature picker |
-| `selectedFeatureIds` | `string[]` | `[]` | Cap 64 |
+| `includeFeatures` | `auto` \| `allImportant` \| `manual` | `auto` | Complete retains all source rules in automatic scope; compact filters by importance without a count cutoff. Manual explicitly restricts either mode to the picked features |
+| `selectedFeatureIds` | `string[]` | `[]` | No hidden selection/count cap; an explicitly empty manual selection stays empty |
 | `includeCustomModifiers` | bool | `true` | Smart leftover **Additional Effects** (default on). Bookkeeping already on the block is filtered; unrepresented riders stay |
 | `includeCustomAbilities` | bool | `true` | Custom abilities routed by action economy |
 | `includeCombatMethods` | bool | `true` | TGTT methods grouped by stamina; stance riders expanded |
 | `crMode` | `auto` \| `manual` | `auto` | |
+| `crEstimator` | `dmg` \| `legacy` | `dmg` | Independent of mode; changing method preserves the manual value |
 | `crManual` | CR string | `"1"` | e.g. `"1/2"`, `"12"` |
 | `legendaryEnabled` | bool | `false` | Off by default |
 | `legendaryActions` | 0–5 | `3` | |
@@ -171,7 +418,96 @@ Persisted under `charsheet-npc-export-options` (source meta under `charsheet-npc
 | `nameSuffix` | string | `" (NPC)"` | Appended to display name |
 | `includeCrBreakdown` | bool | `false` | Adds defensive/offensive CR note under Level Signal (implies `includeLevelSignal`) |
 | `includeLevelSignal` | bool | `false` | Out-of-fiction **Level Signal** trait naming the source character's level/classes. Off by default — a bestiary entry shouldn't advertise its origin |
-| `spellIndex` | object \| `null` | `null` | Name→threat map built by the dialog from `DataUtil.spell.pLoadAll()`. Makes caster CR spell-aware; absent (tests, headless) the school-weighted fallback runs |
+| `spellIndex` | object \| `null` | `null` | Exact `name\|source` threat map built from `DataUtil.spell.pLoadAll()` plus loaded homebrew. Missing data excludes spell damage with explicit DMG limitations; only Legacy retains its school fallback |
+
+### CR estimates and limitations
+
+**DMG-style** is the default, including old preferences without an estimator.
+It calculates defensive CR from HP/AC and offensive CR from a supported
+three-round routine, then averages the two. It does **not** blend in character
+level. **Legacy blended** retains the historical 75% offense/defense mean plus
+25% level anchor, including its feature-weighted adjustments and missing-data
+fallback. These methods are advisories, not interchangeable balance guarantees.
+Manual CR wins under either method.
+
+The DMG calculation uses the published HP/DPR bands and each band's expected
+AC, attack bonus, and save DC (`data/msbcr.json`). Each complete two-point
+accuracy/AC difference moves that component one CR-table row; a one-point
+difference does not. The final average rounds to the nearest supported CR,
+with ties upward. Mixed attack/save delivery selects the largest damage share
+and damage-weights that share's statistic.
+
+The routine uses one action and one bonus action per round, real ordinary
+and independent Pact slots, source-owned finite uses, charge costs, and
+once-per-turn riders. Prepared routes only; higher slots can upcast supported
+source formulas. NPC pools start full without spending live resources; runtime
+companion profiles use their current printed pools. No rest, second bonus
+action, free paid rider, invented slot, or duplicated shared pool is allowed.
+Area/multi-target spells assume two creatures total; already-summed
+projectiles are not multiplied again. Damage assumes hits/failed saves, not
+hit probabilities.
+
+Only supported initial spell damage is counted. No precasting, automatic
+Shield/Mage Armor, later concentration ticks, companion damage, hostile-trigger
+reactions, or legendary-action damage is invented. Nonconsumed components are
+assumed available; unverifiable consumed materials, variable/compound costs,
+conditional source-gated attacks, and unsupported item/psionic procedures are
+excluded and disclosed. Control/healing and narrow defenses receive no
+invented numeric credit. Broad unconditional resistance/immunity uses an
+expected-CR multiplier band derived from unmultiplied defense and offense,
+not level; source-attribution notes alone do not make a defense conditional.
+Configured Legendary Resistance adds effective HP.
+
+The bounded planner keeps at most **512 states per round**. Hitting this
+ceiling is printed as a limitation: the result is best-found, not a certified
+optimum. Missing or unsupported spell data never silently becomes a
+school-based DMG estimate. The real loader's array and `{spell}` shapes are
+supported; failure logs a warning and shows a toast.
+
+`getExportReport(monster).crEstimate` exposes method, component arithmetic,
+effective HP/AC, DPR, all three rounds, resource costs/remaining pools,
+assumptions, exclusions, and search status. The modal displays the method and
+limitation count; JSON download includes a separate report. Diagnostics never
+become unsupported bestiary fields. Presentation mode does not change the
+selected estimator; changing estimator does not change creature mechanics.
+
+### Complete and compact presentation
+
+Primary action economy comes from the source rule, not any occurrence of
+"reaction" or "bonus action." Free triggers stay traits; another creature's
+escape action is not the NPC's activation. Psionic reaction headers retain their
+trigger and structured concentration retains its duration. Bearer names replace
+ambiguous pronouns in caster/target procedures. Sentence splitting preserves
+`vs.` and measurement abbreviations, and maneuver rosters retain later effects,
+durations, and ally reactions. Class-feature references carry a unique
+parent-owned save DC into their separately emitted options.
+
+Complete mechanics is the default, including when restoring preferences created
+before the presentation option existed. It preserves full feature rules,
+nonnumeric riders, nested entries/tables, and uncapped custom abilities rather
+than running the ordinary destructive prose-compaction passes. Manual picks
+remain an explicit scope restriction, not a second automatic ranking.
+
+Compact preserves the existing shorter presentation and attaches recoverable
+source-rule diagnostics. It groups selected mechanics without a feature-count
+cutoff: changing one feature's economy must not push another feature's upgrade
+or trigger out of the block. `CharacterSheetNpcExporter.getExportReport(monster)`
+returns a copy of `{name, source, presentationMode, omissions}`; each omission
+includes the source entity, reason, and full sanitized entries. The comparison
+is conservative: a rewritten rule can be reported even when its meaning was
+preserved. Reports live outside monster/item schema objects.
+
+Changing presentation regenerates the preview. All warnings/errors are
+available through expandable disclosures, and the full report can be copied
+or downloaded. **Download JSON** also downloads an accompanying report when
+needed. Clipboard and Homebrew users can retain it using **Copy report** or
+**Download report**; saving does not close the dialog. Failed conversion or
+item assembly blocks export instead of publishing a stale or incomplete
+success-shaped package.
+
+The historical pipeline notes below describe compact presentation. Complete
+preserves source rules instead of treating keyword inference as proof that an
+entire feature is already represented numerically.
 
 ## Conversion pipeline (high level)
 
@@ -189,7 +525,7 @@ Persisted under `charsheet-npc-export-options` (source meta under `charsheet-npc
 5. Spellcasting: class / pact / innate blocks with sheet DC and attack bonus.
    - **Provenance**: a spell granted by a feat, species or subclass renders as `{@spell Mage Hand|PHB} (Telekinetic)`. Ordinary class routes (`Wizard Spellbook`, `Cantrips Known`, …) are not annotated. A feature whose *entire* content was that grant is then dropped from the ability list; features carrying real mechanics are kept.
    - **Swappable subclass lists**: a subclass declaring two or more `subSubclassSpells` tables gets its own block listing every mode, marking the active one and noting the long-rest switch. Those spells are excluded from the general list so the block never implies both modes are prepared at once.
-6. **Features + feats** (`getFeatures` **and** `getFeats`): classified trait / action / bonus / reaction; cleaned prose; uses on **name** as `(6/LR)` / `(2/SR)` / `(3/Day)`; auto cap 16; same-name upgrades deduped. Feats like Polearm Master / Sentinel become real BA/reaction lines (not residual stubs).
+6. **Features + feats** (`getFeatures` **and** `getFeats`): classified trait / action / bonus / reaction; cleaned prose; uses on **name** as `(6/LR)` / `(2/SR)` / `(3/Day)`; no automatic count cap; same-name upgrades deduped. Feats like Polearm Master / Sentinel become real BA/reaction lines (not residual stubs).
 7. **Class Resources** only lists **orphan** pools not already attached to an exported ability (and not stamina when Combat Methods is present).
 8. Magic items: Special Equipment list + **named `entries` children** as traits/actions/bonus/reaction (e.g. Gae Bolg — Enemy-Blinding Radiance `(1/Dawn)`). Pure attack restatements skipped when the weapon line already covers them. Item-granted spells named per spell.
 9. TGTT combat methods → Combat Methods trait (costs, DC, hovers) + **stance rider prose** expanded inline.
@@ -197,21 +533,9 @@ Persisted under `charsheet-npc-export-options` (source meta under `charsheet-npc
    - `_ensureToggleAbilityIntegrity` guarantees every `while <Toggle>` annotation has a matching ability entry, synthesising one from the active-state or stance description when it is missing. A stance with parseable persistent effects is defined even when nothing references it.
 10. Armor upgrade / gemstone notes via state getters.
 11. Smart **Additional Effects** (default on): leftovers not represented by abilities/defenses/skills; `bonusAction` named mods promoted to real bonus entries when no feat covered them.
-12. CR advisory + optional legendary framing.
-    - **Spell-aware offence.** `highestSlot * 9 + 4` rated a Wish-carrying diplomat exactly
-      like a Meteor Swarm blaster. `_estimateSpellDpr` now scores the spells the character
-      actually knows. With a `spellIndex` (name→`{level, avgDamage, isAoe, isMultiTarget,
-      conditionInflict}`) built from the site's spell data, damage comes from
-      `damageInflict` + the largest `{@damage XdY}` in `entries` — gated on `damageInflict`
-      being non-empty, so *Wish*'s incidental `1d10` is not read as artillery. Control spells
-      score off `conditionInflict` ∩ an incapacitating-condition set. `areaTags` weights the
-      result: every tag except `ST` and `MT` is a real area (×1.5); `MT` is ×1.25.
-    - Scored over the DMG's **three rounds**, spending real slots highest-first with the
-      cantrip as the floor, so one Meteor Swarm is not a sustained 105 DPR.
-    - **Offline** (`spellIndex` absent — tests, Node harnesses) a school heuristic stands in:
-      `(level × 8 + 4) × weight`, weight 1 for Evocation/Conjuration/Necromancy, 0.75 for
-      Enchantment/Illusion, 0.4 for Abjuration/Divination/Transmutation. Coarser, but it
-      still separates a blaster from a utility caster. Homebrew spells always take this path.
+12. Selectable CR advisory + optional legendary framing. See
+    [CR estimates and limitations](#cr-estimates-and-limitations) for the default
+    table-based routine, retained Legacy heuristic, and explicit exclusions.
 
 ## Ability prose pipeline
 
@@ -312,9 +636,8 @@ Goal: **bestiary density + hovers**, not a PC feature dump.
 13. **Features are never suppressed for lacking a structural home.** `advantage` /
     `disadvantage` are not "already applied" — a statblock has no field for them — so
     Reckless Attack, Danger Sense and Brutal Strike stay. A feature with labelled
-    sub-sections is likewise never folded away. Any feature *named by an attack rider* is
-    exempt from the feature cap (`protectedFeatureNames`), on the same principle as v5's
-    toggle integrity: anything referenced elsewhere on the block must be defined on it.
+    sub-sections is likewise never folded away. There is no feature-count cap in either
+    presentation mode. Anything referenced elsewhere on the block must be defined on it.
 
 14. **Name matching is token-subset, never substring** (`_featureKeyMatches`). Raw
     `includes` in both directions made `"rage"` match `"aura of cou`**`rage`**`"`,
@@ -466,6 +789,11 @@ Goal: **bestiary density + hovers**, not a PC feature dump.
 
 ### Runnability passes (v10)
 
+The versioned sections below preserve implementation history. Where superseded,
+the current contracts above take precedence: complete mechanics is uncapped,
+spell identities are source-qualified, companion documents are assembled
+atomically, and CR heuristics/level anchors belong to **Legacy**, not DMG default.
+
 A statblock is only useful if a DM can read a line and act on it. These passes run at
 the end of the ability-prose pipeline and exist purely to reduce what the DM has to do
 in their head.
@@ -501,10 +829,10 @@ in their head.
     `The extra damage dealt by its rite is fire (Rite of the Flame), cold (…), or
     thunder (Rite of the Roar) damage.`
 
-39. **A hoverable roster clause is capped** (`_condenseRosterClause`). Once a maneuver
-    or stance name links to the full rule, the book paragraph beneath it is reference
-    material. Two sentences are kept, plus any sentence carrying a save, DC, condition
-    or damage. Stance labels in the Combat Methods roster are `{@combatmethod}`-tagged
+39. **A hoverable roster preserves its procedure** (`_condenseRosterClause`). A link
+    is not a substitute for later sentences carrying an ally's reaction attack, a rolled
+    AC bonus, a duration, or a resource cost. Roster bodies no longer have a sentence
+    budget. Stance labels in the Combat Methods roster are `{@combatmethod}`-tagged
     like the cost list above them (`_dropDuplicatedStanceBodies` matches either form).
 
 40. **Conditionals are answered** (`_resolveConditionalFeatureReferences`). Book text
@@ -1405,6 +1733,14 @@ Juen's dagger carries 68 properties, of which **17** survive. The schema is
   The sheet writes every bonus slot present and zeroed; carrying that through would bury the
   handful of properties that say something about the item.
 - **Default the three required fields** — `name`, `rarity` (`"none"`), `source`.
+- **Serialize numeric `bonus*` values as strings**, including signed values. The real
+  item schema rejects numbers even though the sheet accepts them. Preserve existing
+  string expressions and meaningful non-bonus zeros such as `charges: 0`.
+- **Normalize nested entries as well as flat prose.** Unsupported `{@itemMaterial}`
+  references become `{@5etools}` crafting links with an encoded name/source hash.
+  Keep the hash in the page argument: the current renderer drops the third argument
+  of that tag. Both entry rendering and the compact item renderer are regression-tested.
+  Missing names/sources remain explicit unresolved-reference text rather than guessed links.
 
 Legal as-is, pleasingly: `property: ["F","L","T"]` (bare codes validate), `mastery:
 ["Nick|XPHB"]`, `baseItem: "dagger|PHB"`, and the object form of `attachedSpells`.
@@ -2406,9 +2742,12 @@ test guarding against. `test/util-npc-export-schema.js` compiles the actual
 `5etools-utils` bestiary and item schemas via the same `UtilAjv`/sibling-registration
 pattern `test/util-combatmethods-schema.js` already uses, and
 `CharacterSheetNpcExporter.schemaValidation.test.js` runs every new fixture through the
-real compiled validator, not the mirror. It `describe.skip`s when
-`node_modules/5etools-utils` is absent (a genuine, documented environment gap here — see
-Testing below) rather than reporting green on an assertion it never made.
+real compiled validator, not the mirror. This required gate fails if the pinned
+dependency is absent. Register every schema, including the target, with an in-memory
+canonical ID under `https://npc-export.schema/site/` before retrieving the validator.
+This keeps the bestiary schema's sibling references resolvable without changing the
+installed schemas. Valid controls pass; unknown monster fields and numeric item bonuses
+must fail.
 
 **What v40 taught.**
 
@@ -2464,6 +2803,16 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 ```
 
 - Unit/regression: `CharacterSheetNpcExporter.test.js` (prose rewrite, tag preserve/enrich, defense fold-in, feature dedupe, residual modifiers)
+- Permanent audit contracts: `presentation`, `progression`, `resourcesAndDc`,
+  `canonicalWeapons`, `attackRules`, `spellcasting`, `itemRules`,
+  `subjectsAndEconomy`, `defenses`, `document`, and `cr` exporter suites. These
+  run without private saves; `schemaValidation` uses the real installed schemas.
+- Real dialog regression: `PW_PORT=<fresh-port> npx playwright test
+  test/e2e/specs/npc-export-dialog.spec.ts --workers=1 --reporter=list`.
+  The dedicated `NpcExportPage` exercises the real spawner, preferences,
+  manual/automatic methods, numerical mode invariants, clipboard/downloaded
+  reports, editable-brew save, mobile bounds, missing-index visibility, and
+  unchanged live State. It does not replace comprehensive build-factory tests.
 - Class + systems matrix: `CharacterSheetNpcExporter.matrix.test.js` — all 13 PHB/TCE/XPHB classes L5, multiclass, combat methods, specialties, divine favor, ioun/items, channel divinity, gemstones, custom abilities, resources, combined legendary boss
 - Materials & upgrades: `CharacterSheetNpcExporter.materials.test.js` — attack-line
   routing (penetration wording, magical-AC reach, crit threshold, damage-type *option*,
@@ -2481,10 +2830,27 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   no display-text-hijacked `{@spell}` links, source-free core condition tags, no second
   person, correct conjugation, no `Class Resources` fallback, uses on names, no duplicate
   abilities, annotated conditional defenses, real AC sources, consistent weapon to-hit,
-  plausible CR). Those saves are **personal character data and intentionally untracked** —
-  the suite `describe.skip`s itself when they are absent, so CI stays green.
+  explicit Legacy CR floors and default DMG budgets). Those saves are **personal
+  character data and intentionally untracked**. Their optional absence is not
+  evidence of correctness: permanent generic audit regressions remain required.
 
-  The corpus is **21** characters chosen to cover the surfaces that break the exporter.
+  Enable the separate stored-package gate with
+  `NPC_EXPORT_ATTACHMENT_PATH="$PWD/npc-exports/all-npcs-CSHEET.json" npm run test:unit -- CharacterSheetNpcExporter.attachmentCorpus --runInBand --no-coverage`.
+  This gate explicitly rejects the raw TGTT custom-skill fields under the strict
+  bestiary schema, then validates every other field on a detached copy excluding
+  only its four known TGTT skill keys. Unknown fields/skills still fail, and the
+  original package is unchanged. This compatibility check is not a claim that the
+  raw document satisfies the strict schema or that historical monsters were fixed.
+
+  `getEffectiveWeaponDamage()` derives only canonical or source-qualified base-item
+  dice. Its profile call disables the legacy display fallback, so an unstructured
+  custom item's full `"1d8 lightning"` display remains intact in item-power hovers
+  rather than losing its type or having an already-written bonus added twice.
+  Attack-profile callers retain their established last-resort display fallback.
+
+  The local corpus is **24** characters, plus the three separately supplied
+  attachment saves used for the audit. The original 21 are described below;
+  Elizabeth, Missy, and Nagara add multiclass casting, rogue, and sea-druid coverage.
   The original eleven:
   **Onger** (barbarian, combat methods, ioun stones), **Duralin** (fighter/shadow knight,
   item powers, multi-benefit feats), **Talna** (dual-form caster), **Dauk** (barbarian/bard
@@ -2552,9 +2918,9 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   `weapon` omit-and-warn, incumbent-preservation priority, the `type: null` prohibition).
   `CharacterSheetNpcExporter.schemaValidation.test.js` runs the same fixtures through the
   **real, AJV-compiled** item and bestiary schemas via `test/util-npc-export-schema.js`
-  (mirrors `test/util-combatmethods-schema.js`'s registration pattern) —
-  `describe.skip`s when `node_modules/5etools-utils` is absent, so it reports skip rather
-  than a false green when the dependency can't be resolved.
+  with canonical sibling IDs. It includes valid and intentionally invalid controls,
+  numeric bonus serialization, and real renderer dispatch for nested material references.
+  Missing `5etools-utils` is a failing prerequisite, not a skipped schema gate.
   `CharacterSheetNpcExporter.attachmentCorpus.test.js` is a local-only integration harness
   for a full reported failing corpus (never committed): set
   `NPC_EXPORT_ATTACHMENT_PATH=/absolute/path/to/corpus.json` (shape `{_meta, monster:[],
@@ -2587,13 +2953,15 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 16. Prose reads name-first then pronouns (“Duralin can push itself…, it can take…”),
     with no `you`, no `Starting at level N`, and no duplicated punctuation
 17. Level Signal absent unless “Level signal” or “Show CR breakdown” is ticked
-18. Level-20 caster/rogue/talent → CR sits within a couple of steps of an equivalent
-    martial; Sneak Attack and psionic damage visibly move it
+18. CR method/default/persistence/manual override work; independent DMG table and
+    legal three-round budgets match, and unsupported psionics are disclosed.
+    Historical level-anchored floors are explicitly Legacy-only.
 19. Talent → one compact `Psionics` trait, powers filed by Manifestation Time with strain
     on the name, and every forced save carries the power save DC
 20. Ioun stone bank → one grouped Special Equipment heading; stat-only stones produce no
     trait; no entry restates a resistance already on the block
-21. No single entry paragraph runs past ~620 characters unless it is a roster
+21. Long complete rules survive without a character cap; any compact omissions
+    are explicit and recoverable in the report
 22. No bare die anywhere in the prose — every `NdX` is `{@dice}` or `{@damage}` and rolls
     from the rendered block
 23. No unresolved `half its <class> level (round up)` / `equal to its level`; a resolved
@@ -2605,11 +2973,10 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 
 ## Known limitations (post-upgrade)
 
-- CR is advisory (DMG-inspired tables + level anchor), not a full monster redesign. It
-  now accounts for spell-slot-scaled caster damage, spell attack bonus, once-per-turn
-  riders (Sneak Attack, base Divine Smite), psionic damage, and conditional resistances
-  (Rage/stance) as effective HP — but it is still a heuristic. Non-martial level-20
-  builds remain the least certain end of it.
+- CR is advisory, not a full monster redesign. The default DMG-style routine
+  intentionally excludes unsupported procedures and lists its uncertainty.
+  The retained Legacy method alone includes the historical level anchor,
+  psionic/burst heuristics, and defensive-spell/conditional-defense adjustments.
 - **Some player choices are not stored by the sheet and therefore cannot be named.**
   Signature Spells and Spell Mastery keep no marker on the chosen spells, and
   `{@feat Resilient}` stores `choices.ability === null`. The export drops the imperative
@@ -2635,8 +3002,8 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   prove the text it removes is redundant; where it cannot, the text stays. Some entries
   are therefore still long (Dzeiy's `Hybrid Transformation`), and a second mention of a
   hovered term in the same sentence is deliberately left as plain English.
-- Long features are split into labelled sections rather than truncated; only a runaway
-  single section is trimmed, at a sentence boundary.
+- Complete source rules have no arbitrary length/count cap. Compact transformations
+  retain a full-source recovery report where a feature is omitted.
 - **Homebrew skill keys are a deliberate schema deviation.** `schema/site/bestiary` sets
   `additionalProperties: false` on `skill`, so `"endurance|TGTT"` is technically invalid
   — but `Renderer.monster.getSkillsString` unpacks the UID and the skill renders *and*
@@ -2645,7 +3012,7 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   structured payloads (`stanceEffects`) are empty in practice. Unusual phrasings may not
   be recognised; the prose itself is always exported in full, so nothing is lost.
 - Damage riders are additive text on the attack line, not recomputed damage averages. The
-  CR heuristic *does* now count them (Rage, Divine Strike, a Crimson Rite, Sneak Attack and
+  Legacy CR heuristic counts them (Rage, Divine Strike, a Crimson Rite, Sneak Attack and
   friends are added once to per-hit damage), along with a Bonus Action attack routine
   (Flurry of Blows, two-weapon fighting, Polearm Master) — omitting both rated a level-13
   monk at CR 6. The rider credit is deliberately conservative: once each, never per swing.
@@ -2656,8 +3023,11 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 - **A die annotation only counts a die-value paren as "already annotated".** "One
   Superiority Die (no action required)" is not annotated, and must still gain its `(1d10)`.
 - Smart leftover **Additional Effects** is on by default; disable via “Leftover modifiers” if you want a minimal block.
-- Validation is structural, not full `schema/site/monster.json`.
-- Spell multiclass presentation prefers pact-only when no normal slots; edge multiclass mixes may need manual CR/feature cleanup.
+- Dialog validation is lightweight. Permanent regressions and corpus verification
+  additionally run the real bestiary/item schemas. Custom skill UID deviations
+  are listed separately, never hidden by relaxing the schema.
+- Multiclass lists retain separate casting abilities, one shared ordinary slot
+  pool, and independent Pact slots. Ambiguous source ownership is disclosed.
 - **Divine Favor needs the homebrew catalog.** `_getDivineFavorBlock` reads
   `state.getDivineFavorGodData()`, which resolves against whatever
   `setDivineFavorCatalog()` was given. Without it (a bare Node harness, or a sheet that
@@ -2677,7 +3047,7 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   from a toggle (Rage resistances, a Shadow Sorcerer's Umbral Form) are only annotated
   when the character actually has the named feature — matching on the resource alone
   fabricated resistances for every Sorcerer.
-- **A caster's effective AC feeds CR** (`_getEffectiveAcForCr`): Mage Armor and Shield are
+- **Legacy effective AC** (`_getEffectiveAcForCr`): Mage Armor and Shield are
   counted when the NPC knows them, because a squishy full caster otherwise rates below
   what it survives in play. It is still an approximation, and a full caster legitimately
   rates lower than an armoured cleric of the same level.
@@ -2706,16 +3076,11 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
   failed to shift it. `npm run serve:dev` (`http-server -c-1`) sends `no-store`. A
   cache-busted `import("…?bust=" + Date.now())` is the quickest way to tell "my fix is
   wrong" apart from "the page is stale".
-- **Real-schema validation depends on an environment that can actually install
-  `5etools-utils`.** `package.json` pins `^0.16.43`; some environments' npm registry
-  mirrors only reach an older `0.16.36`, and forcing that version in isolation (bypassing
-  the lockfile) pulls a newer, ESM-only `htmlparser2` transitively through
-  `sanitize-html` that Jest's CommonJS loader cannot `require()` — trading one gap for a
-  worse one. `CharacterSheetNpcExporter.schemaValidation.test.js` and the AJV-gated cases
-  in `CharacterSheetNpcExporter.attachmentCorpus.test.js` correctly `describe.skip`
-  themselves in that state rather than reporting a false green; the hand-mirrored
-  `_SCHEMA_ITEM_TYPES` set is the fallback source of truth in an environment where the
-  real dependency cannot be installed cleanly.
+- **Real-schema validation requires the pinned `5etools-utils` installation.**
+  Restore dependencies from the lockfile if this prerequisite is missing; do not
+  downgrade the schema or treat the hand-mirrored `_SCHEMA_ITEM_TYPES` set as proof
+  of validity. The required schema regression suite fails visibly without the package.
+  Private attachment-corpus cases remain optional and explicitly report their skips.
 
 ## Key files
 
@@ -2727,7 +3092,7 @@ NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetNpcExporter --no
 | `test/jest/charactersheet/CharacterSheetNpcExporter.matrix.test.js` | Class × systems coverage |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.materials.test.js` | Material & upgrade routing, bundle composition |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.realsaves.test.js` | Contract tests against real saves in `npc-exports/` (skipped when absent) |
-| `test/jest/charactersheet/CharacterSheetNpcExporter.schemaValidation.test.js` | Companion-item fixtures validated against the real AJV-compiled schema (skipped when `5etools-utils` is absent) |
+| `test/jest/charactersheet/CharacterSheetNpcExporter.schemaValidation.test.js` | Required real bestiary/item schema controls, bonus serialization, and nested-entry renderer regressions |
 | `test/jest/charactersheet/CharacterSheetNpcExporter.attachmentCorpus.test.js` | Local-only integration harness for a full reported failing corpus (env-var-gated, never committed) |
 | `test/util-npc-export-schema.js` | Standalone `UtilAjv`-based bestiary/item schema compiler, mirrors `test/util-combatmethods-schema.js` |
 | `.agents/skills/charactersheet-development/references/subsystem-details.md` | Agent quick ref |

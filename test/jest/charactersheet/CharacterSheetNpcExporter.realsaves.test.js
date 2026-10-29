@@ -22,6 +22,7 @@ import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-ioun.js";
 import "../../../js/charactersheet/charactersheet-upgrades.js";
 import "../../../js/charactersheet/charactersheet-materials.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 import "../../../js/charactersheet/charactersheet-npc-exporter.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -74,9 +75,11 @@ const loadStateFrom = (fileName) => {
 	// Seeded before and after: the catalog must be present while the inventory hydrates,
 	// and `loadFromJson` replaces state wholesale.
 	state.setItemMaterialCatalog?.(ITEM_MATERIAL_CATALOG);
+	state.setClassCatalog?.([...(BREW.class || [])]);
 	state.loadFromJson(JSON.parse(fs.readFileSync(path.join(SAVE_DIR, fileName), "utf8")));
 	state.setItemMaterialCatalog?.(ITEM_MATERIAL_CATALOG);
 	state.setDivineFavorCatalog?.(DIVINE_FAVOR_CATALOG);
+	state.setClassCatalog?.([...(BREW.class || [])]);
 	return state;
 };
 
@@ -89,7 +92,7 @@ const loadMonster = (name, opts = {}) => {
 	const key = `${name}|${JSON.stringify(opts)}`;
 	if (!MONSTER_CACHE.has(key)) {
 		const state = loadStateFrom(`${name}.json`);
-		MONSTER_CACHE.set(key, CharacterSheetNpcExporter.convertStateToMonster(state, opts));
+		MONSTER_CACHE.set(key, CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact", ...opts}));
 	}
 	return MONSTER_CACHE.get(key);
 };
@@ -145,7 +148,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			});
 		});
 
-		it("only tags spell names the character actually knows", () => {
+		it("does not invent spell references outside the sheet and source item rules", () => {
 			// Scope to ability prose: the spellcasting block is built straight from the
 			// sheet's spell list and legitimately includes single-word names.
 			const prose = ["trait", "action", "bonus", "reaction"]
@@ -165,6 +168,7 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			const known = new Set([
 				...CharacterSheetNpcExporter._getSpellVocabulary(state).keys(),
 				...(state.getItemGrantedSpells?.() || []).map(sp => String(sp?.name || "").split("|")[0].trim().toLowerCase()),
+				...(JSON.stringify(state.getItems()).matchAll(/\{@spell ([^|}]+)/g)).map(match => match[1].toLowerCase()),
 			]);
 			tagged.forEach(spellName => expect(known).toContain(spellName));
 		});
@@ -195,8 +199,16 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			expect(text).not.toMatch(/^\s*Starting When/m);
 		});
 
-		it("does not fall back to a Class Resources dumping ground", () => {
-			expect(allAbilityNames(mon)).not.toContain("Class Resources");
+		it("prints feature uses locally without hiding otherwise unrepresented resource pools", () => {
+			const poolBlock = mon.trait?.find(entry => entry.name === "Class Resources");
+			if (name !== "Elizabeth") {
+				expect(poolBlock).toBeUndefined();
+				return;
+			}
+			// Gift of the Depths is excluded from this compact feature scope, but its
+			// recorded pool must not disappear merely because the feature still exists.
+			expect(JSON.stringify(poolBlock)).toContain("Gift of the Depths 1/long rest");
+			expect(JSON.stringify(poolBlock)).not.toMatch(/(?:Action Surge|Second Wind|Bladesong) \d+\//);
 		});
 
 		it("prints limited uses on the ability itself", () => {
@@ -265,12 +277,18 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			if (hits.length > 1) expect(Math.max(...hits) - Math.min(...hits)).toBeLessThanOrEqual(4);
 		});
 
-		it("produces a plausible CR for a high-level character", () => {
-			// A squishy full caster rates genuinely lower than a plate-wearing cleric of the
-			// same level, so the floor tracks level rather than asserting one number for all.
+		it("retains the historical level-anchored CR floor in explicit Legacy mode", () => {
+			// This heuristic is a Legacy contract, not an oracle for the new table-based
+			// default. Independent table/resource fixtures live in the CR suite.
 			const level = Number((/level (\d+) character/i.exec(allEntryText(loadMonster(name, {includeLevelSignal: true}))) || [])[1]) || 14;
-			expect(Number(mon.cr)).toBeGreaterThanOrEqual(Math.max(4, Math.floor(level / 2) - 2));
-			expect(Number(mon.cr)).toBeLessThanOrEqual(20);
+			const legacy = loadMonster(name, {crEstimator: "legacy"});
+			expect(Number(legacy.cr)).toBeGreaterThanOrEqual(Math.max(4, Math.floor(level / 2) - 2));
+			expect(Number(legacy.cr)).toBeLessThanOrEqual(20);
+			const report = CharacterSheetNpcExporter.getExportReport(mon).crEstimate;
+			expect(report.estimator).toBe("dmg");
+			expect(report.rounds).toHaveLength(3);
+			expect(report).not.toHaveProperty("levelAnchor");
+			expect(report.resources.every(pool => pool.spent <= pool.maximum)).toBe(true);
 		});
 
 		it("produces a schema-shaped monster", () => {
@@ -357,11 +375,15 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 	});
 
 	describe("cross-character fidelity", () => {
-		it("annotates spells granted by a feature rather than restating the grant", () => {
+		it("preserves restricted racial casting as its complete source procedure", () => {
 			if (!available.includes("Talna")) return;
 			const mon = loadMonster("Talna");
 			const spellText = JSON.stringify(mon.spellcasting || []);
-			expect(spellText).toMatch(/\{@spell [^}]+\}(?:\{@sup \{@tip [^{}|]+\|[^{}]+\}\})? \(Serpentine Spellcasting\)/);
+			const procedure = ["trait", "action", "bonus", "reaction"].flatMap(section => mon[section] || []).find(entry => /Serpentine Spellcasting/.test(entry.name));
+			expect(JSON.stringify(procedure)).toMatch(/only snakes/);
+			expect(JSON.stringify(procedure)).toMatch(/long rest/);
+			expect(JSON.stringify(procedure)).toMatch(/suggestion/i);
+			expect(spellText).not.toMatch(/Animal Friendship[^[]*Serpentine Spellcasting/);
 			// Ordinary class routes must stay unannotated.
 			expect(spellText).not.toMatch(/\(Wizard Spellbook\)/);
 			expect(spellText).not.toMatch(/\(Cantrips Known\)/);
@@ -500,11 +522,15 @@ describeReal("CharacterSheetNpcExporter — real saves", () => {
 			});
 		});
 
-		it("omits build-time spellcasting bookkeeping", () => {
+		it("states runnable casting statistics in headers rather than build-time choices", () => {
 			available.forEach(name => {
-				const text = allEntryText(loadMonster(name));
-				expect(text).not.toMatch(/is the ability (?:score )?increased by this feat/i);
-				expect(text).not.toMatch(/must be from the .{0,40}school of magic/i);
+				// Full restricted source procedures retain unresolved choices and costs.
+				// That is not permission to replace a casting header with a build directive.
+				(loadMonster(name).spellcasting || []).forEach(block => {
+					const text = (block.headerEntries || []).join(" ");
+					expect(text).not.toMatch(/is the ability (?:score )?increased by this feat/i);
+					expect(text).not.toMatch(/must be from the .{0,40}school of magic/i);
+				});
 			});
 		});
 
@@ -889,6 +915,9 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 				["trait", "action", "bonus", "reaction"].forEach(sec => {
 					(loadMonster(n)[sec] || []).forEach(e => {
 						const body = e.entries.filter(it => typeof it === "string").join(" ");
+						// Rage lists forcing a save as an upkeep event. It does not impose
+						// that save or define its DC; the triggering ability does.
+						if (/^Rage\b/.test(e.name) && /\bextend (?:its|the|[\w']+) Rage\b/i.test(body)) return;
 						const forces = /\b(?:creature|creatures|target|targets|enemy|enemies|foe|foes)\b[^.]{0,80}?\b(?:must (?:make|succeed on|repeat)|makes?) (?:a|an|its|the) [A-Za-z]* ?saving throw/i.test(body);
 						if (!forces) return;
 						// A DC that varies with a roll ("a DC equal to 14 + the number rolled")
@@ -936,12 +965,19 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		it("does not restate a labelled clause as its own entry (D20)", () => {
 			available.forEach(n => {
 				const mon = loadMonster(n);
-				const labels = new Set([...allEntryText(mon).matchAll(/\{@b ([^}]{3,60}?)\.?\}/g)].map(m => m[1].trim().toLowerCase()));
-				const dupes = allAbilityNames(mon)
-					.filter(name => labels.has(String(name).replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase()));
-				// A label may legitimately share a name with an entry; the contract is that
-				// the *bodies* were compared and equal ones dropped, so at most a handful.
-				expect(`${n}: ${dupes.length <= 3}`).toBe(`${n}: true`);
+				const entries = ["trait", "action", "bonus", "reaction"].flatMap(section => mon[section] || []);
+				const key = value => CharacterSheetNpcExporter._getPlainMatchTextCased(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+				for (const owner of entries) {
+					for (const line of owner.entries || []) {
+						if (typeof line !== "string") continue;
+						const labelled = /^\{@b ([^}]+?)\.?\}\s*(.+)$/.exec(line);
+						if (!labelled) continue;
+						const duplicate = entries.find(entry => entry !== owner
+						&& key(entry.name.replace(/\s*\([^)]*\)\s*$/, "")) === key(labelled[1])
+						&& key(entry.entries.filter(value => typeof value === "string").join(" ")) === key(labelled[2]));
+						expect(duplicate ? `${n}/${labelled[1]}` : null).toBeNull();
+					}
+				}
 			});
 		});
 
@@ -1172,13 +1208,18 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			});
 		});
 
-		it("never emits an entity tag without a source (W2)", () => {
+		it("requires an explicit source unless the native default resolves the entity (W2)", () => {
+			// Renderer.tag.TagCreature.defaultSource is MM, not an unresolved homebrew source.
+			const coreCreatures = new Set(JSON.parse(fs.readFileSync("data/bestiary/bestiary-mm.json", "utf8")).monster.map(it => it.name.toLowerCase()));
 			available.forEach(n => {
 				const text = allEntryText(loadMonster(n));
 				// A sourceless `@spell` resolves by name to the core list and still hovers,
 				// so it is allowed; a sourceless homebrew tag does not resolve at all.
 				const sourceless = text.match(/\{@(?:item|creature|feat|optfeature|classFeature|subclassFeature|combatmethod) [^}|]+\}/g) || [];
-				const offenders = sourceless.filter(it => !/^\{@(?:condition|action|variantrule|status|skill|dice|damage|dc|hit|atk)\b/.test(it));
+				const offenders = sourceless.filter(tag => {
+					const creature = /^\{@creature ([^}]+)\}$/.exec(tag);
+					return !creature || !coreCreatures.has(creature[1].toLowerCase());
+				});
 				expect(`${n}: ${offenders.join(" ")}`).toBe(`${n}: `);
 			});
 		});
@@ -1252,6 +1293,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 				const mon = loadMonster(n);
 				["trait", "action", "bonus", "reaction"].forEach(sec => {
 					(mon[sec] || []).forEach(e => {
+						if ((e.entries || []).some(it => (it?.type === "list" && it.items?.length) || (it?.type === "table" && it.rows?.length))) return;
 						const body = (e.entries || []).filter(it => typeof it === "string").join(" ").trim();
 						expect(`${n}/${e.name}: ${body.slice(-40)}`).not.toMatch(/:$/);
 					});
@@ -1326,7 +1368,8 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 						const strings = (entry.entries || []).filter(it => typeof it === "string");
 						if (!strings.length) return;
 						const onlyPromise = strings.every(line => /:$/.test(line.trim()) && !/\d|\{@/.test(line));
-						expect(`${n}/${entry.name}`).toBe(onlyPromise ? "NOT-A-BARE-PROMISE" : `${n}/${entry.name}`);
+						const hasListOrTable = entry.entries.some(it => (it?.type === "list" && it.items?.length) || (it?.type === "table" && it.rows?.length));
+						expect(`${n}/${entry.name}`).toBe(onlyPromise && !hasListOrTable ? "NOT-A-BARE-PROMISE" : `${n}/${entry.name}`);
 					});
 				});
 			});
@@ -1340,7 +1383,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			});
 		});
 
-		it("does not list an edition variant beside the spell it duplicates (W8)", () => {
+		it("deduplicates exact spell identities without conflating different editions (W8)", () => {
 			available.forEach(n => {
 				const mon = loadMonster(n);
 				(mon.spellcasting || []).forEach(block2 => {
@@ -1349,21 +1392,18 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 						...Object.values(block2.spells || {}).map(it => it.spells || []),
 					];
 					lists.forEach(list => {
-						const names = list.map(tag => (/\{@spell ([^|}]+)/.exec(tag) || [])[1] || "");
-						const bases = new Set(names.filter(name => !/^5e /i.test(name)).map(it => it.toLowerCase()));
-						names.filter(name => /^5e /i.test(name)).forEach(name => {
-							expect(`${n}: ${name}`).toBe(bases.has(name.replace(/^5e /i, "").toLowerCase()) ? "DUPLICATE" : `${n}: ${name}`);
-						});
+						const identities = list.map(tag => (/\{@spell ([^}]+)/.exec(tag) || [])[1]?.toLowerCase()).filter(Boolean);
+						expect(new Set(identities).size).toBe(identities.length);
 					});
 				});
 			});
 		});
 
-		it("credits once-per-turn and psionic damage in CR (W9)", () => {
+		it("retains Legacy once-per-turn and psionic CR credit (W9)", () => {
 			// A level 20 rogue's whole offence is Sneak Attack; a Talent's is manifestation.
-			if (available.includes("Juen")) expect(Number(loadMonster("Juen").cr)).toBeGreaterThanOrEqual(9);
-			if (available.includes("Phirse")) expect(Number(loadMonster("Phirse").cr)).toBeGreaterThanOrEqual(8);
-			if (available.includes("Mikase")) expect(Number(loadMonster("Mikase").cr)).toBeGreaterThanOrEqual(12);
+			if (available.includes("Juen")) expect(Number(loadMonster("Juen", {crEstimator: "legacy"}).cr)).toBeGreaterThanOrEqual(9);
+			if (available.includes("Phirse")) expect(Number(loadMonster("Phirse", {crEstimator: "legacy"}).cr)).toBeGreaterThanOrEqual(8);
+			if (available.includes("Mikase")) expect(Number(loadMonster("Mikase", {crEstimator: "legacy"}).cr)).toBeGreaterThanOrEqual(12);
 		});
 
 		it("gives every psionic power its mechanics, not just its headers (W2)", () => {
@@ -1822,7 +1862,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(arc.entries.join(" ")).not.toMatch(/dissipates|equidistant|forgo/i);
 		});
 
-		it("annotates every attack a toggle modifies, and shrinks the toggle (A3)", () => {
+		it("annotates every attack a toggle modifies without losing its activation and recovery (A3)", () => {
 			const reggu = loadMonster("Reggu");
 			const melee = (reggu.action || []).filter(it => (it.entries || []).some(l => typeof l === "string" && /\{@atk mw\}/.test(l)));
 			expect(melee.length).toBeGreaterThanOrEqual(3);
@@ -1832,10 +1872,11 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			// The ranged line must not claim a melee-only rider.
 			const bolt = (reggu.action || []).find(it => /Radiant Sun Bolt/i.test(it.name));
 			expect(bolt.entries.join(" ")).not.toMatch(/Eldritch Maul/);
-			// The source keeps only its activation.
+			// The authoritative source also keeps duration and recovery, not just the rider.
 			const toggle = (reggu.bonus || []).find(it => /Eldritch Maul/.test(it.name));
-			expect(toggle.entries.join(" ").length).toBeLessThan(220);
-			expect(toggle.entries.join(" ")).not.toMatch(/inky tendrils|until the next dawn/i);
+			expect(toggle.entries.join(" ")).toMatch(/bonus action/i);
+			expect(toggle.entries.join(" ")).toMatch(/1 minute/i);
+			expect(toggle.entries.join(" ")).toMatch(/until the next dawn/i);
 		});
 
 		it("applies a count upgrade at the anchor and drops the dependent (A0.3)", () => {
@@ -1844,9 +1885,9 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(names).not.toMatch(/Improved Cunning Strike/);
 			const base = (juen.trait || []).find(it => it.name === "Cunning Strike");
 			expect(base.entries[0]).toMatch(/it can add up to two of the following Cunning Strike effects/);
-			// Missy has Cunning Strike without the upgrade and must still read "one".
+			// Missy is Rogue 13 and also owns the level-11 upgrade.
 			const missy = (loadMonster("Missy").trait || []).find(it => it.name === "Cunning Strike");
-			if (missy) expect(missy.entries[0]).not.toMatch(/up to two of the following/);
+			expect(missy.entries[0]).toMatch(/up to two of the following/);
 		});
 	});
 
@@ -1914,9 +1955,12 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(maledict.entries.join(" ")).toMatch(/Fallen Puppet/i);
 		});
 
-		it("drops an ASI-and-spells-only feat entry (B3)", () => {
-			const names = allAbilityNames(loadMonster("Nessa")).join("|");
-			expect(names).not.toMatch(/Shadow Touched/);
+		it("retains a spell feat's free-cast limits and slot alternative instead of assuming roster coverage (B3)", () => {
+			const monster = loadMonster("Nessa");
+			const entry = ["trait", "action", "bonus", "reaction"].flatMap(section => monster[section] || []).find(feature => /Shadow Touched/.test(feature.name));
+			expect(JSON.stringify(entry)).toMatch(/invisibility/i);
+			expect(JSON.stringify(entry)).toMatch(/long rest/);
+			expect(JSON.stringify(entry)).toMatch(/spell slots?/);
 			// Telekinetic grants a real bonus action and must survive.
 			expect(allEntryText(loadMonster("Nessa"))).toMatch(/Telekinetic/i);
 		});
@@ -1949,11 +1993,11 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect((mon.action || []).some(it => /Hybrid Form/.test(it.name))).toBe(true);
 		});
 
-		it("rates a rogue's defence and burst (D2)", () => {
+		it("retains Legacy rogue defense and burst weights (D2)", () => {
 			// A level-20 rogue is not a CR 10 creature; Uncanny Dodge, Evasion and Elusive
 			// are defence the model was blind to, and Assassinate is burst it never priced.
-			expect(Number(loadMonster("Juen").cr)).toBeGreaterThanOrEqual(13);
-			expect(Number(loadMonster("Missy").cr)).toBeGreaterThanOrEqual(8);
+			expect(Number(loadMonster("Juen", {crEstimator: "legacy"}).cr)).toBeGreaterThanOrEqual(13);
+			expect(Number(loadMonster("Missy", {crEstimator: "legacy"}).cr)).toBeGreaterThanOrEqual(8);
 		});
 	});
 
@@ -2011,7 +2055,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect(coated).toBeDefined();
 			expect(coated.name).toMatch(/^Retaliator/);
 			// It is the parent weapon's own line plus what coating adds…
-			expect(coated.entries[0]).toMatch(/\{@atk mw\} \{@hit \+\d+\} to hit, reach 5 ft\. or range 20\/60 ft\./);
+			expect(coated.entries[0]).toMatch(/\{@atk mw\} \{@hit \+\d+\} to hit(?: \(\+\d+ with Sweeping Blows\))?, reach 5 ft\. or range 20\/60 ft\./);
 			expect(coated.entries[0]).toMatch(/Counts as a shadow weapon \(Shadow Sneak, Shadowbite\)\./);
 			// …and the paragraph and cross-reference it replaces are gone.
 			const joined = ["action", "bonus", "trait"].flatMap(sec => (mon[sec] || []).flatMap(it => it.entries || []))
@@ -2027,9 +2071,12 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			expect((katana.entries[0].match(/radiant damage/g) || []).length).toBe(1);
 		});
 
-		it("keeps a standing defence in one place (4)", () => {
+		it("retains every independent source defence, not just an equivalent first sentence (4)", () => {
 			const mon = loadMonster("Talna");
-			expect((mon.trait || []).map(it => it.name).join("|")).not.toMatch(/Master Smith's Aegis/);
+			const aegis = (mon.trait || []).find(it => /Master Smith's Aegis/.test(it.name));
+			expect(aegis.entries.join(" ")).toMatch(/saving throws against spells and other magical effects/i);
+			expect(aegis.entries.join(" ")).toMatch(/spell attack rolls against it have/i);
+			expect(aegis.entries.join(" ")).toMatch(/resistance to damage from spells/i);
 			const res = (mon.trait || []).find(it => /^Resilience$/i.test(String(it?.name || "")));
 			// Every claim the item made is in the merged entry, each still attributed.
 			expect(res.entries.join(" ")).toMatch(/disadvantage on spell attack rolls against it \(Master Smith's Aegis\)/i);
@@ -2124,7 +2171,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 			const lines = ["action", "bonus", "reaction"]
 				.flatMap(sec => psion()[sec] || [])
 				.flatMap(it => (it.entries || []).filter(e => typeof e === "string"))
-				.filter(it => /^Range /.test(it));
+				.filter(it => /^Range:? /.test(it));
 			expect(lines.length).toBeGreaterThan(0);
 			lines.forEach(it => {
 				expect(it).not.toMatch(/Instantaneous/i);
@@ -2144,7 +2191,8 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 				.filter(f => /\b\d+d\d+\b/.test(JSON.stringify(f.modes || [])));
 			if (!damaging.length) return;
 			expect(CharacterSheetNpcExporter._estimatePsionicDpr(state)).toBeGreaterThan(0);
-			expect(Number(psion().cr)).toBeGreaterThanOrEqual(8);
+			expect(Number(loadMonster("Phirse", {crEstimator: "legacy"}).cr)).toBeGreaterThanOrEqual(8);
+			expect(CharacterSheetNpcExporter.getExportReport(psion()).crEstimate.limitations.join(" ")).toMatch(/not numerically modeled/);
 		});
 	});
 
@@ -2207,9 +2255,7 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 		});
 
 		it("binds the mark to the name, inside any provenance parenthetical (A3)", () => {
-			// Order is load-bearing: `_pickPreferredSpellTag` treats a trailing `)` as
-			// "this tag carries provenance". A mark placed after the paren would break
-			// that tiebreak silently, so the mark must come first.
+			// The economy mark belongs to the spell, before its source annotation.
 			const withBoth = available
 				.flatMap(name => allEntryText(loadMonster(name)).split("\n"))
 				.filter(line => /\{@sup /.test(line) && /\{@spell [^}]+\}\{@sup [^}]*\}\}\s*\(/.test(line));
@@ -2218,10 +2264,8 @@ describeReal("CharacterSheetNpcExporter — real saves, v7 regressions", () => {
 					expect(line).not.toMatch(/\)\{@sup /);
 				});
 			}
-			expect(CharacterSheetNpcExporter._pickPreferredSpellTag(
-				"{@spell shield|XPHB}{@sup {@tip R|Reaction}} (Oath Spells)",
-				"{@spell shield|XPHB}{@sup {@tip R|Reaction}}",
-			)).toMatch(/\(Oath Spells\)$/);
+			const tag = CharacterSheetNpcExporter._formatSpellTag({name: "shield", source: "XPHB", castingTime: "1 reaction", sourceFeature: "Oath Spells"});
+			expect(tag).toMatch(/\{@spell shield\|XPHB\}\{@sup \{@tip R\|Reaction\}\} \(Oath Spells\)$/);
 		});
 
 		it("marks every spell the character actually knows (A4)", () => {
@@ -2321,7 +2365,7 @@ describeReal("v20 — companion items travel with the monster", () => {
 	const bundleFor = (name) => {
 		if (!BUNDLE_CACHE.has(name)) {
 			const state = loadState(name);
-			const monster = CharacterSheetNpcExporter.convertStateToMonster(state);
+			const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact"});
 			BUNDLE_CACHE.set(name, {monster, items: CharacterSheetNpcExporter.buildCompanionItems(monster, state, {sourceJson: monster.source})});
 		}
 		return BUNDLE_CACHE.get(name);
@@ -2396,30 +2440,22 @@ describeReal("v20 — companion items travel with the monster", () => {
 	});
 
 	describe("v35 — the exported damage die is the sheet's own", () => {
-		// The exporter does not read the sheet's damage; it recomputes it from the base
-		// item, then the material, then the upgrade. Two independent implementations of one
-		// number, which is exactly the shape that drifts silently. It already did once: the
-		// comment above the die-step in `charactersheet-npc-exporter.js` records Cataclysm
-		// exporting as `2d8+4` against the sheet's own `+13`.
-		//
-		// This is the only corpus-wide guard on the material/upgrade die ladder. It cannot
-		// police the *order* of the two steps -- exactly one weapon in the corpus carries
-		// both a die-stepping material and a die upgrade, and it sits on a rung where both
-		// orders agree (that ordering contract is pinned by unit test elsewhere). What it
-		// does police is the thing a DM actually reads: that the number in the statblock is
-		// the number on the sheet, on every rung, for every weapon anyone has really built.
+		// Compare with the real combat projection, not the inventory-only weapon profile:
+		// the latter intentionally excludes a Monk's Martial Arts replacement. Reggu's
+		// Sun Staff and Tikal's Spear are 1d6 items but correctly roll 1d10 in combat.
 		const DIE_RE = /\d+d\d+/;
 
 		const weaponPairs = (name) => {
 			const state = loadStateFrom(`${name}.json`);
-			const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {});
+			const monster = CharacterSheetNpcExporter.convertStateToMonster(state, {presentationMode: "compact" });
+			const combat = Object.create(globalThis.CharacterSheetCombat.prototype);
+			combat._state = state;
 			const out = [];
 			(state.getInventory?.() || []).forEach(row => {
 				const item = row?.item;
 				if (!item?.weapon) return;
-				// `getEffectiveWeaponDamage` takes the inventory row id, not the item.
-				const sheet = state.getEffectiveWeaponDamage?.(row.id);
-				const sheetDie = DIE_RE.exec(String(sheet?.dice || ""))?.[0];
+				const projected = state.getItems().find(item => item.id === row.id);
+				const sheetDie = DIE_RE.exec(String(combat._getEffectiveWeaponDamageDie(projected)))?.[0];
 				if (!sheetDie) return;
 				const action = (monster.action || []).find(a => a.name === item.name || a.name.startsWith(item.name));
 				if (!action) return;
