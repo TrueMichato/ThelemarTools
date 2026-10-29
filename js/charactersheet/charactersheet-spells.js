@@ -1,6 +1,7 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
+import {CharacterSheetSimulacrumCast} from "./charactersheet-simulacrum-cast.js";
 import {ListVirtualRenderer} from "../list2/list2-virtual.js";
 
 /**
@@ -3087,6 +3088,16 @@ class CharacterSheetSpells {
 	}
 
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
+		const spell = this._state.getSpells().find(row => row.id === spellId);
+		if (CharacterSheetSimulacrumCast.isSpell(spell)) {
+			return CharacterSheetSimulacrumCast.run(this, spell,
+				creation => this._pCastSpell(spellId, {withMetamagic, decision, creation}));
+		}
+		return this._pCastSpell(spellId, {withMetamagic, decision});
+	}
+
+	async _pCastSpell (spellId, {withMetamagic, decision = null, creation = null} = {}) {
+		creation?.assertCurrent();
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
 		// (combat / overview / favourites quick-cast surfaces).
@@ -3102,6 +3113,7 @@ class CharacterSheetSpells {
 
 		// Get full spell data for component/constraint checks
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
+		if (creation && (!spellData || spellData.level !== 7)) throw new Error("The full Simulacrum spell data is unavailable. Reload the spell catalog before casting.");
 
 		// Check if spell requires concentration - use spellData (authoritative source)
 		// Do NOT use spell.concentration as it may have been set incorrectly by migrations
@@ -3435,11 +3447,15 @@ class CharacterSheetSpells {
 			if (!selectedSlot) return;
 		}
 
+		creation?.assertCurrent();
 		const activeMetamagicChoice = await this._resolveMetamagicChoice({spell, spellData, slotLevel: selectedSlot.level, isExplicit: isExplicitMetamagic, shouldPrompt: shouldPromptMetamagic, decision});
+		creation?.assertCurrent();
 		if (activeMetamagicChoice?.cancelled) return;
 		if (!await this._pHandleCastingConstraints(spell, spellData, activeMetamagicChoice?.metamagic || null, {enforceMaterial: true})) return;
+		creation?.assertCurrent();
 		// Variant spell component selection
 		const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
+		creation?.assertCurrent();
 		if (variantComponentChoice?.cancelled) return;
 
 		const castMeta = this._getNormalizedCastMeta({
@@ -3447,6 +3463,7 @@ class CharacterSheetSpells {
 			spellData,
 			slotLevel: selectedSlot.level,
 			castMeta: {
+				...(creation ? {simulacrumCreation: true} : {}),
 				...(activeMetamagicChoice?.metamagic ? {appliedMetamagic: activeMetamagicChoice.metamagic} : {}),
 				...(variantComponentChoice?.variantComponent ? {variantComponent: variantComponentChoice.variantComponent} : {}),
 				...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
@@ -3459,9 +3476,14 @@ class CharacterSheetSpells {
 			return;
 		}
 		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+		creation?.assertCurrent();
 		if (focusSelection.cancelled) return;
 		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
 		const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
+		creation?.assertCurrent();
+		if (creation && isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting) {
+			throw new Error("Simulacrum creation with Gambler's Spellcasting is not automated, including delayed and failed results. No cast costs were spent.");
+		}
 		let gamblerCastResolution = null;
 		if (isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting && !selectedSlot.isWizardCapstone) {
 			gamblerCastResolution = this._state.createGamblerCastResolution?.({
@@ -3485,6 +3507,26 @@ class CharacterSheetSpells {
 			castMeta.gamblerCastResolution = gamblerCastResolution;
 		}
 		const deferGamblerCast = !!gamblerResolutionDecision.deferCast;
+		let creationMaterial;
+		let creationResult;
+		if (creation) {
+			creation.assertCurrent();
+			creationResult = await this._showCastResult(spell, selectedSlot.level, selectedSlot.isPact, false, castMeta);
+			creation.assertCurrent();
+			if (creationResult?.cancelled) return;
+			creationMaterial = await this._pConsumeMaterialComponent({
+				spell,
+				spellData,
+				decision,
+				variantUsed: !!variantComponentChoice?.variantComponent,
+				isPrepareOnly: true,
+				isRequired: true,
+				assertCurrent: () => creation.assertCurrent(),
+			});
+			creation.assertCurrent();
+			if (creationMaterial.cancelled) return;
+		}
+		creation?.beginMutation();
 		const economyTransaction = this._commitSpellCastingEconomy({spellData, castMeta});
 		if (!economyTransaction.ok) {
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
@@ -3501,7 +3543,7 @@ class CharacterSheetSpells {
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			return;
 		}
-		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+		if (activeMetamagicChoice?.metamagic && !creation) this._refreshSorceryPointUI();
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
 		let skipSlotConsumption = false;
@@ -3552,9 +3594,12 @@ class CharacterSheetSpells {
 			this._state.setResourceCurrent(selectedSlot.resourceId, res.current - 1);
 		} else if (!skipSlotConsumption) {
 			if (selectedSlot.isPact) {
-				this._state.setPactSlotsCurrent(pactSlots.current - 1);
+				const current = this._state.getPactSlots().current;
+				if (creation && current <= 0) throw new Error("The selected Pact slot is no longer available.");
+				this._state.setPactSlotsCurrent(current - 1);
 			} else {
 				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+				if (creation && current <= 0) throw new Error("The selected spell slot is no longer available.");
 				ordinarySlotExpenditure = this._state.setSpellSlots(
 					selectedSlot.level,
 					this._state.getSpellSlotsMax(selectedSlot.level),
@@ -3565,6 +3610,7 @@ class CharacterSheetSpells {
 		}
 
 		const refundCastPayment = () => {
+			if (creation) return; // The creation journal refunds the captured owner, never a newly loaded character.
 			this._rollbackSpellCastingEconomy(economyTransaction);
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
@@ -3590,11 +3636,12 @@ class CharacterSheetSpells {
 				}
 			}
 		};
+		creation?.endMutation();
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
 		let castResult;
 		try {
-			castResult = deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
+			castResult = creation ? creationResult : deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
 				? {cancelled: false}
 				: await this._showCastResult(
 					spell,
@@ -3617,6 +3664,56 @@ class CharacterSheetSpells {
 		if (castResult?.cancelled) {
 			refundCastPayment();
 			return;
+		}
+		if (creation) {
+			creation.assertCurrent();
+			creation.mutate(() => {
+				creationMaterial.commit?.();
+				if (variantComponentChoice?.variantComponent) {
+					for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
+						if (!this._state.consumeVariantComponent(id)) throw new Error("The selected variant component is no longer available.");
+					}
+				}
+				creation.addPreparedCompanion();
+				this._state.consumeStatesEndingOnSpellCast?.();
+				this._state.applyCommittedSpellCastTriggers?.(spell);
+			});
+			await creation.save();
+			const receipt = await this._pPublishCommittedSpellCast({
+				spell,
+				spellData,
+				focusInventoryRow: focusSelection.focusInventoryRow,
+				focusRequirement: focusSelection.requirement,
+				cast: {
+					type: selectedSlot.isNoSlotResource ? "noSlotResource" : selectedSlot.isWizardCapstone ? "classFeature" : "slot",
+					slotLevel: selectedSlot.level,
+					isPactSlot: !!selectedSlot.isPact,
+					resourceId: selectedSlot.isNoSlotResource ? selectedSlot.resourceId : null,
+					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+					rolls: castResult?.rolls || [],
+				},
+			});
+			creation.assertCurrent();
+			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
+			this.renderSlots();
+			this._page._renderQuickSpells?.();
+			this._page._renderResources?.();
+			this._page._renderActiveStates?.();
+			this._page._updateAllCalculations?.();
+			this._page._renderCompanions?.();
+			this._page._inventory?.render?.();
+			this._page._combat?.renderCombatActionEconomy?.();
+			if (this._state.getViewMode?.() === "play") this._page._playMode?.render();
+			if (castMeta.feywildShard) {
+				const surge = this._rollPhbWildMagicSurge();
+				JqueryUtil.doToast({type: "info", content: `Feywild Shard: ${surge.roll} - ${surge.effect}`});
+			}
+			if (castMeta.variantComponent?.componentCount > 1) {
+				const surge = this._rollVariantWildMagicSurge(castMeta.variantComponent.componentCount);
+				JqueryUtil.doToast({type: "info", content: `Variant component Wild Magic: ${surge.roll} - ${surge.surged ? surge.effect : "no surge"}`});
+			}
+			JqueryUtil.doToast({type: "success", content: `Created ${spell.source} Simulacrum. Its companion record has been saved.`});
+			return {...receipt, ok: true, committed: true, companionId: creation.companionId};
 		}
 		if (variantComponentChoice?.variantComponent) {
 			for (const id of (variantComponentChoice.variantComponent.itemIds || [variantComponentChoice.variantComponent.itemId])) {
@@ -4131,8 +4228,7 @@ class CharacterSheetSpells {
 		}
 		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return null;
 
-		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
-			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		const info = this._getCastMaterialComponentInfo(spell, spellData);
 		if (!info) return null;
 
 		// A weapon-channel cantrip's material component IS the melee weapon used to make
@@ -4217,6 +4313,13 @@ class CharacterSheetSpells {
 		};
 	}
 
+	_getCastMaterialComponentInfo (spell, spellData) {
+		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
+			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		// The priced portion is ruby, not the snow/hair also named in PHB's description.
+		return info && CharacterSheetSimulacrumCast.isSpell(spell) ? {...info, text: "ruby"} : info;
+	}
+
 	/**
 	 * Consume a gold-cost material component on a committed cast, when the spell
 	 * consumes it. No-op when: the escape-hatch setting is on, the material has no
@@ -4238,20 +4341,25 @@ class CharacterSheetSpells {
 	 * @param {object} args.spellData
 	 * @param {object|null} [args.decision]
 	 * @param {boolean} [args.variantUsed]
-	 * @returns {Promise<{consumed: (null|{id:string, name:string, value:number})}>}
+	 * @param {boolean} [args.isPrepareOnly] Stage the selection without consuming it.
+	 * @param {boolean} [args.isRequired] Cancellation aborts the cast, rather than manual bookkeeping.
+	 * @param {Function|null} [args.assertCurrent] Validate the owner before staged consumption.
 	 */
-	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false}) {
+	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false, isPrepareOnly = false, isRequired = false, assertCurrent = null}) {
 		if (this._page?.pConfirmSpellSupplies) return {consumed: null, supplied: true};
 		if (variantUsed) return {consumed: null};
 		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) return {consumed: null};
 		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return {consumed: null};
 
-		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
-			|| this._state.getSpellMaterialComponentInfo?.(spell);
+		const info = this._getCastMaterialComponentInfo(spell, spellData);
+		if (isRequired && (!info || info.requiresFocus || !info.consume)) throw new Error("The required Simulacrum material component data is unavailable.");
 		if (!info || info.requiresFocus || !info.consume) return {consumed: null};
 
 		const candidates = this._state.getGoldComponentCandidates?.(info.cost, info.text) || [];
-		if (!candidates.length) return {consumed: null}; // the gate should have blocked; be safe
+		if (!candidates.length) {
+			if (isRequired) throw new Error("The required ruby component is no longer available.");
+			return {consumed: null}; // Preserve manual bookkeeping for other casts.
+		}
 
 		// Every candidate is a name match now (value-only items are not accepted as
 		// "the component"). Consume a single unambiguous match directly; prompt only
@@ -4269,13 +4377,20 @@ class CharacterSheetSpells {
 				candidates,
 				isOptional,
 			});
-			if (!chosen) return {consumed: null};
+			if (!chosen) return {consumed: null, ...(isRequired ? {cancelled: true} : {})};
 		}
 
-		this._state.consumeItem(chosen.id);
-		const gpStr = chosen.value ? ` (${Math.floor(chosen.value / 100)} gp)` : "";
-		JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name}${gpStr} casting ${spell.name}.`});
-		return {consumed: {id: chosen.id, name: chosen.name, value: chosen.value}};
+		const commit = () => {
+			assertCurrent?.();
+			const current = this._state.getGoldComponentCandidates?.(info.cost, info.text)?.find(row => row.id === chosen.id);
+			if (!current || !this._state.consumeItem(chosen.id)) throw new Error("The selected material component is no longer available.");
+			if (!isPrepareOnly) {
+				const gpStr = chosen.value ? ` (${Math.floor(chosen.value / 100)} gp)` : "";
+				JqueryUtil.doToast({type: "info", content: `Consumed ${chosen.name}${gpStr} casting ${spell.name}.`});
+			}
+			return {consumed: {id: chosen.id, name: chosen.name, value: chosen.value}};
+		};
+		return isPrepareOnly ? {commit} : commit();
 	}
 
 	/**
@@ -4329,6 +4444,9 @@ class CharacterSheetSpells {
 	}
 
 	async _showCastResult (spell, slotLevel = null, isPactSlot = false, isRitual = false, castMeta = null) {
+		// Creation has its own staged statblock and durable outcome. Do not publish a
+		// premature cast toast or route the touch spell through familiar delivery.
+		if (castMeta?.simulacrumCreation) return {cancelled: false, rolls: []};
 		// Delegate to the enhanced spell effects handler
 		return this._handleSpellEffects(spell, slotLevel, isPactSlot, isRitual, castMeta);
 	}

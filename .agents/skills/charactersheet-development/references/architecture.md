@@ -31,6 +31,16 @@ The manager hydrates the persisted actor and lazily loads the actor bridge
 after Page/Spells/Combat are available. Corrupt snapshots surface diagnostics,
 not an original-character fallback; destroyed snapshots remain dismissible.
 
+`CharacterSheetSimulacrumCast` wraps only the shared player `_castSpell`
+Simulacrum route; Play Mode delegates that spell to the same entrypoint. Resolve
+all prompts before recording synchronous payment/replacement deltas, then await
+guarded owner persistence before publishing/refreshing. Journal scopes must not
+cross an `await`: that would attribute unrelated concurrent edits to the cast.
+Compensation targets captured raw data and ID-keyed records, never a State swap
+or full-owner rollback. Page's narrow compensation hook repairs rescue/canonical
+storage after failure, including a selection switch during the async write.
+Gambler-sourced creation is explicitly refused before payment/receipt creation.
+
 `CharacterSheetCompanionActor` is the explicit actor-page adapter. Hydrate it
 with `{ownerPage, companionId}`, invoke its cast methods or `run(operation)`,
 and await commit/persistence. It allowlists actor-bound Page helpers rather

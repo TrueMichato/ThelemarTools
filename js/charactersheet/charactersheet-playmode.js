@@ -4217,6 +4217,9 @@ export class CharacterSheetPlayMode {
 	// ─── Spell Casting ──────────────────────────────────────────
 
 	_castSpell (spell) {
+		if (/^simulacrum$/i.test(String(spell.name || "").trim())) {
+			return this._page._spells._castSpell(spell.id, {decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
+		}
 		if (spell.level === 0) {
 			// Cantrip concentration check
 			if (spell.concentration && this._state.isConcentrating?.()) {

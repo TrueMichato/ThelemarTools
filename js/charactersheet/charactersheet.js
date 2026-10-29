@@ -4715,6 +4715,31 @@ class CharacterSheetPage {
 		}
 	}
 
+	async _pRestoreFailedSimulacrumCreation (transaction) {
+		const {context, companionId} = transaction;
+		if (!context.characterId) return;
+		const isCurrent = this.getState() === context.state && context.state._data === context.data
+			&& this._currentCharacterId === context.characterId && this._characterLoadGeneration === context.generation;
+		const mirror = this._readActiveCharacterMirror(context.characterId);
+		if (isCurrent) this._writeActiveCharacterMirror(this._stampCharacterSnapshot({...MiscUtil.copyFast(context.data), id: context.characterId}));
+		else if (mirror?.companions?.some(row => row.id === companionId)) {
+			this._writeActiveCharacterMirror(this._stampCharacterSnapshot(transaction.undoData(MiscUtil.copyFast(mirror))));
+		}
+		// A switch during IndexedDB's in-flight write can make the guarded save
+		// return false *after* writing. Compensate that exact cast on its old owner.
+		await this._pWithCharacterStorageLock(async () => {
+			const characters = await this._pReadCharacterRoster();
+			const index = characters.findIndex(row => row.id === context.characterId);
+			if (index < 0 || !characters[index].companions?.some(row => row.id === companionId)) return;
+			const correctedCanonical = transaction.undoData(MiscUtil.copyFast(characters[index]));
+			const corrected = this._reconcilePersistedCharacter(correctedCanonical, this._readActiveCharacterMirror(context.characterId)).chosen;
+			characters[index] = this._stampCharacterSnapshot(corrected);
+			this._writeActiveCharacterMirror(characters[index]);
+			await StorageUtil.pSet("charsheet-characters", characters);
+			this._clearActiveCharacterMirror(context.characterId, {expectedSnapshot: characters[index]});
+		});
+	}
+
 	_initItemTransferListener () {
 		this._disposeItemTransferListener?.();
 		const unsubscribers = this._getCharacterTransferTypes().map(({Transfer}) => Transfer.subscribe(({characterId}) => {

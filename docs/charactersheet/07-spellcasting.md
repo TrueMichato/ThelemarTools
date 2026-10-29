@@ -15,6 +15,54 @@ The `CharacterSheetSpells` module handles all spellcasting functionality:
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661
 
+## Player Simulacrum creation
+
+The Spells tab, Overview/favorites quick casts, and Play Mode route Simulacrum
+through `CharacterSheetSpells._castSpell(id, options)`. This opens
+`CharacterSheetSimulacrum.pPrepareCreation({ownerPage, spellSource})` before
+spending. The own-character statblock preview is mandatory; Specific creature
+is unavailable. The prepared, item-free build is frozen at confirmation, with
+independent full initial pools and the exact casting spell's PHB/XPHB policy.
+
+Result and material choices finish before any slot, metamagic, component or
+casting-economy expenditure. The shared engine then pays the selected casting
+vehicle and metamagic, consumes the selected component, adds the prepared
+record, destroys prior active copies with the same creator, and applies normal
+on-cast state triggers. Replacement uses exact actor-owned effect/summon
+cleanup, not a blanket break of the original's unrelated concentration.
+Normal Simulacrum's twelve-hour casting time does not consume an action pip.
+
+The priced material must be ruby, not another valuable or the snow/hair named
+elsewhere in PHB's description. Multiple ruby matches require a selection;
+cancelling or choosing manual tracking cancels this creation. Selecting a
+valid variant component still uses the shared substitution rules.
+`ignoreSpellcastingRestrictions` remains an explicit manual-bookkeeping
+opt-out; creation never separately deducts another 1,500 gp from currency.
+
+Creation awaits `_saveCurrentCharacter({isReturnStatus: true,
+expectedCharacterId, expectedLoadGeneration})` before publishing a committed
+cast or refreshing the companion UI. A per-State lock excludes duplicate
+simultaneous creation. Raw-data identity, selected character, and load-generation
+guards reject stale prompts. `CharacterSheetSimulacrumCast` journals only
+synchronous creation-owned writes; failure in payment, projection, replacement
+or persistence reverses those field/row deltas, preserving unrelated concurrent
+notes, currency, inventory rows and resource edits. It never swaps live State or
+restores an entire owner snapshot. The narrow Page compensation hook also fixes
+the rescue mirror and any old-owner canonical write completed during a switch.
+Conflicting newer creation-owned records surface a recovery error rather than
+being silently overwritten.
+
+Gambler-sourced Simulacrum creation is explicitly unsupported (including delayed
+and failed Gambling Table outcomes) and refused before spending or rolling a
+receipt. A PHB duplicate is a Construct and cannot duplicate itself; XPHB's
+authoritative no-Simulacrum policy also blocks the cast. Specific-creature
+targeting remains unavailable. These limitations are not success-shaped casts.
+
+`CharacterSheetSimulacrumCreation.test.js` runs the real State, NPC exporter,
+Spells transaction and guarded Page storage path, replacing only interactive
+preview/picker boundaries. It covers payment/replacement, cancellation, stale
+owners, concurrent edits, projection/save failures and write-time switching.
+
 ## Detached companion casting
 
 `CharacterSheetCompanionActor.hydrate({ownerPage, companionId})` returns
@@ -50,7 +98,8 @@ remain unchanged.
 unsupported effects, hostile-target damage, creature-type eligibility, and
 external component bookkeeping remain manual. The snapshot envelope identifies
 the duplicate as a Construct; its copied original race is not its creature type.
-This milestone supplies the runtime, not creation or management dialogs.
+Creation is handled by the player transaction above, not by the detached actor
+adapter.
 
 ### Simulacrum policy boundaries
 
