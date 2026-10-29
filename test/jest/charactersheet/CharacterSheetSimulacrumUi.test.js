@@ -30,6 +30,8 @@ globalThis.e_ = opts => {
 };
 
 const {CharacterSheetSimulacrum: Ui} = await import("../../../js/charactersheet/charactersheet-simulacrum.js");
+await import("../../../js/charactersheet/charactersheet-spells.js");
+await import("../../../js/charactersheet/charactersheet-companion-actor.js");
 
 function makeOwner () {
 	const state = new State();
@@ -51,6 +53,7 @@ function makeOwner () {
 			_currentCharacterId: "owner",
 			_characterLoadGeneration: 1,
 			_saveCurrentCharacter: jest.fn(async () => true),
+			saveCharacter: jest.fn(async () => true),
 			_renderCompanions: jest.fn(),
 			_renderCurrency: jest.fn(),
 			getConditionsList: () => [{name: "Blinded", source: "PHB"}],
@@ -169,6 +172,7 @@ describe("Simulacrum companion surfaces", () => {
 		globalThis.CharacterSheetCompanionActor = class {
 			constructor ({actor}) { this.actor = actor; }
 			getState () { return this.actor; }
+			getManualResolutionNotice () { return "Unsupported effects require manual resolution."; }
 			castSpell (...args) { return cast(...args); }
 			dispose () {}
 		};
@@ -221,6 +225,218 @@ describe("Simulacrum companion surfaces", () => {
 		expect(card.querySelector(".btn-companion-heal").disabled).toBe(true);
 		expect(card._html).toContain("Unavailable");
 		expect(card._html).toContain("Unknown edition");
+	});
+
+	test.each(["missing kind", "null snapshot", "unavailable marker"])("%s cannot fall through to generic editable companion controls", corruption => {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		const companion = state.getCompanion(id);
+		if (corruption === "missing kind") delete companion.actorSnapshot.kind;
+		else if (corruption === "null snapshot") companion.actorSnapshot = null;
+		else {
+			delete companion.actorSnapshot;
+			companion.actorUnavailable = {ok: false};
+		}
+		expect(Ui.isSimulacrum(companion)).toBe(true);
+		const card = Ui.renderCard({ownerPage: page, companion, parent: globalThis.e_({tag: "div"})});
+		expect(card.querySelector(".btn-companion-heal").disabled).toBe(true);
+		expect(card.querySelector(".btn-companion-damage").disabled).toBe(true);
+		expect(card._html).toContain("Unavailable");
+	});
+
+	test("real runtime turn controls expire the actor's timed effects without resetting the original's turn", async () => {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		const hydrated = state.hydrateCompanionActor(id);
+		hydrated.actor.activateState("custom", {name: "One-round buff", sourceFeatureId: "test-round-buff", duration: "1 round", customEffects: []});
+		expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+		const ownerTurn = copy(state._data.turnReceipts);
+		await Ui.pShow({ownerPage: page, companionId: id});
+		modal.root.querySelectorAll("button").find(button => button.textContent === "Start combat").click();
+		await flush();
+		modal.root.querySelectorAll("button").find(button => button.textContent === "Start next turn").click();
+		await flush();
+		const actor = state.hydrateCompanionActor(id).actor;
+		expect(actor.getCombatRound()).toBe(2);
+		expect(actor.getActiveStates().some(effect => effect.name === "One-round buff" && effect.active)).toBe(false);
+		expect(state._data.turnReceipts).toEqual(ownerTurn);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(2);
+		modal.close();
+	});
+
+	test("closing controls during an actor save defers disposal until the action has finished", async () => {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		let resolveSave;
+		page.saveCharacter.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve; }));
+		await Ui.pShow({ownerPage: page, companionId: id});
+		modal.root.querySelectorAll("button").find(button => button.textContent === "Start combat").click();
+		await flush();
+		modal.close();
+		resolveSave(true);
+		await flush();
+		expect(state.hydrateCompanionActor(id).actor.isInCombat()).toBe(true);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+	});
+
+	test.each(["Short", "Long"])("PHB %s Rest restores only eligible actor resources, never HP/slots or the original", async type => {
+		const {state, page} = makeOwner();
+		const {id: resourceId} = state.addResource({name: "Rest Test Pool", max: 2, current: 0, recharge: "short"});
+		const id = addCopy(state);
+		const hydrated = state.hydrateCompanionActor(id);
+		hydrated.actor.setResourceCurrent(resourceId, 0);
+		hydrated.actor.setHp(hydrated.actor.getHp().current - 3);
+		hydrated.actor.setSpellSlotCurrent(1, 3, {isExpenditure: true});
+		hydrated.actor.setPactSlotsCurrent(1);
+		expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+		const hp = state.getCompanion(id).hp.current;
+		const before = copy(state._data);
+		const confirmation = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			await Ui.pShow({ownerPage: page, companionId: id});
+			modal.root.querySelectorAll("button").find(button => button.textContent === `${type} Rest`).click();
+			await flush();
+			const actor = state.hydrateCompanionActor(id).actor;
+			expect(actor.getResources().find(resource => resource.id === resourceId).current).toBe(2);
+			expect(actor.getHp().current).toBe(hp);
+			expect(actor.getSpellSlotsCurrent(1)).toBe(3);
+			expect(actor.getPactSlots().current).toBe(1);
+			const {companions: _beforeCompanions, ...ownerBefore} = before;
+			const {companions: _afterCompanions, ...ownerAfter} = state._data;
+			expect(ownerAfter).toEqual(ownerBefore);
+			expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+			modal.close();
+		} finally {
+			confirmation.mockRestore();
+		}
+	});
+});
+
+describe("PHB laboratory repair dialog with authoritative State", () => {
+	function setupRepair () {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		const hydrated = state.hydrateCompanionActor(id);
+		hydrated.actor.setHp(hydrated.actor.getHp().max - 3);
+		expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+		return {state, page, id};
+	}
+
+	async function openRepair ({page, id}) {
+		const outcome = Ui.pRepair({ownerPage: page, companionId: id});
+		await flush();
+		return {
+			outcome,
+			amount: modal.root.querySelector(".cs-simulacrum__repair-amount"),
+			laboratory: modal.root.querySelector(".cs-simulacrum__laboratory"),
+			confirm: modal.root.querySelector(".cs-simulacrum__repair-confirm"),
+			status: modal.root.querySelector(".cs-simulacrum__status"),
+			submit: () => modal.root.querySelector("form")._handlers.submit({preventDefault () {}}),
+		};
+	}
+
+	function confirmLaboratory (dialog) {
+		dialog.laboratory.checked = true;
+		dialog.laboratory._handlers.change();
+	}
+
+	test("requires a laboratory and pays only for actual missing HP before awaited guarded persistence", async () => {
+		const fixture = setupRepair();
+		const {state, page, id} = fixture;
+		const dialog = await openRepair(fixture);
+		expect(dialog.confirm.disabled).toBe(true);
+		dialog.amount.value = "20";
+		confirmLaboratory(dialog);
+		expect(dialog.status.textContent).toContain("Restore 3 HP for 300 gp");
+		expect(dialog.confirm.disabled).toBe(false);
+		await dialog.submit();
+		await expect(dialog.outcome).resolves.toBe(true);
+		expect(state.getCompanion(id).hp.current).toBe(state.getCompanion(id).hp.max);
+		expect(state.getCurrency().gp).toBe(4700);
+		expect(page._saveCurrentCharacter).toHaveBeenCalledWith({
+			isReturnStatus: true, expectedCharacterId: "owner", expectedLoadGeneration: 1,
+		});
+	});
+
+	test("cancellation and unaffordable or fractional requests do not change HP/currency", async () => {
+		const fixture = setupRepair();
+		fixture.state.setCurrency("gp", 1);
+		const before = copy(fixture.state._data);
+		const dialog = await openRepair(fixture);
+		confirmLaboratory(dialog);
+		expect(dialog.confirm.disabled).toBe(true);
+		dialog.amount.value = "1.5";
+		dialog.amount._handlers.input();
+		expect(dialog.confirm.disabled).toBe(true);
+		modal.close();
+		await expect(dialog.outcome).resolves.toBe(false);
+		expect(fixture.state._data).toEqual(before);
+		expect(fixture.page._saveCurrentCharacter).not.toHaveBeenCalled();
+	});
+
+	test("rejects a stale selected character before either payment or healing", async () => {
+		const fixture = setupRepair();
+		const before = copy(fixture.state._data);
+		const dialog = await openRepair(fixture);
+		confirmLaboratory(dialog);
+		fixture.page._characterLoadGeneration++;
+		await dialog.submit();
+		expect(dialog.status.textContent).toContain("selected character changed");
+		expect(fixture.state._data).toEqual(before);
+		modal.close();
+		await expect(dialog.outcome).resolves.toBe(false);
+	});
+
+	test("failed persistence compensates only this repair, preserving newer actor damage, slot use, spending and notes", async () => {
+		const fixture = setupRepair();
+		const {state, page, id} = fixture;
+		const initialHp = state.getCompanion(id).hp.current;
+		page._saveCurrentCharacter.mockImplementationOnce(async () => {
+			const hydrated = state.hydrateCompanionActor(id);
+			hydrated.actor.setHp(hydrated.actor.getHp().current - 2);
+			hydrated.actor.setSpellSlotCurrent(1, 3, {isExpenditure: true});
+			expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+			state.deductGold(3);
+			state._data.notes.notes = "Keep the new note.";
+			return false;
+		});
+		const dialog = await openRepair(fixture);
+		confirmLaboratory(dialog);
+		await dialog.submit();
+		expect(state.getCompanion(id).hp.current).toBe(initialHp - 2);
+		expect(state.hydrateCompanionActor(id).actor.getSpellSlotsCurrent(1)).toBe(3);
+		expect(state.getCurrency().gp).toBe(4997);
+		expect(state._data.notes.notes).toBe("Keep the new note.");
+		expect(dialog.status.textContent).toContain("No HP or currency changes were kept");
+		modal.close();
+		await expect(dialog.outcome).resolves.toBe(false);
+	});
+
+	test("closing the header during pending persistence cannot cancel early or prevent exact denomination rollback", async () => {
+		const fixture = setupRepair();
+		const {state, page} = fixture;
+		state.setCurrency("gp", 199);
+		state.setCurrency("pp", 11);
+		state.setCurrency("sp", 7);
+		state.setCurrency("cp", 9);
+		const before = copy(state._data);
+		let resolveSave;
+		page._saveCurrentCharacter.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve; }));
+		const dialog = await openRepair(fixture);
+		confirmLaboratory(dialog);
+		const submission = dialog.submit();
+		await flush();
+		let settled = false;
+		dialog.outcome.then(() => { settled = true; });
+		modal.close();
+		await flush();
+		expect(settled).toBe(false);
+		expect(dialog.amount.disabled).toBe(true);
+		resolveSave(false);
+		await submission;
+		await expect(dialog.outcome).resolves.toBe(false);
+		expect(state.getCurrency()).toEqual(before.currency);
+		expect(state._data.companions).toEqual(before.companions);
 	});
 });
 

@@ -5,7 +5,7 @@ const escape = value => CharacterSheetModal._escapeHtml(value ?? "");
 
 class CharacterSheetSimulacrum {
 	static isSimulacrum (companion) {
-		return companion?.actorSnapshot?.kind === "simulacrum";
+		return !!companion && (Object.hasOwn(companion, "actorSnapshot") || !!companion.actorUnavailable);
 	}
 
 	static _captureOwner (page) {
@@ -57,8 +57,8 @@ class CharacterSheetSimulacrum {
 		const companion = prepared.companionData;
 		const snapshot = companion.actorSnapshot;
 		const existing = context.state.getCompanions().filter(it => this.isSimulacrum(it)
-			&& it.actorSnapshot.creatorActorId === snapshot.creatorActorId
-			&& it.actorSnapshot.lifecycle === "active");
+			&& it.actorSnapshot?.creatorActorId === snapshot.creatorActorId
+			&& it.actorSnapshot?.lifecycle === "active");
 		const fingerprint = JSON.stringify(context.data);
 		let resolve;
 		let settled = false;
@@ -319,7 +319,7 @@ class CharacterSheetSimulacrum {
 		});
 		if (!confirmed) return;
 		if (!this._isOwnerCurrent(ownerPage, context)) throw new Error("The selected character changed. No companion was dismissed.");
-		if (companion.actorSnapshot.lifecycle === "active"
+		if (companion.actorSnapshot?.lifecycle === "active"
 			&& context.state.constructor.validateCompanionActorSnapshot(companion.actorSnapshot).ok) {
 			await this._pEnsureRuntime();
 			if (!this._isOwnerCurrent(ownerPage, context)) throw new Error("The selected character changed. No companion was dismissed.");
@@ -363,7 +363,7 @@ class CharacterSheetSimulacrum {
 		const conditionText = (Array.isArray(companion.conditions) ? companion.conditions : []).map(it => typeof it === "string" ? it : it?.name).filter(Boolean).join(", ");
 		card.append(e_({outer: `<header>
 			<h4>${escape(companion.customName || companion.name)}</h4>
-			<p>${escape(companion.actorSnapshot.spell?.source || "Unknown edition")} &middot; Construct &middot; ${active ? "Acts on your turn" : `<strong>${validation.ok ? "Destroyed / melted" : "Unavailable"}</strong>`}</p>
+			<p>${escape(companion.actorSnapshot?.spell?.source || "Unknown edition")} &middot; Construct &middot; ${active ? "Acts on your turn" : `<strong>${validation.ok ? "Destroyed / melted" : "Unavailable"}</strong>`}</p>
 		</header>
 		<p><output aria-label="Simulacrum current HP">${escape(companion.hp?.current ?? "?")}</output> / ${escape(companion.hp?.max ?? "?")} HP${companion.hp?.temp ? ` &middot; ${escape(companion.hp.temp)} temporary HP` : ""} &middot; AC ${escape(companion.ac)}</p>
 		${conditionText ? `<p>${escape(conditionText)}</p>` : ""}
@@ -410,7 +410,7 @@ class CharacterSheetSimulacrum {
 			isWidth100: true,
 			cbClose: () => {
 				closed = true;
-				runtime?.dispose();
+				if (!busy) runtime?.dispose();
 			},
 		});
 		const body = e_({tag: "div", clazz: "cs-simulacrum cs-simulacrum--manager"});
@@ -438,7 +438,8 @@ class CharacterSheetSimulacrum {
 				this._notifyError(error.message);
 			} finally {
 				busy = false;
-				if (!closed) render({preserveStatus: true});
+				if (closed) runtime?.dispose();
+				else render({preserveStatus: true});
 			}
 		};
 		const button = (parent, label, action, {disabled = false, reason = ""} = {}) => {
@@ -490,8 +491,16 @@ class CharacterSheetSimulacrum {
 						: "XPHB: this duplicate cannot take Short or Long Rests or cast Simulacrum. Repair it within 5 feet during your Long Rest.",
 			}));
 			if (!terminal) {
-				runtime ||= this._getRuntime(ownerPage, companionId);
-				const actor = runtime.getState();
+				let actor;
+				try {
+					runtime ||= this._getRuntime(ownerPage, companionId);
+					actor = runtime.getState();
+				} catch (error) {
+					status.textContent = error.message;
+					runtime?.dispose();
+					return;
+				}
+				content.append(e_({tag: "p", clazz: "cs-simulacrum__hint", txt: runtime.getManualResolutionNotice()}));
 				const toolbar = e_({tag: "div", clazz: "cs-simulacrum__toolbar"});
 				button(toolbar, "Damage", async () => {
 					const amount = await InputUiUtil.pGetUserNumber({title: "Damage Simulacrum", min: 1, int: true});
@@ -505,7 +514,25 @@ class CharacterSheetSimulacrum {
 						runtime = this._getRuntime(ownerPage, companionId);
 					}
 				});
-				button(toolbar, "Start next turn", () => runtime.run(state => state.resetTurnEconomy()));
+				button(toolbar, actor.isInCombat() ? "Start next turn" : "Start combat", () => runtime.run(state => {
+					if (state.isInCombat()) return state.advanceRound();
+					state.startCombat();
+				}));
+				if (actor.isInCombat()) button(toolbar, "End combat", () => runtime.run(state => state.endCombat()));
+				if (snapshot.policy.recovery === "no-slot-recovery") {
+					for (const type of ["Short", "Long"]) {
+						button(toolbar, `${type} Rest`, async () => {
+							const confirmed = await InputUiUtil.pGetUserBoolean({
+								title: `${type} Rest for Simulacrum?`,
+								htmlDescription: "Only this duplicate rests. Eligible non-slot uses recover normally, but its HP and ordinary/Pact slots do not recover. The original does not rest.",
+								textYes: `Finish ${type} Rest`,
+								textNo: "Cancel",
+							});
+							if (!confirmed) return;
+							return runtime.run(state => type === "Short" ? state.onShortRest() : state.onLongRest());
+						});
+					}
+				}
 				content.append(toolbar);
 				const concentration = actor.getConcentration();
 				if (concentration) {
@@ -634,8 +661,10 @@ class CharacterSheetSimulacrum {
 					resourceSection.append(e_({tag: "p", clazz: "cs-simulacrum__hint", txt: "Use these trackers only when a feature's rules allow spending or recovery. Casting spends its own applicable costs automatically."}));
 				}
 			}
-			const statblock = section("Full statblock");
+			const statblock = e_({tag: "details", clazz: "cs-simulacrum__statblock", attrs: {open: terminal}});
+			statblock.append(e_({tag: "summary", txt: "Full statblock"}));
 			statblock.insertAdjacentHTML("beforeend", this._getStatblockHtml(companion));
+			content.append(statblock);
 			if (busy) content.querySelectorAll("button, select").forEach(element => { element.disabled = true; });
 		};
 		try {

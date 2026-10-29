@@ -470,6 +470,11 @@ reads the duplicate's current actor state and offers source-qualified ordinary,
 Pact, innate and ritual casting; per-spell slot selection preserves same-level
 ordinary/Pact identity. Conditions, concentration, feature pools and Font of
 Magic use the actor runtime, never the player's mutable action handlers.
+Start combat / next turn / end combat use the actor's existing combat clock,
+so timed effects expire without advancing the original's turn. PHB actors
+can take their own rests to recover eligible non-slot uses; neither HP nor
+ordinary/Pact slots recover. XPHB actors have no rest controls. The manager
+also shows the runtime's explicit manual-resolution/component warning.
 
 `pPrepareCreation()` is a pure, cancellable preview: it returns staged companion
 data and replacement identities without adding a companion, spending a slot,
@@ -486,6 +491,9 @@ recovery guidance rather than falling back to the original character.
 The companion runtime module is loaded lazily at the first live interaction,
 after Page, Spells and Combat are initialized. All writes still require the
 selected owner/generation to match.
+Closing a manager during an in-flight actor save defers runtime disposal until
+the operation finishes. PHB repair compensates only its HP/payment on save
+failure, preserving unrelated notes, newer slot spending and subsequent damage.
 
 ---
 
