@@ -4667,6 +4667,30 @@ Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog va
 
 ## Rest Mechanics
 
+### Optional XPHB Simulacrum Paid Repair
+
+Rest's `_showLongRestDialog({focusSimulacrum: companionId})` stages optional
+whole-HP repair amounts and within-5-feet confirmation for active XPHB actor-backed
+copies. Use State's `getSimulacrumRepairQuote`/`repairSimulacrum` with
+`{amount, ownerLongRest:true, withinFiveFeet}`; never mutate summary HP or create
+another resource store. Quotes enforce original creator identity and funds.
+Rest also binds each staged request to actor ID/revision, checks combined cost,
+and prevents stale-owner/navigation or duplicate confirmation. PHB laboratory
+repair stays outside the owner's Long Rest.
+
+Repair commits after owner recovery/time advancement but before awaited owner
+persistence inside the existing whole-rest rollback. Failure restores currency
+denominations and actor snapshots with the rest; Undo Rest restores both again
+without replenishing any duplicate pools. Cancelling leaves all state untouched.
+`CharacterSheetSimulacrumRest.test.js` exercises the real dialog and State APIs.
+
+The PDF companion presentation validates the persisted envelope, reads raw saved
+actor pools/HP/conditions/concentration and frozen level/PB, and uses the saved
+statblock for numeric saves/skills and complete action/reaction/spellcasting
+sections. It never hydrates or initializes the actor and prints recovery guidance
+instead of original-character fallback for corrupt data. Generic/EFA presentation
+is unchanged; see `CharacterSheetSimulacrumPdf.test.js`.
+
 ### Source-Owned Temporary HP
 
 `CharacterSheetState` owns both the current pool and its optional source receipt:

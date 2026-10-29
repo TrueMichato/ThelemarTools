@@ -1033,7 +1033,18 @@ class CharacterSheetRest {
 		});
 	}
 
-	async _showLongRestDialog ({focusAdventurersAtlas = false} = {}) {
+	async _showLongRestDialog ({focusAdventurersAtlas = false, focusSimulacrum = null} = {}) {
+		const ownerState = this._state;
+		const ownerId = ownerState.getId?.();
+		const selectedCharacterId = this._page._currentCharacterId;
+		const loadGeneration = this._page._characterLoadGeneration;
+		const isCurrentOwner = () => this._state === ownerState
+			&& this._page.getState() === ownerState
+			&& ownerState.getId?.() === ownerId
+			&& this._page._currentCharacterId === selectedCharacterId
+			&& this._page._characterLoadGeneration === loadGeneration;
+		let isCommitting = false;
+		let isClosed = false;
 		const currentHp = this._state.getHp().current;
 		const maxHp = this._state.getHp().max;
 		const hitDice = this._state.getHitDice();
@@ -1055,7 +1066,13 @@ class CharacterSheetRest {
 			title: "🌙 Long Rest",
 			isMinHeight0: true,
 			isWidth100: true,
+			cbClose: () => { isClosed = true; },
 		});
+		if (!isCurrentOwner()) {
+			doClose(false);
+			JqueryUtil.doToast({type: "warning", content: "The character changed. Open Long Rest again on the intended character."});
+			return;
+		}
 
 		const cbResetTempHp = e_({tag: "input", type: "checkbox"});
 		cbResetTempHp.checked = true;
@@ -1195,7 +1212,16 @@ class CharacterSheetRest {
 		}
 
 		// Footer buttons
-		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel", click: () => doClose(false)});
+		const btnCancel = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-default",
+			txt: "Cancel",
+			click: () => {
+				if (isCommitting) return;
+				isClosed = true;
+				doClose(false);
+			},
+		});
 
 		// --- Hunter's Prey swap control ---
 		const huntersPreySwap = this._buildHuntersPreySwapSection();
@@ -1267,19 +1293,33 @@ class CharacterSheetRest {
 			onChange: () => syncValidity(),
 		});
 		if (experimentalElixir) modalInner.append(experimentalElixir.element);
+		const simulacrumRepairs = this._buildSimulacrumLongRestRepairSection({onChange: () => syncValidity()});
+		if (simulacrumRepairs) modalInner.append(simulacrumRepairs.section);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		syncValidity = () => {
 			btnConfirm.disabled = !!(
-				(temporalMasteryAge && !temporalMasteryAge.isValid())
+				isCommitting || isClosed
+				|| (temporalMasteryAge && !temporalMasteryAge.isValid())
 				|| (adventurersAtlas && !adventurersAtlas.isValid())
 				|| (experimentalElixir && !experimentalElixir.isValid())
+				|| (simulacrumRepairs && !simulacrumRepairs.isValid())
 			);
 		};
 		temporalMasteryAge?.onChange(syncValidity);
 		adventurersAtlas?.onChange(syncValidity);
 		syncValidity();
 		btnConfirm.onClick(async () => {
+			if (isCommitting || isClosed) return;
+			if (!isCurrentOwner()) {
+				JqueryUtil.doToast({type: "warning", content: "The character changed. Open Long Rest again on the intended character."});
+				return;
+			}
+			if (simulacrumRepairs && !simulacrumRepairs.isValid()) {
+				simulacrumRepairs.focusFirstInvalid();
+				syncValidity();
+				return;
+			}
 			if (temporalMasteryAge && !temporalMasteryAge.isValid()) return;
 			if (adventurersAtlas && !adventurersAtlas.isValid()) {
 				adventurersAtlas.focusFirstInvalid();
@@ -1302,6 +1342,9 @@ class CharacterSheetRest {
 				});
 				return;
 			}
+			const repairRequests = simulacrumRepairs?.getRequests() || [];
+			isCommitting = true;
+			btnCancel.disabled = true;
 			btnConfirm.disabled = true;
 			let atlasResult = null;
 			try {
@@ -1429,18 +1472,30 @@ class CharacterSheetRest {
 						experimentalElixirResult.error,
 					));
 				}
+				const repairReceipts = this._commitSimulacrumLongRestRepairs(repairRequests);
 
 				// Save changes
 				let saveResult;
 				if (this._page._saveCurrentCharacter) {
-					saveResult = await this._page._saveCurrentCharacter({isReturnStatus: true});
+					saveResult = await this._page._saveCurrentCharacter({
+						isReturnStatus: true,
+						expectedCharacterId: ownerId,
+						expectedLoadGeneration: loadGeneration,
+					});
 				} else {
 					saveResult = this._page.saveCharacter?.();
 					if (saveResult?.then) saveResult = await saveResult;
 				}
 				if (saveResult === false) throw new Error("The Long Rest could not be saved.");
+				if (isClosed) throw new Error("The Long Rest was cancelled before it finished saving.");
+				if (!isCurrentOwner()) {
+					doClose(false);
+					JqueryUtil.doToast({type: "warning", content: "The character changed while saving the Long Rest. Reopen the original character to check its saved rest and repairs."});
+					return;
+				}
 				this._page.renderCharacter();
 
+				isClosed = true;
 				doClose(true);
 
 				let message = "🌙 Long rest complete! All resources restored.";
@@ -1479,6 +1534,7 @@ class CharacterSheetRest {
 				if (experimentalElixirResult) {
 					message += ` Experimental Elixir: ${experimentalElixirResult.expiredItemIds.length} expired, ${experimentalElixirResult.createdItemIds.length} created.`;
 				}
+				for (const repair of repairReceipts) message += ` Simulacrum repaired by ${repair.actualHp} HP for ${repair.costGp} gp.`;
 
 				JqueryUtil.doToast({
 					type: "success",
@@ -1506,6 +1562,11 @@ class CharacterSheetRest {
 
 				this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("long");
 			} catch (error) {
+				if (!isCurrentOwner()) {
+					doClose(false);
+					JqueryUtil.doToast({type: "danger", content: `${error?.message || "The Long Rest could not be completed."} The character changed; reopen the original character to check its saved state. No rollback was applied to the newly selected character.`});
+					return;
+				}
 				if (restSnapshot?.json) this._state.loadFromJson(restSnapshot.json);
 				if (this._page) this._page._lastRestSnapshot = previousRestSnapshot;
 				if (previousRestSnapshot) this._showUndoRestAffordance(previousRestSnapshot.restType);
@@ -1514,7 +1575,11 @@ class CharacterSheetRest {
 				try {
 					let rollbackSaveResult;
 					if (this._page._saveCurrentCharacter) {
-						rollbackSaveResult = await this._page._saveCurrentCharacter({isReturnStatus: true});
+						rollbackSaveResult = await this._page._saveCurrentCharacter({
+							isReturnStatus: true,
+							expectedCharacterId: ownerId,
+							expectedLoadGeneration: loadGeneration,
+						});
 					} else {
 						rollbackSaveResult = this._page.saveCharacter?.();
 						if (rollbackSaveResult?.then) rollbackSaveResult = await rollbackSaveResult;
@@ -1524,7 +1589,9 @@ class CharacterSheetRest {
 					isRollbackPersisted = false;
 				}
 				this._page.renderCharacter?.();
-				btnConfirm.disabled = false;
+				isCommitting = false;
+				btnCancel.disabled = false;
+				syncValidity();
 				JqueryUtil.doToast({
 					type: "danger",
 					content: isRollbackPersisted
@@ -1540,6 +1607,119 @@ class CharacterSheetRest {
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
 		if (focusAdventurersAtlas) adventurersAtlas?.selectCreateModeAndFocus();
+		if (focusSimulacrum && !simulacrumRepairs?.focusCompanion(focusSimulacrum)) {
+			JqueryUtil.doToast({type: "warning", content: "That Simulacrum is not an active XPHB copy available for Long Rest repair."});
+		}
+	}
+
+	_buildSimulacrumLongRestRepairSection ({onChange = () => {}} = {}) {
+		const companions = (this._state.getCompanions?.() || []).filter(companion =>
+			companion.active !== false
+			&& companion.actorSnapshot?.kind === "simulacrum"
+			&& companion.actorSnapshot.spell?.source === "XPHB"
+			&& companion.actorSnapshot.lifecycle === "active",
+		);
+		if (!companions.length) return null;
+
+		const section = e_({tag: "fieldset", clazz: "charsheet__rest-section charsheet__simulacrum-repairs"});
+		const legend = e_({tag: "legend", clazz: "charsheet__rest-section-title", txt: "Simulacrum - Optional Paid Repair"});
+		legend.style.color = "inherit";
+		section.append(
+			legend,
+			e_({tag: "p", clazz: "ve-muted ve-small", txt: "During the original caster's Long Rest, an XPHB copy within 5 feet can be repaired for 100 gp per HP actually restored. Enter 0 to skip. The copy does not rest or regain spell slots or other resources."}),
+		);
+		const rows = companions.map(companion => {
+			const snapshot = companion.actorSnapshot;
+			const amount = e_({tag: "input", type: "number", clazz: "ve-form-control input-xs", value: "0"});
+			amount.setAttribute("min", "0");
+			amount.setAttribute("step", "1");
+			const proximity = e_({tag: "input", type: "checkbox"});
+			const status = e_({tag: "p", clazz: "ve-small mb-0"});
+			status.setAttribute("role", "status");
+			status.setAttribute("aria-live", "polite");
+			const row = e_({tag: "div", clazz: "charsheet__rest-options mb-2"});
+			const amountLabel = e_({tag: "label", clazz: "charsheet__rest-option"});
+			amountLabel.append(e_({tag: "span", txt: `${companion.customName || companion.name}: HP to restore`}), amount);
+			const proximityLabel = e_({tag: "label", clazz: "charsheet__rest-option"});
+			proximityLabel.append(proximity, e_({tag: "span", txt: "This copy is within 5 feet during my Long Rest"}));
+			row.append(amountLabel, proximityLabel, status);
+			section.append(row);
+			return {companionId: companion.id, actorId: snapshot.actorId, revision: snapshot.revision, amount, proximity, status};
+		});
+		const totalStatus = e_({tag: "p", clazz: "ve-small mb-0"});
+		totalStatus.setAttribute("role", "status");
+		totalStatus.setAttribute("aria-live", "polite");
+		section.append(totalStatus);
+
+		const getRequests = () => rows.filter(row => row.amount.value.trim() === "" || Number(row.amount.value) !== 0).map(row => ({
+			companionId: row.companionId,
+			actorId: row.actorId,
+			revision: row.revision,
+			amount: row.amount.value === "" ? NaN : Number(row.amount.value),
+			ownerLongRest: true,
+			withinFiveFeet: row.proximity.checked,
+		}));
+		const validate = () => {
+			let isValid = true;
+			let costGp = 0;
+			for (const row of rows) {
+				const request = getRequests().find(it => it.companionId === row.companionId);
+				const quote = request ? this._getSimulacrumLongRestRepairQuote(request) : null;
+				row.invalid = !!quote && !quote.ok;
+				if (row.invalid) isValid = false;
+				if (quote?.ok) costGp += quote.costGp;
+				row.status.textContent = !quote ? "No repair selected." : quote.ok
+					? `${quote.actualHp} HP restored for ${quote.costGp} gp.`
+					: quote.message || quote.reason || "This repair is unavailable.";
+			}
+			const available = this._state.getTotalGold();
+			if (costGp > available) isValid = false;
+			totalStatus.textContent = `Total repair cost: ${costGp} gp; available: ${available} gp.${costGp > available ? " Insufficient funds for the selected repairs." : ""}`;
+			return isValid;
+		};
+		const refresh = () => { validate(); onChange(); };
+		for (const row of rows) {
+			row.amount.addEventListener("input", refresh);
+			row.amount.onChange(refresh);
+			row.proximity.onChange(refresh);
+		}
+		validate();
+		return {
+			section,
+			rows,
+			getRequests,
+			isValid: validate,
+			focusFirstInvalid: () => (rows.find(row => row.invalid) || rows[0]).amount.focus(),
+			focusCompanion: id => {
+				const row = rows.find(it => it.companionId === id);
+				row?.amount.focus();
+				return !!row;
+			},
+		};
+	}
+
+	_getSimulacrumLongRestRepairQuote (request) {
+		const companion = this._state.getCompanion(request.companionId);
+		const snapshot = companion?.actorSnapshot;
+		if (!snapshot || companion.active === false || snapshot.actorId !== request.actorId || snapshot.revision !== request.revision
+			|| snapshot.spell?.source !== "XPHB" || snapshot.lifecycle !== "active") {
+			return {ok: false, message: "This copy changed while Long Rest was open. Reopen the dialog before repairing it."};
+		}
+		return this._state.getSimulacrumRepairQuote(request.companionId, {
+			amount: request.amount, ownerLongRest: true, withinFiveFeet: request.withinFiveFeet,
+		});
+	}
+
+	_commitSimulacrumLongRestRepairs (requests) {
+		return requests.map(request => {
+			const quote = this._getSimulacrumLongRestRepairQuote(request);
+			if (!quote.ok) throw new Error(quote.message || quote.reason || "Simulacrum repair is unavailable.");
+			const receipt = this._state.repairSimulacrum(request.companionId, {
+				amount: request.amount, ownerLongRest: true, withinFiveFeet: request.withinFiveFeet,
+			});
+			if (!receipt.ok) throw new Error(receipt.message || receipt.reason || "Simulacrum repair failed.");
+			return receipt;
+		});
 	}
 
 	openAdventurersAtlasLongRest () {

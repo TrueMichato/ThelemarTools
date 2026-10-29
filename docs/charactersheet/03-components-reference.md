@@ -677,7 +677,7 @@ _showShortRestDialog()
 _performShortRest(hitDiceSpent)
 
 // Long Rest
-_showLongRestDialog()
+_showLongRestDialog({focusAdventurersAtlas = false, focusSimulacrum = null} = {})
 _performLongRest()
 ```
 
@@ -694,6 +694,28 @@ _performLongRest()
 3. Recover all spell slots
 4. Recover all class features
 5. Reset death saves
+
+### XPHB Simulacrum repair during the owner's Long Rest
+
+The optional **Simulacrum - Optional Paid Repair** fieldset stages an HP amount
+and confirmation that each active XPHB copy is within 5 feet. Zero skips repair;
+opening, editing, or cancelling the dialog changes neither HP nor gold. The live
+State quote caps healing at missing HP and charges **100 gp per HP actually
+restored**. Missing proximity, invalid amounts, insufficient combined funds,
+foreign creator identity, and changed actor revisions prevent confirmation.
+
+`focusSimulacrum` is a companion ID, not an actor State. The parent repair action
+opens this ordinary owner Long Rest dialog and focuses that copy's amount input.
+PHB copies use their separate alchemical laboratory repair flow, not this fieldset.
+The owner's recovery completes first, then `repairSimulacrum` commits only paid HP
+before the normal awaited owner save. The copy never rests or refills its pools.
+Payment/projection/save failures roll back the whole rest; **Undo Rest** restores
+pre-rest companion snapshots and the exact currency denominations together.
+Duplicate confirmation and stale character identity/navigation are guarded.
+
+Focused coverage: `CharacterSheetSimulacrumRest.test.js` drives the actual dialog
+confirmation with real State snapshot/repair APIs; it does not substitute a
+second repair implementation.
 
 ---
 
@@ -798,6 +820,17 @@ reconciled companion overlay and State APIs: setup choices, saves/skills,
 senses/immunities/languages, Hit Dice, Repair, command policy, Arcane Jolt, and
 Improved Deflection. Name-only, TCE, RHW, and generic companions do not enter
 the EFA-specific path.
+
+Actor-backed Simulacra instead validate their saved envelope and read current
+HP, ordinary/Pact slots, innate and limited-use counters, conditions and
+concentration from `actorSnapshot.state`. Frozen level/PB and saved statblock
+saves/skills, actions, bonus actions, reactions and source-qualified spellcasting
+are printed with PHB/XPHB recovery/repair restrictions and active/destroyed
+lifecycle. PDF generation does not hydrate, initialize, or refill the actor, and
+never substitutes the original character's current statistics. Invalid snapshots
+or a missing statblock print an explicit unavailable/backup-recovery message.
+`CharacterSheetSimulacrumPdf.test.js` covers this saved-actor path alongside the
+unchanged generic/EFA controls in `CharacterSheetPdf.test.js`.
 
 ### Key Methods
 
