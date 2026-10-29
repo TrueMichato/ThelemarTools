@@ -3,6 +3,7 @@ import {BrewDoc} from "./utils-brew-models.js";
 import {SITE_STYLE__CLASSIC, SITE_STYLE__ONE} from "../consts.js";
 import {FontManager} from "../utils-font.js";
 import {BrewDocContentMigrator} from "./utils-brew-content-migrator.js";
+import {ManageBrewDiagnosticsUtil} from "./utils-brew-ui-manage-diagnostics.js";
 
 export class BrewUtil2Base {
 	_STORAGE_KEY_LEGACY;
@@ -169,6 +170,7 @@ export class BrewUtil2Base {
 		if (!messageInfo) return;
 		await this._storage.pRemove(this._STORAGE_KEY_RELOAD_MESSAGE);
 		try {
+			if (messageInfo.updateReport) ManageBrewDiagnosticsUtil.logUpdateReport(messageInfo.updateReport, {isReplay: true});
 			JqueryUtil.doToast({
 				...messageInfo,
 				content: veE({outer: messageInfo.contentHtml}),

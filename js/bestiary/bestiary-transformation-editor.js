@@ -316,14 +316,31 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const input = element("div", {className: "bqa__transformation-input"});
 	const details = element("div");
 	const result = element("div");
-	container.append(input, details, error, status, result);
+	const warnings = element("div", {className: "bqa__transformation-summary"});
+	warnings.setAttribute("role", "status");
+	warnings.hidden = true;
+	container.append(warnings, input, details, error, status, result);
 	status.textContent = "Loading site, prerelease, and homebrew transformation candidates…";
 	const showError = message => { error.textContent = message; };
 	let candidates;
 	let load;
+	const loadWithWarnings = async () => {
+		const skipped = [];
+		const loaded = await load({onWarning: warning => skipped.push(warning)});
+		if (!Array.isArray(loaded)) throw new Error("The transformation catalog did not return a candidate list.");
+		if (!isCurrent()) return loaded;
+		warnings.replaceChildren();
+		warnings.hidden = !skipped.length;
+		if (skipped.length) {
+			warnings.append(element("h5", {text: `Skipped unavailable recipes: ${skipped.length}`}));
+			list(warnings, skipped.map(it => `${it.name || `${it.kind} entry ${it.index + 1}`} (${it.source || "unknown source"}): ${it.reason}`));
+			if (!loaded.length) paragraph(warnings, "No usable recipes remain. Correct the listed entries and reopen this editor.");
+		}
+		return loaded;
+	};
 	try {
 		load = pLoadCandidates || (await import("../creature-transformations.js")).pLoadCreatureTransformationCandidates;
-		candidates = await load();
+		candidates = await loadWithWarnings();
 		if (!Array.isArray(candidates)) throw new Error("The transformation catalog did not return a candidate list.");
 	} catch (e) {
 		if (!isCurrent()) return;
@@ -721,7 +738,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		apply.disabled = true;
 		status.textContent = "Checking the live catalog, targets, and storage before saving…";
 		try {
-			const currentCandidates = await load();
+			const currentCandidates = await loadWithWarnings();
 			if (!isCurrent()) throw new Error("The editor changed while the catalog was loading. Select the recipe again.");
 			if (batch !== selectedBatch || candidate !== selectedCandidate || picker.value !== selectedCandidate.id || !visibleIds.has(selectedCandidate.id)
 				|| JSON.stringify(selections) !== JSON.stringify(selectedSelections) || JSON.stringify(decisions) !== JSON.stringify(selectedDecisions)) {
