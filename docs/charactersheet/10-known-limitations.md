@@ -10,15 +10,24 @@ While the character sheet has extensive functionality and test coverage, several
 
 ## Implementation Status
 
-### Simulacrum: internal foundation only
+### Simulacrum: playable own-character copies
 
-Milestone 1 provides isolated, item-free own-character snapshots, versioned
-canonical actor persistence, and full-fidelity companion statblocks. There is
-no creation/casting UI, specific-creature picker, paid repair, or lifecycle/
-recovery enforcement yet. PHB/XPHB policy fields record the intended rules;
-they do not currently block direct actor heal/rest/cast APIs. Do not expose
-this foundation as a playable companion until later milestones add the
-authoritative guards and controller. See
+Casting a learned/prepared PHB or XPHB Simulacrum now previews and creates an
+isolated, item-free own-character companion with independent full starting
+pools. The Companions tab and Play Mode's **More → Companions** share casting,
+damage, conditions, resources, statblock, repair, and dismissal controls.
+Edition-specific recovery/casting guards, paid repairs, terminal destruction,
+replacement cleanup, reload persistence, owner-rest repair/Undo, and PDF output
+are implemented.
+
+Remaining boundaries: **Specific creature** is visibly unavailable; no bestiary
+target selection is implemented. Gambler-sourced creation is refused before
+spending. Unsupported spell effects, hostile damage, creature-type eligibility,
+and supplied-component bookkeeping remain manual; the manager states this
+explicitly. Laboratory/proximity confirmations are player assertions, not a
+distance or calendar simulation. Copies have no advancement, spell-learning,
+or inventory/equipment editor and are not separate roster characters. Full snapshots favor fidelity over
+storage compaction. See
 [NPC export: actor-backed companion foundation](18-npc-export.md#actor-backed-companion-foundation)
 for exact contracts and boundaries.
 

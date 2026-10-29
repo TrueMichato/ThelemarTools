@@ -143,6 +143,37 @@ class CharacterSheetSimulacrum {
 		}
 		if (JSON.stringify(data.currency) === JSON.stringify(after.currency)) data.currency = before.currency;
 		else data.currency.gp = (data.currency.gp || 0) + receipt.costGp;
+		if (data.companions[index].repairTransactionId === receipt.transactionId) {
+			if (before.companion.repairTransactionId) data.companions[index].repairTransactionId = before.companion.repairTransactionId;
+			else delete data.companions[index].repairTransactionId;
+		}
+	}
+
+	static async _pPersistRepairRollback (page, context, before, after, receipt) {
+		if (page._pRestoreFailedSimulacrumCreation) {
+			await page._pRestoreFailedSimulacrumCreation({
+				context,
+				companionId: before.companion.id,
+				wasApplied: snapshot => {
+					const companion = snapshot?.companions?.find(row => row.id === before.companion.id);
+					if (companion?.actorSnapshot?.actorId !== after.companion.actorSnapshot.actorId) return false;
+					if (companion.repairTransactionId === receipt.transactionId) return true;
+					if (companion.repairTransactionId !== before.companion.repairTransactionId) {
+						throw new Error("A newer paid repair changed this companion. Export the original character before resolving its repair payment.");
+					}
+					return false;
+				},
+				undoData: snapshot => {
+					const detached = context.state._createDetachedActorState(snapshot);
+					this._restoreRepairFields({state: detached, data: detached._data}, before, after, receipt);
+					return detached._data;
+				},
+			});
+			return true;
+		}
+		if (!this._isOwnerCurrent(page, context)) return false;
+		await this._pSave(page, context);
+		return true;
 	}
 
 	static async pRepair ({ownerPage, companionId}) {
@@ -187,7 +218,7 @@ class CharacterSheetSimulacrum {
 		});
 		const body = e_({tag: "form", clazz: "cs-simulacrum cs-simulacrum--repair"});
 		body.append(e_({tag: "p", txt: "Repair restores HP in an alchemical laboratory. The sheet deducts 100 gp per HP actually restored as payment for repair components."}));
-		const amount = e_({tag: "input", type: "number", attrs: {min: 1, max: missing, step: 1}, value: missing, clazz: "ve-form-control cs-simulacrum__repair-amount"});
+		const amount = e_({tag: "input", type: "number", attrs: {min: 1, step: 1}, value: missing, clazz: "ve-form-control cs-simulacrum__repair-amount"});
 		const amountLabel = e_({tag: "label", clazz: "cs-simulacrum__field", txt: "Hit points to restore"});
 		amountLabel.append(amount);
 		const laboratory = e_({tag: "input", type: "checkbox", clazz: "cs-simulacrum__laboratory"});
@@ -240,16 +271,15 @@ class CharacterSheetSimulacrum {
 					return;
 				}
 				let rollbackSaved = false;
-				if (this._isOwnerCurrent(ownerPage, context)) {
-					try {
-						await this._pSave(ownerPage, context);
-						rollbackSaved = true;
-					} catch (rollbackError) {
-						this._notifyError(`Repair was undone, but the undo could not be saved: ${rollbackError.message} Save this character before reloading.`);
-					}
-					this._refreshOwner(ownerPage);
+				try {
+					rollbackSaved = await this._pPersistRepairRollback(ownerPage, context, before, after, receipt);
+				} catch (rollbackError) {
+					this._notifyError(`Repair was undone, but the undo could not be saved: ${rollbackError.message} Reopen the original character and save or export a backup before reloading.`);
 				}
-				status.textContent = `${error.message} No HP or currency changes were kept.${rollbackSaved ? "" : " Save the character before reloading."}`;
+				if (this._isOwnerCurrent(ownerPage, context)) this._refreshOwner(ownerPage);
+				status.textContent = rollbackSaved
+					? `${error.message} No HP or currency changes were kept.`
+					: `${error.message} Repair was undone in memory, but saved recovery is incomplete. Reopen the original character and save or export a backup before reloading.`;
 				this._notifyError(status.textContent);
 			} finally {
 				busy = false;
@@ -361,7 +391,8 @@ class CharacterSheetSimulacrum {
 			attrs: {"data-companion-id": companion.id, "data-companion-kind": "simulacrum"},
 		});
 		const conditionText = (Array.isArray(companion.conditions) ? companion.conditions : []).map(it => typeof it === "string" ? it : it?.name).filter(Boolean).join(", ");
-		card.append(e_({outer: `<header>
+		card.append(e_({tag: "div",
+			html: `<header>
 			<h4>${escape(companion.customName || companion.name)}</h4>
 			<p>${escape(companion.actorSnapshot?.spell?.source || "Unknown edition")} &middot; Construct &middot; ${active ? "Acts on your turn" : `<strong>${validation.ok ? "Destroyed / melted" : "Unavailable"}</strong>`}</p>
 		</header>
@@ -661,7 +692,7 @@ class CharacterSheetSimulacrum {
 					resourceSection.append(e_({tag: "p", clazz: "cs-simulacrum__hint", txt: "Use these trackers only when a feature's rules allow spending or recovery. Casting spends its own applicable costs automatically."}));
 				}
 			}
-			const statblock = e_({tag: "details", clazz: "cs-simulacrum__statblock", attrs: {open: terminal}});
+			const statblock = e_({tag: "details", clazz: "cs-simulacrum__statblock", attrs: terminal ? {open: true} : {}});
 			statblock.append(e_({tag: "summary", txt: "Full statblock"}));
 			statblock.insertAdjacentHTML("beforeend", this._getStatblockHtml(companion));
 			content.append(statblock);

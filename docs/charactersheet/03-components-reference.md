@@ -484,7 +484,11 @@ Specific-creature targeting remains visibly disabled.
 
 `pRepair()` uses the authoritative State quote/payment APIs. PHB repair requires
 laboratory confirmation and awaits persistence; XPHB repair opens the owner's
-Long Rest staging flow. Destroyed copies remain viewable and dismissible but
+Long Rest staging flow. Failed laboratory saves compensate captured raw fields
+and persisted old-owner snapshots using the exact repair transaction receipt,
+not the pre-existing companion ID. Newer unrelated edits are preserved; an
+irreconcilable newer repair produces explicit backup/recovery guidance.
+Destroyed copies remain viewable and dismissible but
 cannot act or be repaired. Corrupt envelopes show explicit unavailable/backup
 recovery guidance rather than falling back to the original character.
 

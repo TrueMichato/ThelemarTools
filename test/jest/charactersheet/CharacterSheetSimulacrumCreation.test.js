@@ -522,7 +522,7 @@ describe("Shared Simulacrum creation transaction", () => {
 	});
 });
 
-describe("Real Page persistence and creation compensation", () => {
+describe("Real Page persistence and Simulacrum compensation", () => {
 	let roster;
 	let sync;
 	const installStorage = () => {
@@ -539,6 +539,169 @@ describe("Real Page persistence and creation compensation", () => {
 			else StorageUtil[key] = jest.fn(fn);
 		}
 	};
+	const beginRepair = () => {
+		const harness = makeHarness();
+		const {state, page} = harness;
+		const id = addCopy(state);
+		const hydrated = state.hydrateCompanionActor(id);
+		hydrated.actor.setHp(hydrated.actor.getHp().current - 3);
+		expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+		roster.push(state.toJson());
+		const context = CharacterSheetSimulacrum._captureOwner(page);
+		const before = CharacterSheetSimulacrum._captureRepairFields(state, id);
+		const receipt = state.repairSimulacrum(id, {amount: 3, laboratoryConfirmed: true});
+		expect(receipt).toMatchObject({ok: true, actualHp: 3, costGp: 300});
+		const after = CharacterSheetSimulacrum._captureRepairFields(state, id);
+		page._saveCurrentCharacter = Page.prototype._saveCurrentCharacter;
+		return {...harness, id, context, before, after, receipt};
+	};
+
+	it("keeps terminal Simulacrum records visible for statblock inspection and dismissal", () => {
+		const {state, page} = makeHarness();
+		const id = addCopy(state);
+		expect(state.destroySimulacrum(id).ok).toBe(true);
+		const unrelatedId = state.addCompanion({name: "Hidden ordinary companion", active: false});
+		const visible = page.getFeatureCompanionLifecycleSurfaceCompanions();
+		expect(visible.map(row => row.id)).toContain(id);
+		expect(visible.map(row => row.id)).not.toContain(unrelatedId);
+	});
+
+	it("compensates a paid repair written before switching owners without touching the new owner", async () => {
+		installStorage();
+		const {page, id, context, before, after, receipt} = beginRepair();
+		const normalWrite = StorageUtil.pSet.getMockImplementation();
+		const other = new State();
+		other.setId("other");
+		other.setCurrency("gp", 55);
+		jest.spyOn(StorageUtil, "pSet").mockImplementationOnce(async (...args) => {
+			await normalWrite(...args);
+			page._state = other;
+			page._currentCharacterId = "other";
+			page._characterLoadGeneration++;
+		});
+		await expect(CharacterSheetSimulacrum._pSave(page, context)).rejects.toThrow("could not be saved");
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt);
+		expect(roster[0].companions.find(row => row.id === id)).toEqual(before.companion);
+		expect(roster[0].currency).toEqual(before.currency);
+		expect(page._readActiveCharacterMirror("creator")).toBeNull();
+		expect(other.getTotalGold()).toBe(55);
+		expect(other.getCompanions()).toEqual([]);
+	});
+
+	it("does not refund an unapplied canonical repair just because the existing companion ID is present", async () => {
+		installStorage();
+		const {page, id, context, before, after, receipt} = beginRepair();
+		jest.spyOn(StorageUtil, "pSet").mockRejectedValue(new Error("Disk unavailable"));
+		await expect(CharacterSheetSimulacrum._pSave(page, context)).rejects.toThrow("could not be saved");
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt);
+		expect(roster[0].companions.find(row => row.id === id)).toEqual(before.companion);
+		expect(roster[0].currency).toEqual(before.currency);
+		const mirror = page._readActiveCharacterMirror("creator");
+		expect(mirror.companions.find(row => row.id === id)).toEqual(before.companion);
+		expect(mirror.currency).toEqual(before.currency);
+	});
+
+	it("reverses only the paid repair in newer persisted actor pools, damage, currency and notes", async () => {
+		installStorage();
+		const {state, page, id, context, before, after, receipt} = beginRepair();
+		const hydrated = state.hydrateCompanionActor(id);
+		hydrated.actor.setHp(hydrated.actor.getHp().current - 2);
+		hydrated.actor.useSpellSlot(1);
+		expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+		state.setCurrency("gp", state.getCurrency().gp - 7);
+		state.setNote("backstory", "Keep newer note");
+		roster[0] = state.toJson();
+		page._writeActiveCharacterMirror(page._stampCharacterSnapshot(state.toJson()));
+		page._state = new State();
+		page._currentCharacterId = "other";
+		page._characterLoadGeneration++;
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt);
+		const saved = roster[0].companions.find(row => row.id === id);
+		expect(saved.hp.current).toBe(before.companion.hp.current - 2);
+		expect(saved.actorSnapshot.state.spellcasting.spellSlots[1].current).toBe(3);
+		expect(roster[0].currency.gp).toBe(before.currency.gp - 7);
+		expect(roster[0].notes.backstory).toBe("Keep newer note");
+	});
+
+	it("does not mistake an unrelated canonical actor revision for the failed repair's write", async () => {
+		installStorage();
+		const {state, page, id, context, before, after, receipt} = beginRepair();
+		const canonical = state._createDetachedActorState(roster[0]);
+		const hydrated = canonical.hydrateCompanionActor(id);
+		hydrated.actor.useSpellSlot(1);
+		expect(canonical.commitCompanionActor(id, hydrated).ok).toBe(true);
+		roster[0] = canonical.toJson();
+		expect(roster[0].companions[0].actorSnapshot.revision).toBe(after.companion.actorSnapshot.revision);
+		page._state = new State();
+		page._currentCharacterId = "other";
+		page._characterLoadGeneration++;
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt);
+		expect(roster[0].companions[0].hp.current).toBe(before.companion.hp.current);
+		expect(roster[0].companions[0].actorSnapshot.state.spellcasting.spellSlots[1].current).toBe(3);
+		expect(roster[0].currency).toEqual(before.currency);
+	});
+
+	it("preserves repair write identity through normal character reload", () => {
+		installStorage();
+		const {state, id, receipt} = beginRepair();
+		const loaded = new State({isDetached: true});
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.getCompanion(id).repairTransactionId).toBe(receipt.transactionId);
+	});
+
+	it("surfaces a conflicting newer paid repair instead of refunding or overwriting its saved state", async () => {
+		installStorage();
+		const {state, page, id, context, before, after, receipt} = beginRepair();
+		const canonical = state._createDetachedActorState(roster[0]);
+		expect(canonical.repairSimulacrum(id, {amount: 3, laboratoryConfirmed: true}).ok).toBe(true);
+		roster[0] = canonical.toJson();
+		const saved = copy(roster[0]);
+		page._state = new State();
+		page._currentCharacterId = "other";
+		page._characterLoadGeneration++;
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await expect(CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt))
+			.rejects.toThrow("newer paid repair");
+		expect(roster[0]).toEqual(saved);
+	});
+
+	it("does not promote an older compensated rescue mirror over newer canonical actor changes", async () => {
+		installStorage();
+		const {state, page, id, context, before, after, receipt} = beginRepair();
+		page._writeActiveCharacterMirror({...state.toJson(), _savedAt: 10, _saveRevision: "older"});
+		const canonical = state._createDetachedActorState(state.toJson());
+		const hydrated = canonical.hydrateCompanionActor(id);
+		hydrated.actor.useSpellSlot(1);
+		hydrated.actor.setHp(hydrated.actor.getHp().current - 2);
+		expect(canonical.commitCompanionActor(id, hydrated).ok).toBe(true);
+		canonical.setCurrency("gp", canonical.getCurrency().gp - 7);
+		canonical.setNote("backstory", "Newer canonical note");
+		roster[0] = {...canonical.toJson(), _savedAt: 20};
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt);
+		expect(roster[0].companions[0].hp.current).toBe(before.companion.hp.current - 2);
+		expect(roster[0].companions[0].actorSnapshot.state.spellcasting.spellSlots[1].current).toBe(3);
+		expect(roster[0].currency.gp).toBe(before.currency.gp - 7);
+		expect(roster[0].notes.backstory).toBe("Newer canonical note");
+	});
+
+	it("does not publish an in-memory rollback mirror before detecting a newer paid-repair conflict", async () => {
+		installStorage();
+		const {state, page, id, context, before, after, receipt} = beginRepair();
+		page._writeActiveCharacterMirror({...state.toJson(), _savedAt: 10, _saveRevision: "older"});
+		const originalMirror = page._readActiveCharacterMirror("creator");
+		const canonical = state._createDetachedActorState(roster[0]);
+		expect(canonical.repairSimulacrum(id, {amount: 3, laboratoryConfirmed: true}).ok).toBe(true);
+		roster[0] = {...canonical.toJson(), _savedAt: 20};
+		CharacterSheetSimulacrum._restoreRepairFields(context, before, after, receipt);
+		await expect(CharacterSheetSimulacrum._pPersistRepairRollback(page, context, before, after, receipt))
+			.rejects.toThrow("newer paid repair");
+		expect(page._readActiveCharacterMirror("creator")).toEqual(originalMirror);
+	});
 
 	it("persists actual costs, terminal old record and new item-free actor through the real guarded Page writer", async () => {
 		installStorage();

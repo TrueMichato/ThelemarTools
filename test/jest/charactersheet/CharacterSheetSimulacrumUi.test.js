@@ -310,6 +310,40 @@ describe("Simulacrum companion surfaces", () => {
 			confirmation.mockRestore();
 		}
 	});
+
+	test("a concurrently changed actor disables stale controls without an unhandled re-render rejection", async () => {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		await Ui.pShow({ownerPage: page, companionId: id});
+		const hydrated = state.hydrateCompanionActor(id);
+		hydrated.actor.setHp(hydrated.actor.getHp().current - 1);
+		expect(state.commitCompanionActor(id, hydrated).ok).toBe(true);
+		modal.root.querySelectorAll("button").find(button => button.textContent === "Start combat").click();
+		await flush();
+		expect(modal.root.querySelector(".cs-simulacrum__status").textContent).toContain("Reopen its controls");
+		expect(modal.root.querySelectorAll("button")).toHaveLength(0);
+		expect(page.saveCharacter).not.toHaveBeenCalled();
+		modal.close();
+	});
+
+	test("failed dismissal persistence restores a destroyed record, never a living duplicate or the original's concentration", async () => {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		state.setConcentration({name: "Bless", source: "PHB", level: 1});
+		const concentration = copy(state.getConcentration());
+		page._saveCurrentCharacter.mockResolvedValueOnce(false);
+		const confirmation = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			await expect(Ui._pDismiss({ownerPage: page, companionId: id})).rejects.toThrow("could not be saved");
+			expect(state.getCompanion(id).actorSnapshot.lifecycle).toBe("destroyed");
+			expect(state.getCompanion(id).hp.current).toBe(0);
+			expect(state.getConcentration()).toEqual(concentration);
+			expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(2);
+		} finally {
+			confirmation.mockRestore();
+		}
+	});
 });
 
 describe("PHB laboratory repair dialog with authoritative State", () => {
@@ -345,6 +379,7 @@ describe("PHB laboratory repair dialog with authoritative State", () => {
 		const {state, page, id} = fixture;
 		const dialog = await openRepair(fixture);
 		expect(dialog.confirm.disabled).toBe(true);
+		expect(dialog.amount.attrs.max).toBeUndefined();
 		dialog.amount.value = "20";
 		confirmLaboratory(dialog);
 		expect(dialog.status.textContent).toContain("Restore 3 HP for 300 gp");

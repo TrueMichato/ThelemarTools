@@ -64,6 +64,7 @@
 }
 
 .cs-simulacrum button,
+.cs-simulacrum select,
 .cs-simulacrum input[type="number"] {
 	min-height: 2.75rem;
 }

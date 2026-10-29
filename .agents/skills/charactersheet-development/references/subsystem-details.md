@@ -1075,7 +1075,8 @@ pre-existing or feature-owned.
 
 ## Actor-Backed Companion Snapshots
 
-Simulacrum milestone 1 adds a State-only foundation, **not playable spell UI**.
+Simulacrum's playable creation and shared desktop/Play Mode manager use this
+State-only foundation rather than a second roster character.
 `prepareSimulacrumSnapshot({spellSource, creatorActorId?, exporter?})` returns
 `{ok:true, companionData}`; pass that to existing `addCompanion`. Preparation
 deep-copies raw `_data` with companions/roster ID omitted before traversal,
@@ -1117,11 +1118,17 @@ HP/slot/rest/cast APIs now enforce envelope policy. PHB cannot regain normal or
 Pact slots; XPHB cannot rest/cast Simulacrum but may recover slots without rests.
 Both have repair-only HP and terminal melting at current/max zero. Use
 `getSimulacrumRepairQuote(id,{amount,laboratoryConfirmed,ownerLongRest,withinFiveFeet})`
-and `repairSimulacrum(id,options)`; success reports `actualHp`, `costGp`, `revision`.
+and `repairSimulacrum(id,options)`; success reports `actualHp`, `costGp`, `revision`,
+and `transactionId`. The companion's `repairTransactionId` is payment-write
+identity metadata, not gameplay state. Laboratory rollback matches that exact
+receipt before compensating persisted old-owner data; companion ID/revision
+alone cannot distinguish an applied repair from an unrelated cast.
 The State charges 100 gp/actual HP, atomically commits, and restores exact
 currency on failure; UI/Rest owns persistence and Undo. Lifecycle APIs are
-`destroySimulacrum` and `destroySimulacrumsByCreator`. Creation/management UI
-remains a separate milestone. Underlying actor race is original; eligibility
+`destroySimulacrum` and `destroySimulacrumsByCreator`. Creation/management uses
+`CharacterSheetSimulacrum`; payment/replacement uses its shared casting
+transaction. Keep terminal actor records in the lifecycle surface so they
+remain inspectable and dismissible. Underlying actor race is original; eligibility
 must use envelope kind/Construct projection instead.
 Full envelope, failure, and export contracts:
 `docs/charactersheet/18-npc-export.md`, "Actor-backed companion foundation".

@@ -11,6 +11,7 @@ import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetSimulacrum} from "./charactersheet-simulacrum.js";
+import {CharacterSheetSimulacrumCast} from "./charactersheet-simulacrum-cast.js";
 
 function csRestoreModalFocus (trigger) {
 	if (trigger?.isConnected && typeof trigger.focus === "function") {
@@ -2486,6 +2487,7 @@ export class CharacterSheetPlayMode {
 	_renderSpellRow (parent, spell, {showPreparedToggle = false} = {}) {
 		const wrapper = this._ce("div", "pm-spell-wrapper", parent);
 		const row = this._ce("div", "pm-spell", wrapper);
+		if (spell.id) row.dataset.spellId = spell.id;
 
 		// Prepared toggle (for drawer only)
 		if (showPreparedToggle && spell.level > 0 && !spell.alwaysPrepared) {
@@ -2516,6 +2518,7 @@ export class CharacterSheetPlayMode {
 		if (spell.school) parts.push(spell.school);
 		if (spell.concentration) parts.push("conc.");
 		if (spell.ritual) parts.push("ritual");
+		if (CharacterSheetSimulacrumCast.isSpell(spell) && spell.source) parts.push(spell.source);
 		meta.textContent = parts.join(" · ");
 
 		// Info button → full spell info modal (B1)
@@ -4217,7 +4220,7 @@ export class CharacterSheetPlayMode {
 	// ─── Spell Casting ──────────────────────────────────────────
 
 	_castSpell (spell) {
-		if (/^simulacrum$/i.test(String(spell.name || "").trim())) {
+		if (CharacterSheetSimulacrumCast.isSpell(spell)) {
 			return this._page._spells._castSpell(spell.id, {decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 		}
 		if (spell.level === 0) {

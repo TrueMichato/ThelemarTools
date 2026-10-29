@@ -35,8 +35,20 @@ must project a detached copy, not serialize/remove/restore the live character.
 
 ### Actor-backed companion foundation
 
-The internal Simulacrum foundation is available without a creation/casting UI.
-It does not create a second roster character. The authoritative gameplay store
+Simulacrum uses this foundation from the shared spell-casting flow. Cast the
+learned/prepared PHB or XPHB spell, review the **Your character** preview, then
+confirm creation. **Specific creature** is disabled. Payment, creator-qualified
+replacement, and guarded persistence complete before success is published.
+Cancellation changes neither the original nor an existing copy.
+
+Manage the copy from **Companions** or Play Mode's **More → Companions**.
+Both surfaces share the same actor manager, casting pools, conditions,
+concentration, resource controls, and full statblock. PHB repairs require a
+laboratory; XPHB's Repair button opens the original caster's Long Rest with
+that copy focused. Both charge 100 gp per HP actually restored, capped at
+missing HP. Destroyed copies remain visible for inspection and dismissal.
+
+The copy is not a second roster character. The authoritative gameplay store
 is `companion.actorSnapshot.state`; `statblock`, summary HP, conditions, and PB
 are derived presentation. Do not introduce editable companion-level slot or
 resource stores.
@@ -113,12 +125,16 @@ editions, per-class casting statistics, and separate ordinary/Pact routes even
 at the same level. Slot blocks across class lists describe shared pools, not
 additional pools. Ordinary NPC export defaults and compaction remain unchanged.
 
-Milestone 2 now supplies the isolated shared-caster controller, authoritative
-policy guards, paid-repair State APIs, and actor-qualified lifecycle cleanup.
+The isolated shared-caster controller supplies authoritative policy guards,
+paid-repair State APIs, and actor-qualified lifecycle cleanup.
 See [Detached companion casting](07-spellcasting.md#detached-companion-casting).
-Creation/target/management UI remains separate. Actor-created summons live in
+The creation transaction owns payment/replacement/save; the manager owns
+actor-scoped controls. Actor-created summons live in
 the owner's managed roster; persisted actor snapshots reject nested companions.
 The revision guard protects API commits, not arbitrary out-of-band raw writes.
+Gambler-sourced creation and specific-creature targets are unsupported. The
+manager explicitly identifies manual spell effects, hostile damage,
+creature-type eligibility, and supplied-component bookkeeping.
 
 `CharacterSheetSimulacrumSnapshot.test.js` exercises this foundation with real
 State/exporter instances, source immutability, equipment/effect teardown,

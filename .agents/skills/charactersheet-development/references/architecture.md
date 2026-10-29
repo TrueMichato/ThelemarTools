@@ -39,6 +39,9 @@ cross an `await`: that would attribute unrelated concurrent edits to the cast.
 Compensation targets captured raw data and ID-keyed records, never a State swap
 or full-owner rollback. Page's narrow compensation hook repairs rescue/canonical
 storage after failure, including a selection switch during the async write.
+Laboratory repair reuses that hook with an exact `repairTransactionId` applied-
+write predicate and field-scoped compensation on detached persisted data.
+Do not treat an existing companion ID or actor revision as a payment receipt.
 Gambler-sourced creation is explicitly refused before payment/receipt creation.
 
 `CharacterSheetCompanionActor` is the explicit actor-page adapter. Hydrate it

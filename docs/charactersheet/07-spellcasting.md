@@ -124,7 +124,7 @@ The owning State exposes:
 owner.getSimulacrumRepairQuote(id, {
   amount, laboratoryConfirmed, ownerLongRest, withinFiveFeet,
 }); // {ok:true, actualHp, costGp, revision} or {ok:false, reason, message}
-owner.repairSimulacrum(id, options); // {ok:true, actualHp, costGp, revision}
+owner.repairSimulacrum(id, options); // {ok:true, actualHp, costGp, revision, transactionId}
 owner.destroySimulacrum(id, {reason});
 owner.destroySimulacrumsByCreator(creatorActorId, {exceptCompanionId});
 ```
@@ -134,7 +134,13 @@ the creator's Long Rest and proximity within 5 feet. Quotes cap the amount at
 actual missing HP and check funds. Repair deducts `100 * actualHp` gp with
 `deductGold`, commits the actor/projection, and restores exact original currency
 denominations if projection/commit fails. The caller owns persistence and Undo
-Rest. Repair/rest confirmations are caller assertions, not a calendar or
+Rest. Successful repair stores `companion.repairTransactionId`, a transaction
+identity only, not a second HP/currency store. Laboratory save compensation
+matches this receipt in rescue/canonical snapshots before undoing payment and
+HP; an existing companion ID or unrelated actor revision is not proof of an
+applied repair. Newer actor spending/damage and unrelated owner edits survive.
+Conflicting newer paid repairs require explicit recovery rather than an
+overwrite. Repair/rest confirmations are caller assertions, not a calendar or
 distance-simulation system.
 
 ## Cleric Potent Spellcasting and Damage Follow-Ups

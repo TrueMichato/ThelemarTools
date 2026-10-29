@@ -6064,7 +6064,7 @@ export class CharacterSheetPage {
 	async exitPlayMode (): Promise<void> {
 		const root = this.page.locator(".charsheet-page");
 		if (await root.evaluate(el => el.classList.contains("charsheet--play-mode"))) {
-			const closeDrawer = this.page.getByRole("button", {name: /^Close drawer$/i}).last();
+			const closeDrawer = this.page.locator(".pm-drawer--open").getByRole("button", {name: /^Close drawer$/i}).last();
 			if (await closeDrawer.isVisible().catch(() => false)) {
 				await closeDrawer.click({timeout: 5000});
 				await expect(this.page.locator(".pm-drawer.pm-drawer--open")).toHaveCount(0);

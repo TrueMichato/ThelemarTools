@@ -4718,19 +4718,29 @@ class CharacterSheetPage {
 	async _pRestoreFailedSimulacrumCreation (transaction) {
 		const {context, companionId} = transaction;
 		if (!context.characterId) return;
-		const isCurrent = this.getState() === context.state && context.state._data === context.data
-			&& this._currentCharacterId === context.characterId && this._characterLoadGeneration === context.generation;
-		const mirror = this._readActiveCharacterMirror(context.characterId);
-		if (isCurrent) this._writeActiveCharacterMirror(this._stampCharacterSnapshot({...MiscUtil.copyFast(context.data), id: context.characterId}));
-		else if (mirror?.companions?.some(row => row.id === companionId)) {
-			this._writeActiveCharacterMirror(this._stampCharacterSnapshot(transaction.undoData(MiscUtil.copyFast(mirror))));
-		}
+		const wasApplied = transaction.wasApplied
+			? snapshot => transaction.wasApplied(snapshot)
+			: snapshot => snapshot?.companions?.some(row => row.id === companionId);
 		// A switch during IndexedDB's in-flight write can make the guarded save
-		// return false *after* writing. Compensate that exact cast on its old owner.
+		// return false after writing. Validate both stores before publishing recovery.
 		await this._pWithCharacterStorageLock(async () => {
 			const characters = await this._pReadCharacterRoster();
 			const index = characters.findIndex(row => row.id === context.characterId);
-			if (index < 0 || !characters[index].companions?.some(row => row.id === companionId)) return;
+			const canonicalApplied = index >= 0 && wasApplied(characters[index]);
+			const mirror = this._readActiveCharacterMirror(context.characterId);
+			const mirrorApplied = mirror && wasApplied(mirror);
+			const isCurrent = this.getState() === context.state && context.state._data === context.data
+				&& this._currentCharacterId === context.characterId && this._characterLoadGeneration === context.generation;
+			if ((isCurrent && !mirror) || mirrorApplied) {
+				const correctedMirror = isCurrent
+					? {...MiscUtil.copyFast(context.data), id: context.characterId}
+					: transaction.undoData(MiscUtil.copyFast(mirror));
+				// Compensation is not a newer user edit: keep its original precedence.
+				if (mirror) correctedMirror._savedAt = mirror._savedAt;
+				correctedMirror._saveRevision = CryptUtil.uid();
+				this._writeActiveCharacterMirror(correctedMirror);
+			}
+			if (!canonicalApplied) return;
 			const correctedCanonical = transaction.undoData(MiscUtil.copyFast(characters[index]));
 			const corrected = this._reconcilePersistedCharacter(correctedCanonical, this._readActiveCharacterMirror(context.characterId)).chosen;
 			characters[index] = this._stampCharacterSnapshot(corrected);
@@ -7923,6 +7933,7 @@ class CharacterSheetPage {
 	getFeatureCompanionLifecycleSurfaceCompanions () {
 		return (this._state.getCompanions?.() || []).filter(companion =>
 			companion?.active !== false
+			|| CharacterSheetSimulacrum.isSimulacrum(companion)
 			|| this._isExactEfaSteelDefenderLifecycleCompanion(companion)
 			|| (
 				this._isExactRhwReanimatorCompanion(companion)

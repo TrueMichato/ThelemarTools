@@ -6546,7 +6546,9 @@ class CharacterSheetState {
 			this._data.currency = currency;
 			return committed;
 		}
-		return {...committed, actualHp: quote.actualHp, costGp: quote.costGp};
+		const transactionId = CryptUtil.uid();
+		this.getCompanion(companionId).repairTransactionId = transactionId;
+		return {...committed, actualHp: quote.actualHp, costGp: quote.costGp, transactionId};
 	}
 
 	/** Atomic in-memory commit only; the owning controller must still await persistence. */
