@@ -1133,6 +1133,17 @@ must use envelope kind/Construct projection instead.
 Full envelope, failure, and export contracts:
 `docs/charactersheet/18-npc-export.md`, "Actor-backed companion foundation".
 
+The manager's casting section precedes Rules/manual-resolution and full
+statblock disclosures. Ordinary/Pact pools, innate/feature casting, rituals,
+Metamagic, Font of Magic, conditions, concentration and eligible rest controls
+still use the existing isolated runtime. Turn summaries read actor-local
+availability. Native pending-roll buttons restore keyboard focus after
+re-enabling only when focus fell to the document body, without stealing focus
+from a user-selected control. No owner State substitution, new recovery policy
+or actorSnapshot version is introduced. Read-only rolls retain casting nodes;
+manager mutations restore valid transient choices and show invalidated choices
+explicitly. See `docs/charactersheet/25-simulacrum.md` for the fast-play surfaces.
+
 Companion roll UI is shared by Page `_createCompanionRollControls` and
 `_getCompanionRollModel`; existing
 `_rollCompanion{SkillCheck,SavingThrow,AbilityCheck,Initiative,Attack,Damage}`

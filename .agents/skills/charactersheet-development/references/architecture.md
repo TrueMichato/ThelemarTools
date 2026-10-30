@@ -38,6 +38,15 @@ transports a known Roll History type through the private result options to
 `addRoll`; companion handlers supply their actual kind instead of classifying
 arbitrary names. Omitted metadata preserves legacy title-based classification.
 
+Page `_createCompanionRollControls` is shared by ordinary/grouped sheet cards,
+Simulacrum cards/managers and the Play Mode drawer. Checks/damage are read-only
+and must not rebuild casting DOM nodes. Manager mutations may rebuild
+presentation but restore exact pool/target choices, search, disclosures, scroll
+and keyed focus. Unavailable old choices remain explicit disabled placeholders,
+not silent fallback choices. Preferences remain transient, not persisted schema.
+Grouped sheet/drawer cards share individual and bulk HP controls; ordinary
+Play Mode readiness is composed once and replaced on edits, not accumulated.
+
 `CharacterSheetSimulacrumCast` wraps only the shared player `_castSpell`
 Simulacrum route; Play Mode delegates that spell to the same entrypoint. Resolve
 all prompts before recording synchronous payment/replacement deltas, then await

@@ -507,6 +507,21 @@ Explicit roll-type metadata keeps Roll Log categories independent of companion
 names (for example, an "Attack Cat" Survival roll remains a skill check).
 Legacy callers without metadata retain title-based classification.
 
+### Fast-play presentation
+
+Sheet cards and the Play Mode companion drawer share native direct-roll
+controls. Grouped companions use the same living/total and individual-HP
+surface in both views, not a scalar HP editor. Feature commands, ferocity
+and diagnostics remain actionable; setup provenance uses a native disclosure.
+Source-qualified commands remain on their existing roster or manager surface.
+
+The Simulacrum manager puts casting before long rules, with desktop
+casting/utilities columns and narrow-screen Cast/Rolls/Manage jumps to the
+same nodes. Read-only rolls preserve the actual casting nodes and selections.
+Manager mutations restore still-valid pool/target choices, search, disclosures,
+scroll and keyed focus; unavailable choices remain explicit rather than
+silently switching routes. See [25-simulacrum.md](25-simulacrum.md).
+
 ### Creation and repair
 
 `pPrepareCreation()` is a pure, cancellable preview: it returns staged companion
