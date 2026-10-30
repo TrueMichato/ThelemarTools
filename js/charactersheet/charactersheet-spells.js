@@ -4552,7 +4552,7 @@ class CharacterSheetSpells {
 					if (count < requirement.quantity) throw new SpellMaterialUnavailableError("The selected material source is no longer available. Nothing was consumed; choose supplies again.");
 				}
 			}
-			if (Math.round(this._state.getTotalGold() * 100) < requiredCp) throw new SpellMaterialUnavailableError("Insufficient funds for the selected spell materials. Nothing was consumed; choose supplies again.");
+			if (requiredCp > 0 && Math.round(this._state.getTotalGold() * 100) < requiredCp) throw new SpellMaterialUnavailableError("Insufficient funds for the selected spell materials. Nothing was consumed; choose supplies again.");
 			const counts = new Map();
 			for (const {chosen, requirement} of selected) {
 				counts.set(chosen.id, (counts.get(chosen.id) || 0) + 1);
@@ -4564,7 +4564,7 @@ class CharacterSheetSpells {
 			if (committed) throw new Error("These spell materials have already been committed.");
 			validate();
 			const costCp = routes.reduce((sum, {route: {requirement}, consumeCurrency}) => sum + (consumeCurrency ? requirement.cost : 0), 0);
-			this._state.commitSpellMaterialPayment({itemIds: selected.map(({chosen}) => chosen.id), costCp});
+			if (selected.length || costCp) this._state.commitSpellMaterialPayment({itemIds: selected.map(({chosen}) => chosen.id), costCp});
 			committed = true;
 			if (selected.length && !isPrepareOnly) JqueryUtil.doToast({type: "info", content: `Consumed ${selected.map(row => CharacterSheetClassUtils.escapeHtml(row.chosen.name)).join(", ")} casting ${CharacterSheetClassUtils.escapeHtml(spell.name)}.`});
 			return {consumed: selected[0] ? {id: selected[0].chosen.id, name: selected[0].chosen.name, value: selected[0].chosen.value} : null, currencySpentCp: costCp};

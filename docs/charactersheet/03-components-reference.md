@@ -579,6 +579,9 @@ consumed currency may exchange denominations, while reusable currency only
 checks total wallet value. Selected routes and actor identity are revalidated
 after prompts. Saved source-qualified coin stacks and whole sets remain
 explicit alternatives, never refunds or credit for multiple branches.
+Absent or reusable-only requirements still validate actor and supply identity,
+but do not enter a payment transaction. Only genuine currency routes read the
+wallet; physical ingredient validation does not depend on wallet APIs.
 
 ### Key Methods
 
