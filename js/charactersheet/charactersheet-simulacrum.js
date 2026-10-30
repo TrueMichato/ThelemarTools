@@ -532,6 +532,7 @@ class CharacterSheetSimulacrum {
 					return;
 				}
 				content.append(e_({tag: "p", clazz: "cs-simulacrum__hint", txt: runtime.getManualResolutionNotice()}));
+				if (ownerPage._createCompanionRollControls) content.append(ownerPage._createCompanionRollControls(companion, {runtime}));
 				const toolbar = e_({tag: "div", clazz: "cs-simulacrum__toolbar"});
 				button(toolbar, "Damage", async () => {
 					const amount = await InputUiUtil.pGetUserNumber({title: "Damage Simulacrum", min: 1, int: true});

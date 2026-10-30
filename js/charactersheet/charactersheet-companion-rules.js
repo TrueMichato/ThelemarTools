@@ -1024,6 +1024,50 @@ class CharacterSheetCompanionRules {
 	static FEATURE_UIDS = COMPANION_FEATURE_UIDS;
 	static REGISTRY = COMPANION_RULES;
 
+	static getRollStatistic (value) {
+		if (typeof value !== "number" && (typeof value !== "string" || !/^[+-]?\d+(?:\.\d+)?$/.test(value.trim()))) return null;
+		return Number.isFinite(Number(value)) ? Number(value) : null;
+	}
+
+	static isRollDamageFormula (formula) {
+		if (typeof formula !== "string" || !/^[+-]?(?:\d*d\d+|\d+)(?:\s*[+-]\s*(?:\d*d\d+|\d+))*$/i.test(formula.trim())) return false;
+		return [...formula.matchAll(/(\d*)d(\d+)/gi)].every(match => Number(match[1] || 1) <= 100 && Number(match[2]) >= 1 && Number(match[2]) <= 1000);
+	}
+
+	static getRollActions (companion) {
+		const strings = value => {
+			if (typeof value === "string") return [value];
+			if (Array.isArray(value)) return value.flatMap(strings);
+			return value && typeof value === "object" ? strings(value.entries || value.items || value.entry || value.text) : [];
+		};
+		return (companion.actions || []).map((action, index) => {
+			const text = strings(action.entries || action.text).join(" ");
+			const hit = text.match(/\{@hit\s+([^}|]+)(?:\|[^}]*)?\}/i);
+			const damageTags = [...text.matchAll(/\{@damage\s+([^}]+)\}/gi)];
+			const damages = damageTags.map(match => ({
+				formula: match[1].split("|")[0].trim(),
+				type: text.slice(match.index + match[0].length).match(/^\s+(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\b/i)?.[1]?.toLowerCase() || "",
+			}));
+			const damageText = text.slice(text.indexOf("{@h}") >= 0 ? text.indexOf("{@h}") : damageTags[0]?.index || 0);
+			const fixedDamage = damageText.match(/^\{@h\}\s*(\d+)\s+(acid|cold|fire|force|lightning|necrotic|poison|psychic|radiant|thunder|bludgeoning|piercing|slashing)\s+damage\.?\s*$/i);
+			if (!damages.length && fixedDamage) damages.push({formula: fixedDamage[1], type: fixedDamage[2].toLowerCase()});
+			const damageReason = !damages.length ? "No supported damage formula; resolve damage manually."
+				: /\b(or|if|unless|instead|versatile|saving throw|save)\b/i.test(damageText) ? "Damage has a choice or conditional rider; resolve it manually."
+					: damages.some(damage => !this.isRollDamageFormula(damage.formula)) ? "Unsupported or unresolved damage formula; resolve it manually."
+						: "";
+			return {
+				key: `action:${index}`,
+				name: action.name || `Action ${index + 1}`,
+				attackBonus: hit ? this.getRollStatistic(hit[1].trim()) : null,
+				damages,
+				damageReason,
+				note: text.match(/\{@dc\s+(\d+)(?:\|[^}]*)?\}/i)?.[1]
+					? `Target save DC ${text.match(/\{@dc\s+(\d+)/i)[1]}; resolve saves and riders manually.`
+					: "",
+			};
+		});
+	}
+
 	static getRegistry () {
 		return cloneJson(COMPANION_RULES);
 	}
