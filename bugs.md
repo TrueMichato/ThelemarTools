@@ -3,74 +3,106 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 70 - Casting, combat, companions, and site resilience
+### Round 70 - Unconfirmed original symptoms
 
-The orchestrator alone owns this file. All four sessions start from the same
-tracking commit on `character-sheet-wip`; implementation requires plan approval.
-Each group owns its named regions, not every region of a shared file.
-
-**S1 - Casting and material lifecycle (bugs 1, 2, 3, 6).**
-
-- **1. Simulacrum creation:** Pressing Cast must reach the existing target and
-  creation workflow and add the confirmed copy to Companions. Investigate the
-  material gate before replacing the already-implemented creation subsystem.
-- **2. Required spell components:** Add missing specific materials to the
-  Components item picker, including powdered ruby worth at least 1,500 gp.
-  Preserve priced/consumed versus reusable requirements and distinguish ordinary
-  spell requirements from optional Arcadia 8 variant effects.
-- **3. DM-approved material override:** Offer an explicit, per-cast override
-  when a material is missing, clearly labelled as requiring the DM's permission.
-  Do not bypass unrelated casting restrictions or invent inventory/payment.
-- **6. Shield display:** Refresh visible AC immediately after casting Shield,
-  without requiring the player to open the AC breakdown.
-- **Ownership:** `charactersheet-spells.js`; material catalog, matching and
-  payment; component sourcing in `CharacterSheet._pLoadData`; existing
-  Simulacrum creation transaction integration. Own cast-completion refresh,
-  using the existing page render API. Declare any companion-record contract
-  changes before S3 builds on it.
-
-**S2 - Combat eligibility and concentration (bugs 4, 5).**
-
-- **4. Beaver reaction:** Surface the Zodiac Druid's Beaver reaction only while
-  its required form is active, including after switching, expiration and reload.
-- **5. War Caster:** Carry the actual feat's eligible concentration advantage
-  and attribution through calculation, the modal and the dice roll.
-- **Ownership:** Active-form eligibility, concentration aggregation,
-  `FEATURE_CLASSIFICATION_OVERRIDES`, Zodiac/reaction regions of
-  `charactersheet-combat.js`, and the page's concentration modal and conditional
-  roll picker where needed. S1 alone edits spell-casting consumers; request
-  coordinated changes there rather than editing them independently.
-
-**S3 - Companion roll controls (bug 7).**
-
-- **7. Companion rolls:** Make skills, saves, attacks, initiative and related
-  rolls directly accessible on the Companions surface, using the companion's
-  own statistics and existing roll/history conventions.
-- **Ownership:** Companion UI and roll methods on the page, companion actor/rules
-  roll APIs, scoped companion controls/styles. Validate existing ordinary and
-  Simulacrum record shapes; preserve owner/companion resource isolation.
-  Do not change creation/payment transactions or generic roll handlers.
-
-**S4 - Site resilience and diagnostics (bugs 8, 9).**
-
-- **8. Homebrew update report:** Keep large update/warning/error toasts readable
-  and scrollable, retain accessible close controls, and log the complete report
-  to the console as a backup.
-- **9. Creature templates:** Identify the actual failing template boundary,
-  skip and warn about individual invalid templates, and keep valid templates
-  usable in bestiary and encounter editing. Preserve unrelated copy errors.
-- **Ownership:** Shared toast and template regions of `js/utils.js`, homebrew
-  update reporting, toast styles, and shared bestiary/encounter template
-  catalog/editor consumers. If generic copy resolution changes, cover a
-  non-bestiary consumer as well.
-
-**Integration gate:** Regression tests for every bug, meaningful production
-negative controls, full ESLint, Stylelint and repository Jest. Preserve existing
-skipped-test signatures; do not treat expected failures as fixed behavior.
-Merge all child tips with ancestry preserved in a separate integration worktree,
-reconcile shared contracts, then publish PRs before advancing the base.
+- **War Caster saved-character case (bug 5):** No affected export/acquisition
+  path was supplied. Fresh PHB/XPHB feat acquisition, real text-feature production
+  and reload already supplied concentration advantage. The reproduced loss of
+  conditional concentration choices/context is fixed below, but is not proof of
+  the original saved-character cause. The user explicitly approved publication
+  with this case unconfirmed; no speculative migration or feat-name special case
+  was added.
+- **Simulacrum absent-preview case (bug 1):** Actual PHB/XPHB Cast, preview,
+  confirmed companion creation, isolated use, repair, persistence and replacement
+  pass. The original missing-preview symptom did not reproduce. Preview happens
+  before material constraints, so missing ruby must not be cited as its cause.
+  Preserve this distinction if the original symptom recurs.
 
 ## Closed Bugs
+
+### Round 70 — Casting, combat, companions, and site resilience — INTEGRATED
+
+| PR | Scope |
+|---|---|
+| [#387](https://github.com/TrueMichato/ThelemarTools/pull/387) | S1: Simulacrum workflows, required materials, DM override and Shield display |
+| [#386](https://github.com/TrueMichato/ThelemarTools/pull/386) | S2: active-form eligibility and concentration context |
+| [#388](https://github.com/TrueMichato/ThelemarTools/pull/388) | S3: direct isolated companion rolls |
+| [#389](https://github.com/TrueMichato/ThelemarTools/pull/389) | S4: readable update reports and invalid-template isolation |
+
+**S1 — Required supplies, override and visible casting (bugs 1, 2, 3, 6).**
+The Components picker projects required supplies from the final merged spell
+pool into real inventory rows, retaining matching metadata across reload and
+correct consumption/reuse. The integrated browser audit reached 1,386 spells,
+254 structured requirement rows, 28 explicit priced/consumed prose rows and
+270 supply items, with no uncovered detected requirements. This includes TGTT
+Identify's priced prose and Simulacrum's powdered ruby. Complex/variable,
+delayed or optional qualifications remain explicitly manual/DM-confirmed;
+this is not a complete natural-language parser.
+
+Missing supplies offer fresh per-cast DM permission with default Cancel, not
+fabricated inventory, a stored bypass or a waiver of unrelated restrictions.
+Successful casts refresh the existing public sheet display. Play Mode's legacy
+slot-only path now delegates to canonical Spells while preserving ordinary/Pact
+selection, ritual/no-slot intent and Cancel. Shield's visible AC and expiry
+work in both modes. Source-waived feature casts retain actor-binding guards.
+Simulacrum's existing creation transaction and actorSnapshot v1 authority are
+preserved; verified workflows do not establish the historical preview cause.
+
+**S2 — Form eligibility and concentration (bugs 4, 5).** Live subclass-qualified
+Zodiac eligibility gates Beaver's reaction/classification and stale use before
+payment, including switching, dismissal, expiry and reload. Unrelated reactions
+and independent same-named features remain available. Concentration retains
+default-off conditional choices, raw advantage/disadvantage and named
+source-qualified dice across normal damage, Play Mode, standalone quick saves
+and canonical spell constraints. War Caster and TGTT Poisoned cancel correctly.
+Optional modifier-type union preserves legacy single-query behavior and avoids
+id-less item duplication, wrong disadvantage rerolls and numeric cache leakage.
+
+**S3 — Direct isolated companion rolls (bug 7).** Cards, statblocks and the
+active Simulacrum manager share Initiative, six saves, skills/abilities, modes,
+supported attacks and local damage controls. Exact/scaled/current companion
+statistics never borrow current owner modifiers. Compound criticals double all
+dice, not flat bonuses. Guarded duplicate-only Action commit/rollback preserves
+owner resources; read-only rolls preserve manager spell/slot/target selections.
+Feature-managed attacks retain their existing command transactions. Optional
+resources/rerolls/riders and ambiguous or historically defaulted statistics
+remain explicitly manual/unavailable rather than invented.
+
+**S4 — Update reports and template isolation (bugs 8, 9).** Persistent update
+reports wrap and scroll within the viewport, retain reachable independent close
+controls, and log complete immutable snapshots. Reload replay is labelled as
+the same event, not another update or fresh validation; association limits are
+explicit. Eager runtime template construction now warns and rejects individual
+invalid candidates as whole entries while preserving valid Bestiary/Encounter
+preview/apply/persistence. Legacy copy/meta resolution and unrelated strict
+loader/conversion/saved-operation errors are unchanged.
+
+**Semantic integration and gates.** All four children share actual code base
+`d109a12a9`; the parent's tracking commit is retained separately. All tips were
+merged with `--no-ff` and zero textual conflicts. Real Spells → Page → State
+tests retain equal dice from distinct sources and make picker Cancel abort
+without fallback, rolls, history or expenditure. Explicit optional `rollType`
+crosses public/private results to shared history, keeping all six companion
+roll kinds correct for names such as "Attack Cat" and "Death Save Owl"; legacy
+callers still derive type from titles. Companion documentation is synchronized.
+
+Full repository Jest passed **802 suites / 21,600 tests**, with exactly the
+baseline **one attachmentCorpus suite / 13 cases skipped** and zero failures
+(97.952 seconds). The real-save NPC corpus reached **954 passing cases**, none
+skipped. Full ESLint and configured SCSS Stylelint passed; unchanged authored
+CSS debt is not claimed clean. Combined Chromium passed **5/5** real workflows,
+including both Simulacrum editions, materials, default/explicit cancellation,
+Play Mode permission/slot selection, Shield display/expiry and responsive
+day/night dialogs. Child native companion/concentration/template/report checks
+remain separately documented evidence, not an unexecuted combined-browser claim.
+
+Production mutations failed the actual behavior assertions and were restored
+before the final positive gates. Parent controls specifically turned total 14
+into 8, rolled after Cancel, and misclassified keyword-bearing companion names.
+The stopped, disproportionately slow serialized attempt is not a completed gate;
+the final run uses the baseline's standard parallel command. No primary skips
+or expected-failure tests were added. Local validation inputs/private fixtures
+were not committed. Original symptom uncertainties remain explicitly Open above.
 
 ### Round 69 — Respec, heritage initiative, and Cleric effects — INTEGRATED
 
