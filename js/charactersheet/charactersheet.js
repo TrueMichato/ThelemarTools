@@ -3,6 +3,7 @@ import {CharacterSheetState} from "./charactersheet-state.js";
 import {CharacterSheetBuilder} from "./charactersheet-builder.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
 import {CharacterSheetSpells} from "./charactersheet-spells.js";
+import {CharacterSheetSpellMaterials} from "./charactersheet-spell-materials.js";
 import {CharacterSheetPowers} from "./charactersheet-powers.js";
 import {renderStrainTracker} from "./charactersheet-psionics-ui.js";
 import {CharacterSheetInventory} from "./charactersheet-inventory.js";
@@ -414,6 +415,7 @@ class CharacterSheetPage {
 		// Merge prerelease/homebrew data
 		this._mergeBrewData(prereleaseData);
 		this._mergeBrewData(brewData);
+		this._itemsData.push(...CharacterSheetSpellMaterials.buildCatalog(this._spellsData));
 
 		// Defensively repair malformed spell-scaling tags in the merged spell pool.
 		// `{@scaledice}`/`{@scaledamage}` model spell-SLOT upcasting only, so the

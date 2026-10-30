@@ -594,6 +594,16 @@ three-state attunement filter: **All**, **Requires Attunement**, or
 **No Attunement**. Conditional requirements such as “by a wizard” count as
 requiring attunement; Reset Filters restores **All**.
 
+The **Components** tab includes required priced/consumed spell materials as well
+as optional Arcadia 8 enhancements. Required supplies are derived after site,
+prerelease, and homebrew spell merging, searchable by item or spell name, and
+marked **required supply** rather than **enhancement**. Their details show full
+requirements, quantities, consume/reuse timing, and any DM-qualified handling.
+Price tiers are separate items; a Powdered Ruby (1500 gp) supply is an ordinary
+inventory row, not currency or an Arcadia effect. Normalization preserves its
+`spellComponent: {key, material, spells}` metadata through add/save/load. Generated
+supplies display local details instead of unresolved canonical item links.
+
 ### Item Data Structure
 
 ```javascript

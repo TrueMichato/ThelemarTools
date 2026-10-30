@@ -10,7 +10,7 @@ export class CharacterSheetItemUtils {
 
 	static getItemType (item) {
 		const typeBase = item?.type?.split("|")[0];
-		if (this.isVariantComponent(item)) return "component";
+		if (this.isVariantComponent(item) || item?.spellComponent) return "component";
 		if (this.isWeapon(item)) return "weapon";
 		if (item?.armor || ["LA", "MA", "HA"].includes(typeBase)) return "armor";
 		if (typeBase === "S") return "armor";
@@ -263,6 +263,7 @@ export class CharacterSheetItemUtils {
 			iounSet: sourceItem.iounSet ? MiscUtil.copyFast(sourceItem.iounSet) : [],
 			iounBaseBonuses: sourceItem.iounBaseBonuses ? MiscUtil.copyFast(sourceItem.iounBaseBonuses) : null,
 			variantComponent: sourceItem.variantComponent ? MiscUtil.copyFast(sourceItem.variantComponent) : null,
+			spellComponent: sourceItem.spellComponent ? MiscUtil.copyFast(sourceItem.spellComponent) : undefined,
 			effects: sourceItem.effects ? MiscUtil.copyFast(sourceItem.effects) : undefined,
 			itemPowers: sourceItem.itemPowers ? MiscUtil.copyFast(sourceItem.itemPowers) : undefined,
 			entries: sourceItem.entries ? MiscUtil.copyFast(sourceItem.entries) : null,

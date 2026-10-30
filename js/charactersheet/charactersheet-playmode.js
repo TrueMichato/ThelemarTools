@@ -4223,22 +4223,11 @@ export class CharacterSheetPlayMode {
 		if (CharacterSheetSimulacrumCast.isSpell(spell)) {
 			return this._page._spells._castSpell(spell.id, {decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
 		}
-		if (spell.level === 0) {
-			// Cantrip concentration check
-			if (spell.concentration && this._state.isConcentrating?.()) {
-				this._promptConcentrationBreak(spell, () => {
-					this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source});
-					this._logActivity("spell", `Cast ${spell.name} (cantrip, concentration)`);
-					this._renderStatusBar();
-				});
-				return;
-			}
-			if (spell.concentration) {
-				this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source});
-			}
-			this._logActivity("spell", `Cast ${spell.name} (cantrip)`);
-			if (spell.concentration) this._renderStatusBar();
-			return;
+		if (spell.level === 0 || this._state.canCastAsRitual?.(spell)
+			|| this._state.getSpellMasteryCastInfo?.(spell)
+			|| this._state.getSignatureSpellCastInfo?.(spell)?.available
+			|| this._state.getNoSlotCastResourcesForSpell?.(spell)?.length) {
+			return this._page._spells._castSpell(spell.id, {decision: {chooseSlot: true, skipComponentPrompt: true}});
 		}
 
 		// Collect available slot levels at or above spell level
@@ -4263,8 +4252,7 @@ export class CharacterSheetPlayMode {
 		// If only one slot source, cast immediately
 		const usable = available.filter(s => s.current > 0);
 		if (usable.length === 1) {
-			this._executeCast(spell, usable[0]);
-			return;
+			return this._executeCast(spell, usable[0]);
 		}
 
 		// Show upcast picker inline
@@ -4272,32 +4260,13 @@ export class CharacterSheetPlayMode {
 	}
 
 	_executeCast (spell, slot) {
-		// Concentration check before casting
-		if (spell.concentration && this._state.isConcentrating?.()) {
-			this._promptConcentrationBreak(spell, () => {
-				this._doExecuteCast(spell, slot);
-			});
-			return;
-		}
-		this._doExecuteCast(spell, slot);
+		return this._doExecuteCast(spell, slot);
 	}
 
 	_doExecuteCast (spell, slot) {
-		if (slot.isPact) {
-			this._state.setPactSlotsCurrent(slot.current - 1);
-		} else {
-			this._state.setSpellSlotCurrent(slot.level, slot.current - 1, {isExpenditure: true});
-		}
-
-		// Set concentration
-		if (spell.concentration) {
-			this._state.setConcentration?.({name: spell.name, level: slot.level, source: spell.source});
-		}
-
-		const slotLabel = slot.isPact ? `pact slot (lvl ${slot.level})` : (slot.level === spell.level ? `level ${slot.level}` : `upcast level ${slot.level}`);
-		this._logActivity("spell", `Cast ${spell.name} (${slotLabel})`);
-		this._renderSpellsQuick();
-		this._renderStatusBar();
+		return this._page._spells._castSpell(spell.id, {
+			decision: {slotLevel: slot.level, isPact: !!slot.isPact, castAsRitual: false, skipComponentPrompt: true},
+		});
 	}
 
 	_promptConcentrationBreak (newSpell, onConfirm) {
