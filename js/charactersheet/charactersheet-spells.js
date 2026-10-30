@@ -4317,8 +4317,7 @@ class CharacterSheetSpells {
 		// Gold-cost component: the character must possess a qualifying item.
 		const missing = CharacterSheetSpellMaterials.getMissing(this._state, this._getSpellMaterialRequirements(spell, spellData));
 		if (!missing.length) return null;
-		const gp = Math.floor(info.cost / 100);
-		return `Cannot cast ${spell.name} — requires ${missing.map(row => row.name).join(", ")}${info.cost ? ` worth at least ${gp} gp` : ""}${info.consume ? " (consumed by the spell)" : ""} that you don't have. Add supplies in Inventory, or override this cast only with your DM's permission.`;
+		return `Cannot cast ${spell.name} — requires ${missing.map(row => CharacterSheetSpellMaterials.describe(row)).join("; ")}. Wallet balance: ${Math.round(this._state.getTotalGold() * 100)} cp. Add physical supplies in Inventory or currency to the wallet, or override this cast only with your DM's permission.`;
 	}
 
 	_getSpellMaterialRequirements (spell, spellData) {
@@ -4353,7 +4352,7 @@ class CharacterSheetSpells {
 		}
 	}
 
-	async _pResolveMissingMaterials (spell, spellData, context, {allowVariant = true} = {}) {
+	async _pResolveMissingMaterials (spell, spellData, context, {allowVariant = true, qualificationRequirements = null} = {}) {
 		if (this._page?.pConfirmSpellSupplies || this._state.getSettings?.()?.ignoreSpellcastingRestrictions
 			|| this._state.isSpellCastMaterialComponentWaived?.(spell) || CharacterSheetSpells.getWeaponChannelCantripInfo(spellData)) return true;
 		const info = this._getCastMaterialComponentInfo(spell, spellData);
@@ -4367,7 +4366,7 @@ class CharacterSheetSpells {
 			const escape = value => CharacterSheetClassUtils.escapeHtml(value);
 			const approved = await this._pConfirmMaterialPermission({
 				title: `${spell.name} — Missing Materials`,
-				htmlDescription: `<p>${escape(info.text || "A spellcasting focus or component pouch is required.")}</p><p><strong>Missing:</strong> ${escape(focusMissing ? "spellcasting focus or component pouch" : missing.map(row => `${row.quantity} × ${row.name}${row.cost ? ` (${row.cost / 100} gp each)` : ""}`).join("; "))}.</p><p>Only override if your DM allows casting without these materials. This permission applies to this cast only. Spell slots, resources, and other restrictions still apply. Add required supplies from Inventory → Components for future casts.</p>`,
+				htmlDescription: `<p>${escape(info.text || "A spellcasting focus or component pouch is required.")}</p><p><strong>Missing:</strong> ${escape(focusMissing ? "spellcasting focus or component pouch" : missing.map(row => CharacterSheetSpellMaterials.describe(row)).join("; "))}.</p><p>Wallet balance: ${Math.round(this._state.getTotalGold() * 100)} cp. Currency requirements use the wallet's total value; physical supplies are available in Inventory → Components.</p><p>Only override if your DM allows casting without these materials. This permission applies to this cast only. Spell slots, resources, and other restrictions still apply.</p>`,
 				textYes: "Override for this cast (DM permission required)",
 				textNo: "Cancel",
 			});
@@ -4376,8 +4375,9 @@ class CharacterSheetSpells {
 			for (const requirement of missing) context.overridden.add(requirement.key);
 			if (focusMissing) context.overridden.add("focus");
 		}
-		const manual = requirements.filter(row => row.manual && !context.overridden.has(row.key));
-		if (manual.length && !context.manualConfirmed) {
+		const manual = (qualificationRequirements || requirements).filter(row => row.manual && !context.overridden.has(row.key));
+		context.manualConfirmed ||= new Set();
+		if (manual.some(row => !context.manualConfirmed.has(row.key))) {
 			const approved = await this._pConfirmMaterialPermission({
 				title: `${spell.name} — Confirm Material Qualifications`,
 				htmlDescription: `<p>${CharacterSheetClassUtils.escapeHtml(info.text)}</p><p>Confirm with the DM that the supplied materials meet all target-dependent prices, quantities, attunement, and other qualifications. Target-dependent consumption must be tracked manually; no unknown price or quantity is assumed.</p>`,
@@ -4386,7 +4386,7 @@ class CharacterSheetSpells {
 			});
 			this._assertMaterialContext(context);
 			if (approved !== true) return false;
-			context.manualConfirmed = true;
+			for (const row of manual) context.manualConfirmed.add(row.key);
 		}
 		return true;
 	}
@@ -4487,35 +4487,72 @@ class CharacterSheetSpells {
 
 		const requirements = this._getSpellMaterialRequirements(spell, spellData);
 		const selected = [];
-		for (const requirement of requirements) {
-			if (!requirement.consume || requirement.timing !== "cast" || materialContext?.overridden?.has(requirement.key)) continue;
-			const candidates = this._state.getSpellMaterialCandidates(requirement);
-			if (candidates.reduce((sum, row) => sum + row.quantity, 0) < requirement.quantity) {
-				if (isRequired) throw new SpellMaterialUnavailableError(`The required ${requirement.name} component is no longer available.`);
+		const routes = [];
+		const context = materialContext || this._createMaterialContext();
+		const reserved = new Map();
+		for (const root of requirements) {
+			if (materialContext?.overridden?.has(root.key)) continue;
+			const availableRoutes = this._state.getSpellMaterialAvailability(root).routes.filter(route => route.available);
+			if (!availableRoutes.length) {
+				if (isRequired) throw new SpellMaterialUnavailableError(`The required ${root.name} component is no longer available.`);
 				continue;
 			}
-			const remaining = new Map(candidates.map(row => [row.id, row.quantity]));
+			const route = availableRoutes.length === 1 ? availableRoutes[0] : await CharacterSheetModal.pGetUserEnum({
+				title: `${spell.name} — Choose Material Payment`,
+				htmlDescription: "Choose one complete source. Only that source will be used; cancelling spends nothing.",
+				values: availableRoutes,
+				fnDisplay: row => `${CharacterSheetSpellMaterials.describe(row.requirement)}${row.requirement.legacyOnly ? " (saved legacy supply)" : ""}`,
+				isResolveItem: true,
+			});
+			this._assertMaterialContext(context);
+			if (!route) return {consumed: null, cancelled: true};
+			const requirement = route.requirement;
+			if (requirement.manual && !await this._pResolveMissingMaterials(spell, spellData, context, {allowVariant: false, qualificationRequirements: [requirement]})) return {consumed: null, cancelled: true};
+			let consumeCurrency = requirement.kind === "currency" && !!requirement.consume && requirement.timing === "cast";
+			if (consumeCurrency && requirement.consume === "optional") {
+				consumeCurrency = await InputUiUtil.pGetUserBoolean({
+					title: `${spell.name} — Consume Currency?`,
+					htmlDescription: `Optionally spend ${requirement.cost} cp (${requirement.cost / 100} gp) from your wallet for this spell's lasting effect?`,
+					textYes: "Spend currency",
+					textNo: "Keep it",
+				}) === true;
+				this._assertMaterialContext(context);
+			}
+			routes.push({root, route, consumeCurrency});
+			if (!requirement.consume || requirement.timing !== "cast" || requirement.kind === "currency") continue;
+			const candidates = route.candidates;
+			const remaining = new Map(candidates.map(row => [row.id, row.quantity - (reserved.get(row.id) || 0)]));
 			for (let i = 0; i < requirement.quantity; ++i) {
 				const available = candidates.filter(row => remaining.get(row.id) > 0);
+				if (!available.length) throw new SpellMaterialUnavailableError("The same material supply cannot pay two requirements.");
 				const chosen = available.length === 1 && requirement.consume !== "optional"
 					? available[0]
 					: await this._pPromptConsumeComponentChoice({spell, cost: requirement.cost, candidates: available, isOptional: requirement.consume === "optional"});
-				this._assertMaterialContext(materialContext);
+				this._assertMaterialContext(context);
 				if (!chosen) {
 					if (isRequired && requirement.consume !== "optional") return {consumed: null, cancelled: true};
 					break;
 				}
 				selected.push({chosen, requirement});
 				remaining.set(chosen.id, remaining.get(chosen.id) - 1);
+				reserved.set(chosen.id, (reserved.get(chosen.id) || 0) + 1);
 			}
 		}
 		let committed = false;
 		const validate = () => {
 			assertCurrent?.();
-			this._assertMaterialContext(materialContext);
-			if (materialContext && CharacterSheetSpellMaterials.getMissing(this._state, requirements.filter(row => !materialContext.overridden?.has(row.key))).length) {
-				throw new SpellMaterialUnavailableError("The required spell materials are no longer available. Nothing was consumed; choose supplies again.");
+			this._assertMaterialContext(context);
+			let requiredCp = 0;
+			for (const {route} of routes) {
+				const requirement = route.requirement;
+				if (requirement.kind === "currency") requiredCp += requirement.cost;
+				else {
+					const ids = new Set(route.candidates.map(row => row.id));
+					const count = this._state.getSpellMaterialCandidates(requirement).filter(row => ids.has(row.id)).reduce((sum, row) => sum + row.quantity, 0);
+					if (count < requirement.quantity) throw new SpellMaterialUnavailableError("The selected material source is no longer available. Nothing was consumed; choose supplies again.");
+				}
 			}
+			if (Math.round(this._state.getTotalGold() * 100) < requiredCp) throw new SpellMaterialUnavailableError("Insufficient funds for the selected spell materials. Nothing was consumed; choose supplies again.");
 			const counts = new Map();
 			for (const {chosen, requirement} of selected) {
 				counts.set(chosen.id, (counts.get(chosen.id) || 0) + 1);
@@ -4526,12 +4563,11 @@ class CharacterSheetSpells {
 		const commit = () => {
 			if (committed) throw new Error("These spell materials have already been committed.");
 			validate();
-			for (const {chosen} of selected) {
-				if (!this._state.consumeItem(chosen.id)) throw new Error("The selected material component could not be consumed.");
-			}
+			const costCp = routes.reduce((sum, {route: {requirement}, consumeCurrency}) => sum + (consumeCurrency ? requirement.cost : 0), 0);
+			this._state.commitSpellMaterialPayment({itemIds: selected.map(({chosen}) => chosen.id), costCp});
 			committed = true;
 			if (selected.length && !isPrepareOnly) JqueryUtil.doToast({type: "info", content: `Consumed ${selected.map(row => CharacterSheetClassUtils.escapeHtml(row.chosen.name)).join(", ")} casting ${CharacterSheetClassUtils.escapeHtml(spell.name)}.`});
-			return {consumed: selected[0] ? {id: selected[0].chosen.id, name: selected[0].chosen.name, value: selected[0].chosen.value} : null};
+			return {consumed: selected[0] ? {id: selected[0].chosen.id, name: selected[0].chosen.name, value: selected[0].chosen.value} : null, currencySpentCp: costCp};
 		};
 		if (!isPrepareOnly) return commit();
 		validate();

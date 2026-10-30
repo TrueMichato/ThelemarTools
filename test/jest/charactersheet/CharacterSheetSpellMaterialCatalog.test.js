@@ -20,7 +20,7 @@ describe("required spell material catalog", () => {
 		for (const row of required) {
 			const requirements = Materials.getRequirements(row);
 			expect(requirements.length).toBeGreaterThan(0);
-			for (const requirement of requirements) {
+			for (const requirement of requirements.flatMap(row => Materials.getItemRequirements(row))) {
 				expect(catalog.some(item => item.spellComponent.key === requirement.key && item.source === row.source)).toBe(true);
 			}
 		}
