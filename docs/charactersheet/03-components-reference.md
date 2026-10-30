@@ -476,6 +476,39 @@ can take their own rests to recover eligible non-slot uses; neither HP nor
 ordinary/Pact slots recover. XPHB actors have no rest controls. The manager
 also shows the runtime's explicit manual-resolution/component warning.
 
+### Direct companion rolls
+
+The Companions tab exposes Initiative, six saves, a skill/ability selector and
+supported attack/damage controls directly on ordinary, grouped, feature-managed
+and Simulacrum cards. The statblock dialog and active Simulacrum manager reuse
+the same panel. Normal/Advantage/Disadvantage works by touch or keyboard;
+selections survive companion refreshes. Results use the shared dice display/Roll
+Log and include the companion's name. Grouped clicks roll for one creature;
+existing record-level Action tracking is unchanged.
+
+Ordinary checks prefer resolved scaling/exact statistics through the canonical
+companion readers. Structured attacks use State's existing normalization;
+nested prose supports signed/display-tag hit bonuses and additive compound
+damage. Critical damage doubles dice, not flat modifiers. Missing, dynamic,
+alternative, save-conditional or otherwise ambiguous effects remain visibly
+unavailable/manual. Historical defaulted ability/PB provenance cannot be
+reconstructed; no current owner modifiers are substituted.
+
+Simulacrum rolls read the isolated current actor, including automatic/passive
+bonuses, bonus dice, modes, floors, conditions and exhaustion. Optional class
+resources, conditional effects, rerolls, extra attacks and riders are manual.
+Basic rolls/damage do not spend resources or increment snapshot revision.
+Attack consumes only the duplicate's Action through guarded persistence, with
+failure rollback before success feedback. Registry-backed feature
+attacks/damage keep their existing command transactions. Read-only manager
+rolls preserve spell/slot/target controls.
+
+Explicit roll-type metadata keeps Roll Log categories independent of companion
+names (for example, an "Attack Cat" Survival roll remains a skill check).
+Legacy callers without metadata retain title-based classification.
+
+### Creation and repair
+
 `pPrepareCreation()` is a pure, cancellable preview: it returns staged companion
 data and replacement identities without adding a companion, spending a slot,
 destroying an existing copy or saving. The casting transaction owns that commit.

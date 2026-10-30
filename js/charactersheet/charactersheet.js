@@ -9442,6 +9442,7 @@ class CharacterSheetPage {
 			assertCurrent();
 			const label = `${action.name} Damage${options.isCrit ? " (Critical)" : ""}`;
 			this.showDiceResult({title: `${titleName} — ${escape(label)}`,
+				rollType: "DAMAGE",
 				total,
 				subtitle: rolls.map(roll => `${escape(roll.expression)} = ${roll.total} ${escape(roll.type)}`).join(" + "),
 				resultNote: escape(action.note || "Apply damage to the target manually.")});
@@ -9529,6 +9530,7 @@ class CharacterSheetPage {
 		].filter(Boolean).join(" ");
 		this.showDiceResult({
 			title: `${titleName} — ${escape(check.label)}`,
+			rollType: kind.toUpperCase(),
 			total,
 			subtitle: this.formatD20Breakdown(roll, check.modifier) + bonusRolls.map(die => ` ${die.sign > 0 ? "+" : "-"} ${die.total} [${escape(die.expression)} ${escape(die.source)}]`).join(""),
 			resultClass: autoFail ? "fumble" : isCrit ? "critical" : kind === "attack" && roll.roll === 1 ? "fumble" : "",
@@ -20759,6 +20761,7 @@ class CharacterSheetPage {
 		}
 		// New object format — pure toast.
 		const breakdown = opts.subtitle || `1d20 (${opts.roll}) ${opts.modifier >= 0 ? "+" : ""}${opts.modifier}`;
+		if (opts.rollType != null) return this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote, {rollType: opts.rollType});
 		return this._showDiceResult(opts.title, opts.total, breakdown, opts.resultClass, opts.resultNote);
 	}
 
@@ -21575,9 +21578,9 @@ class CharacterSheetPage {
 		});
 	}
 
-	_showDiceResult (title, total, breakdown, resultClass = "", resultNote = "", {duration = 5000} = {}) {
+	_showDiceResult (title, total, breakdown, resultClass = "", resultNote = "", {duration = 5000, rollType} = {}) {
 		// Log to roll history
-		this._rollHistory?.addRoll({title, total, breakdown, resultClass, resultNote});
+		this._rollHistory?.addRoll({title, total, breakdown, resultClass, resultNote, ...(rollType == null ? {} : {rollType})});
 
 		// Remove existing result
 		this._dismissDiceResult(document.querySelector(".charsheet__dice-result"));

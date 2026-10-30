@@ -1133,6 +1133,18 @@ must use envelope kind/Construct projection instead.
 Full envelope, failure, and export contracts:
 `docs/charactersheet/18-npc-export.md`, "Actor-backed companion foundation".
 
+Companion roll UI is shared by Page `_createCompanionRollControls` and
+`_getCompanionRollModel`; existing
+`_rollCompanion{SkillCheck,SavingThrow,AbilityCheck,Initiative,Attack,Damage}`
+entrypoints delegate to `_pRollCompanion`. Pure Rules helpers
+`getRollStatistic`, `getRollActions`, `isRollDamageFormula` project supported
+data. Runtime `spendRollAction()` uses existing run/commit
+identity/lifecycle/revision/save guards; never swap owner state or route to
+player resource callbacks. Preferences are transient WeakMap data, not saved
+schema. Companion handlers supply explicit `rollType` metadata through the
+shared result API, so names containing "Attack", "Death Save" or "Spell Damage"
+cannot change the Roll Log category. Legacy callers still derive it from titles.
+
 ## Feature-Companion Acquisition and Setup
 
 Feature-companion setup is persisted separately from `_data.companions[]` in

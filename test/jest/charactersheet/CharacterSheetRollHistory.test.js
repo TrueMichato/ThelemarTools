@@ -39,6 +39,16 @@ describe("CharacterSheetRollHistory", () => {
 			expect(rolls[1].title).toBe("Roll 1");
 		});
 
+		test("uses an explicit roll type without classifying companion names", () => {
+			history.addRoll({title: "Death Save Owl — Survival", total: 19, rollType: "SKILL"});
+			expect(history.getRolls()[0]).toMatchObject({title: "Death Save Owl — Survival", total: 19, rollType: "SKILL"});
+		});
+
+		test("rejects unsupported explicit roll types before writing history", () => {
+			expect(() => history.addRoll({title: "Survival", total: 19, rollType: "unknown"})).toThrow("Unsupported roll history type.");
+			expect(history.getRollCount()).toBe(0);
+		});
+
 		test("should default optional fields", () => {
 			history.addRoll({title: "Test", total: 5});
 			const roll = history.getRolls()[0];

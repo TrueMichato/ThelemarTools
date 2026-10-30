@@ -80,6 +80,27 @@ Builder runs. Also cover the duplicate failure/render/Save retry, import retry
 after an admitted import's final save fails, and an import finishing after New;
 assert exact IDs and roster cardinality so retries cannot silently add copies.
 
+### Companion rolls and casting/concentration integration
+
+`CharacterSheetCompanionRolls.test.js` drives actual native listeners, real
+State/actor runtime, real dice evaluator metadata and real shared
+result/RollHistory. Fixtures intentionally disagree with owner stats. Cover
+exact/scaling readers, compound critical dice groups, owner isolation,
+commit/rollback/reload, feature-command bypass protection and unavailable data;
+actual-call mutations must fail these primary assertions. Include names with
+classification keywords and assert the resulting history types for every kind,
+not only the displayed title/total.
+
+`CharacterSheetCastingConcentrationIntegration.test.js` drives canonical Spells
+with the real Page helper and State calculations. Substitute only picker choices,
+randomness and presentation: retain both equal dice from distinct named sources,
+cancel raw advantage/disadvantage correctly, and ensure picker Cancel produces
+no fallback, dice, history, effects or expenditure. The picker takes
+`{rollLabel, conditionalsAvailable}` and returns
+`{cancelled, appliedConditionalIds}`; Page converts cancellation to `null` for
+casting consumers. Bypassing the helper must fail the real total/no-dice checks,
+not merely a spy-call assertion.
+
 ### Getting a character to test against
 
 Do not hand-build characters for manual testing or bug repro. Spawn them:

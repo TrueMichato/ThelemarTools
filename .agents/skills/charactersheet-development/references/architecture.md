@@ -31,6 +31,13 @@ The manager hydrates the persisted actor and lazily loads the actor bridge
 after Page/Spells/Combat are available. Corrupt snapshots surface diagnostics,
 not an original-character fallback; destroyed snapshots remain dismissible.
 
+Companion controls are controller-owned presentation; canonical State remains
+the statistics source, Rules parses supported formulas, and runtime owns actor
+mutations. No record/schema changes. Public `showDiceResult({rollType, ...})`
+transports a known Roll History type through the private result options to
+`addRoll`; companion handlers supply their actual kind instead of classifying
+arbitrary names. Omitted metadata preserves legacy title-based classification.
+
 `CharacterSheetSimulacrumCast` wraps only the shared player `_castSpell`
 Simulacrum route; Play Mode delegates that spell to the same entrypoint. Resolve
 all prompts before recording synchronous payment/replacement deltas, then await

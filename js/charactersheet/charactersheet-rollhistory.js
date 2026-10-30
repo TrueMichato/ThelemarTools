@@ -45,9 +45,13 @@ export class CharacterSheetRollHistory {
 	 * @param {string} [roll.breakdown] - Dice breakdown text (e.g. "1d20 (14) + 5")
 	 * @param {string} [roll.resultClass] - CSS class for coloring (e.g. "text-danger" for crit)
 	 * @param {string} [roll.resultNote] - Extra note (e.g. "Critical Hit!")
+	 * @param {string} [roll.rollType] - Explicit ROLL_TYPES key; omitted callers retain title-based classification
 	 */
-	addRoll ({title, total, breakdown = "", resultClass = "", resultNote = ""}) {
-		const rollType = this._deriveRollType(title);
+	addRoll ({title, total, breakdown = "", resultClass = "", resultNote = "", rollType}) {
+		if (rollType != null && (typeof rollType !== "string" || !Object.hasOwn(CharacterSheetRollHistory.ROLL_TYPES, rollType))) {
+			throw new Error("Unsupported roll history type.");
+		}
+		const resolvedRollType = rollType ?? this._deriveRollType(title);
 
 		this._rolls.unshift({
 			timestamp: Date.now(),
@@ -56,7 +60,7 @@ export class CharacterSheetRollHistory {
 			breakdown,
 			resultClass,
 			resultNote,
-			rollType,
+			rollType: resolvedRollType,
 		});
 
 		if (this._rolls.length > CharacterSheetRollHistory.MAX_ROLLS) {

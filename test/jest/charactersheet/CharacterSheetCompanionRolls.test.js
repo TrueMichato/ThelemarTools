@@ -77,6 +77,19 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("production companion roll surface", () => {
+	test.each(["Attack Cat", "Death Save Owl", "Spell Damage Mage"])("classifies %s rolls by their actual kind, not the companion name", async name => {
+		const {page, companion, history} = fixture({name});
+		RollerUtil.randomise.mockImplementation(sides => Math.min(10, sides));
+		await page._rollCompanionSkillCheck(companion, "survival");
+		await page._rollCompanionSavingThrow(companion, "dex");
+		await page._rollCompanionInitiative(companion);
+		await page._rollCompanionAbilityCheck(companion, "wis");
+		await page._rollCompanionAttack(companion, "action:0");
+		await page._rollCompanionDamage(companion, "action:0");
+		expect(history.map(roll => roll.rollType)).toEqual(["DAMAGE", "ATTACK", "ABILITY", "INITIATIVE", "SAVE", "SKILL"]);
+		expect(history.every(roll => roll.title.startsWith(name))).toBe(true);
+	});
+
 	test("direct native controls roll all skills, exact saves, ability checks and initiative into real history", async () => {
 		const {page, companion, history, owner} = fixture();
 		const before = copy(owner._data);
