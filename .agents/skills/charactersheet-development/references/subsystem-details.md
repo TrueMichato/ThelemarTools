@@ -1947,6 +1947,42 @@ XPHB/TGTT Second-Story Work and Rapid Current Swift Stance, including the real
 Combat post-payment activation seam; direct `activateStance()` alone does not
 exercise the badge/bridge duplication. PHB classic has no equal-to-walk climb grant.
 
+### Active-form feature eligibility
+
+`state.isFeatureActiveForCurrentForm(feature)` is a read-only live eligibility
+check for subclass-qualified Zodiac constellation children. Combat lists and
+stale use controls must consult it; static classification alone cannot determine
+whether Beaver's reaction is currently available. It uses the existing active
+Zodiac descriptor, not a saved eligibility flag. Non-Zodiac features are unaffected.
+
+### Contextual concentration calculation
+
+`makeConcentrationCheck(damage, {appliedConditionalIds} = {})` preserves the old
+single-argument call and adds transient `disadvantage`, `conditionalsAvailable`,
+and `bonusDiceContributions` to the existing result. Both advantage flags are raw;
+pass both to shared `rollD20` for cancellation. Sources describe applied effects,
+not unselected candidates. Concentration matches `concentration`, `save:con`, and
+the explicit `save:con:concentration` context. Generic CON saves remain gated.
+
+`aggregateModifiers(type, {additionalTypes})` optionally unions queries, deduping
+the same modifier ID while preserving distinct sources. Single-type behavior is
+unchanged. Concentration replaces only the named-save portion genuinely cached by
+`getSaveMod`, preserving manual, state and item bonuses; never add a full second
+save aggregate.
+
+`page.pGetConcentrationCheck(damage, {rollLabel} = {})` uses only the current Page
+state and existing picker. Empty candidates return the probe without invoking the
+picker; cancellation returns `null`, with no roll/history/mutation. Skipping
+prompts selects none. Detached adapters may use their own canonical state only
+when the helper is absent, never as a `??` fallback from cancellation.
+
+Dice contributions retain the existing shape `{id, dice, source, conditional}`.
+`source` is human-readable attribution, `conditional` is text or `null`, and
+`dice` is the expression or existing `"martial"` sentinel. Use
+`page._rollModifierDiceBonuses(check)`; its rolled `parts` add `value`. Include
+existing save-state dice, exhaustion and critical modifiers once, and use the
+unchanged shared formatter/animation/result methods for history and attribution.
+
 ### Concentration Breaking Cascade
 
 When Rage (or any state with `breaksConcentration: true`) activates:

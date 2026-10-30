@@ -911,7 +911,7 @@ this._page._onAddCondition?.();
 
 ## Conditional Modifier Picker (Pre-Roll Flow)
 
-Five roll sites in `charactersheet.js` use the same pre-roll picker pattern to let the player opt in to conditional modifiers:
+The following roll sites use the same pre-roll picker pattern to let the player opt in to conditional modifiers:
 
 | Roll site | Line | Notes |
 |---|---|---|
@@ -920,6 +920,7 @@ Five roll sites in `charactersheet.js` use the same pre-roll picker pattern to l
 | `_rollSkillCheck` | ~L9150 | Probes both `skill:X` and `check:<ability>`, dedupes by ID |
 | `_rollToolCheck` | current tool-check helper | Probes `tool:<canonical-key>` and `check:<ability>`; paired skill proficiency supplies advantage |
 | `_rollAttack` | ~L9350 | `async`; only adds the picker's bonus delta to avoid double-counting registry mods already folded into `attack.attackBonus` |
+| `pGetConcentrationCheck` | concentration helpers | Unions CON-save and concentration channels; returns selected canonical info or `null` on cancellation, without rolling or changing concentration |
 
 ### Picker UI — `_pPickConditionalModifiers({rollLabel, conditionalsAvailable})`
 
@@ -935,6 +936,21 @@ Skipped silently when `conditionalsAvailable` is empty **or** `settings.skipCond
 The picker reads `sourceName`, a display-only projection which removes only the
 exact `: <condition>` suffix added by prose registration. Stored names and
 conditional IDs are unchanged.
+
+Concentration consumers display applied named sources in the modal and result
+history, and pass both raw advantage/disadvantage flags to the existing shared
+d20 roller. The same modifier/die reached through multiple concentration channels
+is counted once; distinct sources still stack. Empty candidates take a no-modal
+fast path, and skipping prompts never opts into conditional effects.
+
+### Active-form reactions
+
+Zodiac constellation child features are usable only in their corresponding active
+form. Combat action-economy, generic ability/classification surfaces, and stale
+action-use controls consult `state.isFeatureActiveForCurrentForm(feature)`.
+Beaver therefore disappears while inactive or in another constellation, including
+after switching, dismissal, expiry, or reload. The check is subclass-qualified;
+ordinary reactions and independent same-named features are unaffected.
 
 ### Result Note Format — `_formatAppliedConditionalsNote(applied)`
 

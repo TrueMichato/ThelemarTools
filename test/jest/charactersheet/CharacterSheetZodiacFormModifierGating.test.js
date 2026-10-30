@@ -16,7 +16,11 @@
  * skill deltas), not existence-only / level counts.
  */
 
+import fs from "node:fs";
+import {jest} from "@jest/globals";
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 
 let CharacterSheetState;
 let state;
@@ -40,6 +44,68 @@ beforeAll(async () => {
 
 beforeEach(() => {
 	state = new CharacterSheetState();
+});
+
+describe("Round70 Beaver reaction follows active constellation", () => {
+	let combat;
+	let beaver;
+	const reactions = () => combat.getCombatActionEconomy().reaction.map(it => it.name);
+	beforeEach(() => {
+		const brew = JSON.parse(fs.readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url), "utf8"));
+		const feature = brew.subclassFeature.find(it => it.name === "Beaver" && it.subclassShortName === "Zodiac");
+		state.addFeature({...feature, description: Renderer.stripTags(JSON.stringify(feature.entries))});
+		beaver = state.getFeatures().find(it => it.name === "Beaver");
+		state.addFeature({name: "Parry", source: "TEST", description: "You can use your reaction to parry an attack."});
+		combat = Object.create(globalThis.CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = {};
+	});
+
+	test("is absent inactive/other form, present in Beaver, and absent again after dismissal", () => {
+		expect(reactions()).not.toContain("Beaver");
+		expect(reactions()).toContain("Parry");
+		state.activateZodiacForm("horse");
+		expect(reactions()).not.toContain("Beaver");
+		state.activateZodiacForm("beaver");
+		expect(reactions()).toContain("Beaver");
+		state.activateZodiacForm("horse");
+		expect(reactions()).not.toContain("Beaver");
+		state.activateZodiacForm("beaver");
+		state.deactivateState("zodiacForm");
+		expect(reactions()).not.toContain("Beaver");
+		expect(reactions()).toContain("Parry");
+	});
+
+	test("tracks expiration and active/inactive save reload without a saved eligibility flag", () => {
+		state.activateZodiacForm("beaver");
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		combat._state = restored;
+		expect(reactions()).toContain("Beaver");
+		const active = restored.getActiveStates().find(it => it.active && it.stateTypeId === "zodiacForm");
+		restored.startCombat();
+		active.roundsRemaining = 1;
+		restored.advanceRound();
+		expect(reactions()).not.toContain("Beaver");
+		state.loadFromJson(restored.toJson());
+		combat._state = state;
+		expect(reactions()).not.toContain("Beaver");
+	});
+
+	test("does not suppress an independent same-named reaction", () => {
+		state.removeFeature(beaver.id);
+		state.addFeature({name: "Beaver", source: "TEST", description: "You can use your reaction to protect an ally."});
+		expect(reactions()).toContain("Beaver");
+	});
+
+	test("rejects a stale inactive form action before spending its reaction", async () => {
+		const consume = jest.spyOn(combat, "_consumeActionType");
+		const toast = jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
+		await combat._useCombatAction(beaver);
+		expect(consume).not.toHaveBeenCalled();
+		expect(toast).toHaveBeenCalledWith(expect.objectContaining({type: "warning", content: expect.stringMatching(/active.*form|form.*active/i)}));
+		toast.mockRestore();
+	});
 });
 
 describe("#12 — Zodiac Form feature detection (isZodiacFormFeature)", () => {

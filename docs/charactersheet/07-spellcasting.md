@@ -921,40 +921,41 @@ _parseDuration(durationStr) {
 
 ### Concentration Checks
 
+Use the canonical state calculation, not a feat-name check or a second CON-save
+calculation. War Caster and other acquired effects contribute through named
+modifiers; concentration-only advantage does not apply to ordinary CON saves.
+
 ```javascript
-_rollConcentrationCheck(damage) {
-    const dc = Math.max(10, Math.floor(damage / 2));
-    const mod = this._state.getSavingThrowMod("con");
-    
-    // Check for War Caster
-    const hasWarCaster = this._state.hasFeat("War Caster");
-    
-    // Check for Bladesong
-    const calc = this._state.getFeatureCalculations();
-    let bonus = 0;
-    if (calc.bladesongConcentrationBonus && this._state.isStateTypeActive("bladesong")) {
-        bonus = calc.bladesongConcentrationBonus;
-    }
-    
-    const roll = Renderer.dice.randomNumber(1, 20);
-    const total = roll + mod + bonus;
-    
-    if (total >= dc) {
-        JqueryUtil.doToast({
-            type: "success",
-            content: `Concentration maintained! (${roll} + ${mod + bonus} = ${total} vs DC ${dc})`,
-        });
-        return true;
-    } else {
-        this._breakConcentration();
-        JqueryUtil.doToast({
-            type: "danger",
-            content: `Concentration broken! (${roll} + ${mod + bonus} = ${total} vs DC ${dc})`,
-        });
-        return false;
-    }
-}
+const check = await page.pGetConcentrationCheck(damage);
+if (check === null) return; // Cancelled: no dice, history, or concentration change.
+const rolled = page.rollD20({
+    stateAdvantage: check.advantage,
+    stateDisadvantage: check.disadvantage,
+});
+const namedDice = page._rollModifierDiceBonuses(check);
+// Also include the existing save-state dice, exhaustion and critical-roll
+// adjustment once; format/animate/log using the shared Page roll primitives.
 ```
+
+`makeConcentrationCheck(damage, {appliedConditionalIds})` returns the full flat
+`bonus`, default-off `conditionalsAvailable`, named `sources`, and deduped
+`bonusDiceContributions`. The Page helper offers the existing picker once and
+recomputes with the selected IDs. No candidates means no picker; skipping prompts
+selects none. These options/results are transient, not saved-state fields.
+
+Advantage and disadvantage are raw booleans: both true cancel in `rollD20`.
+The calculation includes the explicit concentration context
+`save:con:concentration` (including TGTT Poisoned), while generic saves keep their
+existing conditional gating. Do not add a second named CON/save aggregate to
+`check.bonus`: that would double-count cached save modifiers.
+
+Damage intake, normal Play Mode damage, fallback Play Mode, and the Combat quick
+save use the same calculation and named attribution. Damage checks retain editable
+DC, Skip (Keep), voluntary Break, and deferred failure for Strain to Maintain.
+A pre-cast gate must not use that damage dialog: failure/cancellation there must
+preserve the existing concentration. A detached adapter without the Page helper
+uses only its own state; an existing helper returning `null` must never fall back
+to a roll.
 
 ---
 

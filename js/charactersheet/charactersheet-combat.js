@@ -9348,6 +9348,7 @@ class CharacterSheetCombat {
 		// Filter for combat-relevant features that have action economy
 		const combatActions = features.filter(f => {
 			const nameLower = f.name?.toLowerCase() || "";
+			if (this._state.isFeatureActiveForCurrentForm?.(f) === false) return false;
 
 			// (R22 #4) Features with a dedicated panel (Interdiction: Baleful Interdict /
 			// Charm Enemy / boons) or passive "<X> Improvement" riders must not also appear
@@ -9998,6 +9999,7 @@ class CharacterSheetCombat {
 		// (3) Features — positive relevance test, then classify.
 		const features = this._state.getFeatures?.() || [];
 		for (const feature of features) {
+			if (this._state.isFeatureActiveForCurrentForm?.(feature) === false) continue;
 			if (!this._isActionEconomyFeature(feature)) continue;
 			const type = this._classifyFeatureActionType(feature);
 			// "free" costs no action; "long" takes a minute or more. Neither belongs in a
@@ -10840,6 +10842,10 @@ class CharacterSheetCombat {
 	 */
 	async _useCombatAction (feature) {
 		try {
+			if (this._state.isFeatureActiveForCurrentForm?.(feature) === false) {
+				JqueryUtil.doToast({type: "warning", content: `${feature.name} requires its active Zodiac Form.`});
+				return;
+			}
 			const actionType = this._getFeatureActionType(feature);
 			if (!this._isActionTypeAvailable(actionType)) {
 				const actionName = actionType === "bonus" ? "Bonus Action" : actionType === "reaction" ? "Reaction" : "Action";
@@ -12268,6 +12274,7 @@ class CharacterSheetCombat {
 		const features = this._state.getFeatures();
 		const overrides = CharacterSheetState.FEATURE_CLASSIFICATION_OVERRIDES || {};
 		return features.filter(f => {
+			if (this._state.isFeatureActiveForCurrentForm?.(f) === false) return false;
 			const nameLower = f.name?.toLowerCase() || "";
 			// Fighter action features have their own dedicated panel (renderCombatFighter);
 			// keep them out of the generic Overview Actions list so there is a single
@@ -14797,62 +14804,54 @@ class CharacterSheetCombat {
 			if (damageStr === null) return;
 
 			const damage = parseInt(damageStr) || 0;
-			const concentrationCheck = this._state.makeConcentrationCheck?.(damage) || {
-				dc: Math.max(10, Math.floor(damage / 2)),
-				bonus: 0,
-				advantage: false,
-				sources: [],
-			};
+			const concentrationCheck = typeof this._page.pGetConcentrationCheck === "function"
+				? await this._page.pGetConcentrationCheck(damage)
+				: this._state.makeConcentrationCheck(damage);
+			if (concentrationCheck === null) return;
 			const dc = concentrationCheck.dc;
 			const totalBonus = concentrationCheck.bonus;
-			const hasAdvantage = concentrationCheck.advantage;
-
-			// Roll the d20
-			const roll1 = this._page.rollDice(1, 20);
-			const roll2 = hasAdvantage ? this._page.rollDice(1, 20) : null;
-			let finalRoll1 = roll1;
-			let finalRoll2 = roll2;
-			let roll = hasAdvantage ? Math.max(finalRoll1, finalRoll2) : finalRoll1;
-			const total = roll + totalBonus;
-			let success = total >= dc;
+			const rolled = this._page.rollD20({stateAdvantage: concentrationCheck.advantage, stateDisadvantage: concentrationCheck.disadvantage});
+			const exhaustion = this._state._getExhaustionD20Penalty();
+			const stateDice = this._page._rollStateDiceBonuses("save:con");
+			const modifierDice = this._page._rollModifierDiceBonuses(concentrationCheck);
+			const extra = -exhaustion + (stateDice?.total || 0) + (modifierDice?.total || 0);
+			let success = rolled.roll + totalBonus + extra + (rolled.thelemar_critBonus || 0) >= dc;
 			let rerollMessage = "";
 
 			if (!success && this._state.canUseFocusedConcentrationReroll?.()) {
 				this._state.useFocusedConcentrationReroll?.();
-				const rerolledDieLabel = hasAdvantage && finalRoll2 != null
-					? (finalRoll1 <= finalRoll2 ? "lower concentration die" : "higher concentration die")
-					: "concentration die";
 				const rerolledValue = this._page.rollDice(1, 20);
-
-				if (hasAdvantage && finalRoll2 != null) {
-					if (finalRoll1 <= finalRoll2) finalRoll1 = rerolledValue;
-					else finalRoll2 = rerolledValue;
-					roll = Math.max(finalRoll1, finalRoll2);
+				if (rolled.roll2 != null) {
+					const replaceFirst = rolled.roll1 <= rolled.roll2;
+					if (replaceFirst) rolled.roll1 = rerolledValue;
+					else rolled.roll2 = rerolledValue;
+					rolled.roll = rolled.mode === "advantage" ? Math.max(rolled.roll1, rolled.roll2) : Math.min(rolled.roll1, rolled.roll2);
 				} else {
-					finalRoll1 = rerolledValue;
-					roll = finalRoll1;
+					rolled.roll1 = rolled.roll = rerolledValue;
 				}
-
-				success = (roll + totalBonus) >= dc;
-				rerollMessage = ` Focused Spell rerolled the ${rerolledDieLabel}.`;
+				rolled.thelemar_critBonus = this._state.getSettings().thelemar_criticalRolls ? (rolled.roll === 20 ? 5 : rolled.roll === 1 ? -5 : 0) : 0;
+				success = rolled.roll + totalBonus + extra + rolled.thelemar_critBonus >= dc;
+				rerollMessage = " Focused Spell rerolled the concentration die.";
 			}
 
-			// Build result message
-			let rollStr = `d20(${roll})`;
-			if (hasAdvantage) {
-				const sourceText = concentrationCheck.sources?.length
-					? ` (${concentrationCheck.sources.join(", ")})`
-					: "";
-				rollStr = `d20(${finalRoll1}, ${finalRoll2}) = ${roll}${sourceText}`;
-			}
-
-			const bonusStr = totalBonus >= 0 ? `+${totalBonus}` : `${totalBonus}`;
+			const total = rolled.roll + totalBonus + extra + (rolled.thelemar_critBonus || 0);
+			const diceText = [stateDice?.breakdownStr, modifierDice?.breakdownStr].filter(Boolean).join(" ");
+			const breakdown = `${this._page.formatD20Breakdown(rolled, totalBonus, exhaustion ? ` - ${exhaustion} (exhaustion)` : "")}${diceText ? ` ${diceText}` : ""} = ${total} vs DC ${dc}`;
+			const sourceText = concentrationCheck.sources.map(source => CharacterSheetClassUtils.escapeHtml(source)).join(", ");
 			const resultEmoji = success ? "✅" : "❌";
 			const resultText = success ? `SUCCESS - Concentration maintained!${rerollMessage}` : `FAILED - Concentration broken!${rerollMessage}`;
+			await this._page.pAnimateD20(rolled);
+			this._page.showDiceResult({
+				title: "Concentration Save",
+				total,
+				subtitle: CharacterSheetClassUtils.escapeHtml(breakdown),
+				resultClass: success ? "" : "charsheet__dice-result-total--fumble",
+				resultNote: `${resultText}${sourceText ? ` Sources: ${sourceText}.` : ""}`,
+			});
 
 			JqueryUtil.doToast({
 				type: success ? "success" : "danger",
-				content: `${resultEmoji} Concentration Save vs DC ${dc}: ${rollStr} ${bonusStr} = ${roll + totalBonus}. ${resultText}`,
+				content: `${resultEmoji} ${CharacterSheetClassUtils.escapeHtml(breakdown)}. ${resultText}${sourceText ? ` Sources: ${sourceText}.` : ""}`,
 			});
 
 			// If failed, break concentration

@@ -4565,7 +4565,7 @@ export class CharacterSheetPlayMode {
 						const spellName = this._state.getConcentrationLabel?.() || "the spell";
 						this._logActivity("shield", `${protection.name}: damage can't end concentration on ${spellName}`);
 					} else {
-						this._doConcentrationCheck(defenses.damage);
+						await this._doConcentrationCheck(defenses.damage);
 					}
 				}
 			}
@@ -4593,25 +4593,13 @@ export class CharacterSheetPlayMode {
 	 * Perform a concentration save after taking damage.
 	 * Shows inline result panel and handles break/success.
 	 */
-	_doConcentrationCheck (damage) {
-		const checkInfo = this._state.makeConcentrationCheck?.(damage);
+	async _doConcentrationCheck (damage) {
+		const checkInfo = typeof this._page.pGetConcentrationCheck === "function"
+			? await this._page.pGetConcentrationCheck(damage)
+			: this._state.makeConcentrationCheck(damage);
 		if (!checkInfo) return;
 
-		const {dc, bonus, advantage} = checkInfo;
-		let roll1 = this._rollD20();
-		let roll2 = advantage ? this._rollD20() : null;
-		let naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
-		let total = naturalRoll + bonus;
-		let passed = total >= dc;
-
-		// Animate the concentration save d20 (advantage shows both dice).
-		void this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: advantage ? [roll1, roll2] : [naturalRoll]}], isAdvantage: !!advantage});
-
-		// Build result description
-		const rollDesc = advantage
-			? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
-			: `d20(${naturalRoll})`;
-		const resultText = `${rollDesc} + ${bonus} = ${total} vs DC ${dc}`;
+		const {passed, resultText} = await this._pRollConcentrationCheck(checkInfo);
 
 		if (passed) {
 			JqueryUtil.doToast({type: "success", content: `Concentration saved! ${resultText}`});
@@ -4619,7 +4607,7 @@ export class CharacterSheetPlayMode {
 		} else {
 			// Check for Focused Spell (Sorcerer metamagic) reroll
 			if (this._state.canUseFocusedConcentrationReroll?.()) {
-				this._showFocusedSpellPrompt(resultText, dc, bonus, advantage);
+				this._showFocusedSpellPrompt(resultText, checkInfo);
 				return;
 			}
 
@@ -4629,7 +4617,29 @@ export class CharacterSheetPlayMode {
 		}
 	}
 
-	_showFocusedSpellPrompt (failText, dc, bonus, advantage) {
+	async _pRollConcentrationCheck (checkInfo) {
+		const rolled = this._page.rollD20({stateAdvantage: checkInfo.advantage, stateDisadvantage: checkInfo.disadvantage});
+		const exhaustion = this._state._getExhaustionD20Penalty();
+		const stateDice = this._page._rollStateDiceBonuses("save:con");
+		const modifierDice = this._page._rollModifierDiceBonuses(checkInfo);
+		const total = rolled.roll + checkInfo.bonus - exhaustion + (rolled.thelemar_critBonus || 0)
+			+ (stateDice?.total || 0) + (modifierDice?.total || 0);
+		const passed = total >= checkInfo.dc;
+		const diceText = [stateDice?.breakdownStr, modifierDice?.breakdownStr].filter(Boolean).join(" ");
+		const breakdown = `${this._page.formatD20Breakdown(rolled, checkInfo.bonus, exhaustion ? ` - ${exhaustion} (exhaustion)` : "")}${diceText ? ` ${diceText}` : ""} = ${total} vs DC ${checkInfo.dc}`;
+		const sourceText = checkInfo.sources.join(", ");
+		await this._page.pAnimateD20(rolled);
+		this._page.showDiceResult({
+			title: "Concentration Check",
+			total,
+			subtitle: CharacterSheetClassUtils.escapeHtml(breakdown),
+			resultClass: passed ? "" : "charsheet__dice-result-total--fumble",
+			resultNote: sourceText ? `Sources: ${CharacterSheetClassUtils.escapeHtml(sourceText)}.` : "",
+		});
+		return {passed, resultText: `${breakdown}${sourceText ? ` (${sourceText})` : ""}`};
+	}
+
+	_showFocusedSpellPrompt (failText, checkInfo) {
 		const overlay = this._ce("div", "pm-modal-overlay");
 
 		const panel = this._ce("div", "pm-modal", overlay);
@@ -4659,20 +4669,10 @@ export class CharacterSheetPlayMode {
 			this._renderStatusBar();
 		});
 
-		rerollBtn.addEventListener("click", () => {
+		rerollBtn.addEventListener("click", async () => {
 			close();
 			this._state.useFocusedConcentrationReroll?.();
-			let roll1 = this._rollD20();
-			let roll2 = advantage ? this._rollD20() : null;
-			const naturalRoll = advantage ? Math.max(roll1, roll2) : roll1;
-			const total = naturalRoll + bonus;
-			const passed = total >= dc;
-			// Animate the reroll d20 (advantage shows both dice).
-			void this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: advantage ? [roll1, roll2] : [naturalRoll]}], isAdvantage: !!advantage});
-			const rerollDesc = advantage
-				? `d20(${roll1}, ${roll2}) → ${naturalRoll}`
-				: `d20(${naturalRoll})`;
-			const rerollText = `${rerollDesc} + ${bonus} = ${total} vs DC ${dc}`;
+			const {passed, resultText: rerollText} = await this._pRollConcentrationCheck(checkInfo);
 
 			if (passed) {
 				JqueryUtil.doToast({type: "success", content: `Focused Spell reroll saved! ${rerollText}`});
