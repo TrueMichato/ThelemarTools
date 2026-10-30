@@ -3,13 +3,15 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 71 - NPC export, companion dashboard, and spell materials - PLANNING
+### Round 71 - NPC export, companion dashboard, and spell materials - IMPLEMENTING
 
-The user approved three fresh planning tracks, followed by approved
-implementation, PRs and integration. All tracks start from published code
+The user approved all three implementation plans, followed by verification,
+PRs and integration. All tracks start from published code
 `72bd3fb1d27306d7090f66261043f356a7cc4243`, not the primary checkout's
 unpublished critique-report commit. Those reports remain local and untouched.
-Planning is not a claim that the bugs are fixed.
+The NPC and material tips are integrated in an isolated checkout; combined
+final verification and the companion correction remain pending. No fix is
+closed by preliminary results.
 
 - **S1 - NPC export clarity (bug 1):** Reproduce the supplied Bard export's
   redundant ASIs, superseded abilities, statistics-only grants and class
@@ -37,8 +39,9 @@ The orchestrator alone owns this file and arbitrates shared-reference sections.
 NPC presentation must not prune companion snapshots. Companion UI must preserve
 the NPC Export menu handler and generic casting/payment paths. Materials must
 retain source waivers, fresh DM permission, actor-bound cancellation and rollback.
-Plans require approval before implementation; full integration gates precede
-advancing the published base.
+Full integration gates precede advancing the published base. The user
+authorized one additional targeted companion layout correction and verification;
+the first usable Cast control must be visible without weakening its check.
 
 ### Round 70 - Unconfirmed original symptoms
 

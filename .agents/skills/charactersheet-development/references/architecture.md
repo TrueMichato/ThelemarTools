@@ -983,9 +983,27 @@ Required spell supplies are a local catalog projection from
 both spell brew merges. They carry `spellComponent` inventory metadata, not
 Arcadia `variantComponent` effects. The Components picker and inventory use
 escaped local names/details (no canonical `items.html` entity exists).
+Only physical requirements become catalog products; genuine currency resolves
+against the existing wallet. Readable names are independent of saved component
+identity. Source-qualified legacy sets and coin rows remain explicit complete
+alternatives without eager inventory conversion, deletion or refunds.
+State's pure availability reader distinguishes item/currency/choice routes.
+The synchronous payment helper runs canonical removals and wallet deduction
+on a genuinely detached candidate, publishing successful changes into the same
+captured live raw object while retaining surviving ID-keyed wrappers. Failed
+candidates publish nothing. Existing creation journals own compensation for
+later creation/save failures; no second wallet ledger or owner snapshot rollback
+is introduced.
 Successful Spells-owned completion calls the existing guarded Page render API
 after effect/material commit; creation refresh follows guarded persistence.
 Headless adapters must remain actor-local and need not expose `renderCharacter`.
+
+NPC exports default to Playable mechanics assembled from complete rules.
+Represented folds are reductions; unproven build-only instructions become
+attributed report warnings without claiming their benefits applied. Unique or
+unresolved live-use rules remain visible. Explicit Complete/Compact preferences
+and manual scopes are honored. NPC-only named-quantity targeting must not alter
+`profile:"companion"` output or actorSnapshot gameplay.
 
 ## Parsers (in charactersheet-state.js)
 

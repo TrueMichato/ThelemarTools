@@ -2980,19 +2980,42 @@ The worn binding also supplies two state-owned benefits:
 
 `CharacterSheetSpellMaterials.getRequirements(spell)` normalizes priced and
 consumed requirements; ordinary focus-covered ingredients return no dedicated
-row. `buildCatalog(fullyMergedSpells)` projects source/price-aware items with
-`spellComponent: {key, material, spells}`. `CharacterSheetItemUtils` preserves
-that metadata, and State `getSpellMaterialCandidates(requirement)` matches
-physical form, explicit per-unit price floor, and positive inventory quantity.
-Compound consume/reuse and Warding Bond's two-ring semantics are explicit
-source-qualified exceptions; target-dependent/manual qualifications are visible.
+row. The array is AND; each row is an `item`, genuine `currency`, or `choice`
+of complete OR routes. `getItemRequirements` visits physical leaves only.
+`buildCatalog(fullyMergedSpells)` projects those source/price-aware items with
+`spellComponent: {key, material, spells, summary}`. Names and summaries retain
+quantity, consumption, aggregate/per-item/manual price scope and qualifications.
+`CharacterSheetItemUtils` preserves metadata, and State
+`getSpellMaterialCandidates(requirement)` matches physical form, explicit price
+floors and positive inventory quantity. Exact source-qualified saved coin rows
+and old whole sets remain whole-payment alternatives, never credit for each
+new ingredient or implicit refunds. Target-dependent quantities remain manual.
+
+`getSpellMaterialAvailability(requirement)` is pure typed availability, not
+inventory-only summation. Genuine reusable currency checks total wallet value
+without spending or exchange. Consumed currency uses `deductGold` with integer
+copper arithmetic and the existing gp/pp/ep/sp/cp spending order and fractional-gp
+change. Insufficient or nonrepresentable amounts fail without mutation. Gold
+does not replace a named priced gem or a specially qualified coin.
 
 Spells keeps missing-material permission in an invocation-local context passed
 through constraints and staged consumption, never in settings or companions.
-Only missing requirements are waived; present consumables still decrement through
-`consumeItem`. All selected rows are validated before any component mutation.
+Only missing roots are waived; present consumables still decrement through
+`consumeItem`. One selected complete payment route is retained and revalidated
+after awaits with State/raw-data/generation/character identity; a disappeared
+selection cannot silently switch to another item or wallet. Optional currency
+requires explicit opt-in.
+
+`commitSpellMaterialPayment({itemIds, costCp})` executes canonical removals then
+wallet deduction on a genuinely detached State with independent mutable runtime
+maps/hooks. Only successful raw-data changes publish synchronously into the
+same live actor, preserving surviving ID-keyed wrappers and canonical removal
+side effects. Failure has no live/global/observer/persistence effects.
+Simulacrum's unchanged outer journal compensates published deltas after later
+save failure without overwriting unrelated writes.
 Class-specific focus gates, actor external supplies, and material-exempt casts
-remain separate. Optional and delayed/manual consumption are not guessed.
+remain separate; detached companions never borrow owner funds. Delayed/manual
+consumption is not guessed.
 
 ### Usable adventuring gear
 
@@ -3424,7 +3447,7 @@ effects. State normalizes explicit passive item advantage/disadvantage independe
 of numeric initiative bonuses. Baseline wear/attunement/orbit gates are allowed;
 activated powers or additional conditional gates remain nonpermanent.
 
-Sanitize options with `getSanitizedExportOptions` (presentation, defense mode, unarmed policy, feature mode/picker, CR mode/estimator, legendary, name suffix, CR breakdown, **level signal**). Complete presentation and the DMG-style estimator are defaults, including for legacy preferences. Keep `crEstimator` independent of `crMode` and the retained manual value. `includeLevelSignal` defaults **false** — the out-of-fiction "Level Signal" trait is opt-in (forced on by `includeCrBreakdown`, which has nowhere else to put its note). **`includeCustomModifiers` defaults true** (smart leftover **Additional Effects**; bookkeeping filtered). List picker rows via `listExportableFeatures(state)` (features **and** feats).
+Sanitize options with `getSanitizedExportOptions` (presentation, defense mode, unarmed policy, feature mode/picker, CR mode/estimator, legendary, name suffix, CR breakdown, **level signal**). Playable mechanics and the DMG-style estimator are defaults for NPCs, including preferences without a presentation mode. Explicit Complete/Compact choices and manual selections remain honored. Playable starts from complete rules: proven represented folds go to `report.reductions`, while unproven build-only acquisitions move verbatim to source/feature-attributed warnings without inferring application. Unresolved live-use grants and unique procedures stay visible. Known-caster lists use canonical class semantics rather than saved preparation flags. Companion profile defaults to Complete and bypasses NPC pruning and named-quantity targeting. Keep `crEstimator` independent of `crMode` and the retained manual value. `includeLevelSignal` defaults **false** — the out-of-fiction "Level Signal" trait is opt-in (forced on by `includeCrBreakdown`, which has nowhere else to put its note). **`includeCustomModifiers` defaults true** (smart leftover **Additional Effects**; bookkeeping filtered). List picker rows via `listExportableFeatures(state)` (features **and** feats).
 
 Resolve casting ability through `_getExportSpellAbility`: a saved `"inherit"`
 is an ownership instruction, never a schema ability or an implicit Intelligence

@@ -548,6 +548,23 @@ own rendering/persistence; headless construction alone does not isolate a
 page adapter that still reads the original character. `setSpells(catalog)`
 supplies the same source-qualified catalog used by ordinary casting.
 
+### Required materials and currency
+
+`CharacterSheetSpellMaterials.getRequirements(spell)` returns AND requirements
+with explicit `item`, genuine `currency`, or `choice` (one complete OR route)
+kinds. `getItemRequirements` traverses physical catalog leaves; `describe`
+retains quantity, consumption, price scope and qualifications. A named ingredient
+worth gold is still an inventory supply, not a wallet payment.
+
+State `getSpellMaterialAvailability(requirement)` is read-only.
+`commitSpellMaterialPayment({itemIds, costCp})` stages canonical item removal and
+wallet deduction on a detached candidate, then publishes only successful
+payment changes into the same live raw actor. Costs are integer copper pieces;
+consumed currency may exchange denominations, while reusable currency only
+checks total wallet value. Selected routes and actor identity are revalidated
+after prompts. Saved source-qualified coin stacks and whole sets remain
+explicit alternatives, never refunds or credit for multiple branches.
+
 ### Key Methods
 
 ```javascript
@@ -862,6 +879,16 @@ Toolbar / Play mode "NPC Export"
 ```
 
 See [18-npc-export.md](./18-npc-export.md).
+
+NPC presentation defaults to **Playable mechanics**, projected from complete
+rules rather than the lossy legacy Compact filter. Proven represented benefits
+are recorded in `report.reductions`; unproven build-only acquisitions move
+verbatim to attributed report warnings without inferring their application.
+Unresolved live-use benefits remain visible. Explicit Complete/Compact
+preferences and manual selections persist. Known-caster availability uses
+canonical class semantics, not an unqualified saved `prepared` flag.
+Neither presentation pruning nor NPC quantity targeting applies to the
+authoritative `profile:"companion"` snapshot projection.
 
 ### Print document sections
 
