@@ -255,7 +255,9 @@ class CharacterSheetNpcExporter {
 	}
 
 	static getSanitizedExportOptions (opts = {}) {
-		const presentationMode = String(opts.presentationMode || "").toLowerCase() === "compact" ? "compact" : "complete";
+		const requestedPresentation = String(opts.presentationMode || "").toLowerCase();
+		const presentationMode = ["playable", "complete", "compact"].includes(requestedPresentation)
+			? requestedPresentation : opts.profile === "companion" ? "complete" : "playable";
 		const defenseMode = String(opts.defenseMode || (opts.profile === "companion" ? "active" : "persistent")).toLowerCase() === "active" ? "active" : "persistent";
 		const includeUnarmedRaw = String(opts.includeUnarmed || "auto").toLowerCase();
 		const includeUnarmed = ["auto", "always", "never"].includes(includeUnarmedRaw) ? includeUnarmedRaw : "auto";
@@ -348,6 +350,8 @@ class CharacterSheetNpcExporter {
 			const monster = this._convertStateToMonsterInner(state, options, exportOpts);
 			if (exportOpts.profile !== "companion") this._retainRestrictedCastingRules(monster, state, exportOpts);
 			if (exportOpts.profile !== "companion") this._retainItemRuleEntries(monster, state);
+			const projection = exportOpts.profile !== "companion" && exportOpts.presentationMode === "playable"
+				? this._projectPlayableMechanics(monster, state, exportOpts) : {reductions: [], warnings: []};
 			for (const section of ["trait", "action", "bonus", "reaction", "legendary", "spellcasting"]) {
 				for (const entry of monster[section] || []) {
 					for (const key of Object.keys(entry)) {
@@ -363,10 +367,11 @@ class CharacterSheetNpcExporter {
 				name: monster.name,
 				source: monster.source,
 				presentationMode: exportOpts.presentationMode,
+				reductions: projection.reductions,
 				crEstimate: this._CR_REPORTS.get(monster),
 				omissions: [...(exportOpts.profile !== "companion" && exportOpts.presentationMode === "compact"
 					? this._getCompactFeatureOmissions(state, monster, exportOpts)
-					: []), ...this._activeSpellDiagnostics.values(), ...this._activeItemDiagnostics.values()],
+					: []), ...projection.warnings, ...this._activeSpellDiagnostics.values(), ...this._activeItemDiagnostics.values()],
 			});
 			return monster;
 		} finally {
@@ -710,6 +715,209 @@ class CharacterSheetNpcExporter {
 		});
 	}
 
+	/** Start from full rules. Unproven live mechanics stay; build-only rows keep full diagnostics. */
+	static _projectPlayableMechanics (monster, state, options) {
+		const reductions = [];
+		const warnings = [];
+		if (options.includeFeatures === "manual") return {reductions, warnings};
+		const sections = ["trait", "action", "bonus", "reaction"];
+		const rows = sections.flatMap(section => (monster[section] || []).map(entry => ({entry, feature: this._ENTRY_FEATURES.get(entry)})));
+		const eq = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+		const text = value => this._getPlainMatchTextCased(this._flattenEntriesValue(value));
+		const record = (feature, before, reason, target = reductions) => target.push({
+			entity: feature.name,
+			source: feature.source || "",
+			reason,
+			entries: MiscUtil.copyFast(before),
+			...(feature.id ? {featureId: feature.id} : {}),
+			...(feature.className ? {className: feature.className, classSource: feature.classSource || "", level: feature.level} : {}),
+		});
+		const decisions = (state.getLevelHistory?.() || []).flatMap(row => row.decisions || []);
+		const classes = state.getClasses?.() || [];
+		const cards = state.getSpellcastingClassBreakdown?.() || [];
+		const owner = feature => {
+			if (!feature?.className) return null;
+			const named = classes.filter(cls => eq(cls.name, feature?.className));
+			const exact = named.filter(cls => eq(cls.source, feature?.classSource));
+			const matches = exact.length ? exact : named;
+			return matches.length === 1 ? matches[0] : null;
+		};
+		const hasRecordedImprovement = feature => decisions.some(decision => {
+			if (!["asi", "asiOrFeat", "feat"].includes(decision.type) || decision.status !== "resolved"
+				|| !eq(decision.className, feature.className) || !eq(decision.classSource, feature.classSource)
+				|| Number(decision.classLevel) !== Number(feature.level)) return false;
+			const selected = decision.selection;
+			const feat = selected?.feat || (decision.type === "feat" ? selected : null);
+			if (feat?.name) return (state.getFeats?.() || []).some(row => eq(row.name, feat.name) && eq(row.source, feat.source));
+			const asi = selected?.asi || (decision.type === "asi" ? selected : null);
+			return asi && Object.entries(asi).length && Object.entries(asi).every(([ability, value]) => (
+				Parser.ABIL_ABVS.includes(ability) && Number(value) > 0
+				&& (decision.receipt?.effects || []).some(effect => (
+					effect.type === "abilityDelta" && effect.ability === ability
+					&& decision.receipt.sourceDecisionKey && effect.sourceDecisionKey === decision.receipt.sourceDecisionKey
+					&& Number.isFinite(effect.before) && Number.isFinite(effect.after)
+					&& Number.isFinite(effect.amount) && effect.amount === Math.max(0, Math.min(Number(value), 20 - effect.before))
+					&& effect.after - effect.before === effect.amount
+					&& state.getAbilityBase(ability) >= effect.after
+					&& Number.isFinite(monster[ability])
+				))
+			));
+		});
+		const resourceIndex = this._buildResourceIndex(state);
+		const removed = new Set();
+		for (const {entry, feature} of rows) {
+			if (!feature) continue;
+			const before = MiscUtil.copyFast(entry.entries);
+			const cls = owner(feature);
+			const body = text(before);
+			// A resolved improvement is build history, not another application of its score/feat.
+			const isImprovementRule = (
+				/^(?:You|[\w' -]+) gains? (?:a feat|the [\w' ()-]+ feat(?: or another feat)?) of (?:your|its) choice for which (?:you qualify|it qualifies)\.(?:\s*(?:You|[\w' -]+) gains? this feature again at [\w, -]+\.)?$/i.test(body)
+				|| (feature.isAsiChoice && /^Ability Score Increases?: (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) \+\d+(?:, (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) \+\d+)*\.?$/i.test(body))
+			);
+			if (cls && isImprovementRule && hasRecordedImprovement(feature)) {
+				removed.add(entry);
+				record(feature, before, "Recorded improvement is represented by the current ability scores or selected feat.");
+				continue;
+			}
+			if (cls && isImprovementRule) {
+				removed.add(entry);
+				record(feature, before, "Build-only acquisition prose moved to this report. This recorded improvement lacks a resolved source-qualified acquisition with represented effects; no score or feat gain was inferred.", warnings);
+				continue;
+			}
+			// A die-only upgrade must point to a unique, same-owner emitted base ability.
+			const upgrade = /^(?:At \d+(?:st|nd|rd|th) level,?\s*)?(?:You[r]?|[\w' -]+'s|its)\s+(.+?) die changes to (?:a |an )?(\d*d\d+)\.$/i.exec(body);
+			if (upgrade && cls && Number(feature.level) <= Number(cls.level)) {
+				const bases = rows.filter(row => row.feature && row.feature !== feature
+					&& owner(row.feature) === cls
+					&& eq(row.feature?.name, upgrade[1]));
+				if (bases.length === 1 && text(bases[0].entry.entries).includes(upgrade[2])
+					&& /\bdie\b/.test(text(bases[0].entry.entries))) {
+					removed.add(entry);
+					record(feature, before, `Current die is represented by ${bases[0].entry.name}.`);
+					continue;
+				}
+				// Earlier ladder notes are covered by the base's latest source-owned die.
+				if (bases.length === 1) {
+					const ladder = rows.filter(row => owner(row.feature) === cls && row.feature !== bases[0].feature
+						&& Number(row.feature?.level) <= Number(cls.level)
+						&& text(row.entry.entries).match(/ die changes to /i)
+						&& text(row.entry.entries).includes(upgrade[1]))
+						.sort((a, b) => Number(b.feature.level) - Number(a.feature.level));
+					const current = ladder.length ? /(\d*d\d+)\.$/.exec(text(ladder[0].entry.entries))?.[1] : null;
+					if (current && text(bases[0].entry.entries).includes(current)) {
+						removed.add(entry);
+						record(feature, before, `Superseded die is represented by ${bases[0].entry.name}.`);
+						continue;
+					}
+				}
+			}
+			const card = cls ? cards.find(row => eq(row.className, cls.name) && eq(row.classSource, cls.source)) : null;
+			const casting = card && (monster.spellcasting || []).find(block => (
+				/^Spellcasting(?: \(|$)/.test(block.name)
+				&& (cards.length === 1 || block.name.includes(card.displayName))
+			));
+			const isCastingBuild = !!casting && /^(?:spellcasting|pact magic)$/i.test(feature.name)
+				&& /\b(?:cantrips|prepared spells|spells known|spell slots)\b/i.test(body);
+			const pool = this._resolveFeatureUses(feature, resourceIndex);
+			const pruneText = (raw) => {
+				const plain = text(raw).trim();
+				if (cls && /^.+ die changes when .+ reaches certain levels in this class\.$/i.test(plain)
+					&& rows.some(row => row.feature && owner(row.feature) === cls && row.feature !== feature
+						&& Number(row.feature.level) <= Number(cls.level)
+						&& text(row.entry.entries).includes(`${feature.name} die changes to `))) return null;
+				if (isCastingBuild) {
+					const clauses = this._splitIntoClauses(raw);
+					const kept = clauses.filter(clause => !this._isRepresentedCastingInstruction(text(clause), card));
+					if (kept.length !== clauses.length) return kept.length ? kept.join(" ") : null;
+				}
+				const skillKind = /^(?:You|[\w' -]+) gains? proficiency in (?:one|two|three|four) skills?(?: of (?:your|its) choice)?\.$/i.test(plain)
+					? "skills"
+					: /^Choose one skill in which [\w' -]+ (?:has|have) proficiency but lack(?:s)? Expertise\. (?:You|It|[\w' -]+) gains? Expertise with that skill\.$/i.test(plain) ? "expertise" : null;
+				if (skillKind && feature.choices?.[skillKind]?.length) {
+					const chosen = feature.choices[skillKind];
+					const missing = chosen.filter(skill => state.getSkillProficiency(skill) < (skillKind === "expertise" ? 2 : 1)
+						|| !this._hasSkillEntry(monster.skill, skill));
+					if (!missing.length) return null;
+					const reason = `Recorded ${skillKind === "expertise" ? "expertise" : "proficiency"} in ${missing.join(", ")} is not represented in the current NPC skill statistics; the source rule is retained.`;
+					if (!warnings.some(row => row.entity === feature.name && row.reason === reason)) record(feature, before, reason, warnings);
+					return `${raw} Recorded choice: ${missing.join(", ")} (not represented in current skill statistics).`;
+				}
+				const language = /^(?:You|[\w' -]+) can speak, read, and write ([^.]+)\.$/i.exec(plain);
+				if (language && language[1].split(/,?\s+and\s+|,\s*/).every(label => (monster.languages || []).some(value => eq(value, label.trim())))) return null;
+				if (pool?.id && this._ENTRY_RESOURCES.get(entry)?.id === pool.id) {
+					const count = /^(?:You|[\w' -]+) can use this feature a number of times equal to (?:your|its) (?:Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) modifier(?: \([+-]?\d+\))?\.$/i;
+					const clauses = this._splitIntoClauses(raw);
+					if (clauses.some(clause => count.test(text(clause)))) {
+						const canonicalRecovery = /short/i.test(pool.recharge) ? "Expended uses recover after a short or long rest."
+							: /long/i.test(pool.recharge) ? "Expended uses recover after a long rest." : null;
+						const remaining = clauses.filter(clause => !count.test(text(clause))).map(clause => (
+							canonicalRecovery && /^(?:You|It|[\w' -]+) regains? (?:any|all) (?:of (?:your|its) )?expended uses when (?:you|it) finishes? a (?:short or long|short|long) rest\.$/i.test(text(clause))
+								? canonicalRecovery : clause
+						));
+						return remaining.length ? remaining.join(" ") : canonicalRecovery || raw;
+					}
+				}
+				return raw;
+			};
+			const visit = values => (values || []).flatMap(value => {
+				if (typeof value === "string") {
+					const result = pruneText(value);
+					return result == null ? [] : [result];
+				}
+				if (!value || typeof value !== "object") return [value];
+				if (value.type !== "entries" && value.type !== "list") return [value];
+				const key = value.type === "list" ? "items" : "entries";
+				const children = visit(value[key]);
+				return children.length ? [{...value, [key]: children}] : [];
+			});
+			entry.entries = visit(entry.entries);
+			if (JSON.stringify(before) !== JSON.stringify(entry.entries)) {
+				// HTML-only feat saves can leave detached headings after their benefit is removed.
+				entry.entries = entry.entries.filter(value => typeof value !== "string"
+					|| !/^(?:[\w' -]+ gains? the following benefits\.|(?:Skill Proficiency|Expertise)(?: \[.\])?)$/i.test(text(value).trim()));
+				record(feature, before, "Only benefits represented in the emitted statistics or casting rules were folded.");
+			}
+			if (isCastingBuild && entry.entries.length) entry.name = "Spellcasting Rules";
+			if (!entry.entries.length) removed.add(entry);
+		}
+		for (const section of sections) {
+			if (!monster[section]) continue;
+			monster[section] = monster[section].filter(entry => !removed.has(entry));
+			if (!monster[section].length) delete monster[section];
+		}
+		return {reductions, warnings};
+	}
+
+	static _isRepresentedCastingInstruction (plain, card) {
+		const clauses = this._splitIntoClauses(plain);
+		return clauses.length > 0 && clauses.every(clause => {
+			const value = clause.trim();
+			if (/\b(?:focus|ritual|regain|restore|expend|without|reaction|bonus action|damage)\b/i.test(value)) return false;
+			if (/^(?:You|[\w' -]+) (?:have |has )?learned to cast spells through [\w' -]+\.$/i.test(value)) return true;
+			if (/^(?:You|[\w' -]+) (?:have|has) learned to untangle and reshape the fabric of reality in harmony with .+ wishes and music\.$/i.test(value)) return true;
+			if (/^.+ spells are part of .+ vast repertoire, magic that .+ can tune to different situations\.$/i.test(value)) return true;
+			if (/^.+ magic comes from the heart and soul .+ pour into the performance of .+ music or oration\.$/i.test(value)) return true;
+			if (/^(?:See .+ for the (?:general )?rules (?:on|of) spellcasting(?: and .+)?|The information below details how .+ uses? those rules with .+ spells, which appear in .+ later in the class's description|The .+ (?:Features )?table shows how many spell slots .+ (?:has|have) to cast .+ spells)\.$/i.test(value)) return true;
+			if (/^(?:You|[\w' -]+) (?:knows? (?:two cantrips|four 1st-level spells) of .+ choice from .+|prepares? the list of level 1\+ spells that are available for .+ to cast with this feature)\.$/i.test(value)) return true;
+			if (/^.+ learns? (?:additional .+ cantrips of .+ choice at higher levels, learning .+|an additional .+ spell of .+ choice at each level except [\d, a-z]+)\.$/i.test(value)) return true;
+			if (/^Each of these spells must be of a level for which .+ has spell slots\.$/i.test(value)) return true;
+			if (/^For instance, when .+ reaches? \d+(?:st|nd|rd|th) level in this class, .+ can learn one new spell of \d+(?:st|nd|rd|th) or \d+(?:st|nd|rd|th) level\.$/i.test(value)) return true;
+			if (/^Additionally, when .+ gains? a level in this class, .+ can choose one of the .+ spells .+ knows? and replace it with another spell from the .+ spell list, which also must be of a level for which .+ has spell slots\.$/i.test(value)) return true;
+			if (/^To start, choose four level 1 spells from [\w ='-]+\.$/i.test(value)) return true;
+			if (/^(?:[\w ,'=-]+ and )?[\w ,'=-]+ are recommended\.$/i.test(value)) return true;
+			if (/^Whenever .+ gains? a .+ level, .+ can replace (?:one of .+ cantrips with another cantrip of .+ choice from .+|one spell on .+ list with another .+ spell for which .+ has spell slots)\.$/i.test(value)) return true;
+			if (/^When .+ reaches? .+ levels? \d.+, .+ learns? another cantrip of .+ choice from .+, as shown in the Cantrips column of the .+ Features table\.$/i.test(value)) return true;
+			if (/^The number of spells on .+ list increases as .+ gains? .+ levels, as shown in the Prepared Spells column of the .+ Features table\.$/i.test(value)) return true;
+			if (/^Whenever that number increases, (?:choose|.+ chooses) additional spells from .+ until the number of spells on .+ list matches the number on the table\.$/i.test(value)) return true;
+			if (/^The chosen spells must be of a level for which .+ has spell slots\.$/i.test(value)) return true;
+			if (/^For example, if .+ a level \d+ \w+, .+ list of prepared spells can include .+ spells of levels? \d+(?: and \d+)? in any combination\.$/i.test(value)) return true;
+			if (card.mechanic === "known" && /^If another .+ feature gives .+ spells that .+ always has prepared, those spells don't count against the number of spells .+ can prepare with this feature, but those spells otherwise count as .+ spells for .+\.$/i.test(value)) return true;
+			if (card.ability && new RegExp(`^(?:You|[\\w' -]+) uses? (?:your|its) ${Parser.attAbvToFull(card.ability)} whenever a spell refers to (?:your|its) spellcasting ability\\.$`, "i").test(value)) return true;
+			return !!card.ability && new RegExp(`^${Parser.attAbvToFull(card.ability)} is .+ spellcasting ability for .+ spells\\.$`, "i").test(value);
+		});
+	}
+
 	/** Class levels keyed by lowercased class name, plus the total, for table row selection. */
 	static _getLevelContext (state) {
 		const byClass = {};
@@ -828,7 +1036,7 @@ class CharacterSheetNpcExporter {
 			npcName,
 			includeFeatures: exportOpts.includeFeatures,
 			isCompanion: exportOpts.profile === "companion",
-			isComplete: exportOpts.presentationMode === "complete",
+			isComplete: exportOpts.presentationMode !== "compact",
 			selectedFeatureIds: exportOpts.selectedFeatureIds,
 			suppressExtraAttack: !!multiattackAction,
 			// An attack line that says "plus 1d8 damage against Constructs" is meaningless
@@ -842,7 +1050,7 @@ class CharacterSheetNpcExporter {
 		const referenceGraph = this._buildFeatureReferenceGraph(featureBlocks);
 		// Residue first: an entry that still says something the line does not carry has
 		// earned its place, even when the rider claimed the whole feature.
-		const preserveFeatureRules = exportOpts.profile !== "companion" && exportOpts.presentationMode === "complete";
+		const preserveFeatureRules = exportOpts.profile !== "companion" && exportOpts.presentationMode !== "compact";
 		const reducedNames = preserveFeatureRules ? new Set() : this._reduceRiderSourcesToResidue(featureBlocks, [...emittedDamageRiders], referenceGraph);
 		const riderReplacedNames = new Set([...emittedDamageRiders]
 			.filter(rider => rider.wholeFeature && rider.sourceName && !this._isReferencedAnchor(rider.sourceName, referenceGraph))
@@ -1055,7 +1263,7 @@ class CharacterSheetNpcExporter {
 		// Early: the provenance label is a prefix on the first sentence, so every later pass
 		// that reasons about how an entry opens needs it gone first.
 		this._stripFeatureProvenanceLabels(out);
-		this._resolveDerivedNumbers(out, state, calculations);
+		this._resolveDerivedNumbers(out, state, calculations, {isNpc: true});
 		this._resolvePsionicPowerSaveDcs(out, state, calculations);
 		this._resolveScaledFeatureDice(out, calculations);
 		this._normalizeResourceTerminology(out, state);
@@ -4923,7 +5131,7 @@ class CharacterSheetNpcExporter {
 	 * @param {Object} state character sheet state
 	 * @param {Object} calculations `getFeatureCalculations()` output
 	 */
-	static _resolveDerivedNumbers (out, state, calculations = {}) {
+	static _resolveDerivedNumbers (out, state, calculations = {}, {isNpc = false} = {}) {
 		const rules = [];
 
 		const addDie = (phrase, raw) => {
@@ -5047,7 +5255,7 @@ class CharacterSheetNpcExporter {
 				const feature = this._ENTRY_FEATURES.get(entry);
 				const level = feature ? this._getFeatureExportLevel(state, feature) : charLevel;
 				entry.entries = entry.entries.map(it => (typeof it === "string" ? this._collapseScalingBonusSentences(resolve(it), level) : it));
-				this._resolveLevelGatedUpgrades(entry, level);
+				this._resolveLevelGatedUpgrades(entry, level, {isNpc});
 				this._dedupeDerivedAnnotations(entry);
 				this._injectMissingSaveDc(entry, dcIndex);
 			});
@@ -5336,17 +5544,17 @@ class CharacterSheetNpcExporter {
 	 * @param {number} charLevel level to resolve against
 	 * @returns {string} text with level-gated upgrades folded into the base value
 	 */
-	static _resolveLevelGatedUpgrades (entry, charLevel) {
+	static _resolveLevelGatedUpgrades (entry, charLevel, {isNpc = false} = {}) {
 		if (!charLevel || !Array.isArray(entry?.entries)) return;
 		const lines = entry.entries;
 		lines.forEach(line => {
 			if (!line || typeof line !== "object") return;
 			if (Array.isArray(line.items)) {
 				const group = {entries: line.items};
-				this._resolveLevelGatedUpgrades(group, charLevel);
+				this._resolveLevelGatedUpgrades(group, charLevel, {isNpc});
 				line.items = group.entries;
 			}
-			this._resolveLevelGatedUpgrades(line, charLevel);
+			this._resolveLevelGatedUpgrades(line, charLevel, {isNpc});
 		});
 		if (!lines.some(it => typeof it === "string" && /\breach(?:es)?\b|\bbecomes?\b|\bincreases?\b/i.test(it))) return;
 
@@ -5414,16 +5622,21 @@ class CharacterSheetNpcExporter {
 			if (!reached.length) continue;
 			const best = reached.reduce((a, b) => (b.at >= a.at ? b : a));
 			const kind = kindOf(best.value);
+			const quantity = isNpc && kind === "die"
+				? /\b(?:your|its|the)\s+([^.;]+?\b(?:die|dice))\s+(?:changes?|becomes?|increases?)/i.exec(plain)?.[1]
+				: null;
 
 			// Write the winning value over the most recent same-kind value stated before it.
 			let applied = false;
 			for (let j = i - 1; j >= 0 && !applied; --j) {
 				if (units[j].opaque) continue;
 				const basePlain = this._getPlainMatchTextCased(units[j].text);
+				if (quantity && !basePlain.toLowerCase().includes(quantity.toLowerCase())) continue;
 				if (kind === "distance" && /\brange\b/i.test(plain) && !/\b(?:range|spell attack|target[^.]*within)\b/i.test(basePlain)) continue;
 				if (kind === "die" && /\bdamage\b/i.test(plain) && !/\bdamage\b/i.test(basePlain)) continue;
 				const base = [...units[j].text.matchAll(new RegExp(`(${VALUE})`, "gi"))]
-					.filter(m => kindOf(m[1]) === kind && rank(m[1]) !== rank(best.value));
+					.filter(m => kindOf(m[1]) === kind && rank(m[1]) !== rank(best.value))
+					.filter(m => !isNpc || kind !== "die" || !/^1?d20$/i.test(m[1]));
 				if (base.length !== 1) continue;
 				const target = base[0];
 				const faces = kind === "pool" ? /\bd(\d+)s\b/i.exec(target[1])?.[1] : null;
@@ -12200,6 +12413,7 @@ class CharacterSheetNpcExporter {
 				block.headerEntries.push(`${npcName} is a spellcaster. ${npcName}'s spellcasting ability is ${Parser.attAbvToFull(ability)} (spell save {@dc ${dc}}, {@hit ${this._toSignedStr(atk)}} to hit with spell attacks).`);
 			} else block.headerEntries.push("The casting class and ability for these saved spells are unresolved.");
 			const castable = group.records.filter(spell => !spell.ritualOnly && (spell.level === 0 || spell.prepared || spell.alwaysPrepared || card?.mechanic === "known"));
+			if (card?.mechanic === "known") block.headerEntries.push("The listed slot-castable known spells are available without a separate daily preparation step.");
 			const unprepared = group.records.filter(spell => !castable.includes(spell));
 			const will = castable.filter(spell => spell.level === 0).map(spell => this._formatSpellTag(spell));
 			if (will.length) block.will = [...new Set(will)];
@@ -12453,7 +12667,7 @@ class CharacterSheetNpcExporter {
 			};
 			this._ENTRY_FEATURES.set(entry, feature);
 			if (!isCompanion) {
-				this._resolveLevelGatedUpgrades(entry, featureLevel);
+				this._resolveLevelGatedUpgrades(entry, featureLevel, {isNpc: true});
 				this._applyCurrentFeatureCalculations(entry, feature, state, psionicCalc, {annotateClassLevels: isComplete});
 				if (isComplete || !feature.description) {
 					entry.entries = this._mapExportEntryStrings(entry.entries, text => this._normalizeAbilityTextForNpc(text, {
@@ -12852,7 +13066,7 @@ class CharacterSheetNpcExporter {
 			const safeLabel = label ? this._getSafeInlineText(label, {maxLen: 64}) : "";
 			let isFirstParagraph = true;
 			const current = {entries: this._splitHtmlParagraphs(html).map(paragraph => this._resolveFutureLevelClauses(this._stripHtmlTags(paragraph), featureLevel))};
-			this._resolveLevelGatedUpgrades(current, featureLevel);
+			this._resolveLevelGatedUpgrades(current, featureLevel, {isNpc: true});
 			current.entries.forEach(paragraph => {
 				const body = this._prepareFeatureTextForNpc(paragraph, {npcName, maxLen, featureLevel});
 				if (!body) return;
