@@ -3,6 +3,43 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 71 - NPC export, companion dashboard, and spell materials - PLANNING
+
+The user approved three fresh planning tracks, followed by approved
+implementation, PRs and integration. All tracks start from published code
+`72bd3fb1d27306d7090f66261043f356a7cc4243`, not the primary checkout's
+unpublished critique-report commit. Those reports remain local and untouched.
+Planning is not a claim that the bugs are fixed.
+
+- **S1 - NPC export clarity (bug 1):** Reproduce the supplied Bard export's
+  redundant ASIs, superseded abilities, statistics-only grants and class
+  spellcasting/build prose. Project current useful mechanics without losing
+  unique actions, costs, recovery or upgrade benefits. Verify known-caster
+  availability separately from misleading preparation prose; the supplied
+  export already contains known spells. Own NPC exporter presentation and
+  the NPC export dialog, not the authoritative companion export profile.
+- **S2 - Companion fast-play dashboard (bug 2):** Improve management for
+  ordinary, grouped, feature-managed and Simulacrum companions. The approved
+  direction prioritizes HP/status, actions, casting and direct rolls, with
+  detailed rules and setup on demand. Own companion-only presentation and
+  scoped styles. Preserve actorSnapshot v1, copied statistics, owner isolation,
+  resource accounting, persistence and existing roll controls. Shared game-rule,
+  creation or payment API changes require coordination before editing.
+- **S3 - Materials and currency (bug 3):** Stop projecting genuine currency
+  requirements as inventory supplies; use the canonical wallet transaction.
+  Keep named ingredients valued in currency as actual ingredients. Replace
+  vague generated material-set labels with readable requirements, retaining
+  qualifications, alternatives and saved-item compatibility. Own material
+  projection/matching, Components sourcing and the narrow material/currency
+  payment regions, not companion management or NPC export.
+
+The orchestrator alone owns this file and arbitrates shared-reference sections.
+NPC presentation must not prune companion snapshots. Companion UI must preserve
+the NPC Export menu handler and generic casting/payment paths. Materials must
+retain source waivers, fresh DM permission, actor-bound cancellation and rollback.
+Plans require approval before implementation; full integration gates precede
+advancing the published base.
+
 ### Round 70 - Unconfirmed original symptoms
 
 - **War Caster saved-character case (bug 5):** No affected export/acquisition
