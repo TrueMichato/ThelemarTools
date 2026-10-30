@@ -1219,12 +1219,13 @@ globalThis.JqueryUtil = class {
 	static _WRP_TOAST = null;
 	static _ACTIVE_TOAST = [];
 	/**
-	 * @param {{content: string|HTMLElementExtended, type?: string, autoHideTime?: boolean} | string} options The options for the toast.
+	 * @param {{content: string|HTMLElementExtended, type?: string, autoHideTime?: number, isAutoHide?: boolean, isDismissOnClick?: boolean} | string} options The options for the toast.
 	 * @param {(string|HTMLElementExtended)} options.content Toast contents.
 	 * @param {string} options.type Toast type. Can be any Bootstrap alert type ("success", "info", "warning", or "danger").
 	 * @param {number} options.autoHideTime The time in ms before the toast will be automatically hidden.
 	 * Defaults to 5000 ms.
 	 * @param {boolean} options.isAutoHide
+	 * @param {boolean} options.isDismissOnClick Defaults to true. Disable for reports whose content must remain selectable and interactive.
 	 */
 	static doToast (options) {
 		if (typeof window === "undefined") return;
@@ -1232,7 +1233,8 @@ globalThis.JqueryUtil = class {
 		if (JqueryUtil._WRP_TOAST == null) {
 			JqueryUtil._WRP_TOAST = veE({
 				tag: "div",
-				clazz: "toast__container ve-no-events ve-w-100 ve-overflow-y-hidden ve-flex-col",
+				clazz: "toast__container ve-flex-col",
+				attrs: {tabindex: "0", role: "region", "aria-label": "Notifications"},
 			});
 			document.body.appendChild(JqueryUtil._WRP_TOAST);
 		}
@@ -1247,6 +1249,15 @@ globalThis.JqueryUtil = class {
 
 		options.isAutoHide = options.isAutoHide ?? true;
 		options.autoHideTime = options.autoHideTime ?? 5000;
+		options.isDismissOnClick = options.isDismissOnClick ?? true;
+
+		const dismiss = evt => {
+			evt.preventDefault();
+			evt.stopPropagation();
+			JqueryUtil._doToastCleanup(toastMeta);
+			if (!EventUtil.isCtrlMetaKey(evt)) return;
+			[...JqueryUtil._ACTIVE_TOAST].forEach(meta => JqueryUtil._doToastCleanup(meta));
+		};
 
 		const eleToast = veE({
 			tag: "div",
@@ -1255,6 +1266,7 @@ globalThis.JqueryUtil = class {
 				veE({
 					tag: "div",
 					clazz: "toast__wrp-content",
+					attrs: {tabindex: "0", role: "region", "aria-label": "Notification content"},
 					children: [options.content],
 				}),
 				veE({
@@ -1265,6 +1277,8 @@ globalThis.JqueryUtil = class {
 							tag: "button",
 							clazz: "ve-btn toast__btn-close",
 							title: "Close (CTRL to Close All)",
+							attrs: {type: "button", "aria-label": "Close notification (CTRL or Command to close all)"},
+							click: dismiss,
 							children: [
 								veE({
 									tag: "span",
@@ -1276,15 +1290,10 @@ globalThis.JqueryUtil = class {
 				}),
 			],
 			mousedown: evt => {
-				evt.preventDefault();
+				if (options.isDismissOnClick) evt.preventDefault();
 			},
 			click: evt => {
-				evt.preventDefault();
-				JqueryUtil._doToastCleanup(toastMeta);
-
-				// Close all on CTRL-click
-				if (!EventUtil.isCtrlMetaKey(evt)) return;
-				[...JqueryUtil._ACTIVE_TOAST].forEach(toastMeta => JqueryUtil._doToastCleanup(toastMeta));
+				if (options.isDismissOnClick) dismiss(evt);
 			},
 		});
 
@@ -1306,20 +1315,14 @@ globalThis.JqueryUtil = class {
 						JqueryUtil._doToastCleanup(toastMeta);
 					}, options.autoHideTime);
 				}
-
-				if (JqueryUtil._ACTIVE_TOAST.length >= 3) {
-					JqueryUtil._ACTIVE_TOAST
-						.filter(({isAutoHide}) => !isAutoHide)
-						.forEach(toastMeta => {
-							JqueryUtil._doToastCleanup(toastMeta);
-						});
-				}
 			});
 	}
 
 	static _doToastCleanup (toastMeta) {
+		const ix = JqueryUtil._ACTIVE_TOAST.indexOf(toastMeta);
+		if (!~ix) return;
 		toastMeta.eleToast.vee.removeClass("toast--animate");
-		JqueryUtil._ACTIVE_TOAST.splice(JqueryUtil._ACTIVE_TOAST.indexOf(toastMeta), 1);
+		JqueryUtil._ACTIVE_TOAST.splice(ix, 1);
 		setTimeout(() => toastMeta.eleToast.parentElement && toastMeta.eleToast.remove(), 85);
 	}
 

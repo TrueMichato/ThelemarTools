@@ -264,71 +264,38 @@ export class ManageBrewUi {
 		try {
 			({brewDocsUpdated, failedBrews} = await this._brewUtil.pPullAllBrews({brews, isReturnMeta: true}));
 		} catch (e) {
-			JqueryUtil.doToast({content: `Update failed! ${VeCt.STR_SEE_CONSOLE}`, type: "danger"});
+			const report = ManageBrewDiagnosticsUtil.getUpdateReport({brewUtil: this._brewUtil, brews: brews || rdState.brews || [], error: e});
+			ManageBrewDiagnosticsUtil.logUpdateReport(report);
+			JqueryUtil.doToast({
+				content: veE({outer: ManageBrewDiagnosticsUtil.getUpdateReportHtml(report)}),
+				type: "danger",
+				isAutoHide: false,
+				isDismissOnClick: false,
+			});
 			throw e;
 		}
 
 		failedBrews = failedBrews || [];
-		failedBrews.forEach(({url, error}) => {
-			// eslint-disable-next-line no-console
-			console.error(`Failed to update ${this._brewUtil.DISPLAY_NAME} from URL "${url}":`, error);
+		brewDocsUpdated ||= [];
+		if (brewDocsUpdated.length) await this._pRender_pBrewList(rdState);
+		if (rdState.diagnosticsScanPromise) await rdState.diagnosticsScanPromise;
+		const updateReport = ManageBrewDiagnosticsUtil.getUpdateReport({
+			brewUtil: this._brewUtil,
+			brews: brews || rdState.brews || [],
+			brewDocsUpdated,
+			failedBrews,
 		});
-
-		const htmlFailedList = this.constructor._pDoPullAll_getFailedListHtml(failedBrews);
-
-		// Outcome: nothing was updated
-		if (!brewDocsUpdated?.length) {
-			// ... and nothing failed
-			if (!failedBrews.length) return JqueryUtil.doToast(`Update complete! No ${this._brewUtil.DISPLAY_NAME} was updated.`);
-
-			// ... but some failed
-			return JqueryUtil.doToast({
-				type: "danger",
-				isAutoHide: false,
-				content: e_({outer: `<div>
-					<div>Update failed for ${failedBrews.length} ${failedBrews.length === 1 ? this._brewUtil.DISPLAY_NAME : this._brewUtil.DISPLAY_NAME_PLURAL}. ${VeCt.STR_SEE_CONSOLE}</div>
-					${htmlFailedList}
-				</div>`}),
-			});
-		}
-
-		await this._pRender_pBrewList(rdState);
-
-		const brewDocsUpdatedMetas = brewDocsUpdated
-			.map(brewDoc => {
-				return {
-					brewName: this.constructor._getBrewName(brewDoc),
-					sources: MiscUtil.copyFast(brewDoc.body._meta?.sources || []),
-				};
-			});
-
-		const htmlListRows = brewDocsUpdatedMetas
-			.sort((a, b) => SortUtil.ascSortLower(a.brewName, b.brewName))
-			.map(({sources}) => {
-				if (!sources.length) return "";
-
-				const htmlListItems = sources
-					.sort((a, b) => SortUtil.ascSortLower(a.full || SOURCE_UNKNOWN_FULL, b.full || SOURCE_UNKNOWN_FULL))
-					.map(brewSource => `<li>${brewSource.full || SOURCE_UNKNOWN_FULL}</li>`);
-
-				if (htmlListItems.length === 1) return htmlListItems[0];
-
-				return `<ul>${htmlListItems.join("")}</ul>`;
-			})
-			.filter(Boolean)
-			.join("");
+		ManageBrewDiagnosticsUtil.logUpdateReport(updateReport);
 
 		const messageInfo = {
 			isAutoHide: false,
-			...(failedBrews.length ? {type: "warning"} : {}),
-			contentHtml: `<div>
-				<div>Update complete! ${brewDocsUpdated.length} ${brewDocsUpdated.length === 1 ? `${this._brewUtil.DISPLAY_NAME} was` : `${this._brewUtil.DISPLAY_NAME_PLURAL} were`} updated.</div>
-				${htmlListRows ? `<ul class="ve-mt-2 ve-mb-0">${htmlListRows}</ul>` : ""}
-				${failedBrews.length ? `<div class="ve-mt-2">${failedBrews.length} failed to update. ${VeCt.STR_SEE_CONSOLE}</div>${htmlFailedList}` : ""}
-			</div>`,
+			isDismissOnClick: false,
+			type: updateReport.outcome === "failed" ? "danger" : failedBrews.length || updateReport.diagnostics.length ? "warning" : "info",
+			contentHtml: ManageBrewDiagnosticsUtil.getUpdateReportHtml(updateReport),
+			updateReport,
 		};
 
-		if (isReload) {
+		if (isReload && brewDocsUpdated.length) {
 			await this._brewUtil.pSetReloadMessage(messageInfo);
 			if (this._brewUtil.isReloadRequired()) this._brewUtil.doLocationReload();
 			return;
@@ -338,18 +305,6 @@ export class ManageBrewUi {
 			...messageInfo,
 			content: veE({outer: messageInfo.contentHtml}),
 		});
-	}
-
-	static _pDoPullAll_getFailedListHtml (failedBrews) {
-		if (!failedBrews?.length) return "";
-
-		const htmlListItems = failedBrews
-			.map(({brew, url}) => this._getBrewName(brew) || brew?.head?.filename || url || "(Unknown)")
-			.sort(SortUtil.ascSortLower)
-			.map(name => `<li>${name.qq()}</li>`)
-			.join("");
-
-		return `<ul class="ve-mt-1 ve-mb-0">${htmlListItems}</ul>`;
 	}
 
 	async pRender (wrp, {rdState = null} = {}) {

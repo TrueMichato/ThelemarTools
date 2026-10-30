@@ -115,6 +115,7 @@ class FakeElement {
 			.flat()
 			.filter(child => child != null)
 			.forEach(child => {
+				if (typeof child === "string") child = this.ownerDocument.createTextNode(child);
 				child.parentElement = this;
 				this._children.push(child);
 				if (
@@ -128,6 +129,18 @@ class FakeElement {
 	appendChild (child) {
 		this.append(child);
 		return child;
+	}
+
+	prepend (...children) {
+		const previous = [...this._children];
+		this._children = [];
+		this.append(...children, ...previous);
+	}
+
+	remove () {
+		if (!this.parentElement) return;
+		this.parentElement._children = this.parentElement._children.filter(child => child !== this);
+		this.parentElement = null;
 	}
 
 	setAttribute (name, value) {

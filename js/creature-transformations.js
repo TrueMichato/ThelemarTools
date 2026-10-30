@@ -38,6 +38,7 @@ const ENTRY_ROLES = new Set(["breathWeapon", "bite", "healingTouch", "angelicWea
 const REVIEW_FIELDS = new Set(["ac", "hp", "attacks", "cr", "characterLevel", "eligibility", "abilities", "traits", "spellcasting", "other"]);
 
 const copy = value => structuredClone(value);
+class CreatureTransformationCandidateError extends Error {}
 const getId = (kind, {name, source}) => `${kind}:${name.toLowerCase()}|${source.toLowerCase()}`;
 const getStableSignature = value => JSON.stringify(value, (_key, part) =>
 	part && typeof part === "object" && !Array.isArray(part)
@@ -50,7 +51,7 @@ const getSignatureHash = signature => {
 };
 const assertIdentity = (entity) => {
 	if (typeof entity?.name !== "string" || !entity.name.trim() || typeof entity?.source !== "string" || !entity.source.trim()) {
-		throw new Error("Creature transformation requires a nonempty name and source.");
+		throw new CreatureTransformationCandidateError("Creature transformation requires a nonempty name and source.");
 	}
 };
 const isEntry = isTransformationEntry;
@@ -60,23 +61,23 @@ const isEntryMatch = match => {
 		|| (keys === "role,source" && ENTRY_ROLES.has(match.role) && typeof match.source === "string" && !!match.source.trim());
 };
 const assertReview = reviews => {
-	if (!Array.isArray(reviews) || !reviews.every(it => REVIEW_FIELDS.has(it?.field) && typeof it.reason === "string" && !!it.reason.trim() && Object.keys(it).sort().join(",") === "field,reason")) {
-		throw new Error("Transformation manualReview must contain typed, nonempty DM review items.");
+	if (!Array.isArray(reviews) || !reviews.every(it => REVIEW_FIELDS.has(it?.field) && typeof it?.reason === "string" && !!it.reason.trim() && Object.keys(it).sort().join(",") === "field,reason")) {
+		throw new CreatureTransformationCandidateError("Transformation manualReview must contain typed, nonempty DM review items.");
 	}
 };
 const assertEligibility = eligibility => {
-	if (!eligibility || typeof eligibility !== "object" || Array.isArray(eligibility)) throw new Error("Transformation eligibility must be an object.");
+	if (!eligibility || typeof eligibility !== "object" || Array.isArray(eligibility)) throw new CreatureTransformationCandidateError("Transformation eligibility must be an object.");
 	const allowed = new Set(["types", "sizes", "minCr", "maxCr", "minInt", "maxInt", "requiresTrait", "dmApproval"]);
-	if (Object.keys(eligibility).some(key => !allowed.has(key))) throw new Error("Unknown transformation eligibility constraint.");
-	if (eligibility.types && (!Array.isArray(eligibility.types) || !eligibility.types.length || eligibility.types.some(it => !CREATURE_TYPES.has(it)))) throw new Error("Invalid creature-type eligibility.");
-	if (eligibility.sizes && (!Array.isArray(eligibility.sizes) || !eligibility.sizes.length || eligibility.sizes.some(it => !["T", "S", "M", "L", "H", "G"].includes(it)))) throw new Error("Invalid size eligibility.");
-	if (["minCr", "maxCr"].some(key => eligibility[key] != null && (!Number.isFinite(eligibility[key]) || eligibility[key] < 0))) throw new Error("Invalid CR eligibility.");
-	if (["minInt", "maxInt"].some(key => eligibility[key] != null && (!Number.isInteger(eligibility[key]) || eligibility[key] < 1 || eligibility[key] > 30))) throw new Error("Invalid Intelligence eligibility.");
-	if (eligibility.requiresTrait != null && (typeof eligibility.requiresTrait !== "string" || !eligibility.requiresTrait.trim())) throw new Error("Invalid trait eligibility.");
-	if (eligibility.dmApproval != null && typeof eligibility.dmApproval !== "boolean") throw new Error("Invalid DM approval eligibility.");
+	if (Object.keys(eligibility).some(key => !allowed.has(key))) throw new CreatureTransformationCandidateError("Unknown transformation eligibility constraint.");
+	if (eligibility.types && (!Array.isArray(eligibility.types) || !eligibility.types.length || eligibility.types.some(it => !CREATURE_TYPES.has(it)))) throw new CreatureTransformationCandidateError("Invalid creature-type eligibility.");
+	if (eligibility.sizes && (!Array.isArray(eligibility.sizes) || !eligibility.sizes.length || eligibility.sizes.some(it => !["T", "S", "M", "L", "H", "G"].includes(it)))) throw new CreatureTransformationCandidateError("Invalid size eligibility.");
+	if (["minCr", "maxCr"].some(key => eligibility[key] != null && (!Number.isFinite(eligibility[key]) || eligibility[key] < 0))) throw new CreatureTransformationCandidateError("Invalid CR eligibility.");
+	if (["minInt", "maxInt"].some(key => eligibility[key] != null && (!Number.isInteger(eligibility[key]) || eligibility[key] < 1 || eligibility[key] > 30))) throw new CreatureTransformationCandidateError("Invalid Intelligence eligibility.");
+	if (eligibility.requiresTrait != null && (typeof eligibility.requiresTrait !== "string" || !eligibility.requiresTrait.trim())) throw new CreatureTransformationCandidateError("Invalid trait eligibility.");
+	if (eligibility.dmApproval != null && typeof eligibility.dmApproval !== "boolean") throw new CreatureTransformationCandidateError("Invalid DM approval eligibility.");
 };
 const assertChanges = changes => {
-	if (!Array.isArray(changes)) throw new Error("Transformation changes must be an array.");
+	if (!Array.isArray(changes)) throw new CreatureTransformationCandidateError("Transformation changes must be an array.");
 	for (const step of changes) {
 		const props = Object.keys(step || {}).sort().join(",");
 		const valid = (() => {
@@ -107,7 +108,7 @@ const assertChanges = changes => {
 				default: return false;
 			}
 		})();
-		if (!valid) throw new Error(`Invalid transformation change: ${step?.op || "(missing op)"}`);
+		if (!valid) throw new CreatureTransformationCandidateError(`Invalid transformation change: ${step?.op || "(missing op)"}`);
 	}
 };
 
@@ -412,29 +413,30 @@ const getRaceRecipe = race => {
  * DataUtil.race already merges separate subraces using Renderer.race.mergeSubraces.
  * The loader also supplies same-source base races; expand inline _versions separately.
  */
-function getCreatureTransformationCandidates ({catalog, races, getVersions}) {
+function getCreatureTransformationCandidates ({catalog, races, getVersions, onInvalidCandidate = null}) {
 	if (!Array.isArray(catalog?.creatureTransformation) || !Array.isArray(races)) throw new Error("Transformation catalog and resolved races are required.");
 	const byId = new Map();
+	let pending = [];
 	const append = candidate => {
 		assertIdentity(candidate.identity);
 		if (
 			!candidate.provenance
 			|| !["classic", "one", "unverified"].includes(candidate.provenance.edition)
 			|| (candidate.provenance.page != null && (!Number.isInteger(candidate.provenance.page) || candidate.provenance.page < 1))
-		) throw new Error(`Invalid transformation provenance: ${candidate.id}`);
+		) throw new CreatureTransformationCandidateError(`Invalid transformation provenance: ${candidate.id}`);
 		assertEligibility(candidate.eligibility);
 		assertReview(candidate.manualReview);
-		if (!Array.isArray(candidate.prerequisites) || candidate.prerequisites.some(it => typeof it !== "string" || !it.trim())) throw new Error(`Invalid transformation prerequisites: ${candidate.id}`);
+		if (!Array.isArray(candidate.prerequisites) || candidate.prerequisites.some(it => typeof it !== "string" || !it.trim())) throw new CreatureTransformationCandidateError(`Invalid transformation prerequisites: ${candidate.id}`);
 		assertChanges(candidate.changes);
-		if (!Array.isArray(candidate.optionGroups)) throw new Error(`Invalid transformation option groups: ${candidate.id}`);
+		if (!Array.isArray(candidate.optionGroups)) throw new CreatureTransformationCandidateError(`Invalid transformation option groups: ${candidate.id}`);
 		const groupIds = new Set();
 		for (const group of candidate.optionGroups) {
-			if (!group.id || groupIds.has(group.id)) throw new Error(`Duplicate or missing option group in ${candidate.id}.`);
+			if (!group?.id || groupIds.has(group.id)) throw new CreatureTransformationCandidateError(`Duplicate or missing option group in ${candidate.id}.`);
 			groupIds.add(group.id);
-			if (!["one", "any"].includes(group.selection) || !Array.isArray(group.options) || !group.options.length) throw new Error(`Invalid option group in ${candidate.id}.`);
+			if (!["one", "any"].includes(group.selection) || !Array.isArray(group.options) || !group.options.length) throw new CreatureTransformationCandidateError(`Invalid option group in ${candidate.id}.`);
 			const ids = new Set();
 			for (const option of group.options) {
-				if (!option.id || ids.has(option.id)) throw new Error(`Duplicate or missing option in ${candidate.id}/${group.id}.`);
+				if (!option?.id || ids.has(option.id)) throw new CreatureTransformationCandidateError(`Duplicate or missing option in ${candidate.id}/${group.id}.`);
 				ids.add(option.id);
 				assertChanges(option.changes);
 				assertReview(option.manualReview);
@@ -444,39 +446,63 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions}) {
 		for (const group of candidate.optionGroups) {
 			if (!group.appliesTo) continue;
 			const parent = candidate.optionGroups.find(it => it.id === group.appliesTo.group);
-			if (!parent?.options.some(it => it.id === group.appliesTo.option) || group.required) throw new Error(`Invalid conditional option group in ${candidate.id}/${group.id}.`);
+			if (!parent?.options.some(it => it.id === group.appliesTo.option) || group.required) throw new CreatureTransformationCandidateError(`Invalid conditional option group in ${candidate.id}/${group.id}.`);
 		}
-		const matches = byId.get(candidate.id) || [];
+		const matches = [...byId.get(candidate.id) || [], ...pending.filter(it => it.candidate.id === candidate.id)];
 		if (matches.length && candidate.kind !== "race") throw new Error(`Duplicate creature transformation identity: ${candidate.id}`);
 		const signature = getStableSignature(candidate);
 		if (matches.some(it => it.signature === signature)) return;
-		matches.push({candidate, signature});
-		byId.set(candidate.id, matches);
+		pending.push({candidate, signature});
 	};
 
-	for (const recipe of catalog.creatureTransformation) {
-		assertIdentity(recipe);
-		append({
-			...copy(recipe),
-			kind: "catalog",
-			id: getId("catalog", recipe),
-			identity: {name: recipe.name, source: recipe.source},
-			manualReview: [...copy(REVIEW_CHASSIS), ...copy(recipe.manualReview)],
+	const visit = (entity, kind, index, fn) => {
+		try {
+			pending = [];
+			fn();
+			for (const match of pending) {
+				const matches = byId.get(match.candidate.id) || [];
+				matches.push(match);
+				byId.set(match.candidate.id, matches);
+			}
+		} catch (e) {
+			if (!onInvalidCandidate || !(e instanceof CreatureTransformationCandidateError)) throw e;
+			onInvalidCandidate({
+				kind,
+				index,
+				name: typeof entity?.name === "string" ? entity.name : null,
+				source: typeof entity?.source === "string" ? entity.source : null,
+				reason: e.message,
+			});
+		}
+	};
+	for (const [index, recipe] of catalog.creatureTransformation.entries()) {
+		visit(recipe, "catalog", index, () => {
+			assertIdentity(recipe);
+			assertReview(recipe.manualReview);
+			append({
+				...copy(recipe),
+				kind: "catalog",
+				id: getId("catalog", recipe),
+				identity: {name: recipe.name, source: recipe.source},
+				manualReview: [...copy(REVIEW_CHASSIS), ...copy(recipe.manualReview)],
+			});
 		});
 	}
-	for (const race of races) {
-		assertIdentity(race);
-		const recipe = getRaceRecipe(race);
-		if (race._isBaseRace) recipe.manualReview.push({field: "eligibility", reason: "Select a playable subrace or lineage if required by this species."});
-		append(recipe);
-		if (!race._versions?.length) continue;
-		if (typeof getVersions !== "function") throw new Error(`Race versions cannot be resolved: ${race.name}|${race.source}`);
-		for (const [ix, version] of getVersions({...race, __prop: "race"}).entries()) {
-			assertIdentity(version);
-			const versionRecipe = getRaceRecipe({...version, _baseName: race.name, _baseSource: race.source});
-			versionRecipe.id = `${versionRecipe.id}~v:${race.name.toLowerCase()}|${race.source.toLowerCase()}:${ix + 1}`;
-			append(versionRecipe);
-		}
+	for (const [index, race] of races.entries()) {
+		visit(race, "race", index, () => {
+			assertIdentity(race);
+			const recipe = getRaceRecipe(race);
+			if (race._isBaseRace) recipe.manualReview.push({field: "eligibility", reason: "Select a playable subrace or lineage if required by this species."});
+			append(recipe);
+			if (!race._versions?.length) return;
+			if (typeof getVersions !== "function") throw new Error(`Race versions cannot be resolved: ${race.name}|${race.source}`);
+			for (const [ix, version] of getVersions({...race, __prop: "race"}).entries()) {
+				assertIdentity(version);
+				const versionRecipe = getRaceRecipe({...version, _baseName: race.name, _baseSource: race.source});
+				versionRecipe.id = `${versionRecipe.id}~v:${race.name.toLowerCase()}|${race.source.toLowerCase()}:${ix + 1}`;
+				append(versionRecipe);
+			}
+		});
 	}
 	const result = [];
 	for (const [id, matches] of byId) {
@@ -497,7 +523,7 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions}) {
 	return result.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function pLoadCreatureTransformationCandidates ({dataUtil = globalThis.DataUtil} = {}) {
+async function pLoadCreatureTransformationCandidates ({dataUtil = globalThis.DataUtil, onWarning = null} = {}) {
 	if (!dataUtil?.race || !dataUtil?.generic?.getVersions) throw new Error("DataUtil.race and DataUtil.generic.getVersions are required.");
 	const [catalog, site, prerelease, brew] = await Promise.all([
 		dataUtil.loadJSON("data/creature-transformations.json"),
@@ -510,14 +536,19 @@ async function pLoadCreatureTransformationCandidates ({dataUtil = globalThis.Dat
 		if (!data || typeof data !== "object" || (data.race != null && !Array.isArray(data.race))) throw new Error(`${name} race source is malformed.`);
 	}
 	const races = JSON.parse(JSON.stringify([...(site.race || []), ...(prerelease.race || []), ...(brew.race || [])]));
-	if (races.some(race => race._copy) && typeof dataUtil.race.pMergeCopy !== "function") {
+	if (races.some(race => race?._copy) && typeof dataUtil.race.pMergeCopy !== "function") {
 		throw new Error("Race copies cannot be resolved without DataUtil.race.pMergeCopy.");
 	}
-	for (const race of races) if (race._copy) await dataUtil.race.pMergeCopy(races, race, {isErrorOnMissing: true});
+	for (const race of races) if (race?._copy) await dataUtil.race.pMergeCopy(races, race, {isErrorOnMissing: true});
 	return getCreatureTransformationCandidates({
 		catalog,
 		races,
 		getVersions: race => dataUtil.generic.getVersions(race, {isExternalApplicationIdentityOnly: false}),
+		onInvalidCandidate: warning => {
+			// eslint-disable-next-line no-console
+			console.warn(`[5et:creature-transformations] Skipping ${warning.name || `${warning.kind} entry ${warning.index + 1}`} (${warning.source || "unknown source"}): ${warning.reason}`, warning);
+			onWarning?.(warning);
+		},
 	});
 }
 

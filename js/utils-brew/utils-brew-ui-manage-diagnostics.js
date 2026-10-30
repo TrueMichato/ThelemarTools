@@ -1,4 +1,87 @@
 export class ManageBrewDiagnosticsUtil {
+	static getUpdateReport ({brewUtil, brews, brewDocsUpdated = [], failedBrews = [], error = null}) {
+		const getDocument = brew => ({
+			documentId: brew.head?.docIdLocal || null,
+			filename: brew.head?.filename || null,
+			url: brew.head?.url || null,
+			sources: structuredClone(brew.body?._meta?.sources || []),
+		});
+		const documents = [...brews, ...brewDocsUpdated, ...failedBrews.map(it => it.brew).filter(Boolean)].map(getDocument);
+		const origin = brewUtil.PAGE_MANAGE === UrlUtil.PG_MANAGE_PRERELEASE ? "prerelease" : "brew";
+		const records = BrewDiagnostics.getRecords();
+		const diagnostics = records.filter(record => {
+			if (record.origin !== "unknown" && record.origin !== origin) return false;
+			const identity = ["documentId", "url", "filename"].find(key => record[key]);
+			if (identity) return documents.some(doc => doc[identity] === record[identity]);
+			if (!record.owner?.source) return false;
+			const matches = documents.filter(doc => doc.sources.some(source => source.json === record.owner.source));
+			return new Set(matches.map(doc => doc.documentId || doc.url || doc.filename)).size === 1;
+		});
+		const outcome = error ? "failed" : failedBrews.length ? brewDocsUpdated.length ? "partial" : "failed" : brewDocsUpdated.length ? "updated" : "unchanged";
+		return {
+			id: CryptUtil.uid(),
+			outcome,
+			summary: error
+				? `Update failed! ${error.message || error}`
+				: brewDocsUpdated.length
+					? `Update complete! ${brewDocsUpdated.length} ${brewDocsUpdated.length === 1 ? `${brewUtil.DISPLAY_NAME} was` : `${brewUtil.DISPLAY_NAME_PLURAL} were`} updated.`
+					: failedBrews.length
+						? `Update failed for ${failedBrews.length} ${failedBrews.length === 1 ? brewUtil.DISPLAY_NAME : brewUtil.DISPLAY_NAME_PLURAL}.`
+						: `Update complete! No ${brewUtil.DISPLAY_NAME} was updated.`,
+			updated: brewDocsUpdated.map(getDocument),
+			failed: failedBrews.map(it => ({document: it.brew ? getDocument(it.brew) : null, url: it.url, error: this._getUpdateError(it.error)})),
+			error: error ? this._getUpdateError(error) : null,
+			diagnostics,
+			unassociatedDiagnostics: records.length - diagnostics.length,
+		};
+	}
+
+	static _getUpdateError (error, seen = new Set()) {
+		if (error == null || typeof error !== "object") return {message: String(error)};
+		if (seen.has(error)) return {message: "(Circular error cause)"};
+		seen.add(error);
+		return {
+			name: error.name || "Error",
+			message: error.message || String(error),
+			stack: error.stack || null,
+			...(error.cause !== undefined ? {cause: this._getUpdateError(error.cause, seen)} : {}),
+		};
+	}
+
+	static getUpdateReportText (report) {
+		const label = doc => doc.sources.map(it => it.full || it.json || "(Unknown source)").join(", ") || doc.filename || doc.url || doc.documentId || "(Unknown document)";
+		const lines = [
+			report.summary,
+			`Updated documents (${report.updated.length}):`,
+			...report.updated.map((doc, ix) => `${ix + 1}. ${label(doc)}\n${JSON.stringify(doc, null, 2)}`),
+			`Failed documents (${report.failed.length}):`,
+			...report.failed.map((failure, ix) => `${ix + 1}. ${failure.document ? label(failure.document) : failure.url}\n${JSON.stringify(failure, null, 2)}`),
+			...(report.error ? [`Update error:\n${JSON.stringify(report.error, null, 2)}`] : []),
+			"Known issues at report time (not a fresh validation scan):",
+			this.getCopyableReport(report.diagnostics),
+			`Diagnostic association: ${report.diagnostics.length} included; ${report.unassociatedDiagnostics} unrelated or unassociated records not attributed to this update.`,
+		];
+		return lines.join("\n\n");
+	}
+
+	static logUpdateReport (report, {isReplay = false} = {}) {
+		const text = `[5et:brew-update] ${report.id}${isReplay ? " (restored report; not a new update)" : ""}\n${this.getUpdateReportText(report)}`;
+		// eslint-disable-next-line no-console
+		console[report.outcome === "failed" ? "error" : report.outcome === "partial" || report.diagnostics.length ? "warn" : "info"](text);
+	}
+
+	static getUpdateReportHtml (report) {
+		const label = doc => doc.sources.map(it => it.full || it.json || "(Unknown source)").join(", ") || doc.filename || doc.url || doc.documentId || "(Unknown document)";
+		const list = items => `<ul class="ve-mt-2 ve-mb-0">${items.map(it => `<li>${it.qq()}</li>`).join("")}</ul>`;
+		return `<div>
+			<div>${report.summary.qq()}</div>
+			${report.updated.length ? list(report.updated.map(label)) : ""}
+			${report.failed.length ? `<div class="ve-mt-2">${report.failed.length} failed to update:</div>${list(report.failed.map(it => `${it.document ? label(it.document) : it.url}: ${it.error.message}`))}` : ""}
+			${report.diagnostics.length ? `<div class="ve-mt-2">Known issues at report time:</div>${list(report.diagnostics.map(it => `[${it.severity.toUpperCase()}] ${it.owner.name || it.filename || it.url || it.code}: ${it.detail || it.code}`))}` : ""}
+			<div class="ve-mt-2">Full update report logged to the console. Close this notification when finished reading.</div>
+		</div>`;
+	}
+
 	static getRecordKey (record) {
 		return JSON.stringify([
 			record.code,
