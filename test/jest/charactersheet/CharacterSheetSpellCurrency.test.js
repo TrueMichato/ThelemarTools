@@ -90,6 +90,24 @@ describe("currency is a payment source, not a generated inventory product", () =
 });
 
 describe("canonical wallet-backed casting", () => {
+	it.each(["Fire Bolt", "Fireball", "Identify"])("does not read the wallet or enter payment for %s without a material debit", async name => {
+		const {state, spell, spells} = harness(name);
+		for (const item of Materials.buildCatalog([spell])) state.addItem(item);
+		const data = state._data;
+		const before = MiscUtil.copyFast(data);
+		const balance = jest.spyOn(state, "getTotalGold").mockImplementation(() => { throw new Error("A physical or absent material requirement must not read the wallet."); });
+		const payment = jest.spyOn(state, "commitSpellMaterialPayment").mockImplementation(() => { throw new Error("A read-only material route must not enter payment."); });
+
+		await expect(spells._pConsumeMaterialComponent({
+			spell, spellData: spell, materialContext: spells._createMaterialContext(),
+		})).resolves.toEqual({consumed: null, currencySpentCp: 0});
+
+		expect(balance).not.toHaveBeenCalled();
+		expect(payment).not.toHaveBeenCalled();
+		expect(state._data).toBe(data);
+		expect(state._data).toEqual(before);
+	});
+
 	it("casts an actual 7cp material through the ordinary spell payment path", async () => {
 		const {state, spell, cast} = harness();
 		spell.components = {m: {text: "7 Copper Pieces, which the spell consumes", cost: 7, consume: true}};
@@ -117,11 +135,13 @@ describe("canonical wallet-backed casting", () => {
 		state.setCurrency("pp", 1);
 		const wallet = state._data.currency;
 		const before = state.getCurrency();
+		const payment = jest.spyOn(state, "commitSpellMaterialPayment");
 		await cast();
 		expect(state.getCurrency()).toEqual(before);
 		expect(state._data.currency).toBe(wallet);
 		expect(state.getSpellSlotsCurrent(2)).toBe(2);
 		expect(permission).not.toHaveBeenCalled();
+		expect(payment).not.toHaveBeenCalled();
 		expect(state.getInventory()).toEqual([]);
 	});
 
