@@ -37,6 +37,32 @@ document for every destination. The standalone converter remains available.
 
 ### Source rules and current progression
 
+**Playable mechanics** is the NPC default. It starts with complete source rules,
+then folds only benefits proven represented in the emitted statistics or casting
+rules. This is not the legacy Compact importance filter or a prose-length limit.
+Pure class acquisition instructions and ASI tracking rows do not belong in the
+playable statblock. Proven source-keyed effects can be reported as represented
+reductions; missing, invalid, or stale receipts instead move the original
+build-only text into an explicit report warning, without claiming the gain was
+applied or changing scores. Mixed/unique live mechanics stay in the statblock.
+Selected skill grants
+require both actual proficiency/expertise and an emitted skill entry. A saved
+choice alone is insufficient: missing grants keep their source rule and recorded
+choice, rather than fabricating a bonus or hiding the discrepancy.
+
+Pure source-owned die upgrades fold into their unique current base ability.
+For example, Bardic Inspiration grants its current die without replacing the
+separate d20 check. Targets, hearing, duration, decision timing, one-die limit,
+canonical resource maximum/recharge, and Font of Inspiration's slot conversion
+remain. Extra benefits in an upgrade or feat are not proof of redundancy.
+Duplicated language lists can disappear without deleting beast communication.
+Unknown structured rules, exceptions, and unproven clauses remain.
+
+Complete and legacy Compact remain explicitly selectable, and existing persisted
+preferences are honored. Manual picks retain their selected source rules in full,
+including build rules. These NPC presentation choices never prune the authoritative
+`profile: "companion"` projection or change its quantities, resources, or snapshot.
+
 Feature definitions retain their edition and complete mechanics; name-only feat,
 Rage, and Reckless Attack templates do not replace them. Class progression uses
 the owning class's level, not total multiclass level. An exact class/source match
@@ -172,7 +198,11 @@ ownership test as the sheet's class cards. Ambiguous multiclass attribution is
 reported rather than assigned to whichever mental ability is highest.
 
 Prepared/spellbook casters list only prepared or always-prepared leveled spells
-for ordinary casting; known casters retain their known-spell access. Unprepared
+for ordinary casting; known casters retain their known-spell access even when
+saved records have `prepared: false`. Their block explicitly says no separate
+daily preparation is required. Playable replaces recognized construction and
+preparation instructions with the actual roster, while retaining focus, slot
+recovery, ritual rules, and unrecognized exceptions. Unprepared
 spellbook entries remain in a clearly noncastable footer. Ritual eligibility
 comes from `canCastAsRitual()`, and eligible rituals are listed separately.
 Innate ritual-only grants do not become ordinary at-will spells.
@@ -401,10 +431,10 @@ Persisted under `charsheet-npc-export-options` (source meta under `charsheet-npc
 
 | Option | Values | Default | Notes |
 |--------|--------|---------|-------|
-| `presentationMode` | `complete` \| `compact` | `complete` | Missing/legacy preferences use complete mechanics; independent of runtime `profile: "companion"` |
+| `presentationMode` | `playable` \| `complete` \| `compact` | `playable` | Missing/invalid NPC preferences use Playable; explicit old modes persist. Runtime `profile: "companion"` retains its Complete default and is never pruned by NPC presentation |
 | `defenseMode` | `persistent` \| `active` | `persistent` | Active merges currently-on effective defenses; **conditional** toggles (Rage B/P/S, stances) always annotate the block with `{note, cond:true}` |
 | `includeUnarmed` | `auto` \| `always` \| `never` | `auto` | Auto keeps monk/enhanced unarmed; drops plain unarmed when other weapons exist |
-| `includeFeatures` | `auto` \| `allImportant` \| `manual` | `auto` | Complete retains all source rules in automatic scope; compact filters by importance without a count cutoff. Manual explicitly restricts either mode to the picked features |
+| `includeFeatures` | `auto` \| `allImportant` \| `manual` | `auto` | Playable starts from complete rules in either automatic scope, then proves reductions. Complete retains all rules; legacy Compact filters by importance. Manual restricts every mode to the picked features and bypasses Playable reductions |
 | `selectedFeatureIds` | `string[]` | `[]` | No hidden selection/count cap; an explicitly empty manual selection stays empty |
 | `includeCustomModifiers` | bool | `true` | Smart leftover **Additional Effects** (default on). Bookkeeping already on the block is filtered; unrepresented riders stay |
 | `includeCustomAbilities` | bool | `true` | Custom abilities routed by action economy |
@@ -482,8 +512,9 @@ ambiguous pronouns in caster/target procedures. Sentence splitting preserves
 durations, and ally reactions. Class-feature references carry a unique
 parent-owned save DC into their separately emitted options.
 
-Complete mechanics is the default, including when restoring preferences created
-before the presentation option existed. It preserves full feature rules,
+Playable mechanics is the default for missing or invalid NPC preferences,
+including preferences created before the presentation option existed. Explicit
+Complete and Compact preferences remain unchanged. Complete preserves full feature rules,
 nonnumeric riders, nested entries/tables, and uncapped custom abilities rather
 than running the ordinary destructive prose-compaction passes. Manual picks
 remain an explicit scope restriction, not a second automatic ranking.
@@ -492,10 +523,14 @@ Compact preserves the existing shorter presentation and attaches recoverable
 source-rule diagnostics. It groups selected mechanics without a feature-count
 cutoff: changing one feature's economy must not push another feature's upgrade
 or trigger out of the block. `CharacterSheetNpcExporter.getExportReport(monster)`
-returns a copy of `{name, source, presentationMode, omissions}`; each omission
+returns a copy including `{name, source, presentationMode, reductions, omissions}`;
+each omission
 includes the source entity, reason, and full sanitized entries. The comparison
 is conservative: a rewritten rule can be reported even when its meaning was
-preserved. Reports live outside monster/item schema objects.
+preserved. Playable's verified folds are informational `reductions`, not omission
+warnings. Unresolved grants/acquisitions produce warnings with their full
+source details. Missing live-use grants remain in the statblock; pure build-only
+instructions reside in the report instead. Reports live outside monster/item schema objects.
 
 Changing presentation regenerates the preview. All warnings/errors are
 available through expandable disclosures, and the full report can be copied

@@ -379,8 +379,9 @@ class CharacterSheetExport {
 			selUnarmed.value = exportOptions.includeUnarmed;
 
 			const selPresentation = e_({outer: `<select class="ve-form-control ve-input-sm" aria-label="Export presentation">
-				<option value="complete">Complete mechanics (default)</option>
-				<option value="compact">Compact with omission warnings</option>
+				<option value="playable">Playable mechanics (default)</option>
+				<option value="complete">Complete source rules</option>
+				<option value="compact">Compact (legacy; omission warnings)</option>
 			</select>`});
 			selPresentation.value = exportOptions.presentationMode;
 
@@ -569,12 +570,12 @@ class CharacterSheetExport {
 			const renderReport = () => {
 				wrpReport.innerHTML = "";
 				const report = CharacterSheetNpcExporter.getExportReport(monster);
-				if (!report.omissions.length && !report.crEstimate) return;
+				if (!report.omissions.length && !report.reductions?.length && !report.crEstimate) return;
 				const details = e_({tag: "details"});
 				const method = {dmg: "DMG-style", legacy: "Legacy blended", manual: "Manual"}[report.crEstimate?.estimator];
 				const limits = report.crEstimate?.limitations?.length || 0;
-				details.append(e_({tag: "summary", style: "display: list-item;", txt: `${method ? `${method} CR report${limits ? ` (${limits} limitations)` : ""}` : "Export report"}${report.omissions.length ? `; ${report.omissions.length} source rules omitted or rewritten` : ""}`}));
-				details.append(e_({tag: "p", txt: "Inspect the estimate, round-by-round costs, assumptions, and any omitted source rules here. Download JSON includes this separate report. It remains available after saving to Homebrew."}));
+				details.append(e_({tag: "summary", style: "display: list-item;", txt: `${method ? `${method} CR report${limits ? ` (${limits} limitations)` : ""}` : "Export report"}${report.reductions?.length ? `; ${report.reductions.length} represented rules folded` : ""}${report.omissions.length ? `; ${report.omissions.length} export warnings` : ""}`}));
+				details.append(e_({tag: "p", txt: "Inspect represented-rule reductions separately from unresolved or omitted rules, plus CR costs and assumptions. Download JSON includes this separate report. It remains available after saving to Homebrew."}));
 				details.append(e_({tag: "button",
 					clazz: "ve-btn ve-btn-default ve-btn-xs mr-2",
 					txt: "Copy report",
@@ -727,7 +728,7 @@ class CharacterSheetExport {
 						<label class="ve-muted no-shrink" style="min-width: 110px;">Presentation</label>
 						${selPresentation}
 					</div>
-					<p class="ve-muted">Complete retains full rules in the selected scope. Manual picks are an explicit restriction. Compact includes a separate report of omitted or rewritten source rules.</p>
+					<p class="ve-muted">Playable keeps live-use rules, folds represented benefits, and moves build-only instructions to the report. Complete and manual picks retain source rules. Legacy Compact can omit mechanics; inspect its warnings.</p>
 					<div class="ve-flex-v-center mb-2" style="gap: 8px;">
 						<label class="ve-muted no-shrink" style="min-width: 110px;">Defenses</label>
 						${selDefenseMode}
@@ -821,7 +822,7 @@ class CharacterSheetExport {
 						{fileType: "homebrew"},
 					);
 					const report = CharacterSheetNpcExporter.getExportReport(monster);
-					if (report.omissions.length || report.crEstimate) DataUtil.userDownload(`${basename}_export_report`, report);
+					if (report.omissions.length || report.reductions?.length || report.crEstimate) DataUtil.userDownload(`${basename}_export_report`, report);
 					const nItems = payload.item?.length || 0;
 					JqueryUtil.doToast({
 						type: "success",

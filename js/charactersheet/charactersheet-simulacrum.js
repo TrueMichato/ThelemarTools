@@ -420,7 +420,10 @@ class CharacterSheetSimulacrum {
 		addButton("Repair", () => this.pRepair({ownerPage, companionId: companion.id}), {disabled: !active, className: "btn-companion-heal"});
 		addButton("Damage", () => this.pDamage({ownerPage, companionId: companion.id}), {disabled: !active, className: "btn-companion-damage"});
 		addButton("Dismiss", () => this._pDismiss({ownerPage, companionId: companion.id}), {className: "btn-companion-dismiss"});
+		const summary = ownerPage._createCompanionTurnSummary?.(companion);
+		if (summary) card.append(summary);
 		card.append(toolbar);
+		if (ownerPage._createCompanionRollControls) card.append(ownerPage._createCompanionRollControls(companion));
 		parent.append(card);
 		return card;
 	}
@@ -435,6 +438,7 @@ class CharacterSheetSimulacrum {
 		let runtime = null;
 		let closed = false;
 		let busy = false;
+		const view = {values: new Map(), open: new Map(), search: "", focus: null, scroll: 0};
 		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Simulacrum",
 			isMinHeight0: true,
@@ -449,20 +453,42 @@ class CharacterSheetSimulacrum {
 		const content = e_({tag: "div", clazz: "cs-simulacrum__content"});
 		body.append(status, content);
 		eleModalInner.append(body);
+		const scroller = eleModalInner.closest?.(".ve-ui-modal__scroller") || eleModalInner.parentElement;
+		const rememberView = () => {
+			view.focus = null;
+			for (const element of content.querySelectorAll("[data-manager-key]")) {
+				const key = element.getAttribute("data-manager-key");
+				if (element.tagName === "SELECT" || element.tagName === "INPUT") view.values.set(key, element.value);
+				if (element.tagName === "DETAILS") view.open.set(key, element.open);
+				if (element === document.activeElement) view.focus = key;
+			}
+			view.scroll = scroller?.scrollTop || 0;
+		};
+		const restoreSelect = (element, key) => {
+			element.setAttribute("data-manager-key", key);
+			if (!view.values.has(key)) return;
+			const value = view.values.get(key);
+			if (![...element.children].some(option => option.value === value && !option.disabled)) {
+				element.append(e_({tag: "option", value, txt: "Previous selection unavailable — choose again", disabled: true}));
+				status.textContent = "A previous target or spell slot is unavailable. Choose a valid replacement before casting.";
+			}
+			element.value = value;
+		};
+		const targetIsValid = target => [...target.children].some(option => option.value === target.value && !option.disabled);
 		const operate = async operation => {
 			if (busy || closed) return;
 			if (!this._isOwnerCurrent(ownerPage, context)) {
 				status.textContent = "The selected character changed. Close this panel and open the current character's companion.";
 				return;
 			}
+			rememberView();
 			busy = true;
-			content.querySelectorAll("button, select").forEach(element => { element.disabled = true; });
+			content.querySelectorAll("button, select, input").forEach(element => { element.disabled = true; });
 			try {
 				const result = await operation();
 				if (result?.ok === false) throw new Error(result.message || "The action could not be completed.");
 				if (!closed && this._isOwnerCurrent(ownerPage, context)) {
 					this._refreshOwner(ownerPage);
-					render();
 				}
 			} catch (error) {
 				status.textContent = error.message;
@@ -473,8 +499,9 @@ class CharacterSheetSimulacrum {
 				else render({preserveStatus: true});
 			}
 		};
-		const button = (parent, label, action, {disabled = false, reason = ""} = {}) => {
+		const button = (parent, label, action, {disabled = false, reason = "", key = label} = {}) => {
 			const element = e_({tag: "button", type: "button", clazz: "ve-btn ve-btn-default", txt: label});
+			element.setAttribute("data-manager-key", `${parent.getAttribute?.("data-manager-key") || "turn"}:${key}`);
 			element.disabled = disabled;
 			if (reason) element.title = reason;
 			element.addEventListener("click", () => void operate(action));
@@ -482,7 +509,7 @@ class CharacterSheetSimulacrum {
 			return element;
 		};
 		const section = (title, parent = content) => {
-			const element = e_({tag: "section", clazz: "cs-simulacrum__section"});
+			const element = e_({tag: "section", clazz: "cs-simulacrum__section", attrs: {"data-manager-key": title}});
 			element.append(e_({tag: "h4", txt: title}));
 			parent.append(element);
 			return element;
@@ -518,8 +545,8 @@ class CharacterSheetSimulacrum {
 				txt: terminal
 					? "This duplicate has melted or been destroyed. It cannot act, recover, or be repaired. Dismiss its record or cast Simulacrum again."
 					: snapshot.policy.recovery === "no-slot-recovery"
-						? "PHB: expended spell slots, including Pact slots, cannot be recovered. HP can only be restored by paid repairs in a laboratory."
-						: "XPHB: this duplicate cannot take Short or Long Rests or cast Simulacrum. Repair it within 5 feet during your Long Rest.",
+						? "PHB: no slot recovery. Paid laboratory repairs only."
+						: "XPHB: no rests or casting Simulacrum. Repair during your Long Rest.",
 			}));
 			if (!terminal) {
 				let actor;
@@ -531,8 +558,24 @@ class CharacterSheetSimulacrum {
 					runtime?.dispose();
 					return;
 				}
-				content.append(e_({tag: "p", clazz: "cs-simulacrum__hint", txt: runtime.getManualResolutionNotice()}));
-				if (ownerPage._createCompanionRollControls) content.append(ownerPage._createCompanionRollControls(companion, {runtime}));
+				const readiness = ownerPage._createCompanionTurnSummary?.(companion, {runtime});
+				if (readiness) content.append(readiness);
+				const layout = e_({tag: "div", clazz: "cs-simulacrum__layout"});
+				const casting = e_({tag: "div", clazz: "cs-simulacrum__casting", attrs: {tabindex: "-1", "data-manager-key": "casting"}});
+				const utilities = e_({tag: "div", clazz: "cs-simulacrum__utilities", attrs: {tabindex: "-1", "data-manager-key": "manage"}});
+				const rolls = e_({tag: "section", clazz: "cs-simulacrum__rolls", attrs: {tabindex: "-1", "data-manager-key": "rolls", "aria-label": "Direct rolls"}});
+				if (ownerPage._createCompanionRollControls) rolls.append(ownerPage._createCompanionRollControls(companion, {runtime}));
+				utilities.append(rolls);
+				layout.append(casting, utilities);
+				const jumps = e_({tag: "nav", clazz: "cs-simulacrum__jumps", attrs: {"aria-label": "Companion tasks"}});
+				for (const [label, target] of [["Cast", casting], ["Rolls", rolls], ["Manage", utilities]]) {
+					const jump = e_({tag: "button", type: "button", clazz: "ve-btn ve-btn-default", txt: label});
+					jump.addEventListener("click", () => {
+						target.scrollIntoView({block: "start"});
+						target.focus({preventScroll: true});
+					});
+					jumps.append(jump);
+				}
 				const toolbar = e_({tag: "div", clazz: "cs-simulacrum__toolbar"});
 				button(toolbar, "Damage", async () => {
 					const amount = await InputUiUtil.pGetUserNumber({title: "Damage Simulacrum", min: 1, int: true});
@@ -549,7 +592,7 @@ class CharacterSheetSimulacrum {
 				button(toolbar, actor.isInCombat() ? "Start next turn" : "Start combat", () => runtime.run(state => {
 					if (state.isInCombat()) return state.advanceRound();
 					state.startCombat();
-				}));
+				}), {key: "start-turn"});
 				if (actor.isInCombat()) button(toolbar, "End combat", () => runtime.run(state => state.endCombat()));
 				if (snapshot.policy.recovery === "no-slot-recovery") {
 					for (const type of ["Short", "Long"]) {
@@ -565,14 +608,14 @@ class CharacterSheetSimulacrum {
 						});
 					}
 				}
-				content.append(toolbar);
+				content.append(toolbar, jumps, layout);
 				const concentration = actor.getConcentration();
 				if (concentration) {
-					const concentrationRow = section("Concentration");
+					const concentrationRow = section("Concentration", utilities);
 					concentrationRow.append(e_({tag: "p", txt: concentration.spellName || concentration.name || "Active concentration"}));
 					button(concentrationRow, "End concentration", () => runtime.run(state => state.breakConcentration()));
 				}
-				const conditions = section("Conditions");
+				const conditions = section("Conditions", utilities);
 				const currentConditions = actor.getConditionNames();
 				conditions.append(e_({tag: "p", txt: currentConditions.length ? currentConditions.join(", ") : "No conditions"}));
 				button(conditions, "Add condition", async () => {
@@ -583,7 +626,7 @@ class CharacterSheetSimulacrum {
 				for (const condition of actor.getConditions()) {
 					button(conditions, `Remove ${condition.name}`, () => runtime.run(state => state.removeCondition(condition.name, condition.source)));
 				}
-				const slots = section("Spell slots");
+				const slots = section("Spell slots", casting);
 				const slotText = [];
 				for (let level = 1; level <= 9; ++level) {
 					const max = actor.getSpellSlotsMax(level);
@@ -593,7 +636,7 @@ class CharacterSheetSimulacrum {
 				if (pact.max) slotText.push(`Pact (level ${pact.level}): ${pact.current}/${pact.max}`);
 				slots.append(e_({tag: "p", clazz: "cs-simulacrum__slots", txt: slotText.join(" · ") || "No spell slots"}));
 				if (actor.hasFontOfMagic()) {
-					const font = section("Font of Magic");
+					const font = section("Font of Magic", utilities);
 					const points = actor.getSorceryPoints();
 					font.append(e_({tag: "p", txt: `Sorcery Points: ${points.current}/${points.max}`}));
 					const slotToPoints = e_({tag: "select", clazz: "ve-form-control", attrs: {"aria-label": "Spell slot to convert into Sorcery Points"}});
@@ -601,6 +644,7 @@ class CharacterSheetSimulacrum {
 						if (actor.getSpellSlotsCurrent(level) > 0) slotToPoints.append(e_({tag: "option", value: level, txt: `Level ${level} slot → ${actor.getSlotToSpReturn(level)} Sorcery Points`}));
 					}
 					font.append(slotToPoints);
+					restoreSelect(slotToPoints, "slot-to-points");
 					button(font, "Convert slot to points", () => runtime.run(state => {
 						const usesBonusAction = !state.getClasses().some(cls => cls.name?.toLowerCase() === "sorcerer" && cls.source === "XPHB");
 						if (usesBonusAction && !state.isBonusActionAvailable()) throw new Error("The duplicate's Bonus Action has already been used this turn.");
@@ -613,6 +657,7 @@ class CharacterSheetSimulacrum {
 						pointsToSlot.append(e_({tag: "option", value: level, txt: `Level ${level} slot (${actor.getSpToSlotCost(level)} Sorcery Points)`}));
 					}
 					font.append(pointsToSlot);
+					restoreSelect(pointsToSlot, "points-to-slot");
 					button(font, "Create slot with points", () => runtime.run(state => {
 						if (!state.isBonusActionAvailable()) throw new Error("The duplicate's Bonus Action has already been used this turn.");
 						if (!state.convertSorceryPointsToSlot(Number(pointsToSlot.value))) throw new Error("The duplicate cannot create that slot with its available Sorcery Points.");
@@ -629,15 +674,39 @@ class CharacterSheetSimulacrum {
 				for (const other of context.state.getCompanions().filter(it => it.id !== companionId && it.actorSnapshot?.lifecycle === "active")) {
 					targets.append(e_({tag: "option", value: other.actorSnapshot.actorId, txt: other.customName || other.name}));
 				}
+				targets.setAttribute("aria-label", "Apply supported ally effects to");
+				restoreSelect(targets, "target");
 				const targetLabel = e_({tag: "label", clazz: "cs-simulacrum__field", txt: "Apply supported ally effects to"});
 				targetLabel.append(targets);
-				content.append(targetLabel, e_({tag: "p", clazz: "cs-simulacrum__hint", txt: "Self-only spells always affect this duplicate. Other targets use the sheet's supported effects; any manual resolution is shown in the cast result."}));
-				const spellSection = section("Spells");
+				casting.append(targetLabel);
+				const searchLabel = e_({tag: "label", clazz: "cs-simulacrum__field", txt: "Find a spell"});
+				const search = e_({tag: "input", clazz: "ve-form-control cs-simulacrum__search", attrs: {type: "search", placeholder: "Spell name or source", "data-manager-key": "search"}});
+				search.value = view.search;
+				searchLabel.append(search);
+				casting.append(searchLabel);
+				const noResults = e_({tag: "p", clazz: "cs-simulacrum__no-results", txt: "No matching spells. Clear the search to see all spells.", attrs: {role: "status"}});
+				const clearSearch = e_({tag: "button", type: "button", clazz: "ve-btn ve-btn-default", txt: "Clear search"});
+				const searchableRows = [];
+				const filterSpells = () => {
+					view.search = search.value;
+					for (const {row, text} of searchableRows) row.hidden = !text.includes(view.search.trim().toLowerCase());
+					noResults.hidden = searchableRows.some(({row}) => !row.hidden) || !view.search;
+					clearSearch.hidden = !view.search;
+				};
+				search.addEventListener("input", filterSpells);
+				clearSearch.addEventListener("click", () => {
+					search.value = "";
+					filterSpells();
+					search.focus();
+				});
+				casting.append(noResults, clearSearch);
+				const spellSection = section("Spells", casting);
 				const spells = [...new Map([...actor.getCantrips(), ...actor.getSpells()].map(spell => [spell.id, spell])).values()]
 					.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
 				if (!spells.length) spellSection.append(e_({tag: "p", txt: "No learned spells."}));
 				for (const spell of spells) {
-					const row = e_({tag: "div", clazz: "cs-simulacrum__spell", attrs: {"data-spell-id": spell.id}});
+					const row = e_({tag: "div", clazz: "cs-simulacrum__spell", attrs: {"data-spell-id": spell.id, "data-manager-key": `spell:${spell.id}`}});
+					searchableRows.push({row, text: `${spell.name} ${spell.source}`.toLowerCase()});
 					row.append(e_({outer: `<div class="cs-simulacrum__spell-name"><strong>${escape(spell.name)}</strong><span>${spell.level === 0 ? "Cantrip" : `Level ${spell.level}`} &middot; ${escape(spell.source)}</span></div>`}));
 					const slot = spell.level > 0 ? e_({tag: "select", clazz: "ve-form-control cs-simulacrum__slot", attrs: {"aria-label": `Slot for ${spell.name}`}}) : null;
 					if (slot) {
@@ -651,8 +720,10 @@ class CharacterSheetSimulacrum {
 							}));
 						}
 						row.append(slot);
+						restoreSelect(slot, `slot:${spell.id}`);
 					}
 					const cast = withMetamagic => {
+						if (!targetIsValid(targets) || (slot && !targetIsValid(slot))) throw new Error("Choose an available target and spell slot before casting.");
 						const [kind, level] = slot?.value?.split(":") || [];
 						return runtime.castSpell(spell.id, {
 							withMetamagic,
@@ -663,24 +734,34 @@ class CharacterSheetSimulacrum {
 					const isPrepared = spell.level === 0 || spell.prepared || spell.alwaysPrepared;
 					button(row, isPrepared ? "Cast" : "Not prepared", () => cast(false), {disabled: !isPrepared, reason: !isPrepared ? "The frozen copy did not have this spell prepared." : ""});
 					if (actor.getSorceryPoints?.()?.max > 0) button(row, "Cast with Metamagic", () => cast(true), {disabled: !isPrepared});
-					if (actor.canCastAsRitual?.(spell)) button(row, "Cast as ritual", () => runtime.castRitual(spell.id, {targetActorId: targets.value || undefined}));
+					if (actor.canCastAsRitual?.(spell)) {
+						button(row, "Cast as ritual", () => {
+							if (!targetIsValid(targets)) throw new Error("Choose an available target before casting.");
+							return runtime.castRitual(spell.id, {targetActorId: targets.value || undefined});
+						});
+					}
 					spellSection.append(row);
 				}
 				const innate = actor.getInnateSpells();
 				if (innate.length) {
-					const innateSection = section("Innate and feature spells");
+					const innateSection = section("Innate and feature spells", casting);
 					for (const spell of innate) {
-						const row = e_({tag: "div", clazz: "cs-simulacrum__spell"});
+						const row = e_({tag: "div", clazz: "cs-simulacrum__spell", attrs: {"data-manager-key": `innate:${spell.id}`}});
+						searchableRows.push({row, text: `${spell.name} ${spell.source}`.toLowerCase()});
 						row.append(e_({tag: "span", txt: `${spell.name} (${spell.source}) · ${spell.uses ? `${spell.uses.current}/${spell.uses.max}` : "At will"}`}));
-						button(row, "Cast", () => runtime.castInnateSpell(spell.id, {targetActorId: targets.value || undefined}), {disabled: !!spell.uses && spell.uses.current <= 0});
+						button(row, "Cast", () => {
+							if (!targetIsValid(targets)) throw new Error("Choose an available target before casting.");
+							return runtime.castInnateSpell(spell.id, {targetActorId: targets.value || undefined});
+						}, {disabled: !!spell.uses && spell.uses.current <= 0});
 						innateSection.append(row);
 					}
 				}
+				filterSpells();
 				const resources = actor.getResources();
 				if (resources.length) {
-					const resourceSection = section("Feature resources");
+					const resourceSection = section("Feature resources", utilities);
 					for (const resource of resources) {
-						const row = e_({tag: "div", clazz: "cs-simulacrum__resource"});
+						const row = e_({tag: "div", clazz: "cs-simulacrum__resource", attrs: {"data-manager-key": `resource:${resource.id}`}});
 						row.append(e_({tag: "span", txt: `${resource.name}: ${resource.current}/${resource.max}`}));
 						button(row, "Spend use", () => runtime.run(state => state.setResourceCurrent(resource.id, resource.current - 1)), {disabled: resource.current <= 0});
 						const isRestOnly = snapshot.policy.recovery === "no-rests" && /short|long|rest/i.test(String(resource.recharge || resource.resetOn || ""));
@@ -692,12 +773,29 @@ class CharacterSheetSimulacrum {
 					}
 					resourceSection.append(e_({tag: "p", clazz: "cs-simulacrum__hint", txt: "Use these trackers only when a feature's rules allow spending or recovery. Casting spends its own applicable costs automatically."}));
 				}
+				const rules = e_({tag: "details", clazz: "cs-simulacrum__rules", attrs: {"data-manager-key": "rules"}});
+				rules.append(e_({tag: "summary", txt: "Rules and manual resolution"}));
+				rules.append(e_({
+					tag: "p",
+					txt: snapshot.policy.recovery === "no-slot-recovery"
+						? "PHB: expended spell slots, including Pact slots, cannot be recovered. HP can only be restored by paid repairs in a laboratory."
+						: "XPHB: this duplicate cannot take Short or Long Rests or cast Simulacrum. Repair it within 5 feet during your Long Rest.",
+				}));
+				rules.append(e_({tag: "p", txt: runtime.getManualResolutionNotice()}),
+					e_({tag: "p", txt: "Self-only spells always affect this duplicate. Other targets use the sheet's supported effects; any manual resolution is shown in the cast result."}));
+				content.append(rules);
 			}
-			const statblock = e_({tag: "details", clazz: "cs-simulacrum__statblock", attrs: terminal ? {open: true} : {}});
+			const statblock = e_({tag: "details", clazz: "cs-simulacrum__statblock", attrs: {"data-manager-key": "statblock", ...(terminal ? {open: true} : {})}});
 			statblock.append(e_({tag: "summary", txt: "Full statblock"}));
 			statblock.insertAdjacentHTML("beforeend", this._getStatblockHtml(companion));
 			content.append(statblock);
-			if (busy) content.querySelectorAll("button, select").forEach(element => { element.disabled = true; });
+			for (const element of content.querySelectorAll("[data-manager-key]")) {
+				const key = element.getAttribute("data-manager-key");
+				if (element.tagName === "DETAILS" && view.open.has(key)) element.open = view.open.get(key);
+				if (key === view.focus && !element.disabled) element.focus?.({preventScroll: true});
+			}
+			if (scroller) scroller.scrollTop = view.scroll;
+			if (busy) content.querySelectorAll("button, select, input").forEach(element => { element.disabled = true; });
 		};
 		try {
 			render();

@@ -113,7 +113,7 @@ describe("Companion Play Mode persistence", () => {
 		expect(onFindSteed).toHaveBeenCalledWith(true);
 	});
 
-	test("companion drawer persists inline HP edits and exposes the initiative roll", () => {
+	test("companion drawer persists inline HP edits and mounts the shared roll panel", () => {
 		const drawerState = new CharacterSheetState();
 		const companionId = drawerState.addCompanion({
 			name: "Quickling",
@@ -121,8 +121,9 @@ describe("Companion Play Mode persistence", () => {
 			hp: {max: 10, current: 10},
 			abilities: {str: 4, dex: 20, con: 10, int: 10, wis: 12, cha: 8},
 		});
-		const rollCompanionInitiative = jest.fn();
-		const {playMode, page, nodes} = makePlayMode(drawerState, {_rollCompanionInitiative: rollCompanionInitiative});
+		const sharedRolls = makeNode("section");
+		const createRollControls = jest.fn(() => sharedRolls);
+		const {playMode, page, nodes} = makePlayMode(drawerState, {_createCompanionRollControls: createRollControls});
 		playMode._makeCard = (container) => {
 			const card = makeNode("div");
 			container.appendChild(card);
@@ -131,15 +132,27 @@ describe("Companion Play Mode persistence", () => {
 
 		playMode._renderCompanionsDrawer(makeNode("div"));
 
-		const initiativeButton = nodes.find(node => node.title === "Roll initiative for Quickling");
-		initiativeButton.click();
-		expect(rollCompanionInitiative).toHaveBeenCalledWith(drawerState.getCompanion(companionId));
+		expect(createRollControls).toHaveBeenCalledWith(drawerState.getCompanion(companionId));
+		expect(sharedRolls.parentElement.children).toContain(sharedRolls);
 
 		const hpInput = nodes.find(node => node.className === "pm-companion__hp-input");
 		hpInput.value = "4";
 		hpInput._handlers.change();
 		expect(drawerState.getCompanion(companionId).hp.current).toBe(4);
 		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+	});
+
+	test("grouped drawer delegates to shared individual HP controls, never a scalar HP editor", () => {
+		const drawerState = new CharacterSheetState();
+		drawerState.addCompanion({name: "Pack", type: "conjured", count: 3, hp: {max: 5, current: 5}, hpArray: Array.from({length: 3}, () => ({current: 5, max: 5}))});
+		const group = drawerState.getCompanions()[0];
+		expect(group.hpArray).toHaveLength(3);
+		const renderGrouped = jest.fn();
+		const {playMode, nodes} = makePlayMode(drawerState, {_renderGroupedCompanion: renderGrouped});
+		const container = makeNode("div");
+		playMode._renderCompanionsDrawer(container);
+		expect(renderGrouped).toHaveBeenCalledWith(group, container);
+		expect(nodes.some(node => node.className === "pm-companion__hp-input")).toBe(false);
 	});
 });
 

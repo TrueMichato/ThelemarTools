@@ -16636,15 +16636,9 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	opacity: 0.5;
 }
 
-/* Companions tab hero — a Committed gradient wash (kept per design intent),
-   tokenized off the amethyst→sapphire accents instead of hardcoded rgba so it
-   holds in day + night and stays detector-clean. */
 .charsheet__companions-header {
-	background: linear-gradient(
-		135deg,
-		rgba(var(--cs-accent-amethyst-rgb, 168, 85, 247), 0.1),
-		rgba(var(--cs-accent-sapphire-rgb, 59, 130, 246), 0.05)
-	);
+	background: var(--cs-bg-surface);
+	border: 1px solid var(--cs-border);
 	border-radius: var(--cs-radius-lg, 16px);
 	padding: 20px;
 	margin-bottom: 20px;
@@ -16670,16 +16664,123 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	font-size: 1.1em;
 	margin-bottom: 8px;
 }
-.charsheet__companion-rolls {
-	display: grid;
-	gap: var(--cs-space-sm, 8px);
+.charsheet__companion-card {
 	min-width: 0;
-	padding: var(--cs-space-md, 12px);
-	margin-block: var(--cs-space-sm, 8px);
+	padding: var(--cs-space-md);
+	margin-bottom: var(--cs-space-md);
 	color: var(--cs-text-primary);
 	background: var(--cs-bg-surface);
-	border: 1px solid var(--cs-border-control);
-	border-radius: var(--cs-radius-md, 10px);
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-md);
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__companion-header,
+.charsheet__companion-readiness,
+.charsheet__companion-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--cs-space-sm);
+	margin-bottom: var(--cs-space-sm);
+}
+
+.charsheet__companion-identity {
+	flex: 1 1 10rem;
+	min-width: 0;
+}
+
+.charsheet__companion-kind {
+	color: var(--cs-text-secondary);
+	font-size: var(--cs-text-sm);
+}
+
+.charsheet__companion-stats {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: var(--cs-space-sm);
+	padding-block: var(--cs-space-sm);
+	margin-bottom: var(--cs-space-sm);
+	background: var(--cs-bg-base);
+	border-radius: var(--cs-radius-sm);
+}
+
+.charsheet__companion-readiness {
+	font-weight: 600;
+}
+
+.charsheet__companion-readiness span {
+	padding: 0.25rem 0.5rem;
+	background: var(--cs-bg-base);
+	border-radius: var(--cs-radius-sm);
+}
+
+.charsheet__companion-card button,
+.charsheet__companion-card select {
+	min-height: 44px;
+	white-space: normal;
+}
+
+.charsheet__companion-reference {
+	margin-block: var(--cs-space-sm);
+	min-width: 0;
+}
+
+.charsheet__companion-reference > summary {
+	display: list-item;
+	min-height: 44px;
+	padding-block: 0.75rem;
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.charsheet__companion-reference :focus-visible,
+.charsheet__companion-card :is(button, select):focus-visible {
+	outline: 2px solid var(--cs-primary);
+	outline-offset: 2px;
+}
+
+.charsheet__grouped-creature {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm);
+	padding: var(--cs-space-sm);
+	background: var(--cs-bg-base);
+}
+
+.charsheet__grouped-creature button {
+	min-width: 44px;
+}
+
+.charsheet__companion-rolls {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 8px);
+	min-width: 0;
+	padding-block: var(--cs-space-sm, 8px);
+	margin-block: var(--cs-space-sm, 8px);
+	color: var(--cs-text-primary);
+	border-block: 1px solid var(--cs-border);
+}
+
+.charsheet__companion-roll-checks,
+.charsheet__companion-roll-attacks {
+	display: grid;
+	align-content: start;
+	gap: var(--cs-space-sm);
+	min-width: 0;
+}
+
+.charsheet__companion-rolls h5 {
+	margin: 0;
+	font-family: inherit;
+	font-size: var(--cs-text-sm);
+	font-weight: 600;
+}
+
+.charsheet__companion-rolls > p {
+	grid-column: 1 / -1;
 }
 
 .charsheet__companion-roll-controls,
@@ -16703,7 +16804,7 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 
 .charsheet__companion-roll-saves {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(100%, 5.5rem), 1fr));
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: var(--cs-space-xs, 4px);
 }
 

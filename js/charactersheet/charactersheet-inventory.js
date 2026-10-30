@@ -5,6 +5,7 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
+import {CharacterSheetSpellMaterials} from "./charactersheet-spell-materials.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
@@ -1722,6 +1723,18 @@ class CharacterSheetInventory {
 
 			const searchTerm = search.value.toLowerCase();
 			const tabPool = tabItems[currentTab];
+			if (currentTab === "component") {
+				const walletSpells = this._page.filterByAllowedSources(this._page._spellsData || []).filter(spell =>
+					(!searchTerm || `${spell.name} ${spell.source} currency wallet copper gold`.toLowerCase().includes(searchTerm))
+					&& CharacterSheetSpellMaterials.getRequirements(spell).some(row => row.kind === "currency" || row.options?.some(option => option.kind === "currency")));
+				if (walletSpells.length) {
+					list.append(e_({
+						tag: "div",
+						clazz: "ve-muted ve-mb-2",
+						txt: `Wallet-backed spell requirements (not inventory products): ${walletSpells.map(spell => `${spell.name} (${spell.source})`).join(", ")}. Consumed currency uses automatic exchange; reusable currency only checks your balance.`,
+					}));
+				}
+			}
 
 			const filterItem = (item) => {
 				if (searchTerm && !`${item.name} ${(item.spellComponent?.spells || []).join(" ")}`.toLowerCase().includes(searchTerm)) return false;
@@ -1862,6 +1875,9 @@ class CharacterSheetInventory {
 					const vcSpellLine = vcSpellLabels.length
 						? `<div class="charsheet__modal-list-item-subtitle ${item.spellComponent ? "ve-muted" : ""}"${item.spellComponent ? "" : " style=\"color: #8b5cf6; font-style: italic;\""}>${item.spellComponent ? "" : "🧫 "}${vcSpellLabels.map(label => CharacterSheetClassUtils.escapeHtml(label)).join(", ")}</div>`
 						: "";
+					const supplySummary = item.spellComponent?.summary
+						? `<div class="charsheet__modal-list-item-subtitle ve-muted">${CharacterSheetClassUtils.escapeHtml(item.spellComponent.summary)}</div>`
+						: "";
 
 					const itemEl = e_({outer: `
 						<div class="charsheet__modal-list-item">
@@ -1872,6 +1888,7 @@ class CharacterSheetInventory {
 									${rarity ? `<span style="color: ${rarityColor}; font-weight: 500;">${rarity}</span> • ` : ""}${item.value ? `${this._formatValue(item.value)} • ` : ""}${Parser.sourceJsonToAbv(item.source)}
 								</div>
 								${vcSpellLine}
+								${supplySummary}
 							</div>
 							<button class="ve-btn ve-btn-primary ve-btn-xs item-picker-add">${isSelectMode ? "Select" : "+ Add"}</button>
 						</div>

@@ -77,6 +77,28 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("production companion roll surface", () => {
+	test("read-only rolls retain native keyboard focus after disabling the pending button", async () => {
+		const {page, companion, owner} = fixture();
+		const before = copy(owner._data);
+		const panel = page._createCompanionRollControls(companion);
+		panel.isConnected = true;
+		const button = panel.querySelector(".btn-companion-initiative");
+		let disabled = false;
+		Object.defineProperty(button, "disabled", {
+			get: () => disabled,
+			set: value => {
+				disabled = value;
+				if (value && document.activeElement === button) document.activeElement = document.body;
+			},
+		});
+		button.focus();
+		await button.click();
+		expect(document.activeElement).toBe(button);
+		expect(button.disabled).toBe(false);
+		expect(owner._data).toEqual(before);
+		expect(page._renderCompanions).not.toHaveBeenCalled();
+	});
+
 	test.each(["Attack Cat", "Death Save Owl", "Spell Damage Mage"])("classifies %s rolls by their actual kind, not the companion name", async name => {
 		const {page, companion, history} = fixture({name});
 		RollerUtil.randomise.mockImplementation(sides => Math.min(10, sides));

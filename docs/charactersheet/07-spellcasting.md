@@ -77,6 +77,17 @@ Explicit currency prices and consumption in prose-string materials are included
 too (for example, TGTT Identify's 100 gp pearl). Mixed prices/consumption and
 unknown target-dependent wording remain manual-confirmation boundaries.
 
+**Currency itself is not a catalog item.** XPHB Detect Thoughts checks for 1 cp
+of wallet value without spending or exchanging anything. XPHB Gentle Repose
+spends **2 cp total**. Consumed currency uses the wallet's total value with
+automatic denomination exchange; the existing wallet API can represent change
+as fractional gp. Galder's Speedy Courier offers **25 gp in currency OR Mineral
+Goods worth 25 gp total** when both are available; only the selected source is
+spent. Cancelling the selection spends nothing. Gold never replaces named
+priced materials such as ruby dust, diamonds, TGTT gems, or specially qualified
+coins. Components search identifies wallet-backed spells without offering new
+coin products.
+
 Priced supplies show their minimum value in gp; stored `value` remains copper
 pieces (1,500 gp = 150,000 cp). Unpriced consumed supplies have no invented price.
 Adding a supply creates a normal inventory row. Save/reload preserves its
@@ -88,9 +99,21 @@ without a recorded value retain the existing player-declaration convention.
 Reusable supplies stay in inventory. Warding Bond needs **two** platinum rings,
 each worth at least 50 gp, in both editions; one expensive ring is insufficient.
 Clone separates consumed diamond/preparation from the reusable vessel, and
-Legend Lore separates incense from four reusable ivory strips. Full material
-sets retain their alternatives and qualifications in their item details; adding
-one means obtaining a complete legal set, not just one noun in the description.
+Legend Lore separates incense from four reusable ivory strips. Supplies use
+actual noun/bundle labels, not generic spell-name "Material Set" labels:
+Draconic Transformation needs a Dragon Statuette; Linked Glyphs needs Incense
+and Powdered Diamond worth **300 gp together**, not 300 gp for each ingredient.
+Bundles retain their full alternatives and qualifications in their item
+details; adding one means obtaining a complete legal bundle, not just one noun
+in the description. Per-creature Astral Projection supplies retain their full
+price and quantity wording rather than inventing a fixed bundle price.
+
+Existing saved whole sets remain valid; no migration silently deletes,
+refunds, splits, or mints anything. Exact source-qualified old generated coin
+stacks remain explicit whole-payment alternatives to the wallet. A cast never
+charges both, and one saved complete bundle does not credit multiple separate
+requirements. Selected sources are revalidated before payment rather than
+silently switching to another inventory row or the wallet.
 
 This catalog is not a target/material rules engine. PHB Imprisonment, per-target
 Astral Projection/Create Undead supplies, planar attunement, biological
@@ -103,13 +126,13 @@ are retained rather than inferred from the spell's display name alone.
 
 ### Missing-material override
 
-When a normal cast lacks materials, the popup lists the spell's requirement and
-missing supplies. **Cancel** is initially focused; Cancel, close, and Escape
+When a normal cast lacks materials, the popup lists the spell's requirement,
+missing supplies, and wallet balance. **Cancel** is initially focused; Cancel, close, and Escape
 spend nothing. **Override for this cast (DM permission required)** must be chosen
 explicitly and only with the DM's permission.
 
 Permission belongs to that invocation, not the character or the next cast. It
-waives only the missing supplies: owned selected consumables are still spent,
+waives only the missing supplies (including missing genuine currency): owned selected consumables are still spent,
 reusable items remain, and slots, resources, armor proficiency, incapacitation,
 verbal/somatic restrictions, source-specific focus requirements, and existing
 cancellation rules still apply. The sheet creates neither fictitious inventory

@@ -47903,6 +47903,72 @@ class CharacterSheetState {
 			.sort((a, b) => a.value - b.value);
 	}
 
+	/** Pure availability; alternatives are complete routes, never pooled partial payments. */
+	getSpellMaterialAvailability (requirement) {
+		if (requirement.kind === "choice") {
+			const routes = requirement.options.flatMap(option => this.getSpellMaterialAvailability(option).routes);
+			return {available: routes.some(route => route.available), routes};
+		}
+		if (requirement.kind === "currency") {
+			const balanceCp = Math.round(this.getTotalGold() * 100);
+			const routes = [{id: requirement.key, requirement, available: balanceCp >= requirement.cost, balanceCp}];
+			if (requirement.legacy) routes.push(...this.getSpellMaterialAvailability(requirement.legacy).routes);
+			return {available: routes.some(route => route.available), routes};
+		}
+		const candidates = this.getSpellMaterialCandidates(requirement);
+		const available = candidates.reduce((sum, row) => sum + row.quantity, 0) >= requirement.quantity;
+		return {available, routes: [{id: requirement.key, requirement, candidates, available}]};
+	}
+
+	/** Apply canonical removals on an isolated candidate; failed payments publish nothing. */
+	commitSpellMaterialPayment ({itemIds = [], costCp = 0} = {}) {
+		if (!Number.isSafeInteger(costCp) || costCp < 0) throw new Error("Invalid spell currency cost.");
+		if (!itemIds.length && !costCp) return;
+		const data = this._data;
+		const candidate = new CharacterSheetState({isDetached: true});
+		candidate._data = MiscUtil.copyFast(data);
+		for (const key of ["_itemMaterialCatalog", "_classCatalog", "_classFeatureCatalog", "_subclassFeatureCatalog", "_optionalFeatureCatalog"]) {
+			if (this[key]) candidate[key] = MiscUtil.copyFast(this[key]);
+		}
+		candidate._companionActorContext = MiscUtil.copyFast(this._companionActorContext || null);
+		candidate._companionActorPolicy = MiscUtil.copyFast(this._companionActorPolicy || null);
+		const counts = new Map();
+		for (const id of itemIds) counts.set(id, (counts.get(id) || 0) + 1);
+		for (const [id, count] of counts) {
+			const row = candidate._findInventoryRow(id);
+			if (!row || (row.quantity ?? 1) < count) throw new Error("The selected material component is no longer available.");
+		}
+		if (Math.round(candidate.getTotalGold() * 100) < costCp) throw new Error("Insufficient funds for spell materials.");
+		for (const id of itemIds) {
+			if (!candidate.consumeItem(id)) throw new Error("The selected material component could not be consumed.");
+		}
+		if (costCp) {
+			const result = candidate.deductGold(costCp / 100);
+			if (!result.success) throw new Error(result.error);
+			if (Math.round(candidate.getTotalGold() * 100) !== Math.round(this.getTotalGold() * 100) - costCp) throw new Error("Spell currency payment did not reconcile.");
+		}
+		if (this._data !== data) throw new Error("The spell payment actor changed.");
+		for (const key of new Set([...Object.keys(data), ...Object.keys(candidate._data)])) {
+			const next = candidate._data[key];
+			if (JSON.stringify(data[key]) === JSON.stringify(next)) continue;
+			// Canonical removal can update other rows (containers, Ioun hosts, effects).
+			// Preserve every surviving record wrapper instead of replacing cloned arrays.
+			if (Array.isArray(next) && next.every(row => row && typeof row === "object" && row.id) && Array.isArray(data[key])) {
+				const previous = new Map(data[key].map(row => [row.id, row]));
+				data[key] = next.map(row => {
+					const current = previous.get(row.id);
+					if (!current) return row;
+					if (JSON.stringify(current) !== JSON.stringify(row)) {
+						for (const field of Object.keys(current)) if (!(field in row)) delete current[field];
+						Object.assign(current, row);
+					}
+					return current;
+				});
+			} else if (next === undefined) delete data[key];
+			else data[key] = next;
+		}
+	}
+
 	/**
 	 * Extract candidate material-noun keywords from a component description for
 	 * fuzzy matching against inventory item names. Lowercased words of length ≥3
@@ -49368,67 +49434,33 @@ class CharacterSheetState {
 	 * @returns {object} {success: boolean, error?: string}
 	 */
 	deductGold (gpCost) {
-		const totalGp = this.getTotalGold();
-		if (totalGp < gpCost) {
-			return {success: false, error: `Insufficient funds: need ${gpCost} gp, have ${totalGp.toFixed(2)} gp`};
+		const rates = {gp: 100, pp: 1000, ep: 50, sp: 10, cp: 1};
+		const costCp = Math.round(gpCost * 100);
+		const balances = Object.entries(rates).map(([type, rate]) => ({type, rate, raw: this._data.currency[type] * rate}));
+		if (!Number.isFinite(gpCost) || gpCost < 0 || !Number.isSafeInteger(costCp)
+			|| (gpCost > 0 && !costCp) || Math.abs(gpCost * 100 - costCp) > 0.000001
+			|| balances.some(({raw}) => !Number.isSafeInteger(Math.round(raw)) || raw < 0 || Math.abs(raw - Math.round(raw)) > 0.000001)) {
+			return {success: false, error: "Currency payments and balances must represent whole copper pieces."};
 		}
-
-		// Deduct from gp first, then convert from higher denominations if needed
-		let remaining = gpCost;
-		if (this._data.currency.gp >= remaining) {
-			this._data.currency.gp -= remaining;
-			return {success: true};
-		}
-		remaining -= this._data.currency.gp;
-		this._data.currency.gp = 0;
-
-		// Convert from pp (1 pp = 10 gp)
-		if (remaining > 0 && this._data.currency.pp > 0) {
-			const ppNeeded = Math.ceil(remaining / 10);
-			const ppUsed = Math.min(ppNeeded, this._data.currency.pp);
-			this._data.currency.pp -= ppUsed;
-			const gpFromPp = ppUsed * 10;
-			remaining -= gpFromPp;
-			if (remaining < 0) {
-				this._data.currency.gp += Math.abs(remaining);
-				remaining = 0;
+		const totalCp = balances.reduce((sum, {raw}) => sum + Math.round(raw), 0);
+		if (!Number.isSafeInteger(totalCp)) return {success: false, error: "Currency balance exceeds exact copper precision."};
+		if (totalCp < costCp) return {success: false, error: `Insufficient funds: need ${gpCost} gp, have ${(totalCp / 100).toFixed(2)} gp`};
+		if (!costCp) return {success: true};
+		const next = {...this._data.currency};
+		let remainingCp = costCp;
+		// Preserve gp-first spending and change in fractional gp, but never ceil binary-float gp.
+		for (const {type, rate, raw} of balances) {
+			if (!remainingCp) break;
+			const availableCp = Math.round(raw);
+			const usedCp = Math.min(availableCp, type === "gp" ? remainingCp : Math.ceil(remainingCp / rate) * rate);
+			next[type] = (availableCp - usedCp) / rate;
+			remainingCp -= usedCp;
+			if (remainingCp < 0) {
+				next.gp = (Math.round(next.gp * 100) - remainingCp) / 100;
+				remainingCp = 0;
 			}
 		}
-
-		// Convert from ep (1 ep = 0.5 gp)
-		if (remaining > 0 && this._data.currency.ep > 0) {
-			const epNeeded = Math.ceil(remaining / 0.5);
-			const epUsed = Math.min(epNeeded, this._data.currency.ep);
-			this._data.currency.ep -= epUsed;
-			const gpFromEp = epUsed * 0.5;
-			remaining -= gpFromEp;
-			if (remaining < 0) {
-				this._data.currency.gp += Math.abs(remaining);
-				remaining = 0;
-			}
-		}
-
-		// Convert from sp (10 sp = 1 gp)
-		if (remaining > 0 && this._data.currency.sp > 0) {
-			const spNeeded = Math.ceil(remaining * 10);
-			const spUsed = Math.min(spNeeded, this._data.currency.sp);
-			this._data.currency.sp -= spUsed;
-			const gpFromSp = spUsed * 0.1;
-			remaining -= gpFromSp;
-			if (remaining < 0) {
-				this._data.currency.gp += Math.abs(remaining);
-				remaining = 0;
-			}
-		}
-
-		// Convert from cp (100 cp = 1 gp)
-		if (remaining > 0 && this._data.currency.cp > 0) {
-			const cpNeeded = Math.ceil(remaining * 100);
-			const cpUsed = Math.min(cpNeeded, this._data.currency.cp);
-			this._data.currency.cp -= cpUsed;
-			remaining -= cpUsed * 0.01;
-		}
-
+		Object.assign(this._data.currency, next);
 		return {success: true};
 	}
 

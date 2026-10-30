@@ -442,6 +442,49 @@ describe("Shared Simulacrum creation transaction", () => {
 		expect(state.getSorceryPoints()).toMatchObject({current: 4, max: 4});
 	});
 
+	it("the outer journal restores detached-payment removal effects without replacing the live actor or erasing newer writes", async () => {
+		const {state, page, cast} = makeHarness();
+		state.removeItem("ruby");
+		state.addItem({id: "bag", name: "Bag", source: "PHB", containerCapacity: {weight: [30]}});
+		state.addItem({id: "ruby", name: "Powdered Ruby", source: "PHB", value: 150000, type: "S", ac: 2, effects: [{type: "initiative", value: 2, name: "Ruby Readiness"}]});
+		state.addArmorProficiency("shield");
+		state.setItemEquipped("ruby", true);
+		expect(state.putItemInContainer("ruby", "bag")).toEqual({success: true});
+		state.addActiveState("sacredWeapon", {customEffects: [{inventoryItemId: "ruby"}]});
+		state.addItem({id: "unrelated", name: "Notebook", source: "PHB"});
+		const companionId = state.addCompanion({name: "Unrelated Familiar"});
+		const companion = state.getCompanion(companionId);
+		const raw = state._data;
+		const before = copy(raw);
+		const globalState = globalThis.__csState;
+		const hooks = state._committedSpellCastHooks;
+		page._pRestoreFailedSimulacrumCreation = jest.fn(async () => {});
+		page._saveCurrentCharacter.mockImplementation(async () => {
+			expect(state._data).toBe(raw);
+			expect(state.getInventory().some(row => row.id === "ruby")).toBe(false);
+			expect(state._data.namedModifiers.some(row => row.sourceFeatureId === "item:ruby")).toBe(false);
+			expect(state.isStateTypeActive("sacredWeapon")).toBe(false);
+			expect(state.getCompanion(companionId)).toBe(companion);
+			state.setNote("backstory", "Newer note");
+			state.setCurrency("gp", 4900);
+			state._data.inventory.find(row => row.id === "unrelated").note = "Newer inventory note";
+			return false;
+		});
+		expect(await cast()).toMatchObject({ok: false, committed: false});
+		expect(state._data).toBe(raw);
+		expect(globalThis.__csState).toBe(globalState);
+		expect(state._committedSpellCastHooks).toBe(hooks);
+		expect(state.getInventory().find(row => row.id === "ruby")).toEqual(before.inventory.find(row => row.id === "ruby"));
+		expect(state.getInventory().find(row => row.id === "bag")).toEqual(before.inventory.find(row => row.id === "bag"));
+		expect(state._data.ac).toEqual(before.ac);
+		expect(state._data.namedModifiers).toEqual(before.namedModifiers);
+		expect(state.isStateTypeActive("sacredWeapon")).toBe(true);
+		expect(state.getSpellSlotsCurrent(7)).toBe(1);
+		expect(state.getNote("backstory")).toBe("Newer note");
+		expect(state.getCurrency("gp")).toBe(4900);
+		expect(state.getInventory().find(row => row.id === "unrelated").note).toBe("Newer inventory note");
+	});
+
 	it("surfaces compensation failures without an unhandled rejection or retaining the creation lock", async () => {
 		const {state, page, cast} = makeHarness();
 		page._saveCurrentCharacter.mockResolvedValue(false);

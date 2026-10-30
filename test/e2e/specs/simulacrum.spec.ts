@@ -72,7 +72,21 @@ test.describe("Simulacrum actor companions", () => {
 		const before = await sheet.snapshot();
 		const layouts = await sheet.captureResponsiveManager(id, name => testInfo.outputPath(name));
 		await testInfo.attach("responsive-layouts", {body: JSON.stringify(layouts, null, 2), contentType: "application/json"});
-		expect(layouts).toEqual(layouts.map(({name}) => ({name, overflow: false, contrast: [], smallControls: []})));
+		expect(layouts.map(({diagnostics, ...acceptance}) => acceptance))
+			.toEqual(layouts.map(({name}) => ({name, overflow: false, contrast: [], smallControls: [], firstCastVisible: true})));
 		expect(await sheet.snapshot()).toEqual(before);
+	});
+
+	test("fast-play rolls retain exact casting choices, nodes and focus; actor actions restore view state", async ({page}) => {
+		const sheet = new SimulacrumPage(page);
+		await sheet.spawnCaster("PHB");
+		const id = await sheet.create("PHB");
+		await sheet.expectFastPlayPreservation(id);
+	});
+
+	test("mounted grouped, mount, feature and ordinary PlayMode dashboards preserve HP and control counts", async ({page}) => {
+		const sheet = new SimulacrumPage(page);
+		await sheet.spawnCaster("PHB");
+		await sheet.expectMountedCompanionDashboard();
 	});
 });

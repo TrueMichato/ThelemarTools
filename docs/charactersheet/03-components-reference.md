@@ -507,6 +507,21 @@ Explicit roll-type metadata keeps Roll Log categories independent of companion
 names (for example, an "Attack Cat" Survival roll remains a skill check).
 Legacy callers without metadata retain title-based classification.
 
+### Fast-play presentation
+
+Sheet cards and the Play Mode companion drawer share native direct-roll
+controls. Grouped companions use the same living/total and individual-HP
+surface in both views, not a scalar HP editor. Feature commands, ferocity
+and diagnostics remain actionable; setup provenance uses a native disclosure.
+Source-qualified commands remain on their existing roster or manager surface.
+
+The Simulacrum manager puts casting before long rules, with desktop
+casting/utilities columns and narrow-screen Cast/Rolls/Manage jumps to the
+same nodes. Read-only rolls preserve the actual casting nodes and selections.
+Manager mutations restore still-valid pool/target choices, search, disclosures,
+scroll and keyed focus; unavailable choices remain explicit rather than
+silently switching routes. See [25-simulacrum.md](25-simulacrum.md).
+
 ### Creation and repair
 
 `pPrepareCreation()` is a pure, cancellable preview: it returns staged companion
@@ -547,6 +562,26 @@ spell panels. The caller must supply an isolated actor page adapter and its
 own rendering/persistence; headless construction alone does not isolate a
 page adapter that still reads the original character. `setSpells(catalog)`
 supplies the same source-qualified catalog used by ordinary casting.
+
+### Required materials and currency
+
+`CharacterSheetSpellMaterials.getRequirements(spell)` returns AND requirements
+with explicit `item`, genuine `currency`, or `choice` (one complete OR route)
+kinds. `getItemRequirements` traverses physical catalog leaves; `describe`
+retains quantity, consumption, price scope and qualifications. A named ingredient
+worth gold is still an inventory supply, not a wallet payment.
+
+State `getSpellMaterialAvailability(requirement)` is read-only.
+`commitSpellMaterialPayment({itemIds, costCp})` stages canonical item removal and
+wallet deduction on a detached candidate, then publishes only successful
+payment changes into the same live raw actor. Costs are integer copper pieces;
+consumed currency may exchange denominations, while reusable currency only
+checks total wallet value. Selected routes and actor identity are revalidated
+after prompts. Saved source-qualified coin stacks and whole sets remain
+explicit alternatives, never refunds or credit for multiple branches.
+Absent or reusable-only requirements still validate actor and supply identity,
+but do not enter a payment transaction. Only genuine currency routes read the
+wallet; physical ingredient validation does not depend on wallet APIs.
 
 ### Key Methods
 
@@ -862,6 +897,16 @@ Toolbar / Play mode "NPC Export"
 ```
 
 See [18-npc-export.md](./18-npc-export.md).
+
+NPC presentation defaults to **Playable mechanics**, projected from complete
+rules rather than the lossy legacy Compact filter. Proven represented benefits
+are recorded in `report.reductions`; unproven build-only acquisitions move
+verbatim to attributed report warnings without inferring their application.
+Unresolved live-use benefits remain visible. Explicit Complete/Compact
+preferences and manual selections persist. Known-caster availability uses
+canonical class semantics, not an unqualified saved `prepared` flag.
+Neither presentation pruning nor NPC quantity targeting applies to the
+authoritative `profile:"companion"` snapshot projection.
 
 ### Print document sections
 

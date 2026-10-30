@@ -14,6 +14,9 @@ test.describe("Required spell materials and committed display refresh", () => {
 		console.log("Material catalog coverage:", JSON.stringify(audit));
 		await testInfo.attach("runtime-material-coverage", {body: JSON.stringify(audit), contentType: "application/json"});
 		expect(audit.missing).toEqual([]);
+		expect(audit.vagueSets).toEqual([]);
+		expect(audit.brewSpells).toBeGreaterThan(0);
+		expect(audit.currencySpells).toContain("Gentle Repose|XPHB");
 		const before = await sheet.snapshot();
 		for (const method of ["button", "escape", "close"] as const) {
 			await sheet.cast("Continual Flame");
@@ -48,6 +51,34 @@ test.describe("Required spell materials and committed display refresh", () => {
 		await sheet.cast("Identify");
 		await expect.poll(async () => (await sheet.snapshot()).slot1).toBe(before.slot1 - 1);
 		expect((await sheet.snapshot()).inventory).toEqual(supplied.inventory);
+	});
+
+	test("wallet-backed currency is not a coin product; reuse, exchange, insufficient funds and Play Mode debit are canonical", async ({page}) => {
+		const sheet = new SpellMaterialsPage(page);
+		await sheet.spawn();
+		await sheet.simulacrum.sheet.setPrioritySources(["XPHB"]);
+		for (const name of ["Detect Thoughts", "Gentle Repose"]) await sheet.simulacrum.prepareSpell(name, "XPHB");
+		await sheet.expectWalletSearch("Gentle Repose");
+		await sheet.setWallet({cp: 0, sp: 1, ep: 0, gp: 0, pp: 0});
+		const before = await sheet.snapshot();
+		await sheet.cast("Detect Thoughts");
+		await expect.poll(async () => (await sheet.snapshot()).slot2).toBe(before.slot2 - 1);
+		expect((await sheet.snapshot()).wallet).toEqual(before.wallet);
+		expect((await sheet.snapshot()).inventory).toEqual(before.inventory);
+		await sheet.setWallet({cp: 1, sp: 0, ep: 0, gp: 0, pp: 0});
+		const insufficient = await sheet.snapshot();
+		await sheet.cast("Gentle Repose");
+		await expect(sheet.permission()).toContainText("Wallet balance: 1 cp");
+		await sheet.cancelPermission("escape");
+		expect(await sheet.snapshot()).toEqual(insufficient);
+		await sheet.setWallet({cp: 0, sp: 1, ep: 0, gp: 0, pp: 0});
+		await sheet.cast("Gentle Repose");
+		await expect.poll(async () => (await sheet.snapshot()).walletCp).toBe(8);
+		expect((await sheet.snapshot()).slot2).toBe(before.slot2 - 2);
+		await sheet.cast("Gentle Repose", {play: true});
+		await expect.poll(async () => (await sheet.snapshot()).walletCp).toBe(6);
+		expect((await sheet.snapshot()).slot2).toBe(before.slot2 - 3);
+		expect((await sheet.snapshot()).inventory).toEqual(before.inventory);
 	});
 
 	test("normal Shield Cast refreshes visible desktop/Play Mode AC and expires normally", async ({page}) => {

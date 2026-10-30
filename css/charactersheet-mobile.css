@@ -2066,6 +2066,40 @@
 		margin-bottom: 0.75rem;
 	}
 
+	.charsheet__companion-rolls,
+	.cs-simulacrum__layout {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.cs-simulacrum--manager) {
+		width: 100%;
+		max-width: 100%;
+		height: calc(100dvh - 16px) !important;
+		max-height: calc(100dvh - 16px) !important;
+	}
+
+	body.is-charsheet-page .ve-ui-modal__inner > .ve-ui-modal__scroller:has(.cs-simulacrum--manager) {
+		max-height: none;
+	}
+
+	.cs-simulacrum__toolbar {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.cs-simulacrum__toolbar button {
+		padding-inline: 0.25rem;
+		white-space: normal;
+	}
+
+	.cs-simulacrum--manager :is(input, select) {
+		font-size: max(16px, calc(var(--cs-text-sm) * var(--cs-text-scale, 1)));
+	}
+
+	.charsheet__companion-toolbar button {
+		flex: 1 1 6rem;
+	}
+
 	.charsheet__feature-companion-setup {
 		align-items: stretch;
 		flex-direction: column;
