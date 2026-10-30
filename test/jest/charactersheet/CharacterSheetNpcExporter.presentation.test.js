@@ -7,8 +7,8 @@ const State = globalThis.CharacterSheetState;
 const entries = monster => ["trait", "action", "bonus", "reaction"].flatMap(section => monster[section] || []);
 
 describe("NPC export presentation and source-rule retention", () => {
-	it("defaults missing and legacy preferences to complete, separately from the runtime companion profile", () => {
-		expect(Exporter.getSanitizedExportOptions({defenseMode: "persistent"}).presentationMode).toBe("complete");
+	it("defaults missing and legacy preferences to playable, separately from the runtime companion profile", () => {
+		expect(Exporter.getSanitizedExportOptions({defenseMode: "persistent"}).presentationMode).toBe("playable");
 		expect(Exporter.getSanitizedExportOptions({presentationMode: "COMPACT"}).presentationMode).toBe("compact");
 		expect(Exporter.getSanitizedExportOptions().profile).toBe("npc");
 	});
