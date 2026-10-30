@@ -3,46 +3,6 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 71 - NPC export, companion dashboard, and spell materials - IMPLEMENTING
-
-The user approved all three implementation plans, followed by verification,
-PRs and integration. All tracks start from published code
-`72bd3fb1d27306d7090f66261043f356a7cc4243`, not the primary checkout's
-unpublished critique-report commit. Those reports remain local and untouched.
-The NPC and material tips are integrated in an isolated checkout; combined
-final verification and the companion correction remain pending. No fix is
-closed by preliminary results.
-
-- **S1 - NPC export clarity (bug 1):** Reproduce the supplied Bard export's
-  redundant ASIs, superseded abilities, statistics-only grants and class
-  spellcasting/build prose. Project current useful mechanics without losing
-  unique actions, costs, recovery or upgrade benefits. Verify known-caster
-  availability separately from misleading preparation prose; the supplied
-  export already contains known spells. Own NPC exporter presentation and
-  the NPC export dialog, not the authoritative companion export profile.
-- **S2 - Companion fast-play dashboard (bug 2):** Improve management for
-  ordinary, grouped, feature-managed and Simulacrum companions. The approved
-  direction prioritizes HP/status, actions, casting and direct rolls, with
-  detailed rules and setup on demand. Own companion-only presentation and
-  scoped styles. Preserve actorSnapshot v1, copied statistics, owner isolation,
-  resource accounting, persistence and existing roll controls. Shared game-rule,
-  creation or payment API changes require coordination before editing.
-- **S3 - Materials and currency (bug 3):** Stop projecting genuine currency
-  requirements as inventory supplies; use the canonical wallet transaction.
-  Keep named ingredients valued in currency as actual ingredients. Replace
-  vague generated material-set labels with readable requirements, retaining
-  qualifications, alternatives and saved-item compatibility. Own material
-  projection/matching, Components sourcing and the narrow material/currency
-  payment regions, not companion management or NPC export.
-
-The orchestrator alone owns this file and arbitrates shared-reference sections.
-NPC presentation must not prune companion snapshots. Companion UI must preserve
-the NPC Export menu handler and generic casting/payment paths. Materials must
-retain source waivers, fresh DM permission, actor-bound cancellation and rollback.
-Full integration gates precede advancing the published base. The user
-authorized one additional targeted companion layout correction and verification;
-the first usable Cast control must be visible without weakening its check.
-
 ### Round 70 - Unconfirmed original symptoms
 
 - **War Caster saved-character case (bug 5):** No affected export/acquisition
@@ -59,6 +19,113 @@ the first usable Cast control must be visible without weakening its check.
   Preserve this distinction if the original symptom recurs.
 
 ## Closed Bugs
+
+### Round 71 - NPC export, companion dashboard, and spell materials - INTEGRATED
+
+| PR | Scope |
+|---|---|
+| [#392](https://github.com/TrueMichato/ThelemarTools/pull/392) | S1: conservative Playable NPC export and truthful reduction reports |
+| [#390](https://github.com/TrueMichato/ThelemarTools/pull/390) | S2: shared companion fast-play dashboards |
+| [#391](https://github.com/TrueMichato/ThelemarTools/pull/391) | S3: wallet-backed material payments and readable supply labels |
+
+**S1 - Playable NPC exports.** The new NPC-only default starts from complete
+rules, not legacy Compact's filters or budgets. Explicit Complete/Compact
+preferences and manual scopes remain honored. Represented mechanics fold into
+current output; pure build-only acquisitions without proof move verbatim to
+individually identified report warnings, never inferred ability gains or State
+repairs. Mixed and unresolved live-use benefits remain visible.
+
+The supplied save changes from 62 feature entries/five ASI traits to 54/zero.
+One acquisition has existing selected-feat corroboration; four retain precise
+unresolved warnings with feature/class/source/level identity. Current Bardic
+Inspiration is one 6/SR pool granting d12, without changing ordinary d20 checks
+or deleting unique conversion, timing or recovery rules. The supplied 7/SR
+was not reproduced; canonical six was not changed to fit it. Covered Persuasion
+expertise folds, while Engineering remains readable with a missing-stat warning;
+its State application remains outside this presentation fix. All 24 leveled
+known spells remain available, as they already were. The known-caster header
+and class construction/prepared-count prose are corrected without changing
+prepared, spellbook, ritual or Pact semantics. Companion-profile output and its
+legacy quantity policy remain unchanged.
+
+**S2 - Companion fast play.** Ordinary, grouped, feature-managed and
+Simulacrum surfaces put HP, availability, direct rolls and supported actions
+before reference material. Sheet and Play Mode share native roll controls and
+grouped individual/bulk HP controls. Feature operations and diagnostics remain
+actionable on their source-qualified roster/manager surfaces; setup provenance
+uses a native disclosure.
+
+The duplicate manager puts casting before long rules, with desktop utility
+columns and narrow-screen jumps to the same sections. Read-only rolls preserve
+the actual casting nodes, selections, focus and actor revision. Mutations
+restore still-valid choices, search, disclosures, scroll and keyed focus;
+invalidated choices are explicit, not silently replaced. ActorSnapshot v1,
+creation/payment/repair policy and the shared NPC Export tools-menu handler
+remain unchanged. Real mounted-DOM checks cover balanced single-root grouped
+markup, individual/bulk healing and damage, ordinary initial/repeated-HP
+readiness counts, mounts and EFA commands. Scoped modal height/scroller
+corrections make the first enabled spell Cast visible at 1440x844 and 390x844
+in both themes, preserving 44px controls and the original visibility assertion.
+
+**S3 - Materials and wallet.** AND requirements distinguish physical items,
+genuine currency and complete OR routes. The wallet pays literal currency
+with integer-copper arithmetic and automatic denomination exchange; reusable
+currency is a read-only total-value check. Named gems and qualified coins
+still require those actual supplies. Physical noun/bundle labels retain honest
+aggregate/per-item/manual price scope and full qualification prose.
+
+Existing source-qualified coin stacks and whole sets remain explicit
+whole-payment alternatives, never newly minted products, refunds or double
+credit. Optional currency requires opt-in. Selected sources and actor identity
+are revalidated after prompts rather than silently switching payment routes.
+Detached companions do not borrow owner funds. Canonical item removal and
+wallet deduction run on a genuinely detached State candidate; failure
+publishes nothing. Successful raw changes preserve the live actor and surviving
+record wrappers; the unchanged Simulacrum journal compensates later save failure.
+Fresh default-Cancel DM permission remains material-only.
+
+**Semantic integration and gates.** All tracks start from published `72bd3fb1d`;
+all final child tips are retained through no-ff merges with zero textual
+conflicts. The unpublished local critique-report commit is not an ancestor of
+the public integration, and its files remain local. Shared component,
+architecture, subsystem and troubleshooting references are synchronized.
+
+The first full combined run exposed unnecessary wallet/payment API calls for
+no-debit casts. The narrow integration reconciliation gates wallet reads on
+actual currency requirements and payment on actual debits, while retaining
+actor/supply validation. Real Fire Bolt, Fireball, Identify and reusable-currency
+controls failed before the fix and pass afterward; legacy casting assertions
+and mocks were not weakened. The material branch includes the identical
+production/test correction before publication.
+
+Final full repository Jest passed **805 suites / 21,668 tests** in 95.554
+seconds. Exact file/name/status comparison confirms only the existing
+**one attachmentCorpus suite / 13 skipped cases**; no primary expected-failure
+or new skip was added. The final real-save NPC corpus reached **954 passing
+cases**, none skipped. Full ESLint and configured SCSS Stylelint passed;
+pre-existing authored CSS debt and unrelated TypeScript diagnostics are not
+claimed fixed.
+
+One final combined Chromium batch passed **9/9** workflows on a fresh port:
+both Simulacrum editions, four responsive manager layouts, casting-node/focus/
+actor isolation, mounted ordinary/grouped/mount/feature controls, material
+permission and supplies, wallet reuse/exchange/insufficiency/Play Mode, and
+Shield display/expiry. Its actual loaded audit reached 1,386 spells including
+77 TGTT, 268 physical supplies and three currency spells, with zero missing
+typed leaves or generic Material Set labels. Its 49 manual qualifications and
+target-dependent quantities remain explicit limits, not automatically proven
+coverage of every possible brew.
+
+Child evidence is not conflated with final gates: S2's four final browser
+passes plus a separately authorized test-selector correction/one mounted rerun
+are distinct from the parent's uninterrupted nine-test pass. S2's initial
+commit silently lacked an ignored local hook shim and was validated
+post-commit; S3's initial focused commit bypassed its hook without parent
+authorization. Both gaps were reported, helpers restored, commits preserved,
+and subsequent normal hooks used. No publication bypass is authorized.
+The first batch push was correctly rejected on S3's old no-debit code;
+its corrected branch then passed the normal full pre-push gate. Git-emitted
+ref order, not CLI argument order, determines that hook's tested SHA.
 
 ### Round 70 — Casting, combat, companions, and site resilience — INTEGRATED
 
