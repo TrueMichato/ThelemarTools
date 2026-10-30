@@ -32,12 +32,15 @@ on-cast state triggers. Replacement uses exact actor-owned effect/summon
 cleanup, not a blanket break of the original's unrelated concentration.
 Normal Simulacrum's twelve-hour casting time does not consume an action pip.
 
-The priced material must be ruby, not another valuable or the snow/hair named
-elsewhere in PHB's description. Multiple ruby matches require a selection;
-cancelling or choosing manual tracking cancels this creation. Selecting a
-valid variant component still uses the shared substitution rules.
-`ignoreSpellcastingRestrictions` remains an explicit manual-bookkeeping
-opt-out; creation never separately deducts another 1,500 gp from currency.
+The priced material is **Powdered Ruby (1500 gp)**, available in **Inventory →
+Add Item → Components** (search for Simulacrum). One added row represents a
+1,500 gp supply, not a generic gemstone. Multiple qualifying supplies require
+a selection; cancelling that selection cancels creation. A brooch, another
+gemstone, or the snow/hair named in PHB's description is not powdered ruby.
+Selecting a variant component still uses the shared substitution rules.
+Missing supplies offer the explicit, per-cast DM-permission override described
+below; declining it spends nothing. Creation never separately deducts another
+1,500 gp from currency.
 
 Creation awaits `_saveCurrentCharacter({isReturnStatus: true,
 expectedCharacterId, expectedLoadGeneration})` before publishing a committed
@@ -62,6 +65,72 @@ targeting remains unavailable. These limitations are not success-shaped casts.
 Spells transaction and guarded Page storage path, replacing only interactive
 preview/picker boundaries. It covers payment/replacement, cancellation, stale
 owners, concurrent edits, projection/save failures and write-time switching.
+
+## Required materials and the Components picker
+
+The Components tab contains two distinct kinds of inventory items: ordinary
+required spell supplies and optional Arcadia 8 enhancement components. Required
+supplies are derived from the fully merged site, homebrew, and prerelease spell
+catalog. Search by supply **or spell name**. Ordinary, unpriced, nonconsumed
+ingredients remain covered by the existing focus/component-pouch rules.
+Explicit currency prices and consumption in prose-string materials are included
+too (for example, TGTT Identify's 100 gp pearl). Mixed prices/consumption and
+unknown target-dependent wording remain manual-confirmation boundaries.
+
+Priced supplies show their minimum value in gp; stored `value` remains copper
+pieces (1,500 gp = 150,000 cp). Unpriced consumed supplies have no invented price.
+Adding a supply creates a normal inventory row. Save/reload preserves its
+requirement identity, and successful casts decrement consumed stacks through
+the normal inventory API. Explicitly underpriced, empty, unrelated, or
+wrong-form items do not qualify. Unambiguously named legacy custom supplies
+without a recorded value retain the existing player-declaration convention.
+
+Reusable supplies stay in inventory. Warding Bond needs **two** platinum rings,
+each worth at least 50 gp, in both editions; one expensive ring is insufficient.
+Clone separates consumed diamond/preparation from the reusable vessel, and
+Legend Lore separates incense from four reusable ivory strips. Full material
+sets retain their alternatives and qualifications in their item details; adding
+one means obtaining a complete legal set, not just one noun in the description.
+
+This catalog is not a target/material rules engine. PHB Imprisonment, per-target
+Astral Projection/Create Undead supplies, planar attunement, biological
+qualifications, and unfamiliar homebrew wording require explicit DM confirmation.
+Unknown target-dependent prices are not advertised as fixed prices, and
+target-dependent consumption remains manual. Optional consumption asks before
+spending; end-of-spell consumption (such as PHB Globe of Invulnerability) remains
+in inventory until the player removes it at the stated time. PHB/XPHB differences
+are retained rather than inferred from the spell's display name alone.
+
+### Missing-material override
+
+When a normal cast lacks materials, the popup lists the spell's requirement and
+missing supplies. **Cancel** is initially focused; Cancel, close, and Escape
+spend nothing. **Override for this cast (DM permission required)** must be chosen
+explicitly and only with the DM's permission.
+
+Permission belongs to that invocation, not the character or the next cast. It
+waives only the missing supplies: owned selected consumables are still spent,
+reusable items remain, and slots, resources, armor proficiency, incapacitation,
+verbal/somatic restrictions, source-specific focus requirements, and existing
+cancellation rules still apply. The sheet creates neither fictitious inventory
+nor a material-payment receipt and does not change the broad
+`ignoreSpellcastingRestrictions` setting. Exempt innate/item casts and detached
+actors retain their existing source-specific/external-supply contracts.
+
+## Successful-cast display refresh
+
+After effects and material commit, successful casts refresh through the existing
+Page `renderCharacter()` API. Shield therefore immediately updates visible AC,
+its breakdown, and Play Mode without a separate AC click or unrelated feature
+trigger. Shield's existing duration lifecycle still removes its bonus normally.
+Detached adapters use only their own guarded render callback; they never refresh
+or borrow the owner's page. Simulacrum refresh happens only after its guarded
+save succeeds.
+
+Play Mode's Cast and ordinary/pact upcast selection forward to that same engine,
+not a second slot-only implementation. Ritual and no-slot/capstone choices use
+the canonical chooser (`decision.chooseSlot`); cancelling it spends nothing.
+The selected slot, resource, and materials are charged by Spells only once.
 
 ## Detached companion casting
 

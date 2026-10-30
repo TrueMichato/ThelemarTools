@@ -44,6 +44,7 @@ function makeHarness (source = "PHB") {
 		_saveCurrentCharacter: jest.fn(async () => true),
 		saveCharacter: jest.fn(async () => true),
 		_renderQuickSpells: jest.fn(),
+		renderCharacter: jest.fn(),
 		_renderResources: jest.fn(),
 		_renderActiveStates: jest.fn(),
 		_updateAllCalculations: jest.fn(),
@@ -85,6 +86,7 @@ function prepare (page, source) {
 
 let preview;
 beforeEach(() => {
+	jest.spyOn(Spells.prototype, "_pConfirmMaterialPermission").mockResolvedValue(false);
 	preview = jest.spyOn(CharacterSheetSimulacrum, "pPrepareCreation").mockImplementation(async ({ownerPage, spellSource}) => prepare(ownerPage, spellSource));
 	jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
 	jest.spyOn(console, "error").mockImplementation(() => {});
@@ -92,6 +94,18 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("Shared Simulacrum creation transaction", () => {
+	it.each(["PHB", "XPHB"])("allows an explicit missing-material override for one %s creation without fabricating a ruby", async source => {
+		const {state, page, cast} = makeHarness(source);
+		state.removeItem("ruby");
+		Spells.prototype._pConfirmMaterialPermission.mockResolvedValueOnce(true);
+		const result = await cast();
+		expect(result).toMatchObject({committed: true});
+		expect(state.getInventory()).toEqual([]);
+		expect(state.getSpellSlotsCurrent(7)).toBe(0);
+		expect(state.getCompanion(result.companionId).actorSnapshot.version).toBe(1);
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
+	});
 	it.each(["PHB", "XPHB"])("creates a saved item-free, full-pool %s actor from the real spell, State and exporter", async source => {
 		const {state, page, cast} = makeHarness(source);
 		state.setConcentration({name: "Haste", source: "PHB", level: 3});
@@ -299,7 +313,8 @@ describe("Shared Simulacrum creation transaction", () => {
 		const {state, cast} = makeHarness();
 		state.removeItem("ruby");
 		state.addItem({id: "variant", name: "Special snow", source: "Ar8", variantComponent: {spellEffects: [{match: {spell: "simulacrum|phb"}, effects: [{type: "noSlot"}]}]}});
-		expect(await cast()).toMatchObject({ok: false, committed: false});
+		expect(await cast()).toBeUndefined();
+		expect(Spells.prototype._pConfirmMaterialPermission).toHaveBeenCalledWith(expect.objectContaining({textYes: "Override for this cast (DM permission required)"}));
 		expect(state.getCompanions()).toHaveLength(0);
 		expect(state.getSpellSlotsCurrent(7)).toBe(1);
 		expect(state.getInventory()).toHaveLength(1);

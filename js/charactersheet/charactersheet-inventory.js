@@ -1086,7 +1086,7 @@ class CharacterSheetInventory {
 		// Classify items into tabs
 		const tabItems = {equipment: [], magic: [], consumable: [], component: []};
 		for (const item of items) {
-			if (this._isVariantComponent(item)) tabItems.component.push(item);
+			if (this._isVariantComponent(item) || item.spellComponent) tabItems.component.push(item);
 			else if (this._isConsumable(item)) tabItems.consumable.push(item);
 			else if (this._isMagicItem(item)) tabItems.magic.push(item);
 			else tabItems.equipment.push(item);
@@ -1724,7 +1724,7 @@ class CharacterSheetInventory {
 			const tabPool = tabItems[currentTab];
 
 			const filterItem = (item) => {
-				if (searchTerm && !item.name.toLowerCase().includes(searchTerm)) return false;
+				if (searchTerm && !`${item.name} ${(item.spellComponent?.spells || []).join(" ")}`.toLowerCase().includes(searchTerm)) return false;
 				// Multi-select type filter
 				if (selectedTypes.has("__NONE__")) return false;
 				if (selectedTypes.size > 0 && !selectedTypes.has("__NONE__")) {
@@ -1856,11 +1856,11 @@ class CharacterSheetInventory {
 					const rarityColors = {"common": "#9ca3af", "uncommon": "#22c55e", "rare": "#3b82f6", "very rare": "#a855f7", "legendary": "#f97316", "artifact": "#ef4444"};
 					const rarityColor = rarityColors[(item.rarity || "").toLowerCase()] || "";
 
-					const itemHoverLink = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
+					const itemHoverLink = item.spellComponent ? CharacterSheetClassUtils.escapeHtml(item.name) : CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
 					const vcSpellLabels = this._getVariantComponentSpellLabels(item);
 					const vcSpellLine = vcSpellLabels.length
-						? `<div class="charsheet__modal-list-item-subtitle" style="color: #8b5cf6; font-style: italic;">🧫 ${vcSpellLabels.join(", ")}</div>`
+						? `<div class="charsheet__modal-list-item-subtitle ${item.spellComponent ? "ve-muted" : ""}"${item.spellComponent ? "" : " style=\"color: #8b5cf6; font-style: italic;\""}>${item.spellComponent ? "" : "🧫 "}${vcSpellLabels.map(label => CharacterSheetClassUtils.escapeHtml(label)).join(", ")}</div>`
 						: "";
 
 					const itemEl = e_({outer: `
@@ -1938,6 +1938,7 @@ class CharacterSheetInventory {
 	 * Returns an array of short strings like "Legend Lore", "psychic damage spells", "restoration spells".
 	 */
 	_getVariantComponentSpellLabels (item) {
+		if (item.spellComponent) return item.spellComponent.spells.map(uid => `${uid.split("|")[0]} (required supply)`);
 		const vc = item.variantComponent;
 		if (!vc?.spellEffects?.length) return [];
 		const labels = [];
@@ -2094,7 +2095,7 @@ class CharacterSheetInventory {
 
 	_getItemTypeTag (item) {
 		const typeBase = item.type?.split("|")[0];
-		if (this._isVariantComponent(item)) return "Component";
+		if (this._isVariantComponent(item) || item.spellComponent) return "Component";
 		if (this._isWeapon(item)) return "Weapon";
 		if (item.armor || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
 		if (typeBase === "S") return "Shield";
@@ -8279,7 +8280,7 @@ class CharacterSheetInventory {
 		// "weapon","staff","wand","ring","potion","wondrous","gear"), NOT the raw 5etools code.
 		// Each branch therefore accepts BOTH the coarse stored type AND the raw code, so a stored
 		// magic staff/wand/ring/wondrous item no longer collapses into "Other".
-		if (this._isVariantComponent(item)) return "Spell Components";
+		if (this._isVariantComponent(item) || item.spellComponent) return "Spell Components";
 		if (item.weapon || item.type === "weapon") return "Weapons";
 		const typeBase = item.type?.split("|")[0];
 		if (item.armor || item.type === "armor" || ["LA", "MA", "HA"].includes(typeBase)) return "Armor";
@@ -8633,7 +8634,7 @@ class CharacterSheetInventory {
 		const gemHasCharges = activeGem?.chargesMax > 0;
 		const gemHasSpellStorage = !!activeGem && !!CharacterSheetUpgrades?.getGemstoneDescriptor?.(activeGem)?.spellStorage;
 		const isVariantComponent = !!(item.variantComponent?.spellEffects?.length);
-		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
+		const vcSpellLabels = isVariantComponent || item.spellComponent ? this._getVariantComponentSpellLabels(item) : [];
 		const canOpenPack = !!this._getEffectivePackContents(item)?.length;
 		const packProvenanceName = item._fromPack ? item._fromPack.split("|")[0] : "";
 		const generatedClassification = this._state.classifyGeneratedFeatureItem?.(item) || {status: "ordinary", reason: "unsupported"};
@@ -8684,7 +8685,7 @@ class CharacterSheetInventory {
 			&& efaHasAlternatePlan
 			&& efaActionAvailable;
 
-		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
+		const itemNameHtml = item.spellComponent ? CharacterSheetClassUtils.escapeHtml(item.name) : CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
 		// Get recharge description for tooltip
 		const rechargeDescriptions = {
@@ -8740,6 +8741,7 @@ class CharacterSheetInventory {
 							${generatedRepairRequired ? `<span class="badge badge-danger ve-small" title="${generatedRepairReason.replace(/"/g, "&quot;")} The item remains in inventory; use the shared generated-item edit/delete/restore controls.">Repair required</span>` : ""}
 							${spellStorage ? `<span class="badge ${spellStorageRepair || spellStorageExpired ? "badge-danger" : "badge-info"} ve-small" title="${spellStorageRepair ? `Spell storage needs repair: ${(spellStorage.repair?.reasons || []).join(", ") || "unresolved identity"}` : spellStorageExpired ? `Spell-Storing Item: ${spellStorage.spell.name} has no uses remaining` : `Spell-Storing Item: ${spellStorage.spell.name} (${spellStorage.usesCurrent}/${spellStorage.usesMax} uses)`}">${spellStorageRepair ? "Storage repair required" : spellStorageExpired ? "Storage depleted" : `Stored: ${String(spellStorage.spell.name || "Spell").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`}</span>` : ""}
 							${isVariantComponent ? `<span class="badge badge-info ve-small" title="Variant Spell Component — can enhance matching spells when cast">🧪 Component</span>` : ""}
+							${item.spellComponent ? `<span class="ve-small ve-muted">Required spell supply</span>` : ""}
 							${isArtifact ? `<span class="badge badge-danger ve-small" title="Artifact">⚗️ Artifact</span>` : item.rarity && !["none", "unknown", "unknown (magic)", "varies"].includes(item.rarity.toLowerCase()) ? `<span class="badge badge-info ve-small">${item.rarity.toTitleCase()}</span>` : ""}
 							${item.weight ? `<span class="ve-muted ve-small">${(item.weight * item.quantity).toFixed(1)} lb.</span>` : ""}
 						</span>
@@ -8765,7 +8767,7 @@ class CharacterSheetInventory {
 							</span>
 						` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
-						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
+						${vcSpellLabels.length ? `<span class="ve-small ${item.spellComponent ? "ve-muted" : ""}"${item.spellComponent ? "" : " style=\"color: #8b5cf6; font-style: italic;\""} title="${item.spellComponent ? "Required materials for these spells" : "Enhances these spells when used as a variant component"}">${item.spellComponent ? "" : "🧫 "}${vcSpellLabels.map(label => CharacterSheetClassUtils.escapeHtml(label)).join(", ")}</span>` : ""}
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${spellStorage ? `<span class="ve-small ${spellStorageRepair ? "text-danger" : "text-info"}" title="Stored-spell casting statistics">Spell storage: <strong>${spellStorage.usesCurrent}/${spellStorage.usesMax}</strong> uses · DC ${spellStorage.casting?.saveDc ?? "—"} · ${(spellStorage.casting?.attackBonus ?? 0) >= 0 ? "+" : ""}${spellStorage.casting?.attackBonus ?? "—"} attack</span>` : ""}

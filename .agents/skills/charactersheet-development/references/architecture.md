@@ -971,6 +971,15 @@ and external/internal renderer links are protocol/path allowlisted before render
 `applyItemHoverPreview` provides the equivalent DOM wiring for item-power rows and other
 already-created elements.
 
+Required spell supplies are a local catalog projection from
+`CharacterSheetSpellMaterials.buildCatalog`, appended in `_pLoadData` **after**
+both spell brew merges. They carry `spellComponent` inventory metadata, not
+Arcadia `variantComponent` effects. The Components picker and inventory use
+escaped local names/details (no canonical `items.html` entity exists).
+Successful Spells-owned completion calls the existing guarded Page render API
+after effect/material commit; creation refresh follows guarded persistence.
+Headless adapters must remain actor-local and need not expose `renderCharacter`.
+
 ## Parsers (in charactersheet-state.js)
 
 Four parser classes extract mechanical data from feature description text:

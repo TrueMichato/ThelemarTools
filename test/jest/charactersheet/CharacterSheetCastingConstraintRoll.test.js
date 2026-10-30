@@ -52,6 +52,7 @@ const makeHarness = ({spellData = SPELL_DATA, dice = [12, 12]} = {}) => {
 	});
 	page.pAnimateD20 = jest.fn(async () => {});
 	page.saveCharacter = jest.fn();
+	page.renderCharacter = jest.fn();
 	page._renderQuickSpells = jest.fn();
 	const spells = Object.create(CharacterSheetSpells.prototype);
 	spells._page = page;
@@ -77,6 +78,56 @@ describe("TGTT casting constraints — committed casts only", () => {
 	});
 
 	afterEach(() => jest.restoreAllMocks());
+
+	it("treats a present canonical helper returning null as Cancel, never as an absent-helper fallback", async () => {
+		const {state, page, spells, spellId} = makeHarness();
+		state.addCondition({name: "Frightened", source: "TGTT"});
+		page.pGetConcentrationCheck = jest.fn(async () => null);
+		const fallback = jest.spyOn(state, "makeConcentrationCheck");
+		const before = state.toJson();
+		await spells._castSpell(spellId, {withMetamagic: false});
+		expect(page.pGetConcentrationCheck).toHaveBeenCalledWith(0, {rollLabel: "Command — Concentration Check"});
+		expect(fallback).not.toHaveBeenCalled();
+		expect(state.rollD20).not.toHaveBeenCalled();
+		expect(page._rollHistory.addRoll).not.toHaveBeenCalled();
+		expect(spells._showCastResult).not.toHaveBeenCalled();
+		expect(state.toJson()).toEqual(before);
+	});
+
+	it("uses only canonical selected contributions, keeps equal dice from distinct sources and raw adv/disadv", async () => {
+		const {state, page, spells, spellId} = makeHarness({dice: [6, 1]});
+		state.addCondition({name: "Frightened", source: "TGTT"});
+		state.addNamedModifier({id: "not-selected", name: "Do not apply", type: "concentration", bonusDie: "1d20", value: 0, enabled: true});
+		const check = {
+			dc: 10,
+			bonus: 2,
+			advantage: true,
+			disadvantage: true,
+			sources: ["Chosen <source>"],
+			rollNeeded: 8,
+			conditionalsAvailable: [],
+			bonusDiceContributions: [
+				{id: "first", dice: "1d4", source: "First", conditional: null},
+				{id: "first", dice: "1d4", source: "First", conditional: null},
+				{id: "second", dice: "1d4", source: "Second", conditional: "Selected for this roll"},
+			],
+		};
+		page.pGetConcentrationCheck = jest.fn(async () => check);
+		const contributionRoll = jest.spyOn(page, "_rollModifierDiceBonuses");
+		const dice = jest.spyOn(Renderer.dice, "parseRandomise2").mockReturnValue(3);
+		await spells._castSpell(spellId, {withMetamagic: false});
+		expect(contributionRoll).toHaveBeenCalledWith(check);
+		expect(dice).toHaveBeenCalledTimes(2);
+		expect(dice).toHaveBeenNthCalledWith(1, "1d4");
+		expect(dice).toHaveBeenNthCalledWith(2, "1d4");
+		expect(state.rollD20).toHaveBeenCalledTimes(1);
+		expect(page.pAnimateD20).toHaveBeenCalledWith(expect.objectContaining({mode: "normal", roll: 6}));
+		expect(page._rollHistory.addRoll).toHaveBeenCalledWith(expect.objectContaining({
+			total: 14,
+			breakdown: expect.stringMatching(/First.*Second.*= 14 vs DC 10/),
+			resultNote: expect.stringContaining("Chosen &lt;source&gt;"),
+		}));
+	});
 
 	it("rolls the real d20 for TGTT Frightened, reports DC and success, then commits the cast", async () => {
 		const {state, page, spells, spellId} = makeHarness({dice: [8, 19]});

@@ -8,6 +8,7 @@ import {CharacterSheetArtificerPlans} from "./charactersheet-artificer-plans.js"
 import "./charactersheet-companion-rules.js";
 import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
 import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
+import {CharacterSheetSpellMaterials} from "./charactersheet-spell-materials.js";
 import {CharacterSheetProgression} from "./charactersheet-progression.js";
 
 // Target-aware riders resolve through this registry rather than through attack-id
@@ -47883,21 +47884,23 @@ class CharacterSheetState {
 	 * the casting-component enforcement.
 	 *
 	 * - `m` absent/false → returns null (no material component).
-	 * - `m` is a string → a no-cost material (a spellcasting focus / component pouch covers it).
+	 * - Prose strings retain explicit prices/consumption; ordinary ingredients allow a focus.
 	 * - `m` is an object `{text, cost, consume}` → cost (copper) and consume flag preserved.
 	 *
 	 * @param {object} spellData Full spell data (or a character spell carrying `components`).
 	 * @returns {null|{text:string, cost:number, consume:(boolean|"optional"), requiresFocus:boolean}}
-	 *   `requiresFocus` is true when the material carries NO gold cost — i.e. a focus/pouch
-	 *   (or a feature that substitutes one) satisfies it, rather than a specific valuable item.
+	 *   `requiresFocus` is true only for ordinary unpriced, nonconsumed ingredients,
+	 *   which a focus/pouch (or feature substitution) can satisfy.
 	 */
 	getSpellMaterialComponentInfo (spellData) {
-		const m = spellData?.components?.m;
-		if (m == null || m === false) return null;
-		if (typeof m === "string") return {text: m, cost: 0, consume: false, requiresFocus: true};
-		if (typeof m !== "object") return {text: "", cost: 0, consume: false, requiresFocus: true};
-		const cost = Number(m.cost) || 0;
-		return {text: m.text || "", cost, consume: m.consume || false, requiresFocus: cost <= 0};
+		return CharacterSheetSpellMaterials.getMaterialInfo(spellData);
+	}
+
+	getSpellMaterialCandidates (requirement) {
+		return this._data.inventory
+			.filter(row => (row.quantity ?? 1) > 0 && CharacterSheetSpellMaterials.matches(row.item || {}, requirement))
+			.map(row => ({id: row.id, name: row.item.name, value: Number(row.item.value) || 0, quantity: row.quantity ?? 1, matchByName: true}))
+			.sort((a, b) => a.value - b.value);
 	}
 
 	/**
@@ -47943,6 +47946,7 @@ class CharacterSheetState {
 		if (!keywords.length) return []; // nothing names the component → nothing can match
 		const out = [];
 		for (const invItem of this._data.inventory) {
+			if ((invItem.quantity ?? 1) <= 0) continue;
 			const it = invItem.item || {};
 			const value = Number(it.value) || 0;
 			const nameLower = (it.name || invItem.name || "").toLowerCase();

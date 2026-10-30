@@ -2928,6 +2928,24 @@ The worn binding also supplies two state-owned benefits:
   `Artificer|EFA`, while ordinary foci and component pouches retain their
   existing unscoped behavior.
 
+### Required spell supplies
+
+`CharacterSheetSpellMaterials.getRequirements(spell)` normalizes priced and
+consumed requirements; ordinary focus-covered ingredients return no dedicated
+row. `buildCatalog(fullyMergedSpells)` projects source/price-aware items with
+`spellComponent: {key, material, spells}`. `CharacterSheetItemUtils` preserves
+that metadata, and State `getSpellMaterialCandidates(requirement)` matches
+physical form, explicit per-unit price floor, and positive inventory quantity.
+Compound consume/reuse and Warding Bond's two-ring semantics are explicit
+source-qualified exceptions; target-dependent/manual qualifications are visible.
+
+Spells keeps missing-material permission in an invocation-local context passed
+through constraints and staged consumption, never in settings or companions.
+Only missing requirements are waived; present consumables still decrement through
+`consumeItem`. All selected rows are validated before any component mutation.
+Class-specific focus gates, actor external supplies, and material-exempt casts
+remain separate. Optional and delayed/manual consumption are not guessed.
+
 ### Usable adventuring gear
 
 `getUsableGear()` is the canonical read API for type-`G` items whose entries declare an

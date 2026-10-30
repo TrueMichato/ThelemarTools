@@ -595,6 +595,7 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 				enforceArmor: true,
 				enforceMaterial: true,
 				componentWaivers: ["v", "s", "m"],
+				materialContext: expect.objectContaining({state}),
 			},
 		);
 		expect(spells._showCastResult).toHaveBeenCalledWith(
@@ -612,6 +613,28 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		expect(state.getCartographerMappingMagicSnapshot().unerringPath.usesCurrent).toBe(0);
 		expect(state.getConcentration()).toMatchObject({spellName: "Find the Path", spellSource: "XPHB"});
 		expect(spells._page._features.render).toHaveBeenCalledTimes(1);
+	});
+
+	test.each(["before payment", "during results"])("keeps a source-waived feature cast bound to its payer when the actor changes %s", async phase => {
+		const state = makeCartographer({level: 15});
+		createSelfAtlas(state);
+		const other = makeCartographer({level: 15});
+		createSelfAtlas(other);
+		const {spells} = makeSpellsManager(state);
+		const before = state.toJson();
+		const otherBefore = other.toJson();
+		const changeActor = async () => {
+			spells._state = other;
+			return phase === "before payment" ? true : {cancelled: false};
+		};
+		if (phase === "before payment") spells._pHandleCastingConstraints.mockImplementation(changeActor);
+		else spells._showCastResult.mockImplementation(changeActor);
+
+		expect(await spells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID))
+			.toMatchObject({ok: false, cancelled: true});
+		expect(state.toJson()).toEqual(before);
+		expect(other.toJson()).toEqual(otherBefore);
+		expect(spells._page.saveCharacter).not.toHaveBeenCalled();
 	});
 
 	test("applies exact component waivers without bypassing unrelated casting restrictions", async () => {

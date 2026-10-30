@@ -8,6 +8,7 @@ import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -425,26 +426,25 @@ describe("CharacterSheetPlayMode", () => {
 	});
 
 	describe("Damage concentration protection", () => {
-		it("preserves spell source when casting a concentration spell", () => {
-			const fakeState = {
-				setSpellSlotCurrent: jest.fn(),
-				setConcentration: jest.fn(),
-			};
-			const pm = new CharacterSheetPlayMode({getState: () => fakeState});
-			pm._logActivity = jest.fn();
-			pm._renderSpellsQuick = jest.fn();
-			pm._renderStatusBar = jest.fn();
-
-			pm._doExecuteCast(
-				{name: "Faerie Fire", source: "XPHB", level: 1, concentration: true},
-				{level: 1, current: 1, max: 2},
-			);
-
-			expect(fakeState.setConcentration).toHaveBeenCalledWith({
-				name: "Faerie Fire",
-				source: "XPHB",
-				level: 1,
+		it("preserves spell source through the canonical casting pipeline", async () => {
+			const state = new CharacterSheetState();
+			state.addClass({name: "Wizard", source: "XPHB", level: 3, spellcastingAbility: "int"});
+			const spellData = {name: "Faerie Fire", source: "XPHB", level: 1, components: {v: true}, duration: [{type: "timed", concentration: true, duration: {type: "minute", amount: 1}}]};
+			state.addSpell({...spellData, sourceClass: "Wizard", sourceClassSource: "XPHB"}, true);
+			state.calculateSpellSlots();
+			const page = {getState: () => state, renderCharacter: jest.fn(), saveCharacter: jest.fn(), _renderQuickSpells: jest.fn()};
+			page._spells = Object.assign(Object.create(globalThis.CharacterSheetSpells.prototype), {
+				_state: state,
+				_page: page,
+				_allSpells: [spellData],
+				renderSlots: jest.fn(),
+				_updateConcentrationUI: jest.fn(),
+				_showCastResult: jest.fn(async () => ({cancelled: false})),
 			});
+			const pm = new CharacterSheetPlayMode(page);
+			await pm._doExecuteCast(state.getSpells()[0], {level: 1, current: 4, max: 4});
+			expect(state.getConcentration()).toMatchObject({spellName: "Faerie Fire", spellSource: "XPHB", spellLevel: 1});
+			expect(state.getSpellSlotsCurrent(1)).toBe(3);
 		});
 
 		it("uses the state provider instead of rolling a damage concentration check in the fallback pipeline", async () => {

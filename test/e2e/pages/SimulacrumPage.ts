@@ -63,7 +63,7 @@ export class SimulacrumPage {
 		await expect.poll(async () => (await this.snapshot()).owner.gp).toBe(5000);
 	}
 
-	async prepareSpell (name: string, source: Source): Promise<void> {
+	async prepareSpell (name: string, source: Source | "TGTT"): Promise<void> {
 		let spell = await this.findSpell(name, source);
 		if (!spell) {
 			await this.sheet.openAddSpellModal();
@@ -80,7 +80,7 @@ export class SimulacrumPage {
 		}
 	}
 
-	private findSpell (name: string, source: Source): Promise<LearnedSpell | null> {
+	private findSpell (name: string, source: Source | "TGTT"): Promise<LearnedSpell | null> {
 		return this.page.evaluate(({spellName, spellSource}) => (globalThis as BrowserScope).charSheet.getState().getSpells()
 			.find(spell => spell.name === spellName && spell.source === spellSource) || null, {spellName: name, spellSource: source});
 	}
@@ -89,9 +89,10 @@ export class SimulacrumPage {
 		const before = (await this.snapshot()).owner.rubies;
 		await this.sheet.openAddItemModal();
 		const modal = this.sheet.itemPickerModal();
-		await modal.locator(".charsheet__modal-search input").fill("Ruby");
+		await modal.getByRole("button", {name: /Components/}).click();
+		await modal.locator(".charsheet__modal-search input").fill("Simulacrum");
 		const row = modal.locator(".charsheet__modal-list-item")
-			.filter({has: this.page.locator(".charsheet__modal-list-item-title").filter({hasText: /^Ruby$/})}).first();
+			.filter({has: this.page.locator(".charsheet__modal-list-item-title").filter({hasText: /^Powdered Ruby \(1500 gp\)$/})}).first();
 		await expect(row).toBeVisible();
 		await row.locator(".item-picker-add").click();
 		await expect.poll(async () => (await this.snapshot()).owner.rubies).toBe(before + 1);
@@ -105,7 +106,7 @@ export class SimulacrumPage {
 				owner: {
 					hp: state.getHp(), ac: state.getAc(), slot1: state.getSpellSlotsCurrent(1),
 					slot7: state.getSpellSlotsCurrent(7), gp: state.getCurrency().gp,
-					rubies: state.getInventory().filter(row => row.item.name === "Ruby").reduce((sum, row) => sum + row.quantity, 0),
+					rubies: state.getInventory().filter(row => row.item.name === "Powdered Ruby (1500 gp)").reduce((sum, row) => sum + row.quantity, 0),
 				},
 				companions: state.getCompanions().filter(row => !!row.actorSnapshot).map(row => ({
 					id: row.id, actorId: row.actorSnapshot.actorId, source: row.actorSnapshot.spell.source,
