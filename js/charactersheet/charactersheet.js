@@ -2835,6 +2835,9 @@ class CharacterSheetPage {
 				<span><strong>Reaction:</strong> ${escape(model.readiness.reaction)}</span>
 				<span class="ve-muted">${model.operationUi?.renderInManager ? "Canonical receipts; use the Operate controls below." : "Status only; use in-play controls where supported."}</span>
 			</div>
+			${operationsHtml}
+			<details class="charsheet__companion-reference">
+				<summary>Setup and provenance</summary>
 			<div class="charsheet__feature-companion-manager-grid">
 				<div>
 					<div class="charsheet__feature-companion-label">Modifications</div>
@@ -2847,7 +2850,7 @@ class CharacterSheetPage {
 				</div>
 			</div>
 			${appearanceHtml}
-			${operationsHtml}
+			</details>
 			${diagnosticsHtml}
 		</section>`;
 	}
@@ -8173,7 +8176,7 @@ class CharacterSheetPage {
 					<div class="charsheet__companions-empty">
 						<div class="charsheet__companions-empty-icon">🦉</div>
 						<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
-						<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
+						<div class="ve-muted ve-small">Add a custom companion above, use an available summon control, or complete your feature setup.</div>
 					</div>
 				`);
 			}
@@ -8182,8 +8185,7 @@ class CharacterSheetPage {
 
 		companions.forEach(companion => {
 			if (CharacterSheetSimulacrum.isSimulacrum(companion)) {
-				const card = CharacterSheetSimulacrum.renderCard({ownerPage: this, companion, parent: list});
-				card.append(this._createCompanionRollControls(companion));
+				CharacterSheetSimulacrum.renderCard({ownerPage: this, companion, parent: list});
 				return;
 			}
 			// Check if this is a grouped companion (conjured creatures)
@@ -8205,8 +8207,7 @@ class CharacterSheetPage {
 				: "";
 			const hp = companion.hp || {current: 1, max: 1};
 			const hpPercent = hp.max > 0 ? Math.round((hp.current / hp.max) * 100) : 0;
-			const hpColor = hpPercent > 50 ? "#22c55e" : hpPercent > 25 ? "#f59e0b" : "#ef4444";
-			const hpBgColor = hpPercent > 50 ? "rgba(34, 197, 94, 0.15)" : hpPercent > 25 ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
+			const hpColor = hpPercent > 50 ? "var(--cs-success)" : hpPercent > 25 ? "var(--cs-warning)" : "var(--cs-danger)";
 
 			// Format speeds
 			const speedStr = this._getCompanionSpeedString(companion);
@@ -8380,49 +8381,20 @@ class CharacterSheetPage {
 				`;
 
 			const card = e_({outer: `
-				<div class="charsheet__companion-card" data-companion-id="${companion.id}" style="
-					border: 2px solid ${info.color}33;
-					border-radius: 12px;
-					padding: 16px;
-					margin-bottom: 12px;
-					background: linear-gradient(135deg, ${info.color}08, transparent);
-					position: relative;
-					overflow: hidden;
-				">
-					<!-- Type badge -->
-					<div style="
-						position: absolute;
-						top: 0;
-						right: 0;
-						background: ${info.color}22;
-						color: ${info.color};
-						padding: 4px 12px 4px 16px;
-						font-size: 0.75em;
-						font-weight: 600;
-						border-bottom-left-radius: 12px;
-					">${info.icon} ${info.label}</div>
-
-					<!-- Header -->
-					<div class="ve-flex ve-flex-v-center mb-3" style="gap: 12px;">
+				<article class="charsheet__companion-card" data-companion-id="${companion.id}">
+					<header class="charsheet__companion-header">
 						${companionIconHtml}
-						<div class="ve-flex-col" style="flex: 1;">
+						<div class="charsheet__companion-identity">
 							${nameDisplay}
 							<div class="ve-muted ve-small">from ${companion.origin || "Unknown origin"}</div>
 						</div>
-					</div>
+						<span class="charsheet__companion-kind">${info.icon} ${info.label}</span>
+					</header>
 
 					${this._getFeatureCompanionLifecycleHtml(companion)}
 
 					<!-- Stats Grid -->
-					<div style="
-						display: grid;
-						grid-template-columns: repeat(4, 1fr);
-						gap: 12px;
-						margin-bottom: 12px;
-						padding: 12px;
-						background: rgba(var(--rgb-bg-text), 0.03);
-						border-radius: 8px;
-					">
+					<div class="charsheet__companion-stats">
 						<div class="ve-flex-col ve-text-center">
 							<div class="ve-muted ve-small" style="margin-bottom: 2px;">HP</div>
 							<div class="ve-flex ve-flex-v-center ve-flex-h-center" style="gap: 6px;">
@@ -8431,7 +8403,7 @@ class CharacterSheetPage {
 							<div style="
 								width: 100%;
 								height: 4px;
-								background: rgba(var(--rgb-bg-text), 0.1);
+								background: var(--cs-bg-elevated);
 								border-radius: 2px;
 								overflow: hidden;
 								margin-top: 4px;
@@ -8441,7 +8413,7 @@ class CharacterSheetPage {
 						</div>
 						<div class="ve-flex-col ve-text-center">
 							<div class="ve-muted ve-small" style="margin-bottom: 2px;">AC</div>
-							<div class="bold" style="font-size: 1.1em;">🛡️ ${companion.ac || "—"}</div>
+							<div class="bold" style="font-size: 1.1em;">🛡️ ${companion.ac ?? "—"}</div>
 						</div>
 						<div class="ve-flex-col ve-text-center">
 							<div class="ve-muted ve-small" style="margin-bottom: 2px;">Speed</div>
@@ -8449,16 +8421,8 @@ class CharacterSheetPage {
 						</div>
 						<div class="ve-flex-col ve-text-center">
 							<div class="ve-muted ve-small" style="margin-bottom: 2px;">Passive</div>
-							<div style="font-size: 0.9em;">👁️ ${companion.passive || "—"}</div>
+							<div style="font-size: 0.9em;">👁️ ${companion.passive ?? "—"}</div>
 						</div>
-					</div>
-
-					${ferocityHtml}
-					${featureOperationHtml}
-
-					<!-- Senses -->
-					<div class="ve-muted ve-small mb-2" style="padding: 0 4px;">
-						<strong>Senses:</strong> ${sensesStr}
 					</div>
 
 					<!-- Conditions -->
@@ -8469,18 +8433,16 @@ class CharacterSheetPage {
 						</button>
 					</div>
 
-					<div class="charsheet__companion-roll-mount mb-2"></div>
-
 					<!-- Familiar Actions -->
-					<div class="charsheet__companion-actions mb-3" style="padding: 0 4px;">
+					<div class="charsheet__companion-actions">
 						<div class="ve-muted ve-small mb-1" style="display: flex; align-items: center; gap: 8px;">
 							<span><strong>Actions:</strong></span>
-							<span class="charsheet__companion-action-status" style="font-size: 0.9em; color: ${usedAction ? "#f59e0b" : "#22c55e"}">
+							<span class="charsheet__companion-action-status">
 								${isLifecycleBlocked ? "⛔ Unavailable" : usedAction ? "⏳ Used" : "✅ Available"}
 							</span>
 							<span class="ve-muted">|</span>
 							<span><strong>Reaction:</strong></span>
-							<span class="charsheet__companion-reaction-status" style="font-size: 0.9em; color: ${usedReaction ? "#f59e0b" : "#22c55e"}">
+							<span class="charsheet__companion-reaction-status">
 								${isLifecycleBlocked ? "⛔ Unavailable" : usedReaction ? "⏳ Used" : "✅ Available"}
 							</span>
 						</div>
@@ -8490,7 +8452,7 @@ class CharacterSheetPage {
 					</div>
 
 					<!-- Action Buttons -->
-					<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
+					<div class="charsheet__companion-toolbar">
 						<button class="ve-btn ve-btn-xs ve-btn-success btn-companion-heal" style="flex: 1; min-width: 80px;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-heart"></span> Heal
 						</button>
@@ -8498,19 +8460,26 @@ class CharacterSheetPage {
 							<span class="glyphicon glyphicon-flash"></span> Damage
 						</button>
 						<button class="ve-btn ve-btn-xs ${this._state.getCompanionNote?.(companion.id) ? "ve-btn-warning" : "ve-btn-default"} btn-companion-note" title="${this._state.getCompanionNote?.(companion.id) ? "Edit Note" : "Add Note"}">
-							<span class="glyphicon glyphicon-comment"></span>
+							<span class="glyphicon glyphicon-comment" aria-hidden="true"></span> Note
 						</button>
 						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-edit" title="Edit companion name">
-							<span class="glyphicon glyphicon-pencil"></span>
+							<span class="glyphicon glyphicon-pencil" aria-hidden="true"></span> Rename
 						</button>
 						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-view" title="View full stat block">
-							<span class="glyphicon glyphicon-list-alt"></span>
+							<span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Statblock
 						</button>
 						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-dismiss" title="Dismiss companion" style="color: #ef4444;" ${lifecycleDisabledAttrs}>
-							<span class="glyphicon glyphicon-remove"></span>
+							<span class="glyphicon glyphicon-remove" aria-hidden="true"></span> Dismiss
 						</button>
 					</div>
-				</div>
+					${ferocityHtml}
+					${featureOperationHtml}
+					<div class="charsheet__companion-roll-mount"></div>
+					<details class="charsheet__companion-reference">
+						<summary>Senses and reference</summary>
+						<div><strong>Senses:</strong> ${sensesStr}</div>
+					</details>
+				</article>
 			`});
 
 			this._bindCompanionFerocityHandlers(card, companion);
@@ -8871,6 +8840,7 @@ class CharacterSheetPage {
 	 * @param {*} list - The list container to append to
 	 */
 	_renderGroupedCompanion (companion, list) {
+		const refresh = () => this._renderCompanionOperationSurfaces();
 		const livingCount = this._state.getLivingGroupedCreatureCount?.(companion.id) || 0;
 		const totalCount = companion.count || 1;
 
@@ -8898,29 +8868,21 @@ class CharacterSheetPage {
 
 		// Create individual HP bars HTML
 		const hpBarsHtml = companion.hpArray.map((creatureHp, index) => {
-			const hpPercent = Math.round((creatureHp.current / creatureHp.max) * 100);
-			const hpColor = creatureHp.current === 0 ? "#6b7280" : hpPercent > 50 ? "#22c55e" : hpPercent > 25 ? "#f59e0b" : "#ef4444";
+			const hpPercent = creatureHp.max > 0 ? Math.max(0, Math.min(100, Math.round((creatureHp.current / creatureHp.max) * 100))) : 0;
+			const hpColor = creatureHp.current === 0 ? "var(--cs-text-muted)" : hpPercent > 50 ? "var(--cs-success)" : hpPercent > 25 ? "var(--cs-warning)" : "var(--cs-danger)";
 			const isDead = creatureHp.current === 0;
 			return `
-				<div class="charsheet__grouped-creature" data-index="${index}" style="
-					display: flex;
-					align-items: center;
-					gap: 8px;
-					padding: 6px 8px;
-					background: ${isDead ? "rgba(107, 114, 128, 0.1)" : "rgba(var(--rgb-bg-text), 0.03)"};
-					border-radius: 6px;
-					${isDead ? "opacity: 0.6;" : ""}
-				">
-					<span style="font-size: 0.85em; width: 24px; text-align: center; color: var(--rgb-text-muted);">#${index + 1}</span>
+				<div class="charsheet__grouped-creature" data-index="${index}">
+					<span>#${index + 1}</span>
 					<div style="flex: 1; display: flex; align-items: center; gap: 6px;">
-						<div style="flex: 1; height: 8px; background: rgba(var(--rgb-bg-text), 0.1); border-radius: 4px; overflow: hidden;">
+						<div style="flex: 1; height: 8px; background: var(--cs-bg-elevated); border-radius: var(--cs-radius-sm); overflow: hidden;">
 							<div style="width: ${hpPercent}%; height: 100%; background: ${hpColor}; transition: width 0.2s;"></div>
 						</div>
 						<span style="font-size: 0.8em; min-width: 48px; text-align: right; color: ${hpColor};">${creatureHp.current}/${creatureHp.max}</span>
 					</div>
 					<div class="ve-flex" style="gap: 4px;">
-						<button class="ve-btn ve-btn-xxs ve-btn-success btn-heal-creature" data-index="${index}" title="Heal" ${isDead ? "" : ""}>+</button>
-						<button class="ve-btn ve-btn-xxs ve-btn-danger btn-damage-creature" data-index="${index}" title="Damage" ${isDead ? "disabled" : ""}>−</button>
+						<button class="ve-btn ve-btn-xxs ve-btn-success btn-heal-creature" data-index="${index}" aria-label="Heal creature ${index + 1}">+</button>
+						<button class="ve-btn ve-btn-xxs ve-btn-danger btn-damage-creature" data-index="${index}" aria-label="Damage creature ${index + 1}" ${isDead ? "disabled" : ""}>−</button>
 					</div>
 					${isDead ? "<span style=\"font-size: 0.8em; color: #ef4444;\">☠️</span>" : ""}
 				</div>
@@ -8928,50 +8890,21 @@ class CharacterSheetPage {
 		}).join("");
 
 		const card = e_({outer: `
-			<div class="charsheet__companion-card charsheet__grouped-companion" data-companion-id="${companion.id}" style="
-				border: 2px solid ${info.color}33;
-				border-radius: 12px;
-				padding: 16px;
-				margin-bottom: 12px;
-				background: linear-gradient(135deg, ${info.color}08, transparent);
-				position: relative;
-				overflow: hidden;
-			">
-				<!-- Type badge -->
-				<div style="
-					position: absolute;
-					top: 0;
-					right: 0;
-					background: ${info.color}22;
-					color: ${info.color};
-					padding: 4px 12px 4px 16px;
-					font-size: 0.75em;
-					font-weight: 600;
-					border-bottom-left-radius: 12px;
-				">${info.icon} ${info.label}</div>
-
-				<!-- Header -->
-				<div class="ve-flex ve-flex-v-center mb-3" style="gap: 12px;">
+			<article class="charsheet__companion-card charsheet__grouped-companion" data-companion-id="${companion.id}">
+				<header class="charsheet__companion-header">
 					${companionIconHtml}
-					<div class="ve-flex-col" style="flex: 1;">
+					<div class="charsheet__companion-identity">
 						<div class="ve-flex ve-flex-v-center" style="gap: 8px;">
-							<span style="font-size: 1.5em; font-weight: bold; color: ${info.color};">${totalCount}×</span>
+							<strong>${totalCount}×</strong>
 							${nameDisplay}
 						</div>
 						<div class="ve-muted ve-small">from ${companion.origin || "Conjure spell"} • ${livingCount}/${totalCount} alive</div>
 					</div>
-				</div>
+					<span class="charsheet__companion-kind">${info.icon} ${info.label}</span>
+				</header>
 
 				<!-- Summary Stats -->
-				<div style="
-					display: grid;
-					grid-template-columns: repeat(4, 1fr);
-					gap: 12px;
-					margin-bottom: 12px;
-					padding: 12px;
-					background: rgba(var(--rgb-bg-text), 0.03);
-					border-radius: 8px;
-				">
+				<div class="charsheet__companion-stats">
 					<div class="ve-flex-col ve-text-center">
 						<div class="ve-muted ve-small" style="margin-bottom: 2px;">Each HP</div>
 						<div class="bold" style="font-size: 1.1em;">❤️ ${companion.hp?.max || "?"}</div>
@@ -8991,22 +8924,17 @@ class CharacterSheetPage {
 				</div>
 
 				<!-- Individual Creatures (Expandable) -->
-				<div class="charsheet__grouped-creatures-container mb-3">
-					<div class="ve-flex ve-flex-v-center mb-2" style="gap: 8px;">
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-toggle-creatures" style="padding: 2px 8px;">
-							<span class="toggle-icon">▶</span> Individual Creatures
-						</button>
-						<span class="ve-muted ve-small">(${livingCount} alive, ${totalCount - livingCount} dead)</span>
-					</div>
-					<div class="charsheet__grouped-creatures-list" style="display: none; max-height: 200px; overflow-y: auto; padding: 4px;">
+				<details class="charsheet__grouped-creatures-container charsheet__companion-reference">
+					<summary>Individual creatures (${livingCount} alive, ${totalCount - livingCount} at 0 HP)</summary>
+					<div class="charsheet__grouped-creatures-list">
 						<div class="ve-flex-col" style="gap: 4px;">
 							${hpBarsHtml}
 						</div>
 					</div>
-				</div>
+				</details>
 
 				<!-- Bulk Actions -->
-				<div class="ve-flex mb-3" style="gap: 8px;">
+				<div class="charsheet__companion-toolbar">
 					<button class="ve-btn ve-btn-sm ve-btn-success btn-heal-all" style="flex: 1;">
 						<span class="glyphicon glyphicon-heart"></span> Heal All
 					</button>
@@ -9027,17 +8955,16 @@ class CharacterSheetPage {
 						<span class="glyphicon glyphicon-remove"></span> Dismiss All
 					</button>
 				</div>
-			</div>
+			</article>
 		`});
 
-		// Toggle creatures list
 		card.querySelector(".charsheet__companion-roll-mount").append(this._createCompanionRollControls(companion));
-		card.querySelector(".btn-toggle-creatures").addEventListener("click", function () {
-			const list = card.querySelector(".charsheet__grouped-creatures-list");
-			const icon = this.querySelector(".toggle-icon");
-			list.style.display = list.style.display === "none" ? "" : "none";
-			icon.textContent = list.style.display === "none" ? "▶" : "▼";
-		});
+		card.querySelector(".charsheet__companion-stats").after(this._createCompanionTurnSummary(companion));
+		const individual = card.querySelector("details");
+		individual.before(card.querySelector(".charsheet__companion-toolbar"));
+		const ui = this._getCompanionRollUi(companion.id);
+		individual.open = !!ui.individualsOpen;
+		individual.addEventListener("toggle", () => { ui.individualsOpen = individual.open; });
 
 		// Heal all creatures
 		card.querySelector(".btn-heal-all").addEventListener("click", async () => {
@@ -9051,7 +8978,7 @@ class CharacterSheetPage {
 
 			const healed = this._state.healAllGroupedCreatures?.(companion.id, amount);
 			this._saveCurrentCharacter();
-			this._renderCompanions();
+			refresh();
 			JqueryUtil.doToast({type: "success", content: `Healed ${healed} HP across all ${companion.name}!`});
 		});
 
@@ -9067,7 +8994,7 @@ class CharacterSheetPage {
 
 			const result = this._state.damageAllGroupedCreatures?.(companion.id, amount);
 			this._saveCurrentCharacter();
-			this._renderCompanions();
+			refresh();
 
 			let msg = `Dealt ${result.totalDamage} damage across all ${companion.name}!`;
 			if (result.creaturesDropped > 0) {
@@ -9090,7 +9017,7 @@ class CharacterSheetPage {
 
 			this._state.healGroupedCreature?.(companion.id, index, amount);
 			this._saveCurrentCharacter();
-			this._renderCompanions();
+			refresh();
 		}));
 
 		// Damage individual creature
@@ -9107,7 +9034,7 @@ class CharacterSheetPage {
 
 			const result = this._state.damageGroupedCreature?.(companion.id, index, amount);
 			this._saveCurrentCharacter();
-			this._renderCompanions();
+			refresh();
 
 			if (result.droppedToZero) {
 				JqueryUtil.doToast({type: "warning", content: `${companion.name} #${index + 1} dropped to 0 HP!`});
@@ -9137,7 +9064,7 @@ class CharacterSheetPage {
 
 			this._state.removeCompanion?.(companion.id);
 			this._saveCurrentCharacter();
-			this._renderCompanions();
+			refresh();
 			JqueryUtil.doToast({type: "info", content: `${companion.count}× ${companion.name} have been dismissed.`});
 		});
 
@@ -9263,6 +9190,21 @@ class CharacterSheetPage {
 		};
 	}
 
+	_createCompanionTurnSummary (companion, {runtime} = {}) {
+		const model = this._getCompanionRollModel(companion.id, {runtime});
+		const managed = this._getFeatureCompanionManagerModel(companion);
+		const summary = e_({tag: "div", clazz: "charsheet__companion-readiness", attrs: {role: "group", "aria-label": "Turn availability"}});
+		const availability = model.actor
+			? [["Action", model.actor.isActionTypeAvailable("action")], ["Bonus Action", model.actor.isBonusActionAvailable()], ["Reaction", model.actor.isActionTypeAvailable("reaction")]]
+			: [["Action", !companion.usedAction], ["Reaction", !companion.usedReaction]];
+		for (const [label, available] of availability) {
+			const managedText = managed?.readiness?.[label.toLowerCase()];
+			summary.append(e_({tag: "span", txt: `${label}: ${model.reason ? "Unavailable" : managedText || (available ? "Available" : "Used")}`}));
+		}
+		if (model.reason) summary.append(e_({tag: "span", clazz: "charsheet__companion-roll-note", txt: model.reason}));
+		return summary;
+	}
+
 	_getCompanionRollUi (companionId) {
 		this._companionRollUi ||= new WeakMap();
 		if (!this._companionRollUi.has(this._state)) this._companionRollUi.set(this._state, new Map());
@@ -9278,6 +9220,10 @@ class CharacterSheetPage {
 		const statusId = `companion-roll-status-${this._companionRollControlsId = (this._companionRollControlsId || 0) + 1}`;
 		const status = e_({tag: "p", clazz: "charsheet__companion-roll-status", attrs: {id: statusId, role: "status", "aria-live": "polite"}});
 		const model = this._getCompanionRollModel(companion.id, {runtime});
+		const checks = e_({tag: "div", clazz: "charsheet__companion-roll-checks"});
+		const attacks = e_({tag: "div", clazz: "charsheet__companion-roll-attacks"});
+		checks.append(e_({tag: "h5", txt: "Checks and saves"}));
+		attacks.append(e_({tag: "h5", txt: "Attacks and damage"}));
 		const signed = value => value == null ? "unavailable" : `${value >= 0 ? "+" : ""}${value}`;
 		const controls = e_({tag: "div", clazz: "charsheet__companion-roll-controls"});
 		const select = (parent, label, clazz, choices, value) => {
@@ -9332,6 +9278,7 @@ class CharacterSheetPage {
 					busy = false;
 					element.disabled = this._state !== owner || owner.getCompanion(companion.id) !== model.companion || !!model.reason || disabled
 						|| (clazz === "btn-companion-attack-roll" && (model.actor ? !!model.companion?.actorSnapshot.state.actionEconomyUsage?.action : !!model.companion?.usedAction));
+					if (hadFocus && !element.disabled && document.activeElement === document.body && panel.isConnected) element.focus({preventScroll: true});
 				}
 			});
 			parent.append(element);
@@ -9339,14 +9286,14 @@ class CharacterSheetPage {
 		};
 		const initiative = model.checks.find(check => check.kind === "initiative");
 		button(controls, `Initiative (${signed(initiative?.modifier)})`, "btn-companion-initiative", options => this._rollCompanionInitiative(companion, options), {disabled: initiative?.modifier == null});
-		panel.append(controls);
+		checks.append(controls);
 		const saves = e_({tag: "div", clazz: "charsheet__companion-roll-saves", attrs: {role: "group", "aria-label": "Saving throws"}});
 		for (const check of model.checks.filter(check => check.kind === "save")) {
 			button(saves, `${check.label} (${signed(check.modifier)})`, "btn-companion-save", options => this._rollCompanionSavingThrow(companion, check.key, options), {
 				disabled: check.modifier == null, attrs: {"data-ability": check.key},
 			});
 		}
-		panel.append(saves);
+		checks.append(saves);
 		const skillRow = e_({tag: "div", clazz: "charsheet__companion-roll-controls"});
 		const skill = select(skillRow, "Skill or ability", "charsheet__companion-roll-skill",
 			[...model.checks.filter(check => check.kind === "skill"), ...model.checks.filter(check => check.kind === "ability")]
@@ -9357,9 +9304,9 @@ class CharacterSheetPage {
 			const [kind, key] = skill.value.split(":");
 			return kind === "ability" ? this._rollCompanionAbilityCheck(companion, key, options) : this._rollCompanionSkillCheck(companion, key, options);
 		}, {disabled: !model.checks.some(check => ["skill", "ability"].includes(check.kind) && check.modifier != null)});
-		panel.append(skillRow);
+		checks.append(skillRow);
 		if (model.operationUi) {
-			panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Use the feature command controls for attacks, damage and action costs."}));
+			attacks.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Use the feature command controls for attacks, damage and action costs."}));
 		} else {
 			for (const action of model.actions) {
 				const row = e_({tag: "div", clazz: "charsheet__companion-roll-attack"});
@@ -9374,9 +9321,11 @@ class CharacterSheetPage {
 					options => this._rollCompanionDamage(companion, action.key, null, damageMode.value === "critical", options), {disabled: !!action.damageReason, attrs: {"data-action-key": action.key}});
 				const description = action.damageReason || action.damages.map(damage => `${damage.formula} ${damage.type}`.trim()).join(" + ");
 				row.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: `${description}${action.note ? ` ${action.note}` : ""}`}));
-				panel.append(row);
+				attacks.append(row);
 			}
 		}
+		if (!model.actions.length && !model.operationUi) attacks.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "No supported attacks. Use the statblock for manual actions."}));
+		panel.append(attacks, checks);
 		if (model.actor) panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Uses this duplicate's current passive effects. Optional class resources, conditional bonuses and rerolls are manual."}));
 		if (companion.count > 1) panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Each roll is for one creature, not the whole group. Action tracking applies to this companion record."}));
 		if (companion.exhaustion) panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: `Exhaustion ${companion.exhaustion}: adjudicate this ordinary companion's exhaustion rules manually.`}));

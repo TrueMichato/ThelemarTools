@@ -11,6 +11,7 @@ interface Companion {
 	actorSnapshot: {
 		actorId: string;
 		lifecycle: string;
+		revision: number;
 		spell: {source: Source};
 		frozen: {level: number; proficiencyBonus: number};
 		state: {
@@ -22,7 +23,14 @@ interface Companion {
 }
 interface SheetHandle {
 	spawn?: unknown;
+	_renderCompanions(): void;
+	saveCharacter(): Promise<unknown>;
 	getState(): {
+		addClass(data: Record<string, unknown>): void;
+		addCompanion(data: Record<string, unknown>): string;
+		getCompanion(id: string): {hp: Hp; hpArray: {current: number; max: number}[] | null};
+		getFeatureCompanionSummonerContext(uid: string): unknown;
+		reconcileFeatureOwnedCompanion(id: string, options: {summonerContext: unknown}): void;
 		getSpells(): LearnedSpell[];
 		getCompanions(): Companion[];
 		getHp(): Hp;
@@ -110,7 +118,7 @@ export class SimulacrumPage {
 				},
 				companions: state.getCompanions().filter(row => !!row.actorSnapshot).map(row => ({
 					id: row.id, actorId: row.actorSnapshot.actorId, source: row.actorSnapshot.spell.source,
-					lifecycle: row.actorSnapshot.lifecycle, hp: row.hp, ac: row.ac,
+					lifecycle: row.actorSnapshot.lifecycle, revision: row.actorSnapshot.revision, hp: row.hp, ac: row.ac,
 					level: row.actorSnapshot.frozen.level, pb: row.actorSnapshot.frozen.proficiencyBonus,
 					slot1: row.actorSnapshot.state.spellcasting.spellSlots[1].current,
 					slot7: row.actorSnapshot.state.spellcasting.spellSlots[7].current,
@@ -196,7 +204,7 @@ export class SimulacrumPage {
 	}
 
 	async closeManager (): Promise<void> {
-		await this.page.keyboard.press("Escape");
+		await this.page.locator(".ve-ui-modal__inner:visible").last().getByRole("button", {name: "Close", exact: true}).click();
 		await expect(this.page.locator(".cs-simulacrum--manager")).toBeHidden();
 	}
 
@@ -275,17 +283,18 @@ export class SimulacrumPage {
 	}
 
 	async captureResponsiveManager (id: string, pathFor: (name: string) => string) {
-		const manager = await this.openManager(id);
 		const toastClose = this.page.locator(".toast__btn-close:visible");
 		if (await toastClose.count()) await toastClose.first().dispatchEvent("click", {ctrlKey: true});
 		const results = [];
-		for (const width of [1280, 390]) {
+		for (const width of [1440, 390]) {
 			for (const night of [false, true]) {
 				await this.page.setViewportSize({width, height: 844});
 				await this.page.evaluate(isNight => {
-					document.documentElement.classList.toggle("ve-night-mode", isNight);
-					document.documentElement.classList.toggle("ve-night-mode--standard", isNight);
+					(globalThis as typeof globalThis & {styleSwitcher: {_setActiveStyleTheme(style: string): void}})
+						.styleSwitcher._setActiveStyleTheme(isNight ? "night" : "day");
 				}, night);
+				const manager = await this.openManager(id);
+				await this.page.waitForTimeout(300);
 				const name = `simulacrum-${width}-${night ? "night" : "day"}`;
 				await this.page.screenshot({path: pathFor(`${name}.png`), animations: "disabled"});
 				const metrics = await manager.evaluate(root => {
@@ -308,19 +317,202 @@ export class SimulacrumPage {
 							return {text: element.textContent!.trim().slice(0, 70), ratio, minimum};
 						}).filter(result => result.ratio < result.minimum);
 					const bounds = root.getBoundingClientRect();
+					const firstCast = Array.from(root.querySelectorAll<HTMLButtonElement>(".cs-simulacrum__spell button"))
+						.find(button => button.textContent === "Cast" && !button.disabled);
+					const castBounds = firstCast?.getBoundingClientRect();
+					const rectangle = (element: Element) => {
+						const bounds = element.getBoundingClientRect();
+						const style = getComputedStyle(element);
+						return {
+							tag: element.tagName, classes: element.className,
+							top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right,
+							height: bounds.height, overflowY: style.overflowY,
+							cssHeight: style.height, maxHeight: style.maxHeight,
+							scrollTop: element.scrollTop, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight,
+						};
+					};
+					const ancestors = [];
+					let visibleTop = 0;
+					let visibleBottom = innerHeight;
+					for (let ancestor = firstCast?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+						ancestors.push(rectangle(ancestor));
+						if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(ancestor).overflowY)) continue;
+						const bounds = ancestor.getBoundingClientRect();
+						visibleTop = Math.max(visibleTop, bounds.top);
+						visibleBottom = Math.min(visibleBottom, bounds.bottom);
+					}
 					const smallControls = Array.from(root.querySelectorAll<HTMLElement>("button,select,input[type=number]"))
 						.filter(element => element.getClientRects().length && element.getBoundingClientRect().height < 43.9)
 						.map(element => element.textContent?.trim().slice(0, 50) || element.tagName);
 					return {
 						overflow: root.scrollWidth > root.clientWidth + 1 || bounds.left < 0 || bounds.right > innerWidth + 1,
-						contrast, smallControls,
+						contrast, smallControls, firstCastVisible: !!castBounds && castBounds.top >= visibleTop && castBounds.bottom <= visibleBottom,
+						diagnostics: {
+							viewport: {width: innerWidth, height: innerHeight},
+							firstCast: firstCast ? {...rectangle(firstCast), text: firstCast.textContent, disabled: firstCast.disabled} : null,
+							visibleTop, visibleBottom, ancestors,
+							leadingElements: Array.from(root.querySelectorAll(".cs-simulacrum__summary, .cs-simulacrum__content > .cs-simulacrum__hint, .charsheet__companion-readiness, .cs-simulacrum__toolbar, .cs-simulacrum__jumps, .cs-simulacrum__casting > section:first-child, .cs-simulacrum__field, .cs-simulacrum__rolls"))
+								.map(rectangle),
+						},
 					};
 				});
 				results.push({name, ...metrics});
+				console.log(`[Companion manager geometry] ${JSON.stringify({name, ...metrics})}`);
+				await this.closeManager();
+				await this.openManager(id, {play: true});
+				await this.closeManager();
+				const drawer = this.page.locator(".pm-drawer--open");
+				await expect(drawer.locator(".btn-companion-save")).toHaveCount(6);
+				expect(await drawer.evaluate(element => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+				await this.page.screenshot({path: pathFor(`${name}-play.png`), animations: "disabled"});
 			}
 		}
-		await this.closeManager();
 		return results;
+	}
+
+	async expectMountedCompanionDashboard (): Promise<void> {
+		// Presentation fixtures use real State registration; creation/payment stay covered by the lifecycle tests.
+		const ids = await this.page.evaluate(async () => {
+			const sheet = (globalThis as BrowserScope).charSheet;
+			const state = sheet.getState();
+			const statistics = {abilities: {str: 12, dex: 14, con: 12, int: 6, wis: 12, cha: 6}, ac: 12, speed: {walk: 30}};
+			const ordinary = state.addCompanion({name: "Dashboard Owl", type: "familiar", ...statistics, hp: {max: 10, current: 10}});
+			const grouped = state.addCompanion({
+				name: "Dashboard Pack", type: "conjured", ...statistics, count: 3, hp: {max: 8, current: 8},
+				hpArray: Array.from({length: 3}, () => ({current: 8, max: 8})),
+			});
+			const mount = state.addCompanion({name: "Dashboard Horse", type: "mount", ...statistics, hp: {max: 20, current: 20}});
+			state.addClass({name: "Artificer", source: "EFA", level: 5, subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"}});
+			const uid = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
+			const feature = state.addCompanion({
+				name: "Steel Defender", source: "EFA", type: "class_summon", origin: "Battle Smith", creatureType: "construct",
+				hp: {max: 30, current: 30, temp: 0}, featureGrant: {uid}, lifecycle: {status: "alive"},
+				uses: {repair: {current: 3, max: 3, recharge: "longRest"}}, hitDice: {die: "d8", current: 5, max: 5},
+			});
+			state.reconcileFeatureOwnedCompanion(feature, {summonerContext: state.getFeatureCompanionSummonerContext(uid)});
+			await sheet.saveCharacter();
+			sheet._renderCompanions();
+			return {ordinary, grouped, mount, feature};
+		});
+		await this.sheet.switchToTab(this.sheet.tabCompanions);
+		const sheetGroup = this.page.locator(`.charsheet__grouped-companion[data-companion-id="${ids.grouped}"]:visible`);
+		await expect(sheetGroup).toHaveCount(1);
+		expect(await sheetGroup.evaluate(element => element.tagName)).toBe("ARTICLE");
+		await expect(sheetGroup.locator(".charsheet__grouped-creature")).toHaveCount(3);
+		await expect(sheetGroup.locator(".btn-companion-save")).toHaveCount(6);
+		await expect(sheetGroup.locator(".btn-heal-all")).toBeVisible();
+		await expect(sheetGroup.locator(".btn-damage-all")).toBeVisible();
+		await expect(sheetGroup.locator("details")).not.toHaveAttribute("open");
+		await this.changeCompanionHpThroughPrompt(sheetGroup.locator(".btn-damage-all"), 2);
+		await expect.poll(() => this.groupHp(ids.grouped)).toEqual([6, 6, 6]);
+		await sheetGroup.locator("summary").click();
+		await this.changeCompanionHpThroughPrompt(sheetGroup.getByRole("button", {name: "Damage creature 1", exact: true}), 3);
+		await expect.poll(() => this.groupHp(ids.grouped)).toEqual([3, 6, 6]);
+		await expect(sheetGroup.locator("details")).toHaveAttribute("open");
+		await this.changeCompanionHpThroughPrompt(sheetGroup.getByRole("button", {name: "Heal creature 1", exact: true}), 1);
+		await expect.poll(() => this.groupHp(ids.grouped)).toEqual([4, 6, 6]);
+		await this.changeCompanionHpThroughPrompt(sheetGroup.locator(".btn-heal-all"), 1);
+		await expect.poll(() => this.groupHp(ids.grouped)).toEqual([5, 7, 7]);
+		const mount = this.page.locator(`.charsheet__companion-card[data-companion-id="${ids.mount}"]:visible`);
+		await expect(mount).toHaveCount(1);
+		await expect(mount.locator(".btn-companion-save")).toHaveCount(6);
+		const manager = this.page.locator(".charsheet__feature-companion-manager:visible").filter({hasText: "Steel Defender"});
+		await expect(manager).toHaveCount(1);
+		await expect(manager.locator(".charsheet__feature-companion-readiness")).toHaveCount(1);
+		await expect(manager.getByText("Setup and provenance", {exact: true})).toBeVisible();
+		const featureCard = this.page.locator(`.charsheet__companion-card[data-companion-id="${ids.feature}"]:visible`);
+		const operations = featureCard.getByRole("group", {name: "Steel Defender feature operations", exact: true});
+		await expect(operations.getByRole("button", {name: /Force-Empowered Rend/})).toBeVisible();
+		await expect(operations.getByRole("button", {name: /Repair/})).toBeVisible();
+		await expect(operations.getByRole("button", {name: /Deflect Attack/})).toBeVisible();
+		await expect(manager.locator(".charsheet__feature-companion-diagnostics")).toHaveCount(0);
+
+		await this.sheet.enterPlayMode();
+		await this.page.locator(".pm-status__tool-btn").filter({hasText: /^More$/}).click();
+		await this.page.locator(".pm-context-menu__item").filter({hasText: /^Companions$/}).click();
+		const drawer = this.page.locator(".pm-drawer--open");
+		const ordinary = drawer.locator(`[data-companion-id="${ids.ordinary}"]`);
+		await expect(ordinary.locator(".charsheet__companion-readiness")).toHaveCount(1);
+		await expect(ordinary.locator(".pm-companion__controls")).toHaveCount(1);
+		await expect(ordinary.locator(".btn-companion-save")).toHaveCount(6);
+		const controls = await ordinary.locator(".pm-companion__controls").elementHandle();
+		for (const value of [8, 4, 9]) {
+			await ordinary.locator(".pm-companion__hp-input").fill(String(value));
+			await ordinary.locator(".pm-companion__hp-input").press("Tab");
+			await expect.poll(() => this.page.evaluate(id => (globalThis as BrowserScope).charSheet.getState().getCompanion(id).hp.current, ids.ordinary)).toBe(value);
+			await expect(ordinary.locator(".charsheet__companion-readiness")).toHaveCount(1);
+			await expect(ordinary.locator(".pm-companion__controls")).toHaveCount(1);
+			expect(await controls!.evaluate(element => element.isConnected)).toBe(true);
+		}
+		await expect(drawer.locator(`[data-companion-id="${ids.mount}"] .btn-companion-save`)).toHaveCount(6);
+		const feature = drawer.locator(`[data-companion-id="${ids.feature}"]`);
+		await expect(feature.locator(".charsheet__companion-readiness")).toHaveCount(1);
+		await expect(feature.locator(".btn-companion-save")).toHaveCount(6);
+		await expect(feature.locator(".btn-companion-attack-roll")).toHaveCount(0);
+		const group = drawer.locator(`.charsheet__grouped-companion[data-companion-id="${ids.grouped}"]`);
+		await expect(group.locator(".pm-companion__hp-input")).toHaveCount(0);
+		await expect(group.locator(".charsheet__grouped-creature")).toHaveCount(3);
+		await this.changeCompanionHpThroughPrompt(group.locator(".btn-damage-all"), 1);
+		await expect.poll(() => this.groupHp(ids.grouped)).toEqual([4, 6, 6]);
+		await expect(group.locator(".charsheet__grouped-creature")).toHaveCount(3);
+		await expect(group.locator(".btn-companion-save")).toHaveCount(6);
+		console.log("[Companion mounted DOM] grouped initial/individual+bulk HP and PlayMode refresh; ordinary initial/repeated-HP readiness+toolbar counts; mount and source-qualified feature controls passed.");
+	}
+
+	private groupHp (id: string): Promise<number[]> {
+		return this.page.evaluate(companionId => (globalThis as BrowserScope).charSheet.getState().getCompanion(companionId).hpArray!.map(row => row.current), id);
+	}
+
+	private async changeCompanionHpThroughPrompt (button: Locator, amount: number): Promise<void> {
+		await button.click();
+		const dialog = this.page.locator(".ve-ui-modal__inner:visible").last();
+		await dialog.getByRole("textbox").fill(String(amount));
+		await dialog.getByRole("button", {name: /^OK$/i}).click();
+		await expect(dialog).toBeHidden();
+	}
+
+	async expectFastPlayPreservation (id: string): Promise<void> {
+		const manager = await this.openManager(id);
+		const casting = manager.locator(".cs-simulacrum__casting");
+		const rules = manager.locator(".cs-simulacrum__rules");
+		expect(await casting.evaluate((element, other) => !!other && !!(element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING), await rules.elementHandle())).toBe(true);
+		await expect(rules).not.toHaveAttribute("open");
+		await expect(manager.locator(".btn-companion-save")).toHaveCount(6);
+		const shield = manager.locator(".cs-simulacrum__spell").filter({hasText: "Shield"});
+		const slot = shield.locator(".cs-simulacrum__slot");
+		const target = manager.locator(".cs-simulacrum__target");
+		await slot.selectOption("slot:1");
+		await target.selectOption({index: 1});
+		const targetValue = await target.inputValue();
+		const search = manager.getByRole("searchbox");
+		await search.fill("Shield");
+		await expect(manager.locator(".cs-simulacrum__spell:visible")).toHaveCount(1);
+		const mode = manager.locator(".charsheet__companion-roll-mode");
+		await mode.selectOption("advantage");
+		const handles = await manager.locator(".cs-simulacrum__casting select, .charsheet__companion-roll-mode").elementHandles();
+		const before = await this.snapshot();
+		const initiative = manager.locator(".btn-companion-initiative");
+		await initiative.click();
+		await expect(manager.locator(".charsheet__companion-roll-status")).toContainText(/Initiative/i);
+		for (const handle of handles) expect(await handle.evaluate(element => element.isConnected)).toBe(true);
+		await expect(initiative).toBeFocused();
+		await expect(slot).toHaveValue("slot:1");
+		await expect(target).toHaveValue(targetValue);
+		await expect(mode).toHaveValue("advantage");
+		expect(await this.snapshot()).toEqual(before);
+		await rules.locator("summary").click();
+		await manager.getByRole("button", {name: "Start combat", exact: true}).click();
+		await expect(manager.getByRole("button", {name: "Start next turn", exact: true})).toBeEnabled();
+		await expect(slot).toHaveValue("slot:1");
+		await expect(target).toHaveValue(targetValue);
+		await expect(mode).toHaveValue("advantage");
+		await expect(search).toHaveValue("Shield");
+		await expect(rules).toHaveAttribute("open");
+		await expect(manager.getByRole("button", {name: "Start next turn", exact: true})).toBeFocused();
+		const after = await this.snapshot();
+		expect(after.owner).toEqual(before.owner);
+		expect(after.companions.find(row => row.id === id)!.revision).toBe(before.companions.find(row => row.id === id)!.revision + 1);
+		await this.closeManager();
 	}
 
 	async reload (): Promise<void> {

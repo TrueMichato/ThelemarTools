@@ -10,7 +10,7 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const flush = async () => { for (let i = 0; i < 12; ++i) await Promise.resolve(); };
 const matches = (node, selector) => selector.startsWith(".")
 	? node.className?.split(" ").includes(selector.slice(1))
-	: node.tag === selector;
+	: selector.startsWith("[") ? Object.hasOwn(node.attrs || {}, selector.slice(1, -1)) : node.tag === selector;
 const descendants = node => node._children.flatMap(child => typeof child === "string" ? [] : [child, ...descendants(child)]);
 const baseElement = globalThis.e_;
 globalThis.e_ = opts => {
@@ -18,7 +18,10 @@ globalThis.e_ = opts => {
 	node.className = opts.clazz || "";
 	node.attrs = {...opts.attrs};
 	node.type = opts.type;
+	node.tagName = node.tag?.toUpperCase();
+	node.getAttribute = name => node.attrs[name] ?? null;
 	node.setAttribute = (name, value) => { node.attrs[name] = value; };
+	node.focus = () => { globalThis.document.activeElement = node; };
 	node.querySelectorAll = selectors => descendants(node).filter(child => selectors.split(",").some(selector => matches(child, selector.trim())));
 	node.querySelector = selector => node.querySelectorAll(selector)[0] || null;
 	node.click = () => node.disabled ? undefined : node._handlers.click?.({preventDefault () {}});
@@ -70,7 +73,10 @@ function addCopy (state, source = "PHB") {
 let modal;
 let modalSpy;
 let rendererBefore;
+let documentBefore;
 beforeAll(() => {
+	documentBefore = globalThis.document;
+	globalThis.document = {activeElement: null};
 	rendererBefore = globalThis.Renderer.monster;
 	globalThis.Renderer.monster = {getCompactRenderedString: jest.fn(() => "<tr><td>Rendered companion</td></tr>")};
 	modalSpy = jest.spyOn(CharacterSheetModal, "pGetShow").mockImplementation(async options => {
@@ -83,6 +89,7 @@ beforeAll(() => {
 	});
 });
 afterAll(() => {
+	globalThis.document = documentBefore;
 	modalSpy.mockRestore();
 	globalThis.Renderer.monster = rendererBefore;
 });
@@ -141,6 +148,33 @@ describe("Simulacrum creation preview", () => {
 });
 
 describe("Simulacrum companion surfaces", () => {
+	test("mutation refresh preserves explicit pool, target, search, disclosure and keyboard focus", async () => {
+		const {state, page} = makeOwner();
+		const id = addCopy(state);
+		await Ui.pShow({ownerPage: page, companionId: id});
+		const slot = modal.root.querySelector(".cs-simulacrum__slot");
+		slot.value = "pact:2";
+		modal.root.querySelector(".cs-simulacrum__target").value = "owner";
+		const search = modal.root.querySelector("input");
+		search.value = "Shield";
+		search._handlers.input();
+		modal.root.querySelector(".cs-simulacrum__rules").open = true;
+		slot.focus();
+		modal.root.querySelectorAll("button").find(button => button.textContent === "Start combat").click();
+		await flush();
+		const restored = modal.root.querySelector(".cs-simulacrum__slot");
+		expect(restored).not.toBe(slot);
+		expect(restored.value).toBe("pact:2");
+		expect(modal.root.querySelector(".cs-simulacrum__target").value).toBe("owner");
+		expect(modal.root.querySelector("input").value).toBe("Shield");
+		expect(modal.root.querySelector(".cs-simulacrum__rules").open).toBe(true);
+		expect(globalThis.document.activeElement).toBe(restored);
+		const hidden = modal.root.querySelectorAll(".cs-simulacrum__spell").filter(row => row.hidden);
+		expect(hidden).toHaveLength(1);
+		expect(hidden[0]._html).toContain("Fire Bolt");
+		modal.close();
+	});
+
 	test.each(["sheet", "play"])("%s card exposes repair and actor controls without an editable HP or fake bestiary link", mode => {
 		const {state, page} = makeOwner();
 		const id = addCopy(state);

@@ -3529,13 +3529,15 @@ export class CharacterSheetPlayMode {
 				CharacterSheetSimulacrum.renderCard({ownerPage: this._page, companion: comp, parent: container, mode: "play"});
 				return;
 			}
+			if (comp.count > 1 && comp.hpArray) {
+				this._page._renderGroupedCompanion(comp, container);
+				return;
+			}
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
 			card.setAttribute("data-companion-id", comp.id);
 			const featureOperationModel = this._page.getFeatureCompanionOperationSurfaceModel?.(comp) || null;
 			const isRhwReanimator = featureOperationModel?.kind === "rhwReanimator"
 				|| this._page.isRhwReanimatorFeatureOwnedCompanion?.(comp) === true;
-			const isRhwLifecycleBlocked = isRhwReanimator
-				&& (comp.active === false || Number(comp.hp?.current) <= 0);
 			const lifecycle = this._page.getFeatureCompanionLifecyclePresentation?.(comp) || null;
 			const lifecycleReasonId = this._renderFeatureCompanionLifecycle(card, comp, lifecycle);
 			const isLifecycleBlocked = !!lifecycle && !lifecycle.isAlive;
@@ -3547,14 +3549,6 @@ export class CharacterSheetPlayMode {
 
 			// ── Interactive controls (B4) ────────────────────────────
 			const controls = this._ce("div", "pm-companion__controls", card);
-
-			const initiative = this._state.getCompanionInitiative?.(comp.id) || 0;
-			const initiativeBtn = this._ce("button", "pm-companion__ctrl-btn", controls);
-			this._setIconLabel(initiativeBtn, "initiative", ` Initiative ${this._fmtMod(initiative)}`);
-			initiativeBtn.title = `Roll initiative for ${comp.customName || comp.name || "companion"}`;
-			initiativeBtn.addEventListener("click", () => this._page._rollCompanionInitiative?.(comp));
-			applyLifecycleDisabled(initiativeBtn);
-			if (isRhwLifecycleBlocked) initiativeBtn.disabled = true;
 
 			if (!isRhwReanimator) {
 				// Heal button
@@ -3603,6 +3597,15 @@ export class CharacterSheetPlayMode {
 				applyLifecycleDisabled(dismissBtn);
 			}
 
+			let readiness;
+			const refreshReadiness = () => {
+				const next = this._page._createCompanionTurnSummary?.(comp);
+				if (!next) return;
+				if (readiness) readiness.replaceWith(next);
+				else card.appendChild(next);
+				readiness = next;
+			};
+
 			// ── HP inline edit ──────────────────────────────────────
 			if (comp.hp?.max) {
 				const hpRow = this._ce("div", "pm-companion__hp-row", card);
@@ -3627,6 +3630,7 @@ export class CharacterSheetPlayMode {
 							this._persistCompanionMutation();
 							this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
 						}
+						refreshReadiness();
 					});
 					applyLifecycleDisabled(hpInput);
 				}
@@ -3642,6 +3646,8 @@ export class CharacterSheetPlayMode {
 				if (pct <= 25) hpBarFill.classList.add("pm-companion__hp-bar-fill--critical");
 				else if (pct <= 50) hpBarFill.classList.add("pm-companion__hp-bar-fill--bloodied");
 			}
+			refreshReadiness();
+			card.appendChild(controls);
 
 			if (comp.featureGrant?.uid && comp.scaling?.resolved) {
 				if (isRhwReanimator && !featureOperationModel) {
@@ -3696,6 +3702,8 @@ export class CharacterSheetPlayMode {
 				const notePreview = this._ce("div", "pm-companion__note-preview", card);
 				notePreview.replaceChildren(this._icon("edit"), document.createTextNode(` ${compNote.slice(0, 100)}${compNote.length > 100 ? "\u2026" : ""}`));
 			}
+			const rolls = this._page._createCompanionRollControls?.(comp);
+			if (rolls) card.appendChild(rolls);
 
 			// Actions (5etools entries format: [{name, entries}])
 			const actions = comp.actions || comp.attacks || [];
