@@ -2066,10 +2066,6 @@
 		margin-bottom: 0.75rem;
 	}
 
-	.charsheet__companion-quick-rolls {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-
 	.charsheet__feature-companion-setup {
 		align-items: stretch;
 		flex-direction: column;

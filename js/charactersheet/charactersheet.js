@@ -8154,6 +8154,10 @@ class CharacterSheetPage {
 
 		featureCompanionModels.forEach((model, index) => {
 			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionManagerHtml(model, index));
+			if (model.isOverviewOnly) {
+				const companion = this._state.getCompanion(model.companionId);
+				if (companion) list.lastElementChild.append(this._createCompanionRollControls(companion));
+			}
 		});
 		featureCompanionCreationModels.forEach((model, index) => {
 			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionCreationSurfaceHtml(model, index));
@@ -8176,7 +8180,8 @@ class CharacterSheetPage {
 
 		companions.forEach(companion => {
 			if (CharacterSheetSimulacrum.isSimulacrum(companion)) {
-				CharacterSheetSimulacrum.renderCard({ownerPage: this, companion, parent: list});
+				const card = CharacterSheetSimulacrum.renderCard({ownerPage: this, companion, parent: list});
+				card.append(this._createCompanionRollControls(companion));
 				return;
 			}
 			// Check if this is a grouped companion (conjured creatures)
@@ -8255,16 +8260,6 @@ class CharacterSheetPage {
 				" title="${isLifecycleBlocked ? CharacterSheetModal._escapeHtml(lifecyclePresentation.disabledReason) : "Click to remove"}">${icon} ${condName}<span style="margin-left: 4px; opacity: 0.7;">×</span></span>`;
 			}).join(" ");
 
-			// Get skill modifiers for quick checks
-			const perceptionMod = this._state.getCompanionSkillMod?.(companion.id, "perception") || 0;
-			const stealthMod = this._state.getCompanionSkillMod?.(companion.id, "stealth") || 0;
-			const investigationMod = this._state.getCompanionSkillMod?.(companion.id, "investigation") || 0;
-			const perceptionStr = perceptionMod >= 0 ? `+${perceptionMod}` : `${perceptionMod}`;
-			const stealthStr = stealthMod >= 0 ? `+${stealthMod}` : `${stealthMod}`;
-			const investigationStr = investigationMod >= 0 ? `+${investigationMod}` : `${investigationMod}`;
-			const initiativeMod = this._state.getCompanionInitiative?.(companion.id) || 0;
-			const initiativeStr = initiativeMod >= 0 ? `+${initiativeMod}` : `${initiativeMod}`;
-
 			const featureCompanionDescriptor = this._getFeatureCompanionDescriptor(companion);
 			const featureOperationUi = this._getFeatureCompanionOperationUiModel(companion, featureCompanionDescriptor);
 			const isFeatureOperationCompanion = !!featureOperationUi;
@@ -8302,22 +8297,6 @@ class CharacterSheetPage {
 			const usedReaction = isFeatureOperationCompanion
 				? !deflectAvailability?.status?.reactionAvailable
 				: companion.usedReaction || false;
-
-			// Get all attack actions from the companion's stat block
-			const attackActions = companion.actions?.filter(a =>
-				a.entries?.some(e => typeof e === "string" && /\{@atk/.test(e)),
-			) || [];
-
-			// Build attack buttons HTML for all attacks
-			const attackButtonsHtml = isFeatureOperationCompanion ? "" : attackActions.map(action => {
-				const entry = action.entries?.find(e => typeof e === "string") || "";
-				const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
-				const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
-				const bonusStr = attackBonus >= 0 ? `+${attackBonus}` : `${attackBonus}`;
-				return `<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-attack-roll" data-action-name="${action.name.replace(/"/g, "&quot;")}" title="Roll ${action.name}" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-					⚔️ ${action.name} (${bonusStr})
-				</button>`;
-			}).join("");
 
 			const ferocityHtml = this._getCompanionFerocityHtml(companion);
 			const featureOperationHtml = isFeatureOperationCompanion ? (() => {
@@ -8488,21 +8467,7 @@ class CharacterSheetPage {
 						</button>
 					</div>
 
-					<!-- Quick Skill Checks -->
-					<div class="charsheet__companion-quick-rolls mb-2">
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-initiative" title="Roll initiative for ${companion.customName || companion.name}" ${lifecycleDisabledAttrs}>
-							⚡ Initiative (${initiativeStr})
-						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" title="Roll Perception check" ${lifecycleDisabledAttrs}>
-							👁️ Perception (${perceptionStr})
-						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" title="Roll Stealth check" ${lifecycleDisabledAttrs}>
-							🤫 Stealth (${stealthStr})
-						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" title="Roll Investigation check" ${lifecycleDisabledAttrs}>
-							🔍 Investigation (${investigationStr})
-						</button>
-					</div>
+					<div class="charsheet__companion-roll-mount mb-2"></div>
 
 					<!-- Familiar Actions -->
 					<div class="charsheet__companion-actions mb-3" style="padding: 0 4px;">
@@ -8520,11 +8485,6 @@ class CharacterSheetPage {
 						<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
 							${featureActionButtonsHtml}
 						</div>
-						${attackButtonsHtml ? `
-						<div class="ve-flex mt-2" style="gap: 6px; flex-wrap: wrap;">
-							${attackButtonsHtml}
-						</div>
-						` : ""}
 					</div>
 
 					<!-- Action Buttons -->
@@ -8552,6 +8512,7 @@ class CharacterSheetPage {
 			`});
 
 			this._bindCompanionFerocityHandlers(card, companion);
+			card.querySelector(".charsheet__companion-roll-mount").append(this._createCompanionRollControls(companion));
 
 			// Dismiss button
 			card.querySelector(".btn-companion-dismiss").addEventListener("click", async () => {
@@ -8628,15 +8589,6 @@ class CharacterSheetPage {
 				if (!isLifecycleBlocked) this._bindActivate(el, {label: `Remove ${el.dataset.condition || "condition"}`});
 			});
 
-			// Skill check buttons
-			card.querySelectorAll(".btn-companion-skill").forEach(el => el.addEventListener("click", (evt) => {
-				const skill = evt.currentTarget.dataset.skill;
-				this._rollCompanionSkillCheck(companion, skill);
-			}));
-			card.querySelector(".btn-companion-initiative").addEventListener("click", () => {
-				this._rollCompanionInitiative(companion);
-			});
-
 			// Edit name button
 			card.querySelector(".btn-companion-edit").addEventListener("click", () => {
 				this._onEditCompanionName(companion);
@@ -8679,12 +8631,6 @@ class CharacterSheetPage {
 					companionId: companion.id,
 					operation: evt.currentTarget.dataset.featureCompanionLifecycleOperation,
 				});
-			}));
-
-			// Attack roll buttons
-			card.querySelectorAll(".btn-companion-attack-roll").forEach(el => el.addEventListener("click", async (evt) => {
-				const actionName = evt.currentTarget.dataset.actionName;
-				await this._rollCompanionAttack(companion, actionName);
 			}));
 
 			list.append(card);
@@ -8793,28 +8739,21 @@ class CharacterSheetPage {
 		if (CharacterSheetSimulacrum.isSimulacrum(companion)) {
 			return CharacterSheetSimulacrum.pShow({ownerPage: this, companionId: companion.id});
 		}
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner} = await CharacterSheetModal.pGetShow({
 			title: `📋 ${companion.customName || companion.name}`,
 			isMinHeight0: true,
 			isWidth100: true,
 		});
 
-		// Format abilities with clickable saves
 		const abilities = companion.abilities || {};
 		const abilityRow = Parser.ABIL_ABVS.map(abl => {
-			const score = abilities[abl] || 10;
-			const mod = Math.floor((score - 10) / 2);
-			const modStr = mod >= 0 ? `+${mod}` : mod;
-			const hasSaveProf = companion.saveProficiencies?.includes(abl);
-			const saveMod = hasSaveProf ? mod + (companion.profBonus || 2) : mod;
-			const saveStr = saveMod >= 0 ? `+${saveMod}` : saveMod;
+			const score = CharacterSheetCompanionRules.getRollStatistic(abilities[abl]);
+			const mod = score == null ? null : Math.floor((score - 10) / 2);
+			const modStr = mod == null ? "—" : mod >= 0 ? `+${mod}` : mod;
 			return `<div class="ve-text-center" style="flex: 1;">
 				<div class="ve-muted ve-small">${abl.toUpperCase()}</div>
-				<div class="bold">${score}</div>
+				<div class="bold">${score ?? "—"}</div>
 				<div class="ve-muted">(${modStr})</div>
-				<div class="ve-small clickable btn-companion-save" data-ability="${abl}" data-mod="${saveMod}" title="Click to roll ${abl.toUpperCase()} save" style="cursor: pointer; color: var(--rgb-link);">
-					${hasSaveProf ? "★" : ""} Save ${saveStr}
-				</div>
 			</div>`;
 		}).join("");
 
@@ -8831,7 +8770,7 @@ class CharacterSheetPage {
 			}).join("")
 			: "<div class='ve-muted'>None</div>";
 
-		// Format actions with proper rendering and roll buttons
+		// Format actions with proper rendering
 		const actionsHtml = companion.actions?.length
 			? companion.actions.map(a => {
 				let text;
@@ -8841,29 +8780,7 @@ class CharacterSheetPage {
 					text = a.entries?.join(" ") || a.text || "";
 				}
 
-				// Check if this is an attack action
-				const entry = a.entries?.find(e => typeof e === "string") || "";
-				const isAttack = /\{@atk/.test(entry);
-				const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
-				const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
-				const bonusStr = attackBonus >= 0 ? `+${attackBonus}` : `${attackBonus}`;
-
-				// Parse damage for display
-				const damageMatches = [...entry.matchAll(/\{@damage\s+([^}]+)\}/g)];
-				const hasDamage = damageMatches.length > 0;
-
-				const rollButton = isAttack ? `
-					<div class="ve-flex mt-1" style="gap: 6px;">
-						<button class="ve-btn ve-btn-xs ve-btn-danger btn-statblock-attack" data-action-name="${a.name.replace(/"/g, "&quot;")}" title="Roll attack">
-							⚔️ Attack (${bonusStr})
-						</button>
-						${hasDamage ? `<button class="ve-btn ve-btn-xs ve-btn-warning btn-statblock-damage" data-action-name="${a.name.replace(/"/g, "&quot;")}" title="Roll damage only">
-							💥 Damage
-						</button>` : ""}
-					</div>
-				` : "";
-
-				return `<div class="mb-2"><strong>${a.name}.</strong> ${text}${rollButton}</div>`;
+				return `<div class="mb-2"><strong>${a.name}.</strong> ${text}</div>`;
 			}).join("")
 			: "<div class='ve-muted'>None</div>";
 
@@ -8932,39 +8849,7 @@ class CharacterSheetPage {
 			</div>
 		`;
 
-		// Bind save roll buttons
-		modalInner.querySelectorAll(".btn-companion-save").forEach(el => el.addEventListener("click", (evt) => {
-			const ability = evt.currentTarget.dataset.ability;
-			const mod = parseInt(evt.currentTarget.dataset.mod);
-			const roll = Renderer.dice.parseRandomise2("1d20");
-			const total = roll + mod;
-			const modStr = mod >= 0 ? `+${mod}` : mod;
-			JqueryUtil.doToast({
-				type: "info",
-				content: `🎲 ${companion.name} ${ability.toUpperCase()} Save: ${roll} ${modStr} = <strong>${total}</strong>`,
-			});
-		}));
-
-		// Bind attack roll buttons in stat block
-		modalInner.querySelectorAll(".btn-statblock-attack").forEach(el => el.addEventListener("click", async (evt) => {
-			const actionName = evt.currentTarget.dataset.actionName;
-			await this._rollCompanionAttack(companion, actionName);
-		}));
-
-		// Bind damage-only roll buttons in stat block
-		modalInner.querySelectorAll(".btn-statblock-damage").forEach(el => el.addEventListener("click", (evt) => {
-			const actionName = evt.currentTarget.dataset.actionName;
-			const action = companion.actions?.find(a => a.name === actionName);
-			if (!action) return;
-
-			const entry = action.entries?.find(e => typeof e === "string") || "";
-			const damageMatches = [...entry.matchAll(/\{@damage\s+([^}]+)\}/g)];
-			const damages = damageMatches.map(m => m[1].trim());
-
-			if (damages.length > 0) {
-				this._rollCompanionDamage(companion, actionName, damages, false);
-			}
-		}));
+		modalInner.prepend(this._createCompanionRollControls(companion));
 	}
 
 	_formatCompanionSpeeds (speed) {
@@ -9144,6 +9029,7 @@ class CharacterSheetPage {
 		`});
 
 		// Toggle creatures list
+		card.querySelector(".charsheet__companion-roll-mount").append(this._createCompanionRollControls(companion));
 		card.querySelector(".btn-toggle-creatures").addEventListener("click", function () {
 			const list = card.querySelector(".charsheet__grouped-creatures-list");
 			const icon = this.querySelector(".toggle-icon");
@@ -9260,30 +9146,7 @@ class CharacterSheetPage {
 	 * Build attack buttons HTML for grouped companions
 	 */
 	_buildGroupedCompanionAttacksHtml (companion) {
-		const attackActions = companion.actions?.filter(a =>
-			a.entries?.some(e => typeof e === "string" && /\{@atk/.test(e)),
-		) || [];
-
-		if (attackActions.length === 0) return "";
-
-		const attackButtonsHtml = attackActions.map(action => {
-			const entry = action.entries?.find(e => typeof e === "string") || "";
-			const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
-			const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
-			const bonusStr = attackBonus >= 0 ? `+${attackBonus}` : `${attackBonus}`;
-			return `<button class="ve-btn ve-btn-xs ve-btn-danger btn-grouped-attack-roll" data-action-name="${action.name.replace(/"/g, "&quot;")}" title="Roll ${action.name}">
-				⚔️ ${action.name} (${bonusStr})
-			</button>`;
-		}).join("");
-
-		return `
-			<div class="charsheet__grouped-attacks mb-3" style="padding: 0 4px;">
-				<div class="ve-muted ve-small mb-1"><strong>Attacks:</strong></div>
-				<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
-					${attackButtonsHtml}
-				</div>
-			</div>
-		`;
+		return `<div class="charsheet__companion-roll-mount mb-3"></div>`;
 	}
 
 	async _onAddCompanionCondition (companion) {
@@ -9321,135 +9184,356 @@ class CharacterSheetPage {
 		JqueryUtil.doToast({type: "info", content: `Added ${chosen} to ${companion.customName || companion.name}`});
 	}
 
-	_rollCompanionSkillCheck (companion, skill) {
-		const mod = this._state.getCompanionSkillMod?.(companion.id, skill) || 0;
-		const roll = Renderer.dice.parseRandomise2("1d20");
-		const total = roll + mod;
-		const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
-		const skillName = skill.charAt(0).toUpperCase() + skill.slice(1);
-
-		JqueryUtil.doToast({
-			type: "info",
-			content: `🎲 ${companion.customName || companion.name} ${skillName}: ${roll} ${modStr} = <strong>${total}</strong>`,
-		});
-	}
-
-	_rollCompanionInitiative (companion) {
-		const mod = this._state.getCompanionInitiative?.(companion.id) || 0;
-		const roll = Renderer.dice.parseRandomise2("1d20");
-		const total = roll + mod;
-		const modStr = mod >= 0 ? `+${mod}` : `${mod}`;
-
-		JqueryUtil.doToast({
-			type: "info",
-			content: `🎲 ${companion.customName || companion.name} Initiative: ${roll} ${modStr} = <strong>${total}</strong>`,
-		});
-	}
-
-	/**
-	 * Roll a companion attack with attack roll and damage
-	 * @param {object} companion - The companion data
-	 * @param {string} actionName - Name of the action to use
-	 */
-	async _rollCompanionAttack (companion, actionName) {
-		const action = companion.actions?.find(a => a.name === actionName);
-		if (!action) {
-			JqueryUtil.doToast({type: "warning", content: `Action "${actionName}" not found`});
-			return;
+	_getCompanionRollModel (companionId, {runtime} = {}) {
+		const companion = this._state.getCompanion(companionId);
+		if (!companion) return {reason: "This companion is no longer available.", checks: [], actions: []};
+		let actor = null;
+		if (Object.hasOwn(companion, "actorSnapshot")) {
+			const hydrated = this._state.hydrateCompanionActor(companionId);
+			if (!hydrated.ok) return {companion, reason: hydrated.message || hydrated.reason, checks: [], actions: []};
+			actor = runtime ? runtime.getState() : hydrated.actor;
 		}
-
-		// Parse attack info from entries
-		const entry = action.entries?.find(e => typeof e === "string") || "";
-		const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
-		const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
-
-		// Parse all damage dice from entry
-		const damageMatches = [...entry.matchAll(/\{@damage\s+([^}]+)\}/g)];
-		const damages = damageMatches.map(m => m[1].trim());
-
-		// Parse DC for save-based effects
-		const dcMatch = entry.match(/\{@dc\s*(\d+)\}/);
-		const saveDC = dcMatch ? parseInt(dcMatch[1]) : null;
-
-		// Roll attack
-		const attackRoll = Renderer.dice.parseRandomise2("1d20");
-		const attackTotal = attackRoll + attackBonus;
-		const bonusStr = attackBonus >= 0 ? `+${attackBonus}` : `${attackBonus}`;
-		const isCrit = attackRoll === 20;
-		const isFumble = attackRoll === 1;
-
-		// Mark action as used
-		this._state.updateCompanion?.(companion.id, {usedAction: true});
-		this._saveCurrentCharacter();
-		this._renderCompanions();
-
-		// Build attack result message
-		let attackResult = `<strong>Attack Roll:</strong> ${attackRoll} ${bonusStr} = <strong style="font-size: 1.2em;">${attackTotal}</strong>`;
-		if (isCrit) attackResult += ` <span style="color: #22c55e;">⭐ CRITICAL!</span>`;
-		if (isFumble) attackResult += ` <span style="color: #ef4444;">💀 FUMBLE!</span>`;
-
-		// Show attack roll first
-		JqueryUtil.doToast({
-			type: isCrit ? "success" : isFumble ? "danger" : "info",
-			content: e_({outer: `<div>
-				<div class="bold mb-1">⚔️ ${companion.customName || companion.name} — ${actionName}</div>
-				<div>${attackResult}</div>
-				${damages.length > 0 ? `<div class="mt-2"><button class="ve-btn ve-btn-xs ve-btn-warning btn-roll-damage" style="width: 100%;">💥 Roll Damage${isCrit ? " (Crit!)" : ""}</button></div>` : ""}
-				${saveDC ? `<div class="ve-muted ve-small mt-1">Target must make a DC ${saveDC} save</div>` : ""}
-			</div>`}),
-		});
-
-		// Bind damage roll button
-		setTimeout(() => {
-			const btn = document.querySelector(".btn-roll-damage");
-			if (btn && damages.length > 0) {
-				btn.addEventListener("click", () => {
-					this._rollCompanionDamage(companion, actionName, damages, isCrit);
-				});
+		const lifecycle = this.getFeatureCompanionLifecyclePresentation(companion);
+		const reason = companion.actorSnapshot && (companion.actorSnapshot.lifecycle !== "active" || companion.hp?.current <= 0) ? "This duplicate has melted or been destroyed and cannot roll."
+			: companion.active === false ? "This companion is inactive."
+				: lifecycle && !lifecycle.isAlive ? lifecycle.disabledReason
+					: companion.count > 1 && !this._state.getLivingGroupedCreatureCount(companionId) ? "No creatures in this group are alive."
+						: "";
+		const numeric = value => CharacterSheetCompanionRules.getRollStatistic(value) != null;
+		const resolved = companion.scaling?.resolved?.statistics;
+		const exact = companion.exactStatistics;
+		const checks = [];
+		const addCheck = (kind, key, label, ability) => {
+			const hasBase = numeric(companion.abilities?.[ability]);
+			const hasExact = kind === "skill" ? numeric(resolved?.skills?.[key]) || numeric(exact?.skills?.[key]) || numeric(resolved?.abilityChecks?.[ability])
+				: kind === "save" ? numeric(resolved?.savingThrows?.[ability]) || numeric(exact?.savingThrows?.[ability])
+					: kind === "initiative" ? Number.isFinite(exact?.initiative) : numeric(resolved?.abilityChecks?.[ability]);
+			let modifier = null;
+			if (actor) {
+				modifier = kind === "skill" ? actor.getSkillBreakdown(key).total
+					: kind === "save" ? actor.getSaveBreakdown(key).total
+						: kind === "initiative" ? actor.getInitiativeBreakdown().total : actor.getAbilityCheckBreakdown(key).total;
+			} else if (hasExact || hasBase) {
+				modifier = kind === "skill" ? this._state.getCompanionSkillMod(companionId, key)
+					: kind === "save" ? this._state.getCompanionSaveMod(companionId, key)
+						: kind === "initiative" ? this._state.getCompanionInitiative(companionId) : this._state.getCompanionAbilityCheckMod(companionId, key);
 			}
-		}, 100);
+			checks.push({kind, key, label, ability, modifier: Number.isFinite(modifier) ? modifier : null});
+		};
+		addCheck("initiative", "initiative", "Initiative", "dex");
+		for (const ability of Parser.ABIL_ABVS) {
+			addCheck("save", ability, `${ability.toUpperCase()} Save`, ability);
+			addCheck("ability", ability, `${ability.toUpperCase()} Check`, ability);
+		}
+		for (const [skill, ability] of Object.entries(Parser.SKILL_TO_ATB_ABV)) {
+			addCheck("skill", skill.replace(/\s+/g, "").toLowerCase(), skill.toTitleCase(), ability);
+		}
+		if (actor) {
+			const skills = this.getSkillsList.call({_state: actor, _skillsData: this._skillsData || []});
+			for (const skill of skills) {
+				const key = skill.name.toLowerCase().replace(/\s+/g, "");
+				if (!checks.some(check => check.kind === "skill" && check.key === key)) addCheck("skill", key, skill.name, actor.getSkillAbility(key));
+			}
+		}
+		const operationUi = this.getFeatureCompanionOperationSurfaceModel(companion);
+		const actions = actor ? actor.getAttacks().map((attack, index) => {
+			const flat = actor.getWeaponDisplayDamageBreakdown(attack).total
+				+ (attack._damageIncludesAbilityMod ? 0 : actor.getAttackAbilityBreakdown(attack).total);
+			const formula = `${attack.damage || ""}${flat ? `${flat >= 0 ? "+" : ""}${flat}` : ""}`;
+			return {
+				key: `actorAttack:${attack.id || index}`,
+				name: attack.name || "Attack",
+				attack,
+				attackBonus: actor.getAttackBonusBreakdown(attack).total - actor._getExhaustionD20Penalty(),
+				damages: [{formula, type: Parser.DMGTYPE_JSON_TO_FULL[attack.damageType] || attack.damageType || ""}],
+				damageReason: CharacterSheetCompanionRules.isRollDamageFormula(formula) ? "" : "Unsupported damage formula; resolve it manually.",
+				note: "Optional class resources, conditional effects, extra attacks and riders require manual resolution.",
+			};
+		}) : CharacterSheetCompanionRules.getRollActions(companion);
+		return {
+			companion,
+			actor,
+			checks,
+			actions,
+			reason,
+			operationUi,
+			actionAvailable: !reason && (actor ? !actor.isIncapacitated() && actor.isActionTypeAvailable("action") : !companion.usedAction),
+		};
 	}
 
-	/**
-	 * Roll damage for a companion attack
-	 */
-	_rollCompanionDamage (companion, actionName, damages, isCrit = false) {
-		const damageResults = damages.map(damageStr => {
-			// Clean up the damage string
-			const cleanDamage = damageStr.replace(/\s+/g, "");
+	_getCompanionRollUi (companionId) {
+		this._companionRollUi ||= new WeakMap();
+		if (!this._companionRollUi.has(this._state)) this._companionRollUi.set(this._state, new Map());
+		const records = this._companionRollUi.get(this._state);
+		if (!records.has(companionId)) records.set(companionId, {skill: "skill:perception", mode: "normal", criticals: new Map()});
+		return records.get(companionId);
+	}
 
-			// For crits, double the dice (not the modifier)
-			let finalDamage = cleanDamage;
-			if (isCrit) {
-				// Parse dice and modifier
-				const diceMatch = cleanDamage.match(/(\d+)d(\d+)/);
-				if (diceMatch) {
-					const numDice = parseInt(diceMatch[1]) * 2; // Double dice for crit
-					const dieSize = diceMatch[2];
-					finalDamage = cleanDamage.replace(/\d+d\d+/, `${numDice}d${dieSize}`);
+	_createCompanionRollControls (companion, {runtime} = {}) {
+		const owner = this._state;
+		const panel = e_({tag: "section", clazz: "charsheet__companion-rolls", attrs: {"aria-label": `${companion.customName || companion.name} rolls`, "data-companion-roll-id": companion.id}});
+		const ui = this._getCompanionRollUi(companion.id);
+		const statusId = `companion-roll-status-${this._companionRollControlsId = (this._companionRollControlsId || 0) + 1}`;
+		const status = e_({tag: "p", clazz: "charsheet__companion-roll-status", attrs: {id: statusId, role: "status", "aria-live": "polite"}});
+		const model = this._getCompanionRollModel(companion.id, {runtime});
+		const signed = value => value == null ? "unavailable" : `${value >= 0 ? "+" : ""}${value}`;
+		const controls = e_({tag: "div", clazz: "charsheet__companion-roll-controls"});
+		const select = (parent, label, clazz, choices, value) => {
+			const wrapper = e_({tag: "label", clazz: "charsheet__companion-roll-label", txt: label});
+			const element = e_({tag: "select", clazz: `ve-form-control ${clazz}`, attrs: {"aria-label": `${companion.customName || companion.name}: ${label}`}});
+			const groups = new Map();
+			for (const choice of choices) {
+				if (choice.group && !groups.has(choice.group)) {
+					const group = e_({tag: "optgroup", attrs: {label: choice.group}});
+					groups.set(choice.group, group);
+					element.append(group);
 				}
+				(groups.get(choice.group) || element).append(e_({tag: "option", value: choice.value, txt: choice.label, disabled: choice.disabled}));
 			}
+			element.value = (choices.find(choice => choice.value === value && !choice.disabled) || choices.find(choice => !choice.disabled) || choices[0])?.value || "";
+			element.disabled = !!model.reason;
+			wrapper.append(element);
+			parent.append(wrapper);
+			return element;
+		};
+		const mode = select(controls, "Roll mode", "charsheet__companion-roll-mode", [
+			{value: "normal", label: "Normal"}, {value: "advantage", label: "Advantage"}, {value: "disadvantage", label: "Disadvantage"},
+		], ui.mode);
+		mode.addEventListener("change", () => { ui.mode = mode.value; });
+		let busy = false;
+		const button = (parent, text, clazz, action, {disabled = false, attrs = {}} = {}) => {
+			const element = e_({tag: "button", type: "button", clazz: `ve-btn ve-btn-default ${clazz}`, txt: text, attrs: {"aria-describedby": statusId, ...attrs}});
+			element.disabled = !!model.reason || disabled;
+			element.addEventListener("click", async event => {
+				if (busy || element.disabled) return;
+				const hadFocus = document.activeElement === element;
+				busy = true;
+				element.disabled = true;
+				try {
+					const result = await action({event, mode: mode.value, runtime});
+					const currentPanel = panel.isConnected ? panel : [...(document.querySelectorAll?.(".charsheet__companion-rolls") || [])]
+						.find(candidate => candidate.getAttribute("data-companion-roll-id") === companion.id) || panel;
+					currentPanel.querySelector(".charsheet__companion-roll-status").textContent = result?.total != null ? `${result.label}: ${result.total}${result.actionKey ? ". Action used." : ""}` : "Roll complete.";
+					if (result?.actionKey) {
+						const damageMode = [...currentPanel.querySelectorAll(".charsheet__companion-roll-damage-mode")].find(candidate => candidate.getAttribute("data-action-key") === result.actionKey);
+						if (damageMode) damageMode.value = result.isCrit ? "critical" : "normal";
+						if (hadFocus && [element, document.body].includes(document.activeElement)) {
+							const next = [...currentPanel.querySelectorAll(".btn-companion-damage-roll")].find(candidate => !candidate.disabled && candidate.getAttribute("data-action-key") === result.actionKey)
+								|| [...currentPanel.querySelectorAll("button")].find(candidate => !candidate.disabled);
+							next?.focus();
+						}
+					}
+				} catch (error) {
+					status.textContent = error.message;
+					JqueryUtil.doToast({type: "warning", content: error.message});
+				} finally {
+					busy = false;
+					element.disabled = this._state !== owner || owner.getCompanion(companion.id) !== model.companion || !!model.reason || disabled
+						|| (clazz === "btn-companion-attack-roll" && (model.actor ? !!model.companion?.actorSnapshot.state.actionEconomyUsage?.action : !!model.companion?.usedAction));
+				}
+			});
+			parent.append(element);
+			return element;
+		};
+		const initiative = model.checks.find(check => check.kind === "initiative");
+		button(controls, `Initiative (${signed(initiative?.modifier)})`, "btn-companion-initiative", options => this._rollCompanionInitiative(companion, options), {disabled: initiative?.modifier == null});
+		panel.append(controls);
+		const saves = e_({tag: "div", clazz: "charsheet__companion-roll-saves", attrs: {role: "group", "aria-label": "Saving throws"}});
+		for (const check of model.checks.filter(check => check.kind === "save")) {
+			button(saves, `${check.label} (${signed(check.modifier)})`, "btn-companion-save", options => this._rollCompanionSavingThrow(companion, check.key, options), {
+				disabled: check.modifier == null, attrs: {"data-ability": check.key},
+			});
+		}
+		panel.append(saves);
+		const skillRow = e_({tag: "div", clazz: "charsheet__companion-roll-controls"});
+		const skill = select(skillRow, "Skill or ability", "charsheet__companion-roll-skill",
+			[...model.checks.filter(check => check.kind === "skill"), ...model.checks.filter(check => check.kind === "ability")]
+				.map(check => ({value: `${check.kind}:${check.key}`, label: `${check.label} (${signed(check.modifier)})`, group: check.kind === "skill" ? "Skills" : "Ability checks", disabled: check.modifier == null})), ui.skill);
+		ui.skill = skill.value;
+		skill.addEventListener("change", () => { ui.skill = skill.value; });
+		button(skillRow, "Roll check", "btn-companion-check", options => {
+			const [kind, key] = skill.value.split(":");
+			return kind === "ability" ? this._rollCompanionAbilityCheck(companion, key, options) : this._rollCompanionSkillCheck(companion, key, options);
+		}, {disabled: !model.checks.some(check => ["skill", "ability"].includes(check.kind) && check.modifier != null)});
+		panel.append(skillRow);
+		if (model.operationUi) {
+			panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Use the feature command controls for attacks, damage and action costs."}));
+		} else {
+			for (const action of model.actions) {
+				const row = e_({tag: "div", clazz: "charsheet__companion-roll-attack"});
+				button(row, `${action.name} Attack (${signed(action.attackBonus)})`, "btn-companion-attack-roll",
+					options => this._rollCompanionAttack(companion, action.key, options), {disabled: action.attackBonus == null || !model.actionAvailable, attrs: {"data-action-key": action.key}});
+				const damageMode = select(row, `${action.name} damage`, "charsheet__companion-roll-damage-mode", [
+					{value: "normal", label: "Normal damage"}, {value: "critical", label: "Critical damage"},
+				], ui.criticals.get(action.key) ? "critical" : "normal");
+				damageMode.setAttribute("data-action-key", action.key);
+				damageMode.addEventListener("change", () => { ui.criticals.set(action.key, damageMode.value === "critical"); });
+				button(row, "Roll damage", "btn-companion-damage-roll",
+					options => this._rollCompanionDamage(companion, action.key, null, damageMode.value === "critical", options), {disabled: !!action.damageReason, attrs: {"data-action-key": action.key}});
+				const description = action.damageReason || action.damages.map(damage => `${damage.formula} ${damage.type}`.trim()).join(" + ");
+				row.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: `${description}${action.note ? ` ${action.note}` : ""}`}));
+				panel.append(row);
+			}
+		}
+		if (model.actor) panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Uses this duplicate's current passive effects. Optional class resources, conditional bonuses and rerolls are manual."}));
+		if (companion.count > 1) panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: "Each roll is for one creature, not the whole group. Action tracking applies to this companion record."}));
+		if (companion.exhaustion) panel.append(e_({tag: "p", clazz: "charsheet__companion-roll-note", txt: `Exhaustion ${companion.exhaustion}: adjudicate this ordinary companion's exhaustion rules manually.`}));
+		if (model.reason) status.textContent = model.reason;
+		else if (model.checks.some(check => check.modifier == null)) status.textContent = "Some statistics are unavailable. Supply missing companion statistics before rolling those checks.";
+		else if (!model.actionAvailable) status.textContent = "Attack unavailable: Action already used or companion incapacitated. Start its next turn first.";
+		panel.append(status);
+		return panel;
+	}
 
-			const total = Renderer.dice.parseRandomise2(finalDamage);
-			return {dice: damageStr, total, critDice: isCrit ? finalDamage : null};
+	_rollCompanionSkillCheck (companion, skill, options) {
+		return this._pRollCompanion(companion, "skill", skill.toLowerCase().replace(/\s+/g, ""), options);
+	}
+
+	_rollCompanionInitiative (companion, options) { return this._pRollCompanion(companion, "initiative", "initiative", options); }
+	_rollCompanionSavingThrow (companion, ability, options) { return this._pRollCompanion(companion, "save", ability, options); }
+	_rollCompanionAbilityCheck (companion, ability, options) { return this._pRollCompanion(companion, "ability", ability, options); }
+	_rollCompanionAttack (companion, actionKey, options) { return this._pRollCompanion(companion, "attack", actionKey, options); }
+	_rollCompanionDamage (companion, actionKey, unusedDamages, isCrit = false, options = {}) {
+		return this._pRollCompanion(companion, "damage", actionKey, {...options, isCrit});
+	}
+
+	_rollCompanionFormula (formula, {isCrit = false} = {}) {
+		if (!CharacterSheetCompanionRules.isRollDamageFormula(formula)) throw new Error("Unsupported dice formula; resolve this roll manually.");
+		const expression = isCrit ? formula.replace(/(\d*)d(\d+)/gi, (match, count, sides) => `${Number(count || 1) * 2}d${sides}`) : formula;
+		const parsed = Renderer.dice.lang.getTree3(expression);
+		if (!parsed) throw new Error("The companion dice formula could not be parsed.");
+		const meta = {};
+		const total = parsed.tree.evl(meta);
+		if (!Number.isFinite(total)) throw new Error("The companion dice formula did not produce a valid total.");
+		return {total, expression, groups: (meta.dice || []).map(die => ({sides: die.faces, values: [...die.vals]}))};
+	}
+
+	async _pRollCompanion (companion, kind, key, options = {}) {
+		const owner = this._state;
+		const model = this._getCompanionRollModel(companion.id, options);
+		if (model.reason) throw new Error(model.reason);
+		const action = ["attack", "damage"].includes(kind)
+			? model.actions.find(candidate => candidate.key === key) || model.actions.find(candidate => candidate.name === key)
+			: null;
+		const check = action ? {modifier: action.attackBonus, label: `${action.name} Attack`}
+			: model.checks.find(candidate => candidate.kind === kind && candidate.key === key);
+		if (["attack", "damage"].includes(kind) && !action) throw new Error("This companion action is no longer available.");
+		if (action && model.operationUi) throw new Error("Use the feature command controls for this companion's attacks and damage.");
+		if (kind === "damage" && action.damageReason) throw new Error(action.damageReason);
+		if (kind !== "damage" && check?.modifier == null) throw new Error("This companion statistic is unavailable.");
+		const actor = model.actor;
+		const record = model.companion;
+		const before = JSON.stringify(record);
+		let expected = before;
+		const assertCurrent = () => {
+			if (this._state !== owner || owner.getCompanion(companion.id) !== record || JSON.stringify(record) !== expected) {
+				throw new Error("This companion changed during the roll. Use its current controls.");
+			}
+			options.runtime?.getState();
+		};
+		const escape = CharacterSheetModal._escapeHtml;
+		const titleName = escape(record.customName || record.name);
+		if (kind === "damage") {
+			const rolls = action.damages.map(damage => ({...damage, ...this._rollCompanionFormula(damage.formula, options)}));
+			const total = rolls.reduce((sum, roll) => sum + roll.total, 0);
+			await this.pAnimateDamageDice(rolls.flatMap(roll => roll.groups));
+			assertCurrent();
+			const label = `${action.name} Damage${options.isCrit ? " (Critical)" : ""}`;
+			this.showDiceResult({title: `${titleName} — ${escape(label)}`,
+				total,
+				subtitle: rolls.map(roll => `${escape(roll.expression)} = ${roll.total} ${escape(roll.type)}`).join(" + "),
+				resultNote: escape(action.note || "Apply damage to the target manually.")});
+			return {total, label};
+		}
+		const rollType = kind === "initiative" ? "initiative" : kind === "ability" ? `check:${key}`
+			: kind === "attack" ? `attack:${actor?.getAttackClassification(action.attack).isMelee ? "melee" : "ranged"}`
+				: `${kind}:${key}`;
+		const aggregates = actor ? [actor.aggregateModifiers(rollType)] : [];
+		if (actor && kind === "skill" && actor.getSkillAbility(key)) aggregates.push(actor.aggregateModifiers(`check:${actor.getSkillAbility(key)}`));
+		const advantage = actor?.getAdvantageState(rollType);
+		const conditions = actor ? [] : (record.conditions || []).flatMap(condition =>
+			CharacterSheetState.getConditionEffects(typeof condition === "string" ? condition : condition.name)?.effects || []);
+		const relevantConditions = conditions.filter(effect => !effect.condition && (effect.type === "incapacitated" || effect.target === rollType
+			|| effect.target === kind || (effect.target === "check" && ["skill", "ability", "initiative"].includes(kind))));
+		const rollState = actor || {getSettings: () => owner.getSettings()};
+		const exhaustionDisadvantage = actor?.getExhaustionRules() === "2014"
+			&& actor.getExhaustion() >= (["skill", "ability", "initiative"].includes(kind) ? 1 : 3);
+		const roll = this._rollD20.call({_state: rollState}, {
+			event: options.event,
+			isAttack: kind === "attack",
+			stateAdvantage: options.mode === "advantage" || advantage?.advantage || advantage?.cancelled || relevantConditions.some(effect => effect.type === "advantage"),
+			stateDisadvantage: options.mode === "disadvantage" || exhaustionDisadvantage || advantage?.disadvantage || advantage?.cancelled || relevantConditions.some(effect => effect.type === "disadvantage"),
 		});
-
-		// Build damage output
-		const damageLines = damageResults.map(r => {
-			const critNote = r.critDice ? ` (${r.critDice})` : "";
-			return `${r.dice}${critNote} = <strong>${r.total}</strong>`;
-		}).join(" + ");
-
-		const totalDamage = damageResults.reduce((sum, r) => sum + r.total, 0);
-
-		JqueryUtil.doToast({
-			type: "warning",
-			content: e_({outer: `<div>
-				<div class="bold mb-1">💥 ${companion.customName || companion.name} — ${actionName} Damage${isCrit ? " (CRIT!)" : ""}</div>
-				<div>${damageLines}</div>
-				<div class="bold mt-1" style="font-size: 1.2em;">Total: ${totalDamage} damage</div>
-			</div>`}),
+		const isCrit = kind === "attack" && (roll.roll >= (actor ? actor.getCriticalRange({attack: action.attack}) : 20) || aggregates.some(aggregate => aggregate.autoCrit));
+		const minima = aggregates.map(aggregate => aggregate.minimum).filter(Number.isFinite);
+		const totalMinima = aggregates.map(aggregate => aggregate.totalMinimum).filter(Number.isFinite);
+		let effective = Math.max(roll.roll, ...minima);
+		const setValue = aggregates.find(aggregate => Number.isFinite(aggregate.setValue))?.setValue;
+		if (setValue != null) effective = setValue;
+		const maxima = aggregates.map(aggregate => aggregate.maximum).filter(Number.isFinite);
+		if (maxima.length) effective = Math.min(effective, ...maxima);
+		const stateDice = actor?.getRollBonusDice(kind === "skill" ? `check:${actor.getSkillAbility(key)}` : rollType) || [];
+		const modifierDice = this.constructor._mergeModifierDiceContributions(...aggregates);
+		const bonusRolls = [...stateDice, ...modifierDice].map(die => ({
+			...this._rollCompanionFormula(die.dice === "martial" ? actor.getFeatureCalculations().martialArtsDie : die.dice), sign: die.sign ?? 1, source: die.source || die.name || "Bonus",
+		}));
+		const total = Math.max(effective + check.modifier + roll.thelemar_critBonus + bonusRolls.reduce((sum, die) => sum + die.total * die.sign, 0), ...totalMinima);
+		if (kind === "attack") {
+			if (!model.actionAvailable || relevantConditions.some(effect => effect.type === "incapacitated")) throw new Error("This companion's Action is unavailable. Start its next turn first.");
+			if (action.damages.some(damage => !CharacterSheetCompanionRules.isRollDamageFormula(damage.formula)) && !action.damageReason) throw new Error("Unsupported attack damage formula.");
+			this._companionRollLocks ||= new WeakMap();
+			if (!this._companionRollLocks.has(owner)) this._companionRollLocks.set(owner, new Set());
+			const locks = this._companionRollLocks.get(owner);
+			if (locks.has(companion.id)) throw new Error("A companion attack is already in progress.");
+			locks.add(companion.id);
+			try {
+				assertCurrent();
+				if (actor) {
+					await CharacterSheetSimulacrum._pEnsureRuntime();
+					assertCurrent();
+					const hydrated = options.runtime ? {ok: true, runtime: options.runtime} : globalThis.CharacterSheetCompanionActor.hydrate({ownerPage: this, companionId: companion.id});
+					if (!hydrated.ok) throw new Error(hydrated.message || hydrated.reason);
+					try { await hydrated.runtime.spendRollAction(); } finally { if (!options.runtime) hydrated.runtime.dispose(); }
+				} else {
+					const usedAction = record.usedAction;
+					owner.updateCompanion(companion.id, {usedAction: true});
+					const actionExpected = JSON.stringify(record);
+					try {
+						const saved = await this.saveCharacter();
+						if (saved === false || saved?.ok === false) throw new Error("Companion changes could not be saved.");
+						if (this._state !== owner || owner.getCompanion(companion.id) !== record || JSON.stringify(record) !== actionExpected) throw new Error("This companion changed while saving.");
+					} catch (error) {
+						if (record.usedAction === true) {
+							if (usedAction === undefined) delete record.usedAction;
+							else record.usedAction = usedAction;
+						}
+						throw error;
+					}
+				}
+				expected = JSON.stringify(record);
+				this._getCompanionRollUi(companion.id).criticals.set(action.key, isCrit);
+			} finally { locks.delete(companion.id); }
+		}
+		await this.pAnimateD20(roll);
+		if (bonusRolls.length) await this.pAnimateDamageDice(bonusRolls.flatMap(die => die.groups));
+		assertCurrent();
+		const autoFail = aggregates.some(aggregate => aggregate.autoFail) || actor?.hasAutoFailFromConditions(rollType) || relevantConditions.some(effect => effect.type === "autoFail");
+		const notes = [
+			autoFail ? "Automatic failure from current effects." : "",
+			aggregates.some(aggregate => aggregate.autoSuccess) ? "Automatic success from current effects." : "",
+			effective !== roll.roll ? `Effective d20 ${effective} (rolled ${roll.roll}).` : "",
+			...aggregates.flatMap(aggregate => aggregate.conditionalsAvailable.map(conditional => `${conditional.name}: ${conditional.conditional} (manual)`)),
+			action?.note || (actor ? "Optional class resources and rerolls are manual." : "Conditional traits and target eligibility require manual resolution."),
+		].filter(Boolean).join(" ");
+		this.showDiceResult({
+			title: `${titleName} — ${escape(check.label)}`,
+			total,
+			subtitle: this.formatD20Breakdown(roll, check.modifier) + bonusRolls.map(die => ` ${die.sign > 0 ? "+" : "-"} ${die.total} [${escape(die.expression)} ${escape(die.source)}]`).join(""),
+			resultClass: autoFail ? "fumble" : isCrit ? "critical" : kind === "attack" && roll.roll === 1 ? "fumble" : "",
+			resultNote: escape(notes),
 		});
+		if (kind === "attack") this._renderCompanions();
+		return {total, label: check.label, actionKey: action?.key, isCrit};
 	}
 
 	async _onEditCompanionName (companion) {
@@ -9472,6 +9556,7 @@ class CharacterSheetPage {
 	}
 
 	_useCompanionAction (companion, action) {
+		if (action === "attack") return this._showCompanionAttackOptions(companion);
 		// Mark action as used
 		this._state.updateCompanion?.(companion.id, {usedAction: true});
 		this._saveCurrentCharacter();
@@ -9502,13 +9587,6 @@ class CharacterSheetPage {
 			return;
 		}
 
-		// For Attack, show available attack actions
-		if (action === "attack" && companion.actions?.length) {
-			this._showCompanionAttackOptions(companion);
-			this._renderCompanions();
-			return;
-		}
-
 		JqueryUtil.doToast({
 			type: "info",
 			content: `⚡ ${name} takes the <strong>${actionName}</strong> action — ${actionDescriptions[action]}`,
@@ -9518,46 +9596,24 @@ class CharacterSheetPage {
 	}
 
 	async _showCompanionAttackOptions (companion) {
-		const attacks = (companion.actions || []).filter(a =>
-			a.entries?.some(e => typeof e === "string" && e.toLowerCase().includes("attack")),
-		);
-
-		if (!attacks) {
-			JqueryUtil.doToast({type: "warning", content: "No attack actions available"});
+		const model = this._getCompanionRollModel(companion.id);
+		const attacks = model.actions.filter(action => action.attackBonus != null);
+		if (model.reason || model.operationUi || !model.actionAvailable || !attacks.length) {
+			JqueryUtil.doToast({type: "warning", content: model.reason || (model.operationUi ? "Use the feature command controls for attacks." : "No available companion attacks. Start its next turn or supply attack statistics.")});
 			return;
 		}
-
 		const chosen = await InputUiUtil.pGetUserEnum({
 			title: `${companion.customName || companion.name} — Choose Attack`,
-			values: attacks.map(a => a.name),
+			values: attacks.map(action => action.key),
+			fnDisplay: key => attacks.find(action => action.key === key).name,
 			isResolveItem: true,
 		});
-
 		if (!chosen) return;
-
-		const attack = attacks.find(a => a.name === chosen);
-		if (!attack) return;
-
-		// Parse attack bonus from entries
-		let attackBonus = 0;
-		for (const entry of attack.entries || []) {
-			if (typeof entry !== "string") continue;
-			const match = entry.match(/\{@hit (\d+)\}/);
-			if (match) {
-				attackBonus = parseInt(match[1]);
-				break;
-			}
+		try {
+			return await this._rollCompanionAttack(companion, chosen);
+		} catch (error) {
+			JqueryUtil.doToast({type: "warning", content: error.message});
 		}
-
-		// Roll attack
-		const roll = Renderer.dice.parseRandomise2("1d20");
-		const total = roll + attackBonus;
-		const modStr = attackBonus >= 0 ? `+${attackBonus}` : attackBonus;
-
-		JqueryUtil.doToast({
-			type: "info",
-			content: `⚔️ ${companion.customName || companion.name} ${chosen}: ${roll} ${modStr} = <strong>${total}</strong>`,
-		});
 	}
 
 	_resetAllCompanionActions () {

@@ -93834,10 +93834,10 @@ class CharacterSheetState {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
 		if (Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getSaveMod(ability);
-		const resolved = companion.scaling?.resolved?.statistics?.savingThrows?.[ability];
-		if (Number.isFinite(Number(resolved))) return Number(resolved);
-		const exact = companion.exactStatistics?.savingThrows?.[ability];
-		if (Number.isFinite(exact)) return exact;
+		const resolved = CharacterSheetCompanionRules.getRollStatistic(companion.scaling?.resolved?.statistics?.savingThrows?.[ability]);
+		if (resolved != null) return resolved;
+		const exact = CharacterSheetCompanionRules.getRollStatistic(companion.exactStatistics?.savingThrows?.[ability]);
+		if (exact != null) return exact;
 		const abilMod = Math.floor((companion.abilities[ability] - 10) / 2);
 		const proficient = companion.saveProficiencies.includes(ability);
 		return abilMod + (proficient ? companion.profBonus : 0);
@@ -93847,8 +93847,8 @@ class CharacterSheetState {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
 		if (Object.hasOwn(companion, "actorSnapshot")) return this._getCompanionActorOrThrow(companionId).getAbilityCheckBreakdown(ability).total;
-		const resolved = companion.scaling?.resolved?.statistics?.abilityChecks?.[ability];
-		if (Number.isFinite(Number(resolved))) return Number(resolved);
+		const resolved = CharacterSheetCompanionRules.getRollStatistic(companion.scaling?.resolved?.statistics?.abilityChecks?.[ability]);
+		if (resolved != null) return resolved;
 		return Math.floor(((Number(companion.abilities?.[ability]) || 10) - 10) / 2);
 	}
 
@@ -93886,14 +93886,16 @@ class CharacterSheetState {
 
 		const ability = skillAbilities[skill.toLowerCase().replace(/\s+/g, "")] || "int";
 		const resolvedStatistics = companion.scaling?.resolved?.statistics;
-		const resolvedSkill = resolvedStatistics?.skills?.[skill.toLowerCase().replace(/\s+/g, "")];
-		if (Number.isFinite(Number(resolvedSkill))) return Number(resolvedSkill);
-		const resolvedCheck = resolvedStatistics?.abilityChecks?.[ability];
-		if (Number.isFinite(Number(resolvedCheck))) return Number(resolvedCheck);
-		const exact = companion.exactStatistics?.skills?.[skill.toLowerCase().replace(/\s+/g, "")];
-		if (Number.isFinite(exact)) return exact;
+		const normalizedSkill = this._normalizeSkillKey(skill);
+		const resolvedSkill = CharacterSheetCompanionRules.getRollStatistic(resolvedStatistics?.skills?.[normalizedSkill]);
+		if (resolvedSkill != null) return resolvedSkill;
+		const resolvedCheck = CharacterSheetCompanionRules.getRollStatistic(resolvedStatistics?.abilityChecks?.[ability]);
+		if (resolvedCheck != null) return resolvedCheck;
+		const exact = CharacterSheetCompanionRules.getRollStatistic(companion.exactStatistics?.skills?.[normalizedSkill]);
+		if (exact != null) return exact;
 		const abilMod = Math.floor((companion.abilities[ability] - 10) / 2);
-		const profLevel = companion.skillProficiencies[skill] || 0;
+		const profLevel = Object.entries(companion.skillProficiencies || {})
+			.find(([key]) => this._normalizeSkillKey(key) === normalizedSkill)?.[1] || 0;
 		return abilMod + (profLevel * companion.profBonus);
 	}
 

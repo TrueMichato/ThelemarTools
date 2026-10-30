@@ -281,6 +281,14 @@ class CharacterSheetCompanionActor {
 
 	commit () { return this.run(() => true); }
 
+	async spendRollAction () {
+		return this.run(state => {
+			if (state.isIncapacitated()) throw new Error("This companion is incapacitated and cannot attack.");
+			if (!state.consumeActionType("action")) throw new Error("This companion has already used its Action. Start its next turn first.");
+			return {ok: true};
+		});
+	}
+
 	async _commit () {
 		this._assertCurrent();
 		const previous = MiscUtil.copyFast(this._owner.getCompanion(this._companionId));
