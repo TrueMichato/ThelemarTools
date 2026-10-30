@@ -72019,6 +72019,7 @@ class CharacterSheetState {
 				default:
 					// Handle save:str, save:dex, etc.
 					if (mod.type.startsWith("save:")) {
+						if (mod.type === "save:con:concentration") break;
 						const abl = mod.type.split(":")[1];
 						if (abl !== "all") {
 							cm.savingThrows[abl] = (cm.savingThrows[abl] || 0) + value;
@@ -72723,7 +72724,7 @@ class CharacterSheetState {
 				if (advantage && !resultMod.advantage) resultMod.advantage = true;
 				if (disadvantage && !resultMod.disadvantage) resultMod.disadvantage = true;
 				// Store extra qualifiers for conditional display
-				if (modExtra && !resultMod.conditional) {
+				if (modExtra && !resultMod.conditional && !(type === "save:con:concentration" && baseType === type)) {
 					resultMod.conditional = modExtra;
 				}
 				if (synthesizedConditional && !resultMod.conditional) {
@@ -72762,14 +72763,24 @@ class CharacterSheetState {
 	 * @param {Set<string>} [opts.appliedConditionalIds] - Stable IDs (built by
 	 *   `_buildConditionalModId`) of conditional modifiers the caller has
 	 *   explicitly opted-in to for this roll.
+	 * @param {string[]} [opts.additionalTypes] - Optional queries to union without
+	 *   counting the same source twice.
 	 * @returns {Object} Aggregated result with {bonus, advantage, disadvantage,
 	 *   minimum, maximum, bonusDice, conditionalsAvailable, …}.
 	 */
-	aggregateModifiers (/** @type {string} */ type, /** @type {*} */ {appliedConditionalIds} = {}) {
-		const modifiers = [
-			...this.getModifiersForType(type),
-			...this._getConditionalActiveStateModifiersForType(type),
-		];
+	aggregateModifiers (/** @type {string} */ type, /** @type {*} */ {appliedConditionalIds, additionalTypes = []} = {}) {
+		const seenModifiers = new Set();
+		const modifiers = [type, ...additionalTypes].flatMap(query => [
+			...this.getModifiersForType(query),
+			...this._getConditionalActiveStateModifiersForType(query),
+		]).filter(mod => {
+			// A union query must not add the same save/d20 source through two channels.
+			if (!additionalTypes.length) return true;
+			const key = mod.id || CharacterSheetState._buildConditionalModId(mod);
+			if (seenModifiers.has(key)) return false;
+			seenModifiers.add(key);
+			return true;
+		});
 		const appliedIds = appliedConditionalIds instanceof Set ? appliedConditionalIds : null;
 
 		const result = {
@@ -79853,6 +79864,12 @@ class CharacterSheetState {
 		return state?.zodiacForm || null;
 	}
 
+	isFeatureActiveForCurrentForm (feature) {
+		if (!CharacterSheetState.isZodiacFormFeature(feature)) return true;
+		const form = CharacterSheetState.getZodiacFormDef(this.getActiveZodiacForm()?.formId);
+		return !!form && form.name.toLowerCase() === feature.name.trim().toLowerCase();
+	}
+
 	/**
 	 * Activate a Zodiac Form (Circle of the Zodiac) by id, snapshotting its
 	 * effects against the base sheet. Any previously-active Zodiac Form is
@@ -85957,13 +85974,20 @@ class CharacterSheetState {
 	 * (e.g., Bladesong INT mod, War Caster advantage tracked separately).
 	 * @returns {number} Total bonus to concentration saves
 	 */
-	getConcentrationSaveBonus () {
+	getConcentrationSaveBonus (options = {}) {
 		// Base: CON save modifier (ability mod + proficiency if proficient + custom + state bonuses)
 		let bonus = this.getSaveMod("con");
 
 		// Add concentration-specific bonuses from named modifiers
-		const concMods = this.aggregateModifiers("concentration");
-		bonus += concMods.bonus || 0;
+		const modifiers = this._getConcentrationModifiers(options);
+		// Replace only the named portion genuinely cached by getSaveMod. Manual,
+		// item and active-state bonuses remain intact; contextual names are opt-in.
+		const cachedNamedBonus = this._data.namedModifiers.reduce((total, mod) => {
+			if (!mod.enabled || mod.type === "save:con:concentration" || !(["save:all", "d20:all"].includes(mod.type) || (mod.type?.startsWith("save:") && mod.type.split(":")[1] === "con"))) return total;
+			const {advantage, disadvantage} = this._parseModifierType(mod.type);
+			return total + (advantage || disadvantage ? 0 : this._getNamedModifierEffectiveValue(mod));
+		}, 0);
+		bonus += modifiers.bonus - cachedNamedBonus;
 
 		// Add concentration bonuses from active states (e.g., Bladesong +INT to concentration saves)
 		bonus += this.getBonusFromStates("concentration");
@@ -85978,51 +86002,53 @@ class CharacterSheetState {
 	 * Check if the character has advantage on concentration saves.
 	 * Detects War Caster, Eldritch Mind, and any feature granting concentration advantage
 	 * via the generic named modifier system (target: "concentration" with advantage).
-	 * @returns {object} {advantage: bool, sources: string[]}
+	 * @returns {object} Raw {advantage, disadvantage, sources} before cancellation.
 	 */
-	getConcentrationAdvantage () {
-		// Check concentration-specific modifiers
-		const concMods = this.aggregateModifiers("concentration");
-		let hasAdvantage = concMods.advantage || false;
-		const sources = [...(concMods.sources || [])];
+	getConcentrationAdvantage (options = {}) {
+		const {advantage, disadvantage, sources} = this._getConcentrationModifiers(options);
+		return {advantage, disadvantage, sources};
+	}
 
-		// Also check generic CON save advantage (applies to all CON saves including concentration)
-		const conSaveMods = this.aggregateModifiers("save:con");
-		if (conSaveMods.advantage) {
-			hasAdvantage = true;
-			sources.push(...(conSaveMods.sources || []));
+	_getConcentrationModifiers ({appliedConditionalIds} = {}) {
+		const types = ["save:con:concentration", "save:con", "concentration"];
+		const modifiers = this.aggregateModifiers(types[0], {appliedConditionalIds, additionalTypes: types.slice(1)});
+		for (const effect of this.getActiveStateEffects()) {
+			if (effect.conditional || !types.some(type => this._effectMatchesType(effect.target, type))) continue;
+			if (!["advantage", "disadvantage"].includes(effect.type)) continue;
+			modifiers[effect.type] = true;
+			const source = effect.stateName || effect.source || "Active State";
+			if (!modifiers.sources.includes(source)) modifiers.sources.push(source);
 		}
-
-		// Check active state effects for save advantage on CON
-		const advState = this.getAdvantageState("save:con");
-		if (advState.advantage) {
-			hasAdvantage = true;
-			sources.push(...(advState.sources || []));
+		if (this.hasStrainDisadvantage("save:con")) {
+			modifiers.disadvantage = true;
+			if (!modifiers.sources.includes("Psionic Strain")) modifiers.sources.push("Psionic Strain");
 		}
-
-		return {
-			advantage: hasAdvantage,
-			sources: [...new Set(sources)],
-		};
+		if (modifiers.removeAdvantage) modifiers.advantage = false;
+		if (modifiers.removeDisadvantage) modifiers.disadvantage = false;
+		return modifiers;
 	}
 
 	/**
 	 * Compute the full concentration check info for given damage.
 	 * Returns DC, total bonus, advantage status, and effective roll needed.
 	 * @param {number} damageTaken - Damage that triggers the concentration save
-	 * @returns {object} {dc, bonus, advantage, sources, rollNeeded}
+	 * @param {object} [options] - Transient per-roll appliedConditionalIds.
+	 * @returns {object} DC, bonus, raw modes, sources, conditional choices and dice.
 	 */
-	makeConcentrationCheck (damageTaken) {
+	makeConcentrationCheck (damageTaken, options = {}) {
 		const dc = this.getConcentrationSaveDC(damageTaken);
-		const bonus = this.getConcentrationSaveBonus();
-		const {advantage, sources} = this.getConcentrationAdvantage();
+		const bonus = this.getConcentrationSaveBonus(options);
+		const {advantage, disadvantage, sources, conditionalsAvailable, bonusDiceContributions} = this._getConcentrationModifiers(options);
 		const rollNeeded = Math.max(1, dc - bonus);
 
 		return {
 			dc,
 			bonus,
 			advantage,
+			disadvantage,
 			sources,
+			conditionalsAvailable,
+			bonusDiceContributions,
 			rollNeeded: Math.min(20, rollNeeded),
 		};
 	}

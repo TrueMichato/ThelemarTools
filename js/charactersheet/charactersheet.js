@@ -16409,17 +16409,30 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Prompt the user to make a concentration check after taking damage.
-	 * Shows DC calculation, allows rolling, skipping, or voluntarily breaking.
+	 * Prepare a canonical check with per-roll contextual choices, without rolling.
 	 * @param {number} damageTaken - The amount of damage taken
+	 * @returns {Promise<object|null>} Prepared check, or null when cancelled.
 	 */
+	async pGetConcentrationCheck (damageTaken, {rollLabel = "Concentration Check"} = {}) {
+		const probe = this._state.makeConcentrationCheck(damageTaken);
+		if (!probe.conditionalsAvailable?.length) return probe;
+		const selection = await this._pPickConditionalModifiers({rollLabel, conditionalsAvailable: probe.conditionalsAvailable});
+		if (selection.cancelled) return null;
+		return this._state.makeConcentrationCheck(damageTaken, {appliedConditionalIds: selection.appliedConditionalIds});
+	}
+
 	async _promptConcentrationCheck (damageTaken) {
 		const concentration = this._state.getConcentration?.();
 		if (!concentration) return;
 
 		const spellName = this._state.getConcentrationLabel?.() || concentration.spellName || "Unknown Spell";
-		const checkInfo = this._state.makeConcentrationCheck(damageTaken);
-		let {dc, bonus, advantage, sources, rollNeeded} = checkInfo;
+		const probe = this._state.makeConcentrationCheck(damageTaken);
+		const checkInfo = probe.conditionalsAvailable?.length ? await this.pGetConcentrationCheck(damageTaken) : probe;
+		if (checkInfo === null) return;
+		let {dc, bonus, advantage, disadvantage, sources, rollNeeded} = checkInfo;
+		const mode = CharacterSheetClassUtils.resolveD20Mode({stateAdvantage: advantage, stateDisadvantage: disadvantage});
+		const modeText = advantage && disadvantage ? "Advantage and disadvantage cancel" : mode === "normal" ? "" : `You have ${mode}`;
+		const sourceText = sources.map(source => CharacterSheetClassUtils.escapeHtml(source)).join(", ");
 
 		const dcExplanation = `DC = max(10, damage ÷ 2) = max(10, ${damageTaken} ÷ 2) = ${dc}`;
 		const bonusBreakdown = [];
@@ -16484,15 +16497,15 @@ class CharacterSheetPage {
 				<div class="ve-flex-col w-100">
 					<div class="mb-2">
 						<strong>Your bonus:</strong> ${bonus >= 0 ? "+" : ""}${bonus}
-						${sources.length ? `<span class="ve-muted">(${sources.join(", ")})</span>` : ""}
+						${sources.length ? `<span class="ve-muted">(${sourceText})</span>` : ""}
 					</div>
-					${advantage ? `<div class="mb-2 ve-small ve-muted">You have <strong>advantage</strong> on this check</div>` : ""}
+					${modeText ? `<div class="mb-2 ve-small ve-muted">${modeText} on this check</div>` : ""}
 				</div>
 			`);
 
 			// Roll needed display (updates dynamically)
 			const rollNeededRow = ee`<div class="mb-3">
-				<span class="ve-muted">You need to roll a </span>${rollNeededDisplay}<span class="ve-muted"> or higher on the die${advantage ? " (with advantage)" : ""} to maintain concentration.</span>
+				<span class="ve-muted">You need to roll a </span>${rollNeededDisplay}<span class="ve-muted"> or higher on the die${mode === "normal" ? "" : ` (with ${mode})`} to maintain concentration.</span>
 			</div>`;
 			modalInner.append(rollNeededRow);
 
@@ -16501,21 +16514,23 @@ class CharacterSheetPage {
 			const btnRow = e_({outer: `<div class="ve-flex-h-right mt-3"></div>`});
 
 			const performRoll = async () => {
+				btnRoll.disabled = true;
 				// Get current DC value from input
 				const currentDc = parseInt(dcInput.value) || 10;
 
-				const roll1 = RollerUtil.randomise(20);
-				const roll2 = advantage ? RollerUtil.randomise(20) : null;
-				const effectiveRoll = advantage ? Math.max(roll1, roll2) : roll1;
-				const total = effectiveRoll + bonus;
+				const rolled = this.rollD20({stateAdvantage: advantage, stateDisadvantage: disadvantage});
+				const exhaustion = this._state._getExhaustionD20Penalty();
+				const stateDice = this._rollStateDiceBonuses("save:con");
+				const modifierDice = this._rollModifierDiceBonuses(checkInfo);
+				const total = rolled.roll + bonus - exhaustion + (rolled.thelemar_critBonus || 0)
+					+ (stateDice?.total || 0) + (modifierDice?.total || 0);
 				const success = total >= currentDc;
 
 				// Show animated dice — adv shows both physical d20s.
-				await this.pAnimateD20({roll: effectiveRoll, roll1, roll2: roll2 ?? roll1, mode: advantage ? "advantage" : "normal"});
-
-				const rollText = advantage
-					? `Rolls: ${roll1}, ${roll2} (took ${effectiveRoll}) + ${bonus} = <strong>${total}</strong> vs DC ${currentDc}`
-					: `Roll: ${roll1} + ${bonus} = <strong>${total}</strong> vs DC ${currentDc}`;
+				await this.pAnimateD20(rolled);
+				const diceText = [stateDice?.breakdownStr, modifierDice?.breakdownStr].filter(Boolean).join(" ");
+				const breakdown = `${this.formatD20Breakdown(rolled, bonus, exhaustion ? ` - ${exhaustion} (exhaustion)` : "")}${diceText ? ` ${diceText}` : ""} = ${total} vs DC ${currentDc}`;
+				const rollText = CharacterSheetClassUtils.escapeHtml(breakdown);
 
 				const resultClass = success ? "charsheet__concentration-success" : "charsheet__concentration-fail";
 				const resultText = success ? "Success! Concentration maintained." : "Failed! Concentration broken.";
@@ -16527,6 +16542,13 @@ class CharacterSheetPage {
 					</div>
 				`;
 				rollResult.classList.remove("ve-hidden");
+				this.showDiceResult({
+					title: "Concentration Check",
+					total,
+					subtitle: rollText,
+					resultClass: success ? "" : "charsheet__dice-result-total--fumble",
+					resultNote: `${resultText}${sourceText ? ` Sources: ${sourceText}.` : ""}`,
+				});
 
 				if (!success) {
 					pendingBreak = true;

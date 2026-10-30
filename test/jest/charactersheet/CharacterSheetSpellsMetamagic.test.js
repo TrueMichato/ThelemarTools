@@ -682,15 +682,21 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		};
 
 		state.setConcentration({name: "Fly", level: 3, appliedMetamagic: {key: "focused", name: "Focused Spell", cost: 3}});
-		rollDiceMock
-			.mockReturnValueOnce(3)
-			.mockReturnValueOnce(17);
+		page.rollD20.mockReturnValueOnce({roll: 3, roll1: 3, roll2: null, mode: "normal", thelemar_critBonus: 0});
+		page._rollStateDiceBonuses = jest.fn(() => null);
+		page._rollModifierDiceBonuses = jest.fn(() => null);
+		page.formatD20Breakdown = jest.fn((rolled, bonus) => `d20(${rolled.roll}) + ${bonus}`);
+		page.pAnimateD20 = jest.fn(async () => {});
+		page.showDiceResult = jest.fn();
+		rollDiceMock.mockReturnValueOnce(17);
 
 		combat._initQuickStateButtons();
 		await handlers["charsheet-combat-conc-save"]();
 
 		expect(state.isConcentrating()).toBe(true);
 		expect(state.canUseFocusedConcentrationReroll()).toBe(false);
+		expect(page.rollD20).toHaveBeenCalledWith({stateAdvantage: false, stateDisadvantage: false});
+		expect(page.pAnimateD20).toHaveBeenCalledWith(expect.objectContaining({roll: 17, mode: "normal"}));
 		const toast = getLastToastContent();
 		expect(toast).toContain("Focused Spell rerolled the concentration die");
 		expect(toast).toContain("SUCCESS - Concentration maintained");
