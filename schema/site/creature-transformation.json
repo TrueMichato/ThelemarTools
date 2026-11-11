@@ -145,7 +145,23 @@
 			"required": ["id", "name", "selection", "required", "options"],
 			"additionalProperties": false
 		},
+		"numericChange": {
+			"description": "Concrete version-2 numeric output only; not permitted in legacy recipe or option changes.",
+			"oneOf": [
+				{"type": "object", "properties": {"op": {"const": "setHitPoints"}, "value": {"type": "object", "properties": {"average": {"type": "integer", "minimum": 1, "maximum": 1000000}, "formula": {"type": "string", "maxLength": 80, "pattern": "^(?:[1-9][0-9]{0,3}|10000)[dD](4|6|8|10|12|20)(?:\\s*[+-]\\s*0*(?:[0-9]{1,6}|1000000))?$"}}, "required": ["average", "formula"], "additionalProperties": false}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "setSaveBonus"}, "ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "value": {"type": "integer", "minimum": -10000, "maximum": 10000}}, "required": ["op", "ability", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "setSkillBonus"}, "skill": {"enum": ["athletics", "acrobatics", "sleight of hand", "stealth", "arcana", "history", "investigation", "nature", "religion", "animal handling", "insight", "medicine", "perception", "survival", "deception", "intimidation", "performance", "persuasion"]}, "value": {"type": "integer", "minimum": -10000, "maximum": 10000}}, "required": ["op", "skill", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "setPassivePerception"}, "value": {"type": "integer", "minimum": 0, "maximum": 10000}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "description": "Atomically set numeric profBonus and canonical +N pbNote; ambiguous or disagreeing existing PB notes require source resolution, never a CR change.", "properties": {"op": {"const": "setProficiencyBonus"}, "value": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["op", "value"], "additionalProperties": false}
+			]
+		},
 		"stagedAutomation": {
+			"oneOf": [
+				{"$ref": "#/$defs/stagedDracolichAutomation"},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
+			]
+		},
+		"stagedDracolichAutomation": {
 			"type": "object",
 			"properties": {
 				"version": {"const": 2},
@@ -192,7 +208,10 @@
 			},
 			"required": ["name", "source", "provenance", "eligibility", "prerequisites", "changes", "optionGroups", "manualReview"],
 			"allOf": [
-				{"if": {"required": ["automation"]}, "then": {"properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}}}}
+				{"if": {"required": ["automation"]}, "then": {"oneOf": [
+					{"properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "dracolich"}}}}},
+					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
+				]}}
 			],
 			"additionalProperties": false
 		}

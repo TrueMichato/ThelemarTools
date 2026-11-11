@@ -1,4 +1,5 @@
 import {getRenderableSpeciesTrait, isTransformationEntry, isTransformationSpell} from "./creature-transformation-entries.js";
+import {compileCreatureTransformationStats, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "./creature-transformation-stats.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -76,7 +77,7 @@ const assertEligibility = eligibility => {
 	if (eligibility.requiresTrait != null && (typeof eligibility.requiresTrait !== "string" || !eligibility.requiresTrait.trim())) throw new CreatureTransformationCandidateError("Invalid trait eligibility.");
 	if (eligibility.dmApproval != null && typeof eligibility.dmApproval !== "boolean") throw new CreatureTransformationCandidateError("Invalid DM approval eligibility.");
 };
-const assertChanges = changes => {
+const assertChanges = (changes, {allowStats = false} = {}) => {
 	if (!Array.isArray(changes)) throw new CreatureTransformationCandidateError("Transformation changes must be an array.");
 	for (const step of changes) {
 		const props = Object.keys(step || {}).sort().join(",");
@@ -105,7 +106,7 @@ const assertChanges = changes => {
 				case "removeEntry": return props === "match,op,section" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match);
 				case "replaceEntry": return props === "entry,match,onMissing,op,section" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match) && isEntry(step.entry) && ["error", "skip"].includes(step.onMissing);
 				case "replaceDamageType": return props === "from,match,onMissing,op,section,to" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match) && Array.isArray(step.from) && step.from.length > 0 && new Set(step.from).size === step.from.length && step.from.every(it => DAMAGE_TYPES.has(it)) && DAMAGE_TYPES.has(step.to) && ["error", "skip"].includes(step.onMissing);
-				default: return false;
+				default: return allowStats && isCreatureTransformationStatChange(step);
 			}
 		})();
 		if (!valid) throw new CreatureTransformationCandidateError(`Invalid transformation change: ${step?.op || "(missing op)"}`);
@@ -114,7 +115,16 @@ const assertChanges = changes => {
 
 const isDracolichIdentity = identity => typeof identity?.name === "string" && identity.name.toLowerCase() === "dracolich"
 	&& typeof identity?.source === "string" && identity.source.toLowerCase() === "mm";
+const isZombieNumericIdentity = identity => typeof identity?.name === "string" && identity.name.toLowerCase() === "zombie"
+	&& typeof identity?.source === "string" && identity.source.toLowerCase() === "dmg";
 const assertAutomation = (automation, identity) => {
+	if (isZombieNumericIdentity(identity)) {
+		if (!automation || Object.keys(automation).sort().join(",") !== "hitPoints,profile,rollout,version"
+			|| automation.version !== 2 || automation.profile !== "zombie-numerics" || automation.rollout !== "staged" || automation.hitPoints !== "constitution") {
+			throw new CreatureTransformationCandidateError("Only the staged version-2 Zombie (DMG) numeric profile is supported.");
+		}
+		return;
+	}
 	if (!isDracolichIdentity(identity)
 		|| !automation || Object.keys(automation).sort().join(",") !== "changes,profile,rollout,version"
 		|| automation.version !== 2 || automation.profile !== "dracolich" || automation.rollout !== "staged") {
@@ -618,6 +628,27 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:zombie|dmg" && isZombieNumericIdentity(resolved.identity)) {
+		if (Object.hasOwn(resolved, "automation") || !Array.isArray(resolved.eligibility) || !resolved.eligibility.some(rule => rule?.dmApproval === true)
+			|| !resolved.selectedOptions || Object.keys(resolved.selectedOptions).join(",") !== "automation-numerics"
+			|| JSON.stringify(resolved.selectedOptions["automation-numerics"]) !== JSON.stringify(["zombie-dmg-m2a"]) || !Array.isArray(resolved.changes)) return false;
+		const seen = new Set();
+		for (const step of resolved.changes) {
+			const op = step?.op ?? step?.type;
+			if (op === "setAbility") {
+				if (!["str", "con", "int", "wis", "cha"].includes(step.ability) || !Number.isInteger(step.value) || step.value < 1 || step.value > 30) return false;
+			} else if (isCreatureTransformationStatOp(op)) {
+				if (!isCreatureTransformationStatChange(step, Object.hasOwn(step, "op") ? "op" : "type")) return false;
+			} else if (!(op === "setType" && step.value === "undead")
+				&& !(op === "grantSense" && step.sense === "darkvision" && step.range === 60)
+				&& !(op === "grantImmunity" && step.value === "poison")
+				&& !(op === "grantConditionImmunity" && step.value === "poisoned")) return false;
+			const key = `${op}:${step.ability ?? step.skill ?? ""}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+		}
+		return ["setType:", "grantSense:", "grantImmunity:", "grantConditionImmunity:", "setAbility:con", "setHitPoints:"].every(key => seen.has(key));
+	}
 	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm"
 		|| !isDracolichIdentity(resolved.identity) || Object.hasOwn(resolved, "automation")) return false;
 	if (!Array.isArray(resolved.eligibility) || !resolved.eligibility.some(rule => rule?.dmApproval === true)) return false;
@@ -647,7 +678,29 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		error.code = code;
 		throw error;
 	};
-	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm") throw new Error("Only staged version-2 Dracolich compilation is supported.");
+	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:zombie|dmg") {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		if (!resolved.selectedOptions || Object.keys(resolved.selectedOptions).length) throw new Error("Staged Zombie numerics do not support additional option groups.");
+		if (!inputs || typeof inputs !== "object" || Array.isArray(inputs) || Object.keys(inputs).length) fail("Zombie numerics retain the target's existing PB; additional input decisions are not supported in this numeric-only profile.");
+		assertChanges(resolved.changes);
+		const abilities = {};
+		for (const step of resolved.changes.filter(it => it.op === "adjustAbility")) {
+			if (!Number.isInteger(current[step.ability]) || current[step.ability] < 1 || current[step.ability] > 30) fail(`${step.ability} needs a supported current ability score.`);
+			abilities[step.ability] = Math.max(step.floor, current[step.ability] + step.amount);
+		}
+		const numeric = compileCreatureTransformationStats({current, abilities, hp: {mode: resolved.automation.hitPoints}});
+		const compiled = copy(resolved);
+		delete compiled.automation;
+		compiled.selectedOptions = {"automation-numerics": ["zombie-dmg-m2a"]};
+		compiled.changes = [...compiled.changes.filter(it => it.op !== "adjustAbility"), ...numeric];
+		compiled.manualReview = compiled.manualReview.filter(it => it.field !== "hp" && it.field !== "abilities");
+		compiled.manualReview.push({field: "traits", reason: "Numeric-only stage: Undead Fortitude, lost capabilities and language restrictions remain unresolved; this is not complete Zombie automation."});
+		assertChanges(compiled.changes, {allowStats: true});
+		if (!isCompiledCreatureTransformation(compiled)) throw new Error("The staged Zombie numeric recipe cannot compile to the supported concrete profile.");
+		return compiled;
+	}
+	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm") throw new Error("Only staged version-2 Dracolich or Zombie numeric compilation is supported.");
 	assertAutomation(resolved.automation, resolved.identity);
 	if (!resolved.selectedOptions || Object.keys(resolved.selectedOptions).length) throw new Error("Staged Dracolich does not support additional option groups.");
 	assertIdentity(current);

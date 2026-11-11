@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import {jest} from "@jest/globals";
+import "../../../js/parser.js";
 import {getCreatureTransformationCandidates, resolveCreatureTransformation} from "../../../js/creature-transformations.js";
 import {normalizeCreatureTransformation} from "../../../js/bestiary/bestiary-transformation-catalog-adapter.js";
 import {createCreatureTransformationChanges, previewCreatureTransformationTargets} from "../../../js/bestiary/bestiary-transformation-workflow.js";
@@ -61,6 +62,144 @@ const makeState = ({selectedIds = ["one", "two"], creatures = [monster, monster]
 	groups: [],
 	ungroupedIds: [],
 	turn: {round: 0, activeId: null},
+});
+
+describe("staged M2a Zombie numerical boundary", () => {
+	const monsters = JSON.parse(fs.readFileSync(new URL("../../../data/bestiary/bestiary-mm.json", import.meta.url), "utf8")).monster;
+	const scout = monsters.find(it => it.name === "Scout" && it.source === "MM");
+	const knight = monsters.find(it => it.name === "Knight" && it.source === "MM");
+	const staged = () => resolveCreatureTransformation({candidates, id: "catalog:zombie|dmg", automationVersion: 2});
+	const stage = (targets, extras = {}) => ready(targets, staged(), extras);
+
+	it("reconciles the actual sourced CON and mental changes without applying another monster's chassis or later milestones", () => {
+		const source = JSON.parse(fs.readFileSync(new URL("../../../data/book/book-dmg.json", import.meta.url), "utf8"));
+		const rows = [];
+		const visit = value => {
+			if (!value || typeof value !== "object") return;
+			if (value.caption === "NPC Features") rows.push(...value.rows);
+			Object.values(value).forEach(part => typeof part === "object" && visit(part));
+		};
+		visit(source);
+		expect(rows.find(row => row[0] === "Zombie")[1]).toBe("+1 Str, +2 Con, -6 Int, -4 Wis, -4 Cha");
+		const batch = stage([target("one", scout), target("two", knight)]);
+		expect(batch.skipped).toEqual([]);
+		expect(batch.previews[0].preview.proposed).toMatchObject({
+			str: 12,
+			con: 14,
+			int: 5,
+			wis: 9,
+			cha: 7,
+			hp: {average: 19, formula: "3d8 + 6"},
+			skill: {nature: "+1", perception: "+3", stealth: "+6", survival: "+3"},
+			passive: 13,
+		});
+		expect(batch.previews[1].preview.proposed).toMatchObject({
+			con: 16, hp: {average: 60, formula: "8d8 + 24"}, save: {con: "+5", wis: "+0"}, passive: 8,
+		});
+		for (const {id, preview} of batch.previews) {
+			const source = id === "one" ? scout : knight;
+			for (const field of ["ac", "action", "bonus", "reaction", "legendary", "spellcasting", "cr", "profBonus", "languages"]) expect(preview.proposed[field]).toEqual(source[field]);
+			expect(preview.manualReview).toContainEqual(expect.objectContaining({reason: expect.stringMatching(/Numeric-only stage.*not complete Zombie/i)}));
+			expect(preview.manualReview.some(it => it.field === "ac" || it.field === "attacks")).toBe(true);
+			expect(preview.proposed.trait?.some(it => it.name === "Undead Fortitude") || false).toBe(false);
+		}
+	});
+
+	it("compiles from each target's actual history and freezes concrete numeric replay through save and removal", () => {
+		const prior = [{id: "prior-con", type: "patch", data: {patch: {set: {con: 16, hp: {average: 22, formula: "3d8 + 9"}}}}}];
+		const targets = [target("one", scout, prior), target("two", knight)];
+		const localCatalog = structuredClone(catalog);
+		const localCandidates = getCreatureTransformationCandidates({catalog: localCatalog, races: []});
+		const recipe = resolveCreatureTransformation({candidates: localCandidates, id: "catalog:zombie|dmg", automationVersion: 2});
+		const batch = ready(targets, recipe);
+		const edits = changes(batch);
+		const expected = batch.previews.map(it => it.preview.proposed);
+		expect(expected[0]).toMatchObject({con: 18, hp: {average: 25, formula: "3d8 + 12"}});
+		expect(expected[1]).toMatchObject({con: 16, hp: {average: 60, formula: "8d8 + 24"}});
+		const operations = JSON.parse(JSON.stringify([...prior, ...edits[0].addOperations]));
+		expect(operations[1].data.resolved).not.toHaveProperty("automation");
+		expect(operations[1].data.resolved.changes).toContainEqual({type: "setHitPoints", value: {average: 25, formula: "3d8 + 12"}});
+		expect(operations[1].data.resolved.changes.some(it => it.type === "adjustAbility")).toBe(false);
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: scout, operations})).toEqual(expected[0]);
+		const registry = new BestiaryQuickActionsRegistry();
+		registry.addOperation({creature: scout, operation: prior[0]});
+		const id = registry.addOperation({creature: scout, operation: operations[1]});
+		expect(registry.getCreature({creature: scout})).toEqual(expected[0]);
+		registry.removeOperation({creature: scout, operationId: id});
+		expect(registry.getCreature({creature: scout})).toMatchObject({con: 16, hp: {average: 22, formula: "3d8 + 9"}});
+		let state = makeState({creatures: [scout, knight]});
+		state = EncounterWorkspaceState.withStatblockChanges(state, [{id: "one", addOperations: prior, removeIds: []}]).state;
+		state = EncounterWorkspaceState.withStatblockChanges(state, edits).state;
+		const saved = JSON.stringify(state);
+		localCatalog.creatureTransformation.length = 0;
+		localCandidates.length = 0;
+		recipe.automation.hitPoints = "changed";
+		const reloaded = EncounterWorkspaceState.validate(JSON.parse(saved));
+		expect(reloaded.instances.map(it => getEncounterEffectiveMonster(it))).toEqual(expected);
+		const removed = EncounterWorkspaceState.withStatblockChanges(reloaded, edits.map(it => ({id: it.id, addOperations: [], removeIds: it.addOperations.map(op => op.id)}))).state;
+		expect(removed.instances.map(it => getEncounterEffectiveMonster(it))).toEqual([BestiaryQuickActionsUtil.applyOperations({baseCreature: scout, operations: prior}), knight]);
+		expect(() => createCreatureTransformationChanges({batch, targets: [{...targets[0], operations: []}, targets[1]]})).toThrow(/stale/i);
+	});
+
+	it.each([
+		[{hp: {special: "variable"}}, /HP needs/],
+		[{hp: {average: 20, formula: "3d8 + 3"}}, /average disagrees/],
+		[{skill: {perception: "+5 + PB"}}, /skill.perception/],
+		[{con: 29}, /output score/],
+		[{passive: "15 + PB"}, /Passive Perception/],
+	])("skips unsupported arithmetic %# explicitly with no partial operation and no cross-target leakage", (patch, reason) => {
+		const batch = stage([target("one", {...scout, ...patch}), target("two", knight)]);
+		expect(batch.previews.map(it => it.id)).toEqual(["two"]);
+		expect(batch.skipped).toEqual([expect.objectContaining({id: "one", reason: expect.stringMatching(reason)})]);
+		expect(changes(batch).map(it => it.id)).toEqual(["two"]);
+	});
+
+	it("treats dependent numerical conflicts as one coherent unit and retains old consent, storage and stale-input guards", () => {
+		const priorRecipe = {...resolve("catalog:zombie|dmg"), eligibility: [], changes: [{op: "setAbility", ability: "con", value: 16}]};
+		const starting = {...scout, hp: {average: 22, formula: "3d8 + 9"}};
+		const prior = changes(ready([target("one", starting)], priorRecipe))[0].addOperations;
+		const targets = [target("one", starting, prior)];
+		const pending = stage(targets);
+		expect(pending.previews[0].preview.conflicts.map(it => it.path)).toEqual(["con"]);
+		expect(pending.previews[0].preview.proposed).toMatchObject({con: 16, hp: starting.hp, wis: scout.wis, passive: scout.passive});
+		expect(() => changes(pending)).toThrow(/winner/i);
+		const incoming = stage(targets, {conflictDecisions: {one: {con: "incoming"}}});
+		expect(incoming.previews[0].preview.proposed).toMatchObject({con: 18, hp: {average: 25, formula: "3d8 + 12"}});
+		expect(changes(incoming, {one: {con: "incoming"}})).toHaveLength(1);
+		const retained = stage(targets, {conflictDecisions: {one: {con: "existing"}}});
+		expect(retained.previews[0].preview.proposed).toMatchObject({con: 16, hp: starting.hp, wis: scout.wis, passive: scout.passive});
+		const retainedOp = changes(retained, {one: {con: "existing"}})[0].addOperations[0];
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: starting, operations: [...prior, retainedOp]})).toEqual(retained.previews[0].preview.proposed);
+		const bothRecipe = {...priorRecipe, changes: [...priorRecipe.changes, {op: "setAbility", ability: "wis", value: 11}]};
+		const bothPrior = changes(ready([target("one", starting)], bothRecipe))[0].addOperations;
+		const mixed = stage([target("one", starting, bothPrior)], {conflictDecisions: {one: {con: "existing", wis: "incoming"}}});
+		expect(mixed.previews).toEqual([]);
+		expect(mixed.skipped[0].reason).toMatch(/one conflict winner/);
+		expect(changes(mixed)).toEqual([]);
+		const noConsent = ready([target("one", scout)], staged(), {dmApproved: false});
+		expect(noConsent.previews).toEqual([]);
+		expect(noConsent.skipped[0].reason).toMatch(/DM approval/i);
+		const capped = stage([target("one", scout)], {validateOperation: () => { throw new Error("Target storage limit."); }});
+		expect(capped.previews).toEqual([]);
+		const batch = stage([target("one", scout)]);
+		expect(() => createCreatureTransformationChanges({batch, targets: batch.targets, automationInputs: {one: {proficiencyBonus: 3}}})).toThrow(/retain.*PB/i);
+		expect(() => ready([target("one", scout)], batch.previews[0].preview.resolved)).toThrow(/snapshot/i);
+		const saved = changes(batch)[0].addOperations[0];
+		saved.data.resolved.changes.find(it => it.type === "setHitPoints").value.average++;
+		expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: scout, operations: [saved]})).toThrow(/changed/i);
+	});
+
+	it("retains frozen pre-M2a Zombie operations verbatim rather than silently upgrading their numbers", () => {
+		const batch = ready([target("one", scout)], resolve("catalog:zombie|dmg"));
+		const saved = JSON.parse(JSON.stringify(changes(batch)[0].addOperations[0]));
+		const result = BestiaryQuickActionsUtil.applyOperations({baseCreature: scout, operations: [saved]});
+		expect(saved.data.resolved).not.toHaveProperty("version");
+		expect(saved.data.resolved.changes.some(it => it.type === "setHitPoints")).toBe(false);
+		expect(result.con).toBe(14);
+		expect(result.hp).toEqual(scout.hp);
+		expect(result.skill).toEqual(scout.skill);
+		expect(result.passive).toBe(scout.passive);
+	});
 });
 
 describe("staged Dracolich compilation", () => {
@@ -250,6 +389,7 @@ describe("staged Dracolich compilation", () => {
 			{...compiled, selectedOptions: {}},
 			{...compiled, changes: compiled.changes.filter(it => it.type !== "addEntry")},
 			{...compiled, changes: [...compiled.changes, {type: "adjustAbility", ability: "str", amount: 1, floor: 1}]},
+			{...compiled, changes: [...compiled.changes, {type: "setHitPoints", value: {average: 1, formula: "1d8"}}]},
 		]) {
 			expect(() => BestiaryQuickActionsUtil.previewCreatureTransformation({
 				baseCreature: green, operations: [], resolved: changed, acknowledgedPrerequisites: changed.prerequisites, dmApproved: true,
