@@ -641,7 +641,7 @@ describe("CharacterSheetPage real character lifecycle", () => {
 		const original = await seed(page);
 		const exporter = new CharacterSheetExport(page);
 		const close = jest.fn();
-		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: e_({}), doClose: close});
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: e_({}), eleModalFooter: e_({}), doClose: close});
 		jest.spyOn(console, "error").mockImplementation(() => {});
 		await exporter._showImportDialog();
 		const textarea = dialogElements.find(element => element.tag === "textarea");
@@ -667,12 +667,55 @@ describe("CharacterSheetPage real character lifecycle", () => {
 		const page = makePage();
 		const exporter = new CharacterSheetExport(page);
 		const close = jest.fn();
-		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: e_({}), doClose: close});
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: e_({}), eleModalFooter: e_({}), doClose: close});
 		jest.spyOn(console, "error").mockImplementation(() => {});
 		await exporter._showImportDialog();
 		dialogElements.find(element => element.tag === "textarea").value = "{broken";
 		await dialogElements.find(element => element.textContent === "Import")._handlers.click();
 		expect(close).not.toHaveBeenCalled();
 		expect(JqueryUtil.doToast).toHaveBeenCalledWith({type: "danger", content: "Failed to import: Invalid JSON data."});
+	});
+
+	test.each([false, true])("pasted wrapped JSON preserves canonical persistence with replacement %s", async replaceExisting => {
+		const page = makePage();
+		const original = await seed(page);
+		const loadedOriginal = page._state.toJSON();
+		const exporter = new CharacterSheetExport(page);
+		const close = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: e_({}), eleModalFooter: e_({}), doClose: close});
+		await exporter._showImportDialog();
+		dialogElements.find(element => element.tag === "textarea").value = JSON.stringify({
+			character: {...original, name: "Pasted import", notes: {...original.notes, backstory: "Imported note"}},
+		});
+		dialogElements.find(element => element.type === "checkbox").checked = replaceExisting;
+		await dialogElements.find(element => element.textContent === "Import")._handlers.click();
+
+		expect(close).toHaveBeenCalledWith(true);
+		expect(page._currentCharacterId === original.id).toBe(replaceExisting);
+		expect(backend.roster).toHaveLength(replaceExisting ? 1 : 2);
+		const imported = backend.roster.find(record => record.id === page._currentCharacterId);
+		const reloaded = new CharacterSheetState();
+		reloaded.fromJSON(imported);
+		expect(reloaded.getName()).toBe("Pasted import");
+		expect(reloaded.getNote("backstory")).toBe("Imported note");
+		if (!replaceExisting) expect(backend.roster.find(record => record.id === original.id)).toMatchObject(loadedOriginal);
+	});
+
+	test("empty confirmation and cancelling a filled import leave the original roster untouched", async () => {
+		const page = makePage();
+		const original = await seed(page);
+		const exporter = new CharacterSheetExport(page);
+		const close = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: e_({}), eleModalFooter: e_({}), doClose: close});
+		await exporter._showImportDialog();
+		await dialogElements.find(element => element.textContent === "Import")._handlers.click();
+		expect(close).not.toHaveBeenCalled();
+		expect(JqueryUtil.doToast).toHaveBeenCalledWith({type: "warning", content: "Please provide character data to import."});
+		dialogElements.find(element => element.tag === "textarea").value = JSON.stringify({...original, name: "Do not import"});
+		await dialogElements.find(element => element.textContent === "Cancel")._handlers.click();
+		expect(close).toHaveBeenCalledWith(false);
+		expect(page._currentCharacterId).toBe(original.id);
+		expect(page._state.getName()).toBe("A");
+		expect(backend.roster).toEqual([original]);
 	});
 });

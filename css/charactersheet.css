@@ -16597,6 +16597,23 @@ body.is-charsheet-page .ve-ui-modal__inner.ve-w-100 {
 	height: auto !important;
 }
 
+.charsheet__import-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.charsheet__import-form,
+.charsheet__import-footer {
+	flex: 0 0 auto;
+	min-width: 0;
+}
+
+.charsheet__import-actions {
+	gap: 0.5rem;
+	padding-block: 0.75rem;
+}
+
 /* Character-sheet modal + Builder primary CTAs — One Voice.
    The site-wide `.ve-btn-primary` is a legacy steel-blue (#2a4e6c fill / muted
    text, borderline <4.5:1) that leaks into every CS modal footer (Level-Up,
