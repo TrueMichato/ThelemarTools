@@ -145,6 +145,37 @@
 			"required": ["id", "name", "selection", "required", "options"],
 			"additionalProperties": false
 		},
+		"stagedAutomation": {
+			"type": "object",
+			"properties": {
+				"version": {"const": 2},
+				"profile": {"const": "dracolich"},
+				"rollout": {"const": "staged"},
+				"changes": {
+					"type": "array",
+					"minItems": 2,
+					"maxItems": 2,
+					"uniqueItems": true,
+					"items": {
+						"type": "object",
+						"properties": {
+							"op": {"const": "addEntry"},
+							"section": {"const": "trait"},
+							"entry": {
+								"allOf": [
+									{"$ref": "#/$defs/entry"},
+									{"type": "object", "properties": {"name": {"enum": ["Magic Resistance", "Undead Nature"]}, "source": {"const": "MM"}}}
+								]
+							}
+						},
+						"required": ["op", "section", "entry"],
+						"additionalProperties": false
+					}
+				}
+			},
+			"required": ["version", "profile", "rollout", "changes"],
+			"additionalProperties": false
+		},
 		"transformation": {
 			"type": "object",
 			"properties": {
@@ -156,9 +187,13 @@
 				"changes": {"type": "array", "items": {"$ref": "#/$defs/change"}},
 				"optionGroups": {"type": "array", "items": {"$ref": "#/$defs/optionGroup"}},
 				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}},
-				"templateReference": {"$ref": "#/$defs/identity"}
+				"templateReference": {"$ref": "#/$defs/identity"},
+				"automation": {"$ref": "#/$defs/stagedAutomation"}
 			},
 			"required": ["name", "source", "provenance", "eligibility", "prerequisites", "changes", "optionGroups", "manualReview"],
+			"allOf": [
+				{"if": {"required": ["automation"]}, "then": {"properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}}}}
+			],
 			"additionalProperties": false
 		}
 	}

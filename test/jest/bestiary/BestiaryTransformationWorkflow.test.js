@@ -3,7 +3,7 @@ import {jest} from "@jest/globals";
 import {getCreatureTransformationCandidates, resolveCreatureTransformation} from "../../../js/creature-transformations.js";
 import {normalizeCreatureTransformation} from "../../../js/bestiary/bestiary-transformation-catalog-adapter.js";
 import {createCreatureTransformationChanges, previewCreatureTransformationTargets} from "../../../js/bestiary/bestiary-transformation-workflow.js";
-import {BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsRegistry, BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
 import {EncounterWorkspaceState, MAX_ENCOUNTER_STATBLOCK_OPERATIONS, getEncounterEffectiveMonster, validateEncounterStatblockOperations} from "../../../js/encounterworkspace/encounterworkspace-state.js";
 import {getEncounterHandoffSnapshot} from "../../../js/encounterworkspace/encounterworkspace-handoff.js";
 
@@ -61,6 +61,231 @@ const makeState = ({selectedIds = ["one", "two"], creatures = [monster, monster]
 	groups: [],
 	ungroupedIds: [],
 	turn: {round: 0, activeId: null},
+});
+
+describe("staged Dracolich compilation", () => {
+	const dragons = JSON.parse(fs.readFileSync(new URL("../../../data/bestiary/bestiary-mm.json", import.meta.url), "utf8")).monster;
+	const green = dragons.find(it => it.name === "Adult Green Dragon" && it.source === "MM");
+	const blue = dragons.find(it => it.name === "Adult Blue Dragon" && it.source === "MM");
+	const inputs = {age: "adult", trueDragon: true, shadowDragon: false, physiology: "amphibious-only", lairActions: "retain"};
+	const resolveStaged = () => resolveCreatureTransformation({candidates, id: "catalog:dracolich|mm", automationVersion: 2});
+	const stage = (targets, extras = {}) => ready(targets, resolveStaged(), {
+		automationInputs: Object.fromEntries(targets.map(it => [it.id, {...inputs}])),
+		...extras,
+	});
+
+	it("compiles actual source-granted rules and retains the real adult dragon chassis", () => {
+		const batch = stage([target("one", green), target("two", blue)]);
+		expect(batch.skipped).toEqual([]);
+		expect(batch.previews).toHaveLength(2);
+		for (const {id, preview} of batch.previews) {
+			const original = id === "one" ? green : blue;
+			expect(preview.proposed.trait).toContainEqual({
+				name: "Magic Resistance", source: "MM", entries: ["The dracolich has advantage on saving throws against spells and other magical effects."],
+			});
+			expect(preview.proposed.trait).toContainEqual({
+				name: "Undead Nature", source: "MM", entries: ["The dracolich needs no air, food, drink, or sleep."],
+			});
+			expect(preview.proposed).toMatchObject({
+				type: "undead",
+				resist: expect.arrayContaining(["necrotic"]),
+				immune: expect.arrayContaining(["poison"]),
+				conditionImmune: expect.arrayContaining(["charmed", "frightened", "paralyzed", "poisoned", "exhaustion"]),
+				hp: original.hp,
+				ac: original.ac,
+				action: original.action,
+				legendary: original.legendary,
+			});
+			expect(preview.proposed.immune).toEqual(expect.arrayContaining(original.immune));
+			expect(preview.proposed.legendaryGroup).toEqual(original.legendaryGroup);
+			expect(preview.proposed.cr).toEqual(original.cr);
+		}
+	});
+
+	it("removes only the target's actual Amphibious trait without leaking removals to another dragon", () => {
+		const batch = stage([target("one", green), target("two", blue)]);
+		expect(batch.skipped).toEqual([]);
+		expect(batch.previews[0].preview.proposed.trait.some(it => it.name === "Amphibious")).toBe(false);
+		expect(batch.previews[0].preview.diff.entries).toContainEqual(expect.objectContaining({name: "Amphibious", after: null}));
+		expect(batch.previews[1].preview.diff.entries.filter(it => it.after === null)).toEqual([]);
+		expect(batch.previews[0].preview.proposed.trait).toContainEqual(green.trait.find(it => it.name === "Legendary Resistance (3/Day)"));
+		expect(green.trait.some(it => it.name === "Amphibious")).toBe(true);
+	});
+
+	it("freezes concrete operations through Bestiary replay, Encounter JSON reload and actual operation removal", () => {
+		const localCatalog = structuredClone(catalog);
+		const localCandidates = getCreatureTransformationCandidates({catalog: localCatalog, races: []});
+		const recipe = resolveCreatureTransformation({candidates: localCandidates, id: "catalog:dracolich|mm", automationVersion: 2});
+		const targets = [target("one", green), target("two", blue)];
+		const batch = ready(targets, recipe, {automationInputs: {one: {...inputs}, two: {...inputs}}});
+		const edits = changes(batch);
+		const expected = batch.previews.map(it => it.preview.proposed);
+		for (const edit of edits) {
+			const operation = edit.addOperations[0];
+			expect(operation.data.resolved.version).toBe(2);
+			expect(operation.data.resolved).not.toHaveProperty("automation");
+			expect(operation.data.resolved).not.toHaveProperty("profile");
+			expect(operation.data.resolved.selectedOptions["automation-nature"]).toEqual(["true-dragon", "not-shadow"]);
+			expect(() => validateEncounterStatblockOperations(targets.find(it => it.id === edit.id).baseCreature, edit.addOperations)).not.toThrow();
+		}
+		const state = makeState({creatures: [green, blue]});
+		const applied = EncounterWorkspaceState.withStatblockChanges(state, edits).state;
+		const json = JSON.stringify(applied);
+		recipe.automation.changes[0].entry.entries[0] = "Changed after save.";
+		localCandidates.find(it => it.id === recipe.id).automation.changes[0].entry.entries[0] = "Changed in live catalog.";
+		localCandidates.length = 0;
+		localCatalog.creatureTransformation.length = 0;
+		const reloaded = EncounterWorkspaceState.validate(JSON.parse(json));
+		expect(reloaded.instances.map(it => getEncounterEffectiveMonster(it))).toEqual(expected);
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: green, operations: JSON.parse(JSON.stringify(edits[0].addOperations))})).toEqual(expected[0]);
+		const registry = new BestiaryQuickActionsRegistry();
+		const operationId = registry.addOperation({creature: green, operation: JSON.parse(JSON.stringify(edits[0].addOperations[0]))});
+		expect(registry.getCreature({creature: green})).toEqual(expected[0]);
+		expect(registry.removeOperation({creature: green, operationId})).toBe(true);
+		expect(registry.getCreature({creature: green})).toEqual(green);
+		const removed = EncounterWorkspaceState.withStatblockChanges(reloaded, edits.map(it => ({
+			id: it.id, addOperations: [], removeIds: it.addOperations.map(operation => operation.id),
+		}))).state;
+		expect(removed.instances.map(it => getEncounterEffectiveMonster(it))).toEqual([green, blue]);
+		expect(state.instances.every(it => it.statblockOperations.length === 0)).toBe(true);
+	});
+
+	it.each([
+		["missing confirmations", {}, green, /confirm/i],
+		["young dragon", {...inputs, age: "young"}, dragons.find(it => it.name === "Young Red Dragon" && it.source === "MM"), /adult or ancient/i],
+		["non-true dragon", {...inputs, trueDragon: false}, dragons.find(it => it.name === "Dragon Turtle" && it.source === "MM"), /true dragon/i],
+		["shadow dragon", {...inputs, shadowDragon: true}, blue, /shadow dragon/i],
+		["additional physiology", {...inputs, physiology: "additional"}, green, /physiology/i],
+		["changed lair", {...inputs, lairActions: "change"}, green, /lair/i],
+		["non-dragon chassis", inputs, monster, /living true dragon/i],
+	])("does not save a partial success for %s", (_label, decisions, creature, reason) => {
+		const batch = stage([target("one", creature)], {automationInputs: {one: decisions}});
+		expect(batch.previews).toEqual([]);
+		expect(batch.skipped).toEqual([expect.objectContaining({id: "one", reason: expect.stringMatching(reason)})]);
+		expect(changes(batch)).toEqual([]);
+	});
+
+	it("uses actual prior history for eligibility and rejects ambiguous source-qualified physiology", () => {
+		const shadow = changes(ready([target("one", green)], resolve("catalog:shadow dragon|mm")))[0].addOperations;
+		const ambiguous = structuredClone(green);
+		ambiguous.trait.push({...ambiguous.trait.find(it => it.name === "Amphibious"), source: "TST"});
+		const batch = stage([target("one", green, shadow), target("two", ambiguous), target("three", blue)]);
+		expect(batch.previews.map(it => it.id)).toEqual(["three"]);
+		expect(batch.skipped).toEqual([
+			expect.objectContaining({id: "one", reason: expect.stringMatching(/shadow dragon/i)}),
+			expect.objectContaining({id: "two", reason: expect.stringMatching(/multiple traits/i)}),
+		]);
+		expect(changes(batch).map(it => it.id)).toEqual(["three"]);
+	});
+
+	it("compiles from current traits with original-chassis source semantics and accepts explicit ancient eligibility", () => {
+		const current = structuredClone(green);
+		current.source = "TST";
+		current.type = {type: "dragon", tags: ["original-tag"]};
+		const prior = [{id: "prior-source", type: "patch", data: {patch: {set: {source: current.source, type: current.type}}}}];
+		const batch = stage([target("one", green, prior)]);
+		const compiled = batch.previews[0].preview.resolved;
+		expect(compiled.changes).toContainEqual({type: "removeEntry", section: "trait", match: {name: "Amphibious", source: "MM"}});
+		expect(batch.previews[0].preview.proposed.type).toBe("undead");
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: green, operations: [...prior, ...changes(batch)[0].addOperations]})).toEqual(batch.previews[0].preview.proposed);
+		const ancient = dragons.find(it => it.name === "Ancient Blue Dragon" && it.source === "MM");
+		const ancientBatch = stage([target("one", ancient)], {automationInputs: {one: {...inputs, age: "ancient"}}});
+		expect(ancientBatch.previews[0].preview.resolved.selectedOptions["automation-age"]).toEqual(["ancient"]);
+		expect(ancientBatch.previews[0].preview.proposed.type).toBe("undead");
+	});
+
+	it("fences staged source/decision/history changes and requires real consent", () => {
+		const targets = [target("one", green)];
+		const recipe = resolveStaged();
+		expect(() => ready(targets, recipe, {automationInputs: {one: inputs}, acknowledgedPrerequisites: []})).toThrow(/prerequisite/i);
+		const unapproved = ready(targets, recipe, {automationInputs: {one: inputs}, dmApproved: false});
+		expect(unapproved.previews).toEqual([]);
+		expect(unapproved.skipped[0].reason).toMatch(/DM approval/i);
+		expect(changes(unapproved)).toEqual([]);
+		expect(() => normalizeCreatureTransformation(recipe)).toThrow(/compiled/i);
+		const batch = stage(targets);
+		expect(() => ready(targets, batch.previews[0].preview.resolved)).toThrow(/snapshot/i);
+		const changedRecipe = structuredClone(recipe);
+		changedRecipe.automation.changes[0].entry.entries[0] = "Changed source rule.";
+		expect(() => createCreatureTransformationChanges({batch, targets, resolved: changedRecipe})).toThrow(/stale/i);
+		expect(() => createCreatureTransformationChanges({batch, targets, automationInputs: {one: {...inputs, age: "ancient"}}})).toThrow(/stale/i);
+		expect(() => createCreatureTransformationChanges({batch, targets: [{...targets[0], operations: [{id: "new-history"}]}]})).toThrow(/stale/i);
+	});
+
+	it("retains conflict decisions and target-specific storage preflight for staged operations", () => {
+		const starting = {...green, type: "beast"};
+		const priorRecipe = {...resolve("catalog:dracolich|mm"),
+			id: "catalog:prior-type|tst",
+			identity: {name: "Prior Type", source: "TST"},
+			eligibility: [],
+			changes: [{op: "setType", value: "dragon"}]};
+		const prior = changes(ready([target("one", starting)], priorRecipe))[0].addOperations;
+		const targets = [target("one", starting, prior), target("two", blue)];
+		const pending = stage(targets);
+		expect(pending.previews[0].preview.conflicts).toHaveLength(1);
+		expect(() => changes(pending)).toThrow(/winner/i);
+		const decisions = {one: Object.fromEntries(pending.previews[0].preview.conflicts.map(({path}) => [path, "incoming"]))};
+		const approved = stage(targets, {conflictDecisions: decisions});
+		const approvedEdits = changes(approved, decisions);
+		expect(BestiaryQuickActionsUtil.applyOperations({baseCreature: starting, operations: [...prior, ...approvedEdits[0].addOperations]})).toEqual(approved.previews[0].preview.proposed);
+		const capped = stage(targets, {
+			conflictDecisions: decisions,
+			validateOperation: ({target: item, operation}) => {
+				if (item.id === "one") throw new Error("Target storage limit.");
+				validateEncounterStatblockOperations(item.baseCreature, [{...operation, id: "preflight"}]);
+			},
+		});
+		expect(capped.skipped).toEqual([expect.objectContaining({id: "one", reason: "Target storage limit."})]);
+		expect(changes(capped, decisions).map(it => it.id)).toEqual(["two"]);
+	});
+
+	it("rejects malformed concrete-v2 profiles and tampered saved data while leaving unexpected failures hard", () => {
+		const batch = stage([target("one", green)]);
+		const compiled = batch.previews[0].preview.resolved;
+		for (const changed of [
+			{...compiled, version: 3},
+			{...compiled, version: "2"},
+			{...compiled, identity: {...compiled.identity, source: "TST"}},
+			{...compiled, automation: resolveStaged().automation},
+			{...compiled, selectedOptions: {}},
+			{...compiled, changes: compiled.changes.filter(it => it.type !== "addEntry")},
+			{...compiled, changes: [...compiled.changes, {type: "adjustAbility", ability: "str", amount: 1, floor: 1}]},
+		]) {
+			expect(() => BestiaryQuickActionsUtil.previewCreatureTransformation({
+				baseCreature: green, operations: [], resolved: changed, acknowledgedPrerequisites: changed.prerequisites, dmApproved: true,
+			})).toThrow();
+		}
+		const operation = changes(batch)[0].addOperations[0];
+		for (const mutate of [
+			saved => saved.data.resolved.version = 3,
+			saved => saved.data.resolved.selectedOptions["automation-age"][0] = "ancient",
+			saved => saved.data.resolved.changes.find(it => it.type === "addEntry").entry.entries[0] = "Tampered rule.",
+			saved => saved.data.sourceUid = "another dragon|mm",
+		]) {
+			const saved = structuredClone(operation);
+			mutate(saved);
+			expect(() => BestiaryQuickActionsUtil.applyOperations({baseCreature: green, operations: [saved]})).toThrow(/changed|another creature/i);
+		}
+		const fault = jest.spyOn(BestiaryQuickActionsUtil, "applyOperations").mockImplementation(() => { throw new TypeError("Unexpected compiler dependency failure"); });
+		try {
+			expect(() => stage([target("one", green)])).toThrow("Unexpected compiler dependency failure");
+		} finally { fault.mockRestore(); }
+	});
+
+	it("leaves old incomplete Dracolich and breathless Half-Dragon operations unchanged on reload", () => {
+		const dracolich = ready([target("one", green)], resolve("catalog:dracolich|mm"));
+		const halfDragon = ready([target("two", monster)], resolve("catalog:half-dragon|mm", {ancestry: ["red"], size: ["large-or-smaller"]}));
+		for (const [batch, original] of [[dracolich, green], [halfDragon, monster]]) {
+			const operation = changes(batch)[0].addOperations[0];
+			expect(operation.data.resolved).not.toHaveProperty("version");
+			expect(operation.data.resolved).not.toHaveProperty("automation");
+			const restored = BestiaryQuickActionsUtil.applyOperations({baseCreature: original, operations: [JSON.parse(JSON.stringify(operation))]});
+			expect(restored).toEqual(batch.previews[0].preview.proposed);
+			expect(restored.trait?.some(it => it.name === "Magic Resistance") || false).toBe(false);
+			if (original === green) expect(restored.trait.some(it => it.name === "Amphibious")).toBe(true);
+			else expect(restored.action).toEqual(original.action);
+		}
+	});
 });
 
 describe("catalog-to-replay transformation adapter", () => {

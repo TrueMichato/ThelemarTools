@@ -1,5 +1,6 @@
 import {BestiaryQuickActionsUtil} from "./bestiary-quick-actions-engine.js";
 import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog-adapter.js";
+import {compileCreatureTransformation} from "../creature-transformations.js";
 
 const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_INELIGIBLE",
@@ -7,7 +8,17 @@ const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_DAMAGE_MISSING",
 	"CREATURE_TRANSFORMATION_TOO_LARGE",
 	"CREATURE_TRANSFORMATION_NO_EFFECT",
+	"CREATURE_TRANSFORMATION_INPUT_REQUIRED",
 ]);
+
+function compileTarget ({target, resolved, automationInputs}) {
+	return normalizeCreatureTransformation(compileCreatureTransformation({
+		resolved,
+		current: BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations}),
+		chassisSource: target.baseCreature.source,
+		inputs: automationInputs[target.id],
+	}));
+}
 
 function getEligibilityDetail (creature, rules, dmApproved) {
 	const type = typeof creature.type === "string" ? creature.type : creature.type?.type;
@@ -28,11 +39,15 @@ function getEligibilityDetail (creature, rules, dmApproved) {
 	return reasons.join("; ");
 }
 
-export function previewCreatureTransformationTargets ({targets, resolved, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, validateOperation = null}) {
+export function previewCreatureTransformationTargets ({targets, resolved, automationInputs = {}, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, validateOperation = null}) {
 	if (!Array.isArray(targets) || !targets.length || new Set(targets.map(it => it.id)).size !== targets.length) {
 		throw new Error("Choose at least one distinct monster to transform.");
 	}
-	const recipe = normalizeCreatureTransformation(resolved);
+	const staged = Object.hasOwn(resolved, "automation");
+	if (Object.hasOwn(resolved, "version") && !staged) throw new Error("Resolve the pending staged profile before previewing targets; a concrete snapshot cannot be reused as a batch recipe.");
+	const recipe = staged ? structuredClone(resolved) : normalizeCreatureTransformation(resolved);
+	if (staged && (!automationInputs || typeof automationInputs !== "object" || Array.isArray(automationInputs)
+		|| Object.keys(automationInputs).some(id => !targets.some(target => target.id === id)))) throw new Error("Automation inputs must be keyed by selected target ID.");
 	const previews = [];
 	const skipped = [];
 	for (const target of targets) {
@@ -40,7 +55,7 @@ export function previewCreatureTransformationTargets ({targets, resolved, acknow
 			const options = {
 				baseCreature: target.baseCreature,
 				operations: target.operations,
-				resolved: recipe,
+				resolved: staged ? compileTarget({target, resolved: recipe, automationInputs}) : recipe,
 				acknowledgedPrerequisites,
 				dmApproved,
 				conflictDecisions: conflictDecisions[target.id] || {},
@@ -71,14 +86,18 @@ export function previewCreatureTransformationTargets ({targets, resolved, acknow
 			skipped.push({id: target.id, label: target.label, reason: reason ? `${e.message} ${reason}.` : e.message});
 		}
 	}
-	return {targets: structuredClone(targets), resolved: recipe, previews, skipped};
+	return {targets: structuredClone(targets), resolved: recipe, previews, skipped, ...(staged ? {automationInputs: structuredClone(automationInputs)} : {})};
 }
 
-export function createCreatureTransformationChanges ({batch, targets, conflictDecisions = {}}) {
+export function createCreatureTransformationChanges ({batch, targets, conflictDecisions = {}, resolved = batch.resolved, automationInputs = batch.automationInputs}) {
 	if (JSON.stringify(batch.targets) !== JSON.stringify(targets)) throw new Error("Transformation preview is stale: the selection or a target history changed. Preview again.");
 	if (batch.previews.some(({preview}) => !preview.canApply)) throw new Error("Choose a winner for every conflicting statblock field before applying.");
 	return batch.previews.map(({id, preview}) => {
 		const target = targets.find(it => it.id === id);
+		if (Object.hasOwn(batch, "automationInputs")) {
+			const compiled = compileTarget({target, resolved, automationInputs});
+			if (JSON.stringify(compiled) !== JSON.stringify(preview.resolved)) throw new Error("Transformation preview is stale: the staged profile or target inputs changed. Preview again.");
+		}
 		const operation = BestiaryQuickActionsUtil.createCreatureTransformationOperation({
 			baseCreature: target.baseCreature,
 			operations: target.operations,
