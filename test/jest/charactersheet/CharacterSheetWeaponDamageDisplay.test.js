@@ -1,6 +1,9 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
+import "../../../js/charactersheet/charactersheet-materials.js";
+import "../../../js/charactersheet/charactersheet-upgrades.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
 
@@ -169,5 +172,165 @@ describe("display and roll consumers", () => {
 		expect(shown.subtitle).toContain("+ 3 (Scoped Item)");
 		expect(shown.subtitle).toContain("+ 2 (rage)");
 		expect(shown.subtitle).toContain("+ 1 (states)");
+	});
+});
+
+describe("Combat base damage expression parity", () => {
+	const tgtt = JSON.parse(readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url), "utf8"));
+	const upgrades = JSON.parse(readFileSync(new URL("../../../data/itemupgrades.json", import.meta.url), "utf8")).itemUpgrade;
+	const superior = upgrades.find(upgrade => upgrade.name === "Superior");
+	const steeline = tgtt.itemMaterial.find(material => material.name === "Steeline");
+	let state;
+	let combat;
+
+	beforeAll(() => globalThis.CharacterSheetUpgrades.setUpgradeCatalog(upgrades));
+	afterAll(() => globalThis.CharacterSheetUpgrades.resetUpgradeCatalog());
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		state.setAbilityBase("str", 16);
+		state.setItemMaterialCatalog(tgtt.itemMaterial);
+		combat = new CharacterSheetCombat({
+			getState: () => state,
+			showDiceResult: jest.fn(),
+			rollDice: () => 2,
+			pAnimateDamageDice () {},
+		}, {isHeadless: true});
+		combat._promptUseCombatMethod = async () => null;
+	});
+
+	const addWeapon = (overrides = {}) => {
+		state.addItem({
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			dmg1: "1d8",
+			dmg2: "1d10",
+			dmgType: "S",
+			property: ["V"],
+			...overrides,
+		}, 1, true);
+		return state.getItems().at(-1).id;
+	};
+	const autoAttack = id => state.buildAutoAttackFromWeapon(state.getItems().find(item => item.id === id));
+	const applySuperior = id => expect(state.applyItemUpgrade(id, superior).success).toBe(true);
+
+	const expectParity = async (attack, expected, {crit = false} = {}) => {
+		const before = JSON.stringify(state.toJson());
+		const html = combat._renderAttackItem(attack).outerHTML;
+		combat._cachedAttacks = [attack];
+		const parse = jest.spyOn(combat, "_parseDamage");
+		try {
+			await combat._rollDamage(attack.id, crit);
+			expect(parse.mock.calls[0]).toEqual([expected, crit, {maximize: false}]);
+			const match = /^(\d+)d(\d+)$/.exec(expected);
+			if (match) {
+				expect(parse.mock.results[0].value).toMatchObject({
+					numDice: Number(match[1]) * (crit ? 2 : 1),
+					sides: Number(match[2]),
+				});
+			}
+			expect(combat._page.showDiceResult).toHaveBeenLastCalledWith(expect.objectContaining({modifier: 3}));
+			expect(html).toContain(`<span class="badge badge-danger">${expected}+3 ${attack.damageType}</span>`);
+			expect(JSON.stringify(state.toJson())).toBe(before);
+		} finally {
+			parse.mockRestore();
+		}
+	};
+
+	test("prints and rolls each plain Gambler tool, then the upgraded coins without changing their base", async () => {
+		state.addClass({name: "Rogue", source: "TGTT", level: 3, subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}});
+		state.applyClassFeatureEffects();
+		const tools = state.getItems().filter(item => item._isGamblerWeapon);
+		expect(tools).toHaveLength(3);
+		for (const [key, dice] of [["coins", "1d4"], ["dice", "1d6"], ["cards", "1d8"]]) {
+			const tool = tools.find(item => item._gamblerWeaponId === key);
+			expect(state.getEffectiveWeaponDamage(tool.id).dice).toBe(dice);
+			await expectParity(autoAttack(tool.id), dice);
+		}
+		const coins = tools.find(item => item._gamblerWeaponId === "coins");
+		applySuperior(coins.id);
+		expect(state.getItemRaw(coins.id).dmg1).toBe("1d4");
+		expect(state.getEffectiveWeaponDamage(coins.id).dice).toBe("1d6");
+		await expectParity(autoAttack(coins.id), "1d6");
+		await expectParity(autoAttack(coins.id), "1d6", {crit: true});
+	});
+
+	test.each([
+		[false, false, "1d12"],
+		[true, false, "2d6"],
+		[false, true, "2d6"],
+		[true, true, "2d8"],
+	])("composes material=%s and upgrade=%s exactly once at the die-ladder boundary", async (material, upgrade, expected) => {
+		const id = addWeapon({dmg1: "1d12", dmg2: undefined, property: []});
+		if (material) expect(state.setItemMaterial(id, steeline)).toBe(true);
+		if (upgrade) applySuperior(id);
+		expect(state.getItemRaw(id).dmg1).toBe("1d12");
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe(expected);
+		await expectParity(autoAttack(id), expected);
+	});
+
+	test("selects versatile damage and suppresses two-handed damage with a shield", async () => {
+		const id = addWeapon();
+		applySuperior(id);
+		expect(state.getEffectiveWeaponDamage(id)).toMatchObject({dice: "1d10", diceVersatile: "1d12"});
+		let cached = autoAttack(id);
+		await expectParity(cached, "1d10");
+		state.setItemHandsUsed(id, 2);
+		cached = {...autoAttack(id), damage: cached.damage};
+		await expectParity(cached, "1d12");
+		state.addItem({name: "Shield", source: "PHB", type: "S", ac: 2}, 1, true);
+		state.syncEquippedAcState();
+		cached = {...autoAttack(id), damage: cached.damage};
+		await expectParity(cached, "1d10");
+	});
+
+	test("substitutes Martial Arts before Superior, but never replaces a larger weapon die", async () => {
+		state.addClass({name: "Monk", source: "XPHB", level: 4});
+		const id = addWeapon({name: "Quarterstaff", weaponCategory: "simple", dmg1: "1d6", dmg2: "1d8"});
+		applySuperior(id);
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe("1d8");
+		const cached = autoAttack(id);
+		await expectParity(cached, "1d8");
+		expect(state.levelUp("Monk")).toBe(true);
+		await expectParity(cached, "1d10");
+		state.replaceItem(id, {...state.getItemRaw(id), dmg1: "1d12", dmg2: undefined});
+		await expectParity(autoAttack(id), "2d6");
+	});
+
+	test("keeps explicit overrides and manual/non-weapon expressions authoritative", async () => {
+		const id = addWeapon();
+		applySuperior(id);
+		state.updateInventoryItemAttackOverrides(id, {attackOverrides: {damage: "3d6"}});
+		expect(state.getEffectiveWeaponDamage(id).dice).toBe("1d10");
+		await expectParity(autoAttack(id), "3d6");
+		state.updateInventoryItemAttackOverrides(id, {attackOverrides: null});
+		for (const flags of [{}, {isFeatureAttack: true}, {isTemporary: true}, {isUnarmedStrike: true}, {isSpell: true}]) {
+			const attack = {...autoAttack(id), id: "authored-attack", isAutoGenerated: false, damage: "2d4", ...flags};
+			await expectParity(attack, "2d4");
+		}
+		await expectParity({...autoAttack(id), sourceItem: undefined, damage: "2d4"}, "2d4");
+		await expectParity({...autoAttack(id), isAutoGenerated: undefined, damage: "1d4"}, "1d10");
+	});
+
+	test("re-reads item edits and a synthetic persisted stale auto string without migrating or rewriting it", async () => {
+		const id = addWeapon();
+		applySuperior(id);
+		await expectParity(autoAttack(id), "1d10");
+		state.replaceItem(id, {...state.getItemRaw(id), dmg1: "1d12", dmg2: undefined});
+		state.setItemEquipped(id, false);
+		state.setItemEquipped(id, true);
+		await expectParity(autoAttack(id), "2d6");
+		const stale = {...autoAttack(id), damage: "1d4"};
+		state.addAttack(stale);
+		const restored = new CharacterSheetState();
+		restored.setItemMaterialCatalog(tgtt.itemMaterial);
+		restored.loadFromJson(state.toJson());
+		state = restored;
+		combat._state = state;
+		expect(state.getAttacks().find(attack => attack.id === stale.id).damage).toBe("1d4");
+		await expectParity(state.getAttacks().find(attack => attack.id === stale.id), "2d6");
 	});
 });
