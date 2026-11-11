@@ -3,6 +3,24 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 72 - Combat damage labels, mobile import, and creature transformations - PLANNING
+
+Planning starts from published `d14b7b8764293899609f8b7cd41a744eb99e1686`,
+not the main checkout's local-only critique-report ancestry. No root cause or
+fix is confirmed yet. Implementation awaits approval of the three plans.
+
+| Track | Reported bugs | Ownership and acceptance |
+|---|---|---|
+| S1 | 1: Combat-tab damage dice can disagree with the item and actual roll, including Gambler weapons. | Canonical weapon-damage projection and combat presentation, related tests and combat documentation. Reproduce the discrepancy and compare displayed dice with the actual roll formula; do not change correct rolls to match incorrect labels. Flag any save/load or other-surface expansion before editing. |
+| S2 | 2: After selecting an import file on mobile, the confirmation button cannot be reached. | Import-dialog region and uniquely import-scoped styles/tests. Verify a real file upload, unclipped and hit-testable confirmation controls before automated scrolling/clicking, and successful import/persistence. Preserve cancellation, errors, focus behavior, and unrelated dialogs. |
+| S3 | 3: Templates do not apply expected changes or entries. 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Shared creature-transformation catalog, projection, execution and Bestiary/Encounter integration. Distinguish broken execution/persistence from explicitly manual catalog effects; retain meaningful mechanical and mixed traits, provenance, choices, saved-operation replay/Undo and invalid-candidate isolation. |
+
+The orchestrator alone owns this tracker and shared character-sheet references.
+S1 does not own import CSS; S2 does not own NPC export, damage calculations or
+global modal styling; S3 does not own character-sheet code. Shared E2E driver
+changes require coordination. Browser runs use separate fresh ports and local
+artifacts; the combined full-repository gates are scheduled by the orchestrator.
+
 ### Round 70 - Unconfirmed original symptoms
 
 - **War Caster saved-character case (bug 5):** No affected export/acquisition
