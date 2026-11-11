@@ -38,7 +38,7 @@ export class EncounterWorkspaceQuickActionsAdapter {
 
 	getCreature () { return this.getOverride(); }
 
-	async applyChanges ({addOperations = [], removeIds = []}) {
+	async applyChanges ({addOperations = [], removeIds = [], replaceOperation = null}) {
 		if (this._isSaving) throw new Error("Wait for the current statblock edit to finish saving.");
 		this._isSaving = true;
 		try {
@@ -51,6 +51,7 @@ export class EncounterWorkspaceQuickActionsAdapter {
 				id: instance.id,
 				addOperations: normalized,
 				removeIds,
+				...(replaceOperation != null ? {replaceOperation} : {}),
 			}]);
 			if (!result.changedIds.length) return null;
 			await this._pCommit(result);
@@ -62,7 +63,7 @@ export class EncounterWorkspaceQuickActionsAdapter {
 					{cause: e},
 				);
 			}
-			return normalized[0]?.id || true;
+			return replaceOperation?.operationId || normalized[0]?.id || true;
 		} finally {
 			this._isSaving = false;
 		}

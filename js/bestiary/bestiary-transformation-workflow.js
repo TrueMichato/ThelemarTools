@@ -1,6 +1,8 @@
 import {BestiaryQuickActionsUtil} from "./bestiary-quick-actions-engine.js";
 import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog-adapter.js";
 import {compileCreatureTransformation} from "../creature-transformations.js";
+import {selectFrozenCreatureTransformation} from "../creature-transformation-forms.js";
+import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation.js";
 
 const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_INELIGIBLE",
@@ -157,4 +159,44 @@ export function createCreatureTransformationChanges ({batch, targets, conflictDe
 		});
 		return {id, addOperations: [operation], removeIds: []};
 	});
+}
+
+export function previewCreatureTransformationForm ({target, operationId, formId, conflictDecisions = {}, validateChange = null}) {
+	// Validate the current complete history before locating/replacing its frozen owner.
+	const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
+	const index = target.operations.findIndex(it => it.id === operationId);
+	const owner = target.operations[index];
+	if (index < 0 || owner.type !== "applyCreatureTransformation" || !owner.data.resolved.frozenForms) throw new Error("Choose an existing frozen transformation form owner.");
+	const resolved = selectFrozenCreatureTransformation({resolved: owner.data.resolved, formId});
+	if (formId === owner.data.resolved.frozenForms.activeForm) {
+		return {target: structuredClone(target), operationId, formId, conflictDecisions: structuredClone(conflictDecisions), noChange: true, canApply: false, current, proposed: current, diff: {fields: [], entries: []}};
+	}
+	const prefix = target.operations.slice(0, index);
+	const preview = BestiaryQuickActionsUtil.previewCreatureTransformation({
+		baseCreature: target.baseCreature,
+		operations: prefix,
+		resolved,
+		acknowledgedPrerequisites: owner.data.acknowledgedPrerequisites,
+		dmApproved: owner.data.dmApproved,
+		conflictDecisions,
+	});
+	const batch = {target: structuredClone(target), operationId, formId, conflictDecisions: structuredClone(conflictDecisions), noChange: false, canApply: preview.canApply, preview, current, proposed: null, diff: null};
+	if (!preview.canApply) return batch;
+	const operation = {...BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: target.baseCreature, operations: prefix, preview, conflictDecisions}), id: operationId};
+	const change = {id: target.id, addOperations: [], removeIds: [], replaceOperation: {operationId, expectedIntegrity: owner.data.integrity, operation}};
+	const operations = BestiaryQuickActionsUtil.replaceCreatureTransformationOperation({...change, baseCreature: target.baseCreature, operations: target.operations});
+	// Downstream saved decisions are revalidated, never rewritten for the new form.
+	const proposed = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations});
+	if (validateChange) validateChange({target, change, operations});
+	return {...batch, proposed, diff: BestiaryCreatureTransformation.getDiff(current, proposed), change};
+}
+
+export function createCreatureTransformationFormChanges ({batch, target, operationId = batch.operationId, formId = batch.formId, conflictDecisions = batch.conflictDecisions}) {
+	if (JSON.stringify(batch.target) !== JSON.stringify(target) || operationId !== batch.operationId || formId !== batch.formId
+		|| JSON.stringify(conflictDecisions) !== JSON.stringify(batch.conflictDecisions)) throw new Error("Form preview is stale: the owner, form, answers or target history changed. Preview again.");
+	const current = previewCreatureTransformationForm({target, operationId, formId, conflictDecisions});
+	if (JSON.stringify(current) !== JSON.stringify(batch)) throw new Error("Form preview is stale or has been changed. Preview again.");
+	if (current.noChange) return [];
+	if (!current.canApply) throw new Error("Choose every conflict winner before switching forms.");
+	return [current.change];
 }

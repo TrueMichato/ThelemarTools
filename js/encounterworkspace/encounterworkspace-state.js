@@ -1,6 +1,6 @@
 import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate} from "../dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerHpAfterOperation} from "../dmscreen/npctracker/dmscreen-npctracker-hp.js";
-import {BestiaryQuickActionsEngine, BestiaryQuickActionsOperationTypes} from "../bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsEngine, BestiaryQuickActionsOperationTypes, BestiaryQuickActionsUtil} from "../bestiary/bestiary-quick-actions-engine.js";
 import {
 	getEncounterEffectTargets,
 	getEncounterIsLegacyPresetId,
@@ -438,7 +438,9 @@ export class EncounterWorkspaceState {
 			if (removed.size !== change.removeIds.length || change.removeIds.some(id => !prior.some(it => it.id === id))) {
 				throw new Error("A statblock operation no longer exists.");
 			}
-			const operations = [...prior.filter(it => !removed.has(it.id)), ...change.addOperations];
+			const operations = change.replaceOperation != null
+				? BestiaryQuickActionsUtil.replaceCreatureTransformationOperation({baseCreature: instance.monster, operations: prior, replaceOperation: change.replaceOperation, addOperations: change.addOperations, removeIds: change.removeIds})
+				: [...prior.filter(it => !removed.has(it.id)), ...change.addOperations];
 			if (JSON.stringify(operations) === JSON.stringify(prior)) return instance;
 			validateEncounterStatblockOperations(instance.monster, operations);
 			const after = BestiaryQuickActionsEngine.applyOperations({monster: instance.monster, operations});

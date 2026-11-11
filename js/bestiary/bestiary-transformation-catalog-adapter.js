@@ -3,6 +3,7 @@ import {isCompiledCreatureTransformation} from "../creature-transformations.js";
 import {isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "../creature-transformation-stats.js";
 import {isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "../creature-transformation-bindings.js";
 import {isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "../creature-transformation-cr.js";
+import {assertFrozenCreatureTransformation} from "../creature-transformation-forms.js";
 
 const DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
@@ -99,6 +100,16 @@ function validateStep (step, allowStats) {
 }
 
 export function normalizeCreatureTransformation (resolved) {
+	if (isRecord(resolved) && Object.hasOwn(resolved, "frozenForms")) {
+		assertFrozenCreatureTransformation(resolved);
+		const {frozenForms, ...leaf} = resolved;
+		const normalized = {
+			...normalizeCreatureTransformation(leaf),
+			frozenForms: {...structuredClone(frozenForms), profiles: frozenForms.profiles.map(profile => ({...profile, resolved: normalizeCreatureTransformation(profile.resolved)}))},
+		};
+		assertFrozenCreatureTransformation(normalized);
+		return normalized;
+	}
 	expect(isRecord(resolved) && Array.isArray(resolved.changes), "resolved changes must be an array");
 	expect(!Object.hasOwn(resolved, "automation"), "staged automation must be compiled for a target first");
 	if (Object.hasOwn(resolved, "version")) expect(isCompiledCreatureTransformation(resolved), "invalid compiled version-2 profile or choices");

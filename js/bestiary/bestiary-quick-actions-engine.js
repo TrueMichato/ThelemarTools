@@ -772,6 +772,51 @@ export class BestiaryQuickActionsUtil {
 		});
 		return BestiaryCreatureTransformation.createOperation({preview, currentPreview, conflictDecisions});
 	}
+
+	static getCreatureTransformationBaseline ({baseCreature, operations = []}) {
+		const {creature} = this._getReplayState({baseCreature, operations});
+		return BestiaryCreatureTransformation.getBaseline({original: baseCreature, current: creature});
+	}
+
+	static replaceCreatureTransformationOperation ({baseCreature, operations, replaceOperation, addOperations = [], removeIds = []}) {
+		if (!replaceOperation || typeof replaceOperation !== "object" || Array.isArray(replaceOperation)
+			|| Object.keys(replaceOperation).sort().join(",") !== "expectedIntegrity,operation,operationId"
+			|| !Array.isArray(addOperations) || !Array.isArray(removeIds) || addOperations.length || removeIds.length) throw new BestiaryQuickActionsValidationError("Choose one form replacement without additions or removals.");
+		const {operationId, expectedIntegrity, operation} = replaceOperation;
+		const owners = operations.filter(it => it.id === operationId);
+		if (typeof operationId !== "string" || !operationId || owners.length !== 1 || typeof expectedIntegrity !== "string"
+			|| owners[0].data?.integrity !== expectedIntegrity) throw new BestiaryQuickActionsValidationError("The form owner changed; preview the history again.");
+		const changed = BestiaryCreatureTransformation.validateFormReplacement({previous: owners[0], operation});
+		if (!changed) return operations;
+		const proposed = operations.map(it => it.id === operationId ? _clone(operation) : it);
+		const index = operations.findIndex(it => it.id === operationId);
+		const states = [operations, proposed].map(history => this._getReplayState({baseCreature, operations: history.slice(0, index + 1)}));
+		for (let i = index + 1; i < operations.length; ++i) {
+			const suffix = operations[i];
+			if (suffix.type === _OPERATION_TYPES.APPLY_CREATURE_TRANSFORMATION) {
+				const {resolved, acknowledgedPrerequisites, dmApproved, conflictDecisions} = suffix.data;
+				// Ordinary replay permits vanished conflicts after removal; frozen form replacement must not.
+				const contexts = states.map(({creature, priorWrites}) => BestiaryCreatureTransformation.preview({
+					original: baseCreature,
+					current: creature,
+					priorWrites,
+					resolved,
+					acknowledgedPrerequisites,
+					dmApproved,
+					allowLegacyNoEffect: true,
+				}).conflicts.map(conflict => ({...conflict, winner: conflictDecisions[conflict.path]})));
+				if (JSON.stringify(contexts[0]) !== JSON.stringify(contexts[1])) throw new BestiaryQuickActionsValidationError("Conflict context changed for a downstream transformation; re-preview the history.", {code: "CREATURE_TRANSFORMATION_STALE"});
+			}
+			for (const state of states) {
+				state.creature = _applyOperation(state.creature, _clone(suffix), {
+					baseCreature,
+					priorWrites: state.priorWrites,
+					operationId: suffix.id || `${suffix.data?.resolved?.id || "operation"}@${i}`,
+				});
+			}
+		}
+		return proposed;
+	}
 }
 
 export class BestiaryQuickActionsProficiency {
@@ -850,10 +895,18 @@ export class BestiaryQuickActionsRegistry {
 		return this.applyChanges({creature, scaleContext, addOperations: [operation], eventType: "addOperation"});
 	}
 
-	applyChanges ({creature = null, monster = null, scaleContext = null, addOperations = [], removeIds = [], eventType = "change"}) {
+	applyChanges ({creature = null, monster = null, scaleContext = null, addOperations = [], removeIds = [], replaceOperation = null, eventType = "change"}) {
 		creature ||= monster;
 		const key = this.getKey({creature, scaleContext});
 		const record = this.#records.get(key) || {baseCreature: _clone(creature), operations: []};
+		if (replaceOperation != null) {
+			const operations = BestiaryQuickActionsUtil.replaceCreatureTransformationOperation({baseCreature: record.baseCreature, operations: record.operations, replaceOperation, addOperations, removeIds});
+			BestiaryQuickActionsUtil.applyOperations({baseCreature: record.baseCreature, operations});
+			if (operations === record.operations) return false;
+			this.#records.set(key, {baseCreature: record.baseCreature, operations});
+			this.#notify({type: eventType, key, operationId: replaceOperation.operationId});
+			return replaceOperation.operationId;
+		}
 		const normalized = addOperations.map(operation => {
 			const out = _clone(operation);
 			out.id ||= `bqa-${this.#nextOperationId++}`;

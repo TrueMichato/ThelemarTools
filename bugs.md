@@ -15,7 +15,7 @@ automation.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. These milestones do not enable default behavior, complete a family, or close this bug. Guided editor/form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. These milestones do not enable default behavior, complete a family, or close this bug. M4b guided inputs, M4c editor controls, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
 
 M2a preserves non-CON HP residuals and explicit proficiency bindings rather than
@@ -51,6 +51,20 @@ in 12 suites, including the actual transformed-HP producer mutation control.
 Normal commit hooks passed 28 suites/382 tests; the exact published-leaf full
 gate passed 808 suites/21,811 tests with the unchanged one skipped suite/13
 skipped tests and real NPC corpus guard. No browser/E2E run was performed.
+
+M4a freezes 2-8 independent same-root concrete profiles against the raw pre-owner
+history, with an exact active projection and immutable permitted set. Switching
+retains the owner's ID/index and unchanged suffix; it never removes then appends
+or recompiles from live sources. A review regression exposed disappearing
+downstream retained conflicts; the new replacement-only fence blocks them without
+changing ordinary legacy replay/removal. Actual Registry and Encounter adapter,
+state and Store paths cover switching, removal/reload, no-op zero-save, failed
+save/retry, HP/temp HP and group consequences. Final affected verification passed
+91 tests in five suites, including 15 kernel cases; normal commit hooks passed
+28 suites/374 tests. The exact published-leaf full gate passed 809 suites/21,826
+tests with the unchanged one skipped suite/13 skipped tests and real NPC corpus
+guard. These are kernel fixtures, not completed family forms. No guided UI,
+styles, browser/E2E, default enablement or Species changes are included.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
