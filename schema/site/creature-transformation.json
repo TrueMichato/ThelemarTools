@@ -306,6 +306,88 @@
 			},
 			"required": ["op", "value", "receipt"], "additionalProperties": false
 		},
+		"compiledFormLeaf": {
+			"description": "Pre-adapter concrete v2 form output, never a catalog recipe or pending descriptor. Runtime additionally checks closed staged-profile markers and same-root/active equality.",
+			"type": "object",
+			"properties": {
+				"version": {"const": 2},
+				"id": {"enum": ["catalog:zombie|dmg", "catalog:dracolich|mm"]},
+				"kind": {"const": "catalog"},
+				"identity": {"$ref": "#/$defs/identity"},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/eligibility"}, "contains": {"type": "object", "required": ["dmApproval"], "properties": {"dmApproval": {"const": true}}}},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {
+					"type": "object",
+					"properties": {
+						"automation-numerics": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "zombie-dmg-m2a"}},
+						"automation-bindings": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "zombie-dmg-m2b"}},
+						"automation-cr": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "zombie-dmg-m3"}},
+						"automation-age": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["adult", "ancient"]}},
+						"automation-nature": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "true-dragon"}, {"const": "not-shadow"}], "items": false},
+						"automation-physiology": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "amphibious-only"}},
+						"automation-lair": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "retain"}}
+					},
+					"additionalProperties": false
+				},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"enum": ["setType", "setAbility", "grantSense", "grantResistance", "grantImmunity", "grantConditionImmunity", "addEntry", "removeEntry"]}}}]},
+					{"$ref": "#/$defs/numericChange"}, {"$ref": "#/$defs/bindingChange"}, {"$ref": "#/$defs/crChange"}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			},
+			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"allOf": [
+				{"if": {"properties": {"id": {"const": "catalog:zombie|dmg"}}}, "then": {"properties": {
+					"identity": {"type": "object", "properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}}},
+					"selectedOptions": {"type": "object", "required": ["automation-numerics"], "propertyNames": {"enum": ["automation-numerics", "automation-bindings", "automation-cr"]}, "if": {"required": ["automation-cr"]}, "then": {"required": ["automation-bindings"]}}
+				}}, "else": {"properties": {
+					"identity": {"type": "object", "properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}}},
+					"selectedOptions": {"type": "object", "required": ["automation-age", "automation-nature", "automation-physiology", "automation-lair"], "propertyNames": {"enum": ["automation-age", "automation-nature", "automation-physiology", "automation-lair"]}}
+				}}}
+			],
+			"additionalProperties": false
+		},
+		"frozenForms": {
+			"type": "object",
+			"properties": {
+				"version": {"const": 1},
+				"baseline": {
+					"type": "object",
+					"properties": {"sourceUid": {"type": "string", "pattern": "^[^|\\r\\n]+\\|[^|\\r\\n]+$"}, "key": {"type": "string", "pattern": "^[a-f0-9]{8}$"}},
+					"required": ["sourceUid", "key"], "additionalProperties": false
+				},
+				"activeForm": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+				"profiles": {
+					"type": "array", "minItems": 2, "maxItems": 8,
+					"items": {
+						"type": "object",
+						"properties": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"}, "label": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "\\S"}, "resolved": {"$ref": "#/$defs/compiledFormLeaf"}},
+						"required": ["id", "label", "resolved"], "additionalProperties": false
+					}
+				}
+			},
+			"required": ["version", "baseline", "activeForm", "profiles"], "additionalProperties": false
+		},
+		"frozenFormResolved": {
+			"description": "Pre-adapter frozen output only. Leaves cannot contain another frozenForms envelope; source/profile identity and active projection equality are also checked at runtime.",
+			"type": "object",
+			"properties": {
+				"version": {"$ref": "#/$defs/compiledFormLeaf/properties/version"},
+				"id": {"$ref": "#/$defs/compiledFormLeaf/properties/id"},
+				"kind": {"$ref": "#/$defs/compiledFormLeaf/properties/kind"},
+				"identity": {"$ref": "#/$defs/identity"},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"$ref": "#/$defs/compiledFormLeaf/properties/eligibility"},
+				"prerequisites": {"$ref": "#/$defs/compiledFormLeaf/properties/prerequisites"},
+				"selectedOptions": {"$ref": "#/$defs/compiledFormLeaf/properties/selectedOptions"},
+				"changes": {"$ref": "#/$defs/compiledFormLeaf/properties/changes"},
+				"manualReview": {"$ref": "#/$defs/compiledFormLeaf/properties/manualReview"},
+				"frozenForms": {"$ref": "#/$defs/frozenForms"}
+			},
+			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "frozenForms"],
+			"additionalProperties": false
+		},
 		"stagedAutomation": {
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},

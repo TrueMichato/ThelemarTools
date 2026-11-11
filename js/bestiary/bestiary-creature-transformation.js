@@ -3,6 +3,7 @@ import {isCompiledCreatureTransformation} from "../creature-transformations.js";
 import {formatCreatureTransformationBonus, getCreatureTransformationProficiencyBonus, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "../creature-transformation-stats.js";
 import {getCreatureTransformationInnateSpellcastingEntry, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "../creature-transformation-bindings.js";
 import {isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "../creature-transformation-cr.js";
+import {assertFrozenCreatureTransformation, assertFrozenCreatureTransformationReplacement} from "../creature-transformation-forms.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -251,6 +252,13 @@ function _validateSection (section) {
 
 function _validateRecipe (resolved) {
 	_assertJson(resolved);
+	if (_isObject(resolved) && Object.hasOwn(resolved, "frozenForms")) {
+		assertFrozenCreatureTransformation(resolved);
+		const {frozenForms, ...leaf} = resolved;
+		_validateRecipe(leaf);
+		frozenForms.profiles.forEach(profile => _validateRecipe(profile.resolved));
+		return;
+	}
 	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"], "Resolved transformation");
 	if (Object.hasOwn(resolved, "version") && !isCompiledCreatureTransformation(resolved)) _fail("Invalid compiled version-2 transformation profile or choices.");
 	_expectString(resolved.id, "Transformation ID");
@@ -626,6 +634,24 @@ function _getDiff (before, after, prefix = "") {
 export class BestiaryCreatureTransformation {
 	static get MAX_OPERATION_BYTES () { return _MAX_OPERATION_BYTES; }
 
+	static getBaseline ({original, current}) {
+		_assertJson(current, new WeakSet(), {strict: false});
+		const sourceUid = _getUid(original);
+		return {sourceUid, key: _digest({sourceUid, current})};
+	}
+
+	static validateFormReplacement ({previous, operation}) {
+		_assertJson(operation);
+		_expectKeys(operation, ["id", "type", "data"], "Form operation");
+		if (!previous?.id || operation.id !== previous.id || previous.type !== "applyCreatureTransformation" || operation.type !== previous.type) _fail("A form replacement must retain its owning transformation ID and position.");
+		const changed = assertFrozenCreatureTransformationReplacement(previous.data?.resolved, operation.data?.resolved);
+		for (const key of ["sourceUid", "acknowledgedPrerequisites", "dmApproved"]) {
+			if (!_equal(previous.data[key], operation.data[key])) _fail("A form replacement cannot change its source or consent.");
+		}
+		if (!changed && !_equal(previous, operation)) _fail("An unchanged form cannot rewrite its saved operation.");
+		return changed;
+	}
+
 	static preview ({original, current, resolved, priorWrites = [], acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, historyFingerprint = "", allowLegacyNoEffect = false}) {
 		_validateRecipe(resolved);
 		_assertJson(original, new WeakSet(), {strict: false});
@@ -633,6 +659,7 @@ export class BestiaryCreatureTransformation {
 		_assertJson(priorWrites, new WeakSet(), {allowUndefined: true, strict: false});
 		_assertJson(conflictDecisions);
 		const sourceUid = _getUid(original);
+		if (resolved.frozenForms && !_equal(resolved.frozenForms.baseline, this.getBaseline({original, current}))) _fail("The pre-template history changed; this frozen form set no longer matches.", "CREATURE_TRANSFORMATION_STALE");
 		_checkEligibility({creature: current, resolved, acknowledgedPrerequisites, dmApproved});
 		if (!_isObject(conflictDecisions)) _fail("Conflict decisions must be keyed by field path.");
 		let candidate = _copy(current);
@@ -732,6 +759,7 @@ export class BestiaryCreatureTransformation {
 		const data = operation?.data;
 		if (!_isObject(data) || !_equal(Object.keys(data).sort(), ["resolved", "sourceUid", "acknowledgedPrerequisites", "dmApproved", "conflictDecisions", "approvedConflicts", "manualReview", "integrity"].sort())) _fail("Malformed transformation operation.");
 		_assertJson(data);
+		if (data.resolved?.frozenForms && new TextEncoder().encode(JSON.stringify(operation)).length > _MAX_OPERATION_BYTES) _fail("Resolved transformation exceeds the operation size budget.", "CREATURE_TRANSFORMATION_TOO_LARGE");
 		const {integrity, ...payload} = data;
 		if (integrity !== _digest(payload) || !_equal(data.manualReview, data.resolved?.manualReview) || data.sourceUid !== _getUid(baseCreature)) _fail("Transformation operation has been changed or belongs to another creature.", "CREATURE_TRANSFORMATION_TAMPERED");
 		const decisions = data.conflictDecisions;
