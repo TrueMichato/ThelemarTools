@@ -1,5 +1,6 @@
 import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
 import {isCompiledCreatureTransformation} from "../creature-transformations.js";
+import {formatCreatureTransformationBonus, getCreatureTransformationProficiencyBonus, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "../creature-transformation-stats.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -134,6 +135,10 @@ function _validateEntry (entry) {
 
 function _validateChange (change) {
 	if (!_isObject(change)) _fail("Transformation changes must be objects.");
+	if (isCreatureTransformationStatOp(change.type)) {
+		if (!isCreatureTransformationStatChange(change, "type")) _fail(`Invalid numeric setter "${change.type}".`);
+		return;
+	}
 	switch (change.type) {
 		case "setType":
 			_expectKeys(change, ["type", "value"], change.type);
@@ -268,6 +273,7 @@ function _validateRecipe (resolved) {
 		choices.forEach(it => _expectString(it, "Selected option"));
 	}
 	_expectArray(resolved.changes, "Changes");
+	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationStatOp(change?.type))) _fail("Numeric setters require an opt-in version-2 snapshot.");
 	resolved.changes.forEach(_validateChange);
 	_expectArray(resolved.manualReview, "Manual review");
 	resolved.manualReview.forEach(it => {
@@ -366,6 +372,33 @@ function _applyChange (creature, change, chassis) {
 			out.size = [change.value];
 			after = out.size;
 			break;
+		case "setHitPoints":
+		case "setPassivePerception":
+			path = {setHitPoints: "hp", setPassivePerception: "passive"}[change.type];
+			before = out[path];
+			out[path] = _copy(change.value);
+			after = out[path];
+			break;
+		case "setProficiencyBonus": {
+			getCreatureTransformationProficiencyBonus(out, undefined, {checkNote: true});
+			const values = {profBonus: change.value, pbNote: formatCreatureTransformationBonus(change.value)};
+			const writes = Object.entries(values).filter(([key, value]) => !_equal(out[key], value))
+				.map(([key, value]) => ({path: key, before: out[key], after: value, section: null}));
+			Object.assign(out, values);
+			return {out, paths: Object.keys(values), writes};
+		}
+		case "setSaveBonus":
+		case "setSkillBonus": {
+			const field = change.type === "setSaveBonus" ? "save" : "skill";
+			const key = field === "save" ? change.ability : change.skill;
+			if (out[field] != null && !_isObject(out[field])) _fail(`${field} must be an object.`);
+			path = `${field}.${key}`;
+			before = out[field]?.[key];
+			out[field] ||= {};
+			out[field][key] = formatCreatureTransformationBonus(change.value);
+			after = out[field][key];
+			break;
+		}
 		case "setAbility":
 		case "minimumAbility":
 		case "maximumAbility":
@@ -574,13 +607,13 @@ export class BestiaryCreatureTransformation {
 		let candidate = _copy(current);
 		const candidateWrites = new Map();
 		const steps = resolved.changes.map(change => {
-			const {out, path, write} = _applyChange(candidate, change, original);
+			const {out, path, write, paths = [path], writes = write ? [write] : []} = _applyChange(candidate, change, original);
 			candidate = out;
-			if (write) {
-				const prior = candidateWrites.get(path);
-				candidateWrites.set(path, {...write, before: prior ? prior.before : write.before});
+			for (const item of writes) {
+				const prior = candidateWrites.get(item.path);
+				candidateWrites.set(item.path, {...item, before: prior ? prior.before : item.before});
 			}
-			return {change, path};
+			return {change, paths};
 		});
 		const conflicts = [];
 		for (const [path, write] of candidateWrites) {
@@ -603,13 +636,22 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		for (const {change, path} of steps) {
-			if (conflicts.some(it => it.path === path) && conflictDecisions[path] !== "incoming") continue;
-			const {out, write} = _applyChange(proposed, change, original);
+		const hasNumericGroup = resolved.version === 2 && resolved.id === "catalog:zombie|dmg";
+		const isNumericStep = change => change.type === "setAbility" || isCreatureTransformationStatOp(change.type);
+		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
+		const numericConflicts = conflicts.filter(it => numericPaths.includes(it.path));
+		const numericWinners = new Set(numericConflicts.map(it => conflictDecisions[it.path]).filter(Boolean));
+		if (numericWinners.size > 1) _fail("Dependent numeric fields must share one conflict winner; mixed ability/HP/bonus decisions require a new numeric reconciliation.", "CREATURE_TRANSFORMATION_INPUT_REQUIRED");
+		const skipNumerics = numericConflicts.length && (numericWinners.has("existing") || numericConflicts.some(it => !Object.hasOwn(conflictDecisions, it.path)));
+		for (const {change, paths} of steps) {
+			if (hasNumericGroup && isNumericStep(change) && skipNumerics) continue;
+			if (conflicts.some(it => paths.includes(it.path) && conflictDecisions[it.path] !== "incoming")) continue;
+			const {out, write, writes = write ? [write] : []} = _applyChange(proposed, change, original);
 			proposed = out;
-			if (!write) continue;
-			const prior = appliedWrites.get(write.path);
-			appliedWrites.set(write.path, {...write, before: prior ? prior.before : write.before});
+			for (const item of writes) {
+				const prior = appliedWrites.get(item.path);
+				appliedWrites.set(item.path, {...item, before: prior ? prior.before : item.before});
+			}
 		}
 		const writes = [...appliedWrites.values()].filter(it => !_equal(it.before, it.after));
 		const unresolvedConflicts = conflicts.filter(it => !Object.hasOwn(conflictDecisions, it.path));
