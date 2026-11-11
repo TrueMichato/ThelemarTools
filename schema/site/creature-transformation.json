@@ -202,6 +202,110 @@
 				}, "required": ["op", "name", "source", "ability", "saveDc", "attackBonus", "components", "spells"], "additionalProperties": false}
 			]
 		},
+		"challengeRating": {"enum": ["0", "1/8", "1/4", "1/2", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"]},
+		"crAmount": {
+			"type": "object",
+			"properties": {"value": {"type": "number", "minimum": 0, "maximum": 100000}, "proficiency": {"type": "integer", "minimum": 0, "maximum": 100}},
+			"required": ["value", "proficiency"], "additionalProperties": false
+		},
+		"crOverride": {
+			"oneOf": [
+				{"type": "null"},
+				{"type": "object", "properties": {"cr": {"$ref": "#/$defs/challengeRating"}, "reason": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"}}, "required": ["cr", "reason"], "additionalProperties": false}
+			]
+		},
+		"crAssumptions": {
+			"type": "object",
+			"properties": {
+				"defense": {
+					"type": "object",
+					"properties": {
+						"expectedCr": {"$ref": "#/$defs/challengeRating"},
+						"hpBoundary": {"enum": [null, "lower", "higher"]},
+						"acIndex": {"type": "integer", "minimum": 0, "maximum": 19},
+						"acAdjustment": {"type": "integer", "minimum": -100, "maximum": 100},
+						"hpAdjustment": {"type": "integer", "minimum": -100000, "maximum": 100000},
+						"resistance": {"enum": ["none", "resistance", "immunity"]},
+						"vulnerability": {"type": "boolean"},
+						"regeneration": {"type": "integer", "minimum": 0, "maximum": 1000},
+						"note": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"}
+					},
+					"required": ["expectedCr", "hpBoundary", "acIndex", "acAdjustment", "hpAdjustment", "resistance", "vulnerability", "regeneration", "note"], "additionalProperties": false
+				},
+				"routines": {
+					"type": "array", "minItems": 1, "maxItems": 12,
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+							"rounds": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/crAmount"}},
+							"accuracy": {
+								"type": "object",
+								"properties": {"kind": {"enum": ["attack", "save"]}, "value": {"type": "integer", "minimum": -100, "maximum": 100}, "proficiency": {"type": "integer", "minimum": 0, "maximum": 2}},
+								"required": ["kind", "value", "proficiency"], "additionalProperties": false
+							},
+							"note": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"}
+						},
+						"required": ["id", "rounds", "accuracy", "note"], "additionalProperties": false
+					}
+				},
+				"routine": {"type": "string", "minLength": 1, "maxLength": 40},
+				"review": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"},
+				"override": {"$ref": "#/$defs/crOverride"},
+				"zeroXp": {"type": "boolean"},
+				"proficiencyAnswer": {
+					"oneOf": [
+						{"type": "null"},
+						{"type": "object", "properties": {"mode": {"enum": ["derived", "source-fixed"]}, "value": {"type": "integer", "minimum": 1, "maximum": 30}, "reason": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"}}, "required": ["mode", "value", "reason"], "additionalProperties": false}
+					]
+				}
+			},
+			"required": ["defense", "routines", "routine", "review", "override", "zeroXp", "proficiencyAnswer"], "additionalProperties": false
+		},
+		"crChange": {
+			"description": "Frozen opt-in M3 estimate/override only. Never permitted in default changes. Replay validates this closed receipt without loading or estimating from a current CR table.",
+			"type": "object",
+			"properties": {
+				"op": {"const": "setChallengeRating"},
+				"value": {
+					"type": "object", "properties": {"cr": {"$ref": "#/$defs/challengeRating"}, "xp": {"type": "integer", "minimum": 0, "maximum": 1000000}},
+					"required": ["cr", "xp"], "additionalProperties": false
+				},
+				"receipt": {
+					"type": "object",
+					"properties": {
+						"method": {"const": "dmg-2014-v1"}, "table": {"const": "data/msbcr.json"},
+						"estimatedCr": {"$ref": "#/$defs/challengeRating"}, "defensiveCr": {"$ref": "#/$defs/challengeRating"}, "offensiveCr": {"$ref": "#/$defs/challengeRating"},
+						"effectiveHp": {"type": "integer", "minimum": 1, "maximum": 850}, "effectiveAc": {"type": "integer", "minimum": 0, "maximum": 200},
+						"routineId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"}, "damagePerRound": {"type": "integer", "minimum": 0, "maximum": 320},
+						"accuracy": {"type": "integer", "minimum": -100, "maximum": 100},
+						"assumptions": {"$ref": "#/$defs/crAssumptions"},
+						"proficiency": {
+							"type": "object",
+							"properties": {
+								"before": {"type": "integer", "minimum": 1, "maximum": 30}, "after": {"type": "integer", "minimum": 1, "maximum": 30},
+								"source": {"enum": ["derived-cr", "source-profBonus", "source-pbNote", "source-input"]},
+								"canonical": {"type": "integer", "minimum": 2, "maximum": 9},
+								"history": {
+									"oneOf": [
+										{"type": "null"},
+										{"type": "object", "properties": {
+											"ownership": {"enum": ["derived", "explicit", "ambiguous"]},
+											"index": {"type": "integer", "minimum": 0, "maximum": 99},
+											"integrity": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[a-f0-9]{8}$"}]},
+											"value": {"type": "integer", "minimum": 1, "maximum": 30}
+										}, "required": ["ownership", "index", "integrity", "value"], "additionalProperties": false}
+									]
+								}
+							},
+							"required": ["before", "after", "source", "canonical", "history"], "additionalProperties": false
+						}
+					},
+					"required": ["method", "table", "estimatedCr", "defensiveCr", "offensiveCr", "effectiveHp", "effectiveAc", "routineId", "damagePerRound", "accuracy", "assumptions", "proficiency"], "additionalProperties": false
+				}
+			},
+			"required": ["op", "value", "receipt"], "additionalProperties": false
+		},
 		"stagedAutomation": {
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},

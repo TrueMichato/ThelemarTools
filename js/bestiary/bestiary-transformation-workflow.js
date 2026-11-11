@@ -12,12 +12,62 @@ const SKIPPABLE_CODES = new Set([
 ]);
 
 function compileTarget ({target, resolved, automationInputs}) {
+	const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
 	return normalizeCreatureTransformation(compileCreatureTransformation({
 		resolved,
-		current: BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations}),
+		current,
 		chassisSource: target.baseCreature.source,
 		inputs: automationInputs[target.id],
+		proficiencyContext: automationInputs[target.id]?.cr ? getProficiencyContext({target, current}) : null,
 	}));
+}
+
+function getProficiencyContext ({target, current}) {
+	const {priorWrites} = BestiaryQuickActionsUtil._getReplayState({baseCreature: target.baseCreature, operations: target.operations});
+	const numericPath = path => /^(?:str|dex|con|int|wis|cha|hp|ac|passive|profBonus|pbNote|cr|save\.[a-z]+|skill\.[a-z ]+|(?:trait|action|bonus|reaction|legendary|spellcasting):.+)$/.test(path);
+	let owner = null;
+	for (const [index, operation] of (target.operations || []).entries()) {
+		if (operation.type === "applyCreatureTransformation") {
+			const {resolved, integrity, approvedConflicts, conflictDecisions} = operation.data;
+			const setter = resolved.changes.find(it => it.type === "setProficiencyBonus");
+			if (!setter) continue;
+			const grouped = resolved.version === 2 && resolved.id === "catalog:zombie|dmg";
+			const operationId = operation.id || `${resolved.id}@${index}`;
+			const writes = priorWrites.filter(it => it.operationKey === integrity && it.operationId === operationId);
+			if (grouped && approvedConflicts.some(it => numericPath(it.path) && conflictDecisions[it.path] === "existing")
+				&& !writes.some(it => numericPath(it.path))) {
+				// Removal can eliminate a formerly retained conflict. Check the actual replay prefix,
+				// not only the old saved decision, before attributing a same-value PB setter.
+				const actual = BestiaryQuickActionsUtil.previewCreatureTransformation({
+					baseCreature: target.baseCreature,
+					operations: target.operations.slice(0, index),
+					resolved,
+					acknowledgedPrerequisites: operation.data.acknowledgedPrerequisites,
+					dmApproved: operation.data.dmApproved,
+				});
+				if (actual.conflicts.some(it => numericPath(it.path) && conflictDecisions[it.path] === "existing")) continue;
+			}
+			const receipt = resolved.changes.find(it => it.type === "setChallengeRating")?.receipt;
+			if (writes.filter(it => ["profBonus", "pbNote"].includes(it.path)).some(it => it.after !== (it.path === "profBonus" ? setter.value : `+${setter.value}`))) {
+				throw new Error("Validated PB writes disagree with the frozen numeric setter.");
+			}
+			owner = {ownership: receipt?.proficiency.source === "derived-cr" ? "derived" : "explicit", index, integrity, value: setter.value};
+			continue;
+		}
+		const patch = operation.data?.patch ?? operation.patch;
+		if (patch) {
+			const set = Object.hasOwn(patch, "set") || Object.hasOwn(patch, "remove") ? patch.set || {} : patch;
+			const paths = [...Object.keys(set), ...patch.remove || []];
+			if (paths.some(path => /^(?:profBonus|pbNote)(?:\.|$)/.test(path))) {
+				owner = {ownership: "explicit", index, integrity: null, value: current.profBonus ?? Number(current.pbNote)};
+			}
+		}
+		if (owner && !["patch", "addEntry", "removeEntry", "setLegendaryGroup"].includes(operation.type)) {
+			owner = {ownership: "ambiguous", index, integrity: null, value: current.profBonus ?? Number(current.pbNote)};
+		}
+	}
+	if (owner && current.profBonus === undefined && current.pbNote === undefined) return null;
+	return owner;
 }
 
 function getEligibilityDetail (creature, rules, dmApproved) {
