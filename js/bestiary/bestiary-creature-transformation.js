@@ -2,6 +2,7 @@ import {isTransformationEntry, isTransformationSpell} from "../creature-transfor
 import {isCompiledCreatureTransformation} from "../creature-transformations.js";
 import {formatCreatureTransformationBonus, getCreatureTransformationProficiencyBonus, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "../creature-transformation-stats.js";
 import {getCreatureTransformationInnateSpellcastingEntry, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "../creature-transformation-bindings.js";
+import {isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "../creature-transformation-cr.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -144,6 +145,10 @@ function _validateChange (change) {
 		if (!isCreatureTransformationBindingChange(change, "type")) _fail(`Invalid binding setter "${change.type}".`);
 		return;
 	}
+	if (isCreatureTransformationCrOp(change.type)) {
+		if (!isCreatureTransformationCrChange(change, "type")) _fail(`Invalid CR setter "${change.type}".`);
+		return;
+	}
 	switch (change.type) {
 		case "setType":
 			_expectKeys(change, ["type", "value"], change.type);
@@ -280,6 +285,7 @@ function _validateRecipe (resolved) {
 	_expectArray(resolved.changes, "Changes");
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationStatOp(change?.type))) _fail("Numeric setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationBindingOp(change?.type))) _fail("Binding setters require an opt-in version-2 snapshot.");
+	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationCrOp(change?.type))) _fail("CR setters require an opt-in version-2 snapshot.");
 	resolved.changes.forEach(_validateChange);
 	_expectArray(resolved.manualReview, "Manual review");
 	resolved.manualReview.forEach(it => {
@@ -381,7 +387,8 @@ function _applyChange (creature, change, chassis) {
 		case "setHitPoints":
 		case "setPassivePerception":
 		case "setArmorClass":
-			path = {setHitPoints: "hp", setPassivePerception: "passive", setArmorClass: "ac"}[change.type];
+		case "setChallengeRating":
+			path = {setHitPoints: "hp", setPassivePerception: "passive", setArmorClass: "ac", setChallengeRating: "cr"}[change.type];
 			before = out[path];
 			out[path] = _copy(change.value);
 			after = out[path];
@@ -661,7 +668,7 @@ export class BestiaryCreatureTransformation {
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
 		const hasNumericGroup = resolved.version === 2 && resolved.id === "catalog:zombie|dmg";
-		const isNumericStep = change => change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type);
+		const isNumericStep = change => change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
 		const numericConflicts = conflicts.filter(it => numericPaths.includes(it.path));
 		const numericWinners = new Set(numericConflicts.map(it => conflictDecisions[it.path]).filter(Boolean));
