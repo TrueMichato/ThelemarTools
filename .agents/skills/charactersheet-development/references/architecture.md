@@ -97,6 +97,10 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 ├── CharacterSheetCombat (charactersheet-combat.js, ~3,900 lines)
 │   Attacks, damage, initiative, death saves, conditions,
 │   concentration, combat methods (Thelemar), turn action tracking.
+│   `_getAttackDamageExpression()` selects the badge/roller's common base
+│   expression, including live hands/shield, Monk and upgrade substitution.
+│   State's auto-attack builder remains a descriptor: NPC export applies its
+│   own upgrade step. Preserve explicit/custom damage expressions.
 │
 ├── CharacterSheetSpells (charactersheet-spells.js, ~3,300 lines)
 │   Spell slots, known/prepared/cantrip tracking, casting,
@@ -152,6 +156,9 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │
 ├── CharacterSheetExport (charactersheet-export.js, ~320 lines)
 │   JSON import/export, print/PDF entry points, delegates to NpcExporter.
+│   Import requests `{isMinHeight0:true, hasFooter:true}`: eleModalInner
+│   scrolls the form and eleModalFooter holds confirmation actions. Keep
+│   charsheet__import-* styles isolated; canonical import/persistence is unchanged.
 │
 ├── CharacterSheetPdf (charactersheet-pdf.js)
 │   Print-optimized self-contained HTML (browser Save as PDF). Notes,
