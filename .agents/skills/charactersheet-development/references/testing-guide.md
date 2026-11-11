@@ -73,6 +73,15 @@ duplicate Page's storage error. Genuine invalid JSON remains a separate control.
 Native smoke checks use a fresh local port and a real spawned survivor; do not
 claim unexecuted browser flows as coverage.
 
+`mobile-character-import.spec.ts` uses the dedicated `CharacterImportPage`:
+expand the real More panel, upload through `setInputFiles`, and wait for the full
+FileReader value. Before clicking (including after textarea focus), require the
+button centre inside `visualViewport` and every clipping ancestor, and confirm
+`elementFromPoint` hits the control; descendant `isVisible()` alone is inadequate.
+Guard the global app and await initialization after reload, then assert the
+stored/reloaded roster and content, not only modal close. Chromium mobile
+emulation does not certify native iOS keyboard or file-picker behavior.
+
 Spawner-entry controls use the real orchestration and Page persistence boundary
 while substituting only wizard-content creation: pristine preservation must not
 admit a predecessor, edited drafts must persist, and failure must abort before

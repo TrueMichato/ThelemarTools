@@ -408,6 +408,14 @@ describe the shortcut. On touch devices, long-press the attack row and choose
 and does not create critical-hit post-attack offers; those still depend on the
 actual attack d20.
 
+The Combat damage badge and damage roller share the same base damage expression.
+Auto-generated weapon attacks resolve the selected hands/shield profile, Monk
+Martial Arts substitution, and upgrade die increases over material-projected dice.
+Explicit weapon damage overrides and custom attack expressions remain authoritative.
+Inventory lists the item's own dice (including both versatile options), so it can
+legitimately differ from a Monk's substituted die or an explicit attack override.
+The badge shows normal damage; critical doubling and optional riders apply when rolling.
+
 ```javascript
 // Combat's delegated button handler passes the gesture to the same roll path:
 this._rollDamage(attackId, event.shiftKey);

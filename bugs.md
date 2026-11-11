@@ -3,6 +3,26 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 72 - Combat damage labels, mobile import, and creature transformations - IN PROGRESS
+
+Planning starts from published `d14b7b8764293899609f8b7cd41a744eb99e1686`,
+not the main checkout's local-only critique-report ancestry. The user approved
+S1 and S2 implementation after the reproductions below. Their completed fixes
+and combined gates are recorded under Closed Bugs. The user approved staged
+implementation of the expanded Template plan, one verified milestone at a time;
+only its first unit is currently released.
+
+| Track | Reported bugs | Ownership and acceptance |
+|---|---|---|
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. M1's staged opt-in Dracolich compilation/frozen-replay foundation has 96 focused tests passing and awaits commit/publication gates; it does not enable default behavior or close this bug. Later calculation, CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
+
+The orchestrator alone owns this tracker and shared character-sheet references.
+S1 does not own import CSS; S2 does not own NPC export, damage calculations or
+global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver
+changes require coordination. Browser runs use separate fresh ports and local
+artifacts; the combined full-repository gates are scheduled by the orchestrator.
+
 ### Round 70 - Unconfirmed original symptoms
 
 - **War Caster saved-character case (bug 5):** No affected export/acquisition
@@ -19,6 +39,35 @@ In general all bugs refer to TGTT classes unless otherwise specified.
   Preserve this distinction if the original symptom recurs.
 
 ## Closed Bugs
+
+### Round 72 - Combat damage labels and mobile import
+
+| PR | Scope |
+|---|---|
+| [#394](https://github.com/TrueMichato/ThelemarTools/pull/394) | S1: Combat damage badge/roller expression parity |
+| [#393](https://github.com/TrueMichato/ThelemarTools/pull/393) | S2: reachable mobile import confirmation |
+
+- **#1:** The Combat badge printed the State descriptor while the roller
+  separately resolved upgraded dice. Both now share Combat's live expression
+  reader: actual Superior Gambler coins display and roll 1d6 instead of showing
+  1d4. Overrides, hands/shield, Monk and material/upgrade composition are covered;
+  State's builder and NPC export's separate upgrade step remain unchanged.
+  Reverting the real badge call site fails both primary Jest and browser tests.
+  This fixes the main Combat badge, not Overview/Play Mode or an unestablished
+  affected-save cause; no speculative migration was added.
+- **#2:** Import actions were inside the file/JSON scroller, clipped in short
+  landscape and hidden again after textarea focus. The existing modal footer now
+  holds Cancel/Import outside that scroller, with import-only styles and unchanged
+  canonical persistence. Real large-file uploads, pre-click viewport/ancestor
+  clipping and centre hit-tests, focused textarea, persistent reload, retries,
+  cancellation/errors and unchanged Export pass. Native iOS keyboard, browser
+  chrome and file-picker behavior remain unverified.
+
+Combined integration verification: full ESLint/configured SCSS lint; 805 Jest
+suites and 21,680 tests passed, with the unchanged one skipped suite/13 skipped
+tests and actual NPC corpus guard; both browser specs passed together, 13/13,
+on a fresh served-byte-verified port. Normal child commit hooks ran separately.
+Template automation and Species remain open above.
 
 ### Round 71 - NPC export, companion dashboard, and spell materials - INTEGRATED
 

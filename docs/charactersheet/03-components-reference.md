@@ -424,6 +424,7 @@ _showAttackCreator()
 _addAttack(attackData)
 _rollAttack(attackId, event)  // event for advantage/disadvantage keys
 _rollDamage(attackId)
+_getAttackDamageExpression(attack) // Common base expression for badge and roller
 
 // Initiative
 _rollInitiative(event)
@@ -442,6 +443,14 @@ _modifyStamina(delta)
 ```
 
 ### Attack Data Structure
+
+The Combat badge and roller read `_getAttackDamageExpression()`, which resolves
+auto weapons through current hands/shield, Monk and upgrade rules. Explicit
+weapon overrides and custom expressions remain authoritative.
+`State.buildAutoAttackFromWeapon()` remains a descriptor, not the finalized
+upgrade-adjusted expression; NPC export already applies its own upgrade step.
+Inventory can legitimately show different dice for a hand choice, Monk
+substitution or explicit attack override.
 
 ```javascript
 {
@@ -884,6 +893,15 @@ Print button / Export dialog "Print / PDF"
     → window.open + document.write
     → screen toolbar (Print / Close) + auto window.print()
 ```
+
+### Character import layout
+
+`_showImportDialog()` uses
+`CharacterSheetModal.pGetShow({isMinHeight0: true, hasFooter: true})`.
+`eleModalInner` scrolls the file/JSON form; `eleModalFooter` holds nonshrinking
+Cancel/Import actions. Only `charsheet__import-*` selectors own this layout;
+other dialogs retain their existing behavior. Files still populate the editable
+JSON preview and commit through the unchanged `_importCharacterData()` path.
 
 ### NPC export pipeline
 

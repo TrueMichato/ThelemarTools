@@ -213,16 +213,21 @@ class CharacterSheetExport {
 
 	async _showImportDialog () {
 		this._pendingImportedCharacterId = null;
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = await CharacterSheetModal.pGetShow({
 			title: "📥 Import Character",
 			isMinHeight0: true,
+			hasFooter: true,
 		});
+		modalInner.classList.add("charsheet__import-body");
+		modalFooter.classList.add("charsheet__import-footer");
 
 		const fileInput = e_({tag: "input", clazz: "ve-form-control"});
+		fileInput.id = "charsheet-import-file";
 		fileInput.type = "file";
 		fileInput.accept = ".json";
 
 		const jsonTextarea = e_({tag: "textarea", clazz: "ve-form-control"});
+		jsonTextarea.id = "charsheet-import-json";
 		jsonTextarea.rows = 8;
 		jsonTextarea.placeholder = "Paste character JSON data here...";
 		jsonTextarea.style.fontFamily = "monospace";
@@ -246,21 +251,21 @@ class CharacterSheetExport {
 			reader.readAsText(file);
 		});
 
-		ee`<div>
+		ee`<div class="charsheet__import-form">
 			<div class="charsheet__import-info mb-3">
 				<p class="ve-muted mb-1"><strong>📂 Import a character</strong> from a previously exported JSON file.</p>
 				<p class="ve-muted" style="font-size: 0.85rem;">Characters are saved locally in your browser. Use this to restore a backup or import a character from another device.</p>
 			</div>
 			
 			<div class="mb-3">
-				<label class="ve-muted mb-1"><strong>Option 1:</strong> Select a file</label>
+				<label class="ve-muted mb-1" for="charsheet-import-file"><strong>Option 1:</strong> Select a file</label>
 				${fileInput}
 			</div>
 			
 			<div class="text-center ve-muted mb-3" style="font-size: 0.85rem;">— or —</div>
 			
 			<div class="mb-3">
-				<label class="ve-muted mb-1"><strong>Option 2:</strong> Paste JSON data</label>
+				<label class="ve-muted mb-1" for="charsheet-import-json"><strong>Option 2:</strong> Paste JSON data</label>
 				${jsonTextarea}
 			</div>
 			
@@ -302,10 +307,10 @@ class CharacterSheetExport {
 				}
 			}});
 
-		ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
+		ee`<div class="charsheet__import-actions ve-flex-v-center ve-flex-h-right">
 			${btnCancel}
 			${btnImport}
-		</div>`.appendTo(modalInner);
+		</div>`.appendTo(modalFooter);
 	}
 
 	/**

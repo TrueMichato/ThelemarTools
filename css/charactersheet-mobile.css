@@ -1248,6 +1248,14 @@
 		padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
 	}
 
+	.charsheet__import-actions {
+		padding-bottom: 0;
+	}
+
+	.charsheet__import-actions .ve-btn {
+		min-height: 44px;
+	}
+
 	/* The modal's own close control measured 28x28 — under both the 44px
 	   comfortable target and the 24px WCAG 2.5.8 floor. */
 	body.is-charsheet-page .ve-ui-modal__inner .ve-btn:has(> .glyphicon-remove) {
