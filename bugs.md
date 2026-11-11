@@ -15,7 +15,7 @@ automation.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. Neither enables default behavior, completes a family, or closes this bug. AC/attack/spell, CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. These milestones do not enable default behavior, complete a family, or close this bug. CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
 
 M2a preserves non-CON HP residuals and explicit proficiency bindings rather than
@@ -27,6 +27,17 @@ controls and setter-to-renderer red/green cases. Normal commit hooks passed
 26 suites/316 tests; the exact published-leaf full gate passed 806 suites/21,745
 tests with the unchanged one skipped suite/13 skipped tests and real NPC corpus
 guard. No browser/E2E run was performed for this internal foundation.
+
+M2b requires explicit armor policies and exact source-qualified entry bindings;
+unsupported or ambiguous inputs block the target rather than guessing numbers.
+Changed AC/PB and new innate grants have foundation/setter coverage, not new
+catalog-producer or family-completion evidence. Frozen replay/removal and the
+coherent numeric conflict group remain intact; changed raw answers invalidate
+stale previews. Focused verification passed 176 tests, including a real Zombie
+compiler-boundary mutation control. Normal commit hooks passed 27 suites/350
+tests; the exact published-leaf full gate passed 807 suites/21,779 tests with
+the unchanged one skipped suite/13 skipped tests and real NPC corpus guard.
+No browser/E2E run was performed; defaults and Species remain unchanged.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or

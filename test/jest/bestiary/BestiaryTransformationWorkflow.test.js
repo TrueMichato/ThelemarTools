@@ -182,7 +182,7 @@ describe("staged M2a Zombie numerical boundary", () => {
 		const capped = stage([target("one", scout)], {validateOperation: () => { throw new Error("Target storage limit."); }});
 		expect(capped.previews).toEqual([]);
 		const batch = stage([target("one", scout)]);
-		expect(() => createCreatureTransformationChanges({batch, targets: batch.targets, automationInputs: {one: {proficiencyBonus: 3}}})).toThrow(/retain.*PB/i);
+		expect(() => createCreatureTransformationChanges({batch, targets: batch.targets, automationInputs: {one: {proficiencyBonus: 3}}})).toThrow(/stale.*input/i);
 		expect(() => ready([target("one", scout)], batch.previews[0].preview.resolved)).toThrow(/snapshot/i);
 		const saved = changes(batch)[0].addOperations[0];
 		saved.data.resolved.changes.find(it => it.type === "setHitPoints").value.average++;

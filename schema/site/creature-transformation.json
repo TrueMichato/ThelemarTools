@@ -155,6 +155,53 @@
 				{"type": "object", "description": "Atomically set numeric profBonus and canonical +N pbNote; ambiguous or disagreeing existing PB notes require source resolution, never a CR change.", "properties": {"op": {"const": "setProficiencyBonus"}, "value": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["op", "value"], "additionalProperties": false}
 			]
 		},
+		"armorClass": {
+			"type": "array", "minItems": 1, "maxItems": 20,
+			"items": {"oneOf": [
+				{"type": "integer", "minimum": 0, "maximum": 100},
+				{"type": "object", "properties": {
+					"ac": {"type": "integer", "minimum": 0, "maximum": 100},
+					"from": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+					"condition": {"type": "string", "minLength": 1, "maxLength": 256},
+					"braces": {"type": "boolean"}
+				}, "required": ["ac"], "additionalProperties": false}
+			]}
+		},
+		"innateSpell": {
+			"type": "object",
+			"properties": {
+				"spell": {"type": "string", "maxLength": 256, "pattern": "^[^\\s{}<>|#&](?:[^{}<>|#&\\r\\n]*[^\\s{}<>|#&])?\\|[A-Za-z0-9-]{2,40}$"},
+				"usage": {"enum": ["will", "daily", "rest"]},
+				"uses": {"type": "integer", "minimum": 1, "maximum": 9},
+				"each": {"type": "boolean"},
+				"restriction": {"const": "selfOnly"}
+			},
+			"required": ["spell", "usage"],
+			"allOf": [{"if": {"properties": {"usage": {"const": "will"}}}, "then": {"not": {"anyOf": [{"required": ["uses"]}, {"required": ["each"]}]}}, "else": {"required": ["uses", "each"]}}],
+			"additionalProperties": false
+		},
+		"bindingChange": {
+			"description": "Concrete opt-in M2b v2 setters only, never default recipe changes. Exact entry identities and frozen content; no executable bindings are saved.",
+			"oneOf": [
+				{"type": "object", "properties": {"op": {"const": "setArmorClass"}, "value": {"$ref": "#/$defs/armorClass"}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setEntryNumbers"},
+					"section": {"enum": ["trait", "action", "bonus", "reaction", "legendary", "spellcasting"]},
+					"match": {"type": "object", "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 256}, "source": {"type": "string", "minLength": 1, "maxLength": 256, "not": {"const": "$chassis"}}}, "required": ["name", "source"], "additionalProperties": false},
+					"entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/entryContent"}}
+				}, "required": ["op", "section", "match", "entries"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "addInnateSpellcasting"},
+					"name": {"type": "string", "minLength": 1, "maxLength": 256},
+					"source": {"type": "string", "pattern": "^[A-Za-z0-9-]{2,40}$"},
+					"ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]},
+					"saveDc": {"type": "integer", "minimum": 0, "maximum": 100},
+					"attackBonus": {"type": "integer", "minimum": -10000, "maximum": 10000},
+					"components": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"enum": ["V", "S", "M"]}},
+					"spells": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/innateSpell"}}
+				}, "required": ["op", "name", "source", "ability", "saveDc", "attackBonus", "components", "spells"], "additionalProperties": false}
+			]
+		},
 		"stagedAutomation": {
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},

@@ -91,6 +91,7 @@ export function previewCreatureTransformationTargets ({targets, resolved, automa
 
 export function createCreatureTransformationChanges ({batch, targets, conflictDecisions = {}, resolved = batch.resolved, automationInputs = batch.automationInputs}) {
 	if (JSON.stringify(batch.targets) !== JSON.stringify(targets)) throw new Error("Transformation preview is stale: the selection or a target history changed. Preview again.");
+	if (Object.hasOwn(batch, "automationInputs") && JSON.stringify(batch.automationInputs) !== JSON.stringify(automationInputs)) throw new Error("Transformation preview is stale: the target input answers changed. Preview again.");
 	if (batch.previews.some(({preview}) => !preview.canApply)) throw new Error("Choose a winner for every conflicting statblock field before applying.");
 	return batch.previews.map(({id, preview}) => {
 		const target = targets.find(it => it.id === id);
