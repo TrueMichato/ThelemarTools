@@ -1,5 +1,6 @@
 import {getRenderableSpeciesTrait, isTransformationEntry, isTransformationSpell} from "./creature-transformation-entries.js";
 import {compileCreatureTransformationStats, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "./creature-transformation-stats.js";
+import {compileCreatureTransformationBindings, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "./creature-transformation-bindings.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -106,7 +107,7 @@ const assertChanges = (changes, {allowStats = false} = {}) => {
 				case "removeEntry": return props === "match,op,section" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match);
 				case "replaceEntry": return props === "entry,match,onMissing,op,section" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match) && isEntry(step.entry) && ["error", "skip"].includes(step.onMissing);
 				case "replaceDamageType": return props === "from,match,onMissing,op,section,to" && ENTRY_SECTIONS.has(step.section) && isEntryMatch(step.match) && Array.isArray(step.from) && step.from.length > 0 && new Set(step.from).size === step.from.length && step.from.every(it => DAMAGE_TYPES.has(it)) && DAMAGE_TYPES.has(step.to) && ["error", "skip"].includes(step.onMissing);
-				default: return allowStats && isCreatureTransformationStatChange(step);
+				default: return allowStats && (isCreatureTransformationStatChange(step) || isCreatureTransformationBindingChange(step));
 			}
 		})();
 		if (!valid) throw new CreatureTransformationCandidateError(`Invalid transformation change: ${step?.op || "(missing op)"}`);
@@ -629,21 +630,26 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 
 function isCompiledCreatureTransformation (resolved) {
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:zombie|dmg" && isZombieNumericIdentity(resolved.identity)) {
+		const hasBindings = JSON.stringify(resolved.selectedOptions?.["automation-bindings"]) === JSON.stringify(["zombie-dmg-m2b"]);
 		if (Object.hasOwn(resolved, "automation") || !Array.isArray(resolved.eligibility) || !resolved.eligibility.some(rule => rule?.dmApproval === true)
-			|| !resolved.selectedOptions || Object.keys(resolved.selectedOptions).join(",") !== "automation-numerics"
+			|| !resolved.selectedOptions || Object.keys(resolved.selectedOptions).sort().join(",") !== (hasBindings ? "automation-bindings,automation-numerics" : "automation-numerics")
 			|| JSON.stringify(resolved.selectedOptions["automation-numerics"]) !== JSON.stringify(["zombie-dmg-m2a"]) || !Array.isArray(resolved.changes)) return false;
 		const seen = new Set();
 		for (const step of resolved.changes) {
 			const op = step?.op ?? step?.type;
 			if (op === "setAbility") {
-				if (!["str", "con", "int", "wis", "cha"].includes(step.ability) || !Number.isInteger(step.value) || step.value < 1 || step.value > 30) return false;
+				if (!(hasBindings ? [...ABILITIES] : ["str", "con", "int", "wis", "cha"]).includes(step.ability) || !Number.isInteger(step.value) || step.value < 1 || step.value > 30) return false;
 			} else if (isCreatureTransformationStatOp(op)) {
 				if (!isCreatureTransformationStatChange(step, Object.hasOwn(step, "op") ? "op" : "type")) return false;
+			} else if (isCreatureTransformationBindingOp(op)) {
+				if (!hasBindings || !isCreatureTransformationBindingChange(step, Object.hasOwn(step, "op") ? "op" : "type")) return false;
 			} else if (!(op === "setType" && step.value === "undead")
 				&& !(op === "grantSense" && step.sense === "darkvision" && step.range === 60)
 				&& !(op === "grantImmunity" && step.value === "poison")
 				&& !(op === "grantConditionImmunity" && step.value === "poisoned")) return false;
-			const key = `${op}:${step.ability ?? step.skill ?? ""}`;
+			const key = isCreatureTransformationBindingOp(op)
+				? `${op}:${step.section ?? ""}:${step.match?.name?.trim().toLowerCase() ?? step.name ?? ""}|${step.match?.source?.trim().toLowerCase() ?? step.source ?? ""}`
+				: `${op}:${step.ability ?? step.skill ?? ""}`;
 			if (seen.has(key)) return false;
 			seen.add(key);
 		}
@@ -682,7 +688,7 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);
 		if (!resolved.selectedOptions || Object.keys(resolved.selectedOptions).length) throw new Error("Staged Zombie numerics do not support additional option groups.");
-		if (!inputs || typeof inputs !== "object" || Array.isArray(inputs) || Object.keys(inputs).length) fail("Zombie numerics retain the target's existing PB; additional input decisions are not supported in this numeric-only profile.");
+		if (!inputs || typeof inputs !== "object" || Array.isArray(inputs) || Object.keys(inputs).some(key => key !== "bindings")) fail("Zombie numerics retain the target's existing PB; only explicit M2b bindings are supported as additional inputs.");
 		assertChanges(resolved.changes);
 		const abilities = {};
 		for (const step of resolved.changes.filter(it => it.op === "adjustAbility")) {
@@ -690,12 +696,20 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 			abilities[step.ability] = Math.max(step.floor, current[step.ability] + step.amount);
 		}
 		const numeric = compileCreatureTransformationStats({current, abilities, hp: {mode: resolved.automation.hitPoints}});
+		let bound = [];
+		if (Object.hasOwn(inputs, "bindings")) {
+			const bindings = inputs.bindings;
+			if (!bindings || typeof bindings !== "object" || Array.isArray(bindings) || Object.keys(bindings).some(key => !["armor", "entries", "proficiencyBonus"].includes(key))) fail("Zombie M2b bindings need explicit armor and entry policies, with optional current proficiencyBonus; they cannot grant new spells or change PB.");
+			bound = compileCreatureTransformationBindings({current, abilities, chassisSource, ...bindings});
+		}
 		const compiled = copy(resolved);
 		delete compiled.automation;
 		compiled.selectedOptions = {"automation-numerics": ["zombie-dmg-m2a"]};
-		compiled.changes = [...compiled.changes.filter(it => it.op !== "adjustAbility"), ...numeric];
+		if (Object.hasOwn(inputs, "bindings")) compiled.selectedOptions["automation-bindings"] = ["zombie-dmg-m2b"];
+		compiled.changes = [...compiled.changes.filter(it => it.op !== "adjustAbility"), ...numeric, ...bound];
 		compiled.manualReview = compiled.manualReview.filter(it => it.field !== "hp" && it.field !== "abilities");
-		compiled.manualReview.push({field: "traits", reason: "Numeric-only stage: Undead Fortitude, lost capabilities and language restrictions remain unresolved; this is not complete Zombie automation."});
+		if (Object.hasOwn(inputs, "bindings")) compiled.manualReview = compiled.manualReview.filter(it => it.field !== "ac" && it.field !== "attacks");
+		compiled.manualReview.push({field: "traits", reason: `${Object.hasOwn(inputs, "bindings") ? "Numeric/binding" : "Numeric-only"} stage: Undead Fortitude, lost capabilities and language restrictions remain unresolved; this is not complete Zombie automation.`});
 		assertChanges(compiled.changes, {allowStats: true});
 		if (!isCompiledCreatureTransformation(compiled)) throw new Error("The staged Zombie numeric recipe cannot compile to the supported concrete profile.");
 		return compiled;

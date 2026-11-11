@@ -1,6 +1,7 @@
 import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
 import {isCompiledCreatureTransformation} from "../creature-transformations.js";
 import {formatCreatureTransformationBonus, getCreatureTransformationProficiencyBonus, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "../creature-transformation-stats.js";
+import {getCreatureTransformationInnateSpellcastingEntry, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "../creature-transformation-bindings.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -139,6 +140,10 @@ function _validateChange (change) {
 		if (!isCreatureTransformationStatChange(change, "type")) _fail(`Invalid numeric setter "${change.type}".`);
 		return;
 	}
+	if (isCreatureTransformationBindingOp(change.type)) {
+		if (!isCreatureTransformationBindingChange(change, "type")) _fail(`Invalid binding setter "${change.type}".`);
+		return;
+	}
 	switch (change.type) {
 		case "setType":
 			_expectKeys(change, ["type", "value"], change.type);
@@ -274,6 +279,7 @@ function _validateRecipe (resolved) {
 	}
 	_expectArray(resolved.changes, "Changes");
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationStatOp(change?.type))) _fail("Numeric setters require an opt-in version-2 snapshot.");
+	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationBindingOp(change?.type))) _fail("Binding setters require an opt-in version-2 snapshot.");
 	resolved.changes.forEach(_validateChange);
 	_expectArray(resolved.manualReview, "Manual review");
 	resolved.manualReview.forEach(it => {
@@ -374,7 +380,8 @@ function _applyChange (creature, change, chassis) {
 			break;
 		case "setHitPoints":
 		case "setPassivePerception":
-			path = {setHitPoints: "hp", setPassivePerception: "passive"}[change.type];
+		case "setArmorClass":
+			path = {setHitPoints: "hp", setPassivePerception: "passive", setArmorClass: "ac"}[change.type];
 			before = out[path];
 			out[path] = _copy(change.value);
 			after = out[path];
@@ -503,6 +510,23 @@ function _applyChange (creature, change, chassis) {
 				if (!_equal(before, after)) speed[change.mode] = after;
 			}
 			if (!_equal(before, after)) out.speed = speed;
+			break;
+		}
+		case "addInnateSpellcasting": {
+			if (out.spellcasting != null && !Array.isArray(out.spellcasting)) _fail("Spellcasting must be an array.");
+			const entry = getCreatureTransformationInnateSpellcastingEntry(change);
+			path = _getEntryKey("spellcasting", entry, chassis);
+			if ((out.spellcasting || []).some(it => _getEntryKey("spellcasting", it, chassis) === path)) _fail(`Duplicate entry "${path}".`, "CREATURE_TRANSFORMATION_ENTRY_MATCH");
+			(out.spellcasting ||= []).push(entry);
+			after = entry;
+			break;
+		}
+		case "setEntryNumbers": {
+			const index = _getEntryIndex(out, change.section, change.match, chassis);
+			before = out[change.section][index];
+			path = _getEntryKey(change.section, before, chassis);
+			after = {...before, [change.section === "spellcasting" ? "headerEntries" : "entries"]: _copy(change.entries)};
+			out[change.section][index] = after;
 			break;
 		}
 		case "grantSpell": {
@@ -637,7 +661,7 @@ export class BestiaryCreatureTransformation {
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
 		const hasNumericGroup = resolved.version === 2 && resolved.id === "catalog:zombie|dmg";
-		const isNumericStep = change => change.type === "setAbility" || isCreatureTransformationStatOp(change.type);
+		const isNumericStep = change => change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
 		const numericConflicts = conflicts.filter(it => numericPaths.includes(it.path));
 		const numericWinners = new Set(numericConflicts.map(it => conflictDecisions[it.path]).filter(Boolean));
