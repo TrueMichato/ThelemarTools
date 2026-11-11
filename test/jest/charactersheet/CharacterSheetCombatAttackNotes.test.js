@@ -226,6 +226,7 @@ describe("CharacterSheetCombat attack notes", () => {
 			getItemRaw: id => state.getItemRaw(id),
 			getItems: () => state.getItems(),
 			getWeaponAbilityMod: () => 3,
+			getWeaponDamageDie: weapon => state.getWeaponDamageDie(weapon),
 			getProficiencyBonus: () => 2,
 			getAttackModifierContributions: () => [],
 			getBonusFromStates: () => 0,
