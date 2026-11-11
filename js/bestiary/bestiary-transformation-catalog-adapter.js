@@ -1,5 +1,6 @@
 import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
 import {isCompiledCreatureTransformation} from "../creature-transformations.js";
+import {isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "../creature-transformation-stats.js";
 
 const DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
@@ -35,7 +36,7 @@ function isMatch (match) {
 		|| (keysAre(match, ["role", "source"]) && ROLES.has(match.role) && isString(match.source));
 }
 
-function validateStep (step) {
+function validateStep (step, allowStats) {
 	const {op} = step || {};
 	switch (op) {
 		case "setType":
@@ -91,7 +92,7 @@ function validateStep (step) {
 				&& Array.isArray(step.from) && !!step.from.length && new Set(step.from).size === step.from.length
 				&& step.from.every(it => DAMAGE_TYPES.has(it)) && DAMAGE_TYPES.has(step.to)
 				&& ["skip", "error"].includes(step.onMissing);
-		default: return false;
+		default: return allowStats && isCreatureTransformationStatChange(step);
 	}
 }
 
@@ -100,7 +101,8 @@ export function normalizeCreatureTransformation (resolved) {
 	expect(!Object.hasOwn(resolved, "automation"), "staged automation must be compiled for a target first");
 	if (Object.hasOwn(resolved, "version")) expect(isCompiledCreatureTransformation(resolved), "invalid compiled version-2 profile or choices");
 	const changes = resolved.changes.map((step, index) => {
-		expect(validateStep(step), `invalid or unrepresentable change ${index + 1} (${step?.op || "missing op"})`);
+		expect(!isCreatureTransformationStatOp(step?.op) || resolved.version === 2, "numeric setters require an opt-in version-2 snapshot");
+		expect(validateStep(step, resolved.version === 2), `invalid or unrepresentable change ${index + 1} (${step?.op || "missing op"})`);
 		const {op, ...fields} = step;
 		return {type: op, ...structuredClone(fields)};
 	});

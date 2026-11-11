@@ -10,12 +10,23 @@ not the main checkout's local-only critique-report ancestry. The user approved
 S1 and S2 implementation after the reproductions below. Their completed fixes
 and combined gates are recorded under Closed Bugs. The user approved staged
 implementation of the expanded Template plan, one verified milestone at a time;
-only its first unit is currently released.
+its published foundations remain internal/staged, without enabling expanded
+automation.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) implements staged opt-in Dracolich compilation and frozen replay, with 96 focused tests and the normal commit/full publication gates passing. It does not enable default behavior or close this bug. Later calculation, CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. Neither enables default behavior, completes a family, or closes this bug. AC/attack/spell, CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
+
+M2a preserves non-CON HP residuals and explicit proficiency bindings rather than
+guessing from bonus magnitude or CR. Explicit PB overrides synchronize numeric
+`profBonus` and displayed `pbNote` as one tracked conflict group; ambiguous or
+disagreeing source notes block application. Concrete replay stays frozen.
+Focused verification passed 135 tests, including actual HP/expertise mutation
+controls and setter-to-renderer red/green cases. Normal commit hooks passed
+26 suites/316 tests; the exact published-leaf full gate passed 806 suites/21,745
+tests with the unchanged one skipped suite/13 skipped tests and real NPC corpus
+guard. No browser/E2E run was performed for this internal foundation.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or

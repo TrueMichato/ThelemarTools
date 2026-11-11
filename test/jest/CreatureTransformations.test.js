@@ -130,6 +130,24 @@ describe("app-owned creature transformation schema and source corpus", () => {
 		expect(byId("Shadow Dragon", "BEG").provenance.evidence).toBe("published-example");
 	});
 
+	it("admits only the one source-qualified staged numeric representative and no default numeric setters", () => {
+		const recipe = byId("Zombie", "DMG");
+		const check = changed => getCreatureTransformationSchemaErrors({data: {creatureTransformation: [changed]}, filePath: "numeric"});
+		expect(check(recipe)).toEqual([]);
+		for (const changed of [
+			{...recipe, source: "MM"},
+			{...recipe, name: "Skeleton"},
+			{...recipe, automation: {...recipe.automation, version: 3}},
+			{...recipe, automation: {...recipe.automation, rollout: "enabled"}},
+			{...recipe, automation: {...recipe.automation, hitPoints: "estimate"}},
+			{...recipe, automation: {...recipe.automation, expression: "con * hd"}},
+			{...recipe, changes: [{op: "setHitPoints", value: {average: 12, formula: "2d8 + 3"}}]},
+		]) {
+			expect(check(changed)).not.toEqual([]);
+			expect(() => getCreatureTransformationCandidates({catalog: {creatureTransformation: [changed]}, races: []})).toThrow();
+		}
+	});
+
 	it("locks every depicted option and major official variant against accidental omission", () => {
 		expect(options("Half-Dragon", "MM", "ancestry")).toEqual(["black", "blue", "brass", "bronze", "copper", "gold", "green", "red", "silver", "white"]);
 		expect(options("Half-Dragon", "MM", "size")).toEqual(["large-or-smaller", "huge", "gargantuan"]);
@@ -207,7 +225,7 @@ describe("app-owned creature transformation schema and source corpus", () => {
 describe("source-qualified candidate and resolution API", () => {
 	it("keeps all default recipe and Species identities/options unchanged and requires an explicit staged opt-in", () => {
 		const legacy = structuredClone(catalog);
-		delete legacy.creatureTransformation.find(it => it.name === "Dracolich" && it.source === "MM").automation;
+		legacy.creatureTransformation.forEach(it => delete it.automation);
 		const races = [{name: "Species", source: "TST", size: ["M"], speed: 30, entries: [{type: "entries", name: "Trait", entries: ["A retained rule."]}]}];
 		const current = getCreatureTransformationCandidates({catalog, races});
 		const previous = getCreatureTransformationCandidates({catalog: legacy, races});
@@ -216,7 +234,7 @@ describe("source-qualified candidate and resolution API", () => {
 			delete match.automation;
 			expect(match).toEqual(candidate);
 		}
-		for (const id of ["catalog:dracolich|mm", "race:species|tst"]) {
+		for (const id of ["catalog:dracolich|mm", "catalog:zombie|dmg", "race:species|tst"]) {
 			expect(resolveCreatureTransformation({candidates: current, id})).toEqual(resolveCreatureTransformation({candidates: previous, id}));
 		}
 		const staged = resolveCreatureTransformation({candidates: current, id: "catalog:dracolich|mm", automationVersion: 2});

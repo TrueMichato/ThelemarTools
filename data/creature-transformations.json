@@ -218,7 +218,8 @@
 			"manualReview": [
 				{"field": "abilities", "reason": "Apply the DMG racial adjustments to this corpse's own scores, not the MM zombie's fixed scores."},
 				{"field": "traits", "reason": "Resolve Undead Fortitude and lost capabilities for the reanimated creature."}
-			]
+			],
+			"automation": {"version": 2, "profile": "zombie-numerics", "rollout": "staged", "hitPoints": "constitution"}
 		},
 		{
 			"name": "Wereshark",
