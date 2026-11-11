@@ -112,6 +112,22 @@ const assertChanges = changes => {
 	}
 };
 
+const isDracolichIdentity = identity => typeof identity?.name === "string" && identity.name.toLowerCase() === "dracolich"
+	&& typeof identity?.source === "string" && identity.source.toLowerCase() === "mm";
+const assertAutomation = (automation, identity) => {
+	if (!isDracolichIdentity(identity)
+		|| !automation || Object.keys(automation).sort().join(",") !== "changes,profile,rollout,version"
+		|| automation.version !== 2 || automation.profile !== "dracolich" || automation.rollout !== "staged") {
+		throw new CreatureTransformationCandidateError("Only the staged version-2 Dracolich (MM) automation profile is supported.");
+	}
+	assertChanges(automation.changes);
+	const names = new Set(automation.changes.map(it => it.entry?.name));
+	if (automation.changes.length !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")
+		|| automation.changes.some(it => it.op !== "addEntry" || it.section !== "trait" || it.entry.source !== "MM")) {
+		throw new CreatureTransformationCandidateError("Staged Dracolich automation requires exactly the sourced Magic Resistance and Undead Nature traits.");
+	}
+};
+
 const getCombinations = (values, count) => {
 	if (!Array.isArray(values) || !values.length || values.length > 24 || new Set(values).size !== values.length
 		|| !Number.isInteger(count) || count < 1 || count > 6 || count > values.length) return null;
@@ -426,6 +442,7 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions, onIn
 		) throw new CreatureTransformationCandidateError(`Invalid transformation provenance: ${candidate.id}`);
 		assertEligibility(candidate.eligibility);
 		assertReview(candidate.manualReview);
+		if (Object.hasOwn(candidate, "automation")) assertAutomation(candidate.automation, candidate.identity);
 		if (!Array.isArray(candidate.prerequisites) || candidate.prerequisites.some(it => typeof it !== "string" || !it.trim())) throw new CreatureTransformationCandidateError(`Invalid transformation prerequisites: ${candidate.id}`);
 		assertChanges(candidate.changes);
 		if (!Array.isArray(candidate.optionGroups)) throw new CreatureTransformationCandidateError(`Invalid transformation option groups: ${candidate.id}`);
@@ -552,7 +569,8 @@ async function pLoadCreatureTransformationCandidates ({dataUtil = globalThis.Dat
 	});
 }
 
-function resolveCreatureTransformation ({candidates, id, selections = {}}) {
+function resolveCreatureTransformation ({candidates, id, selections = {}, automationVersion = 1}) {
+	if (![1, 2].includes(automationVersion)) throw new Error("Unsupported creature transformation automation version.");
 	const candidate = candidates?.find(it => it.id === id);
 	if (!candidate || candidates.filter(it => it.id === id).length !== 1) throw new Error(`Unavailable or ambiguous transformation: ${id}`);
 	if (selections == null || Array.isArray(selections) || typeof selections !== "object") throw new Error("Selections must be keyed by option group.");
@@ -579,7 +597,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}}) {
 	}
 	assertChanges(changes);
 	assertReview(manualReview);
-	return {
+	const resolved = {
 		id: candidate.id,
 		kind: candidate.kind,
 		identity: copy(candidate.identity),
@@ -590,6 +608,90 @@ function resolveCreatureTransformation ({candidates, id, selections = {}}) {
 		changes,
 		manualReview,
 	};
+	if (automationVersion === 2) {
+		if (candidate.kind !== "catalog") throw new Error("Staged automation is not available for species.");
+		assertAutomation(candidate.automation, candidate.identity);
+		resolved.version = 2;
+		resolved.automation = copy(candidate.automation);
+	}
+	return resolved;
 }
 
-export {getCreatureTransformationCandidates, pLoadCreatureTransformationCandidates, resolveCreatureTransformation};
+function isCompiledCreatureTransformation (resolved) {
+	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm"
+		|| !isDracolichIdentity(resolved.identity) || Object.hasOwn(resolved, "automation")) return false;
+	if (!Array.isArray(resolved.eligibility) || !resolved.eligibility.some(rule => rule?.dmApproval === true)) return false;
+	if (!Array.isArray(resolved.changes)) return false;
+	const op = step => step?.op ?? step?.type;
+	if (resolved.changes.some(step => !["setType", "grantResistance", "grantImmunity", "grantConditionImmunity", "addEntry", "removeEntry"].includes(op(step)))) return false;
+	const types = resolved.changes.filter(step => op(step) === "setType");
+	const additions = resolved.changes.filter(step => op(step) === "addEntry");
+	const removals = resolved.changes.filter(step => op(step) === "removeEntry");
+	if (types.length !== 1 || types[0].value !== "undead"
+		|| additions.length !== 2 || new Set(additions.map(step => step.entry?.name)).size !== 2
+		|| additions.some(step => step.section !== "trait" || step.entry?.source !== "MM" || !["Magic Resistance", "Undead Nature"].includes(step.entry?.name))
+		|| removals.length > 1 || removals.some(step => step.section !== "trait" || typeof step.match?.name !== "string" || step.match.name.trim().toLowerCase() !== "amphibious"
+			|| typeof step.match.source !== "string" || !step.match.source.trim() || step.match.source === "$chassis")) return false;
+	const options = resolved.selectedOptions;
+	if (!options || Object.keys(options).sort().join(",") !== "automation-age,automation-lair,automation-nature,automation-physiology") return false;
+	const matches = (key, values) => Array.isArray(options[key]) && options[key].length === values.length && options[key].every((value, index) => value === values[index]);
+	return ["adult", "ancient"].some(age => matches("automation-age", [age]))
+		&& matches("automation-nature", ["true-dragon", "not-shadow"])
+		&& matches("automation-physiology", ["amphibious-only"])
+		&& matches("automation-lair", ["retain"]);
+}
+
+function compileCreatureTransformation ({resolved, current, chassisSource = current?.source, inputs = {}}) {
+	const fail = (message, code = "CREATURE_TRANSFORMATION_INPUT_REQUIRED") => {
+		const error = new Error(message);
+		error.code = code;
+		throw error;
+	};
+	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm") throw new Error("Only staged version-2 Dracolich compilation is supported.");
+	assertAutomation(resolved.automation, resolved.identity);
+	if (!resolved.selectedOptions || Object.keys(resolved.selectedOptions).length) throw new Error("Staged Dracolich does not support additional option groups.");
+	assertIdentity(current);
+	const type = typeof current.type === "string" ? current.type : current.type?.type;
+	if (type !== "dragon") fail("Dracolich requires a living true dragon.", "CREATURE_TRANSFORMATION_INELIGIBLE");
+	if (!inputs || typeof inputs !== "object" || Array.isArray(inputs)
+		|| Object.keys(inputs).some(key => !["age", "trueDragon", "shadowDragon", "physiology", "lairActions"].includes(key))) {
+		fail("Dracolich inputs must specify age, true-dragon status, shadow status, physiology and lair decisions.");
+	}
+	if (["wyrmling", "young"].includes(inputs.age) || inputs.trueDragon === false || inputs.shadowDragon === true) {
+		fail("Only an adult or ancient true dragon that is not a shadow dragon can become a dracolich.", "CREATURE_TRANSFORMATION_INELIGIBLE");
+	}
+	if (!["adult", "ancient"].includes(inputs.age) || inputs.trueDragon !== true || inputs.shadowDragon !== false) {
+		fail("Confirm adult or ancient age, true-dragon status, and that the subject is not a shadow dragon.");
+	}
+	if (inputs.physiology !== "amphibious-only") fail("Review living-physiology traits: this staged profile supports only Amphibious removal; other decisions require later guided support.");
+	if (inputs.lairActions !== "retain") fail("Choose to retain existing lair actions; changing them requires later guided support.");
+	if (current.trait != null && !Array.isArray(current.trait)) throw new Error("Dracolich traits must be an array.");
+	const traits = current.trait || [];
+	if (traits.some(it => it.name?.trim().toLowerCase() === "living shadow")) {
+		fail("A shadow dragon cannot become a dracolich.", "CREATURE_TRANSFORMATION_INELIGIBLE");
+	}
+	const amphibious = traits.filter(it => it.name?.trim().toLowerCase() === "amphibious");
+	if (amphibious.length > 1) fail("Amphibious matches multiple traits; choose the source-qualified physiology trait before applying.", "CREATURE_TRANSFORMATION_ENTRY_MATCH");
+	const compiled = copy(resolved);
+	delete compiled.automation;
+	compiled.eligibility.push({dmApproval: true});
+	compiled.selectedOptions = {
+		"automation-age": [inputs.age],
+		"automation-nature": ["true-dragon", "not-shadow"],
+		"automation-physiology": ["amphibious-only"],
+		"automation-lair": ["retain"],
+	};
+	compiled.changes.push(...copy(resolved.automation.changes));
+	if (amphibious.length) {
+		const entry = amphibious[0];
+		const source = !entry.source || entry.source === "$chassis" ? chassisSource : entry.source;
+		if (typeof source !== "string" || !source.trim()) throw new Error("Amphibious requires a resolvable source identity.");
+		compiled.changes.push({op: "removeEntry", section: "trait", match: {name: entry.name, source}});
+	}
+	compiled.manualReview = copy(REVIEW_CHASSIS);
+	assertChanges(compiled.changes);
+	if (!isCompiledCreatureTransformation(compiled)) throw new Error("The staged Dracolich recipe cannot compile to the supported concrete profile.");
+	return compiled;
+}
+
+export {compileCreatureTransformation, getCreatureTransformationCandidates, isCompiledCreatureTransformation, pLoadCreatureTransformationCandidates, resolveCreatureTransformation};

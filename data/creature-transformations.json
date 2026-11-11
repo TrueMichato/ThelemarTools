@@ -93,7 +93,16 @@
 			],
 			"optionGroups": [],
 			"manualReview": [{"field": "traits", "reason": "Resolve magic resistance, lost traits, and dracolich-specific features; the existing static copy template is not an application engine."}],
-			"templateReference": {"name": "Dracolich", "source": "MM"}
+			"templateReference": {"name": "Dracolich", "source": "MM"},
+			"automation": {
+				"version": 2,
+				"profile": "dracolich",
+				"rollout": "staged",
+				"changes": [
+					{"op": "addEntry", "section": "trait", "entry": {"name": "Magic Resistance", "source": "MM", "entries": ["The dracolich has advantage on saving throws against spells and other magical effects."]}},
+					{"op": "addEntry", "section": "trait", "entry": {"name": "Undead Nature", "source": "MM", "entries": ["The dracolich needs no air, food, drink, or sleep."]}}
+				]
+			}
 		},
 		{
 			"name": "Spore Servant",

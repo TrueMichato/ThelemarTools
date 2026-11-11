@@ -1,4 +1,5 @@
 import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
+import {isCompiledCreatureTransformation} from "../creature-transformations.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -235,7 +236,8 @@ function _validateSection (section) {
 
 function _validateRecipe (resolved) {
 	_assertJson(resolved);
-	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"], "Resolved transformation");
+	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"], "Resolved transformation");
+	if (Object.hasOwn(resolved, "version") && !isCompiledCreatureTransformation(resolved)) _fail("Invalid compiled version-2 transformation profile or choices.");
 	_expectString(resolved.id, "Transformation ID");
 	if (!["catalog", "race"].includes(resolved.kind)) _fail("Transformation kind must be catalog or race.");
 	if (!resolved.id.startsWith(`${resolved.kind}:`) || !resolved.id.includes("|")) _fail("Transformation ID must be a source-qualified catalog or race identity.");
