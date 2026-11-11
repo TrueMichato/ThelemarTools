@@ -1,4 +1,5 @@
 import {isTransformationEntry, isTransformationSpell} from "../creature-transformation-entries.js";
+import {isCompiledCreatureTransformation} from "../creature-transformations.js";
 
 const DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
@@ -96,6 +97,8 @@ function validateStep (step) {
 
 export function normalizeCreatureTransformation (resolved) {
 	expect(isRecord(resolved) && Array.isArray(resolved.changes), "resolved changes must be an array");
+	expect(!Object.hasOwn(resolved, "automation"), "staged automation must be compiled for a target first");
+	if (Object.hasOwn(resolved, "version")) expect(isCompiledCreatureTransformation(resolved), "invalid compiled version-2 profile or choices");
 	const changes = resolved.changes.map((step, index) => {
 		expect(validateStep(step), `invalid or unrepresentable change ${index + 1} (${step?.op || "missing op"})`);
 		const {op, ...fields} = step;

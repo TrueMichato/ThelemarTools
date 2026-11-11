@@ -89,6 +89,27 @@ describe("app-owned creature transformation schema and source corpus", () => {
 		expect(getCreatureTransformationIdentityErrors({data: {creatureTransformation: [recipe]}, filePath: "fixture"})).toEqual(expect.arrayContaining([expect.stringContaining("duplicate option")]));
 	});
 
+	it("admits only the complete staged Dracolich descriptor without widening the app schema", () => {
+		const recipe = byId("Dracolich", "MM");
+		const validate = getCreatureTransformationValidator();
+		const check = changed => [
+			...getCreatureTransformationSchemaErrors({data: {creatureTransformation: [changed]}, filePath: "staged", validate}),
+			...getCreatureTransformationIdentityErrors({data: {creatureTransformation: [changed]}, filePath: "staged"}),
+		];
+		expect(check(recipe)).toEqual([]);
+		for (const automation of [
+			{...recipe.automation, version: 3},
+			{...recipe.automation, profile: "arbitrary"},
+			{...recipe.automation, rollout: "enabled"},
+			{...recipe.automation, when: {path: "size"}},
+			{...recipe.automation, changes: []},
+			{...recipe.automation, changes: [recipe.automation.changes[0], {...recipe.automation.changes[0], entry: {...recipe.automation.changes[0].entry, entries: ["Different duplicate."]}}]},
+			{...recipe.automation, changes: [{op: "setProp", prop: "trait", value: []}]},
+			{...recipe.automation, changes: recipe.automation.changes.map(it => ({...it, entry: {...it.entry, source: "TST"}}))},
+		]) expect(check({...recipe, automation})).not.toEqual([]);
+		expect(check({...recipe, name: "Skeleton"})).not.toEqual([]);
+	});
+
 	it("has every requested family with verified page and edition, or an explicit unverified screenshot", () => {
 		const requested = [
 			["Half-Dragon", "MM", 180], ["Shadow Dragon", "MM", 84], ["Dracolich", "MM", 83],
@@ -184,6 +205,29 @@ describe("app-owned creature transformation schema and source corpus", () => {
 });
 
 describe("source-qualified candidate and resolution API", () => {
+	it("keeps all default recipe and Species identities/options unchanged and requires an explicit staged opt-in", () => {
+		const legacy = structuredClone(catalog);
+		delete legacy.creatureTransformation.find(it => it.name === "Dracolich" && it.source === "MM").automation;
+		const races = [{name: "Species", source: "TST", size: ["M"], speed: 30, entries: [{type: "entries", name: "Trait", entries: ["A retained rule."]}]}];
+		const current = getCreatureTransformationCandidates({catalog, races});
+		const previous = getCreatureTransformationCandidates({catalog: legacy, races});
+		for (const candidate of previous) {
+			const match = structuredClone(current.find(it => it.id === candidate.id));
+			delete match.automation;
+			expect(match).toEqual(candidate);
+		}
+		for (const id of ["catalog:dracolich|mm", "race:species|tst"]) {
+			expect(resolveCreatureTransformation({candidates: current, id})).toEqual(resolveCreatureTransformation({candidates: previous, id}));
+		}
+		const staged = resolveCreatureTransformation({candidates: current, id: "catalog:dracolich|mm", automationVersion: 2});
+		expect(staged.automation).toEqual(byId("Dracolich", "MM").automation);
+		staged.automation.changes[0].entry.entries[0] = "Changed locally.";
+		expect(byId("Dracolich", "MM").automation.changes[0].entry.entries[0]).not.toBe("Changed locally.");
+		expect(() => resolveCreatureTransformation({candidates: current, id: "race:species|tst", automationVersion: 2})).toThrow("species");
+		expect(() => resolveCreatureTransformation({candidates: current, id: "catalog:skeleton|dmg", automationVersion: 2})).toThrow("staged");
+		expect(() => resolveCreatureTransformation({candidates: current, id: "catalog:dracolich|mm", automationVersion: 3})).toThrow("version");
+	});
+
 	const siteRaces = [
 		{name: "Elf", source: "PHB", edition: "classic", page: 21, _isBaseRace: true, entries: ["base"]},
 		{name: "Elf (High Elf)", source: "PHB", edition: "classic", page: 23, _baseName: "Elf", _baseSource: "PHB", darkvision: 60, resist: ["cold"], entries: ["subrace"]},

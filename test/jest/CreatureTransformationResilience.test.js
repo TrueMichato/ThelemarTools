@@ -50,6 +50,18 @@ describe("runtime creature recipe isolation", () => {
 		expect(warnings).toHaveLength(2);
 	});
 
+	it("isolates incomplete or unsupported staged profiles without losing any other candidate", async () => {
+		const index = catalog.creatureTransformation.findIndex(it => it.name === "Dracolich" && it.source === "MM");
+		for (const automation of [{...catalog.creatureTransformation[index].automation, profile: "unknown"}, {...catalog.creatureTransformation[index].automation, changes: []}]) {
+			const invalid = structuredClone(catalog);
+			invalid.creatureTransformation[index].automation = automation;
+			const warnings = [];
+			const result = await pLoadCreatureTransformationCandidates({dataUtil: makeLoader(invalid), onWarning: warning => warnings.push(warning)});
+			expect(result).toEqual(healthy.filter(it => it.id !== "catalog:dracolich|mm"));
+			expect(warnings).toEqual([expect.objectContaining({kind: "catalog", name: "Dracolich", source: "MM"})]);
+		}
+	});
+
 	it("does not partially admit a species when one of its versions is invalid", async () => {
 		const dataUtil = makeLoader(catalog, [{name: "Broken species", source: "TST", _versions: [{}]}]);
 		dataUtil.generic.getVersions = () => [{name: "Valid version", source: "TST"}, {name: null, source: "TST"}];

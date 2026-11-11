@@ -23,6 +23,13 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 		const id = `${recipe.name}|${recipe.source}`.toLowerCase();
 		if (seen.has(id)) errors.push(`${filePath}: duplicate creature transformation identity ${id}`);
 		seen.add(id);
+		if (recipe.automation) {
+			const changes = recipe.automation.changes;
+			const names = new Set(Array.isArray(changes) ? changes.map(it => it?.entry?.name) : []);
+			if (id !== "dracolich|mm" || names.size !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")) {
+				errors.push(`${filePath}: staged automation requires Dracolich|MM and its complete pair of sourced traits`);
+			}
+		}
 		const groupIds = new Set();
 		for (const group of recipe.optionGroups || []) {
 			if (groupIds.has(group.id)) errors.push(`${filePath}: duplicate group ${id}/${group.id}`);
