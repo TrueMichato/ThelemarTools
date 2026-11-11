@@ -7,16 +7,14 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 Planning starts from published `d14b7b8764293899609f8b7cd41a744eb99e1686`,
 not the main checkout's local-only critique-report ancestry. The user approved
-S1 and S2 implementation after the reproductions below. Both fixes have focused
-red/green and browser evidence, but await normal commit hooks and integration
-gates. The user approved staged implementation of the expanded Template plan,
-one verified milestone at a time; only its first unit is currently released.
+S1 and S2 implementation after the reproductions below. Their completed fixes
+and combined gates are recorded under Closed Bugs. The user approved staged
+implementation of the expanded Template plan, one verified milestone at a time;
+only its first unit is currently released.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S1 | 1: Combat-tab damage dice can disagree with the item and actual roll, including Gambler weapons. | Combat-only shared display/roll expression reader implemented. Real Superior Gambler coins now display/roll 1d6; reverting the actual badge call site fails both Jest and browser regressions. Focused 379 tests and two Chromium cases pass. Correct rollers, overrides and State builder/export contracts remain unchanged; Overview/Play Mode and unknown imported-save causes remain outside this fix. Await integration. |
-| S2 | 2: After selecting an import file on mobile, the confirmation button cannot be reached. | Import now uses the existing modal footer outside the scrollable file/JSON form, with import-only styles. Real large-file clipping failed before the fix; 40 lifecycle tests and 11 Chromium cases now pass, including focused-textarea geometry/hit-testing before clicks, persistence/reload, retry, cancellation/errors and unchanged Export. Native iOS keyboard behavior remains unverified. Await integration. |
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. M1 only is implementing a staged opt-in Dracolich compilation/frozen-replay foundation using existing typed operations; it does not enable default behavior or close this bug. Later calculation, CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. M1's staged opt-in Dracolich compilation/frozen-replay foundation has 96 focused tests passing and awaits commit/publication gates; it does not enable default behavior or close this bug. Later calculation, CR, form, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
 
 The orchestrator alone owns this tracker and shared character-sheet references.
@@ -41,6 +39,35 @@ artifacts; the combined full-repository gates are scheduled by the orchestrator.
   Preserve this distinction if the original symptom recurs.
 
 ## Closed Bugs
+
+### Round 72 - Combat damage labels and mobile import
+
+| PR | Scope |
+|---|---|
+| [#394](https://github.com/TrueMichato/ThelemarTools/pull/394) | S1: Combat damage badge/roller expression parity |
+| [#393](https://github.com/TrueMichato/ThelemarTools/pull/393) | S2: reachable mobile import confirmation |
+
+- **#1:** The Combat badge printed the State descriptor while the roller
+  separately resolved upgraded dice. Both now share Combat's live expression
+  reader: actual Superior Gambler coins display and roll 1d6 instead of showing
+  1d4. Overrides, hands/shield, Monk and material/upgrade composition are covered;
+  State's builder and NPC export's separate upgrade step remain unchanged.
+  Reverting the real badge call site fails both primary Jest and browser tests.
+  This fixes the main Combat badge, not Overview/Play Mode or an unestablished
+  affected-save cause; no speculative migration was added.
+- **#2:** Import actions were inside the file/JSON scroller, clipped in short
+  landscape and hidden again after textarea focus. The existing modal footer now
+  holds Cancel/Import outside that scroller, with import-only styles and unchanged
+  canonical persistence. Real large-file uploads, pre-click viewport/ancestor
+  clipping and centre hit-tests, focused textarea, persistent reload, retries,
+  cancellation/errors and unchanged Export pass. Native iOS keyboard, browser
+  chrome and file-picker behavior remain unverified.
+
+Combined integration verification: full ESLint/configured SCSS lint; 805 Jest
+suites and 21,680 tests passed, with the unchanged one skipped suite/13 skipped
+tests and actual NPC corpus guard; both browser specs passed together, 13/13,
+on a fresh served-byte-verified port. Normal child commit hooks ran separately.
+Template automation and Species remain open above.
 
 ### Round 71 - NPC export, companion dashboard, and spell materials - INTEGRATED
 
