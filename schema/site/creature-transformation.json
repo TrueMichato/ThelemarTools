@@ -306,7 +306,79 @@
 			},
 			"required": ["op", "value", "receipt"], "additionalProperties": false
 		},
+		"vampireChange": {
+			"description": "Only finite M8 Vampire|MM source-form fields; no arbitrary field program.",
+			"oneOf": [
+				{"type": "object", "properties": {
+					"op": {"const": "setVampireNature"}, "value": {"$ref": "#/$defs/reanimationChange/oneOf/0/properties/value"},
+					"alignment": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "L"}, {"const": "E"}], "items": false}
+				}, "required": ["op", "value", "alignment"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setVampireForm"}, "form": {"enum": ["bat", "mist"]},
+					"speed": {"$ref": "#/$defs/vampireSpeed"},
+					"languages": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+					"languageTags": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}, "contains": {"const": "CS"}}
+				}, "required": ["op", "form", "speed", "languages", "languageTags"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantVampireMistImmunity"}}, "required": ["op"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "removeVampireSpellcasting"}, "match": {"$ref": "#/$defs/identity"}}, "required": ["op", "match"], "additionalProperties": false}
+			]
+		},
+		"compiledVampire": {
+			"description": "Closed source-stage M8 NPC adaptation. Runtime additionally verifies numerical receipts, exact complete rules and true/bat/mist correspondence.",
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"const": "catalog:vampire|mm"}, "kind": {"const": "catalog"},
+				"identity": {"allOf": [{"$ref": "#/$defs/identity"}, {"type": "object", "properties": {"name": {"const": "Vampire"}, "source": {"const": "MM"}}}]},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {
+					"types": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "humanoid"}}, "dmApproval": {"const": true}
+				}, "required": ["types", "dmApproval"], "additionalProperties": false}},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"outcome": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["vampire", "spawn"]}},
+					"automation-vampire": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "sidebar-npc-m8"}},
+					"automation-vampire-numbers": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^[0-9]+:[0-9]+:[0-9]+:[0-9]+:[0-9]+:[0-9]+$"}},
+					"automation-vampire-legendary": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+					"automation-vampire-bat": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+					"automation-vampire-replacements": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}}
+				}, "required": ["outcome", "automation-vampire", "automation-vampire-numbers", "automation-vampire-legendary", "automation-vampire-bat", "automation-vampire-replacements"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"$ref": "#/$defs/vampireChange"},
+					{"allOf": [{"$ref": "#/$defs/numericChange"}, {"type": "object", "properties": {"op": {"enum": ["setHitPoints", "setSaveBonus", "setSkillBonus", "setPassivePerception"]}}}]},
+					{"allOf": [{"$ref": "#/$defs/bindingChange"}, {"type": "object", "properties": {"op": {"enum": ["setArmorClass", "setEntryNumbers"]}}}]},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"enum": ["setAbility", "grantSense", "grantResistance", "grantConditionalDefense", "addEntry", "removeEntry"]}}}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			}, "required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"allOf": [{"if": {"properties": {"selectedOptions": {"type": "object", "properties": {"outcome": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "spawn"}}}, "required": ["outcome"]}}}, "then": {"properties": {
+				"selectedOptions": {"type": "object", "properties": {"automation-vampire-legendary": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "not-granted"}}, "automation-vampire-bat": {"maxItems": 0, "type": "array"}}},
+				"changes": {"type": "array", "items": {"not": {"type": "object", "properties": {"op": {"enum": ["setVampireForm", "grantVampireMistImmunity", "removeVampireSpellcasting"]}}, "required": ["op"]}}}
+			}}}],
+			"additionalProperties": false
+		},
+		"vampireSpeedValue": {"oneOf": [
+			{"type": "integer", "minimum": 0, "maximum": 1000},
+			{"type": "object", "properties": {"number": {"type": "integer", "minimum": 0, "maximum": 1000}, "condition": {"type": "string", "minLength": 1, "maxLength": 256}}, "required": ["number"], "additionalProperties": false}
+		]},
+		"vampireSpeed": {
+			"type": "object", "properties": {
+				"walk": {"$ref": "#/$defs/vampireSpeedValue"}, "fly": {"$ref": "#/$defs/vampireSpeedValue"}, "swim": {"$ref": "#/$defs/vampireSpeedValue"}, "climb": {"$ref": "#/$defs/vampireSpeedValue"}, "burrow": {"$ref": "#/$defs/vampireSpeedValue"},
+				"canHover": {"type": "boolean"},
+				"alternate": {"type": "object", "properties": {
+					"walk": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/vampireSpeedValue"}},
+					"fly": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/vampireSpeedValue"}},
+					"swim": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/vampireSpeedValue"}},
+					"climb": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/vampireSpeedValue"}},
+					"burrow": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/vampireSpeedValue"}}
+				}, "additionalProperties": false}
+			}, "anyOf": [{"required": ["walk"]}, {"required": ["fly"]}, {"required": ["swim"]}, {"required": ["climb"]}, {"required": ["burrow"]}], "additionalProperties": false
+		},
 		"compiledFormLeaf": {
+			"oneOf": [{"$ref": "#/$defs/compiledHistoricalFormLeaf"}, {"allOf": [
+				{"$ref": "#/$defs/compiledVampire"},
+				{"type": "object", "properties": {"selectedOptions": {"type": "object", "properties": {"outcome": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "vampire"}}}}}}
+			]}]
+		},
+		"compiledHistoricalFormLeaf": {
 			"description": "Pre-adapter concrete v2 form output, never a catalog recipe or pending descriptor. Runtime additionally checks closed staged-profile markers and same-root/active equality.",
 			"type": "object",
 			"properties": {
@@ -373,26 +445,37 @@
 			"description": "Pre-adapter frozen output only. Leaves cannot contain another frozenForms envelope; source/profile identity and active projection equality are also checked at runtime.",
 			"type": "object",
 			"properties": {
-				"version": {"$ref": "#/$defs/compiledFormLeaf/properties/version"},
-				"id": {"$ref": "#/$defs/compiledFormLeaf/properties/id"},
-				"kind": {"$ref": "#/$defs/compiledFormLeaf/properties/kind"},
+				"version": {"const": 2},
+				"id": {"enum": ["catalog:zombie|dmg", "catalog:dracolich|mm", "catalog:vampire|mm"]},
+				"kind": {"const": "catalog"},
 				"identity": {"$ref": "#/$defs/identity"},
 				"provenance": {"$ref": "#/$defs/provenance"},
-				"eligibility": {"$ref": "#/$defs/compiledFormLeaf/properties/eligibility"},
-				"prerequisites": {"$ref": "#/$defs/compiledFormLeaf/properties/prerequisites"},
-				"selectedOptions": {"$ref": "#/$defs/compiledFormLeaf/properties/selectedOptions"},
-				"changes": {"$ref": "#/$defs/compiledFormLeaf/properties/changes"},
-				"manualReview": {"$ref": "#/$defs/compiledFormLeaf/properties/manualReview"},
+				"eligibility": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/eligibility"},
+				"prerequisites": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/prerequisites"},
+				"selectedOptions": {"oneOf": [{"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/selectedOptions"}, {"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}]},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256},
+				"manualReview": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/manualReview"},
 				"frozenForms": {"$ref": "#/$defs/frozenForms"}
 			},
 			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "frozenForms"],
+			"allOf": [
+				{"if": {"properties": {"id": {"const": "catalog:vampire|mm"}}}, "then": {"properties": {
+					"identity": {"$ref": "#/$defs/compiledVampire/properties/identity"},
+					"eligibility": {"$ref": "#/$defs/compiledVampire/properties/eligibility"},
+					"selectedOptions": {"allOf": [{"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}, {"type": "object", "properties": {"outcome": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "vampire"}}}}]},
+					"changes": {"$ref": "#/$defs/compiledVampire/properties/changes"}
+				}}, "else": {"properties": {
+					"selectedOptions": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/selectedOptions"},
+					"changes": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/changes"}
+				}}}
+			],
 			"additionalProperties": false
 		},
 		"stagedAutomation": {
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
-				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
 		},
@@ -653,6 +736,7 @@
 					{"properties": {"name": {"const": "Spore Servant"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "spore-servant"}}}}},
 					{"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "shadow-dragon-mm"}}}}},
 					{"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "BEG"}, "automation": {"type": "object", "properties": {"profile": {"const": "shadow-dragon-beg"}}}}},
+					{"properties": {"name": {"const": "Vampire"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "vampire"}}}}},
 					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
 				]}}
 			],

@@ -23,6 +23,8 @@ function compileTarget ({target, resolved, automationInputs, legendaryGroups}) {
 		inputs: automationInputs[target.id],
 		proficiencyContext: automationInputs[target.id]?.cr ? getProficiencyContext({target, current}) : null,
 		legendaryGroups,
+		...(resolved.version === 2 && resolved.id === "catalog:vampire|mm" && resolved.selectedOptions.outcome?.[0] === "vampire"
+			? {baseline: BestiaryQuickActionsUtil.getCreatureTransformationBaseline({baseCreature: target.baseCreature, operations: target.operations})} : {}),
 	}));
 }
 

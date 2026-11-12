@@ -34,7 +34,8 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 		}
 		const m7 = ["spore-servant", "shadow-dragon-mm", "shadow-dragon-beg"].includes(recipe.automation?.profile);
 		if (m7 && getSporeShadowProfile(`catalog:${id}`) !== recipe.automation.profile) errors.push(`${filePath}: M7 automation requires its exact source-qualified Spore/Shadow identity`);
-		if (recipe.automation && !m7 && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling"].includes(recipe.automation.profile)) {
+		if (recipe.automation?.profile === "vampire" && id !== "vampire|mm") errors.push(`${filePath}: M8 automation is limited to Vampire|MM`);
+		if (recipe.automation && !m7 && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling", "vampire"].includes(recipe.automation.profile)) {
 			const changes = recipe.automation.changes;
 			const names = new Set(Array.isArray(changes) ? changes.map(it => it?.entry?.name) : []);
 			if (id !== "dracolich|mm" || names.size !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")) {
