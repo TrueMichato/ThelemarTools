@@ -155,7 +155,8 @@
 				{"field": "traits", "reason": "Resolve Stealth expertise and the light-dependent shadow traits."},
 				{"field": "attacks", "reason": "Replace the original breath with its shadow form and determine bite, lair, and legendary changes."},
 				{"field": "attacks", "reason": "If Shadow Breath reduces a Humanoid to 0 hit points, adjudicate its death and the resulting shadow; these steps do not create a creature."}
-			]
+			],
+			"automation": {"version": 2, "profile": "shadow-dragon-mm", "rollout": "staged"}
 		},
 		{
 			"name": "Dracolich",
@@ -209,7 +210,8 @@
 				{"field": "traits", "reason": "Remove old traits, skills, saves, languages, tags, and special senses; blindsight has a beyond-range limitation."},
 				{"field": "attacks", "reason": "Retain only permitted melee actions; assess an unarmed strike if none remain."},
 				{"field": "other", "reason": "Reduce each movement speed by 10 feet, minimum 5, without replacing the chassis' movement types."}
-			]
+			],
+			"automation": {"version": 2, "profile": "spore-servant", "rollout": "staged"}
 		},
 		{
 			"name": "Vampire",
@@ -382,7 +384,8 @@
 				{"field": "eligibility", "reason": "Requires a true dragon associated with the Shadowfell; dracoliches are excluded."},
 				{"field": "traits", "reason": "Resolve doubled Stealth proficiency, conditional shadow resistance and hiding, and sunlight sensitivity."},
 				{"field": "attacks", "reason": "Convert elemental bite and breath effects to necrotic; adjudicate a shadow created by lethal breath damage."}
-			]
+			],
+			"automation": {"version": 2, "profile": "shadow-dragon-beg", "rollout": "staged"}
 		},
 		{
 			"name": "Fey Beast",

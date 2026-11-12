@@ -144,7 +144,7 @@ function getPhysiology ({current, decisions, chassisSource}) {
 	return removals;
 }
 
-function getLair (current, choice, legendaryGroups) {
+export function compileCreatureTransformationLair (current, choice, legendaryGroups) {
 	if (keys(choice, ["mode"]) && choice.mode === "retain") return [];
 	if (!keys(choice, ["mode", "baseline", "actions"]) || choice.mode !== "replace" || !lairGroup(choice.baseline)
 		|| !Array.isArray(choice.actions) || (choice.actions.length && !content(choice.actions))) fail("Choose lair mode retain, or replace with the complete source-qualified baseline group and concrete actions (including an empty list to lose all).");
@@ -200,7 +200,7 @@ export function compileReanimation ({resolved, current, chassisSource, inputs, l
 			|| (current.trait || []).some(entry => ["MM", "BEG"].some(source => sameMatch(identity(entry, chassisSource), {name: "Living Shadow", source})))) fail("Only an adult or ancient true dragon, never a shadow dragon, can become a dracolich.", "CREATURE_TRANSFORMATION_INELIGIBLE");
 		if (!["adult", "ancient"].includes(decisions.age) || decisions.trueDragon !== true || decisions.shadowDragon !== false) fail("Confirm adult/ancient age, true-dragon identity and non-shadow nature.");
 		removals = getPhysiology({current, decisions: decisions.physiology, chassisSource});
-		changes.push(...getLair(current, decisions.lair, legendaryGroups));
+		changes.push(...compileCreatureTransformationLair(current, decisions.lair, legendaryGroups));
 		receipts["automation-age"] = [decisions.age];
 		receipts["automation-nature"] = ["true-dragon", "not-shadow"];
 		receipts["automation-physiology"] = decisions.physiology.map(it => `${it.mode}:${it.match.name}|${it.match.source}`);

@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 import Ajv from "ajv/dist/2020.js";
 import {getCreatureTransformationCandidates} from "../js/creature-transformations.js";
+import {getSporeShadowProfile} from "../js/creature-transformation-spore-shadow.js";
 
 const SCHEMA_PATH = "schema/site/creature-transformation.json";
 const DATA_PATH = "data/creature-transformations.json";
@@ -31,7 +32,9 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 				errors.push(`${filePath}: ${error.message}`);
 			}
 		}
-		if (recipe.automation && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling"].includes(recipe.automation.profile)) {
+		const m7 = ["spore-servant", "shadow-dragon-mm", "shadow-dragon-beg"].includes(recipe.automation?.profile);
+		if (m7 && getSporeShadowProfile(`catalog:${id}`) !== recipe.automation.profile) errors.push(`${filePath}: M7 automation requires its exact source-qualified Spore/Shadow identity`);
+		if (recipe.automation && !m7 && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling"].includes(recipe.automation.profile)) {
 			const changes = recipe.automation.changes;
 			const names = new Set(Array.isArray(changes) ? changes.map(it => it?.entry?.name) : []);
 			if (id !== "dracolich|mm" || names.size !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")) {

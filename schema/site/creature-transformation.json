@@ -392,7 +392,7 @@
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
-				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
 		},
@@ -472,6 +472,62 @@
 				{"if": {"properties": {"id": {"const": "catalog:skeletal wyrmling|ar8"}}}, "then": {"properties": {"identity": {"type": "object", "properties": {"name": {"const": "Skeletal Wyrmling"}, "source": {"const": "Ar8"}}}, "selectedOptions": {"type": "object", "required": ["automation-donor", "automation-breaths"], "propertyNames": {"enum": ["automation-reanimation", "automation-donor", "automation-breaths"]}, "properties": {"automation-reanimation": {"type": "array", "items": {"const": "skeletal wyrmling|ar8:m6"}}}}}}}
 			],
 			"additionalProperties": false
+		},
+		"m7SpeedValue": {"oneOf": [
+			{"type": "integer", "minimum": 5, "maximum": 1000},
+			{"type": "object", "properties": {"number": {"type": "integer", "minimum": 5, "maximum": 1000}, "condition": {"type": "string", "minLength": 1, "maxLength": 256}}, "required": ["number"], "additionalProperties": false}
+		]},
+		"m7Speed": {
+			"type": "object", "minProperties": 1,
+			"properties": {
+				"walk": {"$ref": "#/$defs/m7SpeedValue"}, "fly": {"$ref": "#/$defs/m7SpeedValue"}, "swim": {"$ref": "#/$defs/m7SpeedValue"}, "climb": {"$ref": "#/$defs/m7SpeedValue"}, "burrow": {"$ref": "#/$defs/m7SpeedValue"},
+				"canHover": {"type": "boolean"},
+				"alternate": {"type": "object", "properties": {
+					"walk": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/m7SpeedValue"}},
+					"fly": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/m7SpeedValue"}},
+					"swim": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/m7SpeedValue"}},
+					"climb": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/m7SpeedValue"}},
+					"burrow": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/m7SpeedValue"}}
+				}, "additionalProperties": false}
+			}, "anyOf": [{"required": ["walk"]}, {"required": ["fly"]}, {"required": ["swim"]}, {"required": ["climb"]}, {"required": ["burrow"]}], "additionalProperties": false
+		},
+		"sporeShadowChange": {"oneOf": [
+			{"type": "object", "properties": {"op": {"const": "setSporeCharacteristics"}, "speed": {"$ref": "#/$defs/m7Speed"}}, "required": ["op", "speed"], "additionalProperties": false},
+			{"type": "object", "properties": {"op": {"const": "removeSporeSpellcasting"}, "match": {"$ref": "#/$defs/identity"}}, "required": ["op", "match"], "additionalProperties": false},
+			{"type": "object", "properties": {"op": {"enum": ["setSporeLair", "setShadowLair"]}, "value": {"$ref": "#/$defs/reanimationChange/oneOf/2/properties/value"}}, "required": ["op", "value"], "additionalProperties": false}
+		]},
+		"compiledSporeShadow": {
+			"description": "Closed staged M7 source profiles. Runtime additionally checks fixed source rules, receipts, entry identities and per-family effect restrictions.",
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"enum": ["catalog:spore servant|mm", "catalog:shadow dragon|mm", "catalog:shadow dragon|beg"]}, "kind": {"const": "catalog"},
+				"identity": {"$ref": "#/$defs/identity"}, "provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/eligibility"}, "contains": {"type": "object", "required": ["dmApproval"], "properties": {"dmApproval": {"const": true}}}},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"automation-spore-shadow": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["spore servant|mm:m7", "shadow dragon|mm:m7", "shadow dragon|beg:m7"]}},
+					"automation-actions": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+					"automation-equipment": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+					"automation-removals": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 1000}},
+					"automation-nature": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "true-dragon"}, {"enum": ["born", "years"]}], "items": false},
+					"automation-stealth": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^[1-9][0-9]*:[012]:-?[0-9]+$"}},
+					"automation-lair": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["retain", "replace"]}}
+				}, "required": ["automation-spore-shadow", "automation-actions"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"$ref": "#/$defs/sporeShadowChange"},
+					{"allOf": [{"$ref": "#/$defs/bindingChange"}, {"properties": {"op": {"const": "setEntryNumbers"}}}]},
+					{"allOf": [{"$ref": "#/$defs/numericChange"}, {"properties": {"op": {"const": "setSkillBonus"}, "skill": {"const": "stealth"}}}]},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"properties": {"op": {"enum": ["grantResistance", "grantConditionalDefense", "grantConditionImmunity", "removeEntry", "replaceEntry", "addEntry"]}}}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			}, "required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"allOf": [
+				{"if": {"properties": {"id": {"const": "catalog:spore servant|mm"}}}, "then": {"properties": {"changes": {"items": {"properties": {"op": {"enum": ["setSporeCharacteristics", "removeSporeSpellcasting", "setSporeLair", "setEntryNumbers", "grantConditionImmunity", "removeEntry", "replaceEntry", "addEntry"]}}}}}}},
+				{"if": {"properties": {"id": {"enum": ["catalog:shadow dragon|mm", "catalog:shadow dragon|beg"]}}}, "then": {"properties": {"changes": {"items": {"properties": {"op": {"enum": ["grantResistance", "setSkillBonus", "grantConditionalDefense", "replaceEntry", "addEntry", "setShadowLair"]}}}}}}},
+				{"if": {"properties": {"id": {"const": "catalog:spore servant|mm"}}}, "then": {"properties": {"identity": {"properties": {"name": {"const": "Spore Servant"}, "source": {"const": "MM"}}}, "selectedOptions": {"required": ["automation-equipment", "automation-removals"], "propertyNames": {"enum": ["automation-spore-shadow", "automation-actions", "automation-equipment", "automation-removals"]}, "properties": {"automation-spore-shadow": {"items": {"const": "spore servant|mm:m7"}}}}}}},
+				{"if": {"properties": {"id": {"enum": ["catalog:shadow dragon|mm", "catalog:shadow dragon|beg"]}}}, "then": {"properties": {"selectedOptions": {"required": ["automation-nature", "automation-stealth", "automation-lair"], "propertyNames": {"enum": ["automation-spore-shadow", "automation-actions", "automation-nature", "automation-stealth", "automation-lair"]}}}}},
+				{"if": {"properties": {"id": {"const": "catalog:shadow dragon|mm"}}}, "then": {"properties": {"identity": {"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "MM"}}}, "selectedOptions": {"properties": {"automation-spore-shadow": {"items": {"const": "shadow dragon|mm:m7"}}}}}}},
+				{"if": {"properties": {"id": {"const": "catalog:shadow dragon|beg"}}}, "then": {"properties": {"identity": {"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "BEG"}}}, "selectedOptions": {"properties": {"automation-spore-shadow": {"items": {"const": "shadow dragon|beg:m7"}}}}}}}
+			], "additionalProperties": false
 		},
 		"halfDragonAncestry": {"enum": ["black", "blue", "brass", "bronze", "copper", "gold", "green", "red", "silver", "white"]},
 		"halfDragonSize": {"enum": ["large-or-smaller", "huge", "gargantuan"]},
@@ -594,6 +650,9 @@
 					{"properties": {"name": {"const": "Half-Dragon"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "half-dragon"}}}}},
 					{"properties": {"name": {"const": "Skeleton"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "skeleton"}}}}},
 					{"properties": {"name": {"const": "Skeletal Wyrmling"}, "source": {"const": "Ar8"}, "automation": {"type": "object", "properties": {"profile": {"const": "skeletal-wyrmling"}}}}},
+					{"properties": {"name": {"const": "Spore Servant"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "spore-servant"}}}}},
+					{"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "shadow-dragon-mm"}}}}},
+					{"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "BEG"}, "automation": {"type": "object", "properties": {"profile": {"const": "shadow-dragon-beg"}}}}},
 					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
 				]}}
 			],

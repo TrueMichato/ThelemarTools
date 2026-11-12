@@ -5,6 +5,7 @@ import {getCreatureTransformationInnateSpellcastingEntry, isCreatureTransformati
 import {isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "../creature-transformation-cr.js";
 import {assertFrozenCreatureTransformation, assertFrozenCreatureTransformationReplacement} from "../creature-transformation-forms.js";
 import {isReanimationChange, isReanimationOp} from "../creature-transformation-reanimation.js";
+import {isSporeShadowChange, isSporeShadowOp} from "../creature-transformation-spore-shadow.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -139,6 +140,10 @@ function _validateEntry (entry) {
 
 function _validateChange (change) {
 	if (!_isObject(change)) _fail("Transformation changes must be objects.");
+	if (isSporeShadowOp(change.type)) {
+		if (!isSporeShadowChange(change, "type")) _fail(`Invalid M7 setter "${change.type}".`);
+		return;
+	}
 	if (isReanimationOp(change.type)) {
 		if (!isReanimationChange(change, "type")) _fail(`Invalid reanimation setter "${change.type}".`);
 		return;
@@ -300,6 +305,7 @@ function _validateRecipe (resolved) {
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationBindingOp(change?.type))) _fail("Binding setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationCrOp(change?.type))) _fail("CR setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isReanimationOp(change?.type))) _fail("Reanimation setters require an opt-in version-2 snapshot.");
+	if (resolved.version !== 2 && resolved.changes.some(change => isSporeShadowOp(change?.type))) _fail("M7 setters require an opt-in version-2 snapshot.");
 	resolved.changes.forEach(_validateChange);
 	_expectArray(resolved.manualReview, "Manual review");
 	resolved.manualReview.forEach(it => {
@@ -399,6 +405,45 @@ function _applyChange (creature, change, chassis) {
 			Object.assign(out, values);
 			return {out, paths: Object.keys(values), writes};
 		}
+		case "setSporeCharacteristics": {
+			const values = {type: "plant",
+				alignment: ["U"],
+				alignmentPrefix: "",
+				int: 2,
+				wis: 6,
+				cha: 1,
+				speed: _copy(change.speed),
+				senses: ["blindsight 30 ft. (blind beyond this radius)"],
+				senseTags: ["B"],
+				passive: 8,
+				languages: [],
+				languageTags: ["CS"],
+				traitTags: [],
+				spellcastingTags: []};
+			const writes = Object.entries(values).filter(([key, value]) => !_equal(out[key], value))
+				.map(([key, value]) => ({path: key, before: out[key], after: value, section: null}));
+			const paths = Object.keys(values);
+			for (const field of ["save", "skill"]) {
+				if (out[field] !== undefined && !_isObject(out[field])) _fail(`Resolve the existing ${field} map before removing its bonuses.`);
+				for (const [key, value] of Object.entries(out[field] || {})) {
+					paths.push(`${field}.${key}`);
+					writes.push({path: `${field}.${key}`, before: value, after: undefined, section: null});
+				}
+				delete out[field];
+			}
+			Object.assign(out, values);
+			return {out, paths, writes};
+		}
+		case "removeSporeSpellcasting": {
+			const index = _getEntryIndex(out, "spellcasting", change.match, chassis);
+			before = out.spellcasting[index];
+			path = _getEntryKey("spellcasting", before, chassis);
+			out.spellcasting.splice(index, 1);
+			after = undefined;
+			return {out, path, write: {path, before, after, section: "spellcasting"}};
+		}
+		case "setSporeLair":
+		case "setShadowLair":
 		case "setReanimationLair":
 			path = "legendaryGroup";
 			before = out.legendaryGroup;
@@ -719,7 +764,7 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		const reanimation = resolved.version === 2 && Object.hasOwn(resolved.selectedOptions, "automation-reanimation");
+		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow"));
 		const hasNumericGroup = reanimation || (resolved.version === 2 && resolved.id === "catalog:zombie|dmg");
 		const isNumericStep = change => reanimation || change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
