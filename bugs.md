@@ -15,7 +15,7 @@ automation.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. [M4b (#400)](https://github.com/TrueMichato/ThelemarTools/pull/400) adds DOM-free typed target answers, reviewed residual proposals and three-round/CR composition for the existing narrow producers. [M4c C1 (#401)](https://github.com/TrueMichato/ThelemarTools/pull/401) adds internal guided creation/CR controls, exact deltas and reviewed Encounter save consequences; source acceptance only, with combined C1/C2 browser acceptance still held. These milestones do not enable default behavior, complete a family, or close this bug. C2 saved-form controls, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. [M4b (#400)](https://github.com/TrueMichato/ThelemarTools/pull/400) adds DOM-free typed target answers, reviewed residual proposals and three-round/CR composition for the existing narrow producers. [M4c C1 (#401)](https://github.com/TrueMichato/ThelemarTools/pull/401) adds internal guided creation/CR controls, exact deltas and reviewed Encounter save consequences. [M4c C2 (#402)](https://github.com/TrueMichato/ThelemarTools/pull/402) adds frozen saved-owner controls and completes bounded combined C1/C2 Chromium acceptance, including real persistence and native closed-select keyboard use. These milestones do not enable default behavior, complete a family, or close this bug. Family and rollout units remain separately bounded work. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
 
 M2a preserves non-CON HP residuals and explicit proficiency bindings rather than
@@ -97,10 +97,39 @@ the corrected affected selection passed three suites/54 tests. The native
 zero-round mutation also failed the independent DPR12 oracle before restoration.
 Normal commit hooks passed ten suites/74 tests; the exact published-leaf full gate
 passed 811 suites/21,865 tests with the unchanged one skipped suite/13 skipped
-tests and real NPC corpus guard. This is source-only acceptance: combined C1/C2
-real-browser, layout, accessibility, night and narrow-screen acceptance remains
-held and unperformed. C2 saved-form controls, family completion and default
-rollout remain separate; default and Species behavior are unchanged.
+tests and real NPC corpus guard. At C1 publication, combined browser acceptance
+was held; the C2 result below covers the corrected combined internal seam, not
+the original C1 leaf in isolation. Default and Species behavior are unchanged.
+
+M4c C2 opens saved owners before catalog loading and switches only their frozen
+permitted forms, replacing the same owner ID/index without changing history
+length, root or suffix. Resulting-history preflight, fresh consequence review,
+failed Store writes and explicit retry preserve the actual Registry/Encounter
+State, HP/temp HP/undo and group/turn behavior. Ordinary removal and flattened
+Homebrew export remain unchanged. The production CR-table loader removes only
+its exact DataUtil annotation from copied rows; cached rows and strict rejection
+of other invalid data remain intact. Native focus reveals saved controls and
+Cancel's history action through nested scrollers.
+
+Actual forwarding, real annotated-table readiness and native reveal regressions
+failed before their corrections. Normal commit hooks passed the exact 17 related
+suites/254 tests; the exact published-leaf full gate passed 811 suites/21,875
+tests with the unchanged one skipped suite/13 skipped tests and real NPC corpus
+guard. The combined internal Chromium confirmation passed all four cases with
+one worker and zero retries. Both real consumers completed saved-owner A/B/A,
+no-op, failure/retry/reload/removal and suffix-conflict checks. Five actual
+loader/compiler/estimator entries were positively calibrated in four document
+epochs: all 20 direct controls detected a call, then all 20 independent protected
+end counts were zero; missing V8 function records are not the zero-call proof.
+
+At 320px and 390px, plain and actual saved selects independently passed genuine
+Mac closed-select typeahead with trusted native changes, focus, closed popup,
+unchanged saved state and zero dropped records. Authored contrast, 44px targets,
+overflow, disclosure and Cancel focus checks completed. Native Cocoa menu input,
+other-platform keyboard routes, physical devices, a full accessibility audit and
+semantic TypeScript validation are not claimed. Reported `maxTouchPoints:0`
+despite configured touch remains unresolved. Fixtures are kernel-only; all 14
+family completion and default rollout remain open, with Species deferred.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
