@@ -15,7 +15,7 @@ automation.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. These milestones do not enable default behavior, complete a family, or close this bug. M4b guided inputs, M4c editor controls, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. [M4b (#400)](https://github.com/TrueMichato/ThelemarTools/pull/400) adds DOM-free typed target answers, reviewed residual proposals and three-round/CR composition for the existing narrow producers. These milestones do not enable default behavior, complete a family, or close this bug. M4c editor controls, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
 
 M2a preserves non-CON HP residuals and explicit proficiency bindings rather than
@@ -65,6 +65,23 @@ save/retry, HP/temp HP and group consequences. Final affected verification passe
 tests with the unchanged one skipped suite/13 skipped tests and real NPC corpus
 guard. These are kernel fixtures, not completed family forms. No guided UI,
 styles, browser/E2E, default enablement or Species changes are included.
+
+M4b separates observed target facts from unaccepted suggestions and explicit
+source-qualified answers. The app proposes residual bonuses after deliberate
+ability/PB selection and requires adoption; stale or cross-target proposals
+block. Three-round totals and PB coefficients use post-ability projected tokens,
+not original damage, with explicit schedule, coverage and completeness review.
+Inspection-only projection never grants actual consent or conflict decisions.
+Raw answers, generation, table, candidate, history and winner changes invalidate
+approval even when totals agree. Both consumers save/reload/remove only frozen
+concrete leaves and receipts. Initial focused verification passed 178 tests in
+six suites; final affected verification passed 64 tests in two suites, including
+29 input controls and the residual follow-up. The actual damage-source mutation
+failed the independent 12-versus-11 producer oracle before restoration. Normal
+commit hooks passed 30 suites/426 tests; the exact published-leaf full gate
+passed 810 suites/21,855 tests with the unchanged one skipped suite/13 skipped
+tests and real NPC corpus guard. This is not a family/form producer, guided UI
+or default rollout; no browser/E2E or Species changes are included.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or

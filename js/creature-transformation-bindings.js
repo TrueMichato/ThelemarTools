@@ -14,7 +14,13 @@ const isMatch = value => keysAre(value, ["name", "source"]) && isText(value.name
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const canonical = value => value.trim().toLowerCase();
 const getContent = (entry, section) => entry[section === "spellcasting" ? "headerEntries" : "entries"];
-const getTags = text => [...text.matchAll(/\{@(hit|dc|damage) ([^{}]+)}/g)];
+const getTags = text => {
+	const counts = {hit: 0, dc: 0, damage: 0};
+	return [...text.matchAll(/\{@(hit|dc|damage) ([^{}]+)}/g)]
+		.map(tag => Object.assign(tag, {kind: tag[1], raw: tag[2], token: counts[tag[1]]++}));
+};
+const getDamageMean = (dice, bonus = dice.bonus) => dice.number * (dice.faces + 1) / 2 + bonus;
+const getDamageAverage = (dice, bonus = dice.bonus) => Math.max(0, Math.floor(getDamageMean(dice, bonus)));
 const hasNumbers = value => /\{@(?:hit|dc|damage)\b|\bDC\s+\d+/.test(typeof value === "string" ? value : JSON.stringify(value) || "");
 
 function fail (message) {
@@ -105,13 +111,11 @@ function compileEntry ({entry, section, binding, current, out, pbOptions}) {
 			if (hasNumbers(text)) fail(`${entry.name} has nested numerical content; an explicit retain policy is required by this bounded API.`);
 			return structuredClone(text);
 		}
-		const counts = {hit: 0, dc: 0, damage: 0};
 		const edits = [];
 		const tags = getTags(text);
 		if ((text.match(/\{@(?:hit|dc|damage)\b/g) || []).length !== tags.length) fail(`${entry.name} has malformed numeric tags; an explicit retain policy or corrected source data is required.`);
 		for (const tag of tags) {
-			const [, kind, raw] = tag;
-			const token = counts[kind]++;
+			const {kind, raw, token} = tag;
 			const matches = binding.numbers.filter(it => it?.paragraph === paragraph && it.kind === kind && it.token === token);
 			if (matches.length !== 1) fail(`${entry.name} paragraph ${paragraph} ${kind} ${token} requires exactly one computed or source-fixed binding.`);
 			const number = matches[0];
@@ -141,13 +145,13 @@ function compileEntry ({entry, section, binding, current, out, pbOptions}) {
 			const dice = getDice(raw);
 			if (!keysAre(number.dice, ["number", "faces"]) || number.dice.number !== dice.number || number.dice.faces !== dice.faces || dice.bonus !== before) fail(`${entry.name} damage ${token} does not match its declared dice/ability/fixed contributions.`);
 			const average = /(\d+) \($/.exec(text.slice(0, tag.index));
-			if (!average || text[tag.index + tag[0].length] !== ")" || Number(average[1]) !== Math.max(0, Math.floor(dice.number * (dice.faces + 1) / 2 + before))) fail(`${entry.name} damage ${token} needs an adjacent, matching numeric average; custom averages require an explicit retain policy.`);
+			if (!average || text[tag.index + tag[0].length] !== ")" || Number(average[1]) !== getDamageAverage(dice, before)) fail(`${entry.name} damage ${token} needs an adjacent, matching numeric average; custom averages require an explicit retain policy.`);
 			if (after !== before) {
 				const formula = `${dice.number}d${dice.faces}${after ? ` ${after < 0 ? "-" : "+"} ${Math.abs(after)}` : ""}`;
 				edits.push({
 					start: tag.index - average[0].length,
 					end: tag.index + tag[0].length + 1,
-					text: `${Math.max(0, Math.floor(dice.number * (dice.faces + 1) / 2 + after))} ({@damage ${formula}})`,
+					text: `${getDamageAverage(dice, after)} ({@damage ${formula}})`,
 				});
 			}
 		}
@@ -156,6 +160,54 @@ function compileEntry ({entry, section, binding, current, out, pbOptions}) {
 	});
 	if (used.size !== binding.numbers.length) fail(`${entry.name} has unused or duplicate numeric bindings.`);
 	return same(entries, content) ? null : {op: "setEntryNumbers", section, match: structuredClone(binding.match), entries};
+}
+
+export function observeCreatureTransformationBindings ({current, chassisSource = current.source}) {
+	for (const section of SECTIONS) if (current[section] !== undefined && !Array.isArray(current[section])) fail(`${section} must be an entry array.`);
+	return SECTIONS.flatMap(section => (current[section] || []).map(entry => {
+		if (!isRecord(entry)) fail(`${section} needs source-qualified entry objects.`);
+		const match = {name: entry.name, source: !entry.source || entry.source === "$chassis" ? chassisSource : entry.source};
+		const content = getContent(entry, section);
+		const observation = {section, match, entry: structuredClone(entry), needsBinding: hasNumbers(content), tokens: [], supported: true};
+		try {
+			if (!Array.isArray(content)) fail(`${section} ${entry.name} has unsupported entry content.`);
+			for (const [paragraph, text] of (content || []).entries()) {
+				if (typeof text !== "string") continue;
+				for (const {kind, raw, token} of getTags(text)) {
+					const dice = kind === "damage" ? getDice(raw) : null;
+					observation.tokens.push({
+						paragraph,
+						kind,
+						token,
+						text,
+						value: dice ? dice.bonus : Number(raw),
+						...dice ? {dice: {number: dice.number, faces: dice.faces},
+							mean: getDamageMean(dice),
+							average: getDamageAverage(dice)} : {},
+					});
+				}
+			}
+			if (observation.needsBinding) {
+				compileEntry({
+					entry,
+					section,
+					current,
+					out: current,
+					binding: {section,
+						match,
+						mode: "bind",
+						numbers: observation.tokens.map(({paragraph, kind, token, value, dice}) =>
+							({paragraph, kind, token, mode: "fixed", value, ...dice ? {dice} : {}}))},
+				});
+			}
+		} catch (error) {
+			if (error.code !== "CREATURE_TRANSFORMATION_INPUT_REQUIRED") throw error;
+			observation.supported = false;
+			observation.reason = error.message;
+			observation.tokens.forEach(token => delete token.average);
+		}
+		return observation;
+	}));
 }
 
 export function compileCreatureTransformationBindings (options) {
