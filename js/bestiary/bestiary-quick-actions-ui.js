@@ -232,14 +232,16 @@ export class BestiaryQuickActionsUi {
 		return `<button type="button" class="bqa__btn-open ve-btn ve-btn-xs ve-btn-default ve-lst-is-exporting-image__hidden no-print" data-bqa-open="true" data-has-override="${count ? "true" : "false"}" aria-label="${title.qq()}" title="${title.qq()}"><span class="glyphicon glyphicon-pencil" aria-hidden="true"></span></button>`;
 	}
 
-	static async pOpen ({monster, registry = this._registry, pFnOnSave = null} = {}) {
+	static async pOpen ({monster, registry = this._registry, pFnOnSave = null, automationVersion = 1, transformationCallbacks = {}} = {}) {
 		if (!monster) throw new Error("A creature is required to open Bestiary Quick Actions.");
 		// Bestiary filter items are UI metadata, not part of the editable statblock.
 		monster = {...monster};
 		delete monster._fSources;
 
 		let unsubscribe = null;
+		let isOpen = true;
 		const onClose = () => {
+			isOpen = false;
 			unsubscribe?.();
 			this._modalOpenCount = Math.max(0, this._modalOpenCount - 1);
 			if (!this._modalOpenCount) document.body.classList.remove("bqa__modal-active");
@@ -302,7 +304,25 @@ export class BestiaryQuickActionsUi {
 			try {
 				switch (activeSection) {
 					case "minion": return this._pRenderMinion({content, monster, registry});
-					case "transformation": return this._pRenderTransformation({content, monster, registry, isCurrent: () => request === renderRequest});
+					case "transformation": return this._pRenderTransformation({content,
+						monster,
+						registry,
+						automationVersion,
+						...transformationCallbacks,
+						isCurrent: () => isOpen && request === renderRequest,
+						setCommitBusy: busy => {
+							if (busy) {
+								workspace.querySelectorAll("button, input, select, textarea").forEach(node => {
+									node.dataset.transformationWasDisabled = String(node.disabled);
+									node.disabled = true;
+								});
+							} else {
+								workspace.querySelectorAll("[data-transformation-was-disabled]").forEach(node => {
+									node.disabled = node.dataset.transformationWasDisabled === "true";
+									delete node.dataset.transformationWasDisabled;
+								});
+							}
+						}});
 					case "area": return this._pRenderAreaTraits({content, monster, registry});
 					case "lair": return this._pRenderLairActions({content, monster, registry});
 					case "item": return this._pRenderMagicItem({content, monster, registry});
@@ -486,10 +506,13 @@ export class BestiaryQuickActionsUi {
 		return wrp;
 	}
 
-	static async _pRenderTransformation ({content, monster, registry, isCurrent}) {
+	static async _pRenderTransformation ({content, monster, registry, isCurrent, automationVersion = 1, validateOperation = null, getConsequences, setCommitBusy = () => {}}) {
 		await pRenderCreatureTransformationEditor({
 			mount: content,
 			isCurrent,
+			automationVersion,
+			validateOperation,
+			getConsequences,
 			getTargets: () => [{
 				id: "current",
 				label: monster._displayName || monster.name,
@@ -498,13 +521,12 @@ export class BestiaryQuickActionsUi {
 			}],
 			getStamp: () => JSON.stringify(registry.getOverride({monster})),
 			pApply: async changes => {
-				const result = await registry.applyChanges({
-					monster,
-					addOperations: changes[0].addOperations,
-					removeIds: [],
-				});
-				if (!result) throw new Error("The statblock edit was not applied.");
-				JqueryUtil.doToast({type: "success", content: "Transformation applied. Manual-review items still need DM adjudication."});
+				setCommitBusy(true);
+				try {
+					const result = await registry.applyChanges({monster, addOperations: changes[0].addOperations, removeIds: changes[0].removeIds});
+					if (!result) throw new Error("The statblock edit was not applied.");
+					JqueryUtil.doToast({type: "success", content: "Transformation applied. Manual-review items still need DM adjudication."});
+				} finally { setCommitBusy(false); }
 			},
 		});
 	}
