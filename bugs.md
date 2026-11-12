@@ -174,7 +174,38 @@ NPC corpus. No browser/E2E run was performed for M6.
 M6 remains internal/staged, retains current CR/XP and reports the limitation.
 Estimated CR/override composition and shared-editor inputs remain rollout
 prerequisites. Default/version-1 and historical M1-M5 operations remain unchanged.
-This does not close the Templates bug: M7-M13 remain open, with Species deferred.
+This does not close the Templates bug: M8-M13 remain open, with Species deferred.
+
+M7 [#405](https://github.com/TrueMichato/ThelemarTools/pull/405) stages Spore
+Servant MM and independent MM/BEG Shadow Dragon source compilers. Spore executes
+retained/lost characteristics, speed floors, source-qualified melee/equipment
+policies, supported Multiattack cleanup and the unarmed fallback. Explicit
+bindings reconcile retained attacks after mental-score changes. Each Shadow
+profile executes doubled Stealth proficiency, light-dependent defenses,
+elemental bite conversion and necrotic breath with all lethal-humanoid rules.
+Lair choices preserve complete regional/mythic context; unrelated statistics,
+equipment and legendary actions remain intact. Both consumers save/reload/remove
+frozen concrete operations without consulting live sources.
+
+Four deliberate production faults failed ordinary mechanical assertions before
+restoration. Parent review additionally reproduced rejected Spore damage being
+reintroduced and both Shadow sources leaving a non-necrotic breath alternative.
+Nine ordinary regressions failed before correction and passed afterward.
+Unsupported compound damage and inseparable mixed riders now block precisely,
+not partially apply. Initial verification passed 17 suites/395 tests; corrected
+focused verification passed eight suites/192 tests, with zero skips. Parent
+independently repeated all 37 M7 cases, the original probes and 12 malformed-
+profile sibling-isolation controls. The entire prior catalog/schema is preserved
+except the exact staged descriptors/allowlists/definitions; representative
+accepted-base concrete snapshots and old-operation replays remain unchanged.
+
+Normal commit hooks passed the exact seven JS inputs and all 34 related
+suites/542 tests. The exact published-leaf full gate passed 814 suites/21,971
+tests with the unchanged one skipped suite/13 skipped tests and real NPC corpus.
+No browser/E2E run was performed for M7. This remains internal/staged, retains
+current CR/XP and does not enable default behavior. Estimated CR/override,
+guided-editor composition, remaining families and final rollout remain open;
+Species stays deferred.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
