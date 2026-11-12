@@ -15,7 +15,7 @@ automation.
 
 | Track | Reported bugs | Ownership and acceptance |
 |---|---|---|
-| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. [M4b (#400)](https://github.com/TrueMichato/ThelemarTools/pull/400) adds DOM-free typed target answers, reviewed residual proposals and three-round/CR composition for the existing narrow producers. These milestones do not enable default behavior, complete a family, or close this bug. M4c editor controls, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
+| S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. [M4b (#400)](https://github.com/TrueMichato/ThelemarTools/pull/400) adds DOM-free typed target answers, reviewed residual proposals and three-round/CR composition for the existing narrow producers. [M4c C1 (#401)](https://github.com/TrueMichato/ThelemarTools/pull/401) adds internal guided creation/CR controls, exact deltas and reviewed Encounter save consequences; source acceptance only, with combined C1/C2 browser acceptance still held. These milestones do not enable default behavior, complete a family, or close this bug. C2 saved-form controls, family and rollout units require separate bounded assignments. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
 
 M2a preserves non-CON HP residuals and explicit proficiency bindings rather than
@@ -82,6 +82,25 @@ commit hooks passed 30 suites/426 tests; the exact published-leaf full gate
 passed 810 suites/21,855 tests with the unchanged one skipped suite/13 skipped
 tests and real NPC corpus guard. This is not a family/form producer, guided UI
 or default rollout; no browser/E2E or Species changes are included.
+
+M4c C1 adds native guided creation controls over these foundations, with exact
+source-qualified numeric/entry/header deltas, explicit residual adoption,
+reviewed three-round schedules, estimated CR and an independent override.
+Fresh raw answers, table/catalog reloads, histories, winners and compiled consent
+are fenced through the real workflow. Actual individual Encounter and eligible
+mixed-bulk callbacks preserve one atomic Store write. Newly discovered or changed
+HP/group consequences pause with zero writes, persistent named review and fresh
+confirmation; changed membership invalidates approval even when the displayed
+consequences agree. Failed writes await explicit retry; post-save refresh errors
+say saved/reload. The pre-fix real Store regression saved once before review;
+the corrected affected selection passed three suites/54 tests. The native
+zero-round mutation also failed the independent DPR12 oracle before restoration.
+Normal commit hooks passed ten suites/74 tests; the exact published-leaf full gate
+passed 811 suites/21,865 tests with the unchanged one skipped suite/13 skipped
+tests and real NPC corpus guard. This is source-only acceptance: combined C1/C2
+real-browser, layout, accessibility, night and narrow-screen acceptance remains
+held and unperformed. C2 saved-form controls, family completion and default
+rollout remain separate; default and Species behavior are unchanged.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or

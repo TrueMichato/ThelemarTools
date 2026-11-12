@@ -1093,7 +1093,36 @@ export class EncounterWorkspacePage {
 		}
 	}
 
-	async _pOpenStatblockEditor (id) {
+	_getTransformationEditorCallbacks (id = null) {
+		return {
+			validateOperation: ({target, operation}) => {
+				if (target.operations.length >= MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
+					throw new Error(`This monster has reached the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);
+				}
+				let previewId = "preview-transformation";
+				while (target.operations.some(it => it.id === previewId)) previewId += "-next";
+				validateEncounterStatblockOperations(target.baseCreature, [...target.operations, {...operation, id: previewId}]);
+			},
+			getConsequences: changes => {
+				const result = EncounterWorkspaceState.withStatblockChanges(this._state, changes.map(change => {
+					const targetId = id || change.id;
+					const prior = this._state.instances.find(it => it.id === targetId)?.statblockOperations || [];
+					const used = new Set(prior.map(it => it.id));
+					return {...change,
+						id: targetId,
+						addOperations: change.addOperations.map(operation => {
+							let previewId = "preview-transformation";
+							while (used.has(previewId)) previewId += "-next";
+							used.add(previewId);
+							return {...operation, id: previewId};
+						})};
+				}));
+				return id ? {...result, resetHpIds: result.resetHpIds.map(() => "current"), splitIds: result.splitIds.map(() => "current")} : result;
+			},
+		};
+	}
+
+	async _pOpenStatblockEditor (id, {automationVersion = 1} = {}) {
 		if (this._isBusy) return;
 		const instance = this._state.instances.find(it => it.id === id);
 		if (!instance) return this._setError("This encounter monster no longer exists.");
@@ -1103,13 +1132,16 @@ export class EncounterWorkspacePage {
 			pCommit: result => this._pCommitStatblockEdit(result),
 		});
 		try {
-			await BestiaryQuickActionsUi.pOpen({monster: instance.monster, registry: adapter});
+			await BestiaryQuickActionsUi.pOpen({monster: instance.monster,
+				registry: adapter,
+				automationVersion,
+				transformationCallbacks: this._getTransformationEditorCallbacks(id)});
 		} catch (e) {
 			this._setError(`Could not open statblock editor: ${this._getErrorMessage(e)}`);
 		}
 	}
 
-	async _pRenderBulkChoices () {
+	async _pRenderBulkChoices ({automationVersion = 1} = {}) {
 		const type = this._selBulkType.value;
 		const isLegendary = type === "legendary";
 		const isTransformation = type === "transformation";
@@ -1130,6 +1162,7 @@ export class EncounterWorkspacePage {
 				mount: this._eleBulkTransformation,
 				isCurrent: () => request === this._bulkChoiceRequest && this._selBulkType.value === "transformation",
 				isBulk: true,
+				automationVersion,
 				getTargets: () => {
 					const labels = getEncounterInstanceLabels(this._state.instances);
 					return this._state.instances.filter(it => this._state.selectedIds.includes(it.id)).map(it => ({
@@ -1140,18 +1173,7 @@ export class EncounterWorkspacePage {
 					}));
 				},
 				getStamp: () => JSON.stringify(this._state),
-				validateOperation: ({target, operation}) => {
-					if (target.operations.length >= MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
-						throw new Error(`This monster has reached the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);
-					}
-					let id = "preview-transformation";
-					while (target.operations.some(it => it.id === id)) id += "-next";
-					validateEncounterStatblockOperations(target.baseCreature, [...target.operations, {...operation, id}]);
-				},
-				getConsequences: changes => EncounterWorkspaceState.withStatblockChanges(this._state, changes.map((change, index) => ({
-					...change,
-					addOperations: change.addOperations.map((operation, ix) => ({...operation, id: `preview-${index}-${ix}`})),
-				}))),
+				...this._getTransformationEditorCallbacks(),
 				pApply: async changes => {
 					const result = EncounterWorkspaceState.withStatblockChanges(this._state, changes.map(change => ({
 						...change,

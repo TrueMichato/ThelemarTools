@@ -422,6 +422,68 @@ body.bqa__modal-active .ve-hwin {
 		gap: 8px;
 	}
 
+	.bqa__transformation-resolution {
+		min-width: 0;
+		margin: 12px 0;
+		padding: 10px;
+		border: 1px solid vars.$rgb-border-grey;
+		color: vars.$rgb-font;
+		overflow-wrap: anywhere;
+
+		legend,
+		summary {
+			font-weight: 600;
+		}
+
+		details {
+			margin: 10px 0;
+		}
+
+		summary {
+			display: list-item;
+			cursor: pointer;
+		}
+
+		button {
+			margin: 4px;
+		}
+
+		input,
+		select,
+		textarea {
+			min-width: 0;
+			max-width: 100%;
+		}
+
+		[aria-invalid="true"] {
+			border-color: vars.$rgb-alert-text-danger;
+		}
+
+		:focus-visible {
+			outline: 2px solid vars.$rgb-link-blue;
+			outline-offset: 2px;
+		}
+	}
+
+	.bqa__transformation-resolution-row {
+		min-width: 0;
+		margin: 10px 0;
+		padding: 8px;
+		border: 1px solid vars.$rgb-border-grey;
+		overflow-wrap: anywhere;
+	}
+
+	.bqa__transformation-resolution-error {
+		color: vars.$rgb-alert-text-danger;
+		overflow-wrap: anywhere;
+	}
+
+	.bqa__transformation-cr-estimate {
+		padding: 8px 0;
+		font-weight: 600;
+		overflow-wrap: anywhere;
+	}
+
 	.bqa__transformation-config {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.85fr);
@@ -1005,6 +1067,15 @@ body.bqa__modal-active .ve-hwin {
 	}
 
 	.ve-night-mode {
+		.bqa__transformation-resolution,
+		.bqa__transformation-resolution-row {
+			border-color: vars-night.$rgb-border-grey--night;
+			color: vars-night.$rgb-font--night;
+		}
+
+		.bqa__transformation-resolution-error {
+			color: vars-night.$rgb-name-red--night;
+		}
 		.bqa__btn-open[data-has-override="true"]::after {
 			border-color: vars-night.$rgb-bg--night;
 			background: vars-night.$rgb-name-red--night;
@@ -1252,6 +1323,15 @@ body.bqa__modal-active .ve-hwin {
 	}
 
 	@media (width <= 700px) {
+		.bqa__transformation-resolution {
+			padding: 8px;
+
+			input,
+			textarea,
+			summary {
+				min-height: 44px;
+			}
+		}
 		.bqa__btn-open {
 			min-width: 44px;
 			min-height: 44px;
