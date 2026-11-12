@@ -119,7 +119,55 @@ const isDracolichIdentity = identity => typeof identity?.name === "string" && id
 	&& typeof identity?.source === "string" && identity.source.toLowerCase() === "mm";
 const isZombieNumericIdentity = identity => typeof identity?.name === "string" && identity.name.toLowerCase() === "zombie"
 	&& typeof identity?.source === "string" && identity.source.toLowerCase() === "dmg";
+const isHalfDragonIdentity = identity => identity?.name === "Half-Dragon" && identity.source === "MM";
+const HALF_DRAGON_RESISTANCE = {black: "acid", blue: "lightning", brass: "fire", bronze: "lightning", copper: "acid", gold: "fire", green: "poison", red: "fire", silver: "cold", white: "cold"};
+const HALF_DRAGON_SIZES = {"large-or-smaller": ["T", "S", "M", "L"], huge: ["H"], gargantuan: ["G"]};
+const HALF_DRAGON_MODES = {brass: ["Fire Breath", "Sleep Breath"], bronze: ["Lightning Breath", "Repulsion Breath"], copper: ["Acid Breath", "Slowing Breath"], gold: ["Fire Breath", "Weakening Breath"], silver: ["Cold Breath", "Paralyzing Breath"]};
+const getHalfDragonDonorName = (ancestry, size) => {
+	const color = ancestry[0].toUpperCase() + ancestry.slice(1);
+	return size === "large-or-smaller" ? `${color} Dragon Wyrmling` : `${size === "huge" ? "Young" : "Adult"} ${color} Dragon`;
+};
+const isHalfDragonAction = (action, ancestry) => {
+	if (!isEntry(action) || action.source !== "MM") return false;
+	const modes = HALF_DRAGON_MODES[ancestry];
+	if (!modes) {
+		const damage = HALF_DRAGON_RESISTANCE[ancestry];
+		return !!damage && action.name === `${damage[0].toUpperCase()}${damage.slice(1)} Breath {@recharge 5}`
+			&& action.entries.length === 1 && typeof action.entries[0] === "string"
+			&& !action.entries[0].includes("{@recharge");
+	}
+	const [header, list] = action.entries;
+	return action.name === "Breath Weapons {@recharge 5}" && action.entries.length === 2
+		&& typeof header === "string" && !header.includes("{@recharge")
+		&& list?.type === "list" && list.style === "list-hang-notitle" && list.items.length === 2
+		&& list.items.every((item, index) => item.type === "item" && item.name === modes[index]
+			&& typeof item.entry === "string" && !item.entry.includes("{@recharge"));
+};
+const assertHalfDragonBreaths = rows => {
+	if (!Array.isArray(rows) || rows.length !== 30) throw new CreatureTransformationCandidateError("Half-Dragon requires all 30 sourced ancestry/size breath tuples.");
+	const seen = new Set();
+	for (const row of rows) {
+		if (!row || Object.keys(row).sort().join(",") !== "action,ancestry,donor,size"
+			|| !Object.hasOwn(HALF_DRAGON_RESISTANCE, row.ancestry) || !Object.hasOwn(HALF_DRAGON_SIZES, row.size)
+			|| !row.donor || Object.keys(row.donor).sort().join(",") !== "name,page,source"
+			|| row.donor.source !== "MM" || row.donor.name !== getHalfDragonDonorName(row.ancestry, row.size)
+			|| !Number.isInteger(row.donor.page) || row.donor.page < 1 || !isHalfDragonAction(row.action, row.ancestry)) {
+			throw new CreatureTransformationCandidateError("Half-Dragon breath tuple requires the matching MM ancestry/age donor and one complete shared-recharge action.");
+		}
+		const key = `${row.ancestry}|${row.size}`;
+		if (seen.has(key)) throw new CreatureTransformationCandidateError(`Duplicate Half-Dragon breath tuple: ${key}`);
+		seen.add(key);
+	}
+};
 const assertAutomation = (automation, identity) => {
+	if (isHalfDragonIdentity(identity)) {
+		if (!automation || Object.keys(automation).sort().join(",") !== "halfDragonBreaths,profile,rollout,version"
+			|| automation.version !== 2 || automation.profile !== "half-dragon" || automation.rollout !== "staged") {
+			throw new CreatureTransformationCandidateError("Only the staged version-2 Half-Dragon (MM) breath profile is supported.");
+		}
+		assertHalfDragonBreaths(automation.halfDragonBreaths);
+		return;
+	}
 	if (isZombieNumericIdentity(identity)) {
 		if (!automation || Object.keys(automation).sort().join(",") !== "hitPoints,profile,rollout,version"
 			|| automation.version !== 2 || automation.profile !== "zombie-numerics" || automation.rollout !== "staged" || automation.hitPoints !== "constitution") {
@@ -630,6 +678,31 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:half-dragon|mm" && isHalfDragonIdentity(resolved.identity)) {
+		if (Object.hasOwn(resolved, "automation") || !resolved.selectedOptions
+			|| Object.keys(resolved.selectedOptions).sort().join(",") !== "ancestry,automation-breath,size") return false;
+		const {ancestry, size, "automation-breath": donor} = resolved.selectedOptions;
+		if (![ancestry, size, donor].every(value => Array.isArray(value) && value.length === 1)
+			|| !Object.hasOwn(HALF_DRAGON_RESISTANCE, ancestry[0]) || !Object.hasOwn(HALF_DRAGON_SIZES, size[0])
+			|| donor[0] !== `${getHalfDragonDonorName(ancestry[0], size[0]).toLowerCase()}|mm`) return false;
+		const op = step => step?.op ?? step?.type;
+		const expected = [
+			{op: "grantSense", sense: "blindsight", range: 10},
+			{op: "grantSense", sense: "darkvision", range: 60},
+			{op: "grantLanguage", value: "Draconic"},
+			{op: "grantResistance", value: HALF_DRAGON_RESISTANCE[ancestry[0]]},
+		];
+		if (!Array.isArray(resolved.changes) || resolved.changes.length !== 5
+			|| expected.some((step, index) => {
+				const actual = resolved.changes[index];
+				return !actual || getStableSignature({op: op(actual), ...Object.fromEntries(Object.entries(actual).filter(([key]) => !["op", "type"].includes(key)))}) !== getStableSignature(step);
+			})) return false;
+		const action = resolved.changes[4];
+		return op(action) === "addEntry" && action.section === "action" && isHalfDragonAction(action.entry, ancestry[0])
+			&& getStableSignature(resolved.eligibility) === getStableSignature([
+				{types: ["beast", "humanoid", "giant", "monstrosity"]}, {sizes: HALF_DRAGON_SIZES[size[0]]},
+			]);
+	}
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:zombie|dmg" && isZombieNumericIdentity(resolved.identity)) {
 		const hasBindings = JSON.stringify(resolved.selectedOptions?.["automation-bindings"]) === JSON.stringify(["zombie-dmg-m2b"]);
 		const hasCr = JSON.stringify(resolved.selectedOptions?.["automation-cr"]) === JSON.stringify(["zombie-dmg-m3"]);
@@ -694,6 +767,39 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:half-dragon|mm") {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		if (!inputs || typeof inputs !== "object" || Array.isArray(inputs) || Object.keys(inputs).length) fail("Half-Dragon needs only its ancestry and size choices; additional automation inputs are unsupported.");
+		const options = resolved.selectedOptions;
+		if (!options || Object.keys(options).sort().join(",") !== "ancestry,size"
+			|| ![options.ancestry, options.size].every(value => Array.isArray(value) && value.length === 1)
+			|| !Object.hasOwn(HALF_DRAGON_RESISTANCE, options.ancestry[0]) || !Object.hasOwn(HALF_DRAGON_SIZES, options.size[0])) {
+			fail("Choose exactly one Half-Dragon ancestry and one breath size.");
+		}
+		const [ancestry] = options.ancestry;
+		const [size] = options.size;
+		const type = typeof current.type === "string" ? current.type : current.type?.type;
+		if (!["beast", "humanoid", "giant", "monstrosity"].includes(type)) fail("Half-Dragon requires a beast, humanoid, giant, or monstrosity.", "CREATURE_TRANSFORMATION_INELIGIBLE");
+		if (!Array.isArray(current.size) || current.size.length !== 1 || !SIZES.has(current.size[0])) fail("Half-Dragon requires one concrete current size to select its sourced breath bracket.");
+		if (!HALF_DRAGON_SIZES[size].includes(current.size[0])) fail("The selected Half-Dragon breath size does not match the current target.", "CREATURE_TRANSFORMATION_INELIGIBLE");
+		const row = resolved.automation.halfDragonBreaths.find(it => it.ancestry === ancestry && it.size === size);
+		const compiled = copy(resolved);
+		delete compiled.automation;
+		compiled.eligibility = [{types: ["beast", "humanoid", "giant", "monstrosity"]}, {sizes: copy(HALF_DRAGON_SIZES[size])}];
+		compiled.selectedOptions["automation-breath"] = [`${row.donor.name.toLowerCase()}|mm`];
+		compiled.changes = [
+			{op: "grantSense", sense: "blindsight", range: 10},
+			{op: "grantSense", sense: "darkvision", range: 60},
+			{op: "grantLanguage", value: "Draconic"},
+			{op: "grantResistance", value: HALF_DRAGON_RESISTANCE[ancestry]},
+			{op: "addEntry", section: "action", entry: copy(row.action)},
+		];
+		compiled.manualReview = [{field: "cr", reason: "The source's CR 2/7/8 thresholds are optional guidance, not eligibility floors. This staged breath profile retains CR; estimated CR and override integration await rollout."}];
+		assertChanges(compiled.changes);
+		if (!isCompiledCreatureTransformation(compiled)) throw new Error("Half-Dragon could not compile its selected sourced breath.");
+		return compiled;
+	}
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:zombie|dmg") {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);
@@ -746,7 +852,7 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		if (!isCompiledCreatureTransformation(compiled)) throw new Error("The staged Zombie numeric recipe cannot compile to the supported concrete profile.");
 		return compiled;
 	}
-	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm") throw new Error("Only staged version-2 Dracolich or Zombie numeric compilation is supported.");
+	if (resolved?.version !== 2 || resolved.kind !== "catalog" || resolved.id !== "catalog:dracolich|mm") throw new Error("Only staged version-2 Half-Dragon, Dracolich or Zombie numeric compilation is supported.");
 	assertAutomation(resolved.automation, resolved.identity);
 	if (!resolved.selectedOptions || Object.keys(resolved.selectedOptions).length) throw new Error("Staged Dracolich does not support additional option groups.");
 	assertIdentity(current);

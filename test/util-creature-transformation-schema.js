@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 import Ajv from "ajv/dist/2020.js";
+import {getCreatureTransformationCandidates} from "../js/creature-transformations.js";
 
 const SCHEMA_PATH = "schema/site/creature-transformation.json";
 const DATA_PATH = "data/creature-transformations.json";
@@ -23,7 +24,14 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 		const id = `${recipe.name}|${recipe.source}`.toLowerCase();
 		if (seen.has(id)) errors.push(`${filePath}: duplicate creature transformation identity ${id}`);
 		seen.add(id);
-		if (recipe.automation && recipe.automation.profile !== "zombie-numerics") {
+		if (recipe.automation?.profile === "half-dragon") {
+			try {
+				getCreatureTransformationCandidates({catalog: {creatureTransformation: [recipe]}, races: []});
+			} catch (error) {
+				errors.push(`${filePath}: ${error.message}`);
+			}
+		}
+		if (recipe.automation && !["zombie-numerics", "half-dragon"].includes(recipe.automation.profile)) {
 			const changes = recipe.automation.changes;
 			const names = new Set(Array.isArray(changes) ? changes.map(it => it?.entry?.name) : []);
 			if (id !== "dracolich|mm" || names.size !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")) {

@@ -131,6 +131,26 @@ semantic TypeScript validation are not claimed. Reported `maxTouchPoints:0`
 despite configured touch remains unresolved. Fixtures are kernel-only; all 14
 family completion and default rollout remain open, with Species deferred.
 
+M5 [#403](https://github.com/TrueMichato/ThelemarTools/pull/403) stages all 30
+Half-Dragon MM ancestry/size breaths, including exact shared recharge, metallic
+alternatives and their complete special clauses. Target-specific compilation
+adds only the sourced senses, language, resistance and breath while retaining
+the chassis; optional source CR guidance is not an eligibility floor. The strict
+joint table rejects incomplete or misidentified tuples. Both existing consumers
+save/reload/remove frozen concrete operations after live sources disappear;
+legacy/default breathless operations remain unchanged.
+
+The actual compiler 7d6-to-1d6 mutation failed the independent MM source oracle.
+Focused verification passed seven suites/151 tests; parent verification repeated
+all 37 new cases and five malformed-profile isolation controls. Normal commit
+hooks passed the exact 32 related suites/483 tests. The exact published-leaf
+full gate passed 812 suites/21,912 tests with the unchanged one skipped suite/13
+skipped tests and real NPC corpus. No browser/E2E run was performed for M5.
+This producer remains internal/staged: current CR is retained, and estimated
+CR/override plus guided-editor composition still await final rollout. M5 does
+not close the Templates bug or enable default behavior. M6-M13 remain open;
+Species stays deferred.
+
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
 global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver

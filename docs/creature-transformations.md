@@ -44,6 +44,35 @@ Entry sections are `trait`, `action`, `bonus`, `reaction`, and `legendary`. Matc
 
 For example, `resolveCreatureTransformation({candidates, id: "catalog:half-dragon|mm", selections: {ancestry: ["red"], size: ["huge"]}})` returns resistance to fire and checked source guidance for the Huge breath. It does **not** fabricate a new breath attack, assume the source's optional CR floor is a mandatory prerequisite, or change the NPC's current HP.
 
+### M5 Half-Dragon breath profile (staged, internal compilation only)
+
+Explicit `automationVersion:2` resolution of `Half-Dragon|MM` now exposes `automation:{version:2,profile:"half-dragon",rollout:"staged",halfDragonBreaths}`. This does **not** opt the editor/default resolver into v2. Both existing required groups remain `ancestry` and `size`; no choice is inferred, and no existing v1 choice, review item or saved breathless operation is rewritten.
+
+The strict 30-row table joins all ten ancestries to `large-or-smaller`, `huge` and `gargantuan`. Each row contains exactly `{ancestry,size,donor:{name,source:"MM",page},action}`. MM p. 180 supplies the conversion rules: only beasts, humanoids, giants and monstrosities qualify; retain the chassis; add blindsight 10 feet, darkvision 60 feet, Draconic alongside existing languages, and the ancestry resistance. Size selects the corresponding **wyrmling / young / adult** breath, respectively. CR 2 / 7 / 8 are optional source guidance for avoiding recalculation, never eligibility floors. Tiny through Large subjects all use the first bracket. Ambiguous/missing current size needs a concrete size before compilation.
+
+Actual donors are the 2014 entries in `data/bestiary/bestiary-mm.json`, not XMM or a worked Half-Dragon's unrelated statistics:
+
+| Ancestry | Wyrmling / young / adult MM pages | Granted resistance | Breath modes |
+| --- | --- | --- | --- |
+| Black | 88 / 88 / 88 | Acid | Acid |
+| Blue | 91 / 91 / 91 | Lightning | Lightning |
+| Brass | 106 / 105 / 105 | Fire | Fire or sleep |
+| Bronze | 109 / 108 / 108 | Lightning | Lightning or repulsion |
+| Copper | 111 / 112 / 112 | Acid | Acid or slowing |
+| Gold | 115 / 115 / 114 | Fire | Fire or weakening |
+| Green | 95 / 94 / 94 | Poison | Poison |
+| Red | 98 / 98 / 98 | Fire | Fire |
+| Silver | 118 / 118 / 117 | Cold | Cold or paralysis |
+| White | 102 / 101 / 101 | Cold | Cold |
+
+Authored concise action text preserves each donor's exact area/line width, every affected creature, damage type, dice, **printed** average, fixed save ability/DC, half damage on a successful damaging save, and Recharge 5-6. In particular, adult brass retains the source's printed **45 (13d6)** rather than silently rounding it to 46. Metallic alternatives are nested modes of **one** recharging action, not separate resources. Sleep preserves all three durations and both damage/action wake conditions; repulsion preserves its fixed cone and age-specific push away from the user; slowing preserves reaction loss, halved speed, one-attack limit, action/bonus-action exclusivity, duration and end-turn repeat save; weakening preserves all three Strength disadvantages, duration and repeat save; paralysis preserves duration and repeat save. Successful initial non-damaging saves have no effect.
+
+`compileCreatureTransformation` selects against each target's actual effective history and checks the chosen bracket. It emits only five concrete existing steps: two senses, language, resistance and one complete sourced `addEntry` action. Donor stats, type, abilities, equipment, AC, HP, attacks, legendary/spellcasting features and source identity do not replace the target. Existing stronger senses and unrelated languages/defenses remain. Concrete selected options freeze `automation-breath:[donorNameLowercase+"|mm"]` beside ancestry/size; the full table and pending descriptor are not saved. Adapter/executor validation recognizes this closed profile through the existing v2 validator, without new operation kinds or consumer edits.
+
+The catalog validator and runtime reject missing/duplicate tuples, wrong ancestry/size/source/donor identities, incomplete alternatives, independent mode recharge grants and unknown profile fields. Focused source tests independently read **all 30 MM donor actions** and compare complete mechanical signatures through real preview/operation/replay, including special clauses and source page identity. Registry and Encounter adapter/Store save/reload/removal use frozen operations after the live catalog/table is mutated or removed; changed saved contents fail integrity. A deliberate `7d6` -> `1d6` mutation at the actual compilation step fails the red-wyrmling source oracle.
+
+**Remaining staging boundary:** M5 automates the sourced breath/stat grants, not CR integration or shared-editor controls. It retains current CR and reports this explicitly; automatic estimated CR plus override must be composed through the established math/input contracts before final M13 rollout. The internal guided editor still supports only its prior Zombie/Dracolich identities. No source rule is unresolved here, but this staged result is not a claim that the default Templates bug or all-family rollout is complete. Species and every other recipe remain unchanged.
+
 The MM Shadow Dragon breath step covers every supported damage type, including gem-dragon breath damage; its bite step remains limited to the five listed types. Lethal Shadow Breath's Humanoid-to-shadow consequence requires DM review rather than spawning a creature automatically. Resolved DMG Skeleton race candidates grant bludgeoning vulnerability; finite typed vulnerability choices are explicit required options and unrepresentable choices remain for DM review. Fey Beast requires at least one feature pick, and still permits multiple picks. The screenshot recipe's page and edition remain unverified.
 
 Existing approved Encounter operations are replayed from their saved, typed `resolved` recipe, not recomputed against today's race data. Replay permits historical no-op species operations but new previews reject them. The editor's provisional read-only display does not satisfy the engine's consent requirement for saving: real approval and prerequisite acknowledgments are required at Apply and checked again on replay. Stale previews, per-field conflict winners, and the operation-size ceiling still apply. Recipe and option hovers describe `setSize`, `grantSpell`, `grantRelativeSpeed`, and nested trait entries without treating prose as automated roll modifiers.

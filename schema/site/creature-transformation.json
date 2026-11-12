@@ -391,8 +391,78 @@
 		"stagedAutomation": {
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
+				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
+		},
+		"halfDragonAncestry": {"enum": ["black", "blue", "brass", "bronze", "copper", "gold", "green", "red", "silver", "white"]},
+		"halfDragonSize": {"enum": ["large-or-smaller", "huge", "gargantuan"]},
+		"compiledHalfDragon": {
+			"description": "Concrete staged M5 output only; no table, pending descriptor or family forms. Runtime also checks the ancestry/size/donor/resistance correspondence.",
+			"type": "object",
+			"properties": {
+				"version": {"const": 2},
+				"id": {"const": "catalog:half-dragon|mm"},
+				"kind": {"const": "catalog"},
+				"identity": {"allOf": [{"$ref": "#/$defs/identity"}, {"type": "object", "properties": {"name": {"const": "Half-Dragon"}, "source": {"const": "MM"}}}]},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {
+					"type": "array", "minItems": 2, "maxItems": 2,
+					"prefixItems": [
+						{"type": "object", "properties": {"types": {"type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{"const": "beast"}, {"const": "humanoid"}, {"const": "giant"}, {"const": "monstrosity"}], "items": false}}, "required": ["types"], "additionalProperties": false},
+						{"type": "object", "properties": {"sizes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/size"}}}, "required": ["sizes"], "additionalProperties": false}
+					], "items": false
+				},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {
+					"type": "object",
+					"properties": {
+						"ancestry": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/halfDragonAncestry"}},
+						"size": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/halfDragonSize"}},
+						"automation-breath": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^[a-z ]+\\|mm$"}}
+					},
+					"required": ["ancestry", "size", "automation-breath"], "additionalProperties": false
+				},
+				"changes": {
+					"type": "array", "minItems": 5, "maxItems": 5,
+					"prefixItems": [
+						{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"const": "grantSense"}, "sense": {"const": "blindsight"}, "range": {"const": 10}}}]},
+						{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"const": "grantSense"}, "sense": {"const": "darkvision"}, "range": {"const": 60}}}]},
+						{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"const": "grantLanguage"}, "value": {"const": "Draconic"}}}]},
+						{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"const": "grantResistance"}, "value": {"enum": ["acid", "cold", "fire", "lightning", "poison"]}}}]},
+						{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"const": "addEntry"}, "section": {"const": "action"}, "entry": {"type": "object", "properties": {"source": {"const": "MM"}}}}}]}
+					], "items": false
+				},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			},
+			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"additionalProperties": false
+		},
+		"stagedHalfDragonAutomation": {
+			"type": "object",
+			"properties": {
+				"version": {"const": 2},
+				"profile": {"const": "half-dragon"},
+				"rollout": {"const": "staged"},
+				"halfDragonBreaths": {
+					"type": "array", "minItems": 30, "maxItems": 30, "uniqueItems": true,
+					"items": {
+						"type": "object",
+						"properties": {
+							"ancestry": {"$ref": "#/$defs/halfDragonAncestry"},
+							"size": {"$ref": "#/$defs/halfDragonSize"},
+							"donor": {
+								"type": "object",
+								"properties": {"name": {"type": "string", "minLength": 1}, "source": {"const": "MM"}, "page": {"type": "integer", "minimum": 1}},
+								"required": ["name", "source", "page"], "additionalProperties": false
+							},
+							"action": {"allOf": [{"$ref": "#/$defs/entry"}, {"type": "object", "properties": {"source": {"const": "MM"}}}]}
+						},
+						"required": ["ancestry", "size", "donor", "action"], "additionalProperties": false
+					}
+				}
+			},
+			"required": ["version", "profile", "rollout", "halfDragonBreaths"], "additionalProperties": false
 		},
 		"stagedDracolichAutomation": {
 			"type": "object",
@@ -443,6 +513,7 @@
 			"allOf": [
 				{"if": {"required": ["automation"]}, "then": {"oneOf": [
 					{"properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "dracolich"}}}}},
+					{"properties": {"name": {"const": "Half-Dragon"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "half-dragon"}}}}},
 					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
 				]}}
 			],
