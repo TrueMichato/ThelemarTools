@@ -3,6 +3,7 @@ import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog
 import {compileCreatureTransformation} from "../creature-transformations.js";
 import {selectFrozenCreatureTransformation} from "../creature-transformation-forms.js";
 import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation.js";
+import {compileCreatureTransformationInputs, freezeCreatureTransformationInputs, proposeCreatureTransformationResidual} from "./bestiary-transformation-inputs.js";
 
 const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_INELIGIBLE",
@@ -72,6 +73,11 @@ function getProficiencyContext ({target, current}) {
 	return owner;
 }
 
+export function proposeCreatureTransformationTargetResidual ({target, ...options}) {
+	const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
+	return proposeCreatureTransformationResidual({...options, target, proficiencyContext: getProficiencyContext({target, current})});
+}
+
 function getEligibilityDetail (creature, rules, dmApproved) {
 	const type = typeof creature.type === "string" ? creature.type : creature.type?.type;
 	const cr = typeof creature.cr === "object" ? creature.cr?.cr : creature.cr;
@@ -91,19 +97,34 @@ function getEligibilityDetail (creature, rules, dmApproved) {
 	return reasons.join("; ");
 }
 
-export function previewCreatureTransformationTargets ({targets, resolved, automationInputs = {}, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, validateOperation = null}) {
+export function previewCreatureTransformationTargets ({targets, resolved, automationInputs = {}, guidedAnswers, crTable, generation, acknowledgedPrerequisites = [], dmApproved = false, conflictDecisions = {}, validateOperation = null}) {
 	if (!Array.isArray(targets) || !targets.length || new Set(targets.map(it => it.id)).size !== targets.length) {
 		throw new Error("Choose at least one distinct monster to transform.");
 	}
 	const staged = Object.hasOwn(resolved, "automation");
+	const guided = guidedAnswers !== undefined;
+	if (guided && (!guidedAnswers || typeof guidedAnswers !== "object" || Array.isArray(guidedAnswers)
+		|| Object.keys(guidedAnswers).some(id => !targets.some(target => target.id === id)) || Object.keys(automationInputs).length)) throw new Error("Guided answers must be keyed by selected target ID, without separate automation inputs.");
 	if (Object.hasOwn(resolved, "version") && !staged) throw new Error("Resolve the pending staged profile before previewing targets; a concrete snapshot cannot be reused as a batch recipe.");
 	const recipe = staged ? structuredClone(resolved) : normalizeCreatureTransformation(resolved);
 	if (staged && (!automationInputs || typeof automationInputs !== "object" || Array.isArray(automationInputs)
 		|| Object.keys(automationInputs).some(id => !targets.some(target => target.id === id)))) throw new Error("Automation inputs must be keyed by selected target ID.");
 	const previews = [];
 	const skipped = [];
+	const guidedModels = [];
+	if (guided) automationInputs = {};
 	for (const target of targets) {
 		try {
+			if (guided) {
+				const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
+				const model = compileCreatureTransformationInputs({target, resolved: recipe, answers: guidedAnswers[target.id], table: crTable, proficiencyContext: getProficiencyContext({target, current})});
+				guidedModels.push(model);
+				if (model.status !== "ready") {
+					skipped.push({id: target.id, label: target.label, status: model.status, reason: model.requirements.map(it => it.reason).join("; "), requirements: model.requirements});
+					continue;
+				}
+				automationInputs[target.id] = model.automationInputs;
+			}
 			const options = {
 				baseCreature: target.baseCreature,
 				operations: target.operations,
@@ -138,11 +159,30 @@ export function previewCreatureTransformationTargets ({targets, resolved, automa
 			skipped.push({id: target.id, label: target.label, reason: reason ? `${e.message} ${reason}.` : e.message});
 		}
 	}
-	return {targets: structuredClone(targets), resolved: recipe, previews, skipped, ...(staged ? {automationInputs: structuredClone(automationInputs)} : {})};
+	const batch = {targets: structuredClone(targets), resolved: recipe, previews, skipped, ...(staged ? {automationInputs: structuredClone(automationInputs)} : {})};
+	if (!guided) return batch;
+	return freezeCreatureTransformationInputs({...batch,
+		guidedModels,
+		guidedAnswers: structuredClone(guidedAnswers),
+		crTable: structuredClone(crTable),
+		generation: structuredClone(generation),
+		conflictDecisions: structuredClone(conflictDecisions)});
 }
 
-export function createCreatureTransformationChanges ({batch, targets, conflictDecisions = {}, resolved = batch.resolved, automationInputs = batch.automationInputs}) {
+export function createCreatureTransformationChanges ({batch, targets, conflictDecisions = {}, resolved = batch.resolved, automationInputs = batch.automationInputs,
+	guidedAnswers = batch.guidedAnswers, crTable = batch.crTable, generation = batch.generation}) {
 	if (JSON.stringify(batch.targets) !== JSON.stringify(targets)) throw new Error("Transformation preview is stale: the selection or a target history changed. Preview again.");
+	if (Object.hasOwn(batch, "guidedAnswers")) {
+		if (JSON.stringify(batch.guidedAnswers) !== JSON.stringify(guidedAnswers) || JSON.stringify(batch.crTable) !== JSON.stringify(crTable)
+			|| JSON.stringify(batch.generation) !== JSON.stringify(generation) || JSON.stringify(batch.resolved) !== JSON.stringify(resolved)
+			|| JSON.stringify(batch.conflictDecisions) !== JSON.stringify(conflictDecisions)) throw new Error("Transformation preview is stale: raw guided answers, table, candidate, generation or conflict winners changed. Preview again.");
+		for (const {id} of batch.previews) {
+			const target = targets.find(it => it.id === id);
+			const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
+			const model = compileCreatureTransformationInputs({target, resolved, answers: guidedAnswers[id], table: crTable, proficiencyContext: getProficiencyContext({target, current})});
+			if (model.status !== "ready" || JSON.stringify(model.automationInputs) !== JSON.stringify(automationInputs[id])) throw new Error("Transformation preview is stale: guided target inputs changed. Preview again.");
+		}
+	}
 	if (Object.hasOwn(batch, "automationInputs") && JSON.stringify(batch.automationInputs) !== JSON.stringify(automationInputs)) throw new Error("Transformation preview is stale: the target input answers changed. Preview again.");
 	if (batch.previews.some(({preview}) => !preview.canApply)) throw new Error("Choose a winner for every conflicting statblock field before applying.");
 	return batch.previews.map(({id, preview}) => {
