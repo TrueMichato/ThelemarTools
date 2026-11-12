@@ -174,7 +174,7 @@ NPC corpus. No browser/E2E run was performed for M6.
 M6 remains internal/staged, retains current CR/XP and reports the limitation.
 Estimated CR/override composition and shared-editor inputs remain rollout
 prerequisites. Default/version-1 and historical M1-M5 operations remain unchanged.
-This does not close the Templates bug: M8-M13 remain open, with Species deferred.
+This does not close the Templates bug: M9-M13 remain open, with Species deferred.
 
 M7 [#405](https://github.com/TrueMichato/ThelemarTools/pull/405) stages Spore
 Servant MM and independent MM/BEG Shadow Dragon source compilers. Spore executes
@@ -206,6 +206,42 @@ No browser/E2E run was performed for M7. This remains internal/staged, retains
 current CR/XP and does not enable default behavior. Estimated CR/override,
 guided-editor composition, remaining families and final rollout remain open;
 Species stays deferred.
+
+M8 [#406](https://github.com/TrueMichato/ThelemarTools/pull/406) stages the
+Vampire MM recipe's distinct vampire/spawn NPC adaptations. Both implement the
+approved minimum STR/DEX/CON 18, retaining higher scores, and lawful evil. The
+spawn policy is an expressly approved sidebar adaptation, not the example
+spawn's 16/neutral-evil statistics or a universal source-published NPC template.
+Existing numerical reconciliation and exact source-qualified bindings preserve
+the target chassis rather than importing donor AC/HD/PB/mental scores/CR.
+
+Full vampire grants sourced traits/actions, including explicit non-stacking
+Legendary Resistance decisions, and freezes true/bat/mist profiles. Bat executes
+movement, speech and exact carried-equipment decisions; mist executes movement,
+no-actions restrictions and conditional immunity to all nonmagical damage except
+sunlight. Spawn grants only its own defenses, regeneration, attacks and creator
+rules without new full-only features/forms. Registry/Encounter replay, switching,
+removal, owner replacement and failed-save behavior remain frozen and atomic.
+Conditional combat, death and creator clauses are usable rules, not a live engine.
+
+Parent review reproduced five malformed pre-operation successes across two
+closure gaps. Ordinary regressions failed 13 assertions before correction and
+passed afterward; required removals and actual active/inactive physical/mist
+projections now reject those contradictions before conflict winners. The
+unchanged independent probe confirms five rejections, four unchanged normal
+outputs and the retained negative control. Final focused verification passed
+10 suites/282 tests; parent independently repeated M8 plus historical Forms,
+50 tests with no skips. All 13 other recipe structures and the historical form
+leaf are unchanged; accepted-base behavioral comparisons remain explicitly
+sampled, not exhaustive option/history/Species coverage.
+
+Normal commit hooks passed the exact eight JS inputs and all 35 related
+suites/577 tests. The exact published-leaf full gate passed 815 suites/22,006
+tests with the unchanged one skipped suite/13 skipped tests and all 24 real NPC
+inputs reachable. No browser/E2E run was performed. M8 remains internal/staged,
+retains CR/XP with explicit review and does not enable default behavior.
+Estimated CR/override composition, guided-editor integration, remaining families
+and final rollout remain prerequisites; Species stays deferred.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
