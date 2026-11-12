@@ -2,6 +2,7 @@ import {isCompiledCreatureTransformation} from "./creature-transformations.js";
 import {isCreatureTransformationStatChange} from "./creature-transformation-stats.js";
 import {isCreatureTransformationBindingChange} from "./creature-transformation-bindings.js";
 import {isCreatureTransformationCrChange} from "./creature-transformation-cr.js";
+import {getVampireForm, isVampireChange} from "./creature-transformation-vampire.js";
 
 const LEAF_KEYS = ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"];
 const ROOT_KEYS = ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions"];
@@ -52,6 +53,7 @@ function leaf (resolved) {
 	if (!isCompiledCreatureTransformation(resolved) || resolved.changes.length > 256) fail("each profile must be an independently compiled concrete v2 leaf");
 	for (const change of resolved.changes) {
 		const key = Object.hasOwn(change, "op") ? "op" : "type";
+		if (resolved.id === "catalog:vampire|mm" && (isVampireChange(change, key) || change[key] === "grantConditionalDefense")) continue;
 		if (isCreatureTransformationStatChange(change, key) || isCreatureTransformationBindingChange(change, key) || isCreatureTransformationCrChange(change, key)) continue;
 		const fields = {
 			setType: ["value"],
@@ -92,6 +94,9 @@ export function assertFrozenCreatureTransformation (resolved) {
 	}
 	const active = frozenForms.profiles.find(profile => profile.id === frozenForms.activeForm);
 	if (!active || canonical(active.resolved) !== canonical(projection)) fail("active projection does not match its permitted profile");
+	if (resolved.id === "catalog:vampire|mm" && (canonical(resolved.selectedOptions.outcome) !== canonical(["vampire"])
+		|| canonical(frozenForms.profiles.map(profile => profile.id)) !== canonical(["true", "bat", "mist"])
+		|| frozenForms.profiles.some(profile => getVampireForm(profile.resolved) !== profile.id))) fail("a full vampire permits only its source-defined true/bat/mist profiles, never spawn");
 }
 
 export function createFrozenCreatureTransformation ({profiles, activeForm, baseline}) {

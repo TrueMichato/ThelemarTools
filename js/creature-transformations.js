@@ -4,6 +4,7 @@ import {compileCreatureTransformationBindings, isCreatureTransformationBindingCh
 import {estimateCreatureTransformationCr, getCreatureTransformationCrProficiency, isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "./creature-transformation-cr.js";
 import {compileReanimation, isCompiledReanimation} from "./creature-transformation-reanimation.js";
 import {compileSporeShadow, getSporeShadowProfile, isCompiledSporeShadow} from "./creature-transformation-spore-shadow.js";
+import {compileVampire, isCompiledVampire} from "./creature-transformation-vampire.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -162,6 +163,13 @@ const assertHalfDragonBreaths = rows => {
 	}
 };
 const assertAutomation = (automation, identity) => {
+	if (identity?.name === "Vampire" && identity.source === "MM") {
+		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
+			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== "vampire") {
+			throw new CreatureTransformationCandidateError("Only the exact staged Vampire|MM NPC adaptation is supported.");
+		}
+		return;
+	}
 	const profile = getSporeShadowProfile(getId("catalog", identity));
 	if (profile) {
 		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
@@ -696,6 +704,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (resolved?.id === "catalog:vampire|mm") return isCompiledVampire(resolved);
 	if (getSporeShadowProfile(resolved?.id)) return isCompiledSporeShadow(resolved);
 	if (Object.hasOwn(resolved?.selectedOptions || {}, "automation-reanimation")) return isCompiledReanimation(resolved);
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:half-dragon|mm" && isHalfDragonIdentity(resolved.identity)) {
@@ -781,12 +790,17 @@ function isCompiledCreatureTransformation (resolved) {
 		&& matches("automation-lair", ["retain"]);
 }
 
-function compileCreatureTransformation ({resolved, current, chassisSource = current?.source, inputs = {}, proficiencyContext = null, legendaryGroups}) {
+function compileCreatureTransformation ({resolved, current, chassisSource = current?.source, inputs = {}, proficiencyContext = null, legendaryGroups, baseline}) {
 	const fail = (message, code = "CREATURE_TRANSFORMATION_INPUT_REQUIRED") => {
 		const error = new Error(message);
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && resolved.id === "catalog:vampire|mm") {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		return compileVampire({resolved, current, chassisSource, inputs, baseline});
+	}
 	if (resolved?.version === 2 && getSporeShadowProfile(resolved.id)) {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);
