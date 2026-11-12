@@ -285,13 +285,14 @@ export class BestiaryQuickActionsUi {
 			{id: "edit", label: "Quick Edit", icon: "glyphicon-edit"},
 		];
 		let activeSection = "minion";
+		let savedOperationId = null;
 		let renderRequest = 0;
 		const panelId = `bqa-panel-${_getOperationId()}`;
 		content.id = panelId;
 		content.setAttribute("role", "tabpanel");
 
 		const navButtons = new Map();
-		const pRenderActive = async () => {
+		const pRenderActive = async ({focusSavedForm = false} = {}) => {
 			const request = ++renderRequest;
 			navButtons.forEach((btn, id) => {
 				btn.setAttribute("aria-selected", id === activeSection ? "true" : "false");
@@ -304,25 +305,47 @@ export class BestiaryQuickActionsUi {
 			try {
 				switch (activeSection) {
 					case "minion": return this._pRenderMinion({content, monster, registry});
-					case "transformation": return this._pRenderTransformation({content,
-						monster,
-						registry,
-						automationVersion,
-						...transformationCallbacks,
-						isCurrent: () => isOpen && request === renderRequest,
-						setCommitBusy: busy => {
-							if (busy) {
-								workspace.querySelectorAll("button, input, select, textarea").forEach(node => {
-									node.dataset.transformationWasDisabled = String(node.disabled);
-									node.disabled = true;
+					case "transformation": {
+						await this._pRenderTransformation({content,
+							monster,
+							registry,
+							automationVersion,
+							...transformationCallbacks,
+							savedOperationId,
+							onCancel: () => {
+								const ownerId = savedOperationId;
+								savedOperationId = null;
+								activeSection = "minion";
+								return pRenderActive().then(() => {
+									changes.querySelectorAll("button[data-saved-operation-id]").forEach(node => {
+										if (node.dataset.savedOperationId === ownerId) {
+											node.focus();
+											node.scrollIntoView({block: "nearest", inline: "nearest"});
+										}
+									});
 								});
-							} else {
-								workspace.querySelectorAll("[data-transformation-was-disabled]").forEach(node => {
-									node.disabled = node.dataset.transformationWasDisabled === "true";
-									delete node.dataset.transformationWasDisabled;
-								});
-							}
-						}});
+							},
+							isCurrent: () => isOpen && request === renderRequest,
+							setCommitBusy: busy => {
+								if (busy) {
+									workspace.querySelectorAll("button, input, select, textarea").forEach(node => {
+										node.dataset.transformationWasDisabled = String(node.disabled);
+										node.disabled = true;
+									});
+								} else {
+									workspace.querySelectorAll("[data-transformation-was-disabled]").forEach(node => {
+										node.disabled = node.dataset.transformationWasDisabled === "true";
+										delete node.dataset.transformationWasDisabled;
+									});
+								}
+							}});
+						if (focusSavedForm && isOpen && request === renderRequest) {
+							const picker = content.querySelector("select[data-saved-form]");
+							picker?.focus();
+							picker?.scrollIntoView({block: "nearest", inline: "nearest"});
+						}
+						return;
+					}
 					case "area": return this._pRenderAreaTraits({content, monster, registry});
 					case "lair": return this._pRenderLairActions({content, monster, registry});
 					case "item": return this._pRenderMagicItem({content, monster, registry});
@@ -354,6 +377,7 @@ export class BestiaryQuickActionsUi {
 			const icon = _getElement("span", {clazz: `glyphicon ${section.icon}`, attrs: {"aria-hidden": "true"}});
 			btn.append(icon, document.createTextNode(section.label));
 			btn.addEventListener("click", () => {
+				savedOperationId = null;
 				activeSection = section.id;
 				pRenderActive().then(null);
 			});
@@ -428,6 +452,20 @@ export class BestiaryQuickActionsUi {
 					_getElement("div", {clazz: "bqa__row-title", text: operation.label || this._getOperationLabel(operation)}),
 					_getElement("div", {clazz: "bqa__row-meta", text: this._getOperationMeta(operation, {isPersistent: registry.isPersistent})}),
 				);
+				if (operation.type === "applyCreatureTransformation" && operation.data?.resolved?.frozenForms) {
+					const forms = operation.data.resolved.frozenForms;
+					main.append(_getElement("div", {clazz: "bqa__row-meta", text: `Saved form: ${forms.profiles.find(it => it.id === forms.activeForm).label}`}));
+					const switchForm = _getButton({text: "Switch form",
+						clazz: "ve-btn ve-btn-default ve-btn-xs",
+						onClick: () => {
+							savedOperationId = operation.id;
+							activeSection = "transformation";
+							pRenderActive({focusSavedForm: true}).then(null);
+						}});
+					switchForm.dataset.savedOperationId = operation.id;
+					switchForm.setAttribute("aria-label", `Switch saved form for ${operation.data.resolved.identity.name} (${operation.data.resolved.identity.source}), owner ${operation.id}`);
+					main.append(switchForm);
+				}
 				row.append(main, _getButton({
 					text: "Remove",
 					clazz: "ve-btn ve-btn-default ve-btn-xs",
@@ -440,7 +478,7 @@ export class BestiaryQuickActionsUi {
 
 		unsubscribe = registry.subscribe(() => {
 			renderStatus();
-			pRenderActive().then(null);
+			pRenderActive({focusSavedForm: savedOperationId != null}).then(null);
 		});
 
 		const btnClose = _getButton({text: "Done", onClick: () => doClose()});
@@ -506,13 +544,16 @@ export class BestiaryQuickActionsUi {
 		return wrp;
 	}
 
-	static async _pRenderTransformation ({content, monster, registry, isCurrent, automationVersion = 1, validateOperation = null, getConsequences, setCommitBusy = () => {}}) {
+	static async _pRenderTransformation ({content, monster, registry, isCurrent, automationVersion = 1, validateOperation = null, validateChange = null, getConsequences, savedOperationId = null, onCancel = null, setCommitBusy = () => {}}) {
 		await pRenderCreatureTransformationEditor({
 			mount: content,
 			isCurrent,
 			automationVersion,
 			validateOperation,
+			validateChange,
 			getConsequences,
+			savedOperationId,
+			onCancel,
 			getTargets: () => [{
 				id: "current",
 				label: monster._displayName || monster.name,
@@ -523,9 +564,9 @@ export class BestiaryQuickActionsUi {
 			pApply: async changes => {
 				setCommitBusy(true);
 				try {
-					const result = await registry.applyChanges({monster, addOperations: changes[0].addOperations, removeIds: changes[0].removeIds});
+					const result = await registry.applyChanges({monster, ...changes[0]});
 					if (!result) throw new Error("The statblock edit was not applied.");
-					JqueryUtil.doToast({type: "success", content: "Transformation applied. Manual-review items still need DM adjudication."});
+					JqueryUtil.doToast({type: "success", content: savedOperationId != null ? "Saved form switched." : "Transformation applied. Manual-review items still need DM adjudication."});
 				} finally { setCommitBusy(false); }
 			},
 		});

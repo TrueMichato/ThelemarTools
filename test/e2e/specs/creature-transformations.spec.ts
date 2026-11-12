@@ -648,3 +648,45 @@ test.describe("mobile touch and night mode", () => {
 		await expect(magic).toBeChecked();
 	});
 });
+
+import {Round72CreatureTransformationPage} from "../pages/CreatureTransformationPage";
+
+test.describe("Round72 combined C1/C2 internal seam, not public rollout", () => {
+	test.describe.configure({retries: 0});
+	test.use({hasTouch: true});
+	const editors = new WeakMap<import("@playwright/test").Page, Round72CreatureTransformationPage>();
+	test.beforeEach(async ({page}) => { editors.set(page, new Round72CreatureTransformationPage(page)); });
+	test.afterEach(async ({page}, info) => { await editors.get(page)?.captureRound72Evidence(info); });
+
+	test("@round72-c1-c2 Bestiary MM Bugbear native bindings, estimate, consent and stale async fence", async ({page}, info) => {
+		test.setTimeout(180_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.round72Bugbear();
+		await editor.finishRound72Evidence(info, "round72-bugbear");
+	});
+
+	test("@round72-c1-c2 Encounter individual consequences, rejected real Store retry and reviewed mixed bulk", async ({page}, info) => {
+		test.setTimeout(180_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.round72Encounter();
+		await editor.finishRound72Evidence(info, "round72-encounter");
+	});
+
+	test("@round72-c1-c2 kernel-only saved owner Registry and Encounter A/B/A without sources or compilation", async ({page}, info) => {
+		test.setTimeout(180_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.round72SavedForms();
+		await editor.finishRound72Evidence(info, "round72-saved-forms");
+	});
+
+	test("@round72-c1-c2 unchanged default and Species plus night, narrow, keyboard and touch information", async ({page}, info) => {
+		test.setTimeout(180_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.round72DefaultAndResponsive(info);
+		await editor.finishRound72Evidence(info, "round72-native-access");
+	});
+});

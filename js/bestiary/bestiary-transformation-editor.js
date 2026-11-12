@@ -1,4 +1,4 @@
-import {createCreatureTransformationChanges, previewCreatureTransformationTargets, proposeCreatureTransformationTargetResidual} from "./bestiary-transformation-workflow.js";
+import {createCreatureTransformationChanges, createCreatureTransformationFormChanges, previewCreatureTransformationForm, previewCreatureTransformationTargets, proposeCreatureTransformationTargetResidual} from "./bestiary-transformation-workflow.js";
 import {inspectCreatureTransformationInputs, pLoadCreatureTransformationInputTable} from "./bestiary-transformation-inputs.js";
 import {observeCreatureTransformationBindings} from "../creature-transformation-bindings.js";
 
@@ -326,7 +326,7 @@ function renderCompactDelta (parent, batch) {
 	list(parent, [...changes, ...entryChanges].length ? [...changes, ...entryChanges] : ["No automatically representable change."]);
 }
 
-function renderPreviewTarget (parent, {id, label, preview}, decisions, onDecision) {
+function renderPreviewTarget (parent, {id, label, preview, isConflictsOnly = false}, decisions, onDecision) {
 	const section = element("section", {className: "bqa__transformation-target"});
 	section.append(element("h5", {text: label}));
 	preview.conflicts.forEach(({path, existing, incoming}) => {
@@ -345,6 +345,7 @@ function renderPreviewTarget (parent, {id, label, preview}, decisions, onDecisio
 		wrapper.append(select);
 		section.append(wrapper);
 	});
+	if (isConflictsOnly) { parent.append(section); return; }
 	const sourcedEntries = preview.diff.entries.map(entry => ({...entry, source: entry.source || preview.original.source}));
 	renderDiff(section, {...preview.diff, entries: sourcedEntries});
 	sourcedEntries.forEach(entry => renderEntryDelta(section, entry));
@@ -683,7 +684,169 @@ function renderGuidedTarget ({parent, target, resolved, onChange}) {
 		}};
 }
 
-export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true, automationVersion = 1}) {
+function renderSavedFormEditor ({mount, getTargets, getStamp, getConsequences, validateChange, pApply, isCurrent, savedOperationId, onCancel}) {
+	const container = element("section", {className: "bqa__transformation"});
+	mount.replaceChildren(container);
+	const isActive = () => isCurrent() && mount.contains(container);
+	const controls = element("fieldset", {className: "bqa__transformation-resolution bqa__transformation-form-controls"});
+	controls.append(element("legend", {text: "Switch saved form"}));
+	const identity = paragraph(controls, "");
+	paragraph(controls, "Only permitted saved profiles are available. Rules, assumptions, CR overrides and original consent are frozen; nothing is loaded or recompiled. Kernel-only fixtures are not source-defined family forms.");
+	const label = element("label", {className: "bqa__field"});
+	const picker = element("select", {className: "ve-form-control"});
+	picker.dataset.savedForm = savedOperationId;
+	label.append(element("span", {className: "bqa__field-label", text: "Permitted saved form"}), picker);
+	const frozen = element("details");
+	frozen.append(element("summary", {text: "Saved profiles and receipts (read-only)"}));
+	controls.append(label, frozen);
+	const error = element("p", {className: "bqa__transformation-error"});
+	error.id = `bqa-form-error-${++nextOptionGroupId}`;
+	error.setAttribute("role", "alert");
+	picker.setAttribute("aria-describedby", error.id);
+	const status = element("p");
+	status.setAttribute("role", "status");
+	status.setAttribute("aria-live", "polite");
+	const result = element("div");
+	const review = element("div", {className: "bqa__transformation-summary"});
+	review.setAttribute("aria-label", "Encounter consequences to review");
+	review.setAttribute("role", "region");
+	review.tabIndex = -1;
+	review.hidden = true;
+	const actions = element("div", {className: "bqa__transformation-actions"});
+	const apply = button("Switch form", doApply, "ve-btn ve-btn-primary ve-btn-sm");
+	actions.append(apply);
+	if (onCancel) actions.append(button("Cancel", () => { if (!saving) return onCancel(); }));
+	container.append(controls, error, status, result, review, actions);
+	let batch = null;
+	let stamp;
+	let decisions = {};
+	let reviewedKey = null;
+	let confirmation = null;
+	let saving = false;
+	const readTarget = () => {
+		const targets = getTargets();
+		if (targets.length !== 1) throw new Error("Saved form editing requires exactly one existing owner target.");
+		return targets[0];
+	};
+	const clearReview = () => { reviewedKey = null; confirmation = null; review.hidden = true; review.replaceChildren(); };
+	const preview = () => {
+		batch = null;
+		apply.disabled = true;
+		clearReview();
+		result.replaceChildren();
+		error.textContent = status.textContent = "";
+		try {
+			const target = readTarget();
+			const owner = target.operations.find(it => it.id === savedOperationId);
+			const forms = owner?.data?.resolved?.frozenForms;
+			if (!forms) throw new Error("This saved frozen form owner no longer exists. Reopen its current history action.");
+			const selected = picker.value || forms.activeForm;
+			picker.replaceChildren(...forms.profiles.map(it => new Option(it.label, it.id)));
+			picker.value = selected;
+			const active = forms.profiles.find(it => it.id === forms.activeForm);
+			identity.textContent = `${target.label}: ${owner.data.resolved.identity.name} (${owner.data.resolved.identity.source}) · owner ${owner.id} · position ${target.operations.indexOf(owner) + 1} of ${target.operations.length} · current saved form: ${active.label}`;
+			frozen.replaceChildren(element("summary", {text: "Saved profiles and receipts (read-only)"}));
+			list(frozen, forms.profiles.map(it => `${it.label}: ${JSON.stringify(it.resolved)}`));
+			batch = previewCreatureTransformationForm({target, operationId: savedOperationId, formId: picker.value, conflictDecisions: decisions, validateChange});
+			stamp = getStamp();
+			picker.setAttribute("aria-invalid", "false");
+			if (batch.noChange) { status.textContent = "This saved form is already active. No changes to save."; return; }
+			const display = {id: target.id,
+				label: target.label,
+				isConflictsOnly: !batch.canApply,
+				preview: {...batch.preview,
+					original: target.baseCreature,
+					current: batch.current,
+					proposed: batch.proposed || batch.preview.proposed,
+					diff: batch.diff || batch.preview.diff}};
+			if (batch.canApply) renderCompactDelta(result, {previews: [display]});
+			renderPreviewTarget(result, display, {[target.id]: decisions}, (id, path, winner) => {
+				if (saving) return;
+				if (winner) decisions[path] = winner;
+				else delete decisions[path];
+				preview();
+				[...result.querySelectorAll("select[data-conflict-path]")].find(it => it.dataset.conflictPath === path)?.focus({preventScroll: true});
+			});
+			apply.disabled = !batch.canApply;
+			status.textContent = batch.canApply ? "Whole-history preview only - nothing saved." : "Choose each owner conflict winner to preview the complete resulting history.";
+		} catch (e) {
+			batch = null;
+			picker.setAttribute("aria-invalid", "true");
+			error.textContent = `Cannot switch this saved form: ${e.message}`;
+		}
+	};
+	picker.addEventListener("change", () => { if (!saving) { decisions = {}; preview(); } });
+	async function doApply () {
+		if (saving || !isActive() || !batch?.canApply) return;
+		saving = true;
+		error.textContent = "";
+		try {
+			const target = readTarget();
+			if (stamp !== getStamp() || JSON.stringify(target) !== JSON.stringify(batch.target)) {
+				decisions = {};
+				preview();
+				throw new Error("The owner or whole history changed. Review the refreshed preview and apply again.");
+			}
+			const verified = previewCreatureTransformationForm({target, operationId: savedOperationId, formId: picker.value, conflictDecisions: decisions, validateChange});
+			if (JSON.stringify(verified) !== JSON.stringify(batch)) {
+				preview();
+				throw new Error("The form or storage preview changed. Review and apply again.");
+			}
+			const changes = createCreatureTransformationFormChanges({batch: verified, target, operationId: savedOperationId, formId: picker.value, conflictDecisions: decisions});
+			if (!changes.length) return;
+			const effects = getConsequences(changes);
+			if (effects?.resetHpIds?.length || effects?.splitIds?.length || reviewedKey) {
+				const key = JSON.stringify({batch: verified, stamp, effects});
+				if (key !== reviewedKey) {
+					clearReview();
+					reviewedKey = key;
+					review.append(element("h5", {text: "Review encounter consequences - not saved"}));
+					const names = ids => ids.map(id => id === target.id ? target.label : id).join(", ");
+					if (effects?.resetHpIds?.length) paragraph(review, `HP will reset for ${names(effects.resetHpIds)}. Current and maximum HP reset to the new average (or Unset); temporary HP is preserved.`);
+					if (effects?.splitIds?.length) paragraph(review, `${names(effects.splitIds)} will leave incompatible encounter groups.`);
+					if (!effects?.resetHpIds?.length && !effects?.splitIds?.length) paragraph(review, "No HP resets or encounter group changes are now expected.");
+					const label = element("label", {className: "bqa__transformation-check"});
+					confirmation = element("input");
+					confirmation.type = "checkbox";
+					confirmation.checked = false;
+					label.append(confirmation, document.createTextNode(" I confirm these encounter consequences for this saved form switch."));
+					review.append(label);
+					review.hidden = false;
+					status.textContent = "No changes saved. Review, confirm, then Switch form again.";
+					review.focus();
+					return;
+				}
+				if (!confirmation.checked) { confirmation.focus(); throw new Error("Confirm the reviewed encounter consequences before switching."); }
+			}
+			if (!isActive() || stamp !== getStamp() || JSON.stringify(readTarget()) !== JSON.stringify(target)) throw new Error("The editor changed before saving. Review again.");
+			const locked = [...container.querySelectorAll("button, input, select, textarea")].map(node => ({node, disabled: node.disabled}));
+			locked.forEach(({node}) => { node.disabled = true; });
+			status.textContent = "Saving the selected frozen form...";
+			try { await pApply(changes); } finally { locked.forEach(({node, disabled}) => { if (node.isConnected) node.disabled = disabled; }); }
+			if (!isActive()) return;
+			preview();
+			status.textContent = "Saved form switched. The same owner and history position were retained.";
+			picker.focus();
+			picker.scrollIntoView({block: "nearest", inline: "nearest"});
+		} catch (e) {
+			if (!isActive()) return;
+			if (e.isEncounterStatblockSaved) {
+				batch = null;
+				apply.disabled = true;
+				clearReview();
+				status.textContent = e.message;
+				error.textContent = "";
+			} else {
+				status.textContent = "";
+				error.textContent = `Saved form was not switched: ${e.message}. Review and retry explicitly.`;
+			}
+		} finally { saving = false; }
+	}
+	preview();
+}
+
+export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, validateChange = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true, automationVersion = 1, savedOperationId = null, onCancel = null}) {
+	if (savedOperationId != null) return renderSavedFormEditor({mount, getTargets, getStamp, getConsequences, validateChange, pApply, isCurrent, savedOperationId, onCancel});
 	if (![1, 2].includes(automationVersion)) throw new Error("Unsupported internal transformation editor version.");
 	const container = element("section", {className: "bqa__transformation"});
 	mount.replaceChildren(container);
