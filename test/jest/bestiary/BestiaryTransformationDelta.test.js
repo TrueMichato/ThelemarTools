@@ -1,6 +1,6 @@
 import "../../../js/parser.js";
 import "../../../js/utils.js";
-import {formatCreatureTransformationDeltaField} from "../../../js/bestiary/bestiary-transformation-editor.js";
+import {formatCreatureTransformationDeltaField, formatCreatureTransformationDeltaEntry} from "../../../js/bestiary/bestiary-transformation-editor.js";
 
 describe("compact creature transformation delta", () => {
 	it("names abilities, size, type, and defenses with exact before/after values", () => {
@@ -47,5 +47,30 @@ describe("compact creature transformation delta", () => {
 	it("keeps unrecognized fields identifiable and their values intact", () => {
 		expect(formatCreatureTransformationDeltaField({path: "customFlag", before: "old", after: {source: "HBR"}}))
 			.toBe("Other field (customFlag): \"old\" → {\"source\":\"HBR\"}");
+	});
+
+	it("shows exact HP formula, AC alternatives, signed proficiency fields and independent CR/XP values", () => {
+		const field = (path, before, after) => formatCreatureTransformationDeltaField({path, before, after});
+		expect(field("hp", {average: 27, formula: "5d8 + 5"}, {average: 32, formula: "5d8 + 10"})).toBe("Hit points: 27 (5d8 + 5) → 32 (5d8 + 10)");
+		expect(field("ac", [12, {ac: 16, from: ["shield"]}], [12, {ac: 17, from: ["shield"]}])).toContain("[12,{\"ac\":17,\"from\":[\"shield\"]}]");
+		expect(field("save.dex", "+4", "+5")).toBe("Dexterity save: +4 → +5");
+		expect(field("skill.stealth", 6, 7)).toBe("stealth skill: +6 → +7");
+		expect(field("passive", 10, 11)).toBe("Passive Perception: 10 → 11");
+		expect(field("profBonus", null, 2)).toBe("Proficiency bonus: none → +2");
+		expect(field("pbNote", null, "+2")).toBe("Proficiency display: none → +2");
+		expect(field("cr", "1", {cr: "2", xp: 450})).toBe("Challenge rating: 1 → 2 (450 XP)");
+	});
+
+	it("keeps exact sourced entry and spellcasting-header changes, not undefined entries-only summaries", () => {
+		const before = {name: "Innate Spellcasting", source: "MM", headerEntries: ["DC {@dc 11}, {@hit 3} to hit"], will: ["{@spell dancing lights}"]};
+		const after = {...before, headerEntries: ["DC {@dc 8}, {@hit 0} to hit"]};
+		const text = formatCreatureTransformationDeltaEntry({section: "spellcasting", name: before.name, source: "MM", before, after});
+		expect(text).toContain("Changed Innate Spellcasting (MM)");
+		expect(text).toContain("DC {@dc 11}");
+		expect(text).toContain("DC {@dc 8}");
+		expect(text).toContain("\"will\":[\"{@spell dancing lights}\"]");
+		expect(text).not.toContain("undefined");
+		expect(formatCreatureTransformationDeltaEntry({section: "action", name: "Morningstar", chassisSource: "MM", before: {entries: ["{@hit 4}"]}, after: {entries: ["{@hit 5}"]}}))
+			.toContain("Morningstar (MM)");
 	});
 });
