@@ -3,6 +3,7 @@ import {compileCreatureTransformationStats, isCreatureTransformationStatChange, 
 import {compileCreatureTransformationBindings, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "./creature-transformation-bindings.js";
 import {estimateCreatureTransformationCr, getCreatureTransformationCrProficiency, isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "./creature-transformation-cr.js";
 import {compileReanimation, isCompiledReanimation} from "./creature-transformation-reanimation.js";
+import {compileSporeShadow, getSporeShadowProfile, isCompiledSporeShadow} from "./creature-transformation-spore-shadow.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -161,6 +162,14 @@ const assertHalfDragonBreaths = rows => {
 	}
 };
 const assertAutomation = (automation, identity) => {
+	const profile = getSporeShadowProfile(getId("catalog", identity));
+	if (profile) {
+		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
+			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== profile) {
+			throw new CreatureTransformationCandidateError("Only the exact source-qualified staged M7 Spore/Shadow profile is supported.");
+		}
+		return;
+	}
 	if (["skeleton|DMG", "skeletal wyrmling|Ar8"].includes(`${identity?.name?.toLowerCase()}|${identity?.source}`)) {
 		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
 			|| automation.version !== 2 || automation.rollout !== "staged"
@@ -687,6 +696,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (getSporeShadowProfile(resolved?.id)) return isCompiledSporeShadow(resolved);
 	if (Object.hasOwn(resolved?.selectedOptions || {}, "automation-reanimation")) return isCompiledReanimation(resolved);
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:half-dragon|mm" && isHalfDragonIdentity(resolved.identity)) {
 		if (Object.hasOwn(resolved, "automation") || !resolved.selectedOptions
@@ -777,6 +787,11 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && getSporeShadowProfile(resolved.id)) {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		return compileSporeShadow({resolved, current, chassisSource, inputs, legendaryGroups});
+	}
 	if (resolved?.version === 2 && (Object.hasOwn(inputs || {}, "reanimation") || ["skeleton", "skeletal-wyrmling"].includes(resolved.automation?.profile))) {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);
