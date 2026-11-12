@@ -109,6 +109,13 @@ function getHp ({current, abilities, hp, getMod}) {
 	return value;
 }
 
+export function observeCreatureTransformationHitPoints (current) {
+	const getMod = (ability, creature) => Parser.getAbilityModNumber(integer(creature[ability], 1, 30, `${ability} score`));
+	getHp({current, abilities: {}, hp: {mode: "constitution"}, getMod});
+	const dice = getDice(current.hp.formula);
+	return {value: structuredClone(current.hp), dice, residual: dice.bonus - dice.number * getMod("con", current)};
+}
+
 /**
  * Compile only concrete numeric setters. PB is never inferred from CR or from a bonus's magnitude.
  * With unchanged PB, ability deltas preserve every existing proficiency and authored residual.
