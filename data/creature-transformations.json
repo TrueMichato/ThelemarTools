@@ -232,7 +232,8 @@
 					{"id": "spawn", "name": "Vampire spawn", "changes": [{"op": "grantSense", "sense": "darkvision", "range": 60}], "manualReview": [{"field": "traits", "reason": "Resolve spawn-specific regeneration, weaknesses, and dependence on its creator."}]}
 				]}
 			],
-			"manualReview": [{"field": "attacks", "reason": "Resolve bite, charm, grapples, and form-dependent actions for the chosen outcome."}]
+			"manualReview": [{"field": "attacks", "reason": "Resolve bite, charm, grapples, and form-dependent actions for the chosen outcome."}],
+			"automation": {"version": 2, "profile": "vampire", "rollout": "staged"}
 		},
 		{
 			"name": "Lycanthropy",
