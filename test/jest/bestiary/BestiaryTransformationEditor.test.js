@@ -4,10 +4,14 @@ import "../../../js/parser.js";
 import "../../../js/utils.js";
 import "../../../js/utils-ui.js";
 import "../../../js/render.js";
-import {getCreatureTransformationCandidates, resolveCreatureTransformation} from "../../../js/creature-transformations.js";
+import {compileCreatureTransformation, getCreatureTransformationCandidates, resolveCreatureTransformation} from "../../../js/creature-transformations.js";
+import {compileCreatureTransformationStats} from "../../../js/creature-transformation-stats.js";
+import {estimateCreatureTransformationCr} from "../../../js/creature-transformation-cr.js";
+import {createFrozenCreatureTransformation} from "../../../js/creature-transformation-forms.js";
+import {normalizeCreatureTransformation} from "../../../js/bestiary/bestiary-transformation-catalog-adapter.js";
 import {inspectCreatureTransformationInputs} from "../../../js/bestiary/bestiary-transformation-inputs.js";
 import * as workflow from "../../../js/bestiary/bestiary-transformation-workflow.js";
-import {BestiaryQuickActionsRegistry} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
+import {BestiaryQuickActionsOperations, BestiaryQuickActionsRegistry, BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
 import {EncounterWorkspaceState, EncounterWorkspaceStore, getEncounterEffectiveMonster} from "../../../js/encounterworkspace/encounterworkspace-state.js";
 import {EncounterWorkspaceQuickActionsAdapter} from "../../../js/encounterworkspace/encounterworkspace-quick-actions.js";
 
@@ -30,7 +34,8 @@ class Node {
 	constructor (tag = "") {
 		this.tagName = tag.toUpperCase(); this.children = []; this.parentElement = null;
 		this.listeners = new Map(); this.attributes = {}; this.dataset = {}; this.className = ""; this.value = ""; this.disabled = false;
-		this.classList = {add: (...names) => { this.className += ` ${names.join(" ")}`; }};
+		this.classList = {add: (...names) => { this.className += ` ${names.join(" ")}`; },
+			remove: name => { this.className = this.className.split(" ").filter(it => it !== name).join(" "); }};
 	}
 	get isConnected () { return this === document.body || !!this.parentElement?.isConnected; }
 	get options () { return this.children.filter(it => it.tagName === "OPTION"); }
@@ -62,6 +67,7 @@ class Node {
 	querySelector (selector) { return this.querySelectorAll(selector)[0] || null; }
 	addEventListener (event, fn, capture = false) { this.listeners.set(event, [...this.listeners.get(event) || [], {fn, capture}]); }
 	focus () { document.activeElement = this; }
+	scrollIntoView (options) { this.scrollOptions = options; this.scrolledAfterFocus = document.activeElement === this; }
 	async emit (type) {
 		const path = [];
 		for (let node = this; node; node = node.parentElement) path.push(node);
@@ -90,6 +96,299 @@ beforeEach(() => {
 	jest.spyOn(Renderer.monster, "getCompactRenderedString").mockReturnValue("<tr><td>Rendered separately in the browser phase</td></tr>");
 	jest.spyOn(Renderer.get(), "render").mockImplementation(entry => JSON.stringify(entry));
 	mount = document.createElement("main"); document.body.append(mount); create.mockClear();
+});
+
+// Synthetic kernel-only bundle; no source-defined family producer is implied.
+function savedFixture ({withdraw = false, prefixStrength = false} = {}) {
+	const base = {name: "Kernel-only frozen forms",
+		source: "MM",
+		type: "humanoid",
+		size: ["M"],
+		cr: "1",
+		str: 15,
+		dex: 12,
+		con: 12,
+		int: 10,
+		wis: 10,
+		cha: 8,
+		profBonus: 2,
+		hp: {average: 33, formula: "6d8 + 6"},
+		ac: [13],
+		action: [{name: "Claw", entries: ["{@hit +4} to hit. 5 ({@damage 1d6 + 2}) slashing damage."]}]};
+	const patch = (id, set) => ({id, ...BestiaryQuickActionsOperations.patch({set})});
+	let prefix = patch("prefix", {languages: ["Common"]});
+	if (prefixStrength) {
+		const resolved = {id: "catalog:prefix|tst", kind: "catalog", identity: {name: "Kernel-only prefix", source: "TST"}, provenance: {edition: "classic"}, eligibility: [], prerequisites: [], selectedOptions: {}, changes: [{type: "setAbility", ability: "str", value: 14}], manualReview: []};
+		const preview = BestiaryQuickActionsUtil.previewCreatureTransformation({baseCreature: base, operations: [], resolved});
+		prefix = {id: "prefix", ...BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: base, operations: [], preview})};
+	}
+	const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: base, operations: [prefix]});
+	const pending = resolveCreatureTransformation({candidates, id: "catalog:zombie|dmg", automationVersion: 2});
+	const profiles = [0, 1].map(index => {
+		const rating = estimateCreatureTransformationCr({current: {...current, hp: {average: index ? 45 : 39}, ac: [index ? 17 : 14]},
+			table,
+			assumptions: {
+				defense: {expectedCr: "1", hpBoundary: null, acIndex: 0, acAdjustment: 0, hpAdjustment: 0, resistance: "none", vulnerability: false, regeneration: 0, note: "Kernel-only fixture."},
+				routines: [{id: "kernel", rounds: [8, 8, 8].map(value => ({value, proficiency: 0})), accuracy: {kind: "attack", value: 4, proficiency: 1}, note: "Kernel-only fixture."}],
+				routine: "kernel",
+				review: "Synthetic kernel fixture.",
+				override: {cr: index ? "5" : "2", reason: "Kernel-only override."},
+				zeroXp: false,
+				proficiencyAnswer: null,
+			}});
+		const root = compileCreatureTransformation({resolved: pending, current});
+		return {id: index ? "test-b" : "test-a",
+			label: `Kernel-only fixture ${index ? "B" : "A"}`,
+			resolved: {...root,
+				selectedOptions: {...root.selectedOptions, "automation-bindings": ["zombie-dmg-m2b"], "automation-cr": ["zombie-dmg-m3"]},
+				changes: [
+					...root.changes.filter(it => !["setAbility", "setHitPoints", "setSaveBonus", "setSkillBonus", "setPassivePerception"].includes(it.op)),
+					...compileCreatureTransformationStats({current, abilities: {str: index && withdraw ? 15 : index ? 18 : 16, con: index ? 16 : 14}, hp: {mode: "constitution"}})
+						.filter(it => !(index && withdraw && it.op === "setAbility" && it.ability === "str")),
+					{op: "setProficiencyBonus", value: rating.receipt.proficiency.after}, {op: "setArmorClass", value: [index ? 17 : 14]},
+					{op: "setEntryNumbers", section: "action", match: {name: "Claw", source: "MM"}, entries: [`{@hit +${index ? 6 : 5}} to hit. ${index ? 7 : 6} ({@damage 1d6 + ${index ? 4 : 3}}) slashing damage. Kernel-only rider.`]}, rating,
+				]}};
+	});
+	const resolved = normalizeCreatureTransformation(createFrozenCreatureTransformation({profiles, activeForm: "test-a", baseline: BestiaryQuickActionsUtil.getCreatureTransformationBaseline({baseCreature: base, operations: [prefix]})}));
+	const conflictDecisions = prefixStrength ? {str: "incoming"} : {};
+	const preview = BestiaryQuickActionsUtil.previewCreatureTransformation({baseCreature: base, operations: [prefix], resolved, acknowledgedPrerequisites: resolved.prerequisites, dmApproved: true, conflictDecisions});
+	const owner = {id: "form-owner", ...BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: base, operations: [prefix], preview, conflictDecisions})};
+	return {base, prefix, owner, suffix: patch("suffix", {wis: 19}), patch};
+}
+
+describe("C2 saved native controls (Node DOM facade, not browser acceptance)", () => {
+	const picker = () => mount.querySelector("select[data-saved-form]");
+	const switchButton = () => findButton(mount, "Switch form");
+	const confirmEffects = async () => {
+		const node = all(mount, "input").find(it => it.type === "checkbox");
+		expect(node).toBeDefined(); node.checked = true; await node.emit("change");
+	};
+	async function renderSaved (fixture, registry, options = {}) {
+		await BestiaryQuickActionsUi._pRenderTransformation({content: mount, monster: fixture.base, registry, isCurrent: () => true, savedOperationId: fixture.owner.id, ...options});
+	}
+	function noLoads () {
+		DataUtil.loadJSON.mockImplementation(() => { throw new Error("No catalog/table available"); });
+		DataUtil.race.loadJSON = jest.fn(() => { throw new Error("No races available"); });
+		jest.spyOn(JqueryUtil, "doToast").mockImplementation(() => {});
+	}
+
+	it("forwards the full exclusive proposal through actual Quick Actions -> Registry for A/B/A/B, stable owner/order/values and no-op/removal", async () => {
+		const fixture = savedFixture();
+		const {base, prefix, owner, suffix} = fixture;
+		const registry = new BestiaryQuickActionsRegistry();
+		registry.applyChanges({monster: base, addOperations: [prefix, owner, suffix]});
+		const apply = jest.spyOn(registry, "applyChanges");
+		const notified = jest.fn(); registry.subscribe(notified);
+		noLoads();
+		await renderSaved(fixture, registry);
+		expect(picker().options.map(it => it.textContent)).toEqual(["Kernel-only fixture A", "Kernel-only fixture B"]);
+		expect(mount.textContent).toContain("Zombie (DMG)");
+		expect(mount.textContent).toContain("position 2 of 3");
+		expect(switchButton().disabled).toBe(true);
+		await switchButton().emit("click");
+		expect(apply).not.toHaveBeenCalled();
+		for (const form of ["test-b", "test-a", "test-b"]) {
+			const before = registry.getOperations({monster: base});
+			await edit(picker(), form);
+			expect(mount.textContent).toContain(form === "test-b" ? "45" : "39");
+			await switchButton().emit("click");
+			const history = registry.getOperations({monster: base});
+			expect(history.map(it => it.id)).toEqual(["prefix", "form-owner", "suffix"]);
+			expect(JSON.stringify([history[0], history[2]])).toBe(JSON.stringify([prefix, suffix]));
+			expect(history[1].data.resolved.frozenForms.activeForm).toBe(form);
+			expect(registry.getCreature({monster: base})).toMatchObject({
+				str: form === "test-b" ? 18 : 16,
+				con: form === "test-b" ? 16 : 14,
+				wis: 19,
+				hp: {average: form === "test-b" ? 45 : 39, formula: form === "test-b" ? "6d8 + 18" : "6d8 + 12"},
+				ac: [form === "test-b" ? 17 : 14],
+				cr: {cr: form === "test-b" ? "5" : "2", xp: form === "test-b" ? 1800 : 450}});
+			expect(registry.getCreature({monster: base}).action[0].entries[0]).toBe(form === "test-b"
+				? "{@hit +6} to hit. 7 ({@damage 1d6 + 4}) slashing damage. Kernel-only rider."
+				: "{@hit +5} to hit. 6 ({@damage 1d6 + 3}) slashing damage. Kernel-only rider.");
+			const forwarded = apply.mock.calls.at(-1)[0];
+			expect(forwarded).toEqual({monster: base, id: "current", addOperations: [], removeIds: [], replaceOperation: {operationId: owner.id, expectedIntegrity: before[1].data.integrity, operation: history[1]}});
+			expect(history[1].data.resolved.frozenForms.profiles).toEqual(owner.data.resolved.frozenForms.profiles);
+			expect(document.activeElement).toBe(picker());
+		}
+		expect(notified).toHaveBeenCalledTimes(3);
+		expect(DataUtil.loadJSON).not.toHaveBeenCalled();
+		expect(DataUtil.race.loadJSON).not.toHaveBeenCalled();
+		registry.removeOperation({monster: base, operationId: owner.id});
+		expect(registry.getCreature({monster: base})).toEqual({...base, languages: ["Common"], wis: 19});
+	});
+
+	it("reaches actual Encounter callbacks -> adapter -> State -> real Store with slot-100 replacement, exact consequence review, rejected-write retry and reload", async () => {
+		const fixture = savedFixture();
+		const {base, prefix, owner, suffix, patch} = fixture;
+		let next = 0;
+		let state = await EncounterWorkspaceState.pFromSavedList({exportedSublist: {name: "C2 kernel-only", items: [{h: "kernel_mm", c: 3}]}, pResolveItem: async () => ({entity: base}), fnUid: () => `one-${++next}`});
+		const history = [prefix, owner, suffix, ...Array.from({length: 97}, (_, i) => patch(`extra-${i}`, {wis: 19}))];
+		state = EncounterWorkspaceState.withStatblockChanges(state, state.instances.map((it, i) => ({id: it.id, addOperations: i ? [prefix, owner, suffix] : history, removeIds: []}))).state;
+		state = EncounterWorkspaceState.withHp(state, {id: "one-1", prop: "current", value: 4});
+		state = EncounterWorkspaceState.withHp(state, {id: "one-1", prop: "temp", value: 6});
+		state = EncounterWorkspaceState.withGroup({state, memberIds: ["one-1", "one-2", "one-3"], id: "shared-kernel"});
+		state = EncounterWorkspaceState.withSharedTurn(state, {groupId: "shared-kernel", isShared: true, total: 16});
+		state = EncounterWorkspaceState.withTurn(state, "start");
+		const storage = {pSetForPage: jest.fn(async (key, value) => { storage.saved = structuredClone(value); }), pGetForPage: async () => storage.saved};
+		const store = new EncounterWorkspaceStore({storage});
+		await store.pSave(state); storage.pSetForPage.mockClear();
+		const page = Object.create(EncounterWorkspacePage.prototype);
+		Object.assign(page, {_state: state,
+			_store: store,
+			_hpUndo: [[{id: "one-1"}], [{id: "one-2"}]],
+			_setBusy: jest.fn(),
+			_render: jest.fn(),
+			_clearInitiativeMove: jest.fn(),
+			_clearRollResults: jest.fn(),
+			_setStatus: jest.fn(),
+			_setError: jest.fn(),
+			_getTargetNames: () => "Kernel fixture"});
+		const adapter = new EncounterWorkspaceQuickActionsAdapter({id: "one-1", getState: () => page._state, pCommit: result => page._pCommitStatblockEdit(result)});
+		const apply = jest.spyOn(adapter, "applyChanges");
+		const notified = jest.fn(); adapter.subscribe(notified);
+		noLoads();
+		const callbacks = page._getTransformationEditorCallbacks("one-1");
+		expect(() => callbacks.validateOperation({target: {baseCreature: base, operations: history}, operation: patch("append", {wis: 19})})).toThrow(/100-operation/);
+		expect(() => callbacks.validateChange({target: {baseCreature: base}, operations: [patch("large", {languages: ["x".repeat(200_001)]})]})).toThrow(/invalid statblock operation/i);
+		await renderSaved(fixture, adapter, callbacks);
+		await switchButton().emit("click");
+		expect(storage.pSetForPage).not.toHaveBeenCalled();
+		await edit(picker(), "test-b"); await switchButton().emit("click");
+		const review = all(mount, "div").find(it => it.attributes["aria-label"] === "Encounter consequences to review");
+		expect(review.hidden).toBe(false); expect(document.activeElement).toBe(review);
+		expect(storage.pSetForPage).not.toHaveBeenCalled(); expect(notified).not.toHaveBeenCalled();
+		expect(page._state).toBe(state); expect(page._hpUndo).toHaveLength(2);
+		const reviewedText = review.textContent;
+		page._state = EncounterWorkspaceState.withGroupSplit(page._state, {id: "one-3"});
+		await confirmEffects(); await switchButton().emit("click");
+		expect(review.textContent).toBe(reviewedText);
+		expect(all(mount, "input")[0].checked).toBe(false);
+		expect(storage.pSetForPage).not.toHaveBeenCalled();
+		const before = page._state;
+		storage.pSetForPage.mockRejectedValueOnce(new Error("Storage full"));
+		await confirmEffects(); await switchButton().emit("click");
+		expect(mount.textContent).toContain("Storage full");
+		expect(page._state).toBe(before); expect(page._hpUndo).toHaveLength(2);
+		expect(adapter.getOperations()).toEqual(history);
+		expect(notified).not.toHaveBeenCalled(); expect(page._render).not.toHaveBeenCalled(); expect(JqueryUtil.doToast).not.toHaveBeenCalled();
+		let release; let onStarted;
+		const started = new Promise(resolve => { onStarted = resolve; });
+		storage.pSetForPage.mockImplementationOnce(async (key, value) => {
+			await new Promise(resolve => { release = resolve; onStarted(); });
+			storage.saved = structuredClone(value);
+		});
+		const pending = switchButton().emit("click");
+		await started;
+		expect(picker().disabled).toBe(true); expect(switchButton().disabled).toBe(true);
+		release(); await pending;
+		expect(storage.pSetForPage).toHaveBeenCalledTimes(2); expect(notified).toHaveBeenCalledTimes(1);
+		expect(page._hpUndo).toEqual([[{id: "one-2"}]]); expect(page._clearInitiativeMove).toHaveBeenCalledTimes(1);
+		const reloaded = await store.pLoad(); page._state = reloaded;
+		expect(reloaded.instances[0].hp).toEqual({current: 45, max: 45, temp: 6});
+		expect(reloaded.instances[0].monster).toEqual(base);
+		expect(reloaded.instances[0].statblockOperations).toHaveLength(100);
+		expect(reloaded.instances[0].statblockOperations.map(it => it.id)).toEqual(history.map(it => it.id));
+		expect(JSON.stringify(reloaded.instances[0].statblockOperations.slice(2))).toBe(JSON.stringify(history.slice(2)));
+		expect(getEncounterEffectiveMonster(reloaded.instances[0])).toMatchObject({str: 18, ac: [17], cr: {cr: "5", xp: 1800}});
+		expect(apply.mock.calls.at(-1)[0]).toEqual({monster: base, id: "current", addOperations: [], removeIds: [], replaceOperation: {operationId: owner.id, expectedIntegrity: owner.data.integrity, operation: reloaded.instances[0].statblockOperations[1]}});
+		expect(reloaded.groups).toEqual([{id: "shared-kernel", memberIds: ["one-2"], sharedTurn: true, initiative: 16}]);
+		expect(reloaded.turn).toEqual({round: 1, activeId: "shared-kernel"});
+		await renderSaved(fixture, adapter, callbacks);
+		await edit(picker(), "test-a"); await switchButton().emit("click"); await confirmEffects();
+		page._render.mockImplementationOnce(() => { throw new Error("Refresh unavailable"); });
+		await switchButton().emit("click");
+		expect(mount.textContent).toContain("were saved"); expect(mount.textContent).toContain("Reload");
+		expect(mount.textContent).not.toContain("was not switched"); expect(switchButton().disabled).toBe(true);
+		page._state = await store.pLoad();
+		expect(getEncounterEffectiveMonster(page._state.instances[0]).str).toBe(16);
+		await adapter.removeOperation({operationId: owner.id});
+		page._state = await store.pLoad();
+		expect(adapter.getCreature()).toEqual({...base, languages: ["Common"], wis: 19});
+		expect(page._state.instances[0].hp).toEqual({current: 33, max: 33, temp: 6});
+		expect(DataUtil.loadJSON).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])("blocks changed or disappearing downstream conflicts in native preview (withdraw=%s)", async withdraw => {
+		const fixture = savedFixture({withdraw});
+		const {base, prefix, owner} = fixture;
+		const resolved = {id: "catalog:later|tst", kind: "catalog", identity: {name: "Later kernel-only", source: "TST"}, provenance: {edition: "classic"}, eligibility: [], prerequisites: [], selectedOptions: {}, changes: [{type: "setAbility", ability: "str", value: 20}], manualReview: []};
+		const preview = BestiaryQuickActionsUtil.previewCreatureTransformation({baseCreature: base, operations: [prefix, owner], resolved, conflictDecisions: {str: "existing"}});
+		const later = {id: "later", ...BestiaryQuickActionsUtil.createCreatureTransformationOperation({baseCreature: base, operations: [prefix, owner], preview, conflictDecisions: {str: "existing"}})};
+		const registry = new BestiaryQuickActionsRegistry();
+		registry.applyChanges({monster: base, addOperations: [prefix, owner, later]});
+		const apply = jest.spyOn(registry, "applyChanges");
+		noLoads(); await renderSaved(fixture, registry); await edit(picker(), "test-b");
+		expect(mount.textContent).toMatch(/conflict.*changed/i); expect(switchButton().disabled).toBe(true);
+		await switchButton().emit("click");
+		expect(apply).not.toHaveBeenCalled(); expect(registry.getOperations({monster: base})).toEqual([prefix, owner, later]);
+	});
+
+	it("requires owner conflict winners, clears them on form edits and fences a changed suffix before a write", async () => {
+		const fixture = savedFixture({prefixStrength: true});
+		const {base, prefix, owner, suffix, patch} = fixture;
+		const registry = new BestiaryQuickActionsRegistry();
+		registry.applyChanges({monster: base, addOperations: [prefix, owner, suffix]});
+		noLoads(); await renderSaved(fixture, registry);
+		await edit(picker(), "test-b");
+		expect(switchButton().disabled).toBe(true);
+		let winner = all(mount, "select").find(it => it.dataset.conflictPath === "str");
+		await edit(winner, "incoming");
+		expect(document.activeElement.dataset.conflictPath).toBe("str");
+		expect(switchButton().disabled).toBe(false);
+		await edit(picker(), "test-a"); await edit(picker(), "test-b");
+		winner = all(mount, "select").find(it => it.dataset.conflictPath === "str");
+		expect(winner.value).toBe("");
+		await edit(winner, "incoming");
+		registry.applyChanges({monster: base, addOperations: [patch("new-suffix", {languages: ["Common", "Elvish"]})]});
+		const apply = jest.spyOn(registry, "applyChanges");
+		await switchButton().emit("click");
+		expect(mount.textContent).toContain("whole history changed");
+		expect(apply).not.toHaveBeenCalled();
+		expect(registry.getOperations({monster: base})[1]).toEqual(owner);
+	});
+
+	it("opens from real saved history before loading, restores cancel/save focus, and invalidates a closed modal", async () => {
+		const fixture = savedFixture();
+		const {base, prefix, owner, suffix} = fixture;
+		const registry = new BestiaryQuickActionsRegistry();
+		registry.applyChanges({monster: base, addOperations: [prefix, owner, suffix]});
+		noLoads();
+		const parent = document.createElement("div");
+		const inner = document.createElement("div"); const footer = document.createElement("div");
+		parent.append(inner, footer); document.body.append(parent);
+		let close;
+		jest.spyOn(UiUtil, "getShowModal").mockImplementation(({cbClose}) => {
+			close = cbClose; return {eleModalInner: inner, eleModalFooter: footer, doClose: () => close()};
+		});
+		jest.spyOn(BestiaryQuickActionsUi, "_pRenderMinion").mockResolvedValue();
+		await BestiaryQuickActionsUi.pOpen({monster: base, registry});
+		mount = inner.querySelector(".bqa__content");
+		const historyAction = () => inner.querySelector("button[data-saved-operation-id]");
+		expect(historyAction().attributes["aria-label"]).toContain("Zombie (DMG)");
+		await historyAction().emit("click");
+		expect(document.activeElement).toBe(picker());
+		expect(picker().scrollOptions).toEqual({block: "nearest", inline: "nearest"});
+		expect(picker().scrolledAfterFocus).toBe(true);
+		await findButton(mount, "Cancel").emit("click");
+		expect(document.activeElement).toBe(historyAction());
+		expect(historyAction().scrollOptions).toEqual({block: "nearest", inline: "nearest"});
+		expect(historyAction().scrolledAfterFocus).toBe(true);
+		await historyAction().emit("click"); await edit(picker(), "test-b"); await switchButton().emit("click");
+		expect(picker().value).toBe("test-b"); expect(document.activeElement).toBe(picker());
+		expect(picker().scrollOptions).toEqual({block: "nearest", inline: "nearest"});
+		expect(picker().scrolledAfterFocus).toBe(true);
+		expect(inner.textContent).toContain("Saved form: Kernel-only fixture B");
+		await edit(picker(), "test-a");
+		const stale = switchButton();
+		await findButton(historyAction().parentElement.parentElement, "Remove").emit("click");
+		expect(registry.getCreature({monster: base})).toEqual({...base, languages: ["Common"], wis: 19});
+		expect(registry.getOperations({monster: base}).map(it => it.id)).toEqual(["prefix", "suffix"]);
+		expect(mount.textContent).toContain("no longer exists");
+		const apply = jest.spyOn(registry, "applyChanges");
+		await findButton(footer, "Done").emit("click"); await stale.emit("click");
+		expect(apply).not.toHaveBeenCalled(); expect(DataUtil.loadJSON).not.toHaveBeenCalled();
+	});
 });
 afterEach(() => { jest.restoreAllMocks(); Object.assign(globalThis, originalGlobals); });
 

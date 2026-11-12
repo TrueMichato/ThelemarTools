@@ -321,5 +321,12 @@ export function compileCreatureTransformationInputs ({target, resolved, answers,
 
 export async function pLoadCreatureTransformationInputTable ({requested, dataUtil = globalThis.DataUtil}) {
 	if (!requested) return null;
-	return (await dataUtil.loadJSON("data/msbcr.json")).cr;
+	const table = (await dataUtil.loadJSON("data/msbcr.json")).cr;
+	if (!Array.isArray(table)) return table;
+	return table.map(row => {
+		if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+		const copy = {...row};
+		if (copy.__prop === "cr") delete copy.__prop;
+		return copy;
+	});
 }

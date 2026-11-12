@@ -1095,6 +1095,10 @@ export class EncounterWorkspacePage {
 
 	_getTransformationEditorCallbacks (id = null) {
 		return {
+			validateChange: ({target, operations}) => {
+				if (operations.length > MAX_ENCOUNTER_STATBLOCK_OPERATIONS) throw new Error(`This monster exceeds the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);
+				validateEncounterStatblockOperations(target.baseCreature, operations);
+			},
 			validateOperation: ({target, operation}) => {
 				if (target.operations.length >= MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
 					throw new Error(`This monster has reached the ${MAX_ENCOUNTER_STATBLOCK_OPERATIONS}-operation statblock history limit.`);

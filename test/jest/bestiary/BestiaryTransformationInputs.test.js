@@ -350,6 +350,39 @@ describe("M4b DOM-free representative input/composer boundary", () => {
 		expect(adapter.getCreature()).toEqual(source("Bugbear"));
 	});
 
+	it("loads actual DataUtil-annotated CR rows into real guided readiness without changing cached rows", async () => {
+		const cached = {cr: table.map(row => ({...row}))};
+		DataUtil._mutAddProps(cached);
+		expect(cached.cr.every(row => Object.hasOwn(row, "__prop") && row.__prop === "cr")).toBe(true);
+		const original = JSON.stringify(cached);
+		const loaded = await pLoadCreatureTransformationInputTable({requested: true, dataUtil: {loadJSON: async () => cached}});
+		const batch = preview([target()], {one: answersFor()}, {crTable: loaded});
+		expect(batch.skipped).toEqual([]);
+		expect(batch.guidedModels[0].estimate.receipt).toMatchObject({estimatedCr: "1", damagePerRound: 12, accuracy: 5});
+		expect(batch.previews[0].preview.proposed).toMatchObject({hp: {average: 32}, cr: {cr: "1", xp: 200}});
+		expect(batch).toEqual(preview());
+		expect(loaded).toEqual(table);
+		expect(loaded).not.toBe(cached.cr);
+		loaded.forEach((row, i) => { expect(row).not.toBe(cached.cr[i]); });
+		expect(JSON.stringify(cached)).toBe(original);
+	});
+
+	it.each([
+		["wrong transport owner", {__prop: "monster"}],
+		["unknown row property", {_unexpected: true}],
+		["noncanonical numeric data", {ac: -1}],
+	])("keeps %s visible to the unchanged strict estimator", async (label, invalid) => {
+		const cached = {cr: table.map(row => ({...row}))};
+		DataUtil._mutAddProps(cached);
+		Object.assign(cached.cr[0], invalid);
+		const original = JSON.stringify(cached);
+		const loaded = await pLoadCreatureTransformationInputTable({requested: true, dataUtil: {loadJSON: async () => cached}});
+		const batch = preview([target()], {one: answersFor()}, {crTable: loaded});
+		expect(batch.previews).toEqual([]);
+		expect(batch.skipped[0].reason).toMatch(/invalid, missing, reordered or noncanonical row/);
+		expect(JSON.stringify(cached)).toBe(original);
+	});
+
 	it("keeps Dracolich confirmations narrow, never infers age, and rejects legacy/unsupported guided identities", async () => {
 		const resolved = staged("catalog:dracolich|mm");
 		const subject = target("dragon", source("Adult Green Dragon"));

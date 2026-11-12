@@ -435,6 +435,10 @@ body.bqa__modal-active .ve-hwin {
 			font-weight: 600;
 		}
 
+		legend {
+			color: inherit;
+		}
+
 		details {
 			margin: 10px 0;
 		}
@@ -471,6 +475,22 @@ body.bqa__modal-active .ve-hwin {
 		padding: 8px;
 		border: 1px solid vars.$rgb-border-grey;
 		overflow-wrap: anywhere;
+	}
+
+	.bqa__transformation-form-controls {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+
+		select,
+		button {
+			min-height: 44px;
+		}
+
+		li {
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+		}
 	}
 
 	.bqa__transformation-resolution-error {
@@ -1388,6 +1408,14 @@ body.bqa__modal-active .ve-hwin {
 
 		.bqa__transformation-choice-row {
 			grid-template-columns: minmax(0, 1fr) 44px;
+		}
+
+		.bqa__transformation-selected {
+			grid-template-columns: minmax(0, 1fr) 44px;
+
+			.bqa__transformation-info {
+				min-width: 44px;
+			}
 		}
 
 		.bqa__transformation-category-btn {
