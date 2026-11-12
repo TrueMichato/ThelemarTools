@@ -4,6 +4,7 @@ import {formatCreatureTransformationBonus, getCreatureTransformationProficiencyB
 import {getCreatureTransformationInnateSpellcastingEntry, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "../creature-transformation-bindings.js";
 import {isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "../creature-transformation-cr.js";
 import {assertFrozenCreatureTransformation, assertFrozenCreatureTransformationReplacement} from "../creature-transformation-forms.js";
+import {isReanimationChange, isReanimationOp} from "../creature-transformation-reanimation.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -138,6 +139,10 @@ function _validateEntry (entry) {
 
 function _validateChange (change) {
 	if (!_isObject(change)) _fail("Transformation changes must be objects.");
+	if (isReanimationOp(change.type)) {
+		if (!isReanimationChange(change, "type")) _fail(`Invalid reanimation setter "${change.type}".`);
+		return;
+	}
 	if (isCreatureTransformationStatOp(change.type)) {
 		if (!isCreatureTransformationStatChange(change, "type")) _fail(`Invalid numeric setter "${change.type}".`);
 		return;
@@ -294,6 +299,7 @@ function _validateRecipe (resolved) {
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationStatOp(change?.type))) _fail("Numeric setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationBindingOp(change?.type))) _fail("Binding setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isCreatureTransformationCrOp(change?.type))) _fail("CR setters require an opt-in version-2 snapshot.");
+	if (resolved.version !== 2 && resolved.changes.some(change => isReanimationOp(change?.type))) _fail("Reanimation setters require an opt-in version-2 snapshot.");
 	resolved.changes.forEach(_validateChange);
 	_expectArray(resolved.manualReview, "Manual review");
 	resolved.manualReview.forEach(it => {
@@ -380,6 +386,25 @@ function _applyChange (creature, change, chassis) {
 	let before;
 	let after;
 	switch (change.type) {
+		case "setReanimationType":
+			path = "type";
+			before = out.type;
+			out.type = Object.keys(change.value).length === 1 ? "undead" : _copy(change.value);
+			after = out.type;
+			break;
+		case "setReanimationLanguages": {
+			const values = _copy(change.value);
+			const writes = Object.entries(values).filter(([key, value]) => !_equal(out[key], value))
+				.map(([key, value]) => ({path: key, before: out[key], after: value, section: null}));
+			Object.assign(out, values);
+			return {out, paths: Object.keys(values), writes};
+		}
+		case "setReanimationLair":
+			path = "legendaryGroup";
+			before = out.legendaryGroup;
+			out.legendaryGroup = _copy(change.value);
+			after = out.legendaryGroup;
+			break;
 		case "setType":
 			path = "type";
 			before = out.type;
@@ -694,8 +719,9 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		const hasNumericGroup = resolved.version === 2 && resolved.id === "catalog:zombie|dmg";
-		const isNumericStep = change => change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
+		const reanimation = resolved.version === 2 && Object.hasOwn(resolved.selectedOptions, "automation-reanimation");
+		const hasNumericGroup = reanimation || (resolved.version === 2 && resolved.id === "catalog:zombie|dmg");
+		const isNumericStep = change => reanimation || change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
 		const numericConflicts = conflicts.filter(it => numericPaths.includes(it.path));
 		const numericWinners = new Set(numericConflicts.map(it => conflictDecisions[it.path]).filter(Boolean));

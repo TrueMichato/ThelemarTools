@@ -392,8 +392,86 @@
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
+		},
+		"reanimationContent": {
+			"description": "Existing bounded entry subset with source/page metadata for nested lair supplements; not used by default/Species entries.",
+			"oneOf": [
+				{"type": "string", "minLength": 1},
+				{"type": "integer"},
+				{"type": "object", "properties": {"type": {"enum": ["entries", "inset"]}, "name": {"type": "string", "minLength": 1}, "source": {"type": "string", "minLength": 1, "maxLength": 256}, "page": {"type": "integer", "minimum": 1}, "entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}}}, "required": ["type", "entries"], "additionalProperties": false},
+				{"type": "object", "properties": {"type": {"const": "list"}, "style": {"type": "string"}, "source": {"type": "string", "minLength": 1, "maxLength": 256}, "page": {"type": "integer", "minimum": 1}, "items": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}}}, "required": ["type", "items"], "additionalProperties": false},
+				{"type": "object", "properties": {"type": {"enum": ["item", "itemSpell"]}, "name": {"type": "string", "minLength": 1}, "source": {"type": "string", "minLength": 1, "maxLength": 256}, "page": {"type": "integer", "minimum": 1}, "entry": {"$ref": "#/$defs/reanimationContent"}, "entries": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}}}, "required": ["type", "name"], "oneOf": [{"required": ["entry"]}, {"required": ["entries"]}], "additionalProperties": false},
+				{"type": "object", "properties": {"type": {"const": "table"}, "caption": {"type": "string"}, "source": {"type": "string", "minLength": 1, "maxLength": 256}, "page": {"type": "integer", "minimum": 1}, "colLabels": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}}, "colStyles": {"type": "array", "items": {"type": "string"}}, "rows": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}}}}, "required": ["type", "colLabels", "rows"], "additionalProperties": false}
+			]
+		},
+		"reanimationChange": {
+			"description": "M6 concrete setters only; never default recipes, historical snapshots or a general patch.",
+			"oneOf": [
+				{"type": "object", "properties": {
+					"op": {"const": "setReanimationType"},
+					"value": {"type": "object", "properties": {
+						"type": {"const": "undead"},
+						"tags": {"type": "array", "maxItems": 100, "items": {"oneOf": [
+							{"type": "string", "minLength": 1, "maxLength": 256},
+							{"type": "object", "properties": {"tag": {"type": "string", "minLength": 1, "maxLength": 256}, "prefix": {"type": "string", "minLength": 1, "maxLength": 256}, "prefixHidden": {"type": "boolean"}}, "required": ["tag", "prefix"], "additionalProperties": false}
+						]}},
+						"swarmSize": {"$ref": "#/$defs/size"}
+					}, "required": ["type"], "additionalProperties": false}
+				}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setReanimationLanguages"},
+					"value": {"type": "object", "properties": {
+						"languages": {"type": "array", "minItems": 1, "maxItems": 100, "contains": {"type": "string", "pattern": "^(understands .+ but can't speak|can't speak)$"}, "minContains": 1, "maxContains": 1, "items": {"type": "string", "maxLength": 256, "pattern": "^(understands .+ but can't speak|can't speak|[Tt][Ee][Ll][Ee][Pp][Aa][Tt][Hh][Yy]\\b.*)$"}},
+						"languageTags": {"type": "array", "maxItems": 100, "contains": {"const": "CS"}, "items": {"type": "string", "minLength": 1, "maxLength": 256}}
+					}, "required": ["languages", "languageTags"], "additionalProperties": false}
+				}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setReanimationLair"},
+					"value": {"type": "object", "properties": {
+						"name": {"type": "string", "minLength": 1, "maxLength": 256}, "source": {"type": "string", "minLength": 1, "maxLength": 256},
+						"page": {"type": "integer", "minimum": 1},
+						"lairActions": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}},
+						"regionalEffects": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}},
+						"mythicEncounter": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/reanimationContent"}}
+					}, "required": ["name", "source"], "additionalProperties": false}
+				}, "required": ["op", "value"], "additionalProperties": false}
+			]
+		},
+		"compiledReanimation": {
+			"description": "Explicit internal M6 output. Runtime also enforces exact source rules, complete traits, receipts and the closed profile operation set.",
+			"type": "object",
+			"properties": {
+				"version": {"const": 2},
+				"id": {"enum": ["catalog:dracolich|mm", "catalog:skeleton|dmg", "catalog:zombie|dmg", "catalog:skeletal wyrmling|ar8"]},
+				"kind": {"const": "catalog"}, "identity": {"$ref": "#/$defs/identity"}, "provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/eligibility"}, "contains": {"type": "object", "required": ["dmApproval"], "properties": {"dmApproval": {"const": true}}}},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"automation-reanimation": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["dracolich|mm:m6", "skeleton|dmg:m6", "zombie|dmg:m6", "skeletal wyrmling|ar8:m6"]}},
+					"automation-age": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["adult", "ancient"]}},
+					"automation-nature": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "true-dragon"}, {"const": "not-shadow"}], "items": false},
+					"automation-physiology": {"type": "array", "maxItems": 100, "items": {"type": "string", "pattern": "^(remove|retain):.+\\|.+$"}},
+					"automation-lair": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["retain", "replace"]}},
+					"automation-donor": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^.+\\|.+$"}},
+					"automation-breaths": {"type": "array", "maxItems": 100, "items": {"type": "string", "pattern": "^(remove|retain):(trait|action|bonus|reaction|legendary):.+\\|.+$"}}
+				}, "required": ["automation-reanimation"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"$ref": "#/$defs/reanimationChange"}, {"$ref": "#/$defs/numericChange"}, {"$ref": "#/$defs/bindingChange"},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"enum": ["setAbility", "grantResistance", "grantImmunity", "grantVulnerability", "grantConditionImmunity", "grantSense", "addEntry", "replaceEntry", "removeEntry"]}}}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			},
+			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"allOf": [
+				{"if": {"properties": {"id": {"const": "catalog:dracolich|mm"}}}, "then": {"properties": {"identity": {"type": "object", "properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}}}, "selectedOptions": {"type": "object", "required": ["automation-age", "automation-nature", "automation-physiology", "automation-lair"], "propertyNames": {"enum": ["automation-reanimation", "automation-age", "automation-nature", "automation-physiology", "automation-lair"]}, "properties": {"automation-reanimation": {"type": "array", "items": {"const": "dracolich|mm:m6"}}}}}}},
+				{"if": {"properties": {"id": {"const": "catalog:skeleton|dmg"}}}, "then": {"properties": {"identity": {"type": "object", "properties": {"name": {"const": "Skeleton"}, "source": {"const": "DMG"}}}, "selectedOptions": {"type": "object", "propertyNames": {"const": "automation-reanimation"}, "properties": {"automation-reanimation": {"type": "array", "items": {"const": "skeleton|dmg:m6"}}}}}}},
+				{"if": {"properties": {"id": {"const": "catalog:zombie|dmg"}}}, "then": {"properties": {"identity": {"type": "object", "properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}}}, "selectedOptions": {"type": "object", "propertyNames": {"const": "automation-reanimation"}, "properties": {"automation-reanimation": {"type": "array", "items": {"const": "zombie|dmg:m6"}}}}}}},
+				{"if": {"properties": {"id": {"const": "catalog:skeletal wyrmling|ar8"}}}, "then": {"properties": {"identity": {"type": "object", "properties": {"name": {"const": "Skeletal Wyrmling"}, "source": {"const": "Ar8"}}}, "selectedOptions": {"type": "object", "required": ["automation-donor", "automation-breaths"], "propertyNames": {"enum": ["automation-reanimation", "automation-donor", "automation-breaths"]}, "properties": {"automation-reanimation": {"type": "array", "items": {"const": "skeletal wyrmling|ar8:m6"}}}}}}}
+			],
+			"additionalProperties": false
 		},
 		"halfDragonAncestry": {"enum": ["black", "blue", "brass", "bronze", "copper", "gold", "green", "red", "silver", "white"]},
 		"halfDragonSize": {"enum": ["large-or-smaller", "huge", "gargantuan"]},
@@ -514,6 +592,8 @@
 				{"if": {"required": ["automation"]}, "then": {"oneOf": [
 					{"properties": {"name": {"const": "Dracolich"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "dracolich"}}}}},
 					{"properties": {"name": {"const": "Half-Dragon"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "half-dragon"}}}}},
+					{"properties": {"name": {"const": "Skeleton"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "skeleton"}}}}},
+					{"properties": {"name": {"const": "Skeletal Wyrmling"}, "source": {"const": "Ar8"}, "automation": {"type": "object", "properties": {"profile": {"const": "skeletal-wyrmling"}}}}},
 					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
 				]}}
 			],

@@ -2,6 +2,7 @@ import {getRenderableSpeciesTrait, isTransformationEntry, isTransformationSpell}
 import {compileCreatureTransformationStats, isCreatureTransformationStatChange, isCreatureTransformationStatOp} from "./creature-transformation-stats.js";
 import {compileCreatureTransformationBindings, isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "./creature-transformation-bindings.js";
 import {estimateCreatureTransformationCr, getCreatureTransformationCrProficiency, isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "./creature-transformation-cr.js";
+import {compileReanimation, isCompiledReanimation} from "./creature-transformation-reanimation.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -160,6 +161,14 @@ const assertHalfDragonBreaths = rows => {
 	}
 };
 const assertAutomation = (automation, identity) => {
+	if (["skeleton|DMG", "skeletal wyrmling|Ar8"].includes(`${identity?.name?.toLowerCase()}|${identity?.source}`)) {
+		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
+			|| automation.version !== 2 || automation.rollout !== "staged"
+			|| automation.profile !== (identity.name === "Skeleton" ? "skeleton" : "skeletal-wyrmling")) {
+			throw new CreatureTransformationCandidateError("Only the source-qualified staged M6 reanimation profile is supported.");
+		}
+		return;
+	}
 	if (isHalfDragonIdentity(identity)) {
 		if (!automation || Object.keys(automation).sort().join(",") !== "halfDragonBreaths,profile,rollout,version"
 			|| automation.version !== 2 || automation.profile !== "half-dragon" || automation.rollout !== "staged") {
@@ -678,6 +687,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (Object.hasOwn(resolved?.selectedOptions || {}, "automation-reanimation")) return isCompiledReanimation(resolved);
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:half-dragon|mm" && isHalfDragonIdentity(resolved.identity)) {
 		if (Object.hasOwn(resolved, "automation") || !resolved.selectedOptions
 			|| Object.keys(resolved.selectedOptions).sort().join(",") !== "ancestry,automation-breath,size") return false;
@@ -761,12 +771,17 @@ function isCompiledCreatureTransformation (resolved) {
 		&& matches("automation-lair", ["retain"]);
 }
 
-function compileCreatureTransformation ({resolved, current, chassisSource = current?.source, inputs = {}, proficiencyContext = null}) {
+function compileCreatureTransformation ({resolved, current, chassisSource = current?.source, inputs = {}, proficiencyContext = null, legendaryGroups}) {
 	const fail = (message, code = "CREATURE_TRANSFORMATION_INPUT_REQUIRED") => {
 		const error = new Error(message);
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && (Object.hasOwn(inputs || {}, "reanimation") || ["skeleton", "skeletal-wyrmling"].includes(resolved.automation?.profile))) {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		return compileReanimation({resolved, current, chassisSource, inputs, legendaryGroups});
+	}
 	if (resolved?.version === 2 && resolved.kind === "catalog" && resolved.id === "catalog:half-dragon|mm") {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);

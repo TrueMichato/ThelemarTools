@@ -242,7 +242,7 @@ describe("source-qualified candidate and resolution API", () => {
 		staged.automation.changes[0].entry.entries[0] = "Changed locally.";
 		expect(byId("Dracolich", "MM").automation.changes[0].entry.entries[0]).not.toBe("Changed locally.");
 		expect(() => resolveCreatureTransformation({candidates: current, id: "race:species|tst", automationVersion: 2})).toThrow("species");
-		expect(() => resolveCreatureTransformation({candidates: current, id: "catalog:skeleton|dmg", automationVersion: 2})).toThrow("staged");
+		expect(resolveCreatureTransformation({candidates: current, id: "catalog:skeleton|dmg", automationVersion: 2}).automation).toEqual({version: 2, profile: "skeleton", rollout: "staged"});
 		expect(() => resolveCreatureTransformation({candidates: current, id: "catalog:dracolich|mm", automationVersion: 3})).toThrow("version");
 	});
 

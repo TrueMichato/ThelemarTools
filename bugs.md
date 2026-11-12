@@ -148,8 +148,33 @@ full gate passed 812 suites/21,912 tests with the unchanged one skipped suite/13
 skipped tests and real NPC corpus. No browser/E2E run was performed for M5.
 This producer remains internal/staged: current CR is retained, and estimated
 CR/override plus guided-editor composition still await final rollout. M5 does
-not close the Templates bug or enable default behavior. M6-M13 remain open;
+not close the Templates bug or enable default behavior. Later family and rollout
+units remain open;
 Species stays deferred.
+
+M6 [#404](https://github.com/TrueMichato/ThelemarTools/pull/404) stages the complete
+internal Dracolich MM, Skeleton DMG, Zombie DMG and Skeletal Wyrmling Ar8 source
+profiles. Exact ability/HP changes reuse the existing math and explicit
+AC/attack/DC bindings. Physiology, defenses, speech, Fortitude, Spirit Gem and
+breath removal execute as concrete effects; dependent changes share one conflict
+winner. Lair replacement requires independent complete source context and
+preserves regional/mythic effects, including nested FTD metadata. Actual XMM/FTD
+donors remain eligible and cannot retain genuine breaths. Both consumers replay
+frozen operations after live catalog, answers and context disappear.
+
+Four deliberate production faults and four actual pre-fix regression cases
+failed ordinary mechanical assertions before restoration/correction. Focused
+verification passed 12 suites/308 tests with zero skips; parent verification
+repeated all 22 M6 cases, the original counterexamples and four malformed-profile
+isolation controls. Normal commit hooks passed the exact eight JS inputs and
+33 related suites/505 tests. The exact published-leaf full gate passed 813
+suites/21,934 tests with the unchanged one skipped suite/13 skipped tests and real
+NPC corpus. No browser/E2E run was performed for M6.
+
+M6 remains internal/staged, retains current CR/XP and reports the limitation.
+Estimated CR/override composition and shared-editor inputs remain rollout
+prerequisites. Default/version-1 and historical M1-M5 operations remain unchanged.
+This does not close the Templates bug: M7-M13 remain open, with Species deferred.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or

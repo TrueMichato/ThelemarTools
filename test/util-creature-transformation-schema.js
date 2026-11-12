@@ -31,7 +31,7 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 				errors.push(`${filePath}: ${error.message}`);
 			}
 		}
-		if (recipe.automation && !["zombie-numerics", "half-dragon"].includes(recipe.automation.profile)) {
+		if (recipe.automation && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling"].includes(recipe.automation.profile)) {
 			const changes = recipe.automation.changes;
 			const names = new Set(Array.isArray(changes) ? changes.map(it => it?.entry?.name) : []);
 			if (id !== "dracolich|mm" || names.size !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")) {
@@ -39,6 +39,8 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 			}
 		}
 		if (recipe.automation?.profile === "zombie-numerics" && id !== "zombie|dmg") errors.push(`${filePath}: staged numeric automation is limited to Zombie|DMG`);
+		if (recipe.automation?.profile === "skeleton" && id !== "skeleton|dmg") errors.push(`${filePath}: staged skeleton automation is limited to Skeleton|DMG`);
+		if (recipe.automation?.profile === "skeletal-wyrmling" && id !== "skeletal wyrmling|ar8") errors.push(`${filePath}: staged wyrmling automation is limited to Skeletal Wyrmling|Ar8`);
 		const groupIds = new Set();
 		for (const group of recipe.optionGroups || []) {
 			if (groupIds.has(group.id)) errors.push(`${filePath}: duplicate group ${id}/${group.id}`);

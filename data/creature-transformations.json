@@ -277,7 +277,8 @@
 			],
 			"optionGroups": [],
 			"manualReview": [{"field": "traits", "reason": "Determine retained abilities, languages, and reanimation-specific changes for this chassis."}],
-			"templateReference": {"name": "Skeleton", "source": "DMG"}
+			"templateReference": {"name": "Skeleton", "source": "DMG"},
+			"automation": {"version": 2, "profile": "skeleton", "rollout": "staged"}
 		},
 		{
 			"name": "Zombie",
@@ -349,7 +350,8 @@
 				{"field": "hp", "reason": "Add one hit point for each Hit Die to account for the changed Constitution."},
 				{"field": "attacks", "reason": "Remove the breath weapon; do not silently keep it from the original chassis."},
 				{"field": "traits", "reason": "Understands its prior languages but cannot speak."}
-			]
+			],
+			"automation": {"version": 2, "profile": "skeletal-wyrmling", "rollout": "staged"}
 		},
 		{
 			"name": "Shadow Dragon",

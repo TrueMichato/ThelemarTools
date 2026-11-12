@@ -4,6 +4,7 @@ import {isCreatureTransformationStatChange, isCreatureTransformationStatOp} from
 import {isCreatureTransformationBindingChange, isCreatureTransformationBindingOp} from "../creature-transformation-bindings.js";
 import {isCreatureTransformationCrChange, isCreatureTransformationCrOp} from "../creature-transformation-cr.js";
 import {assertFrozenCreatureTransformation} from "../creature-transformation-forms.js";
+import {isReanimationChange, isReanimationOp} from "../creature-transformation-reanimation.js";
 
 const DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
@@ -95,7 +96,7 @@ function validateStep (step, allowStats) {
 				&& Array.isArray(step.from) && !!step.from.length && new Set(step.from).size === step.from.length
 				&& step.from.every(it => DAMAGE_TYPES.has(it)) && DAMAGE_TYPES.has(step.to)
 				&& ["skip", "error"].includes(step.onMissing);
-		default: return allowStats && (isCreatureTransformationStatChange(step) || isCreatureTransformationBindingChange(step) || isCreatureTransformationCrChange(step));
+		default: return allowStats && (isCreatureTransformationStatChange(step) || isCreatureTransformationBindingChange(step) || isCreatureTransformationCrChange(step) || isReanimationChange(step));
 	}
 }
 
@@ -117,6 +118,7 @@ export function normalizeCreatureTransformation (resolved) {
 		expect(!isCreatureTransformationStatOp(step?.op) || resolved.version === 2, "numeric setters require an opt-in version-2 snapshot");
 		expect(!isCreatureTransformationBindingOp(step?.op) || resolved.version === 2, "binding setters require an opt-in version-2 snapshot");
 		expect(!isCreatureTransformationCrOp(step?.op) || resolved.version === 2, "CR setters require an opt-in version-2 snapshot");
+		expect(!isReanimationOp(step?.op) || resolved.version === 2, "reanimation setters require an opt-in version-2 snapshot");
 		expect(validateStep(step, resolved.version === 2), `invalid or unrepresentable change ${index + 1} (${step?.op || "missing op"})`);
 		const {op, ...fields} = step;
 		return {type: op, ...structuredClone(fields)};
