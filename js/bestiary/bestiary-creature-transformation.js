@@ -7,6 +7,7 @@ import {assertFrozenCreatureTransformation, assertFrozenCreatureTransformationRe
 import {isReanimationChange, isReanimationOp} from "../creature-transformation-reanimation.js";
 import {isSporeShadowChange, isSporeShadowOp} from "../creature-transformation-spore-shadow.js";
 import {assertVampireProjection, getVampireMistImmunity, isVampireChange, isVampireOp} from "../creature-transformation-vampire.js";
+import {assertLycanthropeProjection, getLycanthropeProfile, isLycanthropeChange, isLycanthropeOp} from "../creature-transformation-lycanthrope.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -141,6 +142,10 @@ function _validateEntry (entry) {
 
 function _validateChange (change) {
 	if (!_isObject(change)) _fail("Transformation changes must be objects.");
+	if (isLycanthropeOp(change.type)) {
+		if (!isLycanthropeChange(change, "type")) _fail(`Invalid M9 setter "${change.type}".`);
+		return;
+	}
 	if (isVampireOp(change.type)) {
 		if (!isVampireChange(change, "type")) _fail(`Invalid M8 setter "${change.type}".`);
 		return;
@@ -275,6 +280,7 @@ function _validateRecipe (resolved, {formLeaf = false} = {}) {
 		return;
 	}
 	if (!formLeaf && resolved?.version === 2 && resolved.id === "catalog:vampire|mm" && resolved.selectedOptions?.outcome?.[0] === "vampire") _fail("A full M8 vampire requires its frozen true/bat/mist form envelope.");
+	if (!formLeaf && resolved?.version === 2 && getLycanthropeProfile(resolved.id)) _fail("An M9 lycanthrope requires its frozen humanoid/hybrid/animal form envelope.");
 	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"], "Resolved transformation");
 	if (Object.hasOwn(resolved, "version") && !isCompiledCreatureTransformation(resolved)) _fail("Invalid compiled version-2 transformation profile or choices.");
 	_expectString(resolved.id, "Transformation ID");
@@ -313,6 +319,7 @@ function _validateRecipe (resolved, {formLeaf = false} = {}) {
 	if (resolved.version !== 2 && resolved.changes.some(change => isReanimationOp(change?.type))) _fail("Reanimation setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isSporeShadowOp(change?.type))) _fail("M7 setters require an opt-in version-2 snapshot.");
 	if (resolved.version !== 2 && resolved.changes.some(change => isVampireOp(change?.type))) _fail("M8 setters require an opt-in version-2 snapshot.");
+	if (resolved.version !== 2 && resolved.changes.some(change => isLycanthropeOp(change?.type))) _fail("M9 setters require an opt-in version-2 snapshot.");
 	resolved.changes.forEach(_validateChange);
 	_expectArray(resolved.manualReview, "Manual review");
 	resolved.manualReview.forEach(it => {
@@ -399,6 +406,23 @@ function _applyChange (creature, change, chassis) {
 	let before;
 	let after;
 	switch (change.type) {
+		case "setLycanthropeForm":
+		case "setLycanthropeAlignment": {
+			const values = change.type === "setLycanthropeForm"
+				? {size: [change.size], speed: _copy(change.speed), ...change.speech ? _copy(change.speech) : {}}
+				: {alignment: _copy(change.value), alignmentPrefix: ""};
+			const writes = Object.entries(values).filter(([key, value]) => !_equal(out[key], value))
+				.map(([key, value]) => ({path: key, before: out[key], after: value, section: null}));
+			Object.assign(out, values);
+			return {out, paths: Object.keys(values), writes};
+		}
+		case "removeLycanthropeSpellcasting": {
+			const index = _getEntryIndex(out, "spellcasting", change.match, chassis);
+			before = out.spellcasting[index];
+			path = _getEntryKey("spellcasting", before, chassis);
+			out.spellcasting.splice(index, 1);
+			return {out, path, write: {path, before, after: undefined, section: "spellcasting"}};
+		}
 		case "setVampireNature":
 		case "setVampireForm": {
 			const values = change.type === "setVampireNature"
@@ -783,6 +807,14 @@ export class BestiaryCreatureTransformation {
 				assertVampireProjection({resolved: profile.resolved, current, proposed: projected});
 			}
 		}
+		if (resolved.version === 2 && getLycanthropeProfile(resolved.id)) {
+			assertLycanthropeProjection({resolved, current, proposed: candidate, chassisSource: original.source});
+			for (const profile of resolved.frozenForms.profiles) {
+				if (profile.id === resolved.frozenForms.activeForm) continue;
+				const projected = profile.resolved.changes.reduce((creature, change) => _applyChange(creature, change, original).out, _copy(current));
+				assertLycanthropeProjection({resolved: profile.resolved, current, proposed: projected, chassisSource: original.source});
+			}
+		}
 		const conflicts = [];
 		for (const [path, write] of candidateWrites) {
 			if (_equal(write.before, write.after)) continue;
@@ -804,7 +836,7 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire"));
+		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id));
 		const hasNumericGroup = reanimation || (resolved.version === 2 && resolved.id === "catalog:zombie|dmg");
 		const isNumericStep = change => reanimation || change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];

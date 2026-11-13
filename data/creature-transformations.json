@@ -259,7 +259,8 @@
 				{"field": "traits", "reason": "Resolve silver-sensitive immunity, curse, and traits of the chosen form; ordinary immunity would be incorrect."},
 				{"field": "attacks", "reason": "Resolve natural attacks, form-specific movement and speech, and weapon limitations."},
 				{"field": "eligibility", "reason": "The source's ability guidance addresses player characters; adjudicate its use on NPCs."}
-			]
+			],
+			"automation": {"version": 2, "profile": "lycanthropy", "rollout": "staged"}
 		},
 		{
 			"name": "Skeleton",
@@ -328,7 +329,8 @@
 				{"field": "ac", "reason": "Add one point of natural armor in hybrid or shark form, not humanoid form."},
 				{"field": "attacks", "reason": "Adapt the form-specific bite and its lycanthropy save from the original template."},
 				{"field": "other", "reason": "Reconcile changed size, swimming speed, and equipment; do not copy ungranted monster-only features."}
-			]
+			],
+			"automation": {"version": 2, "profile": "wereshark", "rollout": "staged"}
 		},
 		{
 			"name": "Skeletal Wyrmling",
