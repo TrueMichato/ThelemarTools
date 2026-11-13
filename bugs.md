@@ -409,6 +409,31 @@ needs explicit default rollout, all-family UI coverage and final release gates.
 No browser, clean-lock reproducibility or full-repository release proof is claimed.
 The public branch remains unchanged; Species stays deferred and Templates open.
 
+### Round 72 - Shared opt-in Template editor accepted locally
+
+M13b commit `b9fed30da` connects the accepted source/estimate seam to native
+controls shared by Bestiary and Encounter Workspace. Explicit version 2 now
+supports all 14 profiles, source-qualified finite decisions and every permitted
+post-source form, rather than the old Zombie/Dracolich whitelist. Observed facts
+and locked source formulas remain distinct from declared ownership and reviewed
+CR judgments. Default version 1 and Species remain unchanged.
+
+Controls cover armor/numbers, source-specific options, conditional movement,
+capabilities, defense reviews, entry/token accounting, complete three-round
+routines, exact fixed adjudications and independent CR overrides. Source changes
+invalidate dependent judgments and consent without replacing the input being
+edited. Existing stale-history, atomic save/retry and saved-form fences remain.
+Native verification includes all 14 source panels and meaningful rider accounting;
+parent verification passes two suites/71 tests and both actual browser consumers.
+The normal source commit gate passes 11 suites/151 tests. Parent browser proof
+hash-matches 27 served assets per flow, observes both real consumers and reports
+no provenance/page errors; inspected desktop/mobile layouts fit.
+
+This is bounded opt-in editor acceptance, not finished default-enabled coverage.
+M13c still owns public rollout, comprehensive all-family two-surface verification,
+new source-form browser histories, Homebrew dialog coverage and final release gates.
+No final merge/publication, full-repository or clean-lock release proof is claimed.
+
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
 global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver
