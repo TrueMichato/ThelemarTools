@@ -407,7 +407,6 @@ const target = (baseCreature = source("Bugbear")) => ({id: "current", label: bas
 async function open ({subject = target(), registry = new BestiaryQuickActionsRegistry(), load = async () => candidates, ...options} = {}) {
 	const getTargets = () => [{...subject, operations: registry.getOperations({monster: subject.baseCreature})}];
 	await pRenderCreatureTransformationEditor({mount,
-		automationVersion: 2,
 		getTargets,
 		pLoadCandidates: load,
 		pApply: changes => registry.applyChanges({monster: subject.baseCreature, ...changes[0]}),
@@ -1138,7 +1137,7 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		expect(reloaded.instances[0].monster.type).toEqual({type: "humanoid", tags: ["goblinoid"]});
 	});
 
-	it("keeps defaults legacy, enables the Skeleton source model, and requires DM consent for complete v2 estimates", async () => {
+	it("preserves explicit v1, defaults to the Skeleton source model, and requires DM consent for complete estimates", async () => {
 		await open({automationVersion: 1});
 		await choose();
 		expect(mount.querySelector(".bqa__transformation-resolution")).toBeNull();

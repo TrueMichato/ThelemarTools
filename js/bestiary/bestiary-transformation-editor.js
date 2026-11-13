@@ -518,9 +518,9 @@ function renderSavedFormEditor ({mount, getTargets, getStamp, getConsequences, v
 	preview();
 }
 
-export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, validateChange = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true, automationVersion = 1, savedOperationId = null, onCancel = null}) {
+export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, validateChange = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true, automationVersion = 2, savedOperationId = null, onCancel = null}) {
 	if (savedOperationId != null) return renderSavedFormEditor({mount, getTargets, getStamp, getConsequences, validateChange, pApply, isCurrent, savedOperationId, onCancel});
-	if (![1, 2].includes(automationVersion)) throw new Error("Unsupported internal transformation editor version.");
+	if (![1, 2].includes(automationVersion)) throw new Error("Unsupported transformation editor version.");
 	const container = element("section", {className: "bqa__transformation"});
 	mount.replaceChildren(container);
 	const isActive = () => isCurrent() && mount.contains(container);

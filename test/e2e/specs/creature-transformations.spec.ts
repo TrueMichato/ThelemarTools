@@ -2,6 +2,9 @@ import {expect, test} from "@playwright/test";
 import {CreatureTransformationPage} from "../pages/CreatureTransformationPage";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
 
+test.describe("explicit version-1 compatibility and unchanged Species discovery", () => {
+	test.beforeEach(async ({page}) => { await new CreatureTransformationPage(page).useExplicitLegacyEntrypoints(); });
+
 test("Bestiary previews immediately, leaves the source untouched, and stacks explicit conflict winners", async ({page}) => {
 	test.setTimeout(120_000);
 	await page.goto("/bestiary.html#goblin_mm");
@@ -65,7 +68,7 @@ test("Encounter individual and bulk previews are read-only, skip ineligible mons
 	await editor.choose("catalog:lycanthropy|mm");
 	await editor.chooseOption("Lycanthrope", "werebear");
 	await editor.expectLivePreview();
-	await expect(editor.root.locator(".bqa__transformation-summary")).toContainText("1 eligible · 1 skipped");
+	await expect(editor.bulkSummary).toContainText("1 eligible · 1 skipped");
 	await expect(editor.root).toContainText("Goblin #1: Creature does not satisfy transformation eligibility");
 	expect(await editor.savedEncounter()).toEqual(beforeBulk);
 	await editor.apply({bulk: true, count: 1});
@@ -361,7 +364,7 @@ test("a capped bulk target is named at Apply, then only the other target can be 
 	await editor.confirmPrerequisites();
 	await editor.root.getByRole("button", {name: "Apply to 2 · one save"}).click();
 	await expect(editor.root.getByRole("alert")).toContainText("Storage or eligibility changed the preview");
-	await expect(editor.root.locator(".bqa__transformation-summary")).toContainText("1 eligible · 1 skipped");
+	await expect(editor.bulkSummary).toContainText("1 eligible · 1 skipped");
 	await expect(editor.root).toContainText("Goblin #1: This monster has reached the 100-operation statblock history limit");
 	expect(await editor.savedEncounter()).toEqual(before);
 	await editor.apply({bulk: true, count: 1});
@@ -649,16 +652,43 @@ test.describe("mobile touch and night mode", () => {
 	});
 });
 
-import {Round72CreatureTransformationPage} from "../pages/CreatureTransformationPage";
+});
 
-test.describe("Round72 combined C1/C2 internal seam, not public rollout", () => {
+import {Round72CreatureTransformationPage, TEMPLATE_RELEASE_CASES} from "../pages/CreatureTransformationPage";
+
+test.describe("M13c public default all14 two-consumer release", () => {
+	test.describe.configure({retries: 0});
+	const editors = new WeakMap<import("@playwright/test").Page, Round72CreatureTransformationPage>();
+	test.afterEach(async ({page}, info) => { await editors.get(page)?.captureRound72Evidence(info); });
+	for (const surface of ["Bestiary", "Encounter"] as const) {
+		for (const fixture of TEMPLATE_RELEASE_CASES) {
+			test(`@m13c ${surface} ${fixture.uid} complete source effects, estimate, Homebrew, reload and removal`, async ({page}, info) => {
+				test.setTimeout(240_000);
+				const editor = new Round72CreatureTransformationPage(page);
+				editors.set(page, editor);
+				await editor.beginRound72Evidence(info);
+				await editor.releaseFamily(surface, fixture, info);
+			});
+		}
+	}
+});
+
+test.describe("Round72 default workflow and historical C2 compatibility", () => {
 	test.describe.configure({retries: 0});
 	test.use({hasTouch: true});
 	const editors = new WeakMap<import("@playwright/test").Page, Round72CreatureTransformationPage>();
 	test.beforeEach(async ({page}) => { editors.set(page, new Round72CreatureTransformationPage(page)); });
 	test.afterEach(async ({page}, info) => { await editors.get(page)?.captureRound72Evidence(info); });
 
-	test("@m13b Bestiary opt-in source controls, explained estimate, native consent and removal", async ({page}, info) => {
+	test("@reload-readiness Bestiary awaits the new document's completed fixture, not an early Quick Actions button", async ({page}, info) => {
+		test.setTimeout(120_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.reloadReadinessControl();
+		await editor.finishRound72Evidence(info, "m13c-correction-reload-readiness");
+	});
+
+	test("@m13b Bestiary default source controls, explained estimate, native consent and removal", async ({page}, info) => {
 		test.setTimeout(180_000);
 		const editor = editors.get(page)!;
 		await editor.beginRound72Evidence(info);
@@ -666,7 +696,7 @@ test.describe("Round72 combined C1/C2 internal seam, not public rollout", () => 
 		await editor.finishRound72Evidence(info, "m13b-bestiary-complete");
 	});
 
-	test("@m13b Encounter opt-in source estimate, failed Store retry and persistent reload", async ({page}, info) => {
+	test("@m13b Encounter default source estimate, failed Store retry and persistent reload", async ({page}, info) => {
 		test.setTimeout(180_000);
 		const editor = editors.get(page)!;
 		await editor.beginRound72Evidence(info);
@@ -698,7 +728,7 @@ test.describe("Round72 combined C1/C2 internal seam, not public rollout", () => 
 		await editor.finishRound72Evidence(info, "round72-saved-forms");
 	});
 
-	test("@round72-c1-c2 unchanged default and Species plus night, narrow, keyboard and touch information", async ({page}, info) => {
+	test("@round72-c1-c2 explicit legacy and Species plus night, narrow, keyboard and touch information", async ({page}, info) => {
 		test.setTimeout(180_000);
 		const editor = editors.get(page)!;
 		await editor.beginRound72Evidence(info);

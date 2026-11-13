@@ -1126,7 +1126,7 @@ export class EncounterWorkspacePage {
 		};
 	}
 
-	async _pOpenStatblockEditor (id, {automationVersion = 1} = {}) {
+	async _pOpenStatblockEditor (id, {automationVersion = 2} = {}) {
 		if (this._isBusy) return;
 		const instance = this._state.instances.find(it => it.id === id);
 		if (!instance) return this._setError("This encounter monster no longer exists.");
@@ -1145,7 +1145,7 @@ export class EncounterWorkspacePage {
 		}
 	}
 
-	async _pRenderBulkChoices ({automationVersion = 1} = {}) {
+	async _pRenderBulkChoices ({automationVersion = 2} = {}) {
 		const type = this._selBulkType.value;
 		const isLegendary = type === "legendary";
 		const isTransformation = type === "transformation";

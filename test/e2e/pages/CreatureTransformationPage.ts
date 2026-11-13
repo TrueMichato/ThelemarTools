@@ -3,7 +3,22 @@ import {expect, type Page} from "@playwright/test";
 export class CreatureTransformationPage {
 	constructor (readonly page: Page) {}
 
+	async useExplicitLegacyEntrypoints () {
+		await this.page.addInitScript(() => {
+			document.addEventListener("DOMContentLoaded", async () => {
+				const uiUrl = "/js/bestiary/bestiary-quick-actions-ui.js";
+				const encounterUrl = "/js/encounterworkspace.js";
+				const [{BestiaryQuickActionsUi}, {EncounterWorkspacePage}] = await Promise.all([import(uiUrl), import(encounterUrl)]);
+				const open = BestiaryQuickActionsUi.pOpen;
+				BestiaryQuickActionsUi.pOpen = function (options: object) { return open.call(this, {...options, automationVersion: 1}); };
+				const bulk = EncounterWorkspacePage.prototype._pRenderBulkChoices;
+				EncounterWorkspacePage.prototype._pRenderBulkChoices = function () { return bulk.call(this, {automationVersion: 1}); };
+			}, {once: true});
+		});
+	}
+
 	get root () { return this.page.locator(".bqa__transformation:visible"); }
+	get bulkSummary () { return this.root.locator(".bqa__transformation-summary:visible"); }
 
 	templateChoice (id: string) {
 		return this.root.locator(`.bqa__transformation-choice[data-recipe-id="${id}"]`);
@@ -284,18 +299,24 @@ import {readFile} from "node:fs/promises";
 import {resolve} from "node:path";
 
 type Round72Creature = {
-	name: string; source: string; str: number; con: number; wis: number;
+	name: string; source: string; str: number; dex: number; con: number; int: number; wis: number; cha: number;
 	hp: {average: number; formula?: string}; cr: string | {cr: string; xp: number};
 	profBonus?: number; type: unknown; action?: {name: string; entries: string[]}[];
+	ac?: (number | {ac: number})[]; trait?: {name: string; entries: unknown[]}[];
+	speed?: Record<string, unknown>; senses?: string[]; languages?: string[];
+	resist?: unknown[]; immune?: unknown[]; skill?: Record<string, string>;
+	spellcasting?: unknown[];
 };
-type Round72Operation = {
-	id: string; type: string;
-	data: {integrity?: string; resolved?: {
-		identity: {name: string; source: string};
-		frozenForms?: {activeForm: string; profiles: {id: string; label: string}[]};
-		changes: {type: string; receipt?: {estimatedCr: string; damagePerRound: number; proficiency: {before: number; after: number}}}[];
-	}};
+type Round72Resolved = {
+	identity: {name: string; source: string};
+	estimation?: {sourceChangeCount: number};
+	frozenForms?: {activeForm: string; profiles: {id: string; label: string; resolved: Round72Resolved}[]};
+	changes: {type: string; value?: {cr: string; xp: number}; receipt?: {
+		estimatedCr: string; damagePerRound: number; proficiency: {before: number; after: number};
+		assumptions: {override: {cr: string; reason: string} | null};
+	}}[];
 };
+type Round72Operation = {id: string; type: string; data: {integrity?: string; resolved?: Round72Resolved}};
 type Round72State = {
 	instances: {id: string; monster: Round72Creature; statblockOperations: Round72Operation[]; hp: {current: number; max: number; temp: number}}[];
 	groups: {id: string; memberIds: string[]; sharedTurn: boolean; initiative: number | null}[];
@@ -313,13 +334,15 @@ type Round72Controller = {
 	_pRenderBulkChoices: (options?: {automationVersion?: number}) => Promise<void>;
 };
 type Round72Probe = {
-	staged: boolean; controller?: Round72Controller; consumer?: Round72Consumer; monster?: Round72Creature;
+	staged: boolean | "default"; controller?: Round72Controller; consumer?: Round72Consumer; monster?: Round72Creature;
+	registry: Round72Consumer;
 	calls: number; notifications: number; saves: number; writes: number; failNext: boolean;
 	proposals: object[]; savedStates: Round72State[]; forbidden: string[];
 	gateEntered: boolean; release?: () => void;
 };
 type Round72Globals = typeof globalThis & {
 	__round72: Round72Probe;
+	__round72Document: {timeOrigin: number; toolsLoaded: boolean; readyChecks: number; events: {type: string; url: string; at: number}[]};
 	DataUtil: {
 		loadJSON: (url: string) => Promise<{monster: Round72Creature[]; cr: object[]}>;
 		race: {loadJSON: (...args: unknown[]) => Promise<unknown>; loadPrerelease: (...args: unknown[]) => Promise<unknown>; loadBrew: (...args: unknown[]) => Promise<unknown>};
@@ -341,7 +364,40 @@ type Round72DiagnosticGlobals = typeof globalThis & {
 	};
 };
 
-/** Internal-v2 mounting and observation only; all edits still use the real native consumers. */
+type ReleaseForm = {id: string; attack: string; hp: number; dpr: number; cr: string; xp: number; fixedDamage?: number};
+type ReleaseCase = {uid: string; monster: string; options?: [string, string][]; forms: ReleaseForm[]; override?: {cr: string; xp: number; reason: string}};
+const oneForm = (attack: string, hp: number, dpr: number, cr: string, xp: number): ReleaseForm[] => [{id: "default", attack, hp, dpr, cr, xp}];
+export const TEMPLATE_RELEASE_CASES: ReleaseCase[] = [
+	{uid: "half-dragon|mm", monster: "Bugbear", options: [["Dragon ancestry", "red"], ["Breath size", "large-or-smaller"]], forms: oneForm("Morningstar", 27, 11, "1/2", 100)},
+	{uid: "shadow dragon|mm", monster: "Young Black Dragon", forms: oneForm("Bite", 127, 19, "5", 1800)},
+	{uid: "dracolich|mm", monster: "Adult Black Dragon", forms: oneForm("Bite", 195, 21, "8", 3900)},
+	{uid: "spore servant|mm", monster: "Bugbear", forms: oneForm("Morningstar", 27, 6, "1/2", 100)},
+	{uid: "vampire|mm", monster: "Bugbear", options: [["Vampiric outcome", "vampire"]], forms: [
+		{id: "true", attack: "Bite (Bat or Vampire Form Only)", hp: 42, dpr: 17, cr: "2", xp: 450},
+		{id: "bat", attack: "Bite (Bat or Vampire Form Only)", hp: 42, dpr: 17, cr: "2", xp: 450},
+		{id: "mist", attack: "", hp: 42, dpr: 0, cr: "1/4", xp: 50, fixedDamage: 0},
+	]},
+	{uid: "lycanthropy|mm", monster: "Bugbear", options: [["Lycanthrope", "werewolf"]], forms: [
+		{id: "humanoid", attack: "Morningstar", hp: 27, dpr: 11, cr: "1/2", xp: 100},
+		{id: "hybrid", attack: "Bite", hp: 27, dpr: 6, cr: "1/2", xp: 100},
+		{id: "animal", attack: "Bite", hp: 27, dpr: 6, cr: "1/2", xp: 100},
+	]},
+	{uid: "skeleton|dmg", monster: "Bugbear", forms: oneForm("Morningstar", 27, 11, "1/2", 100)},
+	{uid: "zombie|dmg", monster: "Bugbear", forms: oneForm("Morningstar", 32, 12, "1", 200),
+		override: {cr: "2", xp: 450, reason: "This ambush's repeated Fortitude opportunities justify CR 2; retain the independent one-attack CR 1 estimate."}},
+	{uid: "wereshark|arcadia27", monster: "Bugbear", forms: [
+		{id: "humanoid", attack: "Morningstar", hp: 27, dpr: 12, cr: "1", xp: 200},
+		{id: "hybrid", attack: "Bite", hp: 27, dpr: 7, cr: "1", xp: 200},
+		{id: "animal", attack: "Bite", hp: 27, dpr: 7, cr: "1", xp: 200},
+	]},
+	{uid: "skeletal wyrmling|ar8", monster: "Black Dragon Wyrmling", forms: oneForm("Bite", 39, 9, "1", 200)},
+	{uid: "shadow dragon|beg", monster: "Young Black Dragon", forms: oneForm("Bite", 127, 19, "5", 1800)},
+	{uid: "fey beast|scre", monster: "Wolf", options: ["barkskin", "fey-touched", "entangle", "spike-growth", "natural-camouflage", "plant-stride", "rooted", "tree-stride", "nature-sense", "teleport"].map(value => ["Fey traits and actions", value]), forms: oneForm("Bite", 11, 7, "1/2", 100)},
+	{uid: "fallen angel|scre", monster: "Planetar", options: [["Fallen form", "devilsworn"]], forms: oneForm("Greatsword", 200, 43, "10", 5900)},
+	{uid: "undead|scre", monster: "Bugbear", options: [["Undead category", "zombie"]], forms: oneForm("Morningstar", 27, 11, "1/2", 100)},
+];
+
+/** Observation at the real consumers; default release tests never supply a version option. */
 export class Round72CreatureTransformationPage extends CreatureTransformationPage {
 	private readonly served = new Map<string, string>();
 	private readonly bomRemoved = new Map<string, string>();
@@ -349,6 +405,9 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	private readonly responses: Promise<void>[] = [];
 	private readonly provenanceErrors: string[] = [];
 	private readonly errors: string[] = [];
+	private readonly releaseSnapshots: object[] = [];
+	private readonly navigations: {url: string; at: number}[] = [];
+	private readonly harnessSources: Record<string, string> = {};
 	private readonly compilation: {epoch: number; url: string; functionName: string; count: number}[] = [];
 	private responsesSettled = false;
 	private evidenceComplete = false;
@@ -378,6 +437,11 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		"js/bestiary/bestiary-transformation-workflow.js", "js/bestiary/bestiary-transformation-inputs.js",
 		"js/bestiary/bestiary-transformation-catalog-adapter.js", "js/bestiary/bestiary-quick-actions-engine.js",
 		"js/creature-transformations.js", "js/creature-transformation-forms.js", "js/creature-transformation-stats.js", "js/creature-transformation-cr.js",
+		"js/creature-transformation-bindings.js", "js/creature-transformation-entries.js",
+		"js/creature-transformation-reanimation.js", "js/creature-transformation-spore-shadow.js",
+		"js/creature-transformation-vampire.js", "js/creature-transformation-lycanthrope.js",
+		"js/creature-transformation-fey-beast.js", "js/creature-transformation-fallen-angel.js", "js/creature-transformation-undead.js",
+		"js/bestiary/bestiary-creature-transformation.js",
 		"js/encounterworkspace.js", "js/encounterworkspace/encounterworkspace-quick-actions.js", "js/encounterworkspace/encounterworkspace-state.js",
 		"js/render.js", "data/creature-transformations.json", "data/msbcr.json", "css/bestiary.css", "css/encounterworkspace.css",
 	];
@@ -389,6 +453,21 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		expect(info.project.retries).toBe(0);
 		expect(process.env.PW_PORT, "Release must supply a freshly checked-free port").toMatch(/^\d+$/);
 		expect(new URL(String(info.project.use.baseURL)).port).toBe(process.env.PW_PORT);
+		for (const file of ["test/e2e/pages/CreatureTransformationPage.ts", "test/e2e/specs/creature-transformations.spec.ts"]) {
+			this.harnessSources[file] = createHash("sha256").update(await readFile(resolve(process.cwd(), file))).digest("hex");
+		}
+		await this.page.addInitScript(() => {
+			const readiness = (globalThis as Round72Globals).__round72Document = {timeOrigin: performance.timeOrigin, toolsLoaded: false, readyChecks: 0, events: []};
+			for (const type of ["DOMContentLoaded", "load", "toolsLoaded", "pagehide", "hashchange"]) {
+				window.addEventListener(type, () => {
+					if (type === "toolsLoaded") readiness.toolsLoaded = true;
+					readiness.events.push({type, url: location.href, at: performance.now()});
+				});
+			}
+		});
+		this.page.on("framenavigated", frame => {
+			if (frame === this.page.mainFrame()) this.navigations.push({url: frame.url(), at: Date.now()});
+		});
 		for (const path of this.assets) {
 			const local = await readFile(resolve(process.cwd(), path));
 			const response = await this.page.request.get(`/${path}`);
@@ -443,6 +522,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 			new URL(this.page.url()).pathname.slice(1),
 			this.page.url().includes("/encounterworkspace.html") ? "css/encounterworkspace.css" : "css/bestiary.css",
 			"data/creature-transformations.json", "data/msbcr.json",
+			...this.assets.filter(path => path.startsWith("js/creature-transformation")),
 		]) expect([...this.loaded.keys()].some(url => new URL(url).pathname === `/${path}`), `Loaded real ${path}`).toBe(true);
 		expect(this.provenanceErrors, "Loaded bytes allow only raw bytes or removal of the local leading UTF-8 BOM").toEqual([]);
 		expect(this.errors).toEqual([]);
@@ -456,9 +536,15 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 			await info.attach("round72-provenance", {body: JSON.stringify({
 				completion: this.evidenceComplete ? "complete" : "partial-not-accepted",
 				testStatus: info.status, primaryErrors: info.errors.map(error => error.message),
-				internalMount: "Explicit internal automationVersion 2 only; default remains 1",
+				entrypoint: await this.page.evaluate(() => (globalThis as Round72Globals).__round72?.staged ?? "not-observed"),
+				limits: "Registry overrides are session-local; JSON rehydration is explicit. Homebrew tests drive real dialogs with only the destination stubbed. Native Cocoa menus and screenreader behavior are not tested.",
 				servedRaw: Object.fromEntries(this.served), localBomRemoved: Object.fromEntries(this.bomRemoved),
+				harnessSources: this.harnessSources,
 				loaded: Object.fromEntries(this.loaded), responseCount: this.responses.length, responsesSettled: this.responsesSettled,
+				uniqueLoadedPaths: new Set([...this.loaded.keys()].map(url => new URL(url).pathname)).size,
+				navigations: this.navigations,
+				documentReadiness: await this.page.evaluate(() => (globalThis as Round72Globals).__round72Document),
+				releaseSnapshots: this.releaseSnapshots,
 				provenanceErrors: this.provenanceErrors, pageErrors: this.errors,
 				compilation: {status: this.compilation.length ? "calibrated-entry-observations" : "not-collected-not-zero", observations: this.compilation},
 			}, null, 2), contentType: "application/json"});
@@ -827,7 +913,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		if (await this.page.evaluate(() => "__round72" in globalThis)) await this.page.reload();
 	}
 
-	async openRound72Bestiary (staged = true) {
+	async openRound72Bestiary (staged: boolean | "default" = "default") {
 		await this.gotoRound72("/bestiary.html#bugbear_mm");
 		await expect(this.page.locator(".bqa__btn-open:visible").first()).toBeVisible({timeout: 30_000});
 		await this.observeRound72(staged);
@@ -835,7 +921,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.page.getByRole("tab", {name: "Templates", exact: true}).click();
 	}
 
-	private async observeRound72 (staged: boolean) {
+	private async observeRound72 (staged: boolean | "default") {
 		await this.page.evaluate(async staged => {
 			const uiUrl = "/js/bestiary/bestiary-quick-actions-ui.js";
 			const pageUrl = "/js/encounterworkspace.js";
@@ -844,7 +930,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 			const globals = globalThis as Round72Globals;
 			if (globals.__round72) throw new Error("Observation must be installed once per real document.");
 			const probe: Round72Probe = globals.__round72 = {staged, calls: 0, notifications: 0, saves: 0, writes: 0, failNext: false,
-				proposals: [], savedStates: [], forbidden: [], gateEntered: false};
+				proposals: [], savedStates: [], forbidden: [], gateEntered: false, registry: BestiaryQuickActionsUi._registry};
 			const observed = new WeakSet<Round72Consumer>();
 			const open = BestiaryQuickActionsUi.pOpen;
 			BestiaryQuickActionsUi.pOpen = function (options: {monster: Round72Creature; registry?: Round72Consumer}) {
@@ -862,12 +948,12 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 					};
 					consumer.subscribe(() => { probe.notifications++; });
 				}
-				return open.call(this, {...options, ...probe.staged ? {automationVersion: 2} : {}});
+				return open.call(this, {...options, ...probe.staged === "default" ? {} : {automationVersion: probe.staged ? 2 : 1}});
 			};
 			const openEditor = EncounterWorkspacePage.prototype._pOpenStatblockEditor;
 			EncounterWorkspacePage.prototype._pOpenStatblockEditor = function (this: Round72Controller, id: string, options: {automationVersion?: number} = {}) {
 				probe.controller = this;
-				return openEditor.call(this, id, {...options, ...probe.staged ? {automationVersion: 2} : {}});
+				return openEditor.call(this, id, {...options, ...probe.staged === "default" ? {} : {automationVersion: probe.staged ? 2 : 1}});
 			};
 			const save = EncounterWorkspaceStore.prototype.pSave;
 			EncounterWorkspaceStore.prototype.pSave = async function (state: Round72State) {
@@ -917,8 +1003,375 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await control.evaluate(node => {
 			for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
 		});
+		await expect(control).toBeEnabled();
+		await expect(control).toBeVisible();
 		if (await control.evaluate(node => node.tagName === "SELECT")) await control.selectOption(value);
 		else await control.fill(value);
+	}
+
+	private async openReleaseConsumer (surface: "Bestiary" | "Encounter", fixture: ReleaseCase) {
+		if (surface === "Bestiary") {
+			await this.gotoRound72(`/bestiary.html#${encodeURIComponent(fixture.monster.toLowerCase())}_mm`);
+			await expect(this.page.locator(".bqa__btn-open:visible").first()).toBeVisible({timeout: 30_000});
+		} else {
+			await this.gotoRound72("/encounterworkspace.html");
+			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
+			await this.page.evaluate(async name => {
+				const url = "/js/encounterworkspace/encounterworkspace-state.js";
+				const {EncounterWorkspaceState: State, EncounterWorkspaceStore: Store} = await import(url);
+				const {monster} = await (globalThis as Round72Globals).DataUtil.loadJSON("data/bestiary/bestiary-mm.json");
+				const base = monster.find(item => item.name === name && item.source === "MM");
+				if (!base) throw new Error(`Missing actual MM fixture ${name}`);
+				let id = 0;
+				const state = await State.pFromSavedList({
+					exportedSublist: {name: "M13c default consumer", items: [{h: `${name.toLowerCase()}_mm`, c: 2}]},
+					pResolveItem: async () => ({entity: base}), fnUid: () => `release-${++id}`,
+				});
+				await new Store().pSave(state);
+			}, fixture.monster);
+			await this.page.reload();
+			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+		}
+		await this.observeRound72("default");
+		if (surface === "Bestiary") await this.page.locator(".bqa__btn-open:visible").first().click();
+		else await this.page.locator("#ew-focus-edit").click();
+		await this.page.getByRole("tab", {name: "Templates", exact: true}).click();
+		expect((await this.round72Snapshot()).effective?.name).toBe(fixture.monster);
+	}
+
+	private async fillReleaseSource (fixture: ReleaseCase) {
+		const base = (await this.round72Snapshot()).effective!;
+		const pb = fixture.monster === "Planetar" ? 5 : fixture.monster === "Adult Black Dragon" ? 5 : fixture.monster === "Young Black Dragon" ? 3 : 2;
+		const panels = this.root.locator("[data-source-control]");
+		for (let i = 0; i < await panels.count(); i++) {
+			const panel = panels.nth(i);
+			const path = JSON.parse((await panel.getAttribute("data-source-control"))!)[3] as string[];
+			const key = path.at(-1)!;
+			const optional = panel.getByRole("combobox", {name: /^Declare .*\?$/, includeHidden: true}).first();
+			if (await optional.count()) {
+				if (key !== "bindings") continue;
+				await this.setRound72Field(panel, (await optional.locator("..").locator("span").textContent())!, "declare");
+			}
+			const field = (label: string, value: string) => this.setRound72Field(panel, label, value);
+			if (key === "bindings") {
+				const armor = panel.getByRole("combobox", {name: "Armor policy", exact: true, includeHidden: true});
+				if (await armor.count()) await field("Armor policy", "retain");
+				const declare = panel.getByRole("combobox", {name: "Declare a current source PB?", exact: true, includeHidden: true});
+				if (await declare.count()) await field("Declare a current source PB?", "declare");
+				const sourcePb = panel.getByRole("spinbutton", {name: "Current source PB", exact: true, includeHidden: true});
+				if (await sourcePb.count()) await field("Current source PB", String(pb));
+				const entries = panel.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^(trait|action): /})});
+				for (let j = 0; j < await entries.count(); j++) {
+					const entry = entries.nth(j);
+					if (await entry.evaluate(node => !!node.closest("[hidden]"))) continue;
+					const title = await entry.locator(":scope > summary").textContent();
+					const policy = entry.getByRole("combobox", {name: "Entry policy", exact: true, includeHidden: true});
+					if (await policy.count()) await this.setRound72Field(entry, "Entry policy", "bind");
+					const rows = entry.locator("div.bqa__transformation-resolution-row");
+					for (let k = 0; k < await rows.count(); k++) {
+						const row = rows.nth(k);
+						const fact = await row.locator(":scope > p").first().textContent();
+						const token = /, (hit|damage|dc) (\d+): (-?\d+)/.exec(fact!);
+						if (!token) throw new Error(`Unrecognized visible numeric fact: ${fact}`);
+						const physical = title?.startsWith("action: ") && (token[1] === "hit" || token[1] === "damage" && token[2] === "1");
+						await this.setRound72Field(row, "Token interpretation", physical ? "ability" : "fixed");
+						if (!physical) continue;
+						await this.setRound72Field(row, "Governing ability", "str");
+						const multiplier = token[1] === "hit" ? 1 : 0;
+						await this.setRound72Field(row, "Token PB multiplier", String(multiplier));
+						await this.setRound72Field(row, "Fixed non-ability / non-PB contribution", String(Number(token[3]) - Math.floor((base.str - 10) / 2) - multiplier * pb));
+					}
+				}
+			} else if (key === "physiology" || key === "breaths") {
+				const policies = panel.getByRole("combobox", {includeHidden: true});
+				for (let j = 0; j < await policies.count(); j++) {
+					const label = (await policies.nth(j).locator("..").locator("span").textContent())!;
+					await field(label, key === "breaths" || label.startsWith("Amphibious ") ? "remove" : "retain");
+				}
+			} else if (["batEntries", "hybrid", "animal"].includes(key)) {
+				if (key !== "batEntries") {
+					await field("Form equipment AC policy", "retain");
+					await field("Form armor reason", "Retain worn armor; hands-free source abilities need no carried equipment.");
+				}
+				const capabilities = panel.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^(trait|action): /})});
+				for (let j = 0; j < await capabilities.count(); j++) {
+					const entry = capabilities.nth(j);
+					await this.setRound72Field(entry, "Requires speech?", "no");
+					await this.setRound72Field(entry, "Equipment in this form", (await entry.locator(":scope > summary").textContent())?.startsWith("action: ") ? "unusable" : "not-required");
+				}
+			} else if (key === "stealth") {
+				await field("Current Stealth PB multiplier", "1");
+				await field("Current Stealth non-PB residual", "0");
+			} else {
+				const choice: Record<string, [string, string]> = {
+					age: ["Age", "adult"], trueDragon: ["Is this a true dragon?", "yes"], shadowDragon: ["Is this a shadow dragon?", "no"],
+					lair: ["Lair policy", "retain"], donor: ["Blood donor", "actual"], wyrmling: ["Is this the actual wyrmling?", "yes"],
+					adaptation: ["Source adaptation", fixture.uid.startsWith("wereshark") ? "arcadia27-template" : "sidebar-npc"],
+					embrace: ["Embrace the curse?", "no"], legendaryResistance: ["Legendary Resistance pool", "grant"],
+					shadowfell: ["Shadowfell origin", "years"], proficiencyBonus: ["Actual source PB", String(pb)],
+					grappleDc: ["Fixed grapple escape DC (no source formula is defined)", "14"],
+				};
+				if (!choice[key]) throw new Error(`No declared browser source policy for ${path.join(".")}`);
+				await field(...choice[key]);
+			}
+			const reason = panel.getByRole("textbox", {name: / source reason$/, includeHidden: true}).last();
+			await reason.fill("Reviewed the actual source clause and MM target. Retain only stated capabilities; source formulas, equipment losses and grants execute once.");
+		}
+		await expect(this.root.locator("[data-estimate-form]"), "All permitted source forms must exist before judgments").toHaveCount(fixture.forms.length);
+	}
+
+	private assertReleaseMechanics (fixture: ReleaseCase, creature: Round72Creature) {
+		const actions = JSON.stringify(creature.action);
+		const traits = JSON.stringify(creature.trait);
+		const type = typeof creature.type === "string" ? creature.type : (creature.type as {type: string}).type;
+		switch (fixture.uid) {
+			case "half-dragon|mm":
+				expect(actions).toContain("7d6"); expect(actions).toContain("{@dc 13}");
+				expect(creature.resist).toContain("fire"); expect(creature.languages).toContain("Draconic"); break;
+			case "shadow dragon|mm": case "shadow dragon|beg":
+				expect(actions).toContain("necrotic damage"); expect(actions).not.toContain("acid damage");
+				expect(traits).toContain("Living Shadow"); expect(creature.skill?.stealth).toBe("+8");
+				if (fixture.uid.endsWith("|beg")) expect(traits).toContain("BEG");
+				break;
+			case "dracolich|mm":
+				expect(type).toBe("undead"); expect(traits).toContain("Spirit Gem"); expect(traits).toContain("Magic Resistance");
+				expect(traits).not.toContain("Amphibious"); break;
+			case "spore servant|mm":
+				expect(creature).toMatchObject({int: 2, wis: 6, cha: 1});
+				expect(actions).toContain("1d8 + 2"); expect(traits).not.toContain("Brute"); expect(traits).not.toContain("Surprise Attack"); break;
+			case "vampire|mm":
+				expect(creature).toMatchObject({str: 18, dex: 18, con: 18});
+				expect(traits).toContain("Regeneration"); expect(actions).toContain("3d6"); expect(actions).toContain("hit point maximum"); break;
+			case "lycanthropy|mm": case "wereshark|arcadia27":
+				if (fixture.uid.startsWith("wereshark")) expect(JSON.stringify(creature)).toContain("Change Shape");
+				else expect(traits).toContain("Shapechanger");
+				expect(JSON.stringify(creature.immune)).toContain("silver"); expect(creature.str).toBe(fixture.uid.startsWith("wereshark") ? 16 : 15); break;
+			case "skeleton|dmg":
+				expect(creature).toMatchObject({dex: 16, int: 4, cha: 5});
+				expect(JSON.stringify(creature)).toContain("bludgeoning"); expect(creature.languages?.join(" ")).toMatch(/can't speak/i); break;
+			case "zombie|dmg":
+				expect(creature).toMatchObject({str: 16, con: 15, int: 2, wis: 7, cha: 5});
+				expect(traits).toContain("Undead Fortitude"); expect(traits).toContain("critical"); expect(actions).toContain("2d8 + 3"); break;
+			case "skeletal wyrmling|ar8":
+				expect(creature).toMatchObject({dex: 12, con: 15, int: 8, wis: 10, cha: 11});
+				expect(actions).not.toContain("Breath"); expect(creature.hp.formula).toBe("6d8 + 12"); break;
+			case "fey beast|scre":
+				expect(type).toBe("fey"); expect(creature.ac?.[0]).toMatchObject({ac: 16});
+				for (const name of ["Tree Stride", "Rooted", "Plant Stride"]) expect(traits).toContain(name);
+				expect(actions).toContain("Teleport"); expect(actions).toContain("Nature Sense");
+				expect(JSON.stringify(creature.spellcasting)).toContain("spike growth"); break;
+			case "fallen angel|scre":
+				expect(type).toBe("fiend"); expect(actions).toContain("5d8"); expect(actions).toContain("fire damage");
+				expect(actions).not.toContain("radiant damage"); expect(actions).toContain("Corrupting Touch"); break;
+			case "undead|scre":
+				expect(type).toBe("undead"); expect(creature.int).toBe(3); expect(traits).toContain("Undead Fortitude");
+				expect(creature.speed?.walk).toBe(20); break;
+			default: throw new Error(`Missing independent family oracle ${fixture.uid}`);
+		}
+	}
+
+	private async applyRelease () {
+		await this.confirmRound72Compiled();
+		await this.round72ApplyButton().click();
+		const effects = this.round72Consequences();
+		if (await effects.isVisible()) {
+			await this.confirmPrerequisites();
+			await this.round72ApplyButton().click();
+		}
+		await expect.poll(async () => (await this.round72Snapshot()).operations.filter(item => item.type === "applyCreatureTransformation").length).toBe(1);
+	}
+
+	private async saveReleaseHomebrew (fixture: ReleaseCase, effective: Round72Creature) {
+		await this.dismissNativeHover();
+		await this.page.evaluate(() => {
+			const globals = globalThis as typeof globalThis & {BrewUtil2: {
+				pGetOrCreateEditableBrewDoc: () => Promise<object>; pPersistEditableBrewEntity: (prop: string, entity: object) => Promise<void>;
+			}};
+			globals.BrewUtil2.pGetOrCreateEditableBrewDoc = async () => ({body: {_meta: {sources: [{json: "MM", full: "Release destination (stubbed storage only)"}]}, monster: []}});
+			globals.BrewUtil2.pPersistEditableBrewEntity = async (prop, entity) => { sessionStorage.setItem(`release-homebrew-${prop}`, JSON.stringify(entity)); };
+		});
+		await this.page.getByRole("button", {name: "Save to Homebrew", exact: true}).click();
+		const sourceDialog = this.page.locator(".ve-ui-modal__inner").filter({has: this.page.getByText("Choose Homebrew Source", {exact: true})});
+		await sourceDialog.locator("select").selectOption("0");
+		await sourceDialog.getByRole("button", {name: "OK", exact: true}).click();
+		const nameDialog = this.page.locator(".ve-ui-modal__inner").filter({has: this.page.getByText("Save Creature to Homebrew", {exact: true})});
+		await nameDialog.locator("input").fill(`${fixture.monster} ${fixture.uid} release copy`);
+		await nameDialog.getByRole("button", {name: "OK", exact: true}).click();
+		await expect.poll(() => this.page.evaluate(() => sessionStorage.getItem("release-homebrew-monster"))).not.toBeNull();
+		const saved = await this.page.evaluate(() => JSON.parse(sessionStorage.getItem("release-homebrew-monster")!)) as Round72Creature;
+		expect(saved).toMatchObject({hp: effective.hp, cr: effective.cr, action: effective.action, trait: effective.trait});
+		expect(JSON.stringify(saved)).not.toMatch(/frozenForms|estimation|selectedOptions|source-estimate-m13|applyCreatureTransformation/);
+		this.assertReleaseMechanics(fixture, saved);
+		return saved;
+	}
+
+	private async exerciseReleaseForms (surface: "Bestiary" | "Encounter", fixture: ReleaseCase) {
+		await this.page.getByRole("tab", {name: "Quick Edit", exact: true}).click();
+		await this.page.locator(".bqa__content").getByRole("spinbutton", {name: "Wisdom", exact: true})
+			.or(this.page.locator(".bqa__content").getByRole("textbox", {name: "Wisdom", exact: true})).fill("19");
+		await this.page.getByRole("button", {name: "Apply Quick Edit", exact: true}).click();
+		await expect.poll(async () => (await this.round72Snapshot()).operations.length).toBe(2);
+		const baseline = await this.round72Snapshot();
+		const owner = baseline.operations[0];
+		const suffix = JSON.stringify(baseline.operations[1]);
+		await this.page.evaluate(() => {
+			const globals = globalThis as Round72Globals;
+			const load = globals.DataUtil.loadJSON;
+			globals.DataUtil.loadJSON = async function (url) {
+				if (/creature-transformations\.json|msbcr\.json|bestiary.*\.json|races(?:\/|\.)/.test(url)) {
+					globals.__round72.forbidden.push(url);
+					throw new Error(`Modern frozen replay attempted a catalog/donor/table load: ${url}`);
+				}
+				return load.call(this, url);
+			};
+			for (const key of ["loadJSON", "loadPrerelease", "loadBrew"] as const) globals.DataUtil.race[key] = async () => {
+				globals.__round72.forbidden.push(`race.${key}`);
+				throw new Error("Modern frozen replay must not reload races.");
+			};
+		});
+		await this.page.locator(`.bqa__changes button[data-saved-operation-id="${owner.id}"]`).click();
+		const picker = this.root.getByRole("combobox", {name: "Permitted saved form", exact: true});
+		expect(await picker.locator("option").evaluateAll(nodes => nodes.map(node => (node as HTMLOptionElement).value))).toEqual(fixture.forms.map(form => form.id));
+		for (const form of fixture.forms.slice(1).flatMap(form => [form, fixture.forms[0]])) {
+			await picker.selectOption(form.id);
+			const apply = this.root.getByRole("button", {name: "Switch form", exact: true});
+			await apply.click();
+			await expect.poll(async () => (await this.round72Snapshot()).form === form.id || await this.round72Consequences().isVisible()).toBe(true);
+			if ((await this.round72Snapshot()).form !== form.id) {
+				await this.round72Consequences().getByRole("checkbox").check();
+				await apply.click();
+			}
+			await expect.poll(async () => (await this.round72Snapshot()).form).toBe(form.id);
+			const switched = await this.round72Snapshot();
+			expect(switched.ownerId).toBe(owner.id);
+			expect(switched.index).toBe(0);
+			expect(switched.operations.map(item => item.id)).toEqual(baseline.operations.map(item => item.id));
+			expect(JSON.stringify(switched.operations[1])).toBe(suffix);
+			expect(switched.operations[0].data.resolved!.frozenForms!.profiles).toEqual(owner.data.resolved!.frozenForms!.profiles);
+			expect(switched.effective!.cr).toEqual({cr: form.cr, xp: form.xp});
+			expect(switched.effective!.hp.average).toBe(form.hp);
+			expect(switched.effective!.wis).toBe(19);
+			if (form.id === "mist") {
+				expect(switched.effective!.action || []).toEqual([]);
+				expect(switched.effective!.speed).toMatchObject({fly: 20, canHover: true});
+			} else if (form.id === "bat") expect(switched.effective!.speed).toMatchObject({walk: 5, fly: 30});
+			else if (form.id === "animal") expect(switched.effective!.speed).toMatchObject(fixture.uid.startsWith("wereshark") ? {walk: 0, swim: 40} : {walk: 40});
+			this.releaseSnapshots.push({phase: `frozen-form-${form.id}`, surface, family: fixture.uid, snapshot: switched});
+			await picker.selectOption(form.id);
+			await expect(this.root.getByRole("button", {name: "Switch form", exact: true})).toBeDisabled();
+			const noOp = await this.round72Snapshot();
+			expect(noOp.writes).toBe(switched.writes);
+			expect(noOp.calls).toBe(switched.calls);
+			expect(noOp.operations).toEqual(switched.operations);
+			if (surface === "Encounter") expect(noOp.state).toEqual(noOp.persisted);
+		}
+		expect(await this.page.evaluate(() => (globalThis as Round72Globals).__round72.forbidden)).toEqual([]);
+		await this.page.getByRole("tab", {name: "Quick Edit", exact: true}).click();
+		await this.page.locator(".bqa__changes .bqa__row").filter({hasText: "Quick edit"}).getByRole("button", {name: "Remove", exact: true}).click();
+		await expect.poll(async () => (await this.round72Snapshot()).operations.length).toBe(1);
+	}
+
+	async releaseFamily (surface: "Bestiary" | "Encounter", fixture: ReleaseCase, info: TestInfo) {
+		await this.openReleaseConsumer(surface, fixture);
+		const before = await this.round72Snapshot();
+		await this.choose(`catalog:${fixture.uid}`);
+		for (const [group, value] of fixture.options || []) await this.chooseOption(group, value);
+		const discard = this.root.getByRole("button", {name: "Discard stale draft and start new answers", exact: true});
+		if (await discard.count()) await discard.click();
+		await expect(this.root.locator(".bqa__transformation-resolution")).toHaveCount(1);
+		if (await this.root.locator("[data-source-control]").count()) {
+			await expect(this.round72ApplyButton()).toHaveCount(0);
+			expect((await this.round72Snapshot()).operations).toEqual([]);
+		}
+		await this.fillReleaseSource(fixture);
+		for (const form of fixture.forms) {
+			const panel = this.root.locator(`[data-estimate-form="${form.id}"]`);
+			await this.fillRound72SourceForm(panel, form.attack, {fixedDamage: form.fixedDamage, stealthMultiplier: fixture.monster === "Bugbear" ? 2 : 1});
+		}
+		await this.expectLivePreview();
+		const estimate = this.root.locator(".bqa__transformation-cr-estimate");
+		for (const form of fixture.forms) {
+			await expect(estimate).toContainText(`Estimated CR ${form.cr};`);
+			await expect(estimate).toContainText(`DPR ${form.dpr},`);
+			await expect(estimate).toContainText(`Final CR ${form.cr}, ${form.xp} XP.`);
+		}
+		if (fixture.override) {
+			await this.setRound72Field(this.root, "Override estimated CR?", "declare");
+			await this.setRound72Field(this.root, "Final CR override", fixture.override.cr);
+			await this.setRound72Field(this.root, "CR override reason", fixture.override.reason);
+			await expect(estimate).toContainText(`Estimated CR ${fixture.forms[0].cr};`);
+			await expect(estimate).toContainText(`Final CR ${fixture.override.cr}, ${fixture.override.xp} XP.`);
+			await expect(estimate).toContainText("independent estimate retained");
+		}
+		await this.applyRelease();
+		const applied = await this.round72Snapshot();
+		const effective = applied.effective!;
+		this.assertReleaseMechanics(fixture, effective);
+		expect(effective.hp.average).toBe(fixture.forms[0].hp);
+		const final = fixture.override || fixture.forms[0];
+		expect(effective.cr).toEqual({cr: final.cr, xp: final.xp});
+		expect(applied.operations[0].data.resolved).toHaveProperty("estimation");
+		const owner = applied.operations[0].data.resolved!;
+		expect(`${owner.identity.name}|${owner.identity.source}`.toLowerCase()).toBe(fixture.uid);
+		const profiles = owner.frozenForms?.profiles || [{id: "default", resolved: owner}];
+		expect(profiles.map(profile => profile.id)).toEqual(fixture.forms.map(form => form.id));
+		for (const form of fixture.forms) {
+			const leaf = profiles.find(profile => profile.id === form.id)!.resolved;
+			expect(leaf.estimation!.sourceChangeCount).toBeGreaterThan(0);
+			const cr = leaf.changes.at(-1)!;
+			expect(cr.receipt).toMatchObject({estimatedCr: form.cr, damagePerRound: form.dpr,
+				assumptions: {override: fixture.override ? {cr: fixture.override.cr, reason: fixture.override.reason} : null}});
+			expect(cr.value).toEqual({cr: fixture.override?.cr || form.cr, xp: fixture.override?.xp || form.xp});
+		}
+		if (surface === "Encounter") {
+			expect(applied.state.instances[0].monster).toEqual(before.state.instances[0].monster);
+			expect(applied.encounterEffective[1]).toEqual(before.encounterEffective[1]);
+			expect(applied.state).toEqual(applied.persisted);
+		}
+		const homebrew = await this.saveReleaseHomebrew(fixture, effective);
+		this.releaseSnapshots.push({phase: "applied", surface, family: fixture.uid, snapshot: applied, homebrew});
+		await this.page.evaluate(() => {
+			const probe = (globalThis as Round72Globals).__round72;
+			sessionStorage.setItem("release-registry-json", JSON.stringify({monster: probe.monster, operations: probe.consumer!.getOperations({monster: probe.monster!})}));
+		});
+		await this.closeRound72Modal();
+		await expect(this.page.locator(surface === "Encounter" ? ".ew__statblock .ve-stats" : "#pagecontent")).toContainText(fixture.forms[0].attack.split(" (")[0]);
+		const previousTimeOrigin = await this.page.evaluate(() => performance.timeOrigin);
+		await this.page.reload({waitUntil: "domcontentloaded"});
+		if (surface === "Encounter") {
+			await this.page.waitForLoadState("load");
+			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+			await this.observeRound72("default");
+		} else {
+			const ready = await this.waitReleaseBestiaryReady(fixture.monster, previousTimeOrigin);
+			this.releaseSnapshots.push({phase: "reload-ready-before-rehydration", surface, family: fixture.uid, previousTimeOrigin, ready});
+			await expect(this.page.locator(".bqa__btn-open:visible").first()).toBeVisible({timeout: 30_000});
+			await this.observeRound72("default");
+			const replay = await this.page.evaluate(timeOrigin => {
+				const {__round72: probe, __round72Document: current} = globalThis as Round72Globals;
+				if (performance.timeOrigin !== timeOrigin || !current.toolsLoaded) throw new Error("Bestiary document changed before synchronous Registry rehydration.");
+				const saved = JSON.parse(sessionStorage.getItem("release-registry-json")!);
+				probe.registry.applyChanges({monster: saved.monster, addOperations: saved.operations, removeIds: []});
+				return {timeOrigin: performance.timeOrigin, toolsLoaded: current.toolsLoaded,
+					operationCount: probe.registry.getOperations({monster: saved.monster}).length};
+			}, ready.timeOrigin);
+			expect(replay).toEqual({timeOrigin: ready.timeOrigin, toolsLoaded: true, operationCount: applied.operations.length});
+			this.releaseSnapshots.push({phase: "rehydrated-current-document", surface, family: fixture.uid, replay});
+		}
+		if (surface === "Encounter") await this.page.locator("#ew-focus-edit").click();
+		else await this.page.locator(".bqa__btn-open:visible").first().click();
+		const reloaded = await this.round72Snapshot();
+		expect(reloaded.effective).toEqual(effective);
+		expect(reloaded.operations).toEqual(applied.operations);
+		expect(await this.page.evaluate(() => JSON.parse(sessionStorage.getItem("release-homebrew-monster")!))).toEqual(homebrew);
+		this.releaseSnapshots.push({phase: "reloaded", surface, family: fixture.uid, snapshot: reloaded});
+		if (fixture.forms.length > 1) await this.exerciseReleaseForms(surface, fixture);
+		await this.page.locator(".bqa__changes .bqa__row").getByRole("button", {name: "Remove", exact: true}).click();
+		await expect.poll(async () => (await this.round72Snapshot()).operations.length).toBe(0);
+		expect((await this.round72Snapshot()).effective).toEqual(before.effective);
+		this.releaseSnapshots.push({phase: "removed-restored", surface, family: fixture.uid, snapshot: await this.round72Snapshot()});
+		await this.finishRound72Evidence(info, `m13c-${surface}-${fixture.uid.replace(/\W+/g, "-")}`);
+		console.log(`M13c ${surface} ${fixture.uid}: default controls, independent effects/CR/XP, real Homebrew dialogs, JSON reload, removal/restoration; forms=${fixture.forms.map(form => form.id)}. Registry reload uses explicit JSON rehydration, not automatic persistence; Cocoa menus/screenreader UNTESTED.`);
 	}
 
 	private async fillRound72Bugbear () {
@@ -949,7 +1402,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await expect(this.afterStatblock).toContainText("Undead Fortitude");
 	}
 
-	private async fillRound72SourceForm (root: Locator, attack: string) {
+	private async fillRound72SourceForm (root: Locator, attack: string, {fixedDamage, stealthMultiplier = 2}: {fixedDamage?: number; stealthMultiplier?: number} = {}) {
 		const field = (label: string | RegExp, value: string) => this.setRound72Field(root, label, value);
 		await field("Armor policy", "retain");
 		const ownership = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Post-source armor and numeric ownership$/})});
@@ -971,7 +1424,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 			const input = multipliers.nth(i);
 			if (await input.isDisabled()) continue;
 			const label = await input.locator("..").textContent();
-			await field(label!.split("Choose")[0].trim(), label!.includes("stealth") ? "2" : "1");
+			await field(label!.split("Choose")[0].trim(), label!.includes("stealth") ? String(stealthMultiplier) : "1");
 		}
 		const defenseReasons = root.getByRole("textbox", {name: /review \(including absence \/ conditions\)$/, includeHidden: true});
 		for (let i = 0; i < await defenseReasons.count(); i++) {
@@ -988,7 +1441,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		for (let i = 0; i < await entries.count(); i++) {
 			const entry = entries.nth(i);
 			const title = await entry.locator(":scope > summary").textContent();
-			const selected = title!.startsWith(`action: ${attack} (`);
+			const selected = fixedDamage === undefined && title!.startsWith(`action: ${attack} (`);
 			await this.setRound72Field(entry, "Entry contribution to estimate", selected ? "represented" : "excluded");
 			const reason = entry.getByRole("textbox", {name: / coverage reason$/, includeHidden: true});
 			await reason.fill(selected ? "Complete selected attack, including every damage rider." : "Reviewed exclusion from this encounter routine; the source rules remain present.");
@@ -997,17 +1450,29 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		}
 		await root.getByRole("button", {name: "Add alternative routine", exact: true}).click();
 		const accuracy = root.getByRole("combobox", {name: "Predominant attack / save accuracy", exact: true});
-		const accuracyValue = await accuracy.locator("option").filter({hasText: `${attack} (MM) · paragraph 1, hit 1`}).getAttribute("value");
-		await accuracy.selectOption(accuracyValue!);
-		await field("Predominant / mixed-accuracy explanation", "Morningstar accuracy across all three rounds.");
-		await field("Routine source and schedule explanation", "One Morningstar attack per round, no surprise.");
+		const accuracyOption = accuracy.locator("option").filter({hasText: `${attack} (`}).filter({hasText: " · paragraph 1, hit 1"});
+		if (fixedDamage === undefined) await expect(accuracyOption).toHaveCount(1);
+		await accuracy.selectOption(fixedDamage !== undefined ? "fixed" : (await accuracyOption.getAttribute("value"))!);
+		if (fixedDamage !== undefined) {
+			await field("Fixed accuracy kind", "attack");
+			await field("Fixed accuracy value", "0");
+			await field("Fixed accuracy reason", "Mist has no attacks or saving throw in this no-damage routine.");
+		}
+		await field("Predominant / mixed-accuracy explanation", "The selected attack supplies the declared predominant accuracy; mist has none.");
+		await field("Routine source and schedule explanation", "One selected attack per round, including all its riders. Other alternatives and situational defenses are deliberately excluded for this encounter estimate, not removed from the rules.");
 		await root.getByRole("button", {name: "Add contribution", exact: true}).click();
-		const damageValues = await root.getByRole("combobox", {name: "Damage contribution", exact: true}).locator("option")
-			.filter({hasText: new RegExp(`^${attack} \\(MM\\) · paragraph \\d+, damage \\d+`)}).evaluateAll(nodes => nodes.map(node => (node as HTMLOptionElement).value));
+		const damageValues = fixedDamage !== undefined ? ["fixed"] : await root.getByRole("combobox", {name: "Damage contribution", exact: true}).locator("option")
+			.evaluateAll((nodes, name) => nodes.filter(node => node.textContent?.startsWith(`${name} (`) && node.textContent.includes(" · paragraph ") && node.textContent.includes(", damage "))
+				.map(node => (node as HTMLOptionElement).value), attack);
+		expect(damageValues.length, `Actual selected damage for ${attack}`).toBeGreaterThan(0);
 		for (const [i, value] of damageValues.entries()) {
 			if (i) await root.getByRole("button", {name: "Add contribution", exact: true}).click();
 			const row = root.locator("fieldset.bqa__transformation-resolution-row").last();
 			await this.setRound72Field(row, "Damage contribution", value);
+			if (fixedDamage !== undefined) {
+				await this.setRound72Field(row, "Fixed per-use value", String(fixedDamage));
+				await this.setRound72Field(row, "Fixed contribution reason", "Mist form cannot take damage-dealing actions.");
+			}
 			await this.setRound72Field(row, "Timing / use restriction", "normal");
 			await this.setRound72Field(row, "Contribution schedule reason", "One attack against one target each round, including this rider.");
 			for (let round = 1; round <= 3; round++) {
@@ -1072,6 +1537,69 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	private async closeRound72Modal () {
 		await this.page.locator(".bqa__modal").getByRole("button", {name: "Done", exact: true}).click();
 		await expect(this.page.locator(".bqa__modal")).toHaveCount(0);
+	}
+
+	private async waitReleaseBestiaryReady (monster: string, previousTimeOrigin: number) {
+		const ready = await this.page.waitForFunction(({monster, previousTimeOrigin}) => {
+			const globals = globalThis as Round72Globals & {Hist?: {
+				initialLoad: boolean;
+				_listPage?: {_lastRender: {entityBase?: {name: string; source: string}}};
+			}};
+			const documentState = globals.__round72Document;
+			if (!documentState) return false;
+			documentState.readyChecks++;
+			const rendered = globals.Hist?._listPage?._lastRender.entityBase;
+			if (documentState.timeOrigin === previousTimeOrigin || !documentState.toolsLoaded || document.readyState !== "complete"
+				|| globals.Hist?.initialLoad !== false || rendered?.name !== monster || rendered.source !== "MM"
+				|| location.hash !== `#${encodeURIComponent(monster.toLowerCase())}_mm`) return false;
+			return {...documentState, url: location.href, monster: rendered.name, source: rendered.source};
+		}, {monster, previousTimeOrigin}, {timeout: 30_000});
+		try {
+			const state = await ready.jsonValue();
+			if (!state) throw new Error("Bestiary readiness completed without the new document's fixture.");
+			return state;
+		}
+		finally { await ready.dispose(); }
+	}
+
+	async reloadReadinessControl () {
+		await this.openRound72Bestiary();
+		await this.closeRound72Modal();
+		const previousTimeOrigin = await this.page.evaluate(() => performance.timeOrigin);
+		let entered: () => void = () => {};
+		let release: () => void = () => {};
+		const intercepted = new Promise<void>(resolve => { entered = resolve; });
+		const blocked = new Promise<void>(resolve => { release = resolve; });
+		const pattern = "**/data/encounterbuilder.json";
+		await this.page.route(pattern, async route => {
+			entered();
+			await blocked;
+			await route.continue();
+		});
+		try {
+			await this.page.reload({waitUntil: "domcontentloaded"});
+			await intercepted;
+			await expect(this.page.locator(".bqa__btn-open:visible").first()).toBeVisible({timeout: 30_000});
+			const early = await this.page.evaluate(() => structuredClone((globalThis as Round72Globals).__round72Document));
+			expect(early.timeOrigin).not.toBe(previousTimeOrigin);
+			expect(early.toolsLoaded).toBe(false);
+			const ready = this.waitReleaseBestiaryReady("Bugbear", previousTimeOrigin);
+			await this.page.waitForFunction(() => (globalThis as Round72Globals).__round72Document.readyChecks > 0);
+			release();
+			const accepted = await ready;
+			expect(accepted).toMatchObject({toolsLoaded: true, monster: "Bugbear", source: "MM"});
+			expect(accepted.timeOrigin).not.toBe(previousTimeOrigin);
+			this.releaseSnapshots.push({phase: "reload-readiness-control", early, accepted});
+			console.log("Reload readiness: Quick Actions was visible while actual post-load data was blocked; accepted only the new document's toolsLoaded and exact MM fixture. No sleeps/evaluate retry.");
+		} finally {
+			release();
+			await this.page.unroute(pattern);
+		}
+		await this.observeRound72("default");
+		await this.page.locator(".bqa__btn-open:visible").first().click();
+		await this.page.getByRole("tab", {name: "Templates", exact: true}).click();
+		await this.choose("catalog:zombie|dmg");
+		await this.fillRound72Bugbear();
 	}
 
 	async round72Bugbear (info?: TestInfo) {
@@ -1156,7 +1684,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		});
 		await this.page.reload();
 		await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
-		await this.observeRound72(true);
+		await this.observeRound72("default");
 		await this.page.locator("#ew-focus-edit").click();
 		await this.page.getByRole("tab", {name: "Templates", exact: true}).click();
 	}
@@ -1205,7 +1733,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.closeRound72Modal();
 		await this.page.reload();
 		await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
-		await this.observeRound72(true);
+		await this.observeRound72("default");
 		await this.page.locator("#ew-focus-edit").click();
 		expect((await this.round72Snapshot()).state).toEqual(saved.persisted);
 		await this.closeRound72Modal();
@@ -1222,7 +1750,6 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.page.locator("#ew-bulk-type").selectOption("transformation");
 		await this.page.evaluate(async () => {
 			const probe = (globalThis as Round72Globals).__round72;
-			await probe.controller!._pRenderBulkChoices({automationVersion: 2});
 			probe.saves = probe.writes = 0; probe.savedStates = [];
 		});
 		await this.choose("catalog:dracolich|mm");
