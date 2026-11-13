@@ -361,6 +361,30 @@ SCRE source/page/edition attribution. M12 Undead, final CR/override/editor
 integration and M13 default rollout remain open. Species stays deferred;
 the Templates bug is not closed.
 
+### Round 72 - Undead source automation accepted locally
+
+M12 commit `fc3714780` adds the final staged source profile, `Undead|SCRE`,
+covering its six categories and existing additional choices with concrete rules,
+guided source decisions, complete frozen replay and coherent conflict handling.
+The four original screenshots remain the rule oracle; the worked hydra and
+tyrannosaurus are not donors, and source/page/edition attribution remains provisional.
+
+Parent review reproduced two gaps despite the original green suite: zero flight
+suppressed sourced Ghostly flight, and an untagged weapon silently retained
+physical damage after successful spectral conversion. Both now have ordinary
+red-before-fix regressions. Zero flight derives the sourced speed; unsupported
+attack shapes block explicitly rather than guessing or silently succeeding.
+The unchanged parent production-boundary probe now passes six checks, focused
+shared verification passes five suites/140 tests, and the ordinary native
+commit gate passes 39 related suites/755 tests with zero snapshots.
+
+This source commit is on the public-only local integration chain, not yet
+published to `character-sheet-wip`. All 14 source descriptors now exist, but
+shared all-family guided inputs, estimated CR/PB composition and override,
+editor controls, browser verification and explicit default rollout remain M13.
+CR/XP is still retained with review in M12. No final browser, full-repository
+or release proof is claimed; Species stays deferred and Templates remains open.
+
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
 global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver
