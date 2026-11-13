@@ -372,6 +372,9 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	private readonly assets = [
 		"bestiary.html", "encounterworkspace.html",
 		"js/bestiary/bestiary-transformation-editor.js", "js/bestiary/bestiary-quick-actions-ui.js",
+		"js/bestiary/bestiary-transformation-editor-controls.js", "js/bestiary/bestiary-transformation-editor-source.js",
+		"js/bestiary/bestiary-transformation-editor-estimate.js", "js/bestiary/bestiary-transformation-editor-guided.js",
+		"js/bestiary/bestiary-transformation-source-inputs.js", "js/creature-transformation-estimate.js", "js/creature-transformation-routines.js",
 		"js/bestiary/bestiary-transformation-workflow.js", "js/bestiary/bestiary-transformation-inputs.js",
 		"js/bestiary/bestiary-transformation-catalog-adapter.js", "js/bestiary/bestiary-quick-actions-engine.js",
 		"js/creature-transformations.js", "js/creature-transformation-forms.js", "js/creature-transformation-stats.js", "js/creature-transformation-cr.js",
@@ -433,6 +436,9 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.settleRound72Responses();
 		for (const path of [
 			"js/bestiary/bestiary-transformation-editor.js", "js/bestiary/bestiary-quick-actions-ui.js",
+			"js/bestiary/bestiary-transformation-editor-controls.js", "js/bestiary/bestiary-transformation-editor-source.js",
+			"js/bestiary/bestiary-transformation-editor-estimate.js", "js/bestiary/bestiary-transformation-editor-guided.js",
+			"js/bestiary/bestiary-transformation-source-inputs.js", "js/creature-transformation-estimate.js", "js/creature-transformation-routines.js",
 			"js/bestiary/bestiary-transformation-workflow.js", "js/bestiary/bestiary-transformation-inputs.js", "js/render.js",
 			new URL(this.page.url()).pathname.slice(1),
 			this.page.url().includes("/encounterworkspace.html") ? "css/encounterworkspace.css" : "css/bestiary.css",
@@ -906,69 +912,153 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	}
 
 	private async setRound72Field (root: Locator, label: string | RegExp, value: string) {
-		const options = {name: label, exact: typeof label === "string"};
+		const options = {name: label, exact: typeof label === "string", includeHidden: true};
 		const control = root.getByRole("combobox", options).or(root.getByRole("spinbutton", options)).or(root.getByRole("textbox", options));
+		await control.evaluate(node => {
+			for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+		});
 		if (await control.evaluate(node => node.tagName === "SELECT")) await control.selectOption(value);
 		else await control.fill(value);
 	}
 
 	private async fillRound72Bugbear () {
 		const root = this.root.locator(".bqa__transformation-resolution").first();
-		const field = (label: string | RegExp, value: string) => this.setRound72Field(root, label, value);
-		await field("Reviewed unchanged armor", "retain");
-		await field("Reason / source policy", "Zombie retains source equipment; independently reviewed.");
-		const entries = root.locator("details").filter({has: this.page.locator(":scope > summary")});
+		const source = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Source choices$/})});
+		await this.setRound72Field(source, "Armor policy", "retain");
+		await this.setRound72Field(source, "Declare a current source PB?", "declare");
+		await this.setRound72Field(source, "Current source PB", "2");
 		for (const name of ["Surprise Attack", "Morningstar", "Javelin"]) {
-			const panel = entries.filter({has: this.page.locator("summary", {hasText: new RegExp(`^(trait|action): ${name} \\(MM\\)$`)})}).last();
+			const panel = source.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: new RegExp(`^(trait|action): ${name} \\(MM\\)$`)})});
 			await this.setRound72Field(panel, "Entry policy", "bind");
 			const rows = panel.locator(".bqa__transformation-resolution-row");
 			for (let ix = 0; ix < await rows.count(); ix++) {
 				const row = rows.nth(ix);
 				await this.setRound72Field(row, "Token interpretation", name === "Surprise Attack" ? "fixed" : "ability");
-				await this.setRound72Field(row, "Token interpretation reason", "Source-qualified MM token deliberately reviewed.");
 				if (name === "Surprise Attack") continue;
 				await this.setRound72Field(row, "Governing ability", "str");
-				await this.setRound72Field(row, "Token PB multiplier", (await row.textContent())?.includes(", hit token") ? "1" : "0");
-				await row.getByRole("button", {name: "Propose residual", exact: true}).click();
-				await expect(row).toContainText("Unaccepted proposal");
-				await row.getByRole("button", {name: "Adopt this interpretation", exact: true}).click();
-				await expect(row).toContainText("Adopted residual");
+				await this.setRound72Field(row, "Token PB multiplier", (await row.textContent())?.includes(", hit ") ? "1" : "0");
+				await this.setRound72Field(row, "Fixed non-ability / non-PB contribution", "0");
 			}
 		}
-		await field(/^skill: stealth, observed .* - PB multiplier$/, "2");
-		await field("stealth interpretation reason", "MM Stealth expertise reviewed.");
-		await field(/^skill: survival, observed .* - PB multiplier$/, "1");
-		await field("survival interpretation reason", "MM Survival proficiency reviewed.");
+		await this.setRound72Field(source, "Armor and numeric declarations source reason", "Zombie retains source equipment; reviewed Strength and declared PB contributions.");
+		await this.fillRound72SourceForm(root.locator('[data-estimate-form="default"]'), "Morningstar");
+		await expect(root.locator(".bqa__transformation-cr-estimate")).toContainText("Estimated CR 1");
+		await expect(root.locator(".bqa__transformation-cr-estimate")).toContainText("DPR 12");
+		await expect(this.afterStatblock).toContainText("32");
+		await expect(this.afterStatblock).toContainText("12 (2d8 + 3)");
+		await expect(this.afterStatblock).toContainText("Undead Fortitude");
+	}
+
+	private async fillRound72SourceForm (root: Locator, attack: string) {
+		const field = (label: string | RegExp, value: string) => this.setRound72Field(root, label, value);
+		await field("Armor policy", "retain");
+		const ownership = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Post-source armor and numeric ownership$/})});
+		const policies = ownership.getByRole("combobox", {name: "Entry policy", exact: true, includeHidden: true});
+		for (let i = 0; i < await policies.count(); i++) {
+			const policy = policies.nth(i);
+			await policy.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
+			await policy.selectOption("retain");
+		}
+		const interpretations = ownership.getByRole("combobox", {name: "Token interpretation", exact: true, includeHidden: true});
+		for (let i = 0; i < await interpretations.count(); i++) {
+			const token = interpretations.nth(i);
+			if (await token.isDisabled()) continue;
+			await token.selectOption("fixed");
+		}
+		await field("Post-source armor reason", "Retain the actual post-source armor; source changes are already applied.");
+		const multipliers = root.locator('select').filter({has: this.page.locator('option[value="2"]', {hasText: "Expertise / double proficiency"})});
+		for (let i = 0; i < await multipliers.count(); i++) {
+			const input = multipliers.nth(i);
+			if (await input.isDisabled()) continue;
+			const label = await input.locator("..").textContent();
+			await field(label!.split("Choose")[0].trim(), label!.includes("stealth") ? "2" : "1");
+		}
+		const defenseReasons = root.getByRole("textbox", {name: /review \(including absence \/ conditions\)$/, includeHidden: true});
+		for (let i = 0; i < await defenseReasons.count(); i++) {
+			await defenseReasons.nth(i).evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
+			await defenseReasons.nth(i).fill("Reviewed this actual post-source defense, conditions and absent alternatives.");
+		}
 		for (const [label, value] of [
 			["Expected CR band (deliberately adopt or edit)", "1"], ["AC alternative to evaluate", "0"], ["Effective resistance policy", "none"],
 			["Prevalent multiple vulnerabilities?", "no"], ["Applicable regeneration per round", "0"], ["Estimate-only effective HP adjustment", "0"],
 			["Estimate-only effective AC adjustment", "0"], ["Defense policy and reviewed feature adjustments", "No relevant multipliers or regeneration; all features reviewed."],
-			["trait: Brute (MM)", "excluded"], ["Brute coverage reason", "Already baked into weapon dice."],
-			["trait: Surprise Attack (MM)", "excluded"], ["Surprise Attack coverage reason", "No surprise in this reviewed routine."],
-			["action: Morningstar (MM)", "represented"], ["Morningstar coverage reason", "One melee attack each round."],
-			["action: Javelin (MM)", "excluded"], ["Javelin coverage reason", "Ranged alternative reviewed, not chosen."],
 		]) await field(label, value);
+		const coverage = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Entry and numeric-token accounting$/})});
+		const entries = coverage.locator(":scope > details");
+		for (let i = 0; i < await entries.count(); i++) {
+			const entry = entries.nth(i);
+			const title = await entry.locator(":scope > summary").textContent();
+			const selected = title!.startsWith(`action: ${attack} (`);
+			await this.setRound72Field(entry, "Entry contribution to estimate", selected ? "represented" : "excluded");
+			const reason = entry.getByRole("textbox", {name: / coverage reason$/, includeHidden: true});
+			await reason.fill(selected ? "Complete selected attack, including every damage rider." : "Reviewed exclusion from this encounter routine; the source rules remain present.");
+			const adopt = entry.getByRole("button", {name: "Use this entry decision and reason for its unreviewed tokens", exact: true});
+			if (await adopt.count()) await adopt.click();
+		}
 		await root.getByRole("button", {name: "Add alternative routine", exact: true}).click();
-		await root.getByRole("combobox", {name: "Predominant attack / save accuracy", exact: true}).selectOption({label: "Morningstar (MM) - hit 1:1"});
+		const accuracy = root.getByRole("combobox", {name: "Predominant attack / save accuracy", exact: true});
+		const accuracyValue = await accuracy.locator("option").filter({hasText: `${attack} (MM) · paragraph 1, hit 1`}).getAttribute("value");
+		await accuracy.selectOption(accuracyValue!);
 		await field("Predominant / mixed-accuracy explanation", "Morningstar accuracy across all three rounds.");
 		await field("Routine source and schedule explanation", "One Morningstar attack per round, no surprise.");
 		await root.getByRole("button", {name: "Add contribution", exact: true}).click();
-		await root.getByRole("combobox", {name: "Damage contribution", exact: true}).selectOption({label: "Morningstar (MM) - paragraph 1, damage 1"});
-		await field("Timing / use restriction", "normal");
-		await field("Contribution schedule reason", "One attack against one target each round.");
-		for (let round = 1; round <= 3; round++) {
-			await field(`Round ${round} uses`, "1");
-			await field(`Round ${round} targets`, "1");
+		const damageValues = await root.getByRole("combobox", {name: "Damage contribution", exact: true}).locator("option")
+			.filter({hasText: new RegExp(`^${attack} \\(MM\\) · paragraph \\d+, damage \\d+`)}).evaluateAll(nodes => nodes.map(node => (node as HTMLOptionElement).value));
+		for (const [i, value] of damageValues.entries()) {
+			if (i) await root.getByRole("button", {name: "Add contribution", exact: true}).click();
+			const row = root.locator("fieldset.bqa__transformation-resolution-row").last();
+			await this.setRound72Field(row, "Damage contribution", value);
+			await this.setRound72Field(row, "Timing / use restriction", "normal");
+			await this.setRound72Field(row, "Contribution schedule reason", "One attack against one target each round, including this rider.");
+			for (let round = 1; round <= 3; round++) {
+				await this.setRound72Field(row, `Round ${round} uses`, "1");
+				await this.setRound72Field(row, `Round ${round} targets`, "1");
+			}
 		}
 		await field("Routine selection policy", "highest-damage");
 		await field("Final CR0 no-threat 0 XP policy?", "no");
 		await field("All relevant effects and complete alternatives reviewed?", "yes");
 		await field("Completeness explanation (never auto-authored)", "All source effects and complete alternatives deliberately reviewed.");
-		await expect(root.locator(".bqa__transformation-cr-estimate")).toContainText("Estimated CR 1");
-		await expect(root.locator(".bqa__transformation-cr-estimate")).toContainText("DPR 12");
-		await expect(root.locator(".bqa__transformation-cr-estimate")).toContainText("per-use printed average 12");
-		await expect(this.afterStatblock).toContainText("32");
-		await expect(this.afterStatblock).toContainText("12 (2d8 + 3)");
+	}
+
+	private async fillRound72Dracolich (root: Locator) {
+		for (const [label, value] of [
+			["Age", "adult"], ["age source reason", "Actual adult dragon."],
+			["Is this a true dragon?", "yes"], ["True dragon identity source reason", "Actual true dragon."],
+			["Is this a shadow dragon?", "no"], ["Shadow dragon identity source reason", "No shadow dragon transformation."],
+			["Lair policy", "retain"], ["Lair actions source reason", "Retain the complete actual lair context."],
+		]) await this.setRound72Field(root, label, value);
+		const physiology = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Living physiology$/})});
+		const policies = physiology.getByRole("combobox", {includeHidden: true});
+		for (let i = 0; i < await policies.count(); i++) {
+			const label = await policies.nth(i).locator("..").locator("span").textContent();
+			await this.setRound72Field(physiology, label!, label!.startsWith("Amphibious ") ? "remove" : "retain");
+		}
+		await this.setRound72Field(physiology, "Living physiology source reason", "Remove living amphibious physiology; explicitly retain other source traits.");
+		await this.fillRound72SourceForm(root.locator('[data-estimate-form="default"]'), "Bite");
+	}
+
+	private async captureM13bLayouts (info: TestInfo, surface: string) {
+		for (const width of [1280, 390]) {
+			await this.page.setViewportSize({width, height: 900});
+			if (width === 390) await this.useNightMode();
+			const layout = await this.root.evaluate(node => ({fits: node.scrollWidth <= node.clientWidth + 1,
+				width: node.clientWidth, scroll: node.scrollWidth,
+				overflow: [...node.querySelectorAll("*")].filter(child => child.clientWidth > 0 && child.scrollWidth > child.clientWidth + 1)
+					.map(child => ({tag: child.tagName, class: child.className, width: child.clientWidth, scroll: child.scrollWidth})).slice(0, 20)}));
+			expect(layout.fits, `${surface} ${width}px fits: ${JSON.stringify(layout)}`).toBe(true);
+			const armor = this.root.getByRole("combobox", {name: "Armor policy", exact: true}).first();
+			await armor.focus();
+			await expect(armor).toBeFocused();
+			await armor.press("Tab");
+			expect(await this.root.evaluate(node => node.contains(document.activeElement))).toBe(true);
+			await this.page.screenshot({path: info.outputPath(`m13b-${surface}-${width}-source.png`)});
+			const estimate = this.root.locator(".bqa__transformation-cr-estimate").first();
+			await estimate.scrollIntoViewIfNeeded();
+			await expect(estimate).toContainText("DMG 2014 estimate, not playtested");
+			await this.page.screenshot({path: info.outputPath(`m13b-${surface}-${width}-estimate.png`)});
+		}
+		await this.page.setViewportSize({width: 1280, height: 900});
 	}
 
 	private round72ApplyButton () { return this.root.getByRole("button", {name: /^(Apply transformation|Apply to \d+ · one save)$/}); }
@@ -984,15 +1074,16 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await expect(this.page.locator(".bqa__modal")).toHaveCount(0);
 	}
 
-	async round72Bugbear () {
+	async round72Bugbear (info?: TestInfo) {
 		await this.openRound72Bestiary();
 		const source = await this.round72Snapshot();
 		expect(source.effective!.name).toBe("Bugbear");
 		await this.choose("catalog:zombie|dmg");
 		await expect(this.root.getByRole("button", {name: "Apply transformation"})).toHaveCount(0);
 		await this.fillRound72Bugbear();
+		if (info) await this.captureM13bLayouts(info, "bestiary");
 		const field = (label: string, value: string) => this.setRound72Field(this.root, label, value);
-		await field("Override estimated CR?", "override");
+		await field("Override estimated CR?", "declare");
 		await field("Final CR override", "2");
 		await field("CR override reason", "Explicit encounter adjudication; independent estimate remains CR 1.");
 		await expect(this.root.locator(".bqa__transformation-cr-estimate")).toContainText("Estimated CR 1");
@@ -1070,11 +1161,12 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.page.getByRole("tab", {name: "Templates", exact: true}).click();
 	}
 
-	async round72Encounter () {
+	async round72Encounter ({includeBulk = true, info}: {includeBulk?: boolean; info?: TestInfo} = {}) {
 		await this.seedRound72Encounter();
 		const before = await this.round72Snapshot();
 		await this.choose("catalog:zombie|dmg");
 		await this.fillRound72Bugbear();
+		if (info) await this.captureM13bLayouts(info, "encounter");
 		await this.confirmRound72Compiled();
 		await this.round72ApplyButton().click();
 		await expect(this.round72Consequences()).toBeVisible();
@@ -1117,6 +1209,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.page.locator("#ew-focus-edit").click();
 		expect((await this.round72Snapshot()).state).toEqual(saved.persisted);
 		await this.closeRound72Modal();
+		if (!includeBulk) return;
 		await this.page.locator("#ew-focus-more > summary").click();
 		await this.page.locator("#ew-browse-roster").click();
 		await this.page.locator("#ew-none").click();
@@ -1138,10 +1231,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		const panels = allPanels.filter({has: this.page.locator("legend", {hasText: /^Adult Black Dragon/})});
 		await expect(panels).toHaveCount(4);
 		for (let ix = 0; ix < 3; ix++) {
-			for (const [label, value] of [
-				["Age", "adult"], ["Is this a true dragon?", "yes"], ["Is this a shadow dragon?", "no"],
-				["Living physiology review", "amphibious-only"], ["Lair policy", "retain"],
-			]) await this.setRound72Field(panels.nth(ix), label, value);
+			await this.fillRound72Dracolich(panels.nth(ix));
 		}
 		await expect(panels.nth(3).getByRole("combobox", {name: "Age", exact: true})).toHaveValue("");
 		await expect(this.root).toContainText("3 eligible");
@@ -1517,7 +1607,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.useNightMode();
 		await this.choose("catalog:zombie|dmg");
 		await this.root.getByRole("button", {name: /^Review answers for /}).click();
-		await expect(this.root.getByRole("combobox", {name: "Reviewed unchanged armor", exact: true})).toBeFocused();
+		await expect(this.root.getByRole("combobox", {name: "Armor policy", exact: true})).toBeFocused();
 		await this.fillRound72Bugbear();
 		for (const width of [320, 390]) {
 			await this.page.setViewportSize({width, height: 844});

@@ -658,6 +658,22 @@ test.describe("Round72 combined C1/C2 internal seam, not public rollout", () => 
 	test.beforeEach(async ({page}) => { editors.set(page, new Round72CreatureTransformationPage(page)); });
 	test.afterEach(async ({page}, info) => { await editors.get(page)?.captureRound72Evidence(info); });
 
+	test("@m13b Bestiary opt-in source controls, explained estimate, native consent and removal", async ({page}, info) => {
+		test.setTimeout(180_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.round72Bugbear(info);
+		await editor.finishRound72Evidence(info, "m13b-bestiary-complete");
+	});
+
+	test("@m13b Encounter opt-in source estimate, failed Store retry and persistent reload", async ({page}, info) => {
+		test.setTimeout(180_000);
+		const editor = editors.get(page)!;
+		await editor.beginRound72Evidence(info);
+		await editor.round72Encounter({includeBulk: false, info});
+		await editor.finishRound72Evidence(info, "m13b-encounter-complete");
+	});
+
 	test("@round72-c1-c2 Bestiary MM Bugbear native bindings, estimate, consent and stale async fence", async ({page}, info) => {
 		test.setTimeout(180_000);
 		const editor = editors.get(page)!;

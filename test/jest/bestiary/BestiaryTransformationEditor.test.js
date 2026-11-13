@@ -9,7 +9,8 @@ import {compileCreatureTransformationStats} from "../../../js/creature-transform
 import {estimateCreatureTransformationCr} from "../../../js/creature-transformation-cr.js";
 import {createFrozenCreatureTransformation} from "../../../js/creature-transformation-forms.js";
 import {normalizeCreatureTransformation} from "../../../js/bestiary/bestiary-transformation-catalog-adapter.js";
-import {inspectCreatureTransformationInputs} from "../../../js/bestiary/bestiary-transformation-inputs.js";
+import {inspectCreatureTransformationSourceInputs, previewCreatureTransformationSourceInputs, compileCreatureTransformationSourceInputs, SOURCE_ESTIMATE_MODE} from "../../../js/bestiary/bestiary-transformation-source-inputs.js";
+import {renderGuidedTarget} from "../../../js/bestiary/bestiary-transformation-editor-guided.js";
 import * as workflow from "../../../js/bestiary/bestiary-transformation-workflow.js";
 import {BestiaryQuickActionsOperations, BestiaryQuickActionsRegistry, BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
 import {EncounterWorkspaceState, EncounterWorkspaceStore, getEncounterEffectiveMonster} from "../../../js/encounterworkspace/encounterworkspace-state.js";
@@ -89,8 +90,9 @@ beforeEach(() => {
 		}};
 	globalThis.Option = class extends Node { constructor (text, value) { super("option"); this.text = text; this.value = value; } };
 	globalThis.DataUtil = {...originalGlobals.DataUtil,
-		loadJSON: jest.fn(async path => path.includes("msbcr") ? {cr: structuredClone(table)} : structuredClone(catalog)),
-		generic: {getVersions: () => []},
+		loadJSON: jest.fn(async path => path.includes("msbcr") ? {cr: structuredClone(table)}
+			: path.includes("legendarygroups") ? JSON.parse(fs.readFileSync("data/bestiary/legendarygroups.json", "utf8")) : structuredClone(catalog)),
+		generic: {...originalGlobals.DataUtil.generic, getVersions: () => []},
 		race: {loadJSON: async () => ({race: []}), loadPrerelease: async () => ({}), loadBrew: async () => ({})}};
 	jest.spyOn(Renderer.hover, "getMakePredefinedHover").mockReturnValue({mouseOver () {}, mouseMove () {}, mouseLeave () {}, touchStart () {}, show () {}});
 	jest.spyOn(Renderer.monster, "getCompactRenderedString").mockReturnValue("<tr><td>Rendered separately in the browser phase</td></tr>");
@@ -413,58 +415,122 @@ async function open ({subject = target(), registry = new BestiaryQuickActionsReg
 	return {subject, registry, getTargets};
 }
 
-async function fillBugbear (root = mount.querySelector(".bqa__transformation-resolution"), subject = target()) {
-	await edit(findField(root, "Reviewed unchanged armor"), "retain");
-	await edit(findField(root, "Reason / source policy"), "Zombie retains equipment.");
-	const model = inspectCreatureTransformationInputs({target: subject, resolved: resolveCreatureTransformation({candidates, id: "catalog:zombie|dmg", automationVersion: 2})});
-	for (const entry of model.entries.filter(it => it.needsBinding)) {
+async function fillBindings (root, entries, current, {sourceStage = false} = {}) {
+	const armor = findField(root, "Armor policy");
+	if (armor) await edit(armor, "retain");
+	if (sourceStage && findField(root, "Declare a current source PB?")) {
+		await edit(findField(root, "Declare a current source PB?"), "declare");
+		await edit(findField(root, "Current source PB"), String(Parser.crToPb(current.cr?.cr ?? current.cr)));
+	}
+	for (const entry of entries.filter(it => it.needsBinding)) {
 		const panel = all(root, "details").find(it => it.children[0]?.textContent === `${entry.section}: ${entry.match.name} (${entry.match.source})`);
-		await edit(findField(panel, "Entry policy"), "bind");
-		for (const row of panel.querySelectorAll(".bqa__transformation-resolution-row")) {
-			if (entry.match.name === "Surprise Attack") await edit(findField(row, "Token interpretation"), "fixed");
+		expect(panel).toBeDefined();
+		const policy = findField(panel, "Entry policy");
+		if (policy) await edit(policy, entry.supported ? "bind" : "retain");
+		if (!entry.supported) continue;
+		for (const [i, row] of panel.querySelectorAll(".bqa__transformation-resolution-row").entries()) {
+			const interpretation = findField(row, "Token interpretation");
+			if (!interpretation) continue;
+			const token = entry.tokens[i];
+			if (!sourceStage || entry.section !== "action") await edit(interpretation, "fixed");
 			else {
-				await edit(findField(row, "Token interpretation"), "ability");
+				await edit(interpretation, "ability");
 				await edit(findField(row, "Governing ability"), "str");
-				await edit(findField(row, "Token PB multiplier"), row.children[0].textContent.includes(", hit token") ? "1" : "0");
-			}
-			await edit(findField(row, "Token interpretation reason"), "Reviewed source contribution.");
-			if (entry.match.name !== "Surprise Attack") {
-				await findButton(row, "Propose residual").emit("click");
-				expect(row.textContent).toContain("Unaccepted proposal");
-				await findButton(row, "Adopt this interpretation").emit("click");
+				const multiplier = token.kind === "hit" ? 1 : 0;
+				await edit(findField(row, "Token PB multiplier"), String(multiplier));
+				await edit(findField(row, "Fixed non-ability / non-PB contribution"), String(token.value - Parser.getAbilityModNumber(current.str) - multiplier * Parser.crToPb(current.cr?.cr ?? current.cr)));
 			}
 		}
 	}
-	for (const item of model.controls.filter(it => it.kind === "proficiency")) {
-		await edit(findField(root, `${item.selector.section}: ${item.selector.name}, observed ${item.facts.total}, ability ${item.facts.ability} - PB multiplier`), item.selector.name === "stealth" ? "2" : "1");
-		await edit(findField(root, `${item.selector.name} interpretation reason`), "Reviewed source proficiency.");
+}
+
+async function fillEstimate (root, form, {attack = "Morningstar", fixedDamage = null} = {}) {
+	await fillBindings(root, form.entries, form.current);
+	await edit(findField(root, "Post-source armor reason"), "Retain the actual post-source armor.");
+	for (const section of ["save", "skill"]) {
+		for (const [name, value] of Object.entries(form.current[section] || {})) {
+			const input = findField(root, `${section}: ${name}, observed ${value} - PB multiplier`);
+			if (input) await edit(input, name === "stealth" ? "2" : "1");
+		}
+	}
+	for (const node of all(root, "label")) {
+		if (node.children[0]?.textContent.endsWith("review (including absence / conditions)")) {
+			await edit(node.children[1], "Reviewed the actual post-source defense, conditions and absent alternatives.");
+		}
 	}
 	for (const [label, value] of [
 		["Expected CR band (deliberately adopt or edit)", "1"], ["AC alternative to evaluate", "0"], ["Effective resistance policy", "none"],
 		["Prevalent multiple vulnerabilities?", "no"], ["Applicable regeneration per round", "0"], ["Estimate-only effective HP adjustment", "0"], ["Estimate-only effective AC adjustment", "0"],
 		["Defense policy and reviewed feature adjustments", "No relevant multipliers or regeneration; all features reviewed."],
 	]) await edit(findField(root, label), value);
-	for (const entry of model.entries) {
-		await edit(findField(root, `${entry.section}: ${entry.match.name} (${entry.match.source})`), entry.match.name === "Morningstar" ? "represented" : "excluded");
-		await edit(findField(root, `${entry.match.name} coverage reason`), entry.match.name === "Brute" ? "Baked into weapon dice." : "Reviewed no surprise or ranged alternative.");
+	const selected = form.entries.find(entry => entry.match.name === attack && entry.section === "action");
+	const coverage = all(root, "details").find(it => it.children[0]?.textContent === "Entry and numeric-token accounting");
+	for (const entry of form.entries) {
+		const panel = all(coverage, "details").find(it => it.children[0]?.textContent === `${entry.section}: ${entry.match.name} (${entry.match.source})`);
+		await edit(findField(panel, "Entry contribution to estimate"), entry === selected && fixedDamage === null ? "represented" : "excluded");
+		await edit(findField(panel, `${entry.match.name} coverage reason`), entry === selected ? "Included attack and every damage rider." : "Reviewed exclusion from this encounter routine; source rules remain present.");
+		if (entry.tokens.length) await findButton(panel, "Use this entry decision and reason for its unreviewed tokens").emit("click");
 	}
 	await findButton(root, "Add alternative routine").emit("click");
-	await edit(findField(root, "Predominant attack / save accuracy"), model.entries.find(it => it.match.name === "Morningstar").tokens.find(it => it.kind === "hit").id);
+	const accuracy = selected?.tokens.find(token => ["hit", "dc"].includes(token.kind));
+	await edit(findField(root, "Predominant attack / save accuracy"), fixedDamage === null && accuracy ? accuracy.id : "fixed");
+	if (fixedDamage !== null || !accuracy) {
+		await edit(findField(root, "Fixed accuracy kind"), "attack");
+		await edit(findField(root, "Fixed accuracy value"), "0");
+		await edit(findField(root, "Fixed accuracy reason"), "No attack or save in this explicitly adjudicated routine.");
+	}
 	await edit(findField(root, "Predominant / mixed-accuracy explanation"), "Morningstar attack.");
 	await edit(findField(root, "Routine source and schedule explanation"), "One melee attack per round.");
-	await findButton(root, "Add contribution").emit("click");
-	await edit(findField(root, "Damage contribution"), model.entries.find(it => it.match.name === "Morningstar").tokens.find(it => it.kind === "damage").id);
-	await edit(findField(root, "Timing / use restriction"), "normal");
-	await edit(findField(root, "Contribution schedule reason"), "One attack, one target.");
-	for (let i = 1; i <= 3; ++i) {
-		await edit(findField(root, `Round ${i} uses`), "1");
-		await edit(findField(root, `Round ${i} targets`), "1");
+	const damage = fixedDamage === null ? selected.tokens.filter(token => token.kind === "damage") : [null];
+	for (const token of damage) {
+		await findButton(root, "Add contribution").emit("click");
+		const row = root.querySelectorAll("fieldset").filter(it => it.className === "bqa__transformation-resolution-row").at(-1);
+		await edit(findField(row, "Damage contribution"), token?.id ?? "fixed");
+		if (!token) {
+			await edit(findField(row, "Fixed per-use value"), String(fixedDamage));
+			await edit(findField(row, "Fixed contribution reason"), "Actual form has no damage actions in this routine.");
+		}
+		await edit(findField(row, "Timing / use restriction"), "normal");
+		await edit(findField(row, "Contribution schedule reason"), "One attack, one target.");
+		for (let i = 1; i <= 3; ++i) {
+			await edit(findField(row, `Round ${i} uses`), "1");
+			await edit(findField(row, `Round ${i} targets`), "1");
+		}
 	}
 	await edit(findField(root, "Routine selection policy"), "highest-damage");
 	await edit(findField(root, "Final CR0 no-threat 0 XP policy?"), "no");
 	await edit(findField(root, "All relevant effects and complete alternatives reviewed?"), "yes");
 	await edit(findField(root, "Completeness explanation (never auto-authored)"), "All effects and alternatives deliberately reviewed.");
 }
+
+async function fillBugbear (root = mount.querySelector(".bqa__transformation-resolution"), subject = target()) {
+	const resolved = resolveCreatureTransformation({candidates, id: "catalog:zombie|dmg", automationVersion: 2});
+	const model = inspectCreatureTransformationSourceInputs({target: subject, resolved});
+	const sourceRoot = all(root, "details").find(it => it.children[0]?.textContent === "Source choices");
+	await fillBindings(sourceRoot, model.entries, model.current, {sourceStage: true});
+	await edit(findField(sourceRoot, "Armor and numeric declarations source reason"), "Zombie retains equipment.");
+	const control = model.controls.find(control => control.path[0] === "bindings");
+	const sourceBindings = {armor: {mode: "retain"},
+		proficiencyBonus: Parser.crToPb(model.current.cr?.cr ?? model.current.cr),
+		entries: model.entries.filter(entry => entry.needsBinding).map(entry => ({section: entry.section,
+			match: entry.match,
+			...entry.supported ? {mode: "bind",
+				numbers: entry.tokens.map(token => ({
+					paragraph: token.paragraph,
+					kind: token.kind,
+					token: token.token,
+					...token.dice ? {dice: token.dice} : {},
+					...entry.section === "action" ? {mode: "ability",
+						ability: "str",
+						proficiency: token.kind === "hit" ? 1 : 0,
+						fixed: token.value - Parser.getAbilityModNumber(model.current.str) - (token.kind === "hit" ? sourceBindingsPb(model.current) : 0)}
+						: {mode: "fixed", value: token.value},
+				}))} : {mode: "retain"}}))};
+	const preview = previewCreatureTransformationSourceInputs({target: subject, resolved, answers: {mode: SOURCE_ESTIMATE_MODE, targetKey: model.targetKey, source: {[control.id]: {value: sourceBindings, reason: "Zombie retains equipment."}}}});
+	expect(preview.requirements).toEqual([]);
+	await fillEstimate(all(root, "details").find(it => it.dataset.estimateForm === "default"), preview.forms[0]);
+}
+const sourceBindingsPb = current => Parser.crToPb(current.cr?.cr ?? current.cr);
 async function consent () {
 	const apply = findButton(mount, "Apply transformation");
 	if (!apply) throw new Error(`No Apply: ${mount.querySelector(".bqa__transformation-error")?.textContent}; ${mount.querySelector(".bqa__transformation-resolution-error")?.textContent}`);
@@ -472,17 +538,317 @@ async function consent () {
 	for (const node of mount.querySelector(".bqa__transformation-confirm").querySelectorAll("input")) { node.checked = true; await node.emit("change"); }
 }
 
+async function fillSourceControl (root, control, model, resolved) {
+	const [namespace, key = namespace] = control.path;
+	if (!control.required) {
+		if (key !== "bindings") return;
+		await edit(all(root, "select")[0], "declare");
+	}
+	if (key === "bindings") {
+		const armor = findField(root, "Armor policy");
+		if (armor) await edit(armor, "retain");
+		const pb = findField(root, "Current source PB");
+		if (pb && !findField(root, "Declare a current source PB?")) await edit(pb, sourceBindingsPb(model.current));
+		for (const label of all(root, "label")) if (label.children[0]?.textContent === "Entry policy") await edit(label.children[1], "retain");
+	} else if (key === "physiology" || key === "breaths") {
+		for (const entry of control.facts.filter(entry => key === "physiology" || /\bbreath\b/i.test(entry.match.name))) {
+			await edit(findField(root, `${entry.match.name} policy`), key === "breaths" || entry.match.name === "Amphibious" ? "remove" : "retain");
+		}
+	} else if (["batEntries", "hybrid", "animal"].includes(key)) {
+		if (key !== "batEntries") {
+			await edit(findField(root, "Form equipment AC policy"), "retain");
+			await edit(findField(root, "Form armor reason"), "Explicitly retained source equipment.");
+		}
+		for (const label of all(root, "label")) {
+			if (label.children[0]?.textContent === "Requires speech?") await edit(label.children[1], "no");
+			if (label.children[0]?.textContent === "Equipment in this form") await edit(label.children[1], "not-required");
+		}
+	} else {
+		const values = {age: "adult",
+			trueDragon: "yes",
+			shadowDragon: "no",
+			lair: "retain",
+			donor: "actual",
+			wyrmling: "yes",
+			adaptation: resolved.automation.profile === "wereshark" ? "arcadia27-template" : "sidebar-npc",
+			embrace: "no",
+			legendaryResistance: "grant",
+			shadowfell: "years"};
+		if (key === "stealth") {
+			await edit(findField(root, "Current Stealth PB multiplier"), "1");
+			await edit(findField(root, "Current Stealth non-PB residual"), "0");
+		} else if (["proficiencyBonus", "grappleDc"].includes(key)) await edit(all(root, "input")[0], key === "grappleDc" ? 14 : sourceBindingsPb(model.current));
+		else if (values[key] !== undefined) await edit(all(root, "select")[0], values[key]);
+		else throw new Error(`Missing native fixture decision: ${control.path.join(".")}`);
+	}
+	await edit(all(root, "textarea").at(-1), "Deliberately reviewed this actual source clause and target.");
+}
+
+describe("M13b finite shared native source controls", () => {
+	it.each([
+		["half-dragon|mm", "Bugbear", {ancestry: ["red"], size: ["large-or-smaller"]}],
+		["shadow dragon|mm", "Young Black Dragon", {}], ["dracolich|mm", "Adult Black Dragon", {}],
+		["spore servant|mm", "Bugbear", {}], ["vampire|mm", "Bugbear", {outcome: ["vampire"]}],
+		["lycanthropy|mm", "Bugbear", {form: ["werewolf"]}], ["skeleton|dmg", "Bugbear", {}],
+		["zombie|dmg", "Bugbear", {}], ["wereshark|arcadia27", "Bugbear", {}],
+		["skeletal wyrmling|ar8", "Black Dragon Wyrmling", {}], ["shadow dragon|beg", "Young Black Dragon", {}],
+		["fey beast|scre", "Wolf", {features: ["barkskin"]}], ["fallen angel|scre", "Deva", {allegiance: ["fallen"]}],
+		["undead|scre", "Bugbear", {category: ["zombie"]}],
+	])("%s renders finite controls that compile actual source forms", async (uid, name, selections) => {
+		const subject = target(source(name));
+		const resolved = resolveCreatureTransformation({candidates, id: `catalog:${uid}`, selections, automationVersion: 2});
+		const groups = JSON.parse(fs.readFileSync("data/bestiary/legendarygroups.json", "utf8")).legendaryGroup;
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => groups});
+		panel.read();
+		for (const control of panel.model.controls) {
+			const root = all(mount, "details").find(node => node.dataset.sourceControl === control.id);
+			await fillSourceControl(root, control, panel.model, resolved);
+		}
+		const preview = previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read(), legendaryGroups: groups});
+		expect(preview.requirements).toEqual([]);
+		expect(preview.status).toBe("source-ready");
+		expect(all(mount, "details").filter(node => node.dataset.estimateForm).map(node => node.dataset.estimateForm)).toEqual(preview.forms.map(form => form.id));
+		expect(preview.source.changes?.length || preview.source.frozenForms?.profiles.length).toBeGreaterThan(0);
+		for (const node of all(mount, "label").filter(node => node.children[0]?.textContent === "All relevant effects and complete alternatives reviewed?")) expect(node.children[1].value).toBe("");
+		if (uid.startsWith("spore servant")) expect(JSON.stringify(preview.forms[0].current.action)).toContain("1d8 + 2");
+		if (uid.startsWith("skeletal wyrmling")) expect(preview.forms[0].current.action.some(entry => /Breath/.test(entry.name))).toBe(false);
+		if (uid.startsWith("shadow dragon")) expect(preview.forms[0].sourceProficiencies.skill.stealth).toBe(2);
+		console.log(`NATIVE SOURCE ${uid}: real finite controls -> compiler; forms=${preview.forms.map(form => form.id).join(",")}; no review or consent auto-confirmed.`);
+	});
+
+	it("keeps all Devilsworn riders meaningful; zero uses, omitted rows and unlinked fixed totals cannot claim representation", async () => {
+		const subject = target(source("Planetar"));
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:fallen angel|scre", selections: {allegiance: ["devilsworn"]}, automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		const forms = previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()}).forms;
+		await fillEstimate(all(mount, "details").find(node => node.dataset.estimateForm), forms[0], {attack: "Greatsword"});
+		const run = () => compileCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read(), table});
+		expect(run().estimates[0].receipt.damagePerRound).toBe(43);
+		const rows = () => mount.querySelectorAll("fieldset").filter(node => node.className === "bqa__transformation-resolution-row");
+		const rider = rows().at(-1);
+		for (let i = 1; i <= 3; i++) await edit(findField(rider, `Round ${i} uses`), 0);
+		expect(run().requirements[0].reason).toMatch(/represented damage.*positive use|represented damage.*adjudication/i);
+		await findButton(rider, "Remove contribution").emit("click");
+		expect(run().status).toBe("needs-answers");
+		await findButton(mount, "Add contribution").emit("click");
+		const fixed = rows().at(-1);
+		await edit(findField(fixed, "Damage contribution"), "fixed");
+		for (const [label, value] of [["Fixed per-use value", 22], ["Fixed contribution reason", "Exact source fire rider."], ["Timing / use restriction", "normal"],
+			["Contribution schedule reason", "One positive use per round."]]) await edit(findField(fixed, label), value);
+		for (let i = 1; i <= 3; i++) {
+			await edit(findField(fixed, `Round ${i} uses`), 1);
+			await edit(findField(fixed, `Round ${i} targets`), 1);
+		}
+		expect(run().status).toBe("needs-answers");
+		const link = all(fixed, "label").find(node => /Accounts for Greatsword .*damage 2\?$/.test(node.children[0]?.textContent));
+		await edit(link.children[1], "yes");
+		expect(run().estimates[0].receipt.damagePerRound).toBe(43);
+	});
+
+	it("completes inactive Vampire bat/mist estimates and discards dependent judgments, not typing focus, after a source value changes", async () => {
+		const subject = target();
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:vampire|mm", selections: {outcome: ["vampire"]}, automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		for (const control of panel.model.controls) await fillSourceControl(all(mount, "details").find(node => node.dataset.sourceControl === control.id), control, panel.model, resolved);
+		const sourcePreview = () => previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()});
+		const forms = sourcePreview().forms;
+		const compile = () => compileCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read(), table});
+		expect(forms.map(form => form.id)).toEqual(["true", "bat", "mist"]);
+		for (const form of forms) {
+			await fillEstimate(all(mount, "details").find(node => node.dataset.estimateForm === form.id), form,
+				form.id === "mist" ? {fixedDamage: 0} : {attack: "Bite (Bat or Vampire Form Only)"});
+			if (form.id !== "mist") expect(compile().status).toBe("needs-answers");
+		}
+		const complete = compile();
+		expect(complete.status).toBe("ready");
+		expect(complete.estimates.map(estimate => estimate.form)).toEqual(["true", "bat", "mist"]);
+		expect(complete.estimates[2].receipt.damagePerRound).toBe(0);
+		const oldReview = findField(all(mount, "details").find(node => node.dataset.estimateForm === "bat"), "All relevant effects and complete alternatives reviewed?");
+		const dc = findField(mount, "Fixed grapple escape DC (no source formula is defined)");
+		dc.focus();
+		await edit(dc, 15);
+		expect(document.activeElement).toBe(dc);
+		expect(dc.isConnected).toBe(true);
+		expect(oldReview.isConnected).toBe(false);
+		expect(compile().status).toBe("needs-answers");
+		expect(findField(all(mount, "details").find(node => node.dataset.estimateForm === "bat"), "All relevant effects and complete alternatives reviewed?").value).toBe("");
+	});
+
+	it("binds Spore's actual cleaned dice and independently classifies a nonphysical equipment rider", async () => {
+		const current = source("Bugbear");
+		current.action[0].entries[0] = current.action[0].entries[0].replace("piercing damage.", "piercing damage plus 3 ({@damage 1d6}) fire damage.");
+		const subject = target(current);
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:spore servant|mm", automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		panel.read();
+		const equipment = panel.model.controls.find(control => control.path[1] === "equipmentDamage");
+		const equipmentRoot = all(mount, "details").find(node => node.dataset.sourceControl === equipment.id);
+		await edit(all(equipmentRoot, "select")[0], "declare");
+		await edit(all(equipmentRoot, "select")[1], "no");
+		await edit(all(equipmentRoot, "textarea").at(-1), "The fire rider is not equipment damage.");
+		const bindings = panel.model.controls.find(control => control.path[1] === "bindings");
+		const bindingsRoot = all(mount, "details").find(node => node.dataset.sourceControl === bindings.id);
+		await fillSourceControl(bindingsRoot, bindings, panel.model, resolved);
+		expect(bindingsRoot.textContent).toContain("1d8");
+		expect(bindingsRoot.textContent).not.toContain("2d8, printed");
+		const melee = all(bindingsRoot, "details").find(node => node.children[0]?.textContent === "action: Morningstar (MM)");
+		await edit(findField(melee, "Entry policy"), "bind");
+		for (const row of melee.querySelectorAll(".bqa__transformation-resolution-row")) await edit(findField(row, "Token interpretation"), "fixed");
+		const preview = previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()});
+		expect(preview.requirements).toEqual([]);
+		expect(preview.forms[0].current.action[0].entries[0]).toContain("6 ({@damage 1d8 + 2})");
+		expect(preview.forms[0].current.action[0].entries[0]).not.toContain("fire damage");
+	});
+
+	it("does not mistake unanswered optional Undead clause decisions for deliberate exclusions", async () => {
+		const subject = target();
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:undead|scre", selections: {category: ["zombie"]}, automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		for (const control of panel.model.controls) await fillSourceControl(all(mount, "details").find(node => node.dataset.sourceControl === control.id), control, panel.model, resolved);
+		const control = panel.model.controls.find(control => control.path[1] === "additionalTraits");
+		const body = all(mount, "details").find(node => node.dataset.sourceControl === control.id);
+		const preview = () => previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()});
+		expect(preview().status).toBe("source-ready");
+		await edit(all(body, "select")[0], "declare");
+		await edit(all(body, "textarea").at(-1), "Each additional source clause is deliberately declined.");
+		const decisions = all(body, "select").slice(1);
+		await edit(decisions[0], "no");
+		expect(preview().status).toBe("needs-answers");
+		for (const select of decisions.slice(1)) await edit(select, "no");
+		expect(preview().status).toBe("source-ready");
+	});
+
+	it("makes an unresolved Undead movement branch actionable and retains its real conditional alternative", async () => {
+		const current = source("Bugbear");
+		current.speed = {walk: {number: 30, condition: "while corporeal"}, swim: 20, alternate: {walk: [{number: 40, condition: "on moonlit ground"}]}};
+		const subject = target(current);
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:undead|scre", selections: {category: ["ghostly"]}, automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		const declare = async (key, value) => {
+			const control = panel.model.controls.find(control => control.path[1] === key);
+			const body = all(mount, "details").find(node => node.dataset.sourceControl === control.id);
+			await edit(all(body, "select")[0], "declare");
+			await edit(all(body, "select")[1], value);
+			await edit(all(body, "textarea").at(-1), "Reviewed the actual source clause and conditional branch.");
+		};
+		for (const control of panel.model.controls) await fillSourceControl(all(mount, "details").find(node => node.dataset.sourceControl === control.id), control, panel.model, resolved);
+		await declare("ghostAbility", "str");
+		await declare("ghostDamage", "force");
+		const weapons = all(mount, "details").find(node => node.dataset.sourceControl === panel.model.controls.find(control => control.path[1] === "ghostWeapons").id);
+		await edit(all(weapons, "select")[0], "declare");
+		for (const input of all(weapons, "select").slice(1)) await edit(input, "yes");
+		await edit(all(weapons, "textarea").at(-1), "Convert every physical weapon component to force.");
+		const preview = () => previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()});
+		let result = preview();
+		expect(result.status).toBe("needs-answers");
+		expect(result.requirements[0].reason).toContain("ghostFlight");
+		panel.update(result);
+		const flight = panel.model.controls.find(control => control.path[1] === "ghostFlight");
+		const body = all(mount, "details").find(node => node.dataset.sourceControl === flight.id);
+		body.open = false;
+		panel.focus();
+		expect(body.open).toBe(true);
+		expect(document.activeElement).toBe(all(body, "select")[0]);
+		await declare("ghostFlight", JSON.stringify({mode: "walk", alternate: 0}));
+		result = preview();
+		expect(result.requirements).toEqual([]);
+		expect(result.forms[0].current.speed).toEqual({walk: 0, fly: 20, canHover: true, alternate: {fly: [{number: 40, condition: "on moonlit ground"}]}});
+	});
+
+	it("exposes finite ambiguous Fallen weapon components and preserves declared Healing Touch rest usage", async () => {
+		const current = source("Deva");
+		current.trait.find(entry => entry.name === "Angelic Weapons").entries.push("Its separate aura deals 3 ({@damage 1d6}) radiant damage.");
+		current.action.find(entry => entry.name.startsWith("Healing Touch")).name = "Healing Touch";
+		const subject = target(current);
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:fallen angel|scre", selections: {allegiance: ["devilsworn"]}, automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		const controlRoot = key => all(mount, "details").find(node => node.dataset.sourceControl === panel.model.controls.find(control => control.path[1] === key).id);
+		const weapons = controlRoot("weapons");
+		await edit(findField(weapons, "Angelic Weapons trait"), "0");
+		await edit(findField(weapons, "Actual radiant trait component"), JSON.stringify({trait: 0, token: 0}));
+		for (const input of all(weapons, "select").slice(2)) await edit(input, "yes");
+		await edit(all(weapons, "textarea").at(-1), "Convert the actual weapon rider, not the independent aura.");
+		const healing = controlRoot("healing");
+		await edit(findField(healing, "Actual Healing Touch"), "0");
+		await edit(findField(healing, "Original Healing Touch usage"), "shortRest");
+		await edit(findField(healing, "Original uses (day or rest)"), "2");
+		await edit(all(healing, "textarea").at(-1), "The current action is usable twice per short rest.");
+		const preview = previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()});
+		expect(preview.requirements).toEqual([]);
+		expect(preview.forms[0].current.action.some(entry => entry.name.startsWith("Corrupting Touch (2/Short Rest)"))).toBe(true);
+		expect(JSON.stringify(preview.forms[0].current.trait.find(entry => entry.name === "Hellish Weapons"))).toContain("{@damage 1d6}) radiant damage");
+	});
+
+	it("asks opaque Fallen spell exceptions only for deliberate innate casting, including constant-list exceptions", async () => {
+		const current = source("Deva");
+		current.spellcasting = [{name: "Custom Magic",
+			type: "spellcasting",
+			headerEntries: ["The angel uses Charisma to cast its spells."],
+			will: ["{@spell detect evil and good|PHB}"],
+			constant: ["Opaque Dispel Evil and Good"],
+			daily: {"1": ["Opaque Dispel Evil and Good", "Opaque Detect Evil and Good"]},
+			ability: "cha"}];
+		const subject = target(current);
+		const resolved = resolveCreatureTransformation({candidates, id: "catalog:fallen angel|scre", selections: {allegiance: ["fallen"]}, automationVersion: 2});
+		let panel;
+		panel = renderGuidedTarget({parent: mount, target: subject, resolved, onChange: () => panel.read(), getLegendaryGroups: () => []});
+		const control = panel.model.controls.find(control => control.path[1] === "innate");
+		const body = all(mount, "details").find(node => node.dataset.sourceControl === control.id);
+		const innate = findField(body, "Is this casting innate?");
+		const exceptions = all(body, "select").slice(1);
+		const preview = () => previewCreatureTransformationSourceInputs({target: subject, resolved, answers: panel.read()});
+		await edit(all(body, "textarea").at(-1), "Classify the current casting and each opaque source exception.");
+		await edit(innate, "no");
+		expect(preview().requirements).toEqual([]);
+		expect(exceptions.every(input => input.parentElement.parentElement.disabled)).toBe(true);
+		await edit(innate, "yes");
+		expect(preview().status).toBe("needs-answers");
+		expect(exceptions).toHaveLength(3);
+		for (const [i, input] of exceptions.entries()) await edit(input, i === 2 ? "no" : "yes");
+		const result = preview();
+		expect(result.requirements).toEqual([]);
+		expect(result.forms[0].current.spellcasting[0]).toMatchObject({
+			will: current.spellcasting[0].will,
+			constant: ["Opaque Dispel Evil and Good"],
+			daily: {"1": ["Opaque Dispel Evil and Good"]},
+		});
+	});
+});
+
 describe("C1 native staged editor against production workflow/consumers", () => {
-	it("requires deliberate native answers and adopts residuals, calculates DPR12, forwards fresh arguments and applies the actual Bugbear producer", async () => {
+	it("routes explicit v2 Skeleton and Half-Dragon to source choices and post-source estimate controls", async () => {
+		await open();
+		await choose("catalog:skeleton|dmg");
+		expect(mount.textContent).toContain("Source choices");
+		expect(mount.textContent).not.toContain("Unsupported staged identity");
+		expect(DataUtil.loadJSON).toHaveBeenCalledWith("data/msbcr.json");
+		await choose("catalog:half-dragon|mm");
+		for (const [group, value] of [["ancestry", "red"], ["size", "large-or-smaller"]]) {
+			const node = all(mount, "input").find(it => it.value === value);
+			expect(node).toBeDefined(); node.checked = true; await node.emit("change");
+		}
+		expect(mount.textContent).toContain("Post-source");
+		expect(findField(mount, "All relevant effects and complete alternatives reviewed?").value).toBe("");
+		expect(findButton(mount, "Apply transformation")).toBeUndefined();
+	});
+
+	it("requires deliberate native source/form answers, calculates DPR12, forwards fresh arguments and applies complete Zombie rules", async () => {
 		const {subject, registry} = await open();
 		await choose(); await Promise.resolve();
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
 		expect(findField(mount, "Round 1 uses")).toBeUndefined();
 		await findButton(mount, "Review answers for Bugbear").emit("click");
-		expect(document.activeElement).toBe(findField(mount, "Reviewed unchanged armor"));
+		expect(document.activeElement).toBe(findField(mount, "Armor policy"));
 		await fillBugbear();
 		expect(mount.textContent).toContain("DPR 12");
-		expect(mount.textContent).toContain("per-use printed average 12");
+		expect(mount.textContent).toContain("12 per use");
 		expect(mount.textContent).toContain("Changed Morningstar (MM)");
 		const node = findField(mount, "Completeness explanation (never auto-authored)");
 		node.focus();
@@ -494,12 +860,13 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		expect(args).toEqual(expect.objectContaining({resolved: expect.any(Object), guidedAnswers: expect.any(Object), crTable: table, generation: expect.any(Number), conflictDecisions: {}}));
 		expect(args.guidedAnswers).not.toBe(args.batch.guidedAnswers);
 		expect(JSON.stringify(args.guidedAnswers)).toContain("reviewed again");
-		expect(args.batch.guidedModels[0].estimate.receipt.damagePerRound).toBe(12);
-		expect(args.batch.guidedModels[0].automationInputs.cr.assumptions.routines[0].rounds.map(it => it.value)).toEqual([12, 12, 12]);
+		expect(args.guidedAnswers.current.mode).toBe(SOURCE_ESTIMATE_MODE);
+		expect(args.batch.guidedModels[0].estimates[0].receipt.damagePerRound).toBe(12);
 		const result = registry.getCreature({monster: subject.baseCreature});
 		expect(result).toMatchObject({str: 16, hp: {average: 32, formula: "5d8 + 10"}, cr: {cr: "1", xp: 200}});
 		expect(result.action[0].entries[0]).toContain("{@hit 5}");
 		expect(result.action[0].entries[0]).toContain("12 ({@damage 2d8 + 3})");
+		expect(result.trait.some(entry => entry.name === "Undead Fortitude")).toBe(true);
 		const [operation] = registry.getOperations({monster: subject.baseCreature});
 		const reopened = await open({registry});
 		await choose(); await fillBugbear(undefined, reopened.getTargets()[0]);
@@ -510,7 +877,7 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		expect(findButton(mount, "Apply transformation")).toBeDefined();
 		await edit(findField(mount, "Contribution schedule reason"), "Same arithmetic, newly reviewed reason.");
 		expect(all(mount, "select").filter(it => it.dataset.conflictPath).every(it => it.value === "")).toBe(true);
-		expect(findField(mount, "Reason / source policy").value).toBe("Zombie retains equipment.");
+		expect(findField(mount, "Armor and numeric declarations source reason").value).toBe("Zombie retains equipment.");
 		registry.removeOperation({monster: subject.baseCreature, operationId: operation.id});
 		expect(registry.getCreature({monster: subject.baseCreature})).toEqual(subject.baseCreature);
 	});
@@ -544,8 +911,8 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		expect(mount.textContent).toContain("Stale draft");
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
 		await findButton(mount, "Discard stale draft and start new answers").emit("click");
-		expect(findField(mount, "Reviewed unchanged armor").value).toBe("");
-		expect(document.activeElement).toBe(findField(mount, "Reviewed unchanged armor"));
+		expect(findField(mount, "Armor policy").value).toBe("");
+		expect(document.activeElement).toBe(findField(mount, "Armor policy"));
 		await open({load, pApply: apply});
 		await choose(); await fillBugbear(); await consent();
 		reload = true;
@@ -561,7 +928,7 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
 		await findButton(mount, "Retry CR table load").emit("click");
 		expect(mount.textContent).not.toContain("Table offline");
-		expect(findField(mount, "All relevant effects and complete alternatives reviewed?").value).toBe("");
+		expect(findField(mount, "Armor and numeric declarations source reason").value).toBe("");
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
 	});
 
@@ -616,7 +983,7 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 
 		await edit(findField(mount, "Completeness explanation (never auto-authored)"), "Same arithmetic, newly reviewed raw reason.");
 		expect(review.hidden).toBe(true);
-		expect(findField(mount, "Reason / source policy").value).toBe("Zombie retains equipment.");
+		expect(findField(mount, "Armor and numeric declarations source reason").value).toBe("Zombie retains equipment.");
 		await consent(); await findButton(mount, "Apply transformation").emit("click");
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 		expect(review.hidden).toBe(false);
@@ -685,7 +1052,7 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 			registry.applyChanges({monster: subject.baseCreature, ...changes[0]});
 		}});
 		await choose(); await fillBugbear();
-		await edit(findField(mount, "Override estimated CR?"), "override");
+		await edit(findField(mount, "Override estimated CR?"), "declare");
 		await edit(findField(mount, "Final CR override"), "2");
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
 		await edit(findField(mount, "CR override reason"), "Reviewed DM adjudication.");
@@ -693,10 +1060,10 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		expect(mount.textContent).toContain("Final CR 2, 450 XP");
 		const routine = all(mount, "details").find(it => it.children[0]?.textContent === "routine-1");
 		await findButton(routine, "Add contribution").emit("click");
-		await findButton(routine.querySelectorAll("fieldset").at(-1), "Remove contribution").emit("click");
+		await all(routine, "button").filter(it => it.textContent === "Remove contribution").at(-1).emit("click");
 		expect(document.activeElement).toBe(findButton(routine, "Add contribution"));
 		await findButton(routine, "Add contribution").emit("click");
-		const row = routine.querySelectorAll("fieldset").at(-1);
+		const row = routine.querySelectorAll("fieldset").filter(it => it.className === "bqa__transformation-resolution-row").at(-1);
 		await edit(findField(row, "Damage contribution"), "fixed");
 		for (const [label, value] of [["Fixed per-use value", "3"], ["Adjudication source name", "Reviewed donor"], ["Adjudication source code", "MM"],
 			["Fixed contribution reason", "Source-fixed, no PB."], ["Timing / use restriction", "conditional"], ["Contribution schedule reason", "One middle-round use."]]) await edit(findField(row, label), value);
@@ -712,7 +1079,7 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		}
 		expect(release).toEqual(expect.any(Function));
 		expect(findField(mount, "Round 1 uses").disabled).toBe(true);
-		expect(create.mock.calls[0][0].batch.guidedModels[0].automationInputs.cr.assumptions.routines[0].rounds).toEqual([
+		expect(create.mock.calls[0][0].batch.guidedModels[0].estimates[0].receipt.assumptions.routines[0].rounds).toEqual([
 			{value: 12, proficiency: 0}, {value: 15, proficiency: 0}, {value: 12, proficiency: 0},
 		]);
 		release(); await pending;
@@ -722,8 +1089,8 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 
 	it("preflights the real mixed bulk set, asks approval of storage skips, then saves the reviewed eligible siblings once", async () => {
 		let ix = 0;
-		const state = await EncounterWorkspaceState.pFromSavedList({exportedSublist: {name: "C1 bulk", items: [{h: "dragon", c: 4}, {h: "bugbear", c: 1}]},
-			pResolveItem: async item => ({entity: source(item.h === "dragon" ? "Adult Black Dragon" : "Bugbear")}),
+		const state = await EncounterWorkspaceState.pFromSavedList({exportedSublist: {name: "C1 bulk", items: [{h: "bugbear", c: 4}, {h: "elemental", c: 1}]},
+			pResolveItem: async item => ({entity: source(item.h === "bugbear" ? "Bugbear" : "Fire Elemental")}),
 			fnUid: () => `target-${++ix}`});
 		state.instances[2].statblockOperations = Array.from({length: 100}, (_, i) => ({id: `old-${i}`, type: "patch", data: {patch: {set: {str: 23}}}}));
 		const storage = {pSetForPage: jest.fn().mockImplementation(async (key, value) => { storage.saved = structuredClone(value); }), pGetForPage: async () => storage.saved};
@@ -742,10 +1109,11 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 			_selBulkChoice: new Node("select"),
 			_btnBulkPreview: new Node("button"),
 			_eleBulkTransformation: mount});
-		await page._pRenderBulkChoices({automationVersion: 2}); await choose("catalog:dracolich|mm");
-		for (const panel of mount.querySelectorAll(".bqa__transformation-resolution").filter((_, i) => i !== 3)) {
-			for (const [label, value] of [["Age", "adult"], ["Is this a true dragon?", "yes"], ["Is this a shadow dragon?", "no"],
-				["Living physiology review", "amphibious-only"], ["Lair policy", "retain"]]) await edit(findField(panel, label), value);
+		await page._pRenderBulkChoices({automationVersion: 2}); await choose();
+		for (const [i, panel] of mount.querySelectorAll(".bqa__transformation-resolution").entries()) {
+			if (i >= 3) break;
+			const instance = state.instances[i];
+			await fillBugbear(panel, {id: instance.id, label: panel.children[0].textContent, baseCreature: instance.monster, operations: instance.statblockOperations});
 		}
 		expect(mount.textContent).toContain("3 eligible");
 		const apply = () => all(mount, "button").find(it => it.textContent.startsWith("Apply to"));
@@ -759,26 +1127,29 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 		await apply().emit("click");
 		for (const node of mount.querySelector(".bqa__transformation-confirm").querySelectorAll("input")) node.checked = true;
 		await apply().emit("click");
+		expect(storage.pSetForPage).not.toHaveBeenCalled();
+		expect(mount.textContent).toContain("Encounter consequences need fresh review");
+		for (const node of mount.querySelector(".bqa__transformation-confirm").querySelectorAll("input")) node.checked = true;
+		await apply().emit("click");
 		expect(storage.pSetForPage).toHaveBeenCalledTimes(1);
 		const reloaded = await store.pLoad();
 		expect(reloaded.instances.map(it => it.statblockOperations.length)).toEqual([1, 1, 100, 0, 0]);
-		expect(getEncounterEffectiveMonster(reloaded.instances[0]).type).toBe("undead");
-		expect(reloaded.instances[0].monster.type).toBe("dragon");
+		expect(getEncounterEffectiveMonster(reloaded.instances[0]).type).toEqual({type: "undead", tags: ["goblinoid"]});
+		expect(reloaded.instances[0].monster.type).toEqual({type: "humanoid", tags: ["goblinoid"]});
 	});
 
-	it("keeps default and Species legacy, unsupported staged identities explicit, and compiled Dracolich DM consent required", async () => {
+	it("keeps defaults legacy, enables the Skeleton source model, and requires DM consent for complete v2 estimates", async () => {
 		await open({automationVersion: 1});
 		await choose();
 		expect(mount.querySelector(".bqa__transformation-resolution")).toBeNull();
 		expect(mount.textContent).not.toContain("Staged numerical preview");
 		await open();
 		await choose("catalog:skeleton|dmg");
-		expect(mount.textContent).toContain("Unsupported staged identity");
+		expect(mount.textContent).toContain("Source choices");
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
-		const {registry, subject} = await open({subject: target(source("Adult Black Dragon"))});
-		await choose("catalog:dracolich|mm");
-		for (const [label, value] of [["Age", "adult"], ["Is this a true dragon?", "yes"], ["Is this a shadow dragon?", "no"],
-			["Living physiology review", "amphibious-only"], ["Lair policy", "retain"]]) await edit(findField(mount, label), value);
+		const {registry, subject} = await open();
+		await choose();
+		await fillBugbear();
 		const apply = findButton(mount, "Apply transformation");
 		if (!apply) throw new Error(mount.querySelector(".bqa__transformation-error").textContent);
 		await apply.emit("click");

@@ -1,6 +1,7 @@
-import {createCreatureTransformationChanges, createCreatureTransformationFormChanges, previewCreatureTransformationForm, previewCreatureTransformationTargets, proposeCreatureTransformationTargetResidual} from "./bestiary-transformation-workflow.js";
-import {inspectCreatureTransformationInputs, pLoadCreatureTransformationInputTable} from "./bestiary-transformation-inputs.js";
-import {observeCreatureTransformationBindings} from "../creature-transformation-bindings.js";
+import {createCreatureTransformationChanges, createCreatureTransformationFormChanges, previewCreatureTransformationForm, previewCreatureTransformationTargets} from "./bestiary-transformation-workflow.js";
+import {pLoadCreatureTransformationInputTable} from "./bestiary-transformation-inputs.js";
+import {renderGuidedTarget as renderSourceGuidedTarget} from "./bestiary-transformation-editor-guided.js";
+import {inspectCreatureTransformationSourceInputs} from "./bestiary-transformation-source-inputs.js";
 
 let nextOptionGroupId = 0;
 
@@ -356,334 +357,6 @@ function renderPreviewTarget (parent, {id, label, preview, isConflictsOnly = fal
 	parent.append(section);
 }
 
-function renderGuidedTarget ({parent, target, resolved, onChange}) {
-	const model = inspectCreatureTransformationInputs({target, resolved});
-	const root = element("fieldset", {className: "bqa__transformation-resolution"});
-	root.append(element("legend", {text: target.label}));
-	const status = paragraph(root, "Needs answers");
-	status.setAttribute("role", "status");
-	const error = element("p", {className: "bqa__transformation-resolution-error"});
-	error.id = `bqa-resolution-error-${++nextOptionGroupId}`;
-	const output = element("div", {className: "bqa__transformation-cr-estimate"});
-	output.setAttribute("aria-live", "polite");
-	const fields = [];
-	const answers = new Map();
-	const proposals = [];
-	const tokenPolicies = [];
-	let readOwnership = () => null;
-	let readSourcePb = () => undefined;
-	const group = (parent, title) => {
-		const node = element("details");
-		node.open = true;
-		node.append(element("summary", {text: title}));
-		parent.append(node);
-		return node;
-	};
-	const field = (parent, label, {options, type = "text", min, max, required = true, onEdit = null} = {}) => {
-		const wrapper = element("label", {className: "bqa__field"});
-		const input = element(options ? "select" : type === "textarea" ? "textarea" : "input", {className: "ve-form-control"});
-		if (!options && type !== "textarea") input.type = type;
-		if (options) {
-			input.add(new Option("Choose…", ""));
-			options.forEach(([value, name]) => input.add(new Option(name, String(value))));
-		}
-		if (type === "number") Object.assign(input, {min: String(min), max: String(max), step: "1"});
-		else input.maxLength = 1000;
-		input.required = required;
-		input.setAttribute("aria-describedby", error.id);
-		wrapper.append(element("span", {className: "bqa__field-label", text: label}), input);
-		parent.append(wrapper);
-		const item = {node: input, read: () => input.value === "" ? undefined : type === "number" ? Number(input.value) : input.value};
-		fields.push(item);
-		input.addEventListener(options ? "change" : "input", () => { onEdit?.(); onChange(); });
-		return item;
-	};
-	const yesNo = [["yes", "Yes"], ["no", "No"]];
-	const reason = (parent, label = "Reason / source policy") => field(parent, label, {type: "textarea"});
-	const setEnabled = (node, enabled) => {
-		node.hidden = !enabled;
-		node.querySelectorAll("input, select, textarea, button").forEach(input => { input.disabled = !enabled; });
-	};
-	const crChoices = ["0", "1/8", "1/4", "1/2", ...Array.from({length: 30}, (_, i) => String(i + 1))].map(it => [it, it]);
-	const control = (kind, selector) => model.controls.find(it => it.kind === kind && (selector === undefined || it.selector === selector));
-	const read = () => ({targetKey: model.targetKey, controls: Object.fromEntries([...answers].map(([id, get]) => [id, get()]).filter(([, value]) => value !== undefined))});
-	parent.append(root);
-	if (model.status === "unsupported" || model.requirements.length) {
-		status.textContent = model.status;
-		error.textContent = model.requirements.map(it => it.reason).join("; ");
-		root.append(error);
-		return {root, model, read, update: () => {}, focus: () => { root.tabIndex = -1; root.focus(); }};
-	}
-	if (resolved.id === "catalog:dracolich|mm") {
-		paragraph(root, `Observed type/traits/lair (not confirmations): ${JSON.stringify(model.facts)}`);
-		const options = {
-			age: [["adult", "Adult"], ["ancient", "Ancient"], ["young", "Young (ineligible)"], ["wyrmling", "Wyrmling (ineligible)"]],
-			trueDragon: yesNo,
-			shadowDragon: yesNo,
-			physiology: [["amphibious-only", "Reviewed: only Amphibious removal; other traits retained"]],
-			lairActions: [["retain", "Retain existing lair actions"]],
-		};
-		const labels = {age: "Age", trueDragon: "Is this a true dragon?", shadowDragon: "Is this a shadow dragon?", physiology: "Living physiology review", lairActions: "Lair policy"};
-		for (const item of model.controls) {
-			const input = field(root, labels[item.selector], {options: options[item.selector]});
-			answers.set(item.id, () => ({value: ["trueDragon", "shadowDragon"].includes(item.selector)
-				? input.read() === undefined ? undefined : input.read() === "yes" : input.read()}));
-		}
-	} else {
-		paragraph(root, `Observed scores: ${JSON.stringify(model.facts.abilities)}. HP: ${JSON.stringify(model.facts.hp)}. Constitution HP policy; non-CON residual ${model.facts.hitPoints.residual}.`);
-		const armor = group(root, "HP and armor policy");
-		paragraph(armor, `Retain ordered AC/equipment/conditions: ${JSON.stringify(model.facts.ac)}. This staged producer does not change Dexterity or equipment.`);
-		const retainArmor = field(armor, "Reviewed unchanged armor", {options: [["retain", "Retain this AC policy"]]});
-		const armorReason = reason(armor);
-		answers.set(control("armor").id, () => ({mode: retainArmor.read(), reason: armorReason.read()}));
-
-		const pb = group(root, "Proficiency evidence and save / skill interpretation");
-		paragraph(pb, `Observed explicit source PB: ${model.facts.explicitPb ?? "none"}. Ordinary CR-derived PB is not a source PB declaration. Values do not establish proficiency or expertise.`);
-		const declare = field(pb, "Declare a current source PB?", {required: false, options: [["declare", "Declare with source reason"]]});
-		const sourceFields = element("div");
-		pb.append(sourceFields);
-		const sourcePb = field(sourceFields, "Current source PB", {type: "number", min: 1, max: 30});
-		const sourceReason = reason(sourceFields);
-		readSourcePb = () => declare.read() ? sourcePb.read() : undefined;
-		answers.set(control("proficiencyBonus").id, () => declare.read() ? {value: sourcePb.read(), reason: sourceReason.read()} : undefined);
-		setEnabled(sourceFields, false);
-		const invalidateProposals = () => proposals.forEach(it => it.invalidate());
-		declare.node.addEventListener("change", () => { setEnabled(sourceFields, !!declare.read()); invalidateProposals(); onChange(); });
-		sourcePb.node.addEventListener("input", invalidateProposals);
-		const ownership = field(pb, "PB ownership (only for ambiguity or deliberate source-fixed policy)", {required: false, options: [["derived", "Derived from CR"], ["source-fixed", "Source-fixed"]]});
-		const ownershipFields = element("div");
-		pb.append(ownershipFields);
-		const ownershipValue = field(ownershipFields, "Exact current PB for ownership answer", {type: "number", min: 1, max: 30});
-		const ownershipReason = reason(ownershipFields);
-		setEnabled(ownershipFields, false);
-		ownership.node.addEventListener("change", () => { setEnabled(ownershipFields, !!ownership.read()); invalidateProposals(); onChange(); });
-		ownershipValue.node.addEventListener("input", invalidateProposals);
-		readOwnership = () => ownership.read() ? {mode: ownership.read(), value: ownershipValue.read(), reason: ownershipReason.read()} : null;
-		for (const item of model.controls.filter(it => it.kind === "proficiency")) {
-			const multiplier = field(pb, `${item.selector.section}: ${item.selector.name}, observed ${item.facts.total}, ability ${item.facts.ability} - PB multiplier`, {options: [[0, "0 - no PB"], [1, "1 - proficient"], [2, "2 - expertise"]]});
-			const explanation = reason(pb, `${item.selector.name} interpretation reason`);
-			answers.set(item.id, () => ({multiplier: multiplier.read() === undefined ? undefined : Number(multiplier.read()), reason: explanation.read()}));
-		}
-		const bindings = group(root, "Source-qualified entry bindings");
-		for (const entry of model.entries.filter(it => it.needsBinding)) {
-			const panel = group(bindings, `${entry.section}: ${entry.match.name} (${entry.match.source})`);
-			paragraph(panel, JSON.stringify(entry.entry));
-			const policy = field(panel, "Entry policy", {options: [["bind", "Bind every numeric token"], ["retain", "Retain entire entry explicitly"]]});
-			const retention = reason(panel, "Entry retention reason");
-			retention.node.disabled = true;
-			answers.set(entry.id, () => policy.read() === "retain" ? {mode: "retain", reason: retention.read()} : undefined);
-			const tokens = element("div");
-			panel.append(tokens);
-			setEnabled(tokens, false);
-			policy.node.addEventListener("change", () => {
-				retention.node.disabled = policy.read() !== "retain";
-				setEnabled(tokens, policy.read() === "bind");
-				tokenPolicies.filter(it => it.entryId === entry.id).forEach(it => it.sync());
-				proposals.filter(it => it.entryId === entry.id).forEach(it => it.invalidate());
-				onChange();
-			});
-			if (!entry.supported) paragraph(panel, `Unsupported binding: ${entry.reason}. Retention does not prove complete CR coverage.`);
-			for (const token of entry.tokens) {
-				const row = element("div", {className: "bqa__transformation-resolution-row"});
-				tokens.append(row);
-				paragraph(row, `Paragraph ${token.paragraph + 1}, ${token.kind} token ${token.token + 1}: ${token.value}${token.dice ? `; ${token.dice.number}d${token.dice.faces}, printed average ${token.average ?? "unsupported"}` : ""}. ${token.text}`);
-				const interpretation = field(row, "Token interpretation", {options: [["ability", "Ability plus PB and reviewed residual"], ["fixed", "Source-fixed observed value"]]});
-				const ability = field(row, "Governing ability", {options: ["str", "dex", "con", "int", "wis", "cha"].map(it => [it, Parser.attAbvToFull(it)])});
-				const multiplier = field(row, "Token PB multiplier", {options: [[0, "0 - fixed / no PB"], [1, "1 - proficient"], [2, "2 - expertise"]]});
-				const explanation = reason(row, "Token interpretation reason");
-				const proposalText = paragraph(row, "No interpretation adopted.");
-				let proposal = null;
-				let adopted = false;
-				const invalidate = () => { proposal = null; adopted = false; proposalText.textContent = "No interpretation adopted."; };
-				proposals.push({entryId: entry.id, invalidate});
-				const propose = button("Propose residual", () => {
-					try {
-						proposal = proposeCreatureTransformationTargetResidual({target,
-							resolved,
-							tokenId: token.id,
-							ability: ability.read(),
-							proficiency: multiplier.read() === undefined ? undefined : Number(multiplier.read()),
-							proficiencyBonus: readSourcePb(),
-							proficiencyAnswer: readOwnership()});
-						adopted = false;
-						proposalText.textContent = `Unaccepted proposal: observed ${proposal.observed}; ability modifier ${proposal.abilityModifier}; PB ${JSON.stringify(proposal.pb)}; residual ${proposal.fixed}.`;
-						onChange();
-					} catch (e) { error.textContent = e.message; }
-				});
-				const adopt = button("Adopt this interpretation", () => {
-					if (!proposal || !explanation.read()?.trim()) { error.textContent = "Request a residual and supply an interpretation reason before adopting."; explanation.node.focus(); return; }
-					adopted = true;
-					proposalText.textContent = `Adopted residual ${proposal.fixed} for this exact ability/PB/token/history.`;
-					onChange();
-				});
-				row.append(propose, adopt);
-				interpretation.node.addEventListener("change", () => {
-					ability.node.disabled = multiplier.node.disabled = propose.disabled = adopt.disabled = interpretation.read() !== "ability";
-					invalidate();
-					onChange();
-				});
-				tokenPolicies.push({entryId: entry.id,
-					sync: () => {
-						ability.node.disabled = multiplier.node.disabled = propose.disabled = adopt.disabled = policy.read() !== "bind" || interpretation.read() !== "ability";
-					}});
-				ability.node.addEventListener("change", () => { invalidate(); onChange(); });
-				multiplier.node.addEventListener("change", () => { invalidate(); onChange(); });
-				answers.set(token.id, () => policy.read() !== "bind" ? undefined : interpretation.read() === "fixed"
-					? {mode: "fixed", value: token.value, reason: explanation.read()}
-					: {mode: "ability", ability: ability.read(), proficiency: multiplier.read() === undefined ? undefined : Number(multiplier.read()), proposal, adopted, reason: explanation.read()});
-			}
-			setEnabled(tokens, false);
-		}
-		const cr = group(root, "DMG 2014 CR estimate - assumptions and three-round routines");
-		const defense = group(cr, "Defense assumptions");
-		paragraph(defense, `Expected CR suggestion (not accepted): ${JSON.stringify(model.current.cr)}. Poison immunity alone does not establish a defense multiplier.`);
-		const expectedCr = field(defense, "Expected CR band (deliberately adopt or edit)", {options: crChoices});
-		const acIndex = field(defense, "AC alternative to evaluate", {options: model.facts.ac.map((it, i) => [i, JSON.stringify(it)])});
-		const resistance = field(defense, "Effective resistance policy", {options: [["none", "None"], ["resistance", "Resistance"], ["immunity", "Immunity"]]});
-		const vulnerability = field(defense, "Prevalent multiple vulnerabilities?", {options: yesNo});
-		const regeneration = field(defense, "Applicable regeneration per round", {type: "number", min: 0, max: 1000});
-		const hpAdjustment = field(defense, "Estimate-only effective HP adjustment", {type: "number", min: -100_000, max: 100_000});
-		const acAdjustment = field(defense, "Estimate-only effective AC adjustment", {type: "number", min: -100, max: 100});
-		const hpBoundary = field(defense, "Exact 760 / 805 effective HP overlap policy (only if required)", {required: false, options: [["lower", "Lower row"], ["higher", "Higher row"]]});
-		const defenseNote = reason(defense, "Defense policy and reviewed feature adjustments");
-		const coverage = group(cr, "Review every entry's routine coverage");
-		const coverageRows = model.entries.map(entry => {
-			const decision = field(coverage, `${entry.section}: ${entry.match.name} (${entry.match.source})`, {options: [["represented", "Represented"], ["excluded", "Excluded with reviewed reason"]]});
-			const explanation = reason(coverage, `${entry.match.name} coverage reason`);
-			return () => ({entryId: entry.id, decision: decision.read(), reason: explanation.read()});
-		});
-		const routines = [];
-		let nextRoutine = 0;
-		const routineList = element("div");
-		cr.append(routineList);
-		const damageTokens = model.entries.filter(it => it.supported).flatMap(entry => entry.tokens.filter(it => it.kind === "damage")
-			.map(token => [token.id, `${entry.match.name} (${entry.match.source}) - paragraph ${token.paragraph + 1}, damage ${token.token + 1}`]));
-		const accuracyTokens = model.entries.filter(it => it.supported).flatMap(entry => entry.tokens.filter(it => ["hit", "dc"].includes(it.kind))
-			.map(token => [token.id, `${entry.match.name} (${entry.match.source}) - ${token.kind} ${token.paragraph + 1}:${token.token + 1}`]));
-		const routinePolicy = field(cr, "Routine selection policy", {options: [["highest-damage", "Evaluate highest three-round damage"]]});
-		const refreshRoutinePolicy = () => {
-			const previous = routinePolicy.node.value;
-			routinePolicy.node.replaceChildren(new Option("Choose…", ""), new Option("Evaluate highest three-round damage", "highest-damage"));
-			routines.forEach(it => routinePolicy.node.add(new Option(it.id, it.id)));
-			routinePolicy.node.value = [...routinePolicy.node.options].some(it => it.value === previous) ? previous : "";
-		};
-		const addRoutine = button("Add alternative routine", () => {
-			const id = `routine-${++nextRoutine}`;
-			const panel = group(routineList, id);
-			const rows = [];
-			const rowList = element("div");
-			panel.append(rowList);
-			const accuracy = field(panel, "Predominant attack / save accuracy", {options: accuracyTokens});
-			const mixedReason = reason(panel, "Predominant / mixed-accuracy explanation");
-			const note = reason(panel, "Routine source and schedule explanation");
-			const addRow = button("Add contribution", () => {
-				const row = element("fieldset", {className: "bqa__transformation-resolution-row"});
-				row.append(element("legend", {text: `Contribution ${rows.length + 1}`}));
-				rowList.append(row);
-				const source = field(row, "Damage contribution", {options: [...damageTokens, ["fixed", "Fixed numeric adjudication (not inferred spell / aura prose)"]]});
-				const fixedFields = element("div");
-				row.append(fixedFields);
-				const fixedValue = field(fixedFields, "Fixed per-use value", {type: "number", min: 0, max: 100_000});
-				fixedValue.node.step = "any";
-				const fixedName = field(fixedFields, "Adjudication source name");
-				const fixedSource = field(fixedFields, "Adjudication source code");
-				const fixedReason = reason(fixedFields, "Fixed contribution reason");
-				setEnabled(fixedFields, false);
-				source.node.addEventListener("change", () => { setEnabled(fixedFields, source.read() === "fixed"); onChange(); });
-				const timing = field(row, "Timing / use restriction", {options: ["normal", "conditional", "off-turn", "ongoing", "recharge", "limited-use"].map(it => [it, it])});
-				const explanation = reason(row, "Contribution schedule reason");
-				const counts = [];
-				const targets = [];
-				for (let i = 0; i < 3; ++i) {
-					const round = element("div", {className: "bqa__transformation-resolution-row"});
-					row.append(round);
-					counts.push(field(round, `Round ${i + 1} uses`, {type: "number", min: 0, max: 20}));
-					targets.push(field(round, `Round ${i + 1} targets`, {type: "number", min: 1, max: 100}));
-				}
-				const get = () => ({counts: counts.map(it => it.read()),
-					targets: targets.map(it => it.read()),
-					timing: timing.read(),
-					reason: explanation.read(),
-					...source.read() === "fixed" ? {fixed: {value: fixedValue.read(), source: {name: fixedName.read(), source: fixedSource.read()}, reason: fixedReason.read()}} : {tokenId: source.read()}});
-				rows.push(get);
-				row.append(button("Remove contribution", () => { rows.splice(rows.indexOf(get), 1); row.remove(); addRow.disabled = false; onChange(); addRow.focus({preventScroll: true}); }));
-				addRow.disabled = rows.length >= 24;
-				onChange();
-			});
-			panel.append(addRow);
-			const item = {id, read: () => ({id, rows: rows.map(get => get()), accuracy: accuracy.read(), mixedReason: mixedReason.read(), note: note.read()})};
-			routines.push(item);
-			panel.append(button("Remove routine", () => {
-				routines.splice(routines.indexOf(item), 1);
-				panel.remove();
-				addRoutine.disabled = false;
-				refreshRoutinePolicy();
-				onChange();
-				addRoutine.focus({preventScroll: true});
-			}));
-			addRoutine.disabled = routines.length >= 12;
-			refreshRoutinePolicy();
-			onChange();
-		});
-		cr.append(addRoutine);
-		const override = field(cr, "Override estimated CR?", {required: false, options: [["override", "Use an explicit override (estimate retained)"]]});
-		const overrideFields = element("div");
-		cr.append(overrideFields);
-		const overrideCr = field(overrideFields, "Final CR override", {options: crChoices});
-		const overrideReason = reason(overrideFields, "CR override reason");
-		setEnabled(overrideFields, false);
-		override.node.addEventListener("change", () => { setEnabled(overrideFields, !!override.read()); onChange(); });
-		const zeroXp = field(cr, "Final CR0 no-threat 0 XP policy?", {options: [["no", "No - canonical XP (CR0 normally 10)"], ["yes", "Yes - final CR0 only"]]});
-		const review = field(cr, "All relevant effects and complete alternatives reviewed?", {options: [["yes", "I confirm complete review"]]});
-		const reviewReason = reason(cr, "Completeness explanation (never auto-authored)");
-		answers.set(control("cr").id, () => ({
-			defense: {expectedCr: expectedCr.read(),
-				hpBoundary: hpBoundary.read() ?? null,
-				acIndex: acIndex.read() === undefined ? undefined : Number(acIndex.read()),
-				resistance: resistance.read(),
-				vulnerability: vulnerability.read() === undefined ? undefined : vulnerability.read() === "yes",
-				regeneration: regeneration.read(),
-				hpAdjustment: hpAdjustment.read(),
-				acAdjustment: acAdjustment.read(),
-				note: defenseNote.read()},
-			routines: routines.map(it => it.read()),
-			routine: routinePolicy.read(),
-			review: {confirmed: review.read() === "yes", reason: reviewReason.read()},
-			override: override.read() ? {cr: overrideCr.read(), reason: overrideReason.read()} : null,
-			zeroXp: zeroXp.read() === undefined ? undefined : zeroXp.read() === "yes",
-			proficiencyAnswer: readOwnership(),
-			coverage: coverageRows.map(get => get()),
-		}));
-	}
-	root.append(error, output);
-	return {root,
-		model,
-		read,
-		focus: () => {
-			const missing = fields.find(it => it.node.isConnected && !it.node.disabled && it.node.required && (it.read() === undefined || it.node.validity?.valid === false));
-			const node = missing?.node || root;
-			for (let parent = node.parentElement; parent && parent !== root; parent = parent.parentElement) if (parent.tagName === "DETAILS") parent.open = true;
-			if (!missing) root.tabIndex = -1;
-			node.focus();
-		},
-		update: compiled => {
-			const missing = fields.filter(it => it.node.isConnected && !it.node.disabled && it.node.required && (it.read() === undefined || it.node.validity?.valid === false));
-			fields.forEach(it => it.node.setAttribute("aria-invalid", String(missing.includes(it))));
-			status.textContent = compiled?.status === "ready" ? "Ready" : compiled?.status === "needs-answers" ? "Needs answers" : compiled?.status || "Needs answers";
-			error.textContent = compiled?.requirements.map(it => it.reason).join("; ") || "";
-			output.replaceChildren();
-			if (!compiled?.estimate) return;
-			const {receipt, value} = compiled.estimate;
-			paragraph(output, `DMG 2014 estimate, not playtested. Estimated CR ${receipt.estimatedCr}; defensive ${receipt.defensiveCr}; offensive ${receipt.offensiveCr}. Final CR ${value.cr}, ${value.xp} XP.`);
-			paragraph(output, `Effective HP ${receipt.effectiveHp}; AC ${receipt.effectiveAc}; routine ${receipt.routineId}, DPR ${receipt.damagePerRound}, accuracy ${receipt.accuracy}. PB: ${JSON.stringify(receipt.proficiency)}.`);
-			if (receipt.assumptions.override) paragraph(output, `Override (independent estimate retained): ${JSON.stringify(receipt.assumptions.override)}`);
-			for (const routine of compiled.automationInputs.cr.assumptions.routines) paragraph(output, `${routine.id}: rounds ${JSON.stringify(routine.rounds)}; accuracy ${JSON.stringify(routine.accuracy)}.`);
-			for (const entry of observeCreatureTransformationBindings({current: compiled.projection, chassisSource: target.baseCreature.source})) {
-				for (const token of entry.tokens.filter(it => it.kind === "damage")) paragraph(output, `${entry.match.name} (${entry.match.source}), damage ${token.paragraph + 1}:${token.token + 1}: per-use printed average ${token.average ?? "unsupported"}.`);
-			}
-		}};
-}
-
 function renderSavedFormEditor ({mount, getTargets, getStamp, getConsequences, validateChange, pApply, isCurrent, savedOperationId, onCancel}) {
 	const container = element("section", {className: "bqa__transformation"});
 	mount.replaceChildren(container);
@@ -896,7 +569,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		status.textContent = "";
 		showError(`Could not load creature transformations: ${e.message}`);
 		container.append(button("Retry catalog load", () => pRenderCreatureTransformationEditor({
-			mount, getTargets, getStamp, getConsequences, validateOperation, pApply, isBulk, pLoadCandidates, isCurrent, automationVersion,
+			mount, getTargets, getStamp, getConsequences, validateOperation, validateChange, pApply, isBulk, pLoadCandidates, isCurrent, automationVersion,
 		})));
 		return;
 	}
@@ -955,6 +628,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	let isCommitting = false;
 	let generation = 0;
 	let crTable;
+	let legendaryGroups;
 	let tableRequest = 0;
 	let tableLoading = false;
 	let tableError = "";
@@ -1104,10 +778,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		}));
 		details.append(heading);
 		if (isGuided()) {
-			paragraph(details, candidate.id === "catalog:zombie|dmg"
-				? "Staged numerical preview - incomplete template"
-				: candidate.id === "catalog:dracolich|mm" ? "Staged rules preview - incomplete template"
-					: "Unsupported staged identity - no guided automation producer.");
+			paragraph(details, "Opt-in source transformation: complete the source choices, then review every actual post-source form and its DMG 2014 estimate. Nothing is saved until you confirm.");
 		}
 		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
 		paragraph(details, `Eligibility: ${describeEligibility(candidate.eligibility)}. Details and source rules are available from each info button.`);
@@ -1233,6 +904,10 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const renderReview = () => {
 		const review = details.querySelector(".bqa__transformation-review");
 		if (!review) return;
+		if (isGuided()) {
+			review.hidden = true;
+			return;
+		}
 		const items = [...candidate.manualReview];
 		for (const group of candidate.optionGroups) {
 			for (const option of group.options) if (selections[group.id]?.includes(option.id)) items.push(...option.manualReview);
@@ -1256,7 +931,9 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 			}
 		}
 		const summary = element("div", {className: "bqa__transformation-summary"});
-		paragraph(summary, `${batch.previews.length} eligible · ${batch.skipped.length} skipped. Statblocks show only automatic changes; DM review remains separate.`);
+		paragraph(summary, `${batch.previews.length} eligible · ${batch.skipped.length} skipped. ${isGuided()
+			? "Preview includes source rules and the reviewed estimate; no changes have been saved."
+			: "Statblocks show only automatic changes; DM review remains separate."}`);
 		if (batch.skipped.length) {
 			summary.append(element("h5", {text: "Skipped · unchanged"}));
 			list(summary, batch.skipped.map(it => `${it.label}: ${it.reason}`));
@@ -1284,7 +961,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 						acknowledgedPrerequisites: resolved.prerequisites,
 						dmApproved: true,
 						conflictDecisions: decisions,
-						...isGuided() ? {guidedAnswers: readGuidedAnswers(getTargets()), crTable, generation} : {},
+						...isGuided() ? {guidedAnswers: readGuidedAnswers(getTargets()), crTable, legendaryGroups, generation} : {},
 					});
 					renderBatch();
 					result.querySelectorAll("select[data-conflict-id]").forEach(select => {
@@ -1293,12 +970,12 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				} catch (e) { showError(e.message); }
 			});
 			const model = batch.guidedModels?.find(it => it.targetId === target.id);
-			if (model?.estimate && target.preview.conflicts.some(it => decisions[target.id]?.[it.path] === "existing"
+			if (model?.estimates && target.preview.conflicts.some(it => decisions[target.id]?.[it.path] === "existing"
 				&& /^(?:str|dex|con|int|wis|cha|hp|ac|passive|profBonus|pbNote|cr|save\.|skill\.|trait:|action:|bonus:|reaction:|legendary:|spellcasting:)/.test(it.path))) {
 				paragraph(result, "Incoming estimate not applied - existing numerical group retained");
 			}
 		}
-		if (approvalInput) approvalInput.parentElement.hidden = !batch.previews.some(it => it.preview.resolved.eligibility.some(rule => rule.dmApproval));
+		if (approvalInput) approvalInput.parentElement.hidden = !isGuided() && !batch.previews.some(it => it.preview.resolved.eligibility.some(rule => rule.dmApproval));
 		if (!batch.previews.length) return;
 		if (batch.previews.some(it => !it.preview.canApply)) {
 			paragraph(action, "Choose an existing or incoming winner for each overlapping change to complete the preview.");
@@ -1312,13 +989,18 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		tableLoading = true;
 		tableError = "";
 		try {
-			const loaded = await pLoadCreatureTransformationInputTable({requested: true});
+			const [loaded, groups] = await Promise.all([
+				pLoadCreatureTransformationInputTable({requested: true}),
+				DataUtil.loadJSON("data/bestiary/legendarygroups.json"),
+			]);
 			if (!isActive() || request !== tableRequest) return;
 			if (!Array.isArray(loaded)) throw new Error("CR table did not return its version-matched rows.");
+			if (!Array.isArray(groups.legendaryGroup)) throw new Error("Lair context did not return its source-qualified groups.");
 			crTable = loaded;
+			legendaryGroups = groups.legendaryGroup;
 		} catch (e) {
 			if (!isActive() || request !== tableRequest) return;
-			tableError = `Could not load CR table: ${e.message}`;
+			tableError = `Could not load CR table / lair context: ${e.message}`;
 		} finally {
 			if (isActive() && request === tableRequest) { tableLoading = false; doPreview(); }
 		}
@@ -1327,16 +1009,20 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		for (const target of targets) {
 			const key = `${candidate.id}:${target.id}`;
 			let panel = guidedPanels.get(key);
-			const model = inspectCreatureTransformationInputs({target, resolved});
+			const model = inspectCreatureTransformationSourceInputs({target, resolved});
 			if (!panel) {
-				panel = renderGuidedTarget({parent: resolution, target, resolved, onChange: () => { if (!isCommitting) { invalidate(target.id); doPreview(); } }});
+				panel = renderSourceGuidedTarget({parent: resolution,
+					target,
+					resolved,
+					getLegendaryGroups: () => legendaryGroups,
+					onChange: () => { if (!isCommitting) { invalidate(target.id); doPreview(); } }});
 				panel.recipeKey = JSON.stringify(resolved);
 				guidedPanels.set(key, panel);
 			} else if ((panel.model.targetKey !== model.targetKey || panel.recipeKey !== JSON.stringify(resolved) || panel.stale) && !panel.staleNotice) {
 				panel.stale = true;
 				panel.root.disabled = true;
 				const stale = element("div", {className: "bqa__transformation-resolution-error"});
-				paragraph(stale, `Stale draft for ${target.label} (${panel.model.sourceUid}). Source, entry identity or history changed. Old answers were not retargeted.`);
+				paragraph(stale, `Stale draft for ${target.label}. Source, entry identity or history changed. Old answers were not retargeted.`);
 				stale.append(button("Discard stale draft and start new answers", () => {
 					panel.root.remove();
 					stale.remove();
@@ -1368,15 +1054,11 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				paragraph(delta, `Choose ${missing.name} to see the before/after statblocks.`);
 				return;
 			}
-			if (isGuided() && !["catalog:zombie|dmg", "catalog:dracolich|mm"].includes(candidate.id)) {
-				paragraph(delta, "Unsupported staged identity - no guided automation producer. No legacy fallback was applied.");
-				return;
-			}
 			resolved = resolveCreatureTransformation({candidates, id: candidate.id, selections, automationVersion: isGuided() ? 2 : 1});
 			const targets = getTargets();
 			if (isGuided()) {
 				syncGuidedPanels(targets);
-				if (candidate.id === "catalog:zombie|dmg" && crTable === undefined) {
+				if (crTable === undefined) {
 					status.textContent = tableError || "Loading version-matched CR table…";
 					if (!tableError && !tableLoading) loadTable();
 				}
@@ -1388,10 +1070,14 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				acknowledgedPrerequisites: resolved.prerequisites,
 				dmApproved: true,
 				conflictDecisions: decisions,
-				...isGuided() ? {guidedAnswers: readGuidedAnswers(targets), crTable, generation} : {},
+				...isGuided() ? {guidedAnswers: readGuidedAnswers(targets), crTable, legendaryGroups, generation} : {},
 			});
 			renderBatch();
-			if (!batch.previews.length) showError("No eligible monster can use this recipe; review the skipped targets below.");
+			if (!batch.previews.length) {
+				showError(isGuided() && batch.guidedModels.some(model => model.status === "needs-answers")
+					? "Complete the source and post-source form answers below. Review answers opens the next unresolved field."
+					: "No eligible monster can use this recipe; review the skipped targets below.");
+			}
 		} catch (e) { showError(e.message); }
 	};
 	const doApply = async () => {
@@ -1429,14 +1115,22 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		status.textContent = "Checking the live catalog, targets, and storage before saving…";
 		try {
 			const currentCandidates = await loadWithWarnings();
-			const currentTable = guided && selectedCandidate.id === "catalog:zombie|dmg"
-				? await pLoadCreatureTransformationInputTable({requested: true}) : crTable;
+			const [currentTable, currentGroups] = guided
+				? await Promise.all([pLoadCreatureTransformationInputTable({requested: true}), DataUtil.loadJSON("data/bestiary/legendarygroups.json")])
+				: [crTable, null];
 			if (!isActive()) return;
 			if (guided && JSON.stringify(currentTable) !== JSON.stringify(selectedTable)) {
 				crTable = currentTable;
 				invalidate();
 				doPreview();
 				throw new Error("The CR table changed. Review the current estimate and confirm again.");
+			}
+			if (guided && (!Array.isArray(currentGroups.legendaryGroup) || JSON.stringify(currentGroups.legendaryGroup) !== JSON.stringify(legendaryGroups))) {
+				if (!Array.isArray(currentGroups.legendaryGroup)) throw new Error("Lair context did not return its source-qualified groups. Retry explicitly.");
+				legendaryGroups = currentGroups.legendaryGroup;
+				invalidate();
+				doPreview();
+				throw new Error("The source lair context changed. Review the current source choices, forms and estimate, then confirm again.");
 			}
 			if (batch !== selectedBatch || candidate !== selectedCandidate || picker.value !== selectedCandidate.id || !visibleIds.has(selectedCandidate.id)
 				|| generation !== selectedGeneration || JSON.stringify(confirmationInputs.map(it => it.checked)) !== JSON.stringify(selectedConsent)
@@ -1473,7 +1167,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				dmApproved: !selectedBatch.previews.some(it => it.preview.resolved.eligibility.some(rule => rule.dmApproval)) || !!approvalInput?.checked,
 				conflictDecisions: selectedDecisions,
 				validateOperation,
-				...guided ? {guidedAnswers: readGuidedAnswers(targets), crTable: currentTable, generation} : {},
+				...guided ? {guidedAnswers: readGuidedAnswers(targets), crTable: currentTable, legendaryGroups, generation} : {},
 			});
 			const previewShape = snapshot => JSON.stringify({
 				skipped: snapshot.skipped,
@@ -1489,7 +1183,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				targets,
 				resolved: currentResolved,
 				conflictDecisions: decisions,
-				...guided ? {guidedAnswers: readGuidedAnswers(getTargets()), crTable: currentTable, generation} : {}});
+				...guided ? {guidedAnswers: readGuidedAnswers(getTargets()), crTable: currentTable, legendaryGroups, generation} : {}});
 			if (!changes.length) throw new Error("No eligible monster remains to transform.");
 			const effects = getConsequences(changes);
 			const hasEffects = effects?.resetHpIds?.length || effects?.splitIds?.length;
