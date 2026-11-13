@@ -318,6 +318,49 @@ page/edition attribution provisional. Estimated CR/override composition,
 guided-editor integration, M11-M13 and final default rollout remain open.
 Species stays deferred; the Templates bug is not closed.
 
+M11 [#409](https://github.com/TrueMichato/ThelemarTools/pull/409) stages Fallen Angel
+and Devilsworn source automation. Eligible angels gain lawful-evil alignment,
+the target's actual flight reduction and PB/Charisma-based social skills. Bound
+Angelic Weapons and existing Healing Touch convert using the target's actual
+dice, uses and DC inputs, not the example creature's statistics. Devilsworn
+typing, conditional defenses, silver bypass and sight changes preserve unrelated
+metadata and stronger capabilities. Usable charm/control rules are retained,
+not a live adjudication engine.
+
+The source image corrects the original assignment reminder: retain innate
+at-will spells and existing Dispel Evil and Good at their original uses.
+Limited-use Detect Evil and Good is not an exception; ordinary casting is
+unchanged. Parent review reproduced four ordinary failures before correction:
+spell-only attacks misclassified by negated weapon prose, impossible zero-token
+defensive-trait bindings, destructive compound-sense conversion and unfiltered
+prose-only innate casting. Four new regressions failed against unchanged
+production before the bounded fixes. Compound truesight and recognized
+prose-only innate casting now precisely block for supported restructuring;
+these cases are not claimed as successful automation or parser expansion.
+
+Frozen concrete effects and reviewed answers retain closure/tamper checks,
+coherent conflicts, atomic saves, replay/removal without today's catalog, and
+byte/operation ceilings. Other families, defaults and Species remain unchanged.
+Actual old-public-code compatibility checks verified 540 raw blobs and 45
+executions per version across selected catalog defaults, PHB Species and Fey/
+Fallen legacy combinations; this is not exhaustive option/history coverage.
+
+Corrected source verification passed twelve suites/345 tests, including 27 M11
+cases; the unchanged parent probe passed seven checks and parent focused Jest
+passed 95 tests. One ordinary native commit passed all 38 expected related
+suites/713 tests with exactly nine JS inputs. One published-leaf native push
+passed isolated ESLint/stylelint and all 818 expected passing suites/22,142 tests,
+with the unchanged one skipped suite/13 skipped tests, all 24 required NPC
+fixtures and existing crafting inputs. No weakened-input fallback was accepted.
+Observer-only failures were preserved and independently reconciled; successful
+native commit/push actions were not retried.
+
+No browser/E2E, disk-backed Encounter or full data-validation gate is claimed.
+M11 remains internal/staged, retains CR/XP with explicit review and provisional
+SCRE source/page/edition attribution. M12 Undead, final CR/override/editor
+integration and M13 default rollout remain open. Species stays deferred;
+the Templates bug is not closed.
+
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
 global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver
