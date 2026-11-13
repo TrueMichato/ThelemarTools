@@ -174,7 +174,7 @@ NPC corpus. No browser/E2E run was performed for M6.
 M6 remains internal/staged, retains current CR/XP and reports the limitation.
 Estimated CR/override composition and shared-editor inputs remain rollout
 prerequisites. Default/version-1 and historical M1-M5 operations remain unchanged.
-This does not close the Templates bug: M9-M13 remain open, with Species deferred.
+This does not close the Templates bug: M10-M13 remain open, with Species deferred.
 
 M7 [#405](https://github.com/TrueMichato/ThelemarTools/pull/405) stages Spore
 Servant MM and independent MM/BEG Shadow Dragon source compilers. Spore executes
@@ -242,6 +242,42 @@ inputs reachable. No browser/E2E run was performed. M8 remains internal/staged,
 retains CR/XP with explicit review and does not enable default behavior.
 Estimated CR/override composition, guided-editor integration, remaining families
 and final rollout remain prerequisites; Species stays deferred.
+
+M9 [#407](https://github.com/TrueMichato/ThelemarTools/pull/407) stages all five
+existing MM Lycanthropy kinds and Arcadia 27's Wereshark. Frozen humanoid,
+hybrid and animal profiles start in humanoid form. Source minima retain higher
+scores; attacks/DCs use the target's actual ability modifiers and proficiency.
+Movement, conditional nonmagical-unsilvered immunity, natural attacks and complete
+usable curse/control rules execute without replacing the unrelated target chassis.
+
+The MM PC-sidebar-to-NPC adaptation is explicitly labeled and requires per-target
+consent, embrace/resist and exact speech/equipment/armor decisions. Only embracing
+changes MM alignment. Equipment never transforms or disappears implicitly. All MM
+target senses remain unchanged; donor rat/tiger darkvision is not a sidebar grant.
+Arcadia separately grants blindsight 60. Boar/rat equipment-free routines apply in
+humanoid and hybrid, never animal; equipment-dependent humanoid routines and
+example-only Wereshark features are excluded.
+
+Every active and inactive profile is checked against the authoritative pre-owner
+target before conflict winners. Registry/Encounter JSON replay, switching and
+removal preserve source identity, renamed prefixes and target isolation without
+loading current sources. The other twelve catalog records, legacy operations and
+Species identities/options remain unchanged.
+
+Parent review reproduced six source-probe failures. Seven of nineteen new
+correction checks failed before production edits; all nineteen passed afterward,
+as did the unchanged parent probe's 31 checks. Final selected verification passed
+14 suites/425 tests, including 77 M9 cases; parent independently repeated four
+suites/160 tests. Separate actual public-base code comparisons passed their stated
+selected catalog, legacy-operation and Species cases, not exhaustive coverage.
+Normal commit hooks passed all 36 related suites/654 tests and exactly nine JS
+inputs. The published-leaf full gate passed 816 suites/22,083 tests, with the
+unchanged one skipped suite/13 skipped tests and all 24 real NPC inputs reachable.
+
+No browser/E2E or default rollout is claimed. M9 remains internal/staged and retains
+CR/XP with explicit review; usable combat/control text is not a live rules engine.
+Estimated CR/override composition, guided-editor integration, M10-M13 and final
+rollout remain open. Species stays deferred.
 
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
