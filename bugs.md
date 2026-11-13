@@ -3,17 +3,18 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 72 - Combat damage labels, mobile import, and creature transformations - IN PROGRESS
+### Round 72 - Creature transformations - Species deferred
 
 Planning starts from published `d14b7b8764293899609f8b7cd41a744eb99e1686`,
 not the main checkout's local-only critique-report ancestry. The user approved
 S1 and S2 implementation after the reproductions below. Their completed fixes
 and combined gates are recorded under Closed Bugs. The user approved staged
-implementation of the expanded Template plan, one verified milestone at a time;
-its published foundations remain internal/staged, without enabling expanded
-automation.
+implementation of the expanded Template plan, one verified milestone at a time.
+**S3 Templates are complete in M13c; Species remains deferred.** The entries below
+preserve each milestone's historical acceptance-time rollout status. Current
+Template completion is recorded under Closed Bugs.
 
-| Track | Reported bugs | Ownership and acceptance |
+| Track | Reported bugs | Scope and historical milestone acceptance |
 |---|---|---|
 | S3 | 3: Templates do not apply expected changes or entries. | Approved final scope: complete statblocks for all 14 current non-Species recipes/options/forms, guided choices, and automatic estimated CR with override; no live combat adjudication engine. [M1 (#395)](https://github.com/TrueMichato/ThelemarTools/pull/395) stages Dracolich compilation and frozen replay. [M2a (#396)](https://github.com/TrueMichato/ThelemarTools/pull/396) adds HP/Hit Dice/CON, proficiency/expertise, saves/skills/passive reconciliation through a Zombie-only numeric representative. [M2b (#397)](https://github.com/TrueMichato/ThelemarTools/pull/397) adds explicit AC/entry bindings and an innate-spell foundation; its actual Zombie producer updates weapon numbers and existing innate DCs. [M3 (#398)](https://github.com/TrueMichato/ThelemarTools/pull/398) adds finite CR estimates/overrides and coherent XP/PB through required reviewed numerical inputs and the same opt-in Zombie producer. [M4a (#399)](https://github.com/TrueMichato/ThelemarTools/pull/399) stages the finite frozen-form kernel and atomic positional replacement in both consumers, without a source-defined form producer or editor controls. [M4b (#400)](https://github.com/TrueMichato/ThelemarTools/pull/400) adds DOM-free typed target answers, reviewed residual proposals and three-round/CR composition for the existing narrow producers. [M4c C1 (#401)](https://github.com/TrueMichato/ThelemarTools/pull/401) adds internal guided creation/CR controls, exact deltas and reviewed Encounter save consequences. [M4c C2 (#402)](https://github.com/TrueMichato/ThelemarTools/pull/402) adds frozen saved-owner controls and completes bounded combined C1/C2 Chromium acceptance, including real persistence and native closed-select keyboard use. These milestones do not enable default behavior, complete a family, or close this bug. Family and rollout units remain separately bounded work. Preserve source identity, legacy replay, consent, conflicts, atomic saves and candidate isolation. The six original SCRE images are recovered and inspected; source attribution caveats remain. |
 | Deferred | 4: Species conversion adds irrelevant metadata such as age and alignment as traits. | Reproduced pure Age/Alignment pollution, but mixed Warforged Age also contains immunity. The user explicitly deferred Species while expanding Template automation. Keep current Species output, IDs and historical replay unchanged; do not mark this bug fixed. |
@@ -456,6 +457,45 @@ artifacts; the combined full-repository gates are scheduled by the orchestrator.
   Preserve this distinction if the original symptom recurs.
 
 ## Closed Bugs
+
+### Round 72 - Complete default Template automation
+
+M13c source commit `9f022961c` enables the shared version-2 workflow by default
+in Bestiary and Encounter Workspace, including individual and bulk entrypoints.
+All 14 source-qualified Template profiles now compile their complete source
+rules and statblock changes through guided finite choices, post-source numerical
+ownership, a labeled DMG 2014 CR estimate, an explained override and canonical XP.
+Required DM declarations and consent remain explicit; this is not a live combat
+adjudication engine. Explicit version 1 and historical saved operations remain
+supported. Species behavior and its deferred metadata issue are unchanged.
+
+The final ordinary Chromium matrix passes 34 cases, including all 14 families
+on both real consumers with independent effects/CR/XP, actual Homebrew dialogs
+and flattening, reload, removal/restoration and Encounter isolation/persistence.
+Newly UI-created Vampire, werewolf and Wereshark histories complete every form,
+then exercise A-B-A and A-C-A, stable owner/index and nonempty suffix, and
+same-active zero-write/call no-ops without catalog/donor/table access. Failed
+Store saves require explicit retry; stale consent/history and mixed bulk remain
+covered. Parent independently repeats all 34 cases and audits 37 served assets
+per case, settled loaded responses and actual consumer snapshots. Parent unit
+verification passes three suites/99 tests; normal source hooks pass 11/151.
+
+Real default-wiring and fire-grant mutations fail both consumers before
+restoration. Independent review also exposed an asynchronous Registry
+rehydration failure. The driver now waits for the completed new toolsLoaded
+document and exact fixture, then replays synchronously through that document's
+actual Registry. The failed parent run and readiness-only attempt remain
+preserved; the exact low-level protocol rejection is not claimed diagnosed.
+The new readiness control also fails when its real initialization gate is removed.
+
+Bestiary Registry reload is explicit JSON rehydration, not automatic persistence;
+Encounter uses its real Store. Homebrew stubs only destination storage, not
+dialogs or flattening. Two existing 2024 Elf Species assertions about raw spell
+JSON reproduce byte-identically against the accepted baseline and remain outside
+this Template fix. Existing installed dependencies are not clean-lock proof;
+native Cocoa popup/menu, screenreader and physical-device acceptance are not
+claimed. Exact-commit full repository gating is separate from these focused
+source/browser counts and uses the existing NPC/crafting inputs without provisioning.
 
 ### Round 72 - Combat damage labels and mobile import
 
