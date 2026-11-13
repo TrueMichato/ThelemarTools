@@ -591,6 +591,7 @@ describe("M11 Fallen Angel / Devilsworn source-only compilation", () => {
 		for (const recipe of catalog.creatureTransformation) {
 			const current = structuredClone(recipe);
 			if (recipe.name === "Fallen Angel" && recipe.source === "SCRE") delete current.automation;
+			if (recipe.name === "Undead" && recipe.source === "SCRE") delete current.automation;
 			expect(current).toEqual(accepted.creatureTransformation.find(prior => prior.name === recipe.name && prior.source === recipe.source));
 		}
 		for (const mode of ["fallen", "devilsworn"]) {

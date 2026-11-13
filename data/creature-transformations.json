@@ -573,7 +573,8 @@
 			"manualReview": [
 				{"field": "eligibility", "reason": "Screenshot page, edition, and source attribution are unverified; confirm any CR-based option limits."},
 				{"field": "traits", "reason": "Determine alignment and other category-appropriate traits with the DM; the worked tyrannosaurus and hydra are examples, not defaults."}
-			]
+			],
+			"automation": {"version": 2, "profile": "undead-scre", "rollout": "staged"}
 		}
 	]
 }

@@ -10,6 +10,7 @@ import {assertVampireProjection, getVampireMistImmunity, isVampireChange, isVamp
 import {assertLycanthropeProjection, getLycanthropeProfile, isLycanthropeChange, isLycanthropeOp} from "../creature-transformation-lycanthrope.js";
 import {assertFeyBeastProjection, isFeyBeastChange, isFeyBeastOp} from "../creature-transformation-fey-beast.js";
 import {assertFallenAngelProjection, FALLEN_ANGEL_SPELL_LISTS, isFallenAngelChange, isFallenAngelOp} from "../creature-transformation-fallen-angel.js";
+import {assertUndeadProjection, isUndeadChange, isUndeadOp} from "../creature-transformation-undead.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -144,6 +145,10 @@ function _validateEntry (entry) {
 
 function _validateChange (change) {
 	if (!_isObject(change)) _fail("Transformation changes must be objects.");
+	if (isUndeadOp(change.type)) {
+		if (!isUndeadChange(change, "type")) _fail(`Invalid M12 setter "${change.type}".`);
+		return;
+	}
 	if (isFallenAngelOp(change.type)) {
 		if (!isFallenAngelChange(change, "type")) _fail(`Invalid M11 setter "${change.type}".`);
 		return;
@@ -294,6 +299,7 @@ function _validateRecipe (resolved, {formLeaf = false} = {}) {
 	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"], "Resolved transformation");
 	if (resolved.version !== 2 && resolved.changes?.some(change => isFeyBeastOp(change.type))) _fail("M10 setters require a compiled version-2 Fey Beast snapshot.");
 	if (resolved.version !== 2 && resolved.changes?.some(change => isFallenAngelOp(change.type))) _fail("M11 setters require a compiled version-2 Fallen Angel snapshot.");
+	if (resolved.version !== 2 && resolved.changes?.some(change => isUndeadOp(change.type))) _fail("M12 setters require a compiled version-2 Undead snapshot.");
 	if (Object.hasOwn(resolved, "version") && !isCompiledCreatureTransformation(resolved)) _fail("Invalid compiled version-2 transformation profile or choices.");
 	_expectString(resolved.id, "Transformation ID");
 	if (!["catalog", "race"].includes(resolved.kind)) _fail("Transformation kind must be catalog or race.");
@@ -418,6 +424,30 @@ function _applyChange (creature, change, chassis) {
 	let before;
 	let after;
 	switch (change.type) {
+		case "setUndeadNature": {
+			const values = {type: Object.keys(change.value).length === 1 ? "undead" : _copy(change.value), alignment: _copy(change.alignment), alignmentPrefix: ""};
+			const writes = Object.entries(values).filter(([key, value]) => !_equal(out[key], value))
+				.map(([key, value]) => ({path: key, before: out[key], after: value, section: null}));
+			Object.assign(out, values);
+			return {out, paths: Object.keys(values), writes};
+		}
+		case "setUndeadMovement": {
+			const values = change.value;
+			const paths = ["speed", ...new Set([...Object.keys(out.speed || {}), ...Object.keys(values)])].map(key => key === "speed" ? key : `speed.${key}`);
+			for (const mode of _SPEED_MODES) if (out.speed?.alternate?.[mode] !== undefined || values.alternate?.[mode] !== undefined) paths.push(`speed.alternate.${mode}`);
+			const select = (speed, path) => path === "speed" ? speed : path.startsWith("speed.alternate.") ? speed?.alternate?.[path.slice("speed.alternate.".length)] : speed?.[path.slice(6)];
+			const writes = paths.map(path => ({path, before: select(out.speed, path), after: _copy(select(values, path)), section: null}))
+				.filter(write => !_equal(write.before, write.after));
+			out.speed = _copy(values);
+			return {out, paths, writes};
+		}
+		case "setUndeadSenses": {
+			const paths = ["senses", "senses:darkvision", "senses:blindsight"];
+			const select = (values, path) => path === "senses" ? values : values?.find(value => value.toLowerCase().startsWith(`${path.slice(7)} `));
+			const writes = paths.map(path => ({path, before: select(out.senses, path), after: select(change.value, path), section: null})).filter(write => !_equal(write.before, write.after));
+			out.senses = _copy(change.value);
+			return {out, paths, writes};
+		}
 		case "setFallenAngelNature": {
 			const values = {alignment: ["L", "E"], alignmentPrefix: "", ...change.value ? {type: _copy(change.value)} : {}};
 			const writes = Object.entries(values).filter(([key, value]) => !_equal(out[key], value))
@@ -471,6 +501,7 @@ function _applyChange (creature, change, chassis) {
 			Object.assign(out, values);
 			return {out, paths: writes.map(write => write.path), writes};
 		}
+		case "setUndeadEntry":
 		case "setFallenAngelEntry": {
 			const index = _getEntryIndex(out, change.section, change.match, chassis);
 			before = out[change.section][index];
@@ -925,6 +956,7 @@ export class BestiaryCreatureTransformation {
 		}
 		if (resolved.version === 2 && resolved.id === "catalog:fey beast|scre") assertFeyBeastProjection({resolved, current, chassisSource: original.source});
 		if (resolved.version === 2 && resolved.id === "catalog:fallen angel|scre") assertFallenAngelProjection({resolved, current, chassisSource: original.source});
+		if (resolved.version === 2 && resolved.id === "catalog:undead|scre") assertUndeadProjection({resolved, current, chassisSource: original.source});
 		const conflicts = [];
 		for (const [path, write] of candidateWrites) {
 			if (_equal(write.before, write.after)) continue;
@@ -946,7 +978,7 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id) || ["catalog:fey beast|scre", "catalog:fallen angel|scre"].includes(resolved.id));
+		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id) || ["catalog:fey beast|scre", "catalog:fallen angel|scre", "catalog:undead|scre"].includes(resolved.id));
 		const hasNumericGroup = reanimation || (resolved.version === 2 && resolved.id === "catalog:zombie|dmg");
 		const isNumericStep = change => reanimation || change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
@@ -1012,7 +1044,7 @@ export class BestiaryCreatureTransformation {
 		const data = operation?.data;
 		if (!_isObject(data) || !_equal(Object.keys(data).sort(), ["resolved", "sourceUid", "acknowledgedPrerequisites", "dmApproved", "conflictDecisions", "approvedConflicts", "manualReview", "integrity"].sort())) _fail("Malformed transformation operation.");
 		_assertJson(data);
-		if ((data.resolved?.frozenForms || (data.resolved?.version === 2 && ["catalog:fey beast|scre", "catalog:fallen angel|scre"].includes(data.resolved.id)))
+		if ((data.resolved?.frozenForms || (data.resolved?.version === 2 && ["catalog:fey beast|scre", "catalog:fallen angel|scre", "catalog:undead|scre"].includes(data.resolved.id)))
 			&& new TextEncoder().encode(JSON.stringify(operation)).length > _MAX_OPERATION_BYTES) _fail("Resolved transformation exceeds the operation size budget.", "CREATURE_TRANSFORMATION_TOO_LARGE");
 		const {integrity, ...payload} = data;
 		if (integrity !== _digest(payload) || !_equal(data.manualReview, data.resolved?.manualReview) || data.sourceUid !== _getUid(baseCreature)) _fail("Transformation operation has been changed or belongs to another creature.", "CREATURE_TRANSFORMATION_TAMPERED");

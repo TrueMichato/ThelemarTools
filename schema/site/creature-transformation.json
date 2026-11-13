@@ -372,6 +372,58 @@
 				}, "additionalProperties": false}
 			}, "anyOf": [{"required": ["walk"]}, {"required": ["fly"]}, {"required": ["swim"]}, {"required": ["climb"]}, {"required": ["burrow"]}], "additionalProperties": false
 		},
+		"undeadChange": {
+			"description": "Closed M12 source setters. Runtime additionally verifies the complete frozen clause projection against the actual pre-owner target.",
+			"oneOf": [
+				{"type": "object", "properties": {
+					"op": {"const": "setUndeadNature"}, "value": {"$ref": "#/$defs/reanimationChange/oneOf/0/properties/value"},
+					"alignment": {"enum": [["L", "G"], ["N", "G"], ["C", "G"], ["L", "N"], ["N"], ["C", "N"], ["L", "E"], ["N", "E"], ["C", "E"], ["U"]]}
+				}, "required": ["op", "value", "alignment"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setUndeadMovement"}, "value": {"$ref": "#/$defs/vampireSpeed"}
+				}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setUndeadEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "match": {"$ref": "#/$defs/identity"}, "entry": {"$ref": "#/$defs/entry"}
+				}, "required": ["op", "section", "match", "entry"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setUndeadSenses"}, "value": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}}
+				}, "required": ["op", "value"], "additionalProperties": false}
+			]
+		},
+		"compiledUndead": {
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"const": "catalog:undead|scre"}, "kind": {"const": "catalog"},
+				"identity": {"allOf": [{"$ref": "#/$defs/identity"}, {"type": "object", "properties": {"name": {"const": "Undead"}, "source": {"const": "SCRE"}}}]},
+				"provenance": {"$ref": "#/$defs/provenance"}, "eligibility": {"const": [{"dmApproval": true}]},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"category": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["ghostly", "skeletal", "vampiric", "zombie", "ghoulish", "mummified"]}},
+					"ghostly-strikes": {"type": "array", "maxItems": 1, "items": {"enum": ["spectral-strikes", "withering-strikes"]}},
+					"ghostly-features": {"type": "array", "maxItems": 1, "items": {"const": "etherealness"}},
+					"vampiric-weaknesses": {"type": "array", "uniqueItems": true, "maxItems": 4, "items": {"enum": ["forbiddance", "running-water", "stake-to-heart", "sunlight"]}},
+					"ghoulish-features": {"type": "array", "uniqueItems": true, "maxItems": 2, "items": {"enum": ["ghoulish-strikes", "stench"]}},
+					"mummified-features": {"type": "array", "maxItems": 1, "items": {"const": "rotting-strikes"}},
+					"miscellaneous": {"type": "array", "uniqueItems": true, "maxItems": 15, "items": {"enum": ["deathly-aura", "detect-life", "ethereal-sight", "headless", "bestow-curse", "chill-touch", "magic-resistance", "necrotic-absorption", "overwhelming-necrosis", "shadow-stealth", "sunlight-sensitivity", "touch-of-death", "turn-immunity", "turn-resistance", "dreadful-glare"]}},
+					"automation-undead": {"const": ["scre-m12"]},
+					"automation-undead-inputs": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "minLength": 2, "maxLength": 30000}}
+				}, "required": ["category", "ghostly-strikes", "ghostly-features", "vampiric-weaknesses", "ghoulish-features", "mummified-features", "miscellaneous", "automation-undead", "automation-undead-inputs"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"$ref": "#/$defs/undeadChange"},
+					{"allOf": [{"$ref": "#/$defs/numericChange"}, {"type": "object", "properties": {"op": {"enum": ["setSaveBonus", "setSkillBonus", "setPassivePerception"]}}}]},
+					{"$ref": "#/$defs/bindingChange"},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"oneOf": [
+						{"type": "object", "properties": {"op": {"const": "setAbility"}, "ability": {"enum": ["str", "int", "wis", "cha"]}}},
+						{"type": "object", "properties": {"op": {"const": "grantResistance"}, "value": {"enum": ["necrotic", "acid", "cold", "fire", "lightning", "thunder"]}}},
+						{"type": "object", "properties": {"op": {"const": "grantImmunity"}, "value": {"enum": ["poison", "necrotic"]}}},
+						{"type": "object", "properties": {"op": {"const": "grantVulnerability"}, "value": {"enum": ["bludgeoning", "fire"]}}},
+						{"type": "object", "properties": {"op": {"const": "grantConditionImmunity"}, "value": {"enum": ["charmed", "exhaustion", "frightened", "grappled", "paralyzed", "petrified", "poisoned", "prone", "restrained"]}}},
+						{"type": "object", "properties": {"op": {"const": "grantConditionalDefense"}, "kind": {"const": "resistance"}, "value": {"enum": ["bludgeoning", "piercing", "slashing"]}, "when": {"const": "nonmagical"}}},
+						{"type": "object", "properties": {"op": {"const": "addEntry"}, "section": {"enum": ["trait", "action", "bonus"]}, "entry": {"type": "object", "properties": {"source": {"const": "SCRE"}}}}}
+					]}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			}, "required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"], "additionalProperties": false
+		},
 		"fallenAngelChange": {
 			"description": "Closed M11 source setters; runtime also verifies complete effects against the actual pre-owner target before resolving coherent winners.",
 			"oneOf": [
@@ -646,7 +698,7 @@
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
-				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark", "fey-beast", "fallen-angel"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark", "fey-beast", "fallen-angel", "undead-scre"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
 		},
@@ -910,6 +962,26 @@
 					{"properties": {"name": {"const": "Vampire"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "vampire"}}}}},
 					{"properties": {"name": {"const": "Lycanthropy"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "lycanthropy"}}}}},
 					{"properties": {"name": {"const": "Wereshark"}, "source": {"const": "Arcadia27"}, "automation": {"type": "object", "properties": {"profile": {"const": "wereshark"}}}}},
+					{"properties": {"name": {"const": "Undead"}, "source": {"const": "SCRE"}, "automation": {"type": "object", "properties": {"profile": {"const": "undead-scre"}}},
+						"optionGroups": {"type": "array", "minItems": 7, "maxItems": 7, "prefixItems": [
+							{"type": "object", "properties": {"id": {"const": "category"}, "selection": {"const": "one"}, "required": {"const": true}, "options": {"type": "array", "minItems": 6, "maxItems": 6, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "ghostly"}}}, {"type": "object", "properties": {"id": {"const": "skeletal"}}}, {"type": "object", "properties": {"id": {"const": "vampiric"}}}, {"type": "object", "properties": {"id": {"const": "zombie"}}}, {"type": "object", "properties": {"id": {"const": "ghoulish"}}}, {"type": "object", "properties": {"id": {"const": "mummified"}}}
+							]}}},
+							{"type": "object", "properties": {"id": {"const": "ghostly-strikes"}, "selection": {"const": "one"}, "required": {"const": false}, "options": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "spectral-strikes"}}}, {"type": "object", "properties": {"id": {"const": "withering-strikes"}}}
+							]}}},
+							{"type": "object", "properties": {"id": {"const": "ghostly-features"}, "selection": {"const": "any"}, "required": {"const": false}, "options": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {"id": {"const": "etherealness"}}}}}},
+							{"type": "object", "properties": {"id": {"const": "vampiric-weaknesses"}, "selection": {"const": "any"}, "required": {"const": false}, "options": {"type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "forbiddance"}}}, {"type": "object", "properties": {"id": {"const": "running-water"}}}, {"type": "object", "properties": {"id": {"const": "stake-to-heart"}}}, {"type": "object", "properties": {"id": {"const": "sunlight"}}}
+							]}}},
+							{"type": "object", "properties": {"id": {"const": "ghoulish-features"}, "selection": {"const": "any"}, "required": {"const": false}, "options": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "ghoulish-strikes"}}}, {"type": "object", "properties": {"id": {"const": "stench"}}}
+							]}}},
+							{"type": "object", "properties": {"id": {"const": "mummified-features"}, "selection": {"const": "any"}, "required": {"const": false}, "options": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {"id": {"const": "rotting-strikes"}}}}}},
+							{"type": "object", "properties": {"id": {"const": "miscellaneous"}, "selection": {"const": "any"}, "required": {"const": false}, "options": {"type": "array", "minItems": 15, "maxItems": 15, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "deathly-aura"}}}, {"type": "object", "properties": {"id": {"const": "detect-life"}}}, {"type": "object", "properties": {"id": {"const": "ethereal-sight"}}}, {"type": "object", "properties": {"id": {"const": "headless"}}}, {"type": "object", "properties": {"id": {"const": "bestow-curse"}}}, {"type": "object", "properties": {"id": {"const": "chill-touch"}}}, {"type": "object", "properties": {"id": {"const": "magic-resistance"}}}, {"type": "object", "properties": {"id": {"const": "necrotic-absorption"}}}, {"type": "object", "properties": {"id": {"const": "overwhelming-necrosis"}}}, {"type": "object", "properties": {"id": {"const": "shadow-stealth"}}}, {"type": "object", "properties": {"id": {"const": "sunlight-sensitivity"}}}, {"type": "object", "properties": {"id": {"const": "touch-of-death"}}}, {"type": "object", "properties": {"id": {"const": "turn-immunity"}}}, {"type": "object", "properties": {"id": {"const": "turn-resistance"}}}, {"type": "object", "properties": {"id": {"const": "dreadful-glare"}}}
+							]}}}
+						]}}},
 					{"properties": {"name": {"const": "Fallen Angel"}, "source": {"const": "SCRE"}, "automation": {"type": "object", "properties": {"profile": {"const": "fallen-angel"}}},
 						"optionGroups": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {
 							"id": {"const": "allegiance"}, "selection": {"const": "one"}, "required": {"const": true},

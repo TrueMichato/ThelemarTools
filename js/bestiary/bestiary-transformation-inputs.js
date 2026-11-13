@@ -7,6 +7,7 @@ import {BestiaryQuickActionsUtil} from "./bestiary-quick-actions-engine.js";
 import {getLycanthropeProfile} from "../creature-transformation-lycanthrope.js";
 import {observeFeyBeast} from "../creature-transformation-fey-beast.js";
 import {observeFallenAngel} from "../creature-transformation-fallen-angel.js";
+import {observeUndead} from "../creature-transformation-undead.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -43,6 +44,16 @@ export function inspectCreatureTransformationInputs ({target, resolved}) {
 		return control;
 	};
 	const issue = (control, reason, selector = control) => model.requirements.push({targetId: target.id, control, selector, reason});
+	if (resolved?.version === 2 && resolved.id === "catalog:undead|scre" && resolved.automation?.profile === "undead-scre") {
+		try {
+			const binding = observeUndead({current, selected: resolved.selectedOptions, chassisSource: target.baseCreature.source});
+			add("undeadBinding", binding.key, {facts: binding.facts});
+		} catch (error) {
+			if (!known.has(error.code)) throw error;
+			issue("undead", error.message);
+		}
+		return {...model, status: model.requirements.length ? "blocked" : "needs-answers"};
+	}
 	if (resolved?.version === 2 && resolved.id === "catalog:fallen angel|scre" && resolved.automation?.profile === "fallen-angel") {
 		try {
 			for (const binding of observeFallenAngel({current, chassisSource: target.baseCreature.source, allegiance: resolved.selectedOptions.allegiance[0]})) {
@@ -327,6 +338,15 @@ export function compileCreatureTransformationInputs ({target, resolved, answers,
 		requireAnswer(keysAre(answers, ["targetKey", "controls"]) && answers.targetKey === model.targetKey && isRecord(answers.controls),
 			"Answers are missing or stale for this exact target/source/history; retain the old draft without retargeting it.", "answers");
 		requireAnswer(Object.keys(answers.controls).every(id => model.controls.some(it => it.id === id)), "An answer references an unknown target/source-qualified control.", "answers");
+		if (resolved.id === "catalog:undead|scre") {
+			const item = model.controls[0];
+			const answer = answers.controls[item.id];
+			requireAnswer(keysAre(answer, ["value", "reason"]) && isRecord(answer.value) && text(answer.reason), "Resolve the finite M12 source decisions for this exact target and record their reason.", item.kind, item.selector);
+			const automationInputs = {undead: answer.value};
+			control = "projection";
+			const projection = project({target, resolved, automationInputs});
+			return {...model, status: "ready", projectionOnly: true, projection, automationInputs};
+		}
 		if (resolved.id === "catalog:fallen angel|scre") {
 			const fallenAngel = {};
 			for (const item of model.controls) {

@@ -8,6 +8,7 @@ import {compileVampire, isCompiledVampire} from "./creature-transformation-vampi
 import {compileLycanthrope, getLycanthropeProfile, isCompiledLycanthrope} from "./creature-transformation-lycanthrope.js";
 import {compileFeyBeast, isCompiledFeyBeast, isFeyBeastCatalog} from "./creature-transformation-fey-beast.js";
 import {compileFallenAngel, isCompiledFallenAngel, isFallenAngelCatalog} from "./creature-transformation-fallen-angel.js";
+import {compileUndead, isCompiledUndead, isUndeadCatalog} from "./creature-transformation-undead.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -166,6 +167,13 @@ const assertHalfDragonBreaths = rows => {
 	}
 };
 const assertAutomation = (automation, identity) => {
+	if (identity?.name === "Undead" && identity.source === "SCRE") {
+		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
+			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== "undead-scre") {
+			throw new CreatureTransformationCandidateError("Only the exact staged Undead|SCRE M12 profile is supported.");
+		}
+		return;
+	}
 	if (identity?.name === "Fallen Angel" && identity.source === "SCRE") {
 		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
 			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== "fallen-angel") {
@@ -580,6 +588,7 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions, onIn
 		}
 		if (candidate.automation?.profile === "fey-beast" && !isFeyBeastCatalog(candidate)) throw new CreatureTransformationCandidateError("M10 requires the existing ten-choice Fey Beast features contract.");
 		if (candidate.automation?.profile === "fallen-angel" && !isFallenAngelCatalog(candidate)) throw new CreatureTransformationCandidateError("M11 requires the existing two-choice Fallen Angel allegiance contract.");
+		if (candidate.automation?.profile === "undead-scre" && !isUndeadCatalog(candidate)) throw new CreatureTransformationCandidateError("M12 requires the existing six categories and seven option groups.");
 		const matches = [...byId.get(candidate.id) || [], ...pending.filter(it => it.candidate.id === candidate.id)];
 		if (matches.length && candidate.kind !== "race") throw new Error(`Duplicate creature transformation identity: ${candidate.id}`);
 		const signature = getStableSignature(candidate);
@@ -700,7 +709,8 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 		if (!Array.isArray(chosen) || (group.selection === "one" && chosen.length > 1) || (group.required && !chosen.length) || new Set(chosen).size !== chosen.length) {
 			throw new Error(`Invalid selection for ${group.id}.`);
 		}
-		if (chosen.length && group.appliesTo && !selections[group.appliesTo.group]?.includes(group.appliesTo.option)) throw new Error(`Option group ${group.id} requires ${group.appliesTo.group}/${group.appliesTo.option}.`);
+		if (chosen.length && group.appliesTo && !selections[group.appliesTo.group]?.includes(group.appliesTo.option)
+			&& !(automationVersion === 2 && candidate.id === "catalog:undead|scre")) throw new Error(`Option group ${group.id} requires ${group.appliesTo.group}/${group.appliesTo.option}.`);
 		selectedOptions[group.id] = [...chosen];
 		for (const optionId of chosen) {
 			const option = group.options.find(it => it.id === optionId);
@@ -733,6 +743,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (resolved?.id === "catalog:undead|scre") return isCompiledUndead(resolved);
 	if (resolved?.id === "catalog:fallen angel|scre") return isCompiledFallenAngel(resolved);
 	if (resolved?.id === "catalog:fey beast|scre") return isCompiledFeyBeast(resolved);
 	if (getLycanthropeProfile(resolved?.id)) return isCompiledLycanthrope(resolved);
@@ -828,6 +839,11 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && resolved.id === "catalog:undead|scre") {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		return compileUndead({resolved, current, inputs, chassisSource});
+	}
 	if (resolved?.version === 2 && resolved.id === "catalog:fallen angel|scre") {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);
