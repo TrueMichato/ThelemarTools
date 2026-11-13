@@ -372,6 +372,55 @@
 				}, "additionalProperties": false}
 			}, "anyOf": [{"required": ["walk"]}, {"required": ["fly"]}, {"required": ["swim"]}, {"required": ["climb"]}, {"required": ["burrow"]}], "additionalProperties": false
 		},
+		"feyBeastChange": {
+			"oneOf": [
+				{"type": "object", "properties": {
+					"op": {"const": "setFeyBeastType"},
+					"value": {"type": "object", "properties": {
+						"type": {"const": "fey"},
+						"tags": {"$ref": "#/$defs/reanimationChange/oneOf/0/properties/value/properties/tags"},
+						"swarmSize": {"$ref": "#/$defs/size"}
+					}, "required": ["type"], "additionalProperties": false}
+				}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "grantFeyBeastUnderstanding"}}, "required": ["op"], "additionalProperties": false}
+			]
+		},
+		"feyBeastFeatures": {
+			"type": "array", "minItems": 1, "maxItems": 10, "uniqueItems": true,
+			"items": {"enum": ["barkskin", "fey-touched", "entangle", "spike-growth", "natural-camouflage", "plant-stride", "rooted", "tree-stride", "nature-sense", "teleport"]}
+		},
+		"compiledFeyBeast": {
+			"description": "M10 source-only output. Runtime checks the complete selected effects against the actual pre-owner target before coherent conflict winners; no source lookup during replay.",
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"const": "catalog:fey beast|scre"}, "kind": {"const": "catalog"},
+				"identity": {"allOf": [{"$ref": "#/$defs/identity"}, {"type": "object", "properties": {"name": {"const": "Fey Beast"}, "source": {"const": "SCRE"}}}]},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"const": [{"types": ["beast"], "dmApproval": true}]},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"features": {"$ref": "#/$defs/feyBeastFeatures"},
+					"automation-fey-beast": {"const": ["scre-m10"]},
+					"automation-fey-beast-inputs": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "minLength": 2, "maxLength": 256}}
+				}, "required": ["features", "automation-fey-beast", "automation-fey-beast-inputs"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 2, "maxItems": 12, "items": {"oneOf": [
+					{"$ref": "#/$defs/feyBeastChange"},
+					{"type": "object", "properties": {"op": {"const": "setArmorClass"}, "value": {"const": [{"ac": 16, "from": ["natural armor (Barkskin)"]}]}}, "required": ["op", "value"], "additionalProperties": false},
+					{"allOf": [{"$ref": "#/$defs/bindingChange"}, {"type": "object", "properties": {
+						"op": {"const": "addInnateSpellcasting"}, "name": {"enum": ["Innate Spellcasting: Entangle", "Innate Spellcasting: Spike Growth"]},
+						"source": {"const": "SCRE"}, "ability": {"const": "wis"}, "components": {"const": ["S"]},
+						"spells": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {
+							"spell": {"enum": ["entangle|PHB", "spike growth|PHB"]}, "usage": {"const": "daily"}, "uses": {"const": 1}, "each": {"const": true}
+						}, "required": ["spell", "usage", "uses", "each"], "additionalProperties": false}}
+					}}]},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {
+						"op": {"enum": ["addEntry", "replaceEntry"]}, "section": {"enum": ["trait", "action"]}, "onMissing": {"const": "error"},
+						"entry": {"type": "object", "properties": {"source": {"const": "SCRE"}, "name": {"enum": ["Fey-Touched", "Natural Camouflage", "Plant Stride", "Rooted", "Tree Stride", "Nature Sense", "Teleport {@recharge 4}"]}}}
+					}}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			}, "required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"additionalProperties": false
+		},
 		"lycanthropeChange": {
 			"oneOf": [
 				{"type": "object", "properties": {
@@ -521,7 +570,7 @@
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
-				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark", "fey-beast"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
 		},
@@ -785,6 +834,23 @@
 					{"properties": {"name": {"const": "Vampire"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "vampire"}}}}},
 					{"properties": {"name": {"const": "Lycanthropy"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "lycanthropy"}}}}},
 					{"properties": {"name": {"const": "Wereshark"}, "source": {"const": "Arcadia27"}, "automation": {"type": "object", "properties": {"profile": {"const": "wereshark"}}}}},
+					{"properties": {"name": {"const": "Fey Beast"}, "source": {"const": "SCRE"}, "automation": {"type": "object", "properties": {"profile": {"const": "fey-beast"}}},
+						"optionGroups": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {
+							"id": {"const": "features"}, "selection": {"const": "any"}, "required": {"const": true},
+							"options": {"type": "array", "minItems": 10, "maxItems": 10, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "barkskin"}}},
+								{"type": "object", "properties": {"id": {"const": "fey-touched"}}},
+								{"type": "object", "properties": {"id": {"const": "entangle"}}},
+								{"type": "object", "properties": {"id": {"const": "spike-growth"}}},
+								{"type": "object", "properties": {"id": {"const": "natural-camouflage"}}},
+								{"type": "object", "properties": {"id": {"const": "plant-stride"}}},
+								{"type": "object", "properties": {"id": {"const": "rooted"}}},
+								{"type": "object", "properties": {"id": {"const": "tree-stride"}}},
+								{"type": "object", "properties": {"id": {"const": "nature-sense"}}},
+								{"type": "object", "properties": {"id": {"const": "teleport"}}}
+							]}
+						}}}
+					}},
 					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
 				]}}
 			],

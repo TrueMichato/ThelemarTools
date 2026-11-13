@@ -5,6 +5,7 @@ import {getCreatureTransformationCrProficiency} from "../creature-transformation
 import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog-adapter.js";
 import {BestiaryQuickActionsUtil} from "./bestiary-quick-actions-engine.js";
 import {getLycanthropeProfile} from "../creature-transformation-lycanthrope.js";
+import {observeFeyBeast} from "../creature-transformation-fey-beast.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -41,6 +42,18 @@ export function inspectCreatureTransformationInputs ({target, resolved}) {
 		return control;
 	};
 	const issue = (control, reason, selector = control) => model.requirements.push({targetId: target.id, control, selector, reason});
+	if (resolved?.version === 2 && resolved.id === "catalog:fey beast|scre" && resolved.automation?.profile === "fey-beast") {
+		try {
+			const observed = observeFeyBeast({current, features: resolved.selectedOptions.features});
+			model.facts = observed;
+			if (observed.speaksSylvan === null) add("confirmation", "speaksSylvan", {facts: current.languages, choices: [true, false]});
+			if (resolved.selectedOptions.features.some(id => ["entangle", "spike-growth"].includes(id)) && observed.proficiencyBonus === undefined) add("proficiencyBonus", "current", {reason: observed.proficiencyReason});
+		} catch (error) {
+			if (!known.has(error.code)) throw error;
+			issue("feyBeast", error.message);
+		}
+		return {...model, status: model.requirements.length ? "blocked" : model.controls.length ? "needs-answers" : "ready"};
+	}
 	if (resolved?.version === 2 && getLycanthropeProfile(resolved.id) && getLycanthropeProfile(resolved.id) === resolved.automation?.profile) {
 		const shark = resolved.id === "catalog:wereshark|arcadia27";
 		add("lycanthropeConsent", "adaptation", {choices: [shark ? "arcadia27-template" : "sidebar-npc"]});
@@ -302,6 +315,23 @@ export function compileCreatureTransformationInputs ({target, resolved, answers,
 		requireAnswer(keysAre(answers, ["targetKey", "controls"]) && answers.targetKey === model.targetKey && isRecord(answers.controls),
 			"Answers are missing or stale for this exact target/source/history; retain the old draft without retargeting it.", "answers");
 		requireAnswer(Object.keys(answers.controls).every(id => model.controls.some(it => it.id === id)), "An answer references an unknown target/source-qualified control.", "answers");
+		if (resolved.id === "catalog:fey beast|scre") {
+			const feyBeast = {};
+			for (const item of model.controls) {
+				const answer = answers.controls[item.id];
+				if (item.kind === "proficiencyBonus") {
+					requireAnswer(keysAre(answer, ["value", "reason"]) && integer(answer.value, 1, 30) && text(answer.reason), "Declare the actual current PB with its source/reason, not an estimated CR.", item.kind, item.selector);
+					feyBeast.proficiencyBonus = answer.value;
+				} else {
+					requireAnswer(keysAre(answer, ["value"]) && typeof answer.value === "boolean", "Confirm whether this actual language capability includes speaking Sylvan; existing speech is retained.", item.kind, item.selector);
+					feyBeast.speaksSylvan = answer.value;
+				}
+			}
+			const automationInputs = {feyBeast};
+			control = "projection";
+			const projection = project({target, resolved, automationInputs});
+			return {...model, status: "ready", projectionOnly: true, projection, automationInputs};
+		}
 		if (getLycanthropeProfile(resolved.id)) {
 			const get = (kind, selector) => {
 				const item = model.controls.find(control => control.kind === kind && same(control.selector, selector));

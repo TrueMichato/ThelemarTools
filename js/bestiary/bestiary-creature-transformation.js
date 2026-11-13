@@ -8,6 +8,7 @@ import {isReanimationChange, isReanimationOp} from "../creature-transformation-r
 import {isSporeShadowChange, isSporeShadowOp} from "../creature-transformation-spore-shadow.js";
 import {assertVampireProjection, getVampireMistImmunity, isVampireChange, isVampireOp} from "../creature-transformation-vampire.js";
 import {assertLycanthropeProjection, getLycanthropeProfile, isLycanthropeChange, isLycanthropeOp} from "../creature-transformation-lycanthrope.js";
+import {assertFeyBeastProjection, isFeyBeastChange, isFeyBeastOp} from "../creature-transformation-fey-beast.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -142,6 +143,10 @@ function _validateEntry (entry) {
 
 function _validateChange (change) {
 	if (!_isObject(change)) _fail("Transformation changes must be objects.");
+	if (isFeyBeastOp(change.type)) {
+		if (!isFeyBeastChange(change, "type")) _fail(`Invalid M10 setter "${change.type}".`);
+		return;
+	}
 	if (isLycanthropeOp(change.type)) {
 		if (!isLycanthropeChange(change, "type")) _fail(`Invalid M9 setter "${change.type}".`);
 		return;
@@ -282,6 +287,7 @@ function _validateRecipe (resolved, {formLeaf = false} = {}) {
 	if (!formLeaf && resolved?.version === 2 && resolved.id === "catalog:vampire|mm" && resolved.selectedOptions?.outcome?.[0] === "vampire") _fail("A full M8 vampire requires its frozen true/bat/mist form envelope.");
 	if (!formLeaf && resolved?.version === 2 && getLycanthropeProfile(resolved.id)) _fail("An M9 lycanthrope requires its frozen humanoid/hybrid/animal form envelope.");
 	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"], "Resolved transformation");
+	if (resolved.version !== 2 && resolved.changes?.some(change => isFeyBeastOp(change.type))) _fail("M10 setters require a compiled version-2 Fey Beast snapshot.");
 	if (Object.hasOwn(resolved, "version") && !isCompiledCreatureTransformation(resolved)) _fail("Invalid compiled version-2 transformation profile or choices.");
 	_expectString(resolved.id, "Transformation ID");
 	if (!["catalog", "race"].includes(resolved.kind)) _fail("Transformation kind must be catalog or race.");
@@ -406,6 +412,19 @@ function _applyChange (creature, change, chassis) {
 	let before;
 	let after;
 	switch (change.type) {
+		case "setFeyBeastType":
+			path = "type";
+			before = out.type;
+			out.type = Object.keys(change.value).length === 1 ? "fey" : _copy(change.value);
+			after = out.type;
+			break;
+		case "grantFeyBeastUnderstanding":
+			path = "languages";
+			before = _copy(out.languages);
+			out.languages ||= [];
+			out.languages.push("understands Sylvan but can't speak it");
+			after = out.languages;
+			break;
 		case "setLycanthropeForm":
 		case "setLycanthropeAlignment": {
 			const values = change.type === "setLycanthropeForm"
@@ -815,6 +834,7 @@ export class BestiaryCreatureTransformation {
 				assertLycanthropeProjection({resolved: profile.resolved, current, proposed: projected, chassisSource: original.source});
 			}
 		}
+		if (resolved.version === 2 && resolved.id === "catalog:fey beast|scre") assertFeyBeastProjection({resolved, current, chassisSource: original.source});
 		const conflicts = [];
 		for (const [path, write] of candidateWrites) {
 			if (_equal(write.before, write.after)) continue;
@@ -836,7 +856,7 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id));
+		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id) || resolved.id === "catalog:fey beast|scre");
 		const hasNumericGroup = reanimation || (resolved.version === 2 && resolved.id === "catalog:zombie|dmg");
 		const isNumericStep = change => reanimation || change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
@@ -902,7 +922,8 @@ export class BestiaryCreatureTransformation {
 		const data = operation?.data;
 		if (!_isObject(data) || !_equal(Object.keys(data).sort(), ["resolved", "sourceUid", "acknowledgedPrerequisites", "dmApproved", "conflictDecisions", "approvedConflicts", "manualReview", "integrity"].sort())) _fail("Malformed transformation operation.");
 		_assertJson(data);
-		if (data.resolved?.frozenForms && new TextEncoder().encode(JSON.stringify(operation)).length > _MAX_OPERATION_BYTES) _fail("Resolved transformation exceeds the operation size budget.", "CREATURE_TRANSFORMATION_TOO_LARGE");
+		if ((data.resolved?.frozenForms || (data.resolved?.version === 2 && data.resolved.id === "catalog:fey beast|scre"))
+			&& new TextEncoder().encode(JSON.stringify(operation)).length > _MAX_OPERATION_BYTES) _fail("Resolved transformation exceeds the operation size budget.", "CREATURE_TRANSFORMATION_TOO_LARGE");
 		const {integrity, ...payload} = data;
 		if (integrity !== _digest(payload) || !_equal(data.manualReview, data.resolved?.manualReview) || data.sourceUid !== _getUid(baseCreature)) _fail("Transformation operation has been changed or belongs to another creature.", "CREATURE_TRANSFORMATION_TAMPERED");
 		const decisions = data.conflictDecisions;
