@@ -279,6 +279,45 @@ CR/XP with explicit review; usable combat/control text is not a live rules engin
 Estimated CR/override composition, guided-editor integration, M10-M13 and final
 rollout remain open. Species stays deferred.
 
+M10 [#408](https://github.com/TrueMichato/ThelemarTools/pull/408) stages Fey Beast
+source automation. Beast-to-fey conversion and any nonempty selection of the ten
+existing features compile into concrete effects and usable rules; the source's
+typical feature count is not a mandatory cap. Barkskin sets AC 16 rather than a
+floor. Entangle and Spike Growth are separate once-daily Wisdom spells retaining
+somatic components. Conditional benefits, Plant Stride, Rooted saving throws,
+Tree Stride movement/tree/exit requirements, Nature Sense and Teleport retain
+their complete source qualifications, not a live world-adjudication engine.
+
+Language handling preserves existing capabilities and grants understanding-only
+Sylvan, never ungranted speech. Parent review reproduced five ordinary failures
+covering actual MM Giant Owl/Elk/Eagle language lists and explicit-negative Sylvan
+fixtures. Five new regressions failed against unchanged pre-correction production
+and passed after the bounded fixes; the unchanged parent probe then passed all
+16 checks. Unresolved speech still requires its explicit target-qualified answer.
+
+Frozen concrete effects and checked language/proficiency answers replay and
+remove through actual Registry and Encounter Store/Adapter JSON paths without
+loading today's catalog or source. Projection closure runs before coherent
+conflict winners. The other thirteen catalog records, legacy operations and
+Species identities/options remain unchanged. Actual exported public-base code,
+with 539 raw Git blobs verified, matches selected current legacy outputs for
+fourteen first-required catalog defaults, three actual PHB Species defaults and
+eleven Fey v1 combinations; this is not exhaustive option/target/history coverage.
+
+Selected verification passed six suites/216 tests, including 32 M10 cases;
+parent independently repeated four suites/116 tests. Normal commit hooks passed
+all 37 related suites/686 tests with exactly eight JS inputs. The published-leaf
+full gate passed 817 suites/22,115 tests, with the unchanged one skipped suite/
+13 skipped tests, all 24 required real NPC fixtures and existing crafting inputs.
+Complete passed-suite identities matched the preceding public set plus M10;
+ESLint/stylelint passed without a weakened-input fallback.
+
+No browser/E2E, disk-backed Encounter or full data-validation gate is claimed.
+M10 remains internal/staged, retains CR/XP with explicit review and leaves source/
+page/edition attribution provisional. Estimated CR/override composition,
+guided-editor integration, M11-M13 and final default rollout remain open.
+Species stays deferred; the Templates bug is not closed.
+
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
 global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver

@@ -668,7 +668,7 @@ describe("M9 source-defined MM lycanthropes and Arcadia27 Wereshark", () => {
 		for (const recipe of catalog.creatureTransformation) {
 			const prior = acceptedBase.creatureTransformation.find(entry => entry.name === recipe.name && entry.source === recipe.source);
 			const current = structuredClone(recipe);
-			if (["Lycanthropy|MM", "Wereshark|Arcadia27"].includes(`${recipe.name}|${recipe.source}`)) delete current.automation;
+			if (["Lycanthropy|MM", "Wereshark|Arcadia27", "Fey Beast|SCRE"].includes(`${recipe.name}|${recipe.source}`)) delete current.automation;
 			expect(current).toEqual(prior);
 		}
 		for (const kind of kinds) {

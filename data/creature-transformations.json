@@ -417,7 +417,8 @@
 			"manualReview": [
 				{"field": "eligibility", "reason": "Page, edition, and screenshot attribution are not independently verified."},
 				{"field": "traits", "reason": "Reconcile any pre-existing ability to speak Sylvan."}
-			]
+			],
+			"automation": {"version": 2, "profile": "fey-beast", "rollout": "staged"}
 		},
 		{
 			"name": "Fallen Angel",
