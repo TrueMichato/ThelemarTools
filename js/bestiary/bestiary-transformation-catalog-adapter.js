@@ -7,6 +7,7 @@ import {assertFrozenCreatureTransformation} from "../creature-transformation-for
 import {isReanimationChange, isReanimationOp} from "../creature-transformation-reanimation.js";
 import {isSporeShadowChange, isSporeShadowOp} from "../creature-transformation-spore-shadow.js";
 import {isVampireChange, isVampireOp} from "../creature-transformation-vampire.js";
+import {isLycanthropeChange, isLycanthropeOp} from "../creature-transformation-lycanthrope.js";
 
 const DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
 const ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
@@ -98,7 +99,7 @@ function validateStep (step, allowStats) {
 				&& Array.isArray(step.from) && !!step.from.length && new Set(step.from).size === step.from.length
 				&& step.from.every(it => DAMAGE_TYPES.has(it)) && DAMAGE_TYPES.has(step.to)
 				&& ["skip", "error"].includes(step.onMissing);
-		default: return allowStats && (isCreatureTransformationStatChange(step) || isCreatureTransformationBindingChange(step) || isCreatureTransformationCrChange(step) || isReanimationChange(step) || isSporeShadowChange(step) || isVampireChange(step));
+		default: return allowStats && (isCreatureTransformationStatChange(step) || isCreatureTransformationBindingChange(step) || isCreatureTransformationCrChange(step) || isReanimationChange(step) || isSporeShadowChange(step) || isVampireChange(step) || isLycanthropeChange(step));
 	}
 }
 
@@ -123,6 +124,7 @@ export function normalizeCreatureTransformation (resolved) {
 		expect(!isReanimationOp(step?.op) || resolved.version === 2, "reanimation setters require an opt-in version-2 snapshot");
 		expect(!isSporeShadowOp(step?.op) || resolved.version === 2, "M7 setters require an opt-in version-2 snapshot");
 		expect(!isVampireOp(step?.op) || resolved.version === 2, "M8 setters require an opt-in version-2 snapshot");
+		expect(!isLycanthropeOp(step?.op) || resolved.version === 2, "M9 setters require an opt-in version-2 snapshot");
 		expect(validateStep(step, resolved.version === 2), `invalid or unrepresentable change ${index + 1} (${step?.op || "missing op"})`);
 		const {op, ...fields} = step;
 		return {type: op, ...structuredClone(fields)};

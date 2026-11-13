@@ -5,6 +5,7 @@ import {estimateCreatureTransformationCr, getCreatureTransformationCrProficiency
 import {compileReanimation, isCompiledReanimation} from "./creature-transformation-reanimation.js";
 import {compileSporeShadow, getSporeShadowProfile, isCompiledSporeShadow} from "./creature-transformation-spore-shadow.js";
 import {compileVampire, isCompiledVampire} from "./creature-transformation-vampire.js";
+import {compileLycanthrope, getLycanthropeProfile, isCompiledLycanthrope} from "./creature-transformation-lycanthrope.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -163,6 +164,16 @@ const assertHalfDragonBreaths = rows => {
 	}
 };
 const assertAutomation = (automation, identity) => {
+	const lycanthrope = getLycanthropeProfile(getId("catalog", identity));
+	if (lycanthrope) {
+		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
+			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== lycanthrope
+			|| identity.name !== (lycanthrope === "wereshark" ? "Wereshark" : "Lycanthropy")
+			|| identity.source !== (lycanthrope === "wereshark" ? "Arcadia27" : "MM")) {
+			throw new CreatureTransformationCandidateError("Only the exact source-qualified staged M9 lycanthrope profiles are supported.");
+		}
+		return;
+	}
 	if (identity?.name === "Vampire" && identity.source === "MM") {
 		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
 			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== "vampire") {
@@ -704,6 +715,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (getLycanthropeProfile(resolved?.id)) return isCompiledLycanthrope(resolved);
 	if (resolved?.id === "catalog:vampire|mm") return isCompiledVampire(resolved);
 	if (getSporeShadowProfile(resolved?.id)) return isCompiledSporeShadow(resolved);
 	if (Object.hasOwn(resolved?.selectedOptions || {}, "automation-reanimation")) return isCompiledReanimation(resolved);
@@ -796,6 +808,11 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && getLycanthropeProfile(resolved.id)) {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		return compileLycanthrope({resolved, current, chassisSource, inputs, baseline});
+	}
 	if (resolved?.version === 2 && resolved.id === "catalog:vampire|mm") {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);

@@ -4,6 +4,7 @@ import {getCreatureTransformationProficiencyBonus, observeCreatureTransformation
 import {getCreatureTransformationCrProficiency} from "../creature-transformation-cr.js";
 import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog-adapter.js";
 import {BestiaryQuickActionsUtil} from "./bestiary-quick-actions-engine.js";
+import {getLycanthropeProfile} from "../creature-transformation-lycanthrope.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -40,6 +41,29 @@ export function inspectCreatureTransformationInputs ({target, resolved}) {
 		return control;
 	};
 	const issue = (control, reason, selector = control) => model.requirements.push({targetId: target.id, control, selector, reason});
+	if (resolved?.version === 2 && getLycanthropeProfile(resolved.id) && getLycanthropeProfile(resolved.id) === resolved.automation?.profile) {
+		const shark = resolved.id === "catalog:wereshark|arcadia27";
+		add("lycanthropeConsent", "adaptation", {choices: [shark ? "arcadia27-template" : "sidebar-npc"]});
+		if (!shark) add("lycanthropeConsent", "embrace", {choices: [true, false]});
+		add("proficiencyBonus", "current", {facts: current.profBonus ?? current.pbNote ?? null});
+		add("lycanthropeArmorBinding", "current", {facts: current.ac});
+		add("lycanthropeReplacements", "features");
+		try { model.entries = observeCreatureTransformationBindings({current, chassisSource: target.baseCreature.source}); } catch (error) {
+			if (!known.has(error.code)) throw error;
+			issue("entry", error.message);
+			return {...model, status: "blocked"};
+		}
+		for (const entry of model.entries) {
+			if (entry.needsBinding) add("lycanthropeEntryBinding", {section: entry.section, ...entry.match}, {facts: entry});
+			for (const form of ["hybrid", "animal"]) {
+				add("lycanthropeCapability", {form, section: entry.section, ...entry.match}, {facts: entry,
+					equipmentChoices: ["not-required", "usable", "unusable"],
+					speechRestricted: form === "animal"});
+			}
+		}
+		for (const form of ["hybrid", "animal"]) add("lycanthropeArmor", form, {facts: current.ac, choices: ["retain", "unarmored"]});
+		return {...model, status: "needs-answers"};
+	}
 	if (resolved?.version !== 2 || !resolved.automation || ![
 		["catalog:zombie|dmg", "zombie-numerics"], ["catalog:dracolich|mm", "dracolich"],
 	].some(([id, profile]) => resolved.id === id && resolved.automation.profile === profile)) {
@@ -178,6 +202,7 @@ function project ({target, resolved, automationInputs, proficiency}) {
 		chassisSource: target.baseCreature.source,
 		inputs: proficiency
 			? {...automationInputs, bindings: {...automationInputs.bindings, proficiencyBonus: proficiency.before}} : automationInputs,
+		...getLycanthropeProfile(resolved.id) ? {baseline: BestiaryQuickActionsUtil.getCreatureTransformationBaseline({baseCreature: target.baseCreature, operations: target.operations})} : {},
 	}));
 	const options = {baseCreature: target.baseCreature,
 		operations: target.operations,
@@ -277,6 +302,45 @@ export function compileCreatureTransformationInputs ({target, resolved, answers,
 		requireAnswer(keysAre(answers, ["targetKey", "controls"]) && answers.targetKey === model.targetKey && isRecord(answers.controls),
 			"Answers are missing or stale for this exact target/source/history; retain the old draft without retargeting it.", "answers");
 		requireAnswer(Object.keys(answers.controls).every(id => model.controls.some(it => it.id === id)), "An answer references an unknown target/source-qualified control.", "answers");
+		if (getLycanthropeProfile(resolved.id)) {
+			const get = (kind, selector) => {
+				const item = model.controls.find(control => control.kind === kind && same(control.selector, selector));
+				const answer = answers.controls[item?.id];
+				requireAnswer(answer !== undefined, "Answer this exact source/target form control; no speech, equipment, armor or consent decision is inferred.", kind, selector);
+				return answer;
+			};
+			const consent = selector => {
+				const answer = get("lycanthropeConsent", selector);
+				requireAnswer(keysAre(answer, ["value"]), "Consent needs one explicit value.", "lycanthropeConsent", selector);
+				return answer.value;
+			};
+			const pb = get("proficiencyBonus", "current");
+			requireAnswer(keysAre(pb, ["value", "reason"]) && integer(pb.value, 1, 30) && text(pb.reason), "Declare the actual current PB and its source/reason.", "proficiencyBonus");
+			const bindings = {proficiencyBonus: pb.value,
+				armor: get("lycanthropeArmorBinding", "current"),
+				entries: model.entries.filter(entry => entry.needsBinding).map(entry => {
+					const selector = {section: entry.section, ...entry.match};
+					const answer = get("lycanthropeEntryBinding", selector);
+					requireAnswer(keysAre(answer, ["mode"], ["numbers"]), "Entry answers cannot replace their source-qualified control identity.", "lycanthropeEntryBinding", selector);
+					return {section: entry.section, match: entry.match, ...answer};
+				})};
+			const form = name => ({armor: get("lycanthropeArmor", name),
+				entries: model.entries.map(entry => {
+					const selector = {form: name, section: entry.section, ...entry.match};
+					const answer = get("lycanthropeCapability", selector);
+					requireAnswer(keysAre(answer, ["requiresSpeech", "equipment"]), "Capability answers cannot replace their source-qualified control identity.", "lycanthropeCapability", selector);
+					return {section: entry.section, match: entry.match, ...answer};
+				})});
+			const automationInputs = {lycanthrope: {adaptation: consent("adaptation"),
+				embrace: resolved.id === "catalog:wereshark|arcadia27" ? false : consent("embrace"),
+				hybrid: form("hybrid"),
+				animal: form("animal"),
+				replaceFeatures: get("lycanthropeReplacements", "features")},
+			bindings};
+			control = "projection";
+			const projection = project({target, resolved, automationInputs});
+			return {...model, status: "ready", projectionOnly: true, projection, automationInputs};
+		}
 		let automationInputs;
 		if (resolved.id === "catalog:dracolich|mm") {
 			automationInputs = {};
