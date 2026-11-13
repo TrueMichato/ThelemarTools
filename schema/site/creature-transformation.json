@@ -372,8 +372,51 @@
 				}, "additionalProperties": false}
 			}, "anyOf": [{"required": ["walk"]}, {"required": ["fly"]}, {"required": ["swim"]}, {"required": ["climb"]}, {"required": ["burrow"]}], "additionalProperties": false
 		},
+		"lycanthropeChange": {
+			"oneOf": [
+				{"type": "object", "properties": {
+					"op": {"const": "setLycanthropeForm"}, "form": {"enum": ["humanoid", "hybrid", "animal"]}, "size": {"enum": ["T", "S", "M", "L", "H", "G"]},
+					"speed": {"$ref": "#/$defs/vampireSpeed"},
+					"speech": {"type": "object", "properties": {
+						"languages": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+						"languageTags": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}, "contains": {"const": "CS"}}
+					}, "required": ["languages", "languageTags"], "additionalProperties": false}
+				}, "required": ["op", "form", "size", "speed"], "if": {"properties": {"form": {"const": "animal"}}}, "then": {"required": ["speech"]}, "else": {"not": {"required": ["speech"]}}, "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "setLycanthropeAlignment"}, "value": {"enum": [["N", "G"], ["N", "E"], ["L", "E"], ["N"], ["C", "E"]]}}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {"op": {"const": "removeLycanthropeSpellcasting"}, "match": {"$ref": "#/$defs/identity"}}, "required": ["op", "match"], "additionalProperties": false}
+			]
+		},
+		"compiledLycanthrope": {
+			"description": "M9 only. Runtime validates every concrete active/inactive projection against the authoritative pre-owner target and its bounded frozen declarations before conflict winners.",
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"enum": ["catalog:lycanthropy|mm", "catalog:wereshark|arcadia27"]}, "kind": {"const": "catalog"},
+				"identity": {"$ref": "#/$defs/identity"}, "provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"$ref": "#/$defs/compiledVampire/properties/eligibility"},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"form": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["werebear", "wereboar", "wererat", "weretiger", "werewolf"]}},
+					"automation-lycanthrope": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["mm-sidebar-npc-m9", "arcadia27-template-m9"]}},
+					"automation-lycanthrope-contract": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 60000}}
+				}, "required": ["automation-lycanthrope", "automation-lycanthrope-contract"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"$ref": "#/$defs/lycanthropeChange"},
+					{"allOf": [{"$ref": "#/$defs/numericChange"}, {"type": "object", "properties": {"op": {"enum": ["setSaveBonus", "setSkillBonus", "setPassivePerception"]}}}]},
+					{"allOf": [{"$ref": "#/$defs/bindingChange"}, {"type": "object", "properties": {"op": {"enum": ["setArmorClass", "setEntryNumbers"]}}}]},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"type": "object", "properties": {"op": {"enum": ["setAbility", "grantConditionalDefense", "grantSense", "addEntry", "removeEntry"]}}}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			}, "required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"allOf": [{"if": {"properties": {"id": {"const": "catalog:lycanthropy|mm"}}}, "then": {"properties": {
+				"identity": {"type": "object", "properties": {"name": {"const": "Lycanthropy"}, "source": {"const": "MM"}}},
+				"selectedOptions": {"type": "object", "required": ["form"], "properties": {"automation-lycanthrope": {"type": "array", "items": {"const": "mm-sidebar-npc-m9"}}}}
+			}}, "else": {"properties": {
+				"identity": {"type": "object", "properties": {"name": {"const": "Wereshark"}, "source": {"const": "Arcadia27"}}},
+				"selectedOptions": {"type": "object", "not": {"required": ["form"]}, "properties": {"automation-lycanthrope": {"type": "array", "items": {"const": "arcadia27-template-m9"}}}}
+			}}}],
+			"additionalProperties": false
+		},
 		"compiledFormLeaf": {
-			"oneOf": [{"$ref": "#/$defs/compiledHistoricalFormLeaf"}, {"allOf": [
+			"oneOf": [{"$ref": "#/$defs/compiledLycanthrope"}, {"$ref": "#/$defs/compiledHistoricalFormLeaf"}, {"allOf": [
 				{"$ref": "#/$defs/compiledVampire"},
 				{"type": "object", "properties": {"selectedOptions": {"type": "object", "properties": {"outcome": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "vampire"}}}}}}
 			]}]
@@ -446,13 +489,13 @@
 			"type": "object",
 			"properties": {
 				"version": {"const": 2},
-				"id": {"enum": ["catalog:zombie|dmg", "catalog:dracolich|mm", "catalog:vampire|mm"]},
+				"id": {"enum": ["catalog:zombie|dmg", "catalog:dracolich|mm", "catalog:vampire|mm", "catalog:lycanthropy|mm", "catalog:wereshark|arcadia27"]},
 				"kind": {"const": "catalog"},
 				"identity": {"$ref": "#/$defs/identity"},
 				"provenance": {"$ref": "#/$defs/provenance"},
 				"eligibility": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/eligibility"},
 				"prerequisites": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/prerequisites"},
-				"selectedOptions": {"oneOf": [{"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/selectedOptions"}, {"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}]},
+				"selectedOptions": {"oneOf": [{"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/selectedOptions"}, {"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}, {"$ref": "#/$defs/compiledLycanthrope/properties/selectedOptions"}]},
 				"changes": {"type": "array", "minItems": 1, "maxItems": 256},
 				"manualReview": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/manualReview"},
 				"frozenForms": {"$ref": "#/$defs/frozenForms"}
@@ -464,10 +507,13 @@
 					"eligibility": {"$ref": "#/$defs/compiledVampire/properties/eligibility"},
 					"selectedOptions": {"allOf": [{"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}, {"type": "object", "properties": {"outcome": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "vampire"}}}}]},
 					"changes": {"$ref": "#/$defs/compiledVampire/properties/changes"}
+				}}, "else": {"if": {"properties": {"id": {"enum": ["catalog:lycanthropy|mm", "catalog:wereshark|arcadia27"]}}}, "then": {"properties": {
+					"selectedOptions": {"$ref": "#/$defs/compiledLycanthrope/properties/selectedOptions"},
+					"changes": {"$ref": "#/$defs/compiledLycanthrope/properties/changes"}
 				}}, "else": {"properties": {
 					"selectedOptions": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/selectedOptions"},
 					"changes": {"$ref": "#/$defs/compiledHistoricalFormLeaf/properties/changes"}
-				}}}
+				}}}}
 			],
 			"additionalProperties": false
 		},
@@ -475,7 +521,7 @@
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
-				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
 		},
@@ -737,6 +783,8 @@
 					{"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "shadow-dragon-mm"}}}}},
 					{"properties": {"name": {"const": "Shadow Dragon"}, "source": {"const": "BEG"}, "automation": {"type": "object", "properties": {"profile": {"const": "shadow-dragon-beg"}}}}},
 					{"properties": {"name": {"const": "Vampire"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "vampire"}}}}},
+					{"properties": {"name": {"const": "Lycanthropy"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "lycanthropy"}}}}},
+					{"properties": {"name": {"const": "Wereshark"}, "source": {"const": "Arcadia27"}, "automation": {"type": "object", "properties": {"profile": {"const": "wereshark"}}}}},
 					{"properties": {"name": {"const": "Zombie"}, "source": {"const": "DMG"}, "automation": {"type": "object", "properties": {"profile": {"const": "zombie-numerics"}}}}}
 				]}}
 			],

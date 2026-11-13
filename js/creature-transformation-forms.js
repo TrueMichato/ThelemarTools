@@ -3,6 +3,7 @@ import {isCreatureTransformationStatChange} from "./creature-transformation-stat
 import {isCreatureTransformationBindingChange} from "./creature-transformation-bindings.js";
 import {isCreatureTransformationCrChange} from "./creature-transformation-cr.js";
 import {getVampireForm, isVampireChange} from "./creature-transformation-vampire.js";
+import {getLycanthropeForm, getLycanthropeProfile, isLycanthropeChange} from "./creature-transformation-lycanthrope.js";
 
 const LEAF_KEYS = ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"];
 const ROOT_KEYS = ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions"];
@@ -54,6 +55,7 @@ function leaf (resolved) {
 	for (const change of resolved.changes) {
 		const key = Object.hasOwn(change, "op") ? "op" : "type";
 		if (resolved.id === "catalog:vampire|mm" && (isVampireChange(change, key) || change[key] === "grantConditionalDefense")) continue;
+		if (getLycanthropeProfile(resolved.id) && (isLycanthropeChange(change, key) || change[key] === "grantConditionalDefense")) continue;
 		if (isCreatureTransformationStatChange(change, key) || isCreatureTransformationBindingChange(change, key) || isCreatureTransformationCrChange(change, key)) continue;
 		const fields = {
 			setType: ["value"],
@@ -97,6 +99,8 @@ export function assertFrozenCreatureTransformation (resolved) {
 	if (resolved.id === "catalog:vampire|mm" && (canonical(resolved.selectedOptions.outcome) !== canonical(["vampire"])
 		|| canonical(frozenForms.profiles.map(profile => profile.id)) !== canonical(["true", "bat", "mist"])
 		|| frozenForms.profiles.some(profile => getVampireForm(profile.resolved) !== profile.id))) fail("a full vampire permits only its source-defined true/bat/mist profiles, never spawn");
+	if (getLycanthropeProfile(resolved.id) && (canonical(frozenForms.profiles.map(profile => profile.id)) !== canonical(["humanoid", "hybrid", "animal"])
+		|| frozenForms.profiles.some(profile => getLycanthropeForm(profile.resolved) !== profile.id))) fail("M9 permits only humanoid/hybrid/animal profiles for its selected kind");
 }
 
 export function createFrozenCreatureTransformation ({profiles, activeForm, baseline}) {

@@ -4,6 +4,7 @@ import {compileCreatureTransformation} from "../creature-transformations.js";
 import {selectFrozenCreatureTransformation} from "../creature-transformation-forms.js";
 import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation.js";
 import {compileCreatureTransformationInputs, freezeCreatureTransformationInputs, proposeCreatureTransformationResidual} from "./bestiary-transformation-inputs.js";
+import {getLycanthropeProfile} from "../creature-transformation-lycanthrope.js";
 
 const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_INELIGIBLE",
@@ -23,7 +24,7 @@ function compileTarget ({target, resolved, automationInputs, legendaryGroups}) {
 		inputs: automationInputs[target.id],
 		proficiencyContext: automationInputs[target.id]?.cr ? getProficiencyContext({target, current}) : null,
 		legendaryGroups,
-		...(resolved.version === 2 && resolved.id === "catalog:vampire|mm" && resolved.selectedOptions.outcome?.[0] === "vampire"
+		...(resolved.version === 2 && (getLycanthropeProfile(resolved.id) || (resolved.id === "catalog:vampire|mm" && resolved.selectedOptions.outcome?.[0] === "vampire"))
 			? {baseline: BestiaryQuickActionsUtil.getCreatureTransformationBaseline({baseCreature: target.baseCreature, operations: target.operations})} : {}),
 	}));
 }
