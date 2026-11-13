@@ -44,6 +44,32 @@ Entry sections are `trait`, `action`, `bonus`, `reaction`, and `legendary`. Matc
 
 For example, `resolveCreatureTransformation({candidates, id: "catalog:half-dragon|mm", selections: {ancestry: ["red"], size: ["huge"]}})` returns resistance to fire and checked source guidance for the Huge breath. It does **not** fabricate a new breath attack, assume the source's optional CR floor is a mandatory prerequisite, or change the NPC's current HP.
 
+### M10 Fey Beast source stage (staged, internal compilation only)
+
+Only **Fey Beast|SCRE** gains the `fey-beast` staged descriptor. Explicit `automationVersion:2` compiles the existing required, multi-select `features` group on each actual target. All ten IDs and the default/version-1 effects remain unchanged. The source's typical CR-linked count is guidance, **not a cap**; above-CR selections are valid. Species and the other thirteen catalog records are unchanged.
+
+The compiler changes beast to fey while retaining type tags/swarm size and unrelated chassis capabilities. Intelligence 3+ adds **understanding-only Sylvan**, unless the target already speaks or understands it; no existing speech, languages or telepathy are removed. Intelligence 2 receives no language grant. Ambiguous authored language capabilities require the existing target/source/history-qualified input API's explicit `speaksSylvan` decision, not a guessed language loss.
+
+The bounded language recognizer accepts MM's explicit understanding-only clauses ending in "can't speak them" without a speech prompt. Only a positive listed Sylvan capability establishes existing understanding; a mention after an exclusion or negation such as "except Sylvan" or "but not Sylvan" does not suppress the grant. Original language strings stay intact, and the same observed facts govern compilation and replay completeness checks.
+
+| Pick | Concrete output |
+| --- | --- |
+| Barkskin | Actual AC **16**, including when existing AC is higher; not a minimum or a spell grant. |
+| Fey-Touched | Advantage on saves against charm/frighten, not immunity. |
+| Entangle / Spike Growth | Separate source-qualified innate grants, each **1/day**, Wisdom DC/attack calculated by the existing helper from the actual current PB/WIS; **somatic required, verbal/material waived**. Unrelated spellcasting is retained. |
+| Natural Camouflage | Advantage on **Dexterity (Stealth)** only in forest/grassland. |
+| Plant Stride | Nonmagical plant slowing/hazard protection plus non-impediment by magically created/manipulated plants. |
+| Rooted | **Saving throws only** against push/pull/prone, not ability checks. |
+| Tree Stride | Once on its **own turn**, costs **10 feet movement**, living entry tree within **5 feet**, second within **60 feet of the first**, unoccupied exit within **5 feet**, both at least one size larger; no action/bonus action. |
+| Nature Sense | **Action**; nearest chosen beast/plant kind, direction and distance within **5 miles**, if present. |
+| Teleport | **Action**, recharge **4–6**, visible unoccupied destination within **30 feet**, equipment accompanies it; exactly one optional attack **before or after**, not both or Multiattack. |
+
+`inputs.feyBeast` optionally declares `proficiencyBonus` when a spell needs a current PB declaration, and `speaksSylvan` only for ambiguous language capabilities. Existing checked PB helpers prefer numeric `profBonus`/`pbNote`, otherwise use the **actual current canonical CR**, not a new CR estimate. Unknown/conditional CR without explicit PB requires a reviewed declaration; malformed or contradictory PB metadata blocks. Existing internal controls are exposed only when needed. Same-name **other-source** rules/spells survive; a unique same-source trait/action is replaced with the complete rule, while duplicate identities or an existing same-source innate grant block explicitly rather than stacking silently.
+
+Bounded input receipts and concrete changes are persisted in the existing operation. Before conflict resolution, replay checks completeness against the actual pre-owner target without reading the catalog, screenshot or spell sources. All M10 effects share a coherent conflict winner; mixed winners require a new preview. Registry/Encounter source qualification, consent, integrity, prefixes, save/count/byte limits and operation removal retain their existing contracts.
+
+**Limits:** this is M10 source-only, not a live turn/tree/target engine. CR/XP is retained with explicit review; estimated CR/override, public editor integration and default enablement remain M13. SCRE is still provisional screenshot attribution with unverified page/edition/publisher. No browser, E2E, full-suite or release claim is implied.
+
 ### M9 Lycanthropy and Wereshark source stage (staged, internal compilation only)
 
 Only **Lycanthropy|MM** and **Wereshark|Arcadia27** gain M9 descriptors, with explicit `automationVersion:2` and per-target `inputs.lycanthrope` plus M2b `bindings`. The existing required MM option group `form` still chooses **kind** (`werebear`, `wereboar`, `wererat`, `weretiger`, `werewolf`), not active form. Wereshark has no catalog options. Each compiled owner freezes exactly **humanoid, hybrid, animal**; it cannot switch kind or source. Default editor/version-1 behavior, the other 12 records and Species remain unchanged.
