@@ -9,6 +9,7 @@ import {compileLycanthrope, getLycanthropeProfile, isCompiledLycanthrope} from "
 import {compileFeyBeast, isCompiledFeyBeast, isFeyBeastCatalog} from "./creature-transformation-fey-beast.js";
 import {compileFallenAngel, isCompiledFallenAngel, isFallenAngelCatalog} from "./creature-transformation-fallen-angel.js";
 import {compileUndead, isCompiledUndead, isUndeadCatalog} from "./creature-transformation-undead.js";
+import {getCreatureTransformationSourceProfile, isEstimatedCreatureTransformation} from "./creature-transformation-estimate.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -743,6 +744,10 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (Object.hasOwn(resolved || {}, "estimation")) {
+		return isEstimatedCreatureTransformation(resolved)
+		&& isCompiledCreatureTransformation(getCreatureTransformationSourceProfile(resolved));
+	}
 	if (resolved?.id === "catalog:undead|scre") return isCompiledUndead(resolved);
 	if (resolved?.id === "catalog:fallen angel|scre") return isCompiledFallenAngel(resolved);
 	if (resolved?.id === "catalog:fey beast|scre") return isCompiledFeyBeast(resolved);

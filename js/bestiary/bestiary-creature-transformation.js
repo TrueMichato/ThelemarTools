@@ -11,6 +11,7 @@ import {assertLycanthropeProjection, getLycanthropeProfile, isLycanthropeChange,
 import {assertFeyBeastProjection, isFeyBeastChange, isFeyBeastOp} from "../creature-transformation-fey-beast.js";
 import {assertFallenAngelProjection, FALLEN_ANGEL_SPELL_LISTS, isFallenAngelChange, isFallenAngelOp} from "../creature-transformation-fallen-angel.js";
 import {assertUndeadProjection, isUndeadChange, isUndeadOp} from "../creature-transformation-undead.js";
+import {assertCreatureTransformationEstimate, getCreatureTransformationSourceProfile} from "../creature-transformation-estimate.js";
 
 const _ABILITIES = new Set(["str", "dex", "con", "int", "wis", "cha"]);
 const _DAMAGE_TYPES = new Set(["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"]);
@@ -296,7 +297,8 @@ function _validateRecipe (resolved, {formLeaf = false} = {}) {
 	}
 	if (!formLeaf && resolved?.version === 2 && resolved.id === "catalog:vampire|mm" && resolved.selectedOptions?.outcome?.[0] === "vampire") _fail("A full M8 vampire requires its frozen true/bat/mist form envelope.");
 	if (!formLeaf && resolved?.version === 2 && getLycanthropeProfile(resolved.id)) _fail("An M9 lycanthrope requires its frozen humanoid/hybrid/animal form envelope.");
-	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version"], "Resolved transformation");
+	_expectKeys(resolved, ["id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "version", "estimation"], "Resolved transformation");
+	if (Object.hasOwn(resolved, "estimation") && resolved.version !== 2) _fail("Source estimates require a complete compiled version-2 profile.");
 	if (resolved.version !== 2 && resolved.changes?.some(change => isFeyBeastOp(change.type))) _fail("M10 setters require a compiled version-2 Fey Beast snapshot.");
 	if (resolved.version !== 2 && resolved.changes?.some(change => isFallenAngelOp(change.type))) _fail("M11 setters require a compiled version-2 Fallen Angel snapshot.");
 	if (resolved.version !== 2 && resolved.changes?.some(change => isUndeadOp(change.type))) _fail("M12 setters require a compiled version-2 Undead snapshot.");
@@ -897,6 +899,17 @@ function _getDiff (before, after, prefix = "") {
 }
 
 export class BestiaryCreatureTransformation {
+	static projectSourceProfile ({original, current, resolved}) {
+		_validateRecipe(resolved, {formLeaf: true});
+		const proposed = resolved.changes.reduce((creature, change) => _applyChange(creature, change, original).out, _copy(current));
+		if (resolved.id === "catalog:vampire|mm") assertVampireProjection({resolved, current, proposed});
+		if (getLycanthropeProfile(resolved.id)) assertLycanthropeProjection({resolved, current, proposed, chassisSource: original.source});
+		if (resolved.id === "catalog:fey beast|scre") assertFeyBeastProjection({resolved, current, chassisSource: original.source});
+		if (resolved.id === "catalog:fallen angel|scre") assertFallenAngelProjection({resolved, current, chassisSource: original.source});
+		if (resolved.id === "catalog:undead|scre") assertUndeadProjection({resolved, current, chassisSource: original.source});
+		return proposed;
+	}
+
 	static get MAX_OPERATION_BYTES () { return _MAX_OPERATION_BYTES; }
 
 	static getBaseline ({original, current}) {
@@ -938,7 +951,14 @@ export class BestiaryCreatureTransformation {
 			}
 			return {change, paths};
 		});
-		if (resolved.version === 2 && resolved.id === "catalog:vampire|mm") {
+		if (resolved.estimation) {
+			for (const profile of resolved.frozenForms?.profiles.map(item => item.resolved) || [resolved]) {
+				const source = getCreatureTransformationSourceProfile(profile);
+				const projected = this.projectSourceProfile({original, current, resolved: source});
+				assertCreatureTransformationEstimate({resolved: profile, current: projected, beforeSource: current, baseline: this.getBaseline({original, current}), chassisSource: original.source});
+			}
+		}
+		if (!resolved.estimation && resolved.version === 2 && resolved.id === "catalog:vampire|mm") {
 			assertVampireProjection({resolved, current, proposed: candidate});
 			for (const profile of resolved.frozenForms?.profiles || []) {
 				if (profile.id === resolved.frozenForms.activeForm) continue;
@@ -946,7 +966,7 @@ export class BestiaryCreatureTransformation {
 				assertVampireProjection({resolved: profile.resolved, current, proposed: projected});
 			}
 		}
-		if (resolved.version === 2 && getLycanthropeProfile(resolved.id)) {
+		if (!resolved.estimation && resolved.version === 2 && getLycanthropeProfile(resolved.id)) {
 			assertLycanthropeProjection({resolved, current, proposed: candidate, chassisSource: original.source});
 			for (const profile of resolved.frozenForms.profiles) {
 				if (profile.id === resolved.frozenForms.activeForm) continue;
@@ -954,9 +974,9 @@ export class BestiaryCreatureTransformation {
 				assertLycanthropeProjection({resolved: profile.resolved, current, proposed: projected, chassisSource: original.source});
 			}
 		}
-		if (resolved.version === 2 && resolved.id === "catalog:fey beast|scre") assertFeyBeastProjection({resolved, current, chassisSource: original.source});
-		if (resolved.version === 2 && resolved.id === "catalog:fallen angel|scre") assertFallenAngelProjection({resolved, current, chassisSource: original.source});
-		if (resolved.version === 2 && resolved.id === "catalog:undead|scre") assertUndeadProjection({resolved, current, chassisSource: original.source});
+		if (!resolved.estimation && resolved.version === 2 && resolved.id === "catalog:fey beast|scre") assertFeyBeastProjection({resolved, current, chassisSource: original.source});
+		if (!resolved.estimation && resolved.version === 2 && resolved.id === "catalog:fallen angel|scre") assertFallenAngelProjection({resolved, current, chassisSource: original.source});
+		if (!resolved.estimation && resolved.version === 2 && resolved.id === "catalog:undead|scre") assertUndeadProjection({resolved, current, chassisSource: original.source});
 		const conflicts = [];
 		for (const [path, write] of candidateWrites) {
 			if (_equal(write.before, write.after)) continue;
@@ -978,7 +998,7 @@ export class BestiaryCreatureTransformation {
 		}
 		let proposed = _copy(current);
 		const appliedWrites = new Map();
-		const reanimation = resolved.version === 2 && (Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id) || ["catalog:fey beast|scre", "catalog:fallen angel|scre", "catalog:undead|scre"].includes(resolved.id));
+		const reanimation = resolved.version === 2 && (resolved.estimation || Object.hasOwn(resolved.selectedOptions, "automation-reanimation") || Object.hasOwn(resolved.selectedOptions, "automation-spore-shadow") || Object.hasOwn(resolved.selectedOptions, "automation-vampire") || !!getLycanthropeProfile(resolved.id) || ["catalog:fey beast|scre", "catalog:fallen angel|scre", "catalog:undead|scre"].includes(resolved.id));
 		const hasNumericGroup = reanimation || (resolved.version === 2 && resolved.id === "catalog:zombie|dmg");
 		const isNumericStep = change => reanimation || change.type === "setAbility" || isCreatureTransformationStatOp(change.type) || isCreatureTransformationBindingOp(change.type) || isCreatureTransformationCrOp(change.type);
 		const numericPaths = hasNumericGroup ? steps.filter(({change}) => isNumericStep(change)).flatMap(it => it.paths) : [];
@@ -1044,7 +1064,7 @@ export class BestiaryCreatureTransformation {
 		const data = operation?.data;
 		if (!_isObject(data) || !_equal(Object.keys(data).sort(), ["resolved", "sourceUid", "acknowledgedPrerequisites", "dmApproved", "conflictDecisions", "approvedConflicts", "manualReview", "integrity"].sort())) _fail("Malformed transformation operation.");
 		_assertJson(data);
-		if ((data.resolved?.frozenForms || (data.resolved?.version === 2 && ["catalog:fey beast|scre", "catalog:fallen angel|scre", "catalog:undead|scre"].includes(data.resolved.id)))
+		if ((data.resolved?.estimation || data.resolved?.frozenForms || (data.resolved?.version === 2 && ["catalog:fey beast|scre", "catalog:fallen angel|scre", "catalog:undead|scre"].includes(data.resolved.id)))
 			&& new TextEncoder().encode(JSON.stringify(operation)).length > _MAX_OPERATION_BYTES) _fail("Resolved transformation exceeds the operation size budget.", "CREATURE_TRANSFORMATION_TOO_LARGE");
 		const {integrity, ...payload} = data;
 		if (integrity !== _digest(payload) || !_equal(data.manualReview, data.resolved?.manualReview) || data.sourceUid !== _getUid(baseCreature)) _fail("Transformation operation has been changed or belongs to another creature.", "CREATURE_TRANSFORMATION_TAMPERED");

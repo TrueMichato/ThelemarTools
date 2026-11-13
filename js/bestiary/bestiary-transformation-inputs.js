@@ -8,6 +8,7 @@ import {getLycanthropeProfile} from "../creature-transformation-lycanthrope.js";
 import {observeFeyBeast} from "../creature-transformation-fey-beast.js";
 import {observeFallenAngel} from "../creature-transformation-fallen-angel.js";
 import {observeUndead} from "../creature-transformation-undead.js";
+import {composeCreatureTransformationRoutines} from "../creature-transformation-routines.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -251,85 +252,6 @@ function project ({target, resolved, automationInputs, proficiency}) {
 	return BestiaryQuickActionsUtil.previewCreatureTransformation({...options, conflictDecisions}).proposed;
 }
 
-function composeRoutines ({model, projection, bindings, answer, proficiency}) {
-	requireAnswer(keysAre(answer, ["defense", "routines", "routine", "review", "override", "zeroXp", "proficiencyAnswer", "coverage"])
-		&& keysAre(answer.review, ["confirmed", "reason"]) && answer.review.confirmed === true && text(answer.review.reason),
-	"Explicitly confirm completeness with an explanation; unsupported effects cannot be silently omitted.", "cr", "review");
-	requireAnswer(Array.isArray(answer.coverage) && answer.coverage.length === model.entries.length
-		&& model.entries.every(entry => answer.coverage.filter(it => keysAre(it, ["entryId", "decision", "reason"]) && it.entryId === entry.id
-			&& ["represented", "excluded"].includes(it.decision) && text(it.reason)).length === 1),
-	"Review inclusion/exclusion of every observed entry, including baked dice, riders, spells and alternatives.", "cr", "coverage");
-	requireAnswer(Array.isArray(answer.routines) && answer.routines.length >= 1 && answer.routines.length <= 12, "Choose 1 to 12 complete alternative routines.", "cr", "routines");
-	const observed = observeCreatureTransformationBindings({current: projection, chassisSource: model.chassisSource});
-	const tokens = new Map();
-	for (const entry of model.entries) {
-		const after = observed.find(it => it.section === entry.section && same(it.match, entry.match));
-		for (const token of entry.tokens) {
-			const projected = after?.tokens.find(it => it.paragraph === token.paragraph && it.kind === token.kind && it.token === token.token);
-			const binding = bindings.entries.find(it => it.section === entry.section && same(it.match, entry.match));
-			const number = binding?.numbers?.find(it => it.paragraph === token.paragraph && it.kind === token.kind && it.token === token.token);
-			tokens.set(token.id, {entry,
-				token: projected,
-				supported: entry.supported && after?.supported,
-				proficiency: number?.mode === "ability" ? number.proficiency : 0});
-		}
-	}
-	const routines = answer.routines.map(routine => {
-		requireAnswer(keysAre(routine, ["id", "rows", "accuracy", "mixedReason", "note"]) && text(routine.note)
-			&& Array.isArray(routine.rows) && routine.rows.length >= 1 && routine.rows.length <= 24, "Each routine needs 1..24 reviewed contribution rows.", "cr", routine?.id);
-		const rounds = Array.from({length: 3}, () => ({value: 0, proficiency: 0}));
-		const notes = [];
-		for (const row of routine.rows) {
-			requireAnswer(keysAre(row, ["counts", "targets", "timing", "reason"], ["tokenId", "fixed"]) && text(row.reason)
-				&& ["normal", "conditional", "off-turn", "ongoing", "recharge", "limited-use"].includes(row.timing)
-				&& ["counts", "targets"].every(key => Array.isArray(row[key]) && row[key].length === 3
-					&& [...row[key]].every(value => integer(value, key === "counts" ? 0 : 1, key === "counts" ? 20 : 100)))
-				&& (Object.hasOwn(row, "tokenId") !== Object.hasOwn(row, "fixed")), "Review exactly three rounds of counts, targets, timing and source.", "cr", routine.id);
-			let value;
-			let coefficient = 0;
-			if (Object.hasOwn(row, "tokenId")) {
-				const selected = tokens.get(row.tokenId);
-				requireAnswer(selected?.supported && selected.token?.kind === "damage", "Select an exact supported observed damage token; unsupported contributions remain unresolved.", "cr", row.tokenId);
-				requireAnswer(answer.coverage.find(it => it.entryId === selected.entry.id)?.decision === "represented", "A selected contribution cannot be marked excluded.", "cr", row.tokenId);
-				value = selected.token.average;
-				requireAnswer(selected.proficiency === 0 || proficiency.source !== "derived-cr"
-					|| selected.token.mean + selected.proficiency * (2 - proficiency.before) >= 0,
-				"A per-token zero-floor crossing cannot be represented by linear M3 PB coefficients; supply a bounded fixed adjudication.", "cr", row.tokenId);
-				coefficient = selected.proficiency;
-				notes.push(`${selected.entry.match.name}|${selected.entry.match.source} ${selected.token.kind}:${selected.token.paragraph}:${selected.token.token}`);
-			} else {
-				requireAnswer(keysAre(row.fixed, ["value", "source", "reason"]) && Number.isFinite(row.fixed.value) && row.fixed.value >= 0
-					&& row.fixed.value <= 100_000 && keysAre(row.fixed.source, ["name", "source"])
-					&& text(row.fixed.source.name) && text(row.fixed.source.source) && text(row.fixed.reason),
-				"Fixed contributions need a bounded per-use value, source-qualified adjudication and reason.", "cr", routine.id);
-				value = row.fixed.value;
-				notes.push(`${row.fixed.source.name}|${row.fixed.source.source} fixed ${value}: ${row.fixed.reason}`);
-			}
-			notes.push(`${row.counts.join("/")} uses x ${row.targets.join("/")} targets; ${row.timing}: ${row.reason}`);
-			for (let i = 0; i < 3; ++i) {
-				rounds[i].value += value * row.counts[i] * row.targets[i];
-				rounds[i].proficiency += coefficient * row.counts[i] * row.targets[i];
-			}
-		}
-		const accuracy = tokens.get(routine.accuracy);
-		requireAnswer(accuracy?.supported && ["hit", "dc"].includes(accuracy.token?.kind) && text(routine.mixedReason),
-			"Deliberately choose supported attack/save accuracy and explain predominant/mixed measures.", "cr", routine.id);
-		requireAnswer(answer.coverage.find(it => it.entryId === accuracy.entry.id)?.decision === "represented",
-			"The selected accuracy source must be represented in the review.", "cr", routine.accuracy);
-		return {id: routine.id,
-			rounds,
-			accuracy: {kind: accuracy.token.kind === "hit" ? "attack" : "save", value: accuracy.token.value, proficiency: accuracy.proficiency},
-			note: [routine.note, routine.mixedReason, ...notes].join("; ")};
-	});
-	return {defense: structuredClone(answer.defense),
-		routines,
-		routine: answer.routine,
-		review: [answer.review.reason, ...answer.coverage.map(it => `${model.entries.find(entry => entry.id === it.entryId).match.name}: ${it.decision}: ${it.reason}`)].join("; "),
-		override: structuredClone(answer.override),
-		zeroXp: answer.zeroXp,
-		proficiencyAnswer: structuredClone(answer.proficiencyAnswer)};
-}
-
 export function compileCreatureTransformationInputs ({target, resolved, answers, table, proficiencyContext = null}) {
 	const model = inspectCreatureTransformationInputs({target, resolved});
 	if (model.requirements.length) return model;
@@ -434,7 +356,7 @@ export function compileCreatureTransformationInputs ({target, resolved, answers,
 		const projection = project({target, resolved, automationInputs, proficiency});
 		if (answer !== undefined) {
 			control = "cr";
-			const assumptions = composeRoutines({model, projection, bindings: automationInputs.bindings, answer, proficiency});
+			const assumptions = composeCreatureTransformationRoutines({model, projection, bindings: automationInputs.bindings, answer, proficiency});
 			automationInputs.proficiencies = {save: {}, skill: {}};
 			for (const item of model.controls.filter(it => it.kind === "proficiency")) {
 				const supplied = answers.controls[item.id];

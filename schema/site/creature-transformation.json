@@ -291,7 +291,7 @@
 										{"type": "null"},
 										{"type": "object", "properties": {
 											"ownership": {"enum": ["derived", "explicit", "ambiguous"]},
-											"index": {"type": "integer", "minimum": 0, "maximum": 99},
+											"index": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
 											"integrity": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[a-f0-9]{8}$"}]},
 											"value": {"type": "integer", "minimum": 1, "maximum": 30}
 										}, "required": ["ownership", "index", "integrity", "value"], "additionalProperties": false}
@@ -591,6 +591,186 @@
 				"selectedOptions": {"type": "object", "not": {"required": ["form"]}, "properties": {"automation-lycanthrope": {"type": "array", "items": {"const": "arcadia27-template-m9"}}}}
 			}}}],
 			"additionalProperties": false
+		},
+		"estimateReason": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"},
+		"estimateEntrySection": {"enum": ["trait", "action", "bonus", "reaction", "legendary", "spellcasting"]},
+		"estimateArmor": {
+			"oneOf": [
+				{"type": "object", "properties": {"mode": {"const": "retain"}}, "required": ["mode"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"mode": {"const": "recalculate"},
+					"alternatives": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"oneOf": [
+						{"$ref": "#/$defs/estimateArmor/oneOf/0"},
+						{"type": "object", "properties": {
+							"kind": {"enum": ["worn", "natural", "unarmored"]}, "base": {"type": "integer", "minimum": 0, "maximum": 100},
+							"dexterity": {"enum": ["none", "full", "capped"]}, "shield": {"type": "integer", "minimum": 0, "maximum": 10},
+							"fixed": {"type": "integer", "minimum": -100, "maximum": 100}, "maxDex": {"type": "integer", "minimum": 0, "maximum": 10},
+							"minimum": {"type": "integer", "minimum": 0, "maximum": 100}
+						}, "required": ["kind", "base", "dexterity", "shield", "fixed"],
+						"if": {"properties": {"dexterity": {"const": "capped"}}}, "then": {"required": ["maxDex"]}, "else": {"not": {"required": ["maxDex"]}},
+						"additionalProperties": false}
+					]}}
+				}, "required": ["mode", "alternatives"], "additionalProperties": false}
+			]
+		},
+		"estimateNumber": {
+			"type": "object", "properties": {
+				"paragraph": {"type": "integer", "minimum": 0, "maximum": 99}, "kind": {"enum": ["hit", "dc", "damage"]},
+				"token": {"type": "integer", "minimum": 0, "maximum": 99}, "mode": {"enum": ["fixed", "ability"]},
+				"value": {"type": "integer", "minimum": -10000, "maximum": 10000},
+				"ability": {"enum": ["str", "dex", "con", "int", "wis", "cha"]},
+				"proficiency": {"enum": [0, 1, 2]}, "fixed": {"type": "integer", "minimum": -10000, "maximum": 10000},
+				"dice": {"type": "object", "properties": {"number": {"type": "integer", "minimum": 1, "maximum": 1000}, "faces": {"type": "integer", "minimum": 2, "maximum": 100}},
+					"required": ["number", "faces"], "additionalProperties": false}
+			}, "required": ["paragraph", "kind", "token", "mode"],
+			"allOf": [
+				{"if": {"properties": {"mode": {"const": "fixed"}}}, "then": {"required": ["value"], "not": {"anyOf": [{"required": ["ability"]}, {"required": ["proficiency"]}, {"required": ["fixed"]}]}},
+					"else": {"required": ["ability", "proficiency", "fixed"], "not": {"required": ["value"]}}},
+				{"if": {"properties": {"kind": {"const": "damage"}}}, "then": {"required": ["dice"]}, "else": {"not": {"required": ["dice"]}}}
+			], "additionalProperties": false
+		},
+		"estimateBindings": {
+			"type": "object", "properties": {
+				"armor": {"$ref": "#/$defs/estimateArmor"}, "proficiencyBonus": {"type": "integer", "minimum": 1, "maximum": 30},
+				"entries": {"type": "array", "maxItems": 100, "items": {
+					"type": "object", "properties": {
+						"section": {"$ref": "#/$defs/estimateEntrySection"}, "match": {"$ref": "#/$defs/identity"}, "mode": {"enum": ["bind", "retain"]},
+						"numbers": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/estimateNumber"}}
+					}, "required": ["section", "match", "mode"],
+					"if": {"properties": {"mode": {"const": "bind"}}}, "then": {"required": ["numbers"]}, "else": {"not": {"required": ["numbers"]}}, "additionalProperties": false
+				}}
+			}, "required": ["armor", "entries"], "additionalProperties": false
+		},
+		"estimateEntryCoverage": {
+			"type": "object", "properties": {
+				"section": {"$ref": "#/$defs/estimateEntrySection"}, "match": {"$ref": "#/$defs/identity"},
+				"decision": {"enum": ["represented", "excluded"]}, "reason": {"$ref": "#/$defs/estimateReason"}
+			}, "required": ["section", "match", "decision", "reason"], "additionalProperties": false
+		},
+		"estimateFixed": {
+			"type": "object", "properties": {
+				"value": {"type": "number", "minimum": 0, "maximum": 100000}, "source": {"$ref": "#/$defs/identity"}, "reason": {"$ref": "#/$defs/estimateReason"}
+			}, "required": ["value", "source", "reason"], "additionalProperties": false
+		},
+		"estimateComposition": {
+			"type": "object", "properties": {
+				"defense": {"$ref": "#/$defs/crAssumptions/properties/defense"},
+				"routines": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+					"type": "object", "properties": {
+						"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"}, "note": {"$ref": "#/$defs/estimateReason"},
+						"mixedReason": {"$ref": "#/$defs/estimateReason"},
+						"accuracy": {"oneOf": [
+							{"type": "string", "minLength": 1, "maxLength": 2000},
+							{"type": "object", "properties": {"kind": {"enum": ["attack", "save"]}, "value": {"type": "integer", "minimum": -100, "maximum": 100},
+								"source": {"$ref": "#/$defs/identity"}, "reason": {"$ref": "#/$defs/estimateReason"}},
+								"required": ["kind", "value", "source", "reason"], "additionalProperties": false}
+						]},
+						"rows": {"type": "array", "minItems": 1, "maxItems": 24, "items": {
+							"type": "object", "properties": {
+								"tokenId": {"type": "string", "minLength": 1, "maxLength": 2000}, "fixed": {"$ref": "#/$defs/estimateFixed"},
+								"accountsFor": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+								"counts": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 0, "maximum": 20}},
+								"targets": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 1, "maximum": 100}},
+								"timing": {"enum": ["normal", "conditional", "off-turn", "ongoing", "recharge", "limited-use"]}, "reason": {"$ref": "#/$defs/estimateReason"}
+							}, "required": ["counts", "targets", "timing", "reason"], "oneOf": [{"required": ["tokenId"]}, {"required": ["fixed"]}],
+							"dependentRequired": {"accountsFor": ["fixed"]}, "additionalProperties": false
+						}}
+					}, "required": ["id", "note", "mixedReason", "accuracy", "rows"], "additionalProperties": false
+				}},
+				"routine": {"$ref": "#/$defs/crAssumptions/properties/routine"},
+				"review": {"type": "object", "properties": {"confirmed": {"const": true}, "reason": {"$ref": "#/$defs/estimateReason"}},
+					"required": ["confirmed", "reason"], "additionalProperties": false},
+				"override": {"$ref": "#/$defs/crOverride"}, "zeroXp": {"type": "boolean"},
+				"proficiencyAnswer": {"$ref": "#/$defs/crAssumptions/properties/proficiencyAnswer"},
+				"coverage": {"type": "array", "maxItems": 600, "items": {
+					"type": "object", "properties": {"entryId": {"type": "string", "minLength": 1, "maxLength": 2000},
+						"decision": {"enum": ["represented", "excluded"]}, "reason": {"$ref": "#/$defs/estimateReason"},
+						"tokens": {"type": "array", "maxItems": 10000, "items": {
+							"type": "object", "properties": {"tokenId": {"type": "string", "minLength": 1, "maxLength": 2000},
+								"decision": {"enum": ["represented", "excluded"]}, "reason": {"$ref": "#/$defs/estimateReason"}},
+							"required": ["tokenId", "decision", "reason"], "additionalProperties": false
+						}}},
+					"required": ["entryId", "decision", "reason", "tokens"], "additionalProperties": false
+				}}
+			}, "required": ["defense", "routines", "routine", "review", "override", "zeroXp", "proficiencyAnswer", "coverage"], "additionalProperties": false
+		},
+		"estimateInputs": {
+			"type": "object", "properties": {
+				"scope": {"$ref": "#/$defs/estimateReason"}, "armorReason": {"$ref": "#/$defs/estimateReason"}, "bindings": {"$ref": "#/$defs/estimateBindings"},
+				"proficiencies": {"type": "object", "properties": {
+					"save": {"type": "object", "propertyNames": {"enum": ["str", "dex", "con", "int", "wis", "cha"]}, "additionalProperties": {"enum": [0, 1, 2]}},
+					"skill": {"type": "object", "propertyNames": {"$ref": "#/$defs/numericChange/oneOf/2/properties/skill"}, "additionalProperties": {"enum": [0, 1, 2]}}
+				}, "required": ["save", "skill"], "additionalProperties": false},
+				"composition": {"$ref": "#/$defs/estimateComposition"},
+				"coverage": {"type": "object", "properties": {
+					"entries": {"type": "array", "maxItems": 600, "items": {"$ref": "#/$defs/estimateEntryCoverage"}},
+					"defenses": {"type": "array", "minItems": 13, "maxItems": 13, "items": {
+						"type": "object", "properties": {
+							"field": {"enum": ["hp", "ac", "save", "skill", "passive", "resist", "immune", "vulnerable", "conditionImmune", "speed", "senses", "legendaryGroup", "mythic"]},
+							"reason": {"$ref": "#/$defs/estimateReason"}
+						}, "required": ["field", "reason"], "additionalProperties": false
+					}}
+				}, "required": ["entries", "defenses"], "additionalProperties": false},
+				"table": {"type": "array", "minItems": 34, "maxItems": 34, "items": {
+					"type": "object", "properties": {
+						"_cr": {"$ref": "#/$defs/challengeRating"}, "pb": {"type": "integer", "minimum": 2, "maximum": 9},
+						"ac": {"type": "integer", "minimum": 0, "maximum": 1000}, "hpMin": {"type": "integer", "minimum": 0, "maximum": 1000},
+						"hpMax": {"type": "integer", "minimum": 0, "maximum": 1000}, "attackBonus": {"type": "integer", "minimum": 0, "maximum": 1000},
+						"dprMin": {"type": "integer", "minimum": 0, "maximum": 1000}, "dprMax": {"type": "integer", "minimum": 0, "maximum": 1000},
+						"saveDc": {"type": "integer", "minimum": 0, "maximum": 1000}
+					}, "required": ["_cr", "pb", "ac", "hpMin", "hpMax", "attackBonus", "dprMin", "dprMax", "saveDc"], "additionalProperties": false
+				}}
+			}, "required": ["scope", "armorReason", "bindings", "proficiencies", "composition", "coverage", "table"], "additionalProperties": false
+		},
+		"estimatedCompiled": {
+			"description": "M13a opt-in composed output only. Runtime extracts and validates the unchanged closed source prefix, then exactly recomposes the bounded numeric tail from frozen entry-level judgments and table. Not a generic effects recipe.",
+			"type": "object", "properties": {
+				"version": {"const": 2}, "kind": {"const": "catalog"}, "id": {"type": "string"}, "identity": {"$ref": "#/$defs/identity"},
+				"provenance": {"$ref": "#/$defs/provenance"}, "eligibility": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/eligibility"}},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}}, "selectedOptions": {"type": "object"},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}},
+				"changes": {"type": "array", "minItems": 2, "maxItems": 512, "items": {"anyOf": [
+					{"$ref": "#/$defs/change"}, {"$ref": "#/$defs/numericChange"}, {"$ref": "#/$defs/bindingChange"}, {"$ref": "#/$defs/crChange"},
+					{"$ref": "#/$defs/reanimationChange"}, {"$ref": "#/$defs/sporeShadowChange"}, {"$ref": "#/$defs/vampireChange"},
+					{"$ref": "#/$defs/lycanthropeChange"}, {"$ref": "#/$defs/feyBeastChange"}, {"$ref": "#/$defs/fallenAngelChange"}, {"$ref": "#/$defs/undeadChange"}
+				]}},
+				"estimation": {"type": "object", "properties": {
+					"version": {"const": 1}, "baseline": {"$ref": "#/$defs/frozenForms/properties/baseline"},
+					"sourceChangeCount": {"type": "integer", "minimum": 1, "maximum": 256}, "sourceReview": {"type": "array", "items": {"$ref": "#/$defs/review"}},
+					"inputs": {"$ref": "#/$defs/estimateInputs"}
+				}, "required": ["version", "baseline", "sourceChangeCount", "sourceReview", "inputs"], "additionalProperties": false}
+			},
+			"oneOf": [
+				{"properties": {"id": {"$ref": "#/$defs/compiledHalfDragon/properties/id"}, "identity": {"$ref": "#/$defs/compiledHalfDragon/properties/identity"}, "selectedOptions": {"$ref": "#/$defs/compiledHalfDragon/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledReanimation/properties/id"}, "selectedOptions": {"$ref": "#/$defs/compiledReanimation/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledSporeShadow/properties/id"}, "selectedOptions": {"$ref": "#/$defs/compiledSporeShadow/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledVampire/properties/id"}, "identity": {"$ref": "#/$defs/compiledVampire/properties/identity"}, "selectedOptions": {"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledLycanthrope/properties/id"}, "selectedOptions": {"$ref": "#/$defs/compiledLycanthrope/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledFeyBeast/properties/id"}, "identity": {"$ref": "#/$defs/compiledFeyBeast/properties/identity"}, "selectedOptions": {"$ref": "#/$defs/compiledFeyBeast/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledFallenAngel/properties/id"}, "identity": {"$ref": "#/$defs/compiledFallenAngel/properties/identity"}, "selectedOptions": {"$ref": "#/$defs/compiledFallenAngel/properties/selectedOptions"}}},
+				{"properties": {"id": {"$ref": "#/$defs/compiledUndead/properties/id"}, "identity": {"$ref": "#/$defs/compiledUndead/properties/identity"}, "selectedOptions": {"$ref": "#/$defs/compiledUndead/properties/selectedOptions"}}}
+			],
+			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "estimation"], "additionalProperties": false
+		},
+		"estimatedFrozenForm": {
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"enum": ["catalog:vampire|mm", "catalog:lycanthropy|mm", "catalog:wereshark|arcadia27"]}, "kind": {"const": "catalog"},
+				"identity": {"$ref": "#/$defs/identity"}, "provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"$ref": "#/$defs/estimatedCompiled/properties/eligibility"}, "prerequisites": {"$ref": "#/$defs/estimatedCompiled/properties/prerequisites"},
+				"selectedOptions": {"oneOf": [{"$ref": "#/$defs/compiledVampire/properties/selectedOptions"}, {"$ref": "#/$defs/compiledLycanthrope/properties/selectedOptions"}]},
+				"changes": {"$ref": "#/$defs/estimatedCompiled/properties/changes"}, "manualReview": {"$ref": "#/$defs/estimatedCompiled/properties/manualReview"},
+				"estimation": {"$ref": "#/$defs/estimatedCompiled/properties/estimation"},
+				"frozenForms": {"type": "object", "properties": {
+					"version": {"const": 1}, "baseline": {"$ref": "#/$defs/frozenForms/properties/baseline"},
+					"activeForm": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+					"profiles": {"type": "array", "minItems": 3, "maxItems": 3, "items": {
+						"type": "object", "properties": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+							"label": {"type": "string", "minLength": 1, "maxLength": 80}, "resolved": {"$ref": "#/$defs/estimatedCompiled"}},
+						"required": ["id", "label", "resolved"], "additionalProperties": false
+					}}
+				}, "required": ["version", "baseline", "activeForm", "profiles"], "additionalProperties": false}
+			},
+			"required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview", "estimation", "frozenForms"], "additionalProperties": false
 		},
 		"compiledFormLeaf": {
 			"oneOf": [{"$ref": "#/$defs/compiledLycanthrope"}, {"$ref": "#/$defs/compiledHistoricalFormLeaf"}, {"allOf": [
