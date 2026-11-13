@@ -435,7 +435,7 @@ describe("M10 Fey Beast source-only producer and effects", () => {
 		const accepted = JSON.parse(childProcess.execFileSync("git", ["show", "76a6019851a19f591746670704f58622929cb482:data/creature-transformations.json"], {encoding: "utf8"}));
 		for (const recipe of catalog.creatureTransformation) {
 			const current = structuredClone(recipe);
-			if (recipe.name === "Fey Beast" && recipe.source === "SCRE") delete current.automation;
+			if (["Fey Beast|SCRE", "Fallen Angel|SCRE"].includes(`${recipe.name}|${recipe.source}`)) delete current.automation;
 			expect(current).toEqual(accepted.creatureTransformation.find(prior => prior.name === recipe.name && prior.source === recipe.source));
 		}
 		for (const selected of features.map(id => [id]).concat([features])) {

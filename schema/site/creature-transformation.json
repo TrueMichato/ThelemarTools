@@ -372,6 +372,82 @@
 				}, "additionalProperties": false}
 			}, "anyOf": [{"required": ["walk"]}, {"required": ["fly"]}, {"required": ["swim"]}, {"required": ["climb"]}, {"required": ["burrow"]}], "additionalProperties": false
 		},
+		"fallenAngelChange": {
+			"description": "Closed M11 source setters; runtime also verifies complete effects against the actual pre-owner target before resolving coherent winners.",
+			"oneOf": [
+				{"type": "object", "properties": {
+					"op": {"const": "setFallenAngelNature"},
+					"value": {"type": "object", "properties": {
+						"type": {"const": "fiend"},
+						"tags": {"allOf": [{"$ref": "#/$defs/reanimationChange/oneOf/0/properties/value/properties/tags"}, {"type": "array", "contains": {"const": "devil"}}]},
+						"swarmSize": {"$ref": "#/$defs/size"}
+					}, "required": ["type", "tags"], "additionalProperties": false}
+				}, "required": ["op"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setFallenAngelFlight"}, "value": {"$ref": "#/$defs/vampireSpeedValue"},
+					"alternate": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/vampireSpeedValue"}}
+				}, "required": ["op"], "anyOf": [{"required": ["value"]}, {"required": ["alternate"]}], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setFallenAngelEntry"}, "section": {"$ref": "#/$defs/entrySection"}, "match": {"$ref": "#/$defs/identity"}, "entry": {"$ref": "#/$defs/entry"}
+				}, "required": ["op", "section", "match", "entry"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setFallenAngelSpells"}, "match": {"$ref": "#/$defs/identity"},
+					"lists": {"type": "array", "maxItems": 100, "items": {"type": "object", "properties": {
+						"prop": {"enum": ["constant", "will", "ritual", "daily", "rest", "weekly", "monthly", "yearly", "recharge", "charges", "legendary", "spells"]},
+						"key": {"type": "string", "pattern": "^(?:[0-9]|[1-9][0-9]?e?)$"},
+						"spells": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"oneOf": [
+							{"type": "string", "minLength": 1, "maxLength": 10000},
+							{"type": "object", "properties": {"entry": {"type": "string", "minLength": 1, "maxLength": 10000}, "hidden": {"type": "boolean"}}, "required": ["entry"], "additionalProperties": false}
+						]}}
+					}, "required": ["prop", "spells"], "allOf": [
+						{"if": {"properties": {"prop": {"enum": ["constant", "will", "ritual"]}}}, "then": {"not": {"required": ["key"]}}, "else": {"required": ["key"]}},
+						{"if": {"properties": {"prop": {"const": "spells"}}}, "then": {"properties": {"key": {"type": "string", "pattern": "^[0-9]$"}}}}
+					], "additionalProperties": false}}
+				}, "required": ["op", "match", "lists"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setDevilswornResistances"},
+					"value": {"type": "array", "maxItems": 100, "items": {"oneOf": [
+						{"$ref": "#/$defs/damage"},
+						{"type": "object", "properties": {
+							"resist": {"type": "array", "minItems": 1, "maxItems": 13, "items": {"$ref": "#/$defs/damage"}},
+							"note": {"type": "string", "minLength": 1, "maxLength": 256}, "preNote": {"type": "string", "minLength": 1, "maxLength": 256}, "cond": {"type": "boolean"}
+						}, "required": ["resist"], "additionalProperties": false}
+					]}}
+				}, "required": ["op", "value"], "additionalProperties": false},
+				{"type": "object", "properties": {
+					"op": {"const": "setDevilswornSenses"},
+					"value": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+					"tags": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 256}}
+				}, "required": ["op", "value", "tags"], "additionalProperties": false}
+			]
+		},
+		"compiledFallenAngel": {
+			"description": "M11 source-only output, with bounded frozen decisions rather than mutable catalog/donor pointers.",
+			"type": "object", "properties": {
+				"version": {"const": 2}, "id": {"const": "catalog:fallen angel|scre"}, "kind": {"const": "catalog"},
+				"identity": {"allOf": [{"$ref": "#/$defs/identity"}, {"type": "object", "properties": {"name": {"const": "Fallen Angel"}, "source": {"const": "SCRE"}}}]},
+				"provenance": {"$ref": "#/$defs/provenance"},
+				"eligibility": {"const": [{"types": ["celestial"], "dmApproval": true}]},
+				"prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}},
+				"selectedOptions": {"type": "object", "properties": {
+					"allegiance": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"enum": ["fallen", "devilsworn"]}},
+					"automation-fallen-angel": {"const": ["scre-m11"]},
+					"automation-fallen-angel-inputs": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "minLength": 2, "maxLength": 30000}}
+				}, "required": ["allegiance", "automation-fallen-angel", "automation-fallen-angel-inputs"], "additionalProperties": false},
+				"changes": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"oneOf": [
+					{"$ref": "#/$defs/fallenAngelChange"},
+					{"allOf": [{"$ref": "#/$defs/numericChange"}, {"type": "object", "properties": {"op": {"const": "setSkillBonus"}, "skill": {"enum": ["deception", "intimidation"]}}}]},
+					{"allOf": [{"$ref": "#/$defs/change"}, {"oneOf": [
+						{"type": "object", "properties": {"op": {"const": "grantResistance"}, "value": {"const": "necrotic"}}},
+						{"type": "object", "properties": {"op": {"const": "grantImmunity"}, "value": {"const": "poison"}}},
+						{"type": "object", "properties": {"op": {"const": "grantConditionImmunity"}, "value": {"const": "poisoned"}}},
+						{"type": "object", "properties": {"op": {"const": "addEntry"}, "section": {"const": "trait"}, "entry": {"type": "object", "properties": {"name": {"const": "Devil's Sight"}, "source": {"const": "SCRE"}}}}}
+					]}]}
+				]}},
+				"manualReview": {"type": "array", "items": {"$ref": "#/$defs/review"}}
+			}, "required": ["version", "id", "kind", "identity", "provenance", "eligibility", "prerequisites", "selectedOptions", "changes", "manualReview"],
+			"additionalProperties": false
+		},
 		"feyBeastChange": {
 			"oneOf": [
 				{"type": "object", "properties": {
@@ -570,7 +646,7 @@
 			"oneOf": [
 				{"$ref": "#/$defs/stagedDracolichAutomation"},
 				{"$ref": "#/$defs/stagedHalfDragonAutomation"},
-				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark", "fey-beast"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
+				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"enum": ["skeleton", "skeletal-wyrmling", "spore-servant", "shadow-dragon-mm", "shadow-dragon-beg", "vampire", "lycanthropy", "wereshark", "fey-beast", "fallen-angel"]}, "rollout": {"const": "staged"}}, "required": ["version", "profile", "rollout"], "additionalProperties": false},
 				{"type": "object", "properties": {"version": {"const": 2}, "profile": {"const": "zombie-numerics"}, "rollout": {"const": "staged"}, "hitPoints": {"const": "constitution"}}, "required": ["version", "profile", "rollout", "hitPoints"], "additionalProperties": false}
 			]
 		},
@@ -834,6 +910,15 @@
 					{"properties": {"name": {"const": "Vampire"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "vampire"}}}}},
 					{"properties": {"name": {"const": "Lycanthropy"}, "source": {"const": "MM"}, "automation": {"type": "object", "properties": {"profile": {"const": "lycanthropy"}}}}},
 					{"properties": {"name": {"const": "Wereshark"}, "source": {"const": "Arcadia27"}, "automation": {"type": "object", "properties": {"profile": {"const": "wereshark"}}}}},
+					{"properties": {"name": {"const": "Fallen Angel"}, "source": {"const": "SCRE"}, "automation": {"type": "object", "properties": {"profile": {"const": "fallen-angel"}}},
+						"optionGroups": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {
+							"id": {"const": "allegiance"}, "selection": {"const": "one"}, "required": {"const": true},
+							"options": {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [
+								{"type": "object", "properties": {"id": {"const": "fallen"}}},
+								{"type": "object", "properties": {"id": {"const": "devilsworn"}}}
+							]}
+						}}}
+					}},
 					{"properties": {"name": {"const": "Fey Beast"}, "source": {"const": "SCRE"}, "automation": {"type": "object", "properties": {"profile": {"const": "fey-beast"}}},
 						"optionGroups": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "object", "properties": {
 							"id": {"const": "features"}, "selection": {"const": "any"}, "required": {"const": true},

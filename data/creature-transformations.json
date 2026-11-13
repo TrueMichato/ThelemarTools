@@ -445,7 +445,8 @@
 					]}
 				]}
 			],
-			"manualReview": [{"field": "eligibility", "reason": "Screenshot page and edition are unverified; do not infer rules from the Fallen Planetar example."}]
+			"manualReview": [{"field": "eligibility", "reason": "Screenshot page and edition are unverified; do not infer rules from the Fallen Planetar example."}],
+			"automation": {"version": 2, "profile": "fallen-angel", "rollout": "staged"}
 		},
 		{
 			"name": "Undead",

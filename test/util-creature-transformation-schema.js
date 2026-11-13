@@ -5,6 +5,7 @@ import {getCreatureTransformationCandidates} from "../js/creature-transformation
 import {getSporeShadowProfile} from "../js/creature-transformation-spore-shadow.js";
 import {getLycanthropeProfile} from "../js/creature-transformation-lycanthrope.js";
 import {isFeyBeastCatalog} from "../js/creature-transformation-fey-beast.js";
+import {isFallenAngelCatalog} from "../js/creature-transformation-fallen-angel.js";
 
 const SCHEMA_PATH = "schema/site/creature-transformation.json";
 const DATA_PATH = "data/creature-transformations.json";
@@ -41,7 +42,8 @@ function getCreatureTransformationIdentityErrors ({data, filePath}) {
 		if (m9 && getLycanthropeProfile(`catalog:${id}`) !== recipe.automation.profile) errors.push(`${filePath}: M9 automation requires its exact source-qualified Lycanthropy/Wereshark identity`);
 		if (recipe.automation?.profile === "fey-beast" && id !== "fey beast|scre") errors.push(`${filePath}: M10 automation requires Fey Beast|SCRE`);
 		if (recipe.automation?.profile === "fey-beast" && !isFeyBeastCatalog(recipe)) errors.push(`${filePath}: M10 requires its existing ten-choice features contract`);
-		if (recipe.automation && !m7 && !m9 && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling", "vampire", "fey-beast"].includes(recipe.automation.profile)) {
+		if (recipe.automation?.profile === "fallen-angel" && (id !== "fallen angel|scre" || !isFallenAngelCatalog(recipe))) errors.push(`${filePath}: M11 requires Fallen Angel|SCRE and its existing two-choice allegiance contract`);
+		if (recipe.automation && !m7 && !m9 && !["zombie-numerics", "half-dragon", "skeleton", "skeletal-wyrmling", "vampire", "fey-beast", "fallen-angel"].includes(recipe.automation.profile)) {
 			const changes = recipe.automation.changes;
 			const names = new Set(Array.isArray(changes) ? changes.map(it => it?.entry?.name) : []);
 			if (id !== "dracolich|mm" || names.size !== 2 || !names.has("Magic Resistance") || !names.has("Undead Nature")) {

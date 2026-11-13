@@ -7,6 +7,7 @@ import {compileSporeShadow, getSporeShadowProfile, isCompiledSporeShadow} from "
 import {compileVampire, isCompiledVampire} from "./creature-transformation-vampire.js";
 import {compileLycanthrope, getLycanthropeProfile, isCompiledLycanthrope} from "./creature-transformation-lycanthrope.js";
 import {compileFeyBeast, isCompiledFeyBeast, isFeyBeastCatalog} from "./creature-transformation-fey-beast.js";
+import {compileFallenAngel, isCompiledFallenAngel, isFallenAngelCatalog} from "./creature-transformation-fallen-angel.js";
 
 const REVIEW_CHASSIS = [
 	{field: "ac", reason: "Recheck AC after changing defenses or creature type."},
@@ -165,6 +166,13 @@ const assertHalfDragonBreaths = rows => {
 	}
 };
 const assertAutomation = (automation, identity) => {
+	if (identity?.name === "Fallen Angel" && identity.source === "SCRE") {
+		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
+			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== "fallen-angel") {
+			throw new CreatureTransformationCandidateError("Only the exact staged Fallen Angel|SCRE M11 profile is supported.");
+		}
+		return;
+	}
 	if (identity?.name === "Fey Beast" && identity.source === "SCRE") {
 		if (!automation || Object.keys(automation).sort().join(",") !== "profile,rollout,version"
 			|| automation.version !== 2 || automation.rollout !== "staged" || automation.profile !== "fey-beast") {
@@ -571,6 +579,7 @@ function getCreatureTransformationCandidates ({catalog, races, getVersions, onIn
 			if (!parent?.options.some(it => it.id === group.appliesTo.option) || group.required) throw new CreatureTransformationCandidateError(`Invalid conditional option group in ${candidate.id}/${group.id}.`);
 		}
 		if (candidate.automation?.profile === "fey-beast" && !isFeyBeastCatalog(candidate)) throw new CreatureTransformationCandidateError("M10 requires the existing ten-choice Fey Beast features contract.");
+		if (candidate.automation?.profile === "fallen-angel" && !isFallenAngelCatalog(candidate)) throw new CreatureTransformationCandidateError("M11 requires the existing two-choice Fallen Angel allegiance contract.");
 		const matches = [...byId.get(candidate.id) || [], ...pending.filter(it => it.candidate.id === candidate.id)];
 		if (matches.length && candidate.kind !== "race") throw new Error(`Duplicate creature transformation identity: ${candidate.id}`);
 		const signature = getStableSignature(candidate);
@@ -724,6 +733,7 @@ function resolveCreatureTransformation ({candidates, id, selections = {}, automa
 }
 
 function isCompiledCreatureTransformation (resolved) {
+	if (resolved?.id === "catalog:fallen angel|scre") return isCompiledFallenAngel(resolved);
 	if (resolved?.id === "catalog:fey beast|scre") return isCompiledFeyBeast(resolved);
 	if (getLycanthropeProfile(resolved?.id)) return isCompiledLycanthrope(resolved);
 	if (resolved?.id === "catalog:vampire|mm") return isCompiledVampire(resolved);
@@ -818,6 +828,11 @@ function compileCreatureTransformation ({resolved, current, chassisSource = curr
 		error.code = code;
 		throw error;
 	};
+	if (resolved?.version === 2 && resolved.id === "catalog:fallen angel|scre") {
+		assertAutomation(resolved.automation, resolved.identity);
+		assertIdentity(current);
+		return compileFallenAngel({resolved, current, inputs, chassisSource});
+	}
 	if (resolved?.version === 2 && resolved.id === "catalog:fey beast|scre") {
 		assertAutomation(resolved.automation, resolved.identity);
 		assertIdentity(current);
