@@ -50,8 +50,8 @@ function canonical (value) {
 }
 
 function leaf (resolved) {
-	keys(resolved, LEAF_KEYS);
-	if (!isCompiledCreatureTransformation(resolved) || resolved.changes.length > 256) fail("each profile must be an independently compiled concrete v2 leaf");
+	keys(resolved, [...LEAF_KEYS, ...Object.hasOwn(resolved, "estimation") ? ["estimation"] : []]);
+	if (!isCompiledCreatureTransformation(resolved) || resolved.changes.length > (resolved.estimation ? 512 : 256)) fail("each profile must be an independently compiled concrete v2 leaf");
 	for (const change of resolved.changes) {
 		const key = Object.hasOwn(change, "op") ? "op" : "type";
 		if (resolved.id === "catalog:vampire|mm" && (isVampireChange(change, key) || change[key] === "grantConditionalDefense")) continue;
@@ -76,7 +76,7 @@ function leaf (resolved) {
 
 export function assertFrozenCreatureTransformation (resolved) {
 	assertJson(resolved);
-	keys(resolved, [...LEAF_KEYS, "frozenForms"]);
+	keys(resolved, [...LEAF_KEYS, "frozenForms", ...Object.hasOwn(resolved, "estimation") ? ["estimation"] : []]);
 	const {frozenForms, ...projection} = resolved;
 	leaf(projection);
 	keys(frozenForms, ["version", "baseline", "activeForm", "profiles"]);
@@ -92,6 +92,8 @@ export function assertFrozenCreatureTransformation (resolved) {
 			|| typeof profile.label !== "string" || !profile.label.trim() || profile.label.length > 80) fail("invalid or duplicate profile ID/label");
 		ids.add(profile.id);
 		leaf(profile.resolved);
+		if (!!profile.resolved.estimation !== !!projection.estimation
+			|| (profile.resolved.estimation && canonical(profile.resolved.estimation.baseline) !== canonical(frozenForms.baseline))) fail("every form must carry the same source baseline and estimate policy");
 		if (ROOT_KEYS.some(key => canonical(profile.resolved[key]) !== canonical(projection[key]))) fail("profile root, choices, consent requirements or provenance differ");
 	}
 	const active = frozenForms.profiles.find(profile => profile.id === frozenForms.activeForm);

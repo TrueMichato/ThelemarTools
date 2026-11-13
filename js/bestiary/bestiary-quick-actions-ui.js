@@ -232,7 +232,7 @@ export class BestiaryQuickActionsUi {
 		return `<button type="button" class="bqa__btn-open ve-btn ve-btn-xs ve-btn-default ve-lst-is-exporting-image__hidden no-print" data-bqa-open="true" data-has-override="${count ? "true" : "false"}" aria-label="${title.qq()}" title="${title.qq()}"><span class="glyphicon glyphicon-pencil" aria-hidden="true"></span></button>`;
 	}
 
-	static async pOpen ({monster, registry = this._registry, pFnOnSave = null, automationVersion = 1, transformationCallbacks = {}} = {}) {
+	static async pOpen ({monster, registry = this._registry, pFnOnSave = null, automationVersion = 2, transformationCallbacks = {}} = {}) {
 		if (!monster) throw new Error("A creature is required to open Bestiary Quick Actions.");
 		// Bestiary filter items are UI metadata, not part of the editable statblock.
 		monster = {...monster};
@@ -544,7 +544,7 @@ export class BestiaryQuickActionsUi {
 		return wrp;
 	}
 
-	static async _pRenderTransformation ({content, monster, registry, isCurrent, automationVersion = 1, validateOperation = null, validateChange = null, getConsequences, savedOperationId = null, onCancel = null, setCommitBusy = () => {}}) {
+	static async _pRenderTransformation ({content, monster, registry, isCurrent, automationVersion = 2, validateOperation = null, validateChange = null, getConsequences, savedOperationId = null, onCancel = null, setCommitBusy = () => {}}) {
 		await pRenderCreatureTransformationEditor({
 			mount: content,
 			isCurrent,

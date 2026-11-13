@@ -15,7 +15,7 @@ const isOverride = value => value === null || (keysAre(value, ["cr", "reason"]) 
 const isProficiencyAnswer = value => value === null || (keysAre(value, ["mode", "value", "reason"])
 	&& ["derived", "source-fixed"].includes(value.mode) && isInteger(value.value, 1, 30) && isText(value.reason));
 const isProficiencyContext = value => value === null || (keysAre(value, ["ownership", "index", "integrity", "value"])
-	&& ["derived", "explicit", "ambiguous"].includes(value.ownership) && isInteger(value.index, 0, 99)
+	&& ["derived", "explicit", "ambiguous"].includes(value.ownership) && isInteger(value.index, 0, Number.MAX_SAFE_INTEGER)
 	&& (value.integrity === null || (typeof value.integrity === "string" && /^[a-f0-9]{8}$/.test(value.integrity)))
 	&& isInteger(value.value, 1, 30));
 
