@@ -385,6 +385,30 @@ editor controls, browser verification and explicit default rollout remain M13.
 CR/XP is still retained with review in M12. No final browser, full-repository
 or release proof is claimed; Species stays deferred and Templates remains open.
 
+### Round 72 - Shared Template source inputs and estimates accepted locally
+
+M13a commit `cb1c1d387` composes all 14 staged source profiles through one
+DOM-free guided-input boundary. Estimates use the actual post-source creature
+and each permitted frozen form, preserve source-fixed donor numbers, reconcile
+declared proficiency ownership and pair the labeled DMG 2014 estimate with an
+explained CR override and canonical XP. Replay validates the original source
+profile and recomputes the bounded estimate tail without today's catalog.
+
+Parent review caught an incomplete-estimate bug despite the original green
+suite: removing the Devilsworn Greatsword rider could lower ready DPR from 43
+to 21 while coverage still claimed the whole hit was included. Represented
+supported damage now requires positive scheduled use or exact bounded fixed
+accounting; zero-use rows and consistently re-signed misleading receipts reject.
+Explained exclusions, alternatives and historical routine payloads remain valid.
+The unchanged parent probe now rejects the omission; focused verification passes
+four suites/129 tests and the normal native commit gate passes 40 suites/804 tests.
+
+This is local shared-layer acceptance, not finished Template automation.
+M13b still needs complete user-facing controls in both editors, and M13c still
+needs explicit default rollout, all-family UI coverage and final release gates.
+No browser, clean-lock reproducibility or full-repository release proof is claimed.
+The public branch remains unchanged; Species stays deferred and Templates open.
+
 The orchestrator alone owns this tracker and shared character-sheet references.
 S1 does not own import CSS; S2 does not own NPC export, damage calculations or
 global modal styling; S3 does not own character-sheet code or a Species fix. Shared E2E driver
