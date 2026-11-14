@@ -13994,7 +13994,6 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 			// Build a context with the methods applyThelemarSpellRarity needs
 			const context = {
 				_state: mockState,
-				_isOfficialSource: CharacterSheetSpells.prototype._isOfficialSource,
 			};
 			return (spells) => CharacterSheetSpells.prototype.applyThelemarSpellRarity.call(context, spells);
 		};
@@ -14011,10 +14010,10 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(result[0].subschools).toContain("legality:legal");
 			});
 
-			it("should tag homebrew spells as uncommon + legal", () => {
+			it("should use the site's TGTT common + legal default", () => {
 				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
 				const result = applyRarity([TGTT_SPELL]);
-				expect(result[0].subschools).toContain("rarity:uncommon");
+				expect(result[0].subschools).toContain("rarity:common");
 				expect(result[0].subschools).toContain("legality:legal");
 			});
 
@@ -14049,7 +14048,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				const applyRarity = makeRarityApplier({thelemar_spellRarity: true});
 				const result = applyRarity([PHB_SPELL, TGTT_SPELL]);
 				expect(result[0].subschools).toContain("rarity:common");
-				expect(result[1].subschools).toContain("rarity:uncommon");
+				expect(result[1].subschools).toContain("rarity:common");
 			});
 
 			it("should handle empty array", () => {
@@ -14071,7 +14070,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(result).toHaveLength(2);
 				expect(result[0].subschools).toContain("rarity:common");
 				expect(result[0].subschools).toContain("legality:legal");
-				expect(result[1].subschools).toContain("rarity:uncommon");
+				expect(result[1].subschools).toContain("rarity:common");
 				expect(result[1].subschools).toContain("legality:legal");
 			});
 
@@ -14099,7 +14098,7 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 				expect(result.find(s => s.name === "Fireball").source).toBe("TGTT");
 				expect(result.find(s => s.name === "Shield").source).toBe("PHB");
 				// Both should have rarity tags
-				expect(result.find(s => s.name === "Fireball").subschools).toContain("rarity:uncommon");
+				expect(result.find(s => s.name === "Fireball").subschools).toContain("rarity:common");
 				expect(result.find(s => s.name === "Shield").subschools).toContain("rarity:common");
 			});
 		});

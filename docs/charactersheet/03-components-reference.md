@@ -1239,6 +1239,19 @@ Shared UX for Add Spell / Item / Feat, conditions source filter, builder spell p
 
 Use `shouldShowFilteredEmpty(arr)` instead of `if (!filtered)` — arrays are always truthy. Multiselect All/Clear must call `syncMultiselectChecks` so every row updates. Do **not** migrate these pickers to site `ModalFilterBase` without a dedicated architecture pass.
 
+Add Spell uses `TgttFilter.computeSpellMetadata()` from `js/tgtt-filter.js`,
+the same rarity dictionary as the main Spells page. Source IDs resolve through
+their displayed abbreviations (for example, `BookOfEbonTides` → `BoET` → Rare).
+Explicit subschool rarity/legality markers override source defaults;
+`tgttRarity` / `tgttLegality` properties take highest priority. The sheet
+normalizes these markers for its multiselects without changing the source
+spell or enabling the site's floating TGTT filter.
+
+Class and expanded-subclass selections combine with **OR**; level, school,
+rarity, legality, other tags, source, search, and component/ritual/concentration
+filters further narrow that union. Virtualization does not limit the logical
+result set: all matching spells remain reachable by scrolling.
+
 ---
 
 ## Custom Abilities

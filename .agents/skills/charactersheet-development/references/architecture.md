@@ -23,6 +23,13 @@ with `setSpells()` and keep the actor page adapter's state-sensitive callbacks,
 rendering, and persistence isolated; this option is not a license to reuse
 the player's page or swap its `_state`.
 
+Spell rarity/legality comes from the site's `TgttFilter.computeSpellMetadata()`,
+not a second sheet dictionary or `SourceUtil` filter groups. `getFilteredSpellData()`
+applies it after source filtering and subclass augmentation. The Spells module
+imports `tgtt-filter.js` for its metadata; the sheet is excluded from that file's
+site-wide toggle/observer initialization. Preserve unrelated subschools and
+normalize metadata-only tags for the sheet's exact-value filter predicates.
+
 `CharacterSheetSimulacrum` owns the shared desktop/Play Mode actor card and
 manager. Its creation preview only stages data; the spell transaction owns
 payment/replacement/commit. Actor-backed records must never fall through to
