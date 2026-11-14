@@ -3,6 +3,7 @@ import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js"
 import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
 import {CharacterSheetSimulacrumCast} from "./charactersheet-simulacrum-cast.js";
 import {CharacterSheetSpellMaterials} from "./charactersheet-spell-materials.js";
+import "../tgtt-filter.js";
 
 class SpellMaterialUnavailableError extends Error {}
 import {ListVirtualRenderer} from "../list2/list2-virtual.js";
@@ -532,19 +533,9 @@ class CharacterSheetSpells {
 	// ========================================================================
 	// Thelemar Spell Rarity/Legality System
 	// ========================================================================
-	// Override map: Set homebrew sources to a specific rarity
-	// Format: { "SourceAbbrev": "uncommon" }
-	// Available rarities: common, uncommon, rare, very-rare, legendary
-	static HOMEBREW_RARITY_OVERRIDES = {
-		// Example: "MyHomebrew": "rare",
-		// Add your homebrew sources here with their desired rarity
-	};
-
 	/**
 	 * Apply Thelemar rarity/legality tags to spells if the setting is enabled
-	 * - Official sources: Legal + Common (unless spell has explicit tags)
-	 * - Homebrew sources: Legal + Uncommon (unless spell has explicit tags)
-	 * - Explicit spell tags always take precedence
+	 * Uses the same source dictionary and explicit overrides as the Spells page.
 	 * @param {Array} spells - Array of spell objects
 	 * @returns {Array} Spells with rarity/legality applied
 	 */
@@ -556,65 +547,16 @@ class CharacterSheetSpells {
 		}
 
 		return spells.map(spell => {
-			// Check if spell already has rarity or legality tags
-			const existingSubschools = spell.subschools || [];
-			const hasRarity = existingSubschools.some(s => s.includes("rarity:"));
-			const hasLegality = existingSubschools.some(s => s.includes("legality:"));
-
-			// If spell already has both tags, don't modify
-			if (hasRarity && hasLegality) {
-				return spell;
-			}
-
-			// Determine if source is official or homebrew
-			const isOfficial = this._isOfficialSource(spell.source);
-			const newSubschools = [...existingSubschools];
-
-			// Apply legality if not already present
-			if (!hasLegality) {
-				newSubschools.push("legality:legal");
-			}
-
-			// Apply rarity if not already present
-			if (!hasRarity) {
-				if (isOfficial) {
-					newSubschools.push("rarity:common");
-				} else {
-					// Check for homebrew-specific rarity override
-					const overrideRarity = CharacterSheetSpells.HOMEBREW_RARITY_OVERRIDES[spell.source];
-					if (overrideRarity) {
-						newSubschools.push(`rarity:${overrideRarity}`);
-					} else {
-						newSubschools.push("rarity:uncommon");
-					}
-				}
-			}
-
-			// Return modified spell (don't mutate original)
+			const {rarity, legality} = TgttFilter.computeSpellMetadata(spell);
+			// Canonical tags make case/spacing and explicit-property overrides
+			// agree with the picker's exact-value multiselects.
+			const subschools = (spell.subschools || []).filter(sub =>
+				!/^\s*\(?\s*(?:rarity|legality):\s*[^),\s]+\s*\)?\s*$/i.test(sub));
 			return {
 				...spell,
-				subschools: newSubschools,
+				subschools: [...subschools, `rarity:${rarity}`, `legality:${legality}`],
 			};
 		});
-	}
-
-	/**
-	 * Determine if a source is official (WotC published content)
-	 * @param {string} source - Source abbreviation
-	 * @returns {boolean} True if official source
-	 */
-	_isOfficialSource (source) {
-		// Use SourceUtil if available
-		if (typeof SourceUtil !== "undefined") {
-			const filterGroup = SourceUtil.getFilterGroup(source);
-			// Standard and Partnered are considered official
-			return filterGroup === SourceUtil.FILTER_GROUP_STANDARD
-				|| filterGroup === SourceUtil.FILTER_GROUP_PARTNERED;
-		}
-
-		// Fallback: check against known official sources
-		const officialPrefixes = ["PHB", "XGE", "TCE", "FTD", "XPHB", "MM", "DMG", "SCAG", "VGM", "MTF", "GGR", "AI", "EGW", "MOT", "TCE", "FTD", "SCC", "WBtW", "SJA", "DSotDQ", "BGG", "PAitM", "BMT", "MPMoM", "VEoR", "PHB2024", "DMG2024", "MM2024"];
-		return officialPrefixes.some(prefix => source === prefix || source.startsWith(`${prefix}-`));
 	}
 
 	_initEventListeners () {

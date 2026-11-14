@@ -823,6 +823,8 @@ class TgttFilterModalUI {
 // Auto-initialize if on a supported page
 if (typeof window !== "undefined") {
 	window.addEventListener("load", () => {
+		// The sheet imports the shared metadata, not the site's toggle or observers.
+		if (/(?:^|\/)charactersheet\.html$/i.test(window.location.pathname)) return;
 		// Check if TGTT features should be enabled (could check a setting here)
 		const tgttFilter = new TgttFilter();
 		const tgttFilterUI = new TgttFilterModalUI(tgttFilter);
