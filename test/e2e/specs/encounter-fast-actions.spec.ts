@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("shown members from two statblock groups receive only explicitly selected damage and saves", async ({page}) => {
 	const encounter = new EncounterRollPage(page);

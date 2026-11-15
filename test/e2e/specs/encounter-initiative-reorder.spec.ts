@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("dragging a turn changes whole-number totals, preserves the active actor, and survives reload", async ({page}) => {
 	const encounter = new EncounterRollPage(page);

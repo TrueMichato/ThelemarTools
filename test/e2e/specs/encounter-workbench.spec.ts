@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("combat cockpit keeps canonical order, viewed statblock, and bulk targets separate", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
@@ -283,7 +286,9 @@ test("the live turn and focused statblock lead mobile navigation in day and nigh
 			await expect(page.locator("#ew-roster")).toHaveCSS("overflow-y", "visible");
 			if (night) await expect(page.locator("#ew-position > summary")).toHaveCSS("background-color", "rgb(56, 56, 56)");
 			if (width <= 480) {
-				const smallControls = await page.locator(".ew button, .ew select, .ew input:not([type=checkbox]), .ew summary")
+				// The statblock's inline recharge chip is deliberately compact (30px, above the 24px WCAG 2.5.8 minimum)
+				// so it fits its heading; encounter-resources.spec.ts pins it between 30 and 44px.
+				const smallControls = await page.locator(".ew button:not(.ew__statblock .ew__inline-recharge), .ew select, .ew input:not([type=checkbox]), .ew summary")
 					.evaluateAll(elements => elements.filter(element => element.getClientRects().length && getComputedStyle(element).visibility === "visible")
 						.filter(element => element.getBoundingClientRect().width < 44 || element.getBoundingClientRect().height < 44)
 						.map(element => element.getAttribute("aria-label") || element.id || element.textContent?.trim().slice(0, 40)));

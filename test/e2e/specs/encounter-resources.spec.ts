@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("resources and concentration belong to each monster and survive reload without auto-spending", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
@@ -317,8 +320,16 @@ test("compact indicators wrap at headings, with separate accessible touch target
 			expect(rechargeMetrics.height).toBeLessThan(44);
 			expect(rechargeMetrics.height).toBeGreaterThanOrEqual(30);
 			const rolls = await encounter.rolledEntries.count();
+			// Positive control: a real reference link in the same statblock does open the site's hover window.
+			const hoverWindows = page.locator(".ve-hwin");
+			await encounter.statblock("one").getByRole("link", {name: "shield", exact: true}).hover();
+			await expect(hoverWindows).toHaveCount(1);
+			await page.mouse.move(0, 0);
+			await expect(hoverWindows).toHaveCount(0);
 			await recharge.hover();
-			await expect(page.locator(".hwin")).toHaveCount(0);
+			// Give a hover window the same chance to open as the control had before asserting there is none.
+			await page.waitForTimeout(500);
+			await expect(hoverWindows).toHaveCount(0);
 			await recharge.click();
 			await expect(encounter.rolledEntries).toHaveCount(rolls);
 			await expect(recharge).toBeFocused();

@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("typed damage resolves per-target defenses, consumes temporary HP, reports changes and shares HP undo", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
@@ -59,7 +62,8 @@ test("typed damage resolves per-target defenses, consumes temporary HP, reports 
 test("visible statblock concentration remains active after typed damage and reports the correct check DC", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
 	await encounter.seed({count: 1});
-	const panel = encounter.resourcePanel("one");
+	// The concentration toggle lives in the statblock heading, not the resource panel.
+	const panel = encounter.statblock("one");
 	await panel.getByRole("button", {name: "Goblin #1: start concentration"}).click();
 	const concentrating = panel.getByRole("button", {name: "Goblin #1: end concentration"});
 	await expect(concentrating).toHaveAttribute("aria-pressed", "true");

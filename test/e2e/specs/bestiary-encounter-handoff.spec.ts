@@ -1,4 +1,7 @@
 import {expect, test} from "@playwright/test";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 const WORKSPACE_INIT_TIMEOUT = 30_000;
 
@@ -43,7 +46,7 @@ test("a generated unsaved Bestiary encounter opens through the actual button exa
 		return (await bestiary._sublistManager.pGetExportableSublist({isMemoryOnly: true})).items;
 	});
 	await page.locator(".best-ecgen__visible--flex .bestiary__encounter-workspace-link").click();
-	await expect(page).toHaveURL(/encounterworkspace\.html$/, {timeout: WORKSPACE_INIT_TIMEOUT});
+	await expect(page).toHaveURL(/encounterworkspace\.html\?ew=1$/, {timeout: WORKSPACE_INIT_TIMEOUT});
 	await expect(page.locator("#ew-status")).toContainText('from "Current Bestiary Encounter" in Bestiary', {timeout: WORKSPACE_INIT_TIMEOUT});
 	const opened = await readWorkspace(page);
 	expect(opened.sourceList).toEqual({name: "Current Bestiary Encounter", saveId: ""});
@@ -115,7 +118,7 @@ test("a missing handoff is reported without changing the working copy; ordinary 
 	test.setTimeout(120_000);
 	await openBestiary(page);
 	await page.locator(".bestiary__wrp-controls .bestiary__encounter-workspace-link").click();
-	await expect(page).toHaveURL(/encounterworkspace\.html$/, {timeout: WORKSPACE_INIT_TIMEOUT});
+	await expect(page).toHaveURL(/encounterworkspace\.html\?ew=1$/, {timeout: WORKSPACE_INIT_TIMEOUT});
 	await expect(page.locator("#ew-status")).toContainText("Choose a saved Bestiary pinned list", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await page.evaluate(async () => {
 		const {StorageUtil} = globalThis as typeof globalThis & {
