@@ -1,7 +1,6 @@
 /**
  * P3b — the Effects tab: what is on the targets right now (hoverable, duration editable by hand, removable) and the
- * saved effects library (apply / delete). Creating a custom effect is P3a's builder; until it lands the button opens the
- * Fx dock tab.
+ * saved effects library (apply / delete). "New custom effect" opens P3a's shared builder inline.
  */
 
 import {h} from "../dom.js";
@@ -10,8 +9,10 @@ import {
 	deleteEncounterSavedEffect,
 	fmtEncounterDuration,
 	removeEncounterEffect,
+	saveEncounterEffectDef,
 	setEncounterEffectRounds,
 } from "../../encounterworkspace-fx.js";
+import {createCockpitEffectBuilder} from "./act-effect-builder.js";
 import {getPrepCurrentEffectRows, parsePrepRounds} from "./prep-model.js";
 import {acts, btn, input, lbl, muted, plural, scopeSeg, tip} from "./prep-ui.js";
 
@@ -127,9 +128,45 @@ export function renderPrepEffectsTab (P) {
 		tip("Durations count down at the end of each round. Leave empty for “until removed”. Concentration effects end when their caster drops it."),
 		h("div.ewc-prep__sep"),
 		...renderSaved(P, ids),
-		acts(
-			// P3a-HOOK: swap in openCockpitEffectBuilder from ./act-effect-builder.js
-			btn("＋ New custom effect", () => P.api.setDockTab("fx"), {key: "fx-new"}),
-		),
+		...renderBuilder(P),
 	];
+}
+
+async function pAddCustom (P, def, {isSave}) {
+	const {api} = P;
+	const ctx = api.getCtx();
+	const ids = P.getTargetIds();
+	if (!ids.length && !isSave) throw new Error("View or select a creature to apply it to — or tick “Save for reuse”.");
+	const label = ids.length ? `${def.name} → ${ids.length === 1 ? ctx.labels.get(ids[0]) : plural(ids.length, "creature")}` : `Save ${def.name}`;
+	const next = await api.pCommit(label, (draft, {log}) => {
+		const saved = isSave ? saveEncounterEffectDef(draft, def) : null;
+		if (ids.length) applyEncounterEffect(draft, {targetIds: ids, def: saved || def, rounds: def.duration, casterId: def.conc ? ctx.activeInstanceId : null, ruleset: ctx.ruleset, log});
+		return draft;
+	});
+	if (!next) return false;
+	P.S.isFxBuilderOpen = false;
+	api.toast(`${label}.`, {isUndo: true});
+	P.rerender();
+}
+
+function renderBuilder (P) {
+	const {S} = P;
+	S.fxBuilder ||= createCockpitEffectBuilder({
+		fk: "prep-fxb",
+		submitLabel: "Add & apply",
+		isSaveDefault: true,
+		onSubmit: (def, meta) => pAddCustom(S.fxBuilderP, def, meta),
+		onCancel: () => { S.isFxBuilderOpen = false; S.fxBuilderP.rerender(); },
+	});
+	S.fxBuilderP = P;
+	const toggle = btn(S.isFxBuilderOpen ? "▾ New custom effect" : "＋ New custom effect", () => {
+		S.isFxBuilderOpen = !S.isFxBuilderOpen;
+		P.rerender();
+		if (S.isFxBuilderOpen) S.fxBuilder.focus();
+	}, {key: "fx-new"});
+	toggle.setAttribute("aria-expanded", `${!!S.isFxBuilderOpen}`);
+	if (!S.isFxBuilderOpen) return [acts(toggle)];
+	const host = h("div.ewc-prep__fxb");
+	S.fxBuilder.render(host);
+	return [acts(toggle), host];
 }

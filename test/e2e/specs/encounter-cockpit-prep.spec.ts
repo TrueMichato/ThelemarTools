@@ -202,9 +202,16 @@ test.describe("Encounter cockpit prep mode (?ew=2)", () => {
 		await page.mouse.move(640, 4);
 		await fxRow.getByRole("button", {name: /Remove War Cry/}).click();
 		await expect(page.locator('[data-ewc-fx-row^="owlbear|"]')).toHaveCount(0);
-		// Creating a custom effect hands off to the Fx dock tab.
+		// Creating a custom effect opens the shared builder inline; submitting applies + saves it and folds the form.
 		await fk(page, "fx-new").click();
-		await expect(page.locator('.ewc-dock__tab[aria-selected="true"]')).toContainText("Fx");
+		const builder = page.locator('[data-ewc-fxb="prep-fxb"]');
+		await expect(builder).toBeVisible();
+		await builder.locator('[data-ewc-field="name"]').fill("Shield wall");
+		await builder.locator("[data-ewc-fxb-submit]").click();
+		await expect(builder).toHaveCount(0);
+		await expect(page.locator('[data-ewc-fx-row^="owlbear|"]').filter({hasText: "Shield wall"})).toBeVisible();
+		await expect(page.locator(".ewc-prep__dyn")).toContainText("Shield wall");
+		await expect(fk(page, "fx-new")).toHaveAttribute("aria-expanded", "false");
 
 		// Battlefield: add Dim light for 3 rounds; it shows in the strip with a native hover; edit focuses it; remove.
 		await fk(page, "ptab-area").click();
