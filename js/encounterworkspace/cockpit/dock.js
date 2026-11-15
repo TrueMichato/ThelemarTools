@@ -1,6 +1,6 @@
 /**
  * Bottom dock: a target line and tabbed panels that act on the selection, or on the viewed creature when nothing is
- * selected. HP and Cond are built here; Save, Check and Fx are registered slots that later phases fill in with
+ * selected. HP and Cond are built here; Roll and Fx are registered slots that later phases fill in with
  * `dock.registerTab({id, label, keys, render(ctx, panel)})`.
  */
 
@@ -47,10 +47,9 @@ export class EncounterCockpitDock {
 		this._cb = callbacks;
 		this._tabs = [
 			{id: "hp", label: "HP", keys: ["H"], render: (ctx, panel) => this._renderHp(ctx, panel)},
-			getSlotTab("save", "Save", ["S"], "Saving throws for the targets"),
-			getSlotTab("check", "Check", [], "Ability checks for the targets"),
+			getSlotTab("roll", "Roll", ["R"], "Saving throws, ability checks and skills for the targets"),
 			{id: "cond", label: "Cond", keys: ["C"], render: (ctx, panel) => this._renderCond(ctx, panel)},
-			getSlotTab("fx", "Fx", ["F"], "Spell and custom effects"),
+			getSlotTab("fx", "Fx", ["E"], "Spell and custom effects"),
 		];
 		this._tab = "hp";
 		this._hpForm = {amount: "", damageType: null, isAllTypes: false, source: "unspecified", isCrit: false};
