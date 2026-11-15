@@ -2,6 +2,11 @@
 @use "vars/vars-night";
 @use "includes/bestiary-quick-actions";
 @use "includes/encounterworkspace-resources";
+@use "includes/encounterworkspace-cockpit-shell";
+@use "includes/encounterworkspace-cockpit-rail";
+@use "includes/encounterworkspace-cockpit-statblock";
+@use "includes/encounterworkspace-cockpit-dock";
+@use "includes/encounterworkspace-cockpit-keymap";
 
 @layer vetools {
 	.ew {

@@ -1,0 +1,268 @@
+@use "../vars/vars";
+@use "../vars/vars-night";
+
+// Encounter Workspace cockpit (?ew=2) — viewed-creature head + native statblock tile.
+// The statblock keeps the site's native look (it's the thing DMs already read fluently); the cockpit only
+// centres it, removes dead right-hand space and layers live HP/AC/effects in the head above it.
+
+@layer vetools {
+	.ewc {
+		.ewc-away {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			max-width: 100%;
+			min-height: 28px;
+			margin-bottom: 10px;
+			padding: 0 6px 0 10px;
+			border: 1px solid var(--ewc-ind-line);
+			border-radius: 999px;
+			background: var(--ewc-ind-soft);
+			color: var(--ewc-ink-2);
+			font-size: var(--ewc-f-s);
+			white-space: nowrap;
+
+			b {
+				color: var(--ewc-ink);
+				font-weight: 600;
+			}
+
+			&:hover {
+				background: var(--ewc-ind-soft-2);
+				color: var(--ewc-ink);
+			}
+
+			&__dot {
+				flex: none;
+				width: 7px;
+				height: 7px;
+				border-radius: 50%;
+				background: var(--ewc-ind);
+			}
+
+			&__who {
+				overflow: hidden;
+				color: var(--ewc-ink);
+				text-overflow: ellipsis;
+			}
+		}
+
+		.ewc-vh {
+			&__top {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				gap: 8px 10px;
+			}
+
+			&__name {
+				min-width: 0;
+				font-size: var(--ewc-f-xl);
+				font-weight: 600;
+				line-height: 1.25;
+				overflow-wrap: anywhere;
+			}
+
+			&__tag {
+				padding: 1px 8px;
+				border-radius: 999px;
+				background: var(--ewc-gold-soft);
+				color: var(--ewc-gold);
+				font-size: var(--ewc-f-xs);
+				font-weight: 600;
+
+				&--bad {
+					background: var(--ewc-bad-soft);
+					color: var(--ewc-bad);
+				}
+
+				&--warn {
+					background: var(--ewc-warn-soft);
+					color: var(--ewc-warn);
+				}
+			}
+
+			&__sel {
+				margin-left: auto;
+
+				&[aria-pressed="true"] {
+					border-color: var(--ewc-ind-line);
+					background: var(--ewc-ind-soft-2);
+					color: var(--ewc-ind-text);
+				}
+			}
+
+			&__stats {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				gap: 4px 18px;
+				margin-top: 8px;
+				color: var(--ewc-ink-3);
+				font-size: var(--ewc-f-s);
+			}
+
+			&__stat {
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
+				white-space: nowrap;
+
+				b {
+					color: var(--ewc-ink);
+					font-size: var(--ewc-f-m);
+					font-weight: 600;
+
+					&.is-changed {
+						color: var(--ewc-ind-text);
+					}
+				}
+
+				s {
+					color: var(--ewc-ink-4);
+				}
+			}
+
+			&__tmp {
+				color: var(--ewc-ind-text);
+			}
+
+			&__hpbar {
+				display: inline-block;
+				width: 80px;
+				height: 4px;
+				margin-left: 6px;
+				overflow: hidden;
+				border-radius: var(--ewc-r-xs);
+				background: var(--ewc-hair-2);
+
+				i {
+					display: block;
+					width: 100%;
+					height: 100%;
+					background: var(--ewc-ok-bar);
+					transform: scaleX(var(--p, 1));
+					transform-origin: left;
+					transition: transform var(--ewc-t) var(--ewc-ease);
+				}
+
+				&.is-hurt i { background: var(--ewc-ink-3); }
+				&.is-bloodied i { background: var(--ewc-warn-bar); }
+				&.is-down i { background: var(--ewc-bad-bar); }
+			}
+
+			&__line {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				gap: 4px;
+				margin-top: 8px;
+				font-size: var(--ewc-f-s);
+			}
+
+			&__lbl {
+				margin-right: 4px;
+				color: var(--ewc-ink-4);
+				font-size: var(--ewc-f-xs);
+				font-weight: 600;
+				letter-spacing: 0.03em;
+				text-transform: uppercase;
+			}
+		}
+
+		// Native statblock, centred in the stage with no dead right-hand space.
+		.ewc-sb {
+			width: 100%;
+			margin: 0 auto;
+			padding: 10px 14px 14px;
+			border: 1px solid var(--ewc-hair-2);
+			border-radius: var(--ewc-r-m);
+			background: vars.$rgb-bg;
+			color: vars.$rgb-font;
+
+			overflow-x: auto;
+
+			.ve-stats {
+				width: 100%;
+				min-width: 0;
+				margin: 0;
+
+				td,
+				th {
+					overflow-wrap: normal;
+					word-break: normal;
+				}
+			}
+
+			.ew__concentration {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				min-height: 26px;
+				margin: 0 0 8px;
+				padding: 0 10px;
+				border: 1px solid var(--ewc-hair-2);
+				border-radius: 999px;
+				background: var(--ewc-chrome);
+				color: var(--ewc-ink-2);
+				font-size: var(--ewc-f-xs);
+				font-weight: 500;
+				line-height: 1;
+				box-shadow: none;
+
+				&::before {
+					content: "◉";
+					color: var(--ewc-ink-4);
+				}
+
+				&:hover,
+				&:focus-visible {
+					border-color: var(--ewc-ind-strong);
+					color: var(--ewc-ink);
+				}
+			}
+
+			.ew__concentration--active {
+				border-color: var(--ewc-gold);
+				background: var(--ewc-gold-soft);
+				color: var(--ewc-gold);
+
+				&::before {
+					color: var(--ewc-gold);
+				}
+			}
+
+			.ew__resources {
+				margin-top: 10px;
+			}
+
+			.ewc-sb__fixed {
+				table-layout: fixed;
+			}
+
+			[data-packed-dice] {
+				cursor: pointer;
+			}
+		}
+	}
+
+	@media (width <= 1000px) {
+		.ewc .ewc-sb {
+			padding: 8px 8px 10px;
+
+			// The native table is `table-layout: fixed`; at this width that makes the top row's cells overlap.
+			.ve-stats,
+			.ewc-sb__fixed {
+				table-layout: auto;
+			}
+		}
+	}
+
+	.ve-night-mode .ewc {
+		.ewc-sb {
+			border-color: var(--ewc-hair-2);
+			background: vars-night.$rgb-bg--night;
+			color: vars-night.$rgb-font--night;
+		}
+	}
+}
