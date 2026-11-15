@@ -303,8 +303,45 @@ export function formatCreatureTransformationDeltaField ({path, before, after}) {
 	return `${label}: ${format(before)} → ${format(after)}`;
 }
 
+const DELTA_SPELL_FREQUENCIES = {daily: "day", rest: "rest", weekly: "week", monthly: "month", yearly: "year"};
+
+function getDeltaText (value) {
+	if (value == null) return [];
+	if (typeof value === "string") return [Renderer.stripTags(value)];
+	if (typeof value === "number") return [String(value)];
+	if (Array.isArray(value)) return value.flatMap(getDeltaText);
+	if (typeof value !== "object") return [];
+	const body = [...getDeltaText(value.entries), ...getDeltaText(value.items), ...getDeltaText(value.entry)];
+	const name = typeof value.name === "string" ? Renderer.stripTags(value.name) : "";
+	if (name && body.length) return [`${name}. ${body.join(" ")}`];
+	return name ? [name] : body;
+}
+
+function formatDeltaSpells (spells) {
+	return (spells || []).flatMap(getDeltaText).join(", ");
+}
+
+// Readable, tag-free content so the DM sees "At will: dancing lights", never serialized JSON.
+function formatDeltaEntryContent (entry) {
+	if (!entry) return "not present";
+	if (typeof entry !== "object") return getDeltaText(entry).join(" ") || "no text";
+	const parts = [...getDeltaText(entry.headerEntries), ...getDeltaText(entry.entries), ...getDeltaText(entry.items)];
+	if (entry.will?.length) parts.push(`At will: ${formatDeltaSpells(entry.will)}`);
+	Object.entries(DELTA_SPELL_FREQUENCIES).forEach(([prop, unit]) => {
+		Object.entries(entry[prop] || {})
+			.sort(([a], [b]) => parseInt(b) - parseInt(a))
+			.forEach(([key, spells]) => parts.push(`${parseInt(key)}/${unit}${key.endsWith("e") ? " each" : ""}: ${formatDeltaSpells(spells)}`));
+	});
+	Object.entries(entry.spells || {}).forEach(([level, {slots, spells} = {}]) => {
+		const label = Number(level) === 0 ? "Cantrips" : `Level ${level}${slots ? ` (${slots} slots)` : ""}`;
+		parts.push(`${label}: ${formatDeltaSpells(spells)}`);
+	});
+	parts.push(...getDeltaText(entry.footerEntries));
+	return parts.join(" ") || "no text";
+}
+
 export function formatCreatureTransformationDeltaEntry ({section, name, source, chassisSource, before, after}) {
-	const content = entry => entry ? JSON.stringify(entry) : "not present";
+	const content = formatDeltaEntryContent;
 	return `${DELTA_ENTRY_NAMES[section] || section}: ${before && after ? "Changed" : after ? "Added" : "Removed"} ${name} (${source || chassisSource || "source unverified"}): ${content(before)} → ${content(after)}`;
 }
 

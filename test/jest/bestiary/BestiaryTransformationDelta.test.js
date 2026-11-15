@@ -1,5 +1,6 @@
 import "../../../js/parser.js";
 import "../../../js/utils.js";
+import "../../../js/render.js";
 import {formatCreatureTransformationDeltaField, formatCreatureTransformationDeltaEntry} from "../../../js/bestiary/bestiary-transformation-editor.js";
 
 describe("compact creature transformation delta", () => {
@@ -61,16 +62,23 @@ describe("compact creature transformation delta", () => {
 		expect(field("cr", "1", {cr: "2", xp: 450})).toBe("Challenge rating: 1 → 2 (450 XP)");
 	});
 
-	it("keeps exact sourced entry and spellcasting-header changes, not undefined entries-only summaries", () => {
+	it("keeps exact sourced entry and spellcasting-header changes as readable text, not serialized JSON", () => {
 		const before = {name: "Innate Spellcasting", source: "MM", headerEntries: ["DC {@dc 11}, {@hit 3} to hit"], will: ["{@spell dancing lights}"]};
 		const after = {...before, headerEntries: ["DC {@dc 8}, {@hit 0} to hit"]};
 		const text = formatCreatureTransformationDeltaEntry({section: "spellcasting", name: before.name, source: "MM", before, after});
 		expect(text).toContain("Changed Innate Spellcasting (MM)");
-		expect(text).toContain("DC {@dc 11}");
-		expect(text).toContain("DC {@dc 8}");
-		expect(text).toContain("\"will\":[\"{@spell dancing lights}\"]");
+		expect(text).toContain("DC 11, +3 to hit");
+		expect(text).toContain("DC 8, +0 to hit");
+		expect(text).toContain("At will: dancing lights");
+		expect(text).not.toContain("{@");
+		expect(text).not.toContain("\"will\"");
 		expect(text).not.toContain("undefined");
+		const drowMagic = {
+			name: "Drow Magic", headerEntries: ["Innate."], daily: {"1e": ["{@spell darkness}", "{@spell faerie fire}"]}, spells: {"1": {slots: 2, spells: ["{@spell shield}"]}},
+		};
+		expect(formatCreatureTransformationDeltaEntry({section: "spellcasting", name: "Drow Magic", source: "MM", before: null, after: drowMagic}))
+			.toContain("Added Drow Magic (MM): not present → Innate. 1/day each: darkness, faerie fire Level 1 (2 slots): shield");
 		expect(formatCreatureTransformationDeltaEntry({section: "action", name: "Morningstar", chassisSource: "MM", before: {entries: ["{@hit 4}"]}, after: {entries: ["{@hit 5}"]}}))
-			.toContain("Morningstar (MM)");
+			.toBe("Actions: Changed Morningstar (MM): +4 → +5");
 	});
 });
