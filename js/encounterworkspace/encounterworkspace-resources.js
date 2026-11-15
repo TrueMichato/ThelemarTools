@@ -46,10 +46,12 @@ export function getEncounterResourceDefaults (monster) {
 			if (max) abilities.push({id: `auto:ability:${section}:${index}`, name, current: max, max});
 		});
 	}
+	// Like the site renderer, a legendary section with no count or header means the standard 3 uses (almost all MM/XMM data).
+	const hasLegendary = Array.isArray(monster?.legendary) && monster.legendary.length > 0;
 	const actions = getCount(monster?.legendaryActions)
 		|| (Array.isArray(monster?.legendaryHeader)
 			? getCount(Number(getEntryText(monster.legendaryHeader).match(/\bcan take (\d+) legendary actions\b/i)?.[1]))
-			: null);
+			: hasLegendary && monster.legendaryActions == null ? 3 : null);
 	if (actions) abilities.push({id: "auto:legendary-actions", name: "Legendary Actions", current: actions, max: actions});
 	const equipment = monster?.specialEquipment;
 	const seenEquipment = new Set();
