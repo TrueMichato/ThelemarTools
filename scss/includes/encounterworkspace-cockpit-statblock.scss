@@ -40,7 +40,12 @@
 				background: var(--ewc-ind);
 			}
 
+			&__sep {
+				color: var(--ewc-ink-4);
+			}
+
 			&__who {
+				min-width: 0;
 				overflow: hidden;
 				color: var(--ewc-ink);
 				text-overflow: ellipsis;

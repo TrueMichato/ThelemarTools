@@ -72,7 +72,7 @@ export class EncounterCockpitStatblock {
 				"data-ewc-fk": "vh-back",
 				title: "Back to the active creature (Space)",
 				onclick: () => this._cb.onViewActive(),
-			}, h("span.ewc-away__dot", {"aria-hidden": "true"}), "Viewing ", h("b", null, label), " · Back to active ",
+			}, h("span.ewc-away__dot", {"aria-hidden": "true"}), "Viewing ", h("b", null, label), h("span.ewc-away__sep", {"aria-hidden": "true"}, "·"), "back to ",
 			h("span.ewc-away__who", null, ctx.labels.get(activeId)), kbd(["Space"])));
 		}
 

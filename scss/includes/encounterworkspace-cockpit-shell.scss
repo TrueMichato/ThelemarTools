@@ -413,13 +413,19 @@
 
 			&__enc {
 				display: flex;
-				flex: 1 1 0;
+				flex: 1 1 auto;
 				align-items: center;
 				gap: 10px;
 				min-width: 0;
+
+				.ewc-badge {
+					flex: none;
+				}
 			}
 
 			&__title {
+				flex: 0 1 auto;
+				min-width: 12ch;
 				overflow: hidden;
 				font-size: var(--ewc-f-l);
 				font-weight: 600;
@@ -689,6 +695,11 @@
 			pointer-events: none;
 		}
 
+		// Closed, the log bar only echoes the toast; open, its filter row is live, so sit above it.
+		&:has(.ewc-log.is-open) .ewc-toasts {
+			bottom: 58px;
+		}
+
 		.ewc-toast {
 			display: flex;
 			align-items: center;
@@ -786,7 +797,9 @@
 				max-width: 200px;
 			}
 
-			[data-ewc-act="prev"] .ewc-btn__lbl {
+			[data-ewc-act="prev"] .ewc-btn__lbl,
+			.ewc-bar__help .ewc-btn__lbl,
+			.ewc-con__lbl {
 				display: none;
 			}
 		}
@@ -804,20 +817,34 @@
 	}
 
 	@media (width <= 1000px) {
+		// Too narrow for one row: the bar becomes two fixed rows (encounter + turn, then tools).
 		.ewc {
 			--ewc-rail-w: 240px;
 			--ewc-dock-w: 292px;
+			--ewc-bar-h: 86px;
 
 			.ewc-bar {
-				gap: 8px;
-				padding: 0 8px 0 10px;
+				flex-wrap: wrap;
+				align-content: center;
+				gap: 6px 8px;
+				padding: 6px 8px 6px 12px;
+
+				&__title {
+					display: block;
+				}
 
 				&__turn {
 					gap: 4px;
 				}
 
 				&__tools {
+					flex: 1 1 100%;
+					justify-content: flex-start;
 					gap: 2px;
+
+					.ewc-menu {
+						margin-left: auto;
+					}
 
 					.ewc-btn {
 						padding: 0 8px;

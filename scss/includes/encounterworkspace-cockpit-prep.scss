@@ -147,6 +147,13 @@
 					color: var(--ewc-ink);
 				}
 
+				// The strip scrolls, which clips an outset ring down to a stray edge.
+				&:focus-visible {
+					border-radius: 6px;
+					outline: 2px solid var(--ewc-ind);
+					outline-offset: -2px;
+				}
+
 				&[aria-selected="true"] {
 					color: var(--ewc-ink);
 
