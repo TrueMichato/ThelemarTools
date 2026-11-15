@@ -4,6 +4,31 @@ The separate [Encounter Workspace](../encounterworkspace.html) can start directl
 
 If a working encounter already exists, confirm before replacing it. Declining leaves it intact. An empty, unreadable, partially resolvable, or stale Bestiary handoff does **not** replace the working copy: the page explains what failed and asks you to return to Bestiary and try again (or choose a saved list). The handoff is consumed once and removed from the address bar, so reloading or revisiting the page restores only the working copy; it does not import the roster a second time.
 
+## The cockpit (default view)
+
+The workspace opens in the **cockpit**, a three-column combat view over the same saved working encounter. The older stacked view is still available at `encounterworkspace.html?ew=1` until it is retired. The rest of this page, from the next paragraph onward, describes that older view; the encounter data, undo history and DM Screen handoff are shared between the two.
+
+- **Top bar:** the encounter name and award XP, the round with the active combatant, **Prev/Next turn**, and tools: the command console, **Enter/Exit Prep Mode**, **Timeline**, **End combat**, undo and redo, the shortcut sheet, and a settings menu. Under 1000px wide the bar becomes two rows.
+- **Initiative rail (left):** one row per creature, showing its initiative, HP bar, AC, conditions and effects. Group chips sit at the top; press **1–9** to select a group, and press it again to unselect. The viewed row has **Dmg / Heal / Cond / ›\_** quick actions, and other rows show them on hover or keyboard focus. Clicking an initiative number lets you type it. **Drag the ⠿ handle**, or press **Alt+↑/↓**, to change the creature's *position* in the turn order; its initiative number adjusts to match. Downed party members show death-save pips. Monsters get them only when the setting is on.
+- **Stage (centre):** the viewed creature's native statblock. Its limited-use resources and spell slots are tracked inside the statblock, and an **Under** row of hoverable condition and effect pills sits under its name. When you view someone other than the active creature, a pill says so, and **Space** returns to the active one. **T** switches the stage to a round-by-round timeline. **L** expands or minimizes the combat log, which you can filter by turns, rolls, damage or effects.
+- **Dock (right):** acts on the **target**. The target is the selection when there is one, otherwise the creature you're viewing. It has four tabs:
+  - **HP (H):** damage, healing, temp HP, or setting HP to a value. Typed damage has a **More types…** list, and pressing a selected type again unselects it.
+  - **Roll (R):** saves, checks and skills, with advantage or disadvantage. Results open in a tray where you can select the failures and **Apply outcome**.
+  - **Cond (C):** conditions, including the TGTT ones, with a duration. Exhaustion is tracked as a level.
+  - **Fx (E):** effect presets such as Bless, Bane, half and three-quarters cover, and Haste, plus a custom-effect builder. A custom effect can change a single save or skill, attacks, AC, speed or initiative, grant advantage or disadvantage, and give resistances, immunities or vulnerabilities. Save it to reuse it.
+- **Command console (/):** type actions such as damage, heal, saves, conditions or effects. It previews the targets before you run the command, keeps a history, and every command can be undone.
+- **Prep Mode (Q):** permanent edits to the encounter:
+  - **Creature:** quick edit (**I**), the full statblock editor, templates, legendary actions, habitat traits and CR.
+  - **Effects** and **Battlefield** (area rules).
+  - **Items.**
+  - **Add (Shift+A):** search the whole bestiary, or add party members. New duplicates join their group automatically, and **G** manages groups yourself.
+- **Concentration:** before a concentrating caster starts a new concentration spell, the Fx tab warns which spell and how many creatures it will end. Casting it then ends the previous spell's effects. Damage to a concentrating creature offers a one-click Constitution save at the right DC.
+- **End combat:** shows a summary, awards XP, then offers to choose another encounter or send this one to the DM Screen.
+
+Every change is one undoable step (**⌘/Ctrl+Z**, redo with **⌘/Ctrl+Shift+Z**), and the undo toast names what changed. Shortcuts never fire while you are typing in a field. **Shift+?** lists every shortcut. Hovering a creature, spell, condition or effect name opens the site's normal hover window.
+
+## Loading and the older view
+
 Each counted creature becomes its own instance with a stable ID. Scaled CR, spell-summon, and class-summon variants are resolved using the pinned list's custom hash before a statblock snapshot is copied for each instance. The snapshot stays unchanged even if the Bestiary source or saved list later changes. All targets start selected; the roster checkboxes and **All/None** controls save individual target selection. Reloading restores the working encounter, edits, and selection without looking up the original source again.
 
 **Award XP** beside the working list name is the live, *unadjusted* reward total for all encounter instances, independent of selected targets, defeated status, or roster filters. Each rendered statblock also shows its own award XP. It is calculated from the **effective** creature after saved statblock edits and transformations, honoring an explicit `cr.xp` override, including `xp: 0`; a normal CR 0 without an override yields 10 XP. An unrated/unsupported CR or invalid XP override is reported as unknown, not silently treated as zero; a mixed roster shows the known subtotal and rated/total count (the unrated creatures are excluded). These are reward XP, **not** the encounter-building adjusted XP or difficulty multiplier. No estimate changes either CR or XP.

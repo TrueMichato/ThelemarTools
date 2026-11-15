@@ -1,7 +1,7 @@
 // Encounter Workspace entry point: picks the cockpit or the legacy UI.
 // `?ew=1` always opens the legacy UI; `?ew=2` always opens the cockpit.
-// The default flips to the cockpit once it reaches parity (see docs/encounterworkspace).
-export const ENCOUNTER_WORKSPACE_COCKPIT_DEFAULT = false;
+// The cockpit is the default; the legacy UI stays reachable at `?ew=1` until it is retired.
+export const ENCOUNTER_WORKSPACE_COCKPIT_DEFAULT = true;
 
 export const getEncounterWorkspaceUiMode = (search = globalThis.location?.search || "") => {
 	const ew = new URLSearchParams(search).get("ew");
