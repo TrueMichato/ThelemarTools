@@ -462,6 +462,11 @@
 		}
 
 		// ---------------- roll tray ----------------
+		// While the tray is open the stage can scroll its last lines above it (act-tray.js sets the height).
+		.ewc-stage__scroll {
+			padding-bottom: calc(24px + var(--ewc-tray-room, 0px));
+		}
+
 		.ewc-tray {
 			bottom: 12px;
 			display: flex;
@@ -658,6 +663,162 @@
 			&__status {
 				margin: 0;
 				font-size: var(--ewc-f-xs);
+			}
+		}
+
+		// ---------------- statblock roll feed (shares the tray slot) ----------------
+		.ewc-feed {
+			gap: 6px;
+
+			&__clear {
+				margin-left: auto;
+			}
+
+			&__list {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+				margin: 0;
+				padding: 0;
+				list-style: none;
+			}
+
+			&__card {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+				padding: 6px 8px;
+				border: 1px solid var(--ewc-hair);
+				border-radius: var(--ewc-r-s);
+				background: var(--ewc-surface);
+
+				&--atk .ewc-feed__k {
+					color: var(--ewc-ind-text);
+				}
+
+				&--dmg .ewc-feed__k {
+					color: var(--ewc-bad);
+				}
+
+				&.is-applied {
+					opacity: 0.75;
+				}
+			}
+
+			&__top {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: baseline;
+				gap: 4px 8px;
+				font-size: var(--ewc-f-s);
+			}
+
+			&__k {
+				color: var(--ewc-ink-3);
+				font-size: var(--ewc-f-2xs);
+				font-weight: 600;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+			}
+
+			&__who {
+				overflow: hidden;
+				color: var(--ewc-ink-2);
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			&__n {
+				margin-left: auto;
+				font-family: var(--ewc-mono);
+				font-size: var(--ewc-f-l);
+				font-variant-numeric: tabular-nums;
+
+				s {
+					color: var(--ewc-ink-4);
+					font-size: var(--ewc-f-xs);
+					font-weight: 400;
+				}
+			}
+
+			&__bd {
+				color: var(--ewc-ink-2);
+				font-size: var(--ewc-f-xs);
+				font-weight: 400;
+			}
+
+			&__die {
+				padding: 0 3px;
+				border: 1px solid var(--ewc-hair-2);
+				border-radius: var(--ewc-r-xs);
+
+				small {
+					margin-left: 2px;
+					color: var(--ewc-ink-4);
+				}
+
+				&.is-crit {
+					border-color: var(--ewc-ok);
+					color: var(--ewc-ok);
+				}
+
+				&.is-fumble {
+					border-color: var(--ewc-bad-line);
+					color: var(--ewc-bad);
+				}
+			}
+
+			&__p.is-src {
+				color: var(--ewc-ind-text);
+				text-decoration: underline dotted var(--ewc-hair-3);
+				text-underline-offset: 3px;
+				cursor: help;
+			}
+
+			&__flag,
+			&__meta {
+				font-size: var(--ewc-f-xs);
+			}
+
+			&__meta {
+				color: var(--ewc-ink-3);
+
+				.is-ok {
+					color: var(--ewc-ok);
+				}
+
+				.is-bad {
+					color: var(--ewc-bad);
+				}
+			}
+
+			&__flag.is-ok {
+				color: var(--ewc-ok);
+			}
+
+			&__flag.is-bad {
+				color: var(--ewc-bad);
+			}
+
+			&__acts {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+
+				[aria-pressed="true"] {
+					border-color: var(--ewc-ind-text);
+					color: var(--ewc-ind-text);
+				}
+			}
+
+			&__done {
+				margin: 0;
+				color: var(--ewc-ok);
+				font-size: var(--ewc-f-xs);
+			}
+
+			&__more {
+				align-self: flex-start;
 			}
 		}
 

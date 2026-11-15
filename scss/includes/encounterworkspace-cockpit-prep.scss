@@ -172,7 +172,8 @@
 				flex-direction: column;
 				gap: 10px;
 				min-height: 0;
-				padding: 12px 14px 16px;
+				// Room for an open roll tray floating over the drawer's foot (act-tray.js / act-feed.js set it).
+				padding: 12px 14px calc(16px + var(--ewc-tray-room, 0px));
 				overflow-y: auto;
 			}
 

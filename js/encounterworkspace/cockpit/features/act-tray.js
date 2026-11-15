@@ -14,24 +14,29 @@ import {
 	getCockpitTrayCounts,
 	getCockpitTrayRows,
 } from "./act-roll-model.js";
-import {bindCockpitSource, getKbd, getSeg, getWhoText, plural} from "./act-shared.js";
+import {bindCockpitSource, getKbd, getSeg, getWhoText, plural, trackCockpitTrayRoom} from "./act-shared.js";
 
 export function createCockpitRollTray (api) {
 	const root = h("section.ewc-tray", {"aria-label": "Roll results", hidden: true, "data-ewc-tray": ""});
 	api.getRegion("layer").append(root);
+	const setRoom = trackCockpitTrayRoom(root);
 
 	let tray = null; // {title, rolled, outcome, sort, open: Set, status, review}
+	const showListeners = [];
 
 	const hide = () => {
 		tray = null;
 		root.hidden = true;
 		root.replaceChildren();
+		setRoom();
 	};
 
 	const show = (rolled, {title, outcome = null, isFocus = true}) => {
 		tray = {title, rolled, outcome, sort: "order", open: new Set(), names: new Map(), status: null, review: null, isApplying: false};
+		showListeners.forEach(fn => fn());
 		root.hidden = false;
 		render();
+		setRoom();
 		if (isFocus) root.querySelector("[data-ewc-tray-primary]")?.focus({preventScroll: true});
 	};
 
@@ -231,5 +236,8 @@ export function createCockpitRollTray (api) {
 
 	api.onRender(ctx => { if (tray) render(ctx); });
 
-	return {show, hide, render, getIsOpen: () => !!tray};
+	/** fn() whenever a new roll opens the tray — the statblock roll feed shares the slot and hides itself. */
+	const onShow = fn => showListeners.push(fn);
+
+	return {show, hide, render, onShow, getIsOpen: () => !!tray};
 }
