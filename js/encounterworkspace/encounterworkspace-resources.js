@@ -16,6 +16,65 @@ function getEntryText (entry) {
 	return getEntryText(entry.entries || entry.entry || "");
 }
 
+const getTagDisplay = inner => {
+	const parts = inner.split("|");
+	return (parts[2] || parts[0]).trim();
+};
+
+/** The display name of one entry in a spellcasting `daily` list, e.g. "Fireball" for "{@spell Fireball|XPHB} (level 4 version)". */
+export function getEncounterDailySpellName (spell) {
+	const text = typeof spell === "string" ? spell : spell?.entry;
+	if (typeof text !== "string") return null;
+	const tag = text.match(/\{@spell\s+([^}]*)}/i);
+	const name = tag ? getTagDisplay(tag[1]) : text.replace(/\{@\w+\s+([^}]*)}/g, (_, inner) => getTagDisplay(inner)).trim();
+	return name ? name.slice(0, 100) : null;
+}
+
+export const getEncounterDailySpellLabel = (name, max) => `${name.charAt(0).toUpperCase()}${name.slice(1)} (${max}/day)`;
+
+/** `"3"` → 3/day, `"2e"` → 2/day each. Both give every spell in the row its own pips. */
+export function getEncounterDailyUses (key) {
+	const match = /^(\d+)(e?)$/.exec(key);
+	const max = match ? getCount(Number(match[1])) : null;
+	return max ? {max, isEach: !!match[2]} : null;
+}
+
+function getDailySpellAbilities (monster) {
+	const abilities = [];
+	(Array.isArray(monster?.spellcasting) ? monster.spellcasting : []).forEach((spellcasting, casterIndex) => {
+		const daily = spellcasting?.daily;
+		if (!isRecord(daily)) return;
+		// A hidden list renders only as a named block, e.g. "Misty Step (3/Day).", so it gets one tracker on that heading.
+		if (Array.isArray(spellcasting.hidden) && spellcasting.hidden.includes("daily")) {
+			const name = isName(spellcasting.name?.trim?.()) ? spellcasting.name.trim() : null;
+			const uses = Object.keys(daily).map(getEncounterDailyUses).filter(Boolean);
+			const max = getCount(Number(name?.match(/\((\d+)\/Day\)/i)?.[1])) || (uses.length === 1 ? uses[0].max : null);
+			if (name && max) abilities.push({id: `auto:daily-entry:${casterIndex}`, name, current: max, max});
+			return;
+		}
+		// Highest uses first, matching the order the statblock lists them in.
+		const rows = Object.entries(daily).map(([key, list]) => ({key, list, uses: getEncounterDailyUses(key)}))
+			.filter(it => it.uses && Array.isArray(it.list))
+			.sort((a, b) => b.uses.max - a.uses.max);
+		for (const {key, list, uses} of rows) {
+			list.filter(spell => !spell?.hidden).forEach((spell, index) => {
+				const name = getEncounterDailySpellName(spell);
+				if (name) abilities.push({id: `auto:daily:${casterIndex}:${key}:${index}`, name: getEncounterDailySpellLabel(name, uses.max), current: uses.max, max: uses.max});
+			});
+		}
+	});
+	return abilities;
+}
+
+/** Adds daily-spell trackers to resources saved before they existed, unless the instance already tracks any. */
+export function withEncounterDailySpellDefaults (resources, monster) {
+	if (resources.abilities.some(it => it.id.startsWith("auto:daily"))) return resources;
+	const taken = new Set([...resources.abilities, ...resources.recharges].map(it => it.id));
+	const added = getDailySpellAbilities(monster).filter(it => !taken.has(it.id));
+	if (!added.length) return resources;
+	return {...resources, abilities: [...resources.abilities, ...added].slice(0, MAX_ENCOUNTER_RESOURCE_ENTRIES)};
+}
+
 export function getEncounterResourceDefaults (monster) {
 	const spellSlots = {};
 	for (const spellcasting of Array.isArray(monster?.spellcasting) ? monster.spellcasting : []) {
@@ -53,6 +112,7 @@ export function getEncounterResourceDefaults (monster) {
 			? getCount(Number(getEntryText(monster.legendaryHeader).match(/\bcan take (\d+) legendary actions\b/i)?.[1]))
 			: hasLegendary && monster.legendaryActions == null ? 3 : null);
 	if (actions) abilities.push({id: "auto:legendary-actions", name: "Legendary Actions", current: actions, max: actions});
+	abilities.push(...getDailySpellAbilities(monster));
 	const equipment = monster?.specialEquipment;
 	const seenEquipment = new Set();
 	(Array.isArray(equipment) ? equipment : equipment == null ? [] : [equipment]).forEach((entry, index) => {
@@ -82,7 +142,7 @@ export function getEncounterResourceDefaults (monster) {
 				abilities.push({id: `auto:equipment-trait:${index}:${match.index}`, name, current: max, max});
 			}
 		});
-	return {spellSlots, abilities, recharges, concentration: {active: false, label: ""}};
+	return {spellSlots, abilities: abilities.slice(0, MAX_ENCOUNTER_RESOURCE_ENTRIES), recharges, concentration: {active: false, label: ""}};
 }
 
 export function validateEncounterResources (resources) {

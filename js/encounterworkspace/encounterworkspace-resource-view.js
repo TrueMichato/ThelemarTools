@@ -1,4 +1,4 @@
-import {getEncounterResourceDefaults, MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
+import {getEncounterDailySpellLabel, getEncounterDailySpellName, getEncounterDailyUses, getEncounterResourceDefaults, MAX_ENCOUNTER_RESOURCE_COUNT} from "./encounterworkspace-resources.js";
 
 const MAX_VISIBLE_PIPS = 12;
 const MAX_INLINE_PIPS = 12;
@@ -190,12 +190,73 @@ export function getEncounterInlineResourceEntry ({effective, resource}) {
 	return {type, section, name: entry.name};
 }
 
+function getDailyInlineTarget ({effective, resource, table}) {
+	const entry = resource.id.match(/^auto:daily-entry:(\d+)$/);
+	if (entry) {
+		const caster = effective.spellcasting?.[Number(entry[1])];
+		if (!caster?.name || resource.name !== caster.name.trim()) return null;
+		const heading = getEntryHeadings(getSectionContent(table, caster.displayAs || "trait")).get(Renderer.stripTags(caster.name));
+		return heading ? {parent: heading, before: null} : null;
+	}
+	const spell = resource.id.match(/^auto:daily:(\d+):(\d+e?):(\d+)$/);
+	if (!spell) return null;
+	const [, casterIndex, key, rawIndex] = spell;
+	const caster = effective.spellcasting?.[Number(casterIndex)];
+	const uses = getEncounterDailyUses(key);
+	const visible = (caster?.daily?.[key] || []).filter(it => !it?.hidden);
+	const name = getEncounterDailySpellName(visible[Number(rawIndex)]);
+	if (!caster?.name || !uses || !name || resource.name !== getEncounterDailySpellLabel(name, uses.max)) return null;
+	const content = getSectionContent(table, caster.displayAs || "trait");
+	if (!content) return null;
+	const expected = Renderer.stripTags(caster.name);
+	const label = new RegExp(`^\\s*${uses.max}/day(?: each)?:\\s*$`, "i");
+	const lines = [...content.querySelectorAll(".ve-rd__li-spell > p")]
+		.filter(line => line.closest("[data-roll-name-ancestor]")?.dataset.rollNameAncestor === expected
+			&& line.firstChild?.nodeType === Node.TEXT_NODE && label.test(line.firstChild.textContent));
+	if (lines.length !== 1) return null;
+	const anchor = [...lines[0].querySelectorAll("a[data-vet-page='spells.html']")]
+		.find(it => it.textContent.trim().toLowerCase() === name.toLowerCase());
+	return anchor ? {parent: lines[0], before: getSpellSegmentEnd(anchor)} : null;
+}
+
+// Pips belong after the whole list item ("Fireball (level 4 version)"), i.e. before the next top-level comma.
+function getSpellSegmentEnd (anchor) {
+	let depth = 0;
+	for (let node = anchor.nextSibling; node; node = node.nextSibling) {
+		if (node.nodeType !== Node.TEXT_NODE) {
+			if (node.matches?.("a[data-vet-page='spells.html']")) return node;
+			continue;
+		}
+		const text = node.textContent;
+		for (let i = 0; i < text.length; ++i) {
+			if (text[i] === "(") depth++;
+			else if (text[i] === ")") depth = Math.max(0, depth - 1);
+			else if (text[i] === "," && !depth) return i ? node.splitText(i) : node;
+		}
+	}
+	return null;
+}
+
 export function renderEncounterInlineResources ({instance, effective, table, onAction}) {
 	table.querySelectorAll("[data-inline-resource]").forEach(control => control.remove());
 	const matched = new Set();
 	const resources = instance.resources;
 	const headings = new Map();
 	for (const resource of [...resources.abilities, ...resources.recharges]) {
+		if (resource.id.startsWith("auto:daily")) {
+			const target = getDailyInlineTarget({effective, resource, table});
+			if (!target) continue;
+			const key = `ability:${resource.id}`;
+			const uses = getInlineUses({
+				...resource,
+				resourceKey: key,
+				onChange: change => onAction({kind: "abilityUse", abilityId: resource.id, change}),
+			});
+			uses.classList.add("ew__inline-resource--spell");
+			target.parent.insertBefore(uses, target.before);
+			matched.add(key);
+			continue;
+		}
 		if (resource.id === "auto:legendary-actions") {
 			const header = [...table.querySelectorAll("h3.ve-stats__sect-header-inner")]
 				.filter(it => it.firstChild?.textContent?.trim() === "Legendary Actions");

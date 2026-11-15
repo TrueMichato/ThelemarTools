@@ -163,6 +163,8 @@ export class EncounterCockpitStatblock {
 			// The site's `!important` fixed layout overlaps the AC/Init/HP cells in a narrow stage; the cockpit class
 			//   keeps it fixed on wide screens only.
 			table.querySelectorAll(".ve-table-layout-fixed").forEach(it => it.classList.replace("ve-table-layout-fixed", "ewc-sb__fixed"));
+			// The site's page-level two-column toggle has no meaning in the stage and collides with the name.
+			table.querySelectorAll(".ve-stats__btn-two-col").forEach(it => it.remove());
 			matched = renderEncounterInlineResources({instance, effective, table, onAction});
 		} catch (e) {
 			setTimeout(() => { throw e; });

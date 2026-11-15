@@ -9,7 +9,7 @@ import {
 	validateEncounterAreaNote,
 	validateEncounterModifier,
 } from "./encounterworkspace-effects.js";
-import {getEncounterResourceDefaults, validateEncounterResources} from "./encounterworkspace-resources.js";
+import {getEncounterResourceDefaults, validateEncounterResources, withEncounterDailySpellDefaults} from "./encounterworkspace-resources.js";
 import {getEncounterDamageForMonster} from "./encounterworkspace-damage.js";
 
 const STORAGE_KEY = "encounterWorkspaceState";
@@ -466,6 +466,9 @@ export class EncounterWorkspaceState {
 			}
 			if (raw.version < 5) instance.statblockOperations = [];
 			if (raw.version < 7) instance.resources = getEncounterResourceDefaults(getEncounterEffectiveMonster(instance));
+			else if (!instance.resources.abilities.some(it => it.id.startsWith("auto:daily"))) {
+				instance.resources = withEncounterDailySpellDefaults(instance.resources, getEncounterEffectiveMonster(instance));
+			}
 			Object.assign(instance, withInstanceV8Defaults(instance));
 			freezeSnapshot(instance.monster);
 		});

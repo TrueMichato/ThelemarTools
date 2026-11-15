@@ -92,18 +92,20 @@ describe("Encounter Workspace combat resources", () => {
 		})).toBeNull();
 	});
 
-	it("extracts explicit counts and the renderer's default 3 legendary actions, excluding daily spells", () => {
+	it("extracts explicit counts and the renderer's default 3 legendary actions, with per-spell daily pips", () => {
 		const resources = getEncounterResourceDefaults(monster);
 		expect(resources.spellSlots).toEqual({"1": {current: 4, max: 4}, "3": {current: 2, max: 2}});
 		expect(resources.abilities.map(({id, name, max}) => ({id, name, max}))).toEqual([
 			{id: "auto:ability:trait:0", name: "Legendary Resistance (3/Day, or 4/Day in Lair)", max: 3},
 			{id: "auto:ability:action:1", name: "Enslave (2/Day)", max: 2},
 			{id: "auto:legendary-actions", name: "Legendary Actions", max: 3},
+			{id: "auto:daily:0:1:0", name: "Lightning bolt (1/day)", max: 1},
+			{id: "auto:daily:0:1e:0", name: "Shield (1/day)", max: 1},
 			{id: "auto:equipment:0", name: "Amber Wand", max: 5},
 		]);
 		expect(resources.recharges).toEqual([{id: "auto:recharge:action:0", name: "Breath", min: 5, ready: true}]);
 		expect(resources.concentration).toEqual({active: false, label: ""});
-		expect(getEncounterResourceSummary(resources)).toBe("L1 slots 4/4 · L3 slots 2/2 · Legendary Resistance (3/Day, or 4/Day in Lair) 3/3 · +4 more");
+		expect(getEncounterResourceSummary(resources)).toBe("L1 slots 4/4 · L3 slots 2/2 · Legendary Resistance (3/Day, or 4/Day in Lair) 3/3 · +6 more");
 		expect(getEncounterResourceDefaults({...monster, legendary: []}).abilities.some(it => it.id === "auto:legendary-actions")).toBe(false);
 		expect(getEncounterResourceDefaults({...monster, legendaryHeader: ["Custom wording with no count."]})
 			.abilities.some(it => it.id === "auto:legendary-actions")).toBe(false);
@@ -121,6 +123,31 @@ describe("Encounter Workspace combat resources", () => {
 			...monster,
 			trait: [{name: "Special Equipment", entries: ["The jade staff has 7 charges. The rumored staff may have charges."]}],
 		}).abilities.at(-1)).toEqual({id: "auto:equipment-trait:0:0", name: "jade staff", current: 7, max: 7});
+	});
+
+	it("gives every spell in an N/day row its own N pips, skipping hidden spells and summarising hidden lists", () => {
+		const abilities = getEncounterResourceDefaults({spellcasting: [
+			{name: "Spellcasting", daily: {"3e": ["{@spell Fireball|XPHB} (level 4 version)", {entry: "{@spell secret}", hidden: true}, "{@spell fly||Flight}"], "2": ["{@spell darkness}"]}},
+			{name: "Protective Magic (3/Day)", daily: {"3": ["{@spell Counterspell|XPHB}", "{@spell Shield|XPHB}"]}, hidden: ["daily"]},
+			{name: "Odd", daily: {"0": ["{@spell light}"], "x": ["{@spell light}"]}},
+		]}).abilities;
+		expect(abilities).toEqual([
+			{id: "auto:daily:0:3e:0", name: "Fireball (3/day)", current: 3, max: 3},
+			{id: "auto:daily:0:3e:1", name: "Flight (3/day)", current: 3, max: 3},
+			{id: "auto:daily:0:2:0", name: "Darkness (2/day)", current: 2, max: 2},
+			{id: "auto:daily-entry:1", name: "Protective Magic (3/Day)", current: 3, max: 3},
+		]);
+	});
+
+	it("backfills daily spell pips into v8 saves made before they existed, once", async () => {
+		const state = await create();
+		state.instances.forEach(it => { it.resources.abilities = it.resources.abilities.filter(ab => !ab.id.startsWith("auto:daily")); });
+		const migrated = EncounterWorkspaceState.validate(state);
+		expect(migrated.instances[0].resources.abilities.filter(it => it.id.startsWith("auto:daily")).map(it => it.id))
+			.toEqual(["auto:daily:0:1:0", "auto:daily:0:1e:0"]);
+		const spent = structuredClone(migrated);
+		spent.instances[0].resources.abilities.find(it => it.id === "auto:daily:0:1e:0").current = 0;
+		expect(EncounterWorkspaceState.validate(spent).instances[0].resources).toEqual(spent.instances[0].resources);
 	});
 
 	it("keeps identical instances independent while spending, restoring, editing and removing counters", async () => {

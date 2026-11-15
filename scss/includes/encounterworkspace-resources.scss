@@ -44,6 +44,16 @@
 			font-style: normal;
 			font-weight: normal;
 			font-variant-numeric: tabular-nums;
+
+			// Spell-list pips sit mid-sentence; keep the line from ballooning to the 44px trait-heading size.
+			&--spell {
+				margin: 0 2px 0 4px;
+
+				.ew__inline-resource-button {
+					min-width: 28px;
+					min-height: 28px;
+				}
+			}
 		}
 
 		&__inline-resource-pips,
