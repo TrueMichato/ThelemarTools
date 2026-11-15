@@ -69,6 +69,7 @@ describe("Encounter Cockpit groups (v8)", () => {
 		expect(rolled.roll.text).toBe("14 (12 +2)");
 		expect(rolled.state.instances.map(it => [it.id, it.initiative, it.tieOrder])).toEqual([["c1", 14, 1], ["c2", 14, 2], ["c3", 14, 3], ["c4", 14, 0]]);
 		expect(rolled.state.groupMeta.Pack).toEqual({sharedInit: 14});
+		expect(EncounterWorkspaceState.getInitiativeOrder(rolled.state).map(it => it.id)).toEqual(["c4", "c1", "c2", "c3"]);
 
 		const set = withEncounterGroupInitiative(state, {name: "Pack", total: 9});
 		expect(set.instances.filter(it => it.customGroup === "Pack").map(it => it.initiative)).toEqual([9, 9, 9]);

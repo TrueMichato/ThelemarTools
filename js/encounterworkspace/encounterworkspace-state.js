@@ -985,7 +985,7 @@ export class EncounterWorkspaceState {
 	static getInitiativeOrder (state) {
 		return this.getInitiativeEntries(state)
 			.filter(({entry}) => entry.initiative != null)
-			.sort((a, b) => b.entry.initiative - a.entry.initiative || a.order - b.order)
+			.sort((a, b) => b.entry.initiative - a.entry.initiative || (a.entry.tieOrder ?? 0) - (b.entry.tieOrder ?? 0) || a.order - b.order)
 			.map(({entry}) => entry);
 	}
 
