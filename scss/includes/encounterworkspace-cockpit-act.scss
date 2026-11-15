@@ -1,0 +1,7 @@
+// Encounter cockpit P3 feature styles (act). Scoped under `.ewc`; use the shell tokens (`--ewc-*`).
+
+@layer vetools {
+	.ewc {
+		--ewc-feature-act: 1;
+	}
+}

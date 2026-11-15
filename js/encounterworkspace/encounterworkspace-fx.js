@@ -16,9 +16,9 @@ import {EncounterWorkspaceState, cloneEncounterState} from "./encounterworkspace
  * state and validates the result.
  */
 
-export const ENCOUNTER_ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
-export const ENCOUNTER_ABILITY_NAMES = {str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"};
-export const ENCOUNTER_SKILL_ABILITIES = {
+export const ENCOUNTER_ABILITIES = Object.freeze(["str", "dex", "con", "int", "wis", "cha"]);
+export const ENCOUNTER_ABILITY_NAMES = Object.freeze({str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"});
+export const ENCOUNTER_SKILL_ABILITIES = Object.freeze({
 	"acrobatics": "dex",
 	"animal handling": "wis",
 	"arcana": "int",
@@ -37,7 +37,7 @@ export const ENCOUNTER_SKILL_ABILITIES = {
 	"sleight of hand": "dex",
 	"stealth": "dex",
 	"survival": "wis",
-};
+});
 
 const D20_KINDS = ["flat", "dice", "adv", "dis", "autoFail"];
 /** Everything a custom effect modifier can target, with the kinds that make sense for it. */
@@ -450,16 +450,24 @@ export function deleteEncounterSavedEffect (draft, key) {
 
 /* -------------------------------------------- Roll contributors -------------------------------------------- */
 
+/** Ability modifier from a score; a missing or unreadable score counts as 10. */
 export function getEncounterAbilityMod (score) {
-	return Math.floor(((Number.isFinite(score) ? score : 10) - 10) / 2);
+	const value = typeof score === "string" && score.trim() ? Number(score) : score;
+	return Math.floor(((Number.isFinite(value) ? value : 10) - 10) / 2);
 }
 
-/** Base AC before effects: party members use their tracked AC, monsters their first statblock AC. */
-export function getEncounterBaseAc (instance, monster = instance.monster) {
-	if (instance.kind === "party" && Number.isSafeInteger(instance.party?.ac)) return instance.party.ac;
-	const ac = Array.isArray(monster?.ac) ? monster.ac[0] : monster?.ac;
-	const value = typeof ac === "number" ? ac : ac?.ac;
-	return Number.isFinite(value) ? value : 10;
+/** Base AC before effects, with where it comes from: party members use their tracked AC, monsters their first statblock AC. */
+export function getEncounterBaseAcInfo (instance, monster = instance?.monster) {
+	if (instance?.kind === "party" && Number.isSafeInteger(instance.party?.ac)) return {value: instance.party.ac, from: []};
+	const first = Array.isArray(monster?.ac) ? monster.ac[0] : monster?.ac;
+	if (Number.isFinite(first)) return {value: first, from: []};
+	if (first && Number.isFinite(first.ac)) return {value: first.ac, from: (first.from || []).map(it => `${it}`.replace(/\{@[a-z]+\s+([^}|]+)[^}]*\}/gi, "$1"))};
+	if (Number.isFinite(first?.special)) return {value: first.special, from: []};
+	return {value: 10, from: []};
+}
+
+export function getEncounterBaseAc (instance, monster = instance?.monster) {
+	return getEncounterBaseAcInfo(instance, monster).value;
 }
 
 const getEffectMods = instance => (instance.effects || []).flatMap(effect => (effect.mods || []).map(mod => ({effect, mod: getEncounterNormalizedMod(mod)})));

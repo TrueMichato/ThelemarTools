@@ -614,6 +614,29 @@
 				margin: 0 auto;
 			}
 
+			// Feature regions (P3): strips above, drawers below, alternative stage modes. Empty regions take no space.
+			&__top,
+			&__bottom {
+				flex: none;
+				min-width: 0;
+
+				&:empty {
+					display: none;
+				}
+			}
+
+			&__alt {
+				flex: 1 1 auto;
+				min-height: 0;
+				overflow: auto;
+			}
+
+			&__head[hidden],
+			&__scroll[hidden],
+			&__alt[hidden] {
+				display: none;
+			}
+
 			&__none {
 				padding: 24px 0;
 				text-align: center;

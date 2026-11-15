@@ -20,6 +20,26 @@ import {
 	getEncounterViewGroups,
 } from "../encounterworkspace-state.js";
 import {createEncounterEngine} from "../encounterworkspace-engine.js";
+import {
+	endEncounterConcentration,
+	getEncounterConcentration,
+	getEncounterConcentrationDc,
+	startEncounterConcentration,
+} from "../encounterworkspace-fx.js";
+import {
+	applyEncounterCondition,
+	ENCOUNTER_EXHAUSTION_DEATH_LEVEL,
+	getEncounterConditionRule,
+	removeEncounterCondition,
+	setEncounterExhaustion,
+} from "../encounterworkspace-conditions-rules.js";
+import {applyEncounterDeathSaveDamage, applyEncounterHealing} from "../encounterworkspace-deathsaves.js";
+import {
+	getCockpitEffectItems,
+	getCockpitExtraDefensesGetter,
+	getCockpitShellDerived,
+	withCockpitTurnAdvanced,
+} from "./rules.js";
 import {pRollEncounterInstance} from "../encounterworkspace-roll.js";
 import {getEncounterXpSummary} from "../encounterworkspace-assessment.js";
 import {EncounterWorkspaceHandoffStore, getEncounterHandoffSnapshot} from "../encounterworkspace-handoff.js";
@@ -33,17 +53,20 @@ import {EncounterCockpitStatblock} from "./statblock.js";
 import {EncounterCockpitDock} from "./dock.js";
 import {
 	getCockpitAriaShortcut,
+	COCKPIT_KEY_BINDINGS,
 	getCockpitIsMac,
 	getCockpitKeyLabels,
 	getCockpitShortcutSheet,
 	installCockpitKeymap,
 } from "./keymap.js";
+import {installCockpitActFeatures} from "./features/act.js";
+import {installCockpitPrepFeatures} from "./features/prep.js";
+import {installCockpitFlowFeatures} from "./features/flow.js";
 import {
 	getCockpitDamageSummary,
 	getCockpitDockTargetIds,
 	getCockpitExhaustionLevel,
 	getCockpitGroupChips,
-	getCockpitInstanceEffectItems,
 	getCockpitInstanceLabels,
 	getCockpitPlural,
 	getCockpitPrevTurn,
@@ -53,7 +76,6 @@ import {
 	getCockpitStepId,
 } from "./model.js";
 
-const MAX_EXHAUSTION = 6;
 const TOAST_MS = 7000;
 const RULESET_LABELS = {phb: "PHB 2014", xphb: "PHB 2024", tgtt: "Thelemar"};
 const QUICK_ACTIONS = [
@@ -102,11 +124,14 @@ export class EncounterCockpit {
 
 		// Injection points (see getApi).
 		this._providers = {
-			getDerived: () => ({}),
-			effectItems: (state, instance) => getCockpitInstanceEffectItems(instance),
+			getDerived: (instance, state) => this._getCachedShellDerived(state, instance),
+			effectItems: (state, instance) => getCockpitEffectItems(state, instance),
 			difficulty: null,
 		};
-		this._hooks = {damageApplied: new Set(), turnChanged: new Set(), rolled: new Set()};
+		this._hooks = {damageApplied: new Set(), turnChanged: new Set(), rolled: new Set(), render: new Set()};
+		/** Feature extension points (P3): render callbacks, persistent regions, stage modes, extra keys. */
+		this._ext = {barItems: [], railTop: [], railFoot: [], rowDecorators: [], stageModes: [], keys: [], menuItems: []};
+		this._stageMode = "statblock";
 		this._rollHandler = null;
 	}
 
@@ -148,6 +173,7 @@ export class EncounterCockpit {
 		this._engine = createEncounterEngine({state, pSave: next => this._store.pSave(next)});
 		this._engine.subscribe((next, meta) => this._onEngineChange(meta));
 		this._mountParts();
+		this._installFeatures();
 		this._ui.viewedId = this._getActiveInstanceId(state) ?? this._getOrderIds(state)[0] ?? null;
 		this._render();
 
@@ -161,10 +187,14 @@ export class EncounterCockpit {
 			h("header.ewc-bar", {"aria-label": "Encounter"}),
 			h("aside.ewc-rail", {"aria-label": "Combatants"}),
 			h("section.ewc-stage", {"aria-label": "Viewed creature"},
+				h("div.ewc-stage__top"),
 				h("div.ewc-stage__head", null, h("p.ewc-loading", {role: "status"}, "Loading the encounter…")),
 				h("div.ewc-stage__scroll", {tabindex: "-1"}, h("div.ewc-stage__body")),
+				h("div.ewc-stage__alt", {hidden: true}),
+				h("div.ewc-stage__bottom"),
 			),
 			h("aside.ewc-dock", {"aria-label": "Act on the target"}),
+			h("div.ewc-layer"),
 			h("div.ewc-toasts", {"aria-live": "polite"}),
 		);
 		const get = sel => this._root.querySelector(sel);
@@ -173,6 +203,11 @@ export class EncounterCockpit {
 			rail: get(".ewc-rail"),
 			stageHead: get(".ewc-stage__head"),
 			stageBody: get(".ewc-stage__body"),
+			stageScroll: get(".ewc-stage__scroll"),
+			stageTop: get(".ewc-stage__top"),
+			stageAlt: get(".ewc-stage__alt"),
+			stageBottom: get(".ewc-stage__bottom"),
+			layer: get(".ewc-layer"),
 			dock: get(".ewc-dock"),
 			toasts: get(".ewc-toasts"),
 		};
@@ -185,6 +220,19 @@ export class EncounterCockpit {
 	_syncTopOffset () {
 		const top = Math.max(0, Math.round(this._root.getBoundingClientRect().top + window.scrollY));
 		this._root.style.setProperty("--ewc-top", `${top}px`);
+	}
+
+	/** Each P3 feature module gets the public API; one failing module must not take the cockpit down. */
+	_installFeatures () {
+		const api = this.getApi();
+		[installCockpitActFeatures, installCockpitPrepFeatures, installCockpitFlowFeatures].forEach(install => {
+			try {
+				install(api);
+			} catch (e) {
+				rethrowLater(e);
+				this.toast(`A cockpit feature failed to load (${getErrorMessage(e)}).`, {kind: "error"});
+			}
+		});
 	}
 
 	_mountParts () {
@@ -232,7 +280,8 @@ export class EncounterCockpit {
 			root: this._root,
 			isMac: this._isMac,
 			isEnabled: () => !this._root.hidden && !document.body.classList.contains("ve-ui-modal__body-active") && !this._dlgHelp?.open,
-			handlers: this._getKeyHandlers(),
+			handlers: this._keyHandlers = this._getKeyHandlers(),
+			getBindings: () => this._getKeyBindings(),
 		});
 	}
 
@@ -268,7 +317,112 @@ export class EncounterCockpit {
 			hover: this._hover,
 			getSettings: () => ({...this._settings}),
 			getReferenceData: () => this._reference,
+			getCtx: () => this._getCtx(),
+			isMac: this._isMac,
+
+			/* ---- Regions: persistent elements the shell never re-renders. Features own their contents. ---- */
+			/** "stageTop" (strips above the viewed creature), "stageBottom" (drawers under it), "layer" (overlays, dialogs). */
+			getRegion: name => ({stageTop: this._ele.stageTop, stageBottom: this._ele.stageBottom, layer: this._ele.layer})[name] || null,
+			/** fn(ctx) after every render — keep persistent regions in sync. Returns an unsubscribe. */
+			onRender: fn => this._addHook("render", fn),
+
+			/* ---- Render-time contributions: fn(ctx) → Node | Node[] | null, called on every render. ---- */
+			addBarItem: fn => this._addExt("barItems", fn),
+			addRailTop: fn => this._addExt("railTop", fn),
+			addRailFoot: fn => this._addExt("railFoot", fn),
+			/** fn(rowEl, instance, ctx) — append pips, markers, drag handles to a rail row. */
+			addRailRowDecorator: fn => this._addExt("rowDecorators", fn),
+			/** {id, label, onclick(), keys?} entries in the ⋯ menu. */
+			addMenuItem: item => this._addExt("menuItems", item),
+
+			/* ---- Stage modes: alternative views of the stage (e.g. the timeline); "statblock" is the default. ---- */
+			/** {id, label, keys?, render(el, ctx)} — while active, the statblock is hidden and render() fills `el`. */
+			registerStageMode: mode => this._addExt("stageModes", mode),
+			setStageMode: id => this._setStageMode(id),
+			getStageMode: () => this._stageMode,
+
+			/* ---- Keys: {section, keys: ["G"] | ["Shift", "G"], label, action, run(evt) → false to not handle} ---- */
+			registerKey: binding => this._registerKey(binding),
+
+			/* ---- The shell's own actions, so consoles and menus go through the same paths (undo, logs, toasts). ---- */
+			actions: {
+				pDamage: args => this._pDamage(args),
+				pHp: args => this._pHp(args),
+				pCondition: args => this._pCondition(args),
+				pExhaustion: args => this._pExhaustion(args),
+				pNextTurn: () => this._pNextTurn(),
+				pPrevTurn: () => this._pPrevTurn(),
+				pRollInitiative: ids => this._pRollInitiative(ids),
+				pSetInitiative: (id, total) => this._pSetInitiative(id, total),
+				pResourceAction: (id, action) => this._pResourceAction(id, action),
+				pUndo: () => this._pUndo(),
+				pRedo: () => this._pRedo(),
+				openHelp: () => this._openHelp(),
+			},
 		};
+	}
+
+	_addExt (kind, item) {
+		this._ext[kind].push(item);
+		this._render();
+		return () => {
+			const ix = this._ext[kind].indexOf(item);
+			if (ix >= 0) this._ext[kind].splice(ix, 1);
+			if (kind === "stageModes" && item.id === this._stageMode) this._stageMode = "statblock";
+			this._render();
+		};
+	}
+
+	_registerKey (binding) {
+		const {keys, action, run} = binding;
+		if (!action || typeof run !== "function" || !Array.isArray(keys)) throw new Error("registerKey needs {keys, action, run}.");
+		const clash = this._getKeyBindings().find(it => it.keys.join("+") === keys.join("+"));
+		if (clash) throw new Error(`Key ${keys.join("+")} is already bound to "${clash.action}".`);
+		this._ext.keys.push(binding);
+		this._keyHandlers[action] = (_, evt) => run(evt);
+		return () => {
+			const ix = this._ext.keys.indexOf(binding);
+			if (ix >= 0) this._ext.keys.splice(ix, 1);
+			delete this._keyHandlers[action];
+		};
+	}
+
+	_getKeyBindings () {
+		return [...COCKPIT_KEY_BINDINGS, ...this._ext.keys];
+	}
+
+	_setStageMode (id) {
+		const mode = id === "statblock" ? null : this._ext.stageModes.find(it => it.id === id);
+		if (id !== "statblock" && !mode) return false;
+		this._stageMode = id;
+		this._render();
+		return true;
+	}
+
+	_renderStageMode (ctx) {
+		const mode = this._stageMode === "statblock" ? null : this._ext.stageModes.find(it => it.id === this._stageMode);
+		if (!mode) this._stageMode = "statblock";
+		this._root.dataset.ewcStage = this._stageMode;
+		this._ele.stageAlt.hidden = !mode;
+		this._ele.stageScroll.hidden = !!mode;
+		this._ele.stageHead.hidden = !!mode;
+		if (!mode) return;
+		try {
+			mode.render(this._ele.stageAlt, ctx);
+		} catch (e) {
+			rethrowLater(e);
+		}
+	}
+
+	_getExtNodes (kind, ctx) {
+		return this._ext[kind].flatMap(fn => {
+			try {
+				return [fn(ctx)].flat().filter(Boolean);
+			} catch (e) {
+				rethrowLater(e);
+				return [];
+			}
+		});
 	}
 
 	_addHook (name, fn) {
@@ -304,6 +458,17 @@ export class EncounterCockpit {
 
 	_getOrderIds (state) {
 		return getCockpitRailOrder({instances: state.instances, initiativeOf: it => getEncounterInitiativeTotal(state, it)});
+	}
+
+	/** Derived numbers are pure per (state, settings); one render asks for the same creature several times. */
+	_getCachedShellDerived (state, instance) {
+		if (!state || !instance) return {};
+		this._derivedCache ||= new WeakMap();
+		let byKey = this._derivedCache.get(state);
+		if (!byKey) this._derivedCache.set(state, byKey = new Map());
+		const key = `${instance.id}|${this._settings.ruleset}|${!!this._settings.monsterDeathSaves}`;
+		if (!byKey.has(key)) byKey.set(key, getCockpitShellDerived(state, instance, this._settings));
+		return byKey.get(key);
 	}
 
 	_getTurnOrderIds (state) {
@@ -374,6 +539,10 @@ export class EncounterCockpit {
 			ruleset: this._settings.ruleset,
 			settings: this._settings,
 			isMac: this._isMac,
+			stageMode: this._stageMode,
+			railTop: this._ext.railTop,
+			railFoot: this._ext.railFoot,
+			rowDecorators: this._ext.rowDecorators,
 		};
 	}
 
@@ -397,6 +566,8 @@ export class EncounterCockpit {
 		const isEmpty = !ctx.state.instances.length;
 		this._root.classList.toggle("is-empty", isEmpty);
 		if (isEmpty) this._renderEmpty();
+		else this._renderStageMode(ctx);
+		this._runHooks("render", ctx);
 	}
 
 	_renderEmpty () {
@@ -458,6 +629,7 @@ export class EncounterCockpit {
 		);
 
 		const tools = h("div.ewc-bar__tools", null,
+			...this._getExtNodes("barItems", ctx),
 			this._getHistoryButton("undo"),
 			this._getHistoryButton("redo"),
 			h("span.ewc-bar__sep", {"aria-hidden": "true"}),
@@ -588,6 +760,8 @@ export class EncounterCockpit {
 			item(unrolled.length ? `Roll initiative for ${getCockpitPlural(unrolled.length, "creature")} without it` : "Re-roll everyone's initiative", () => this._pRollInitiative(rollIds, {isReroll: !unrolled.length}), {disabled: !ctx.state.instances.length, act: "rollinit"}),
 			item("Reset turns to not started", () => this._pResetTurns(), {disabled: !ctx.state.turn?.round, act: "resetturns"}),
 			h("div.ewc-menu__sep", {role: "separator"}),
+			...this._ext.menuItems.map(it => item(it.keys ? [it.label, kbd(getCockpitKeyLabels(it.keys, {isMac: this._isMac}))] : it.label, () => it.onclick(), {disabled: !!it.disabled?.(ctx), title: it.title || null, act: it.id})),
+			this._ext.menuItems.length ? h("div.ewc-menu__sep", {role: "separator"}) : null,
 			item("Choose saved list…", () => this._pChooseList(), {disabled: !this._isCatalogReady, act: "choose"}),
 			item("Send to DM Screen", () => this._pSendToDmScreen(), {disabled: !ctx.state.instances.length, title: "Queue the selection (or everyone still fighting) for the DM Screen initiative tracker", act: "dmscreen"}),
 			h("a.ewc-menu__item", {role: "menuitem", href: "encounterworkspace.html?ew=1"}, "Open the classic workspace"),
@@ -784,7 +958,7 @@ export class EncounterCockpit {
 			this._dlgHelp.addEventListener("click", evt => { if (evt.target === this._dlgHelp) this._dlgHelp.close(); });
 			this._root.append(this._dlgHelp);
 		}
-		const sheet = getCockpitShortcutSheet({isMac: this._isMac});
+		const sheet = getCockpitShortcutSheet({isMac: this._isMac, bindings: this._getKeyBindings()});
 		this._dlgHelp.replaceChildren(
 			h("div.ewc-dialog__head", null,
 				h("h2.ewc-dialog__title", {id: "ewc-keys-title"}, "Keyboard shortcuts"),
@@ -808,7 +982,10 @@ export class EncounterCockpit {
 			return;
 		}
 		const isStart = !state.turn?.round;
-		const next = await this._pCommit(isStart ? "Start combat" : "Next turn", draft => EncounterWorkspaceState.withTurn(draft, isStart ? "start" : "next"));
+		const next = await this._pCommit(isStart ? "Start combat" : "Next turn", (draft, {log}) => withCockpitTurnAdvanced(
+			EncounterWorkspaceState.withTurn(draft, isStart ? "start" : "next"),
+			{previousTurn: state.turn, log},
+		));
 		if (next) this._afterTurnChange(state, next);
 	}
 
@@ -816,7 +993,8 @@ export class EncounterCockpit {
 		const state = this._engine.getState();
 		const turn = getCockpitPrevTurn({turn: state.turn, orderIds: this._getTurnOrderIds(state)});
 		if (!turn) return this.toast(state.turn?.round ? "This is the first turn of combat." : "Combat hasn't started.");
-		const next = await this._pCommit("Previous turn", draft => { draft.turn = {...draft.turn, ...turn}; });
+		// Going back only moves the marker; durations are not un-ticked (undo is the way to rewind them).
+		const next = await this._pCommit("Previous turn", draft => EncounterWorkspaceState.withTurn(draft, "prev"));
 		if (next) this._afterTurnChange(state, next);
 	}
 
@@ -898,6 +1076,15 @@ export class EncounterCockpit {
 		const text = action.kind === "concentration"
 			? `${action.active === false ? "End concentration" : "Concentration"} — ${label}`
 			: `Update resources — ${label}`;
+		if (action.kind === "concentration") {
+			// Through the rules module so ending or switching spells also ends the effects linked to the old spell.
+			await this._pCommit(text, (draft, {log}) => {
+				if (action.active === false) endEncounterConcentration(draft, id, {log});
+				else startEncounterConcentration(draft, id, action.label || "", {log});
+				return draft;
+			});
+			return;
+		}
 		await this._pCommit(text, draft => EncounterWorkspaceState[reducer](draft, {...action, id}));
 	}
 
@@ -916,14 +1103,26 @@ export class EncounterCockpit {
 		try {
 			next = await this._pCommit(label, (draft, {log}) => {
 				if (damageType) {
-					outcome = EncounterWorkspaceState.withTypedDamage(draft, {amount, damageType, source, decisions, targetIds});
+					outcome = EncounterWorkspaceState.withTypedDamage(draft, {
+						amount,
+						damageType,
+						source,
+						decisions,
+						targetIds,
+						getExtraDefenses: getCockpitExtraDefensesGetter(draft, this._settings),
+					});
 				} else {
 					const result = EncounterWorkspaceState.withHpOperation(draft, {operation: {mode: "delta", value: -amount}, targetIds});
 					outcome = {...result, results: result.snapshots.map(({id, before, after}) => ({id, damage: amount, defenses: {}, before, after, concentrationDc: null}))};
 				}
 				const extra = `${isCrit ? " (critical hit)" : ""}${amountText && amountText !== `${amount}` ? ` [${amountText}]` : ""}`;
 				log("damage", `${getCockpitDamageSummary({amount, damageType, results: outcome.results, labels, skippedIds: outcome.skippedIds})}${extra}`);
-				return outcome.state;
+				const out = outcome.state;
+				outcome.results.forEach(({id, damage, before, after}) => {
+					const leftover = damage - Math.max(0, (before?.temp || 0) - (after?.temp || 0));
+					applyEncounterDeathSaveDamage(out, {id, damage: leftover, hpBefore: before?.current ?? 0, isCrit, monsterDeathSaves: this._settings.monsterDeathSaves, ruleset: this._settings.ruleset, log});
+				});
+				return out;
 			});
 		} catch (e) {
 			if (Array.isArray(e?.unresolved)) return {unresolved: e.unresolved};
@@ -931,18 +1130,22 @@ export class EncounterCockpit {
 			return {ok: false};
 		}
 		if (!next) return {ok: false};
-		const results = outcome.results.map(it => ({...it, concentrationDc: it.concentrationDc ?? this._getConcentrationDc(next, it)}));
+		// A creature that dropped to 0 lost its concentration in the same commit; no save to prompt for.
+		const results = outcome.results.map(it => ({...it, concentrationDc: this._getConcentrationDc(next, it)}));
 		this.toast(getCockpitDamageSummary({amount, damageType, results, labels, skippedIds: outcome.skippedIds}), {isUndo: true});
 		this._runHooks("damageApplied", {amount, damageType, source, isCrit, results, skippedIds: outcome.skippedIds, targetIds, state: next});
 		return {ok: true};
 	}
 
-	/** Untyped damage goes through withHpOperation, which does not report concentration; add it for concentrating creatures. */
+	/**
+	 * Untyped damage goes through withHpOperation, which does not report concentration; add it for creatures that
+	 * still concentrate after the hit (dropping to 0 HP already ended it).
+	 */
 	_getConcentrationDc (state, {id, before, after}) {
 		const instance = state.instances.find(it => it.id === id);
-		if (!instance?.resources?.concentration?.active || !before || !after) return null;
+		if (!instance || !getEncounterConcentration(instance) || !before || !after) return null;
 		const lost = ((before.current ?? 0) - (after.current ?? 0)) + ((before.temp ?? 0) - (after.temp ?? 0));
-		return lost > 0 ? Math.max(10, Math.floor(lost / 2)) : null;
+		return lost > 0 ? getEncounterConcentrationDc(lost) : null;
 	}
 
 	async _pHp ({mode, amount, amountText, targetIds}) {
@@ -952,7 +1155,14 @@ export class EncounterCockpit {
 		let skipped = [];
 		const next = await this._pCommit(label, (draft, {log}) => {
 			let out;
-			if (mode === "temp") {
+			if (mode === "heal") {
+				out = draft;
+				skipped = targetIds.filter(id => {
+					const instance = out.instances.find(it => it.id === id);
+					return !instance || instance.hp?.max == null || instance.hp?.current == null;
+				});
+				targetIds.filter(id => !skipped.includes(id)).forEach(id => applyEncounterHealing(out, {id, amount}));
+			} else if (mode === "temp") {
 				out = draft;
 				targetIds.forEach(id => {
 					const instance = out.instances.find(it => it.id === id);
@@ -979,18 +1189,11 @@ export class EncounterCockpit {
 		const name = `${condition}`.toTitleCase();
 		const label = `${isAdd ? name : `End ${name}`} → ${who}${isAdd && rounds ? ` (${getCockpitPlural(rounds, "round")})` : ""}`;
 		const next = await this._pCommit(label, (draft, {log}) => {
-			const had = new Set(draft.instances.filter(it => it.conditions.includes(condition)).map(it => it.id));
-			const out = EncounterWorkspaceState.withConditions(draft, {condition, isAdd, targetIds});
-			if (isAdd) {
-				out.instances = out.instances.map(instance => {
-					if (!targetIds.includes(instance.id) || !instance.conditions.includes(condition)) return instance;
-					// Re-applying without a duration keeps the existing one.
-					if (had.has(instance.id) && rounds == null) return instance;
-					return {...instance, conditionDetails: {...instance.conditionDetails, [condition]: {...instance.conditionDetails?.[condition], rounds}}};
-				});
-			}
-			log("condition", label);
-			return out;
+			const ruleset = this._settings.ruleset;
+			// Re-applying without a duration keeps the existing one (undefined = leave rounds alone).
+			if (isAdd) applyEncounterCondition(draft, {targetIds, condition, rounds: rounds ?? undefined, ruleset, log});
+			else removeEncounterCondition(draft, {targetIds, condition, log});
+			return draft;
 		});
 		if (next) this.toast(`${label}.`, {isUndo: true});
 	}
@@ -1000,27 +1203,20 @@ export class EncounterCockpit {
 		const who = this._getWho(targetIds, this._getLabels(state));
 		const levels = new Map(state.instances
 			.filter(it => targetIds.includes(it.id))
-			.map(it => [it.id, Math.max(0, Math.min(MAX_EXHAUSTION, getCockpitExhaustionLevel(it) + delta))]));
+			.map(it => [it.id, Math.max(0, Math.min(this._getMaxExhaustion(), getCockpitExhaustionLevel(it) + delta))]));
 		const shown = [...new Set(levels.values())];
 		const label = `Exhaustion ${shown.length === 1 ? shown[0] : delta > 0 ? "+1" : "−1"} → ${who}`;
 		const next = await this._pCommit(label, (draft, {log}) => {
-			const toAdd = [...levels].filter(([, level]) => level > 0).map(([id]) => id);
-			const toRemove = [...levels].filter(([, level]) => level === 0).map(([id]) => id);
-			let out = draft;
-			if (toAdd.length) out = EncounterWorkspaceState.withConditions(out, {condition: "exhaustion", isAdd: true, targetIds: toAdd});
-			if (toRemove.length) out = EncounterWorkspaceState.withConditions(out, {condition: "exhaustion", isAdd: false, targetIds: toRemove});
-			out = {
-				...out,
-				instances: out.instances.map(instance => {
-					const level = levels.get(instance.id);
-					if (!level) return instance;
-					return {...instance, conditionDetails: {...instance.conditionDetails, exhaustion: {rounds: instance.conditionDetails?.exhaustion?.rounds ?? null, level}}};
-				}),
-			};
-			log("condition", label);
-			return out;
+			const byLevel = new Map();
+			levels.forEach((level, id) => byLevel.set(level, [...(byLevel.get(level) || []), id]));
+			byLevel.forEach((ids, level) => setEncounterExhaustion(draft, {targetIds: ids, level, ruleset: this._settings.ruleset, log}));
+			return draft;
 		});
 		if (next) this.toast(`${label}.`, {isUndo: true});
+	}
+
+	_getMaxExhaustion () {
+		return ENCOUNTER_EXHAUSTION_DEATH_LEVEL[getEncounterConditionRule("exhaustion", this._settings.ruleset).exhaustion] ?? 6;
 	}
 
 	/* -------------------------------------------- Loading encounters -------------------------------------------- */

@@ -918,7 +918,7 @@ export class EncounterWorkspaceState {
 		return {state: next, changedIds, skippedIds, snapshots};
 	}
 
-	static withTypedDamage (state, {amount, damageType, source, decisions = {}, targetIds = state.selectedIds}) {
+	static withTypedDamage (state, {amount, damageType, source, decisions = {}, targetIds = state.selectedIds, getExtraDefenses = null}) {
 		const {eligibleIds} = getEncounterEffectTargets(state, {targetIds});
 		if (!decisions || typeof decisions !== "object" || Array.isArray(decisions)) throw new Error("Damage defense decisions must be explicit.");
 		getEncounterDamageForMonster({amount, damageType, source});
@@ -940,6 +940,7 @@ export class EncounterWorkspaceState {
 				damageType,
 				source,
 				decisions: Object.hasOwn(decisions, instance.id) ? decisions[instance.id] : {},
+				extraDefenses: getExtraDefenses ? getExtraDefenses(instance, damageType) : null,
 			});
 			if (calculation.unresolved.length) {
 				unresolved.push(...calculation.unresolved.map(defense => ({id: instance.id, ...defense})));
@@ -1111,6 +1112,14 @@ export class EncounterWorkspaceState {
 		if (action === "start") {
 			if (state.turn.round !== 0) throw new Error("Reset turns before starting a new round.");
 			return this.validate({...state, turn: {round: 1, activeId: order[0].id}});
+		}
+		if (action === "prev") {
+			if (!state.turn.round) throw new Error("Start turns before going back.");
+			const index = order.findIndex(it => it.id === state.turn.activeId);
+			if (index < 0) return this.validate({...state, turn: {round: state.turn.round, activeId: order[0].id}});
+			if (index > 0) return this.validate({...state, turn: {round: state.turn.round, activeId: order[index - 1].id}});
+			if (state.turn.round <= 1) throw new Error("This is the first turn of combat.");
+			return this.validate({...state, turn: {round: state.turn.round - 1, activeId: order[order.length - 1].id}});
 		}
 		if (action !== "next" || !state.turn.round) throw new Error("Start turns before advancing.");
 		const index = order.findIndex(it => it.id === state.turn.activeId);

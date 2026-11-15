@@ -48,7 +48,11 @@ function getContextDecision (note, source) {
 	return null;
 }
 
-export function getEncounterDamageForMonster ({monster, amount, damageType, source = "unspecified", decisions = {}}) {
+/**
+ * `extraDefenses` ({immune, resist, vulnerable} booleans) come from effects and conditions on the creature. They join
+ * the statblock's own defenses, so a creature that resists from both still only halves once.
+ */
+export function getEncounterDamageForMonster ({monster, amount, damageType, source = "unspecified", decisions = {}, extraDefenses = null}) {
 	if (!Number.isSafeInteger(amount) || amount < 0) throw new Error("Enter a non-negative whole-number damage amount.");
 	if (!ENCOUNTER_DAMAGE_TYPES.includes(damageType)) throw new Error("Choose a known damage type.");
 	if (!ENCOUNTER_DAMAGE_SOURCES.includes(source)) throw new Error("Choose a known damage source.");
@@ -79,6 +83,7 @@ export function getEncounterDamageForMonster ({monster, amount, damageType, sour
 		});
 	}
 	if (unresolved.length) return {damage: null, defenses, unresolved};
+	if (extraDefenses) Object.keys(defenses).forEach(key => { if (extraDefenses[key]) defenses[key] = true; });
 	let damage = defenses.immune ? 0 : defenses.resist ? Math.floor(amount / 2) : amount;
 	if (!defenses.immune && defenses.vulnerable) {
 		if (damage > Number.MAX_SAFE_INTEGER / 2) throw new Error("The adjusted damage exceeds the supported range.");

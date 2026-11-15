@@ -91,12 +91,26 @@ export class EncounterCockpitRail {
 		const list = h("ol.ewc-rail__list", {"aria-labelledby": "ewc-rail-title"}, rows.map(instance => this._getRow(instance, ctx)));
 		const empty = rows.length ? null : h("p.ewc-rail__empty", null, "No creatures yet. Use ", h("b", null, "⋯ → Choose saved list"), " or send an encounter from the Bestiary.");
 
-		replaceKeepingFocus(this._root, [head, legend, chips, list, empty].filter(Boolean));
+		const top = this._getExtras(ctx.railTop, ctx);
+		const foot = this._getExtras(ctx.railFoot, ctx);
+		replaceKeepingFocus(this._root, [head, legend, chips, ...top, list, empty, ...foot].filter(Boolean));
 
 		if (openTallyId) {
 			const anchor = this._root.querySelector(`[data-ewc-tally="${CSS.escape(openTallyId)}"]`);
 			if (anchor) this._openTally(openTallyId, anchor, {isFocus: false});
 		}
+	}
+
+	/** Feature renderers (fn(ctx) → Node | Node[] | null); a throwing renderer is skipped, not fatal. */
+	_getExtras (renderers, ctx) {
+		return (renderers || []).flatMap(fn => {
+			try {
+				return [fn(ctx)].flat().filter(Boolean);
+			} catch (e) {
+				setTimeout(() => { throw e; });
+				return [];
+			}
+		});
 	}
 
 	_getLegend (ui) {
@@ -207,6 +221,13 @@ export class EncounterCockpitRail {
 
 		row.append(check, initCell, main, right, this._getSubline(instance, ctx, {label, isViewed, hpState}));
 		if (!instance.defeated && ctx.quickActions.length) row.append(this._getQuickActions(instance, label, ctx));
+		(ctx.rowDecorators || []).forEach(fn => {
+			try {
+				fn(row, instance, ctx);
+			} catch (e) {
+				setTimeout(() => { throw e; });
+			}
+		});
 		return row;
 	}
 

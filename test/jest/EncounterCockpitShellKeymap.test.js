@@ -1,4 +1,5 @@
 import {
+	COCKPIT_KEY_BINDINGS,
 	getCockpitAriaShortcut,
 	getCockpitIsMac,
 	getCockpitKeyAction,
@@ -93,6 +94,27 @@ describe("Encounter cockpit shell keymap", () => {
 			expect(mac).not.toContain("Ctrl+Y");
 			expect(mac).toContain("⌘+Z");
 			expect(new Set(pc).size).toBe(pc.length);
+		});
+	});
+
+	describe("feature bindings", () => {
+		const bindings = [
+			...COCKPIT_KEY_BINDINGS,
+			{section: "Console", keys: ["/"], label: "Open the console", action: "console"},
+			{section: "Groups", keys: ["Shift", "G"], label: "Group the selection", action: "groupSel"},
+		];
+
+		test("added single keys and Shift+letter keys resolve; Shift+letter without a binding still does nothing", () => {
+			expect(getCockpitKeyAction(key("/"), {bindings})).toEqual({action: "console"});
+			expect(getCockpitKeyAction(key("G", {shiftKey: true}), {bindings})).toEqual({action: "groupSel"});
+			expect(getCockpitKeyAction(key("N", {shiftKey: true}), {bindings})).toBeNull();
+			expect(getCockpitKeyAction(key("/"))).toBeNull();
+			expect(getCockpitKeyAction(key("G", {shiftKey: true}), {bindings, isTyping: true})).toBeNull();
+		});
+
+		test("the shortcut sheet lists feature keys in their own sections", () => {
+			const sheet = getCockpitShortcutSheet({bindings});
+			expect(sheet.find(it => it.name === "Groups").rows).toEqual([{label: "Group the selection", keys: ["Shift", "G"], action: "groupSel"}]);
 		});
 	});
 });

@@ -61,7 +61,7 @@ export function getCockpitEventKey (evt) {
  * Resolve a keyboard event to an action, or null.
  * Returns {action, digit?}. Never resolves while typing, except Esc (which blurs) and undo/redo (left to the input).
  */
-export function getCockpitKeyAction (evt, {isMac = false, isTyping = false} = {}) {
+export function getCockpitKeyAction (evt, {isMac = false, isTyping = false, bindings = COCKPIT_KEY_BINDINGS} = {}) {
 	const key = getCockpitEventKey(evt);
 	const mod = isMac ? evt.metaKey : evt.ctrlKey;
 	if (isTyping) return key === "Esc" ? {action: "blur"} : null;
@@ -72,9 +72,12 @@ export function getCockpitKeyAction (evt, {isMac = false, isTyping = false} = {}
 	}
 	if (evt.ctrlKey || evt.metaKey || evt.altKey) return null;
 	if (key === "?" || (evt.shiftKey && key === "/")) return {action: "help"};
-	if (evt.shiftKey) return null;
+	if (evt.shiftKey) {
+		const shifted = bindings.find(it => it.keys.length === 2 && it.keys[0] === "Shift" && it.keys[1] === key);
+		return shifted ? {action: shifted.action} : null;
+	}
 	if (/^[1-9]$/.test(key)) return {action: "group", digit: Number(key)};
-	const binding = COCKPIT_KEY_BINDINGS.find(it => it.keys.length === 1 && it.keys[0] === key);
+	const binding = bindings.find(it => it.keys.length === 1 && it.keys[0] === key);
 	return binding ? {action: binding.action} : null;
 }
 
@@ -105,15 +108,16 @@ export function getCockpitAriaShortcut (keys, {isMac = false} = {}) {
 }
 
 /**
- * Install the keymap on the document. `handlers` maps action ids to functions; unknown actions are ignored.
+ * Install the keymap on the document. `handlers` maps action ids to functions (read at key time, so entries added
+ * later work); unknown actions are ignored. `getBindings` lets features add keys after install.
  * Returns an uninstall function.
  */
-export function installCockpitKeymap ({root, handlers, isMac = getCockpitIsMac(), isEnabled = () => true}) {
+export function installCockpitKeymap ({root, handlers, isMac = getCockpitIsMac(), isEnabled = () => true, getBindings = () => COCKPIT_KEY_BINDINGS}) {
 	const onKeyDown = evt => {
 		if (evt.defaultPrevented || evt.isComposing || !isEnabled()) return;
 		if (evt.target instanceof Node && !root.contains(evt.target) && evt.target !== document.body && evt.target !== document.documentElement) return;
 		const isTyping = isCockpitTypingTarget(evt, {activeElement: document.activeElement});
-		const resolved = getCockpitKeyAction(evt, {isMac, isTyping});
+		const resolved = getCockpitKeyAction(evt, {isMac, isTyping, bindings: getBindings()});
 		if (!resolved) return;
 		if (resolved.action === "blur") {
 			const el = document.activeElement;

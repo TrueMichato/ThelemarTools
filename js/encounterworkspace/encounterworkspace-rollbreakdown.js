@@ -1,4 +1,14 @@
 import {getEncounterEffectiveMonster} from "./encounterworkspace-state.js";
+import {
+	ENCOUNTER_ABILITIES,
+	ENCOUNTER_ABILITY_NAMES,
+	ENCOUNTER_SKILL_ABILITIES,
+	getEncounterAbilityMod,
+	getEncounterBaseAc,
+	getEncounterBaseAcInfo,
+} from "./encounterworkspace-fx.js";
+
+export {ENCOUNTER_ABILITIES, ENCOUNTER_ABILITY_NAMES, ENCOUNTER_SKILL_ABILITIES, getEncounterAbilityMod, getEncounterBaseAc, getEncounterBaseAcInfo};
 
 /**
  * Pure roll maths for the Encounter Cockpit. Every roll reports the natural die and each named bonus
@@ -8,38 +18,11 @@ import {getEncounterEffectiveMonster} from "./encounterworkspace-state.js";
  * (or an array of partials) shaped `{bonuses, advantage, disadvantage, autoFail, autoCrit, notes}`.
  */
 
-export const ENCOUNTER_ABILITIES = Object.freeze(["str", "dex", "con", "int", "wis", "cha"]);
-export const ENCOUNTER_ABILITY_NAMES = Object.freeze({str: "Strength", dex: "Dexterity", con: "Constitution", int: "Intelligence", wis: "Wisdom", cha: "Charisma"});
-export const ENCOUNTER_SKILL_ABILITIES = Object.freeze({
-	"acrobatics": "dex",
-	"animal handling": "wis",
-	"arcana": "int",
-	"athletics": "str",
-	"deception": "cha",
-	"history": "int",
-	"insight": "wis",
-	"intimidation": "cha",
-	"investigation": "int",
-	"medicine": "wis",
-	"nature": "int",
-	"perception": "wis",
-	"performance": "cha",
-	"persuasion": "cha",
-	"religion": "int",
-	"sleight of hand": "dex",
-	"stealth": "dex",
-	"survival": "wis",
-});
 export const ENCOUNTER_ROLL_KINDS = Object.freeze(["attack", "save", "check", "damage", "ac", "initiative"]);
 
 const EMPTY_PARTIAL = Object.freeze({bonuses: [], advantage: [], disadvantage: [], autoFail: [], autoCrit: [], notes: []});
 
 export const getEncounterSignedNumber = value => `${value < 0 ? "-" : "+"}${Math.abs(value)}`;
-
-export function getEncounterAbilityMod (score) {
-	const value = Number(score);
-	return Number.isFinite(value) ? Math.floor((value - 10) / 2) : 0;
-}
 
 export function getEncounterCrNumber (cr) {
 	const raw = cr && typeof cr === "object" ? cr.cr : cr;
@@ -337,18 +320,10 @@ export function getEncounterDamageRollBreakdown ({expr, damageType = null, crit 
 	};
 }
 
-export function getEncounterBaseAc (monster) {
-	const first = Array.isArray(monster?.ac) ? monster.ac[0] : monster?.ac;
-	if (Number.isFinite(first)) return {value: first, from: []};
-	if (first && Number.isFinite(first.ac)) return {value: first.ac, from: (first.from || []).map(it => `${it}`.replace(/\{@[a-z]+\s+([^}|]+)[^}]*\}/gi, "$1"))};
-	if (Number.isFinite(first?.special)) return {value: first.special, from: []};
-	return {value: 10, from: []};
-}
-
 /** AC with every flat contributor named (`17 (15 +2)`); dice contributors cannot apply to AC and become notes. */
 export function getEncounterAcBreakdown ({instance, getContributors = null, query = {}}) {
 	const monster = getEncounterEffectiveMonster(instance);
-	const base = getEncounterBaseAc(monster);
+	const base = getEncounterBaseAcInfo(instance, monster);
 	const partial = getContributorPartial(getContributors, instance, {...query, kind: "ac"});
 	const bonuses = partial.bonuses.filter(it => Number.isFinite(it.value));
 	const parts = bonuses.map(it => ({label: it.label, value: Math.trunc(it.value), source: it.source || "effect", text: `${it.label} ${getEncounterSignedNumber(Math.trunc(it.value))}`}));

@@ -7,6 +7,9 @@
 @use "includes/encounterworkspace-cockpit-statblock";
 @use "includes/encounterworkspace-cockpit-dock";
 @use "includes/encounterworkspace-cockpit-keymap";
+@use "includes/encounterworkspace-cockpit-act";
+@use "includes/encounterworkspace-cockpit-prep";
+@use "includes/encounterworkspace-cockpit-flow";
 
 @layer vetools {
 	.ew {
