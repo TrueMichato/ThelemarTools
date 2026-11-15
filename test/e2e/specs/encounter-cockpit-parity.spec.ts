@@ -13,6 +13,7 @@ import {expect, test, type Page} from "@playwright/test";
  *   FLOW   encounter-cockpit-flow.spec.ts  › "timeline, log drawer, groups and turn-order moves"
  *   DS     encounter-cockpit-flow.spec.ts  › "death saves, concentration checks and end combat"
  *   SWEEP  encounter-cockpit-sweep.spec.ts › the four 30-monster encounters (+ "Zombie (DMG) applies …")
+ *   SB     encounter-cockpit-statblock.spec.ts › roll chips, DC calls, header, Held by / Tools / Reminders, PC card, hint
  *   P1/P2/P3  the tests in this file (rail & turns / statblock roll feed / templates, effects & battlefield)
  *
  * | verify-a6 step                                                          | Real site                                                                 |
@@ -24,7 +25,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 108 §1 tray ½ / ×2 / → Viewed / attack + save cards / more              | P2. Save cards: ACT (Roll tab → tray)                                     |
  * | 142 Kept·A tray "Stage in console"                                      | P2                                                                        |
  * | 153 §2 caster chip ◉ Conc · Bless, target pills, click → view caster    | DS (conc chip, Con save) + P3 (◉ chip from console). Pill → caster jump: N/A, real pills open the native effect hover |
- * | 167 §2 statblock concentration strip; Held-by link                      | DS (concentration strip). Held-by link: N/A, not part of the real cockpit |
+ * | 167 §2 statblock concentration strip; Held-by link                      | DS (concentration strip) + SB (header conc line, Held by → caster)        |
  * | 184 §2 Drop concentration removes linked effects (+undo)                | ACT (switching concentration ends Bless everywhere) + DS (conc-drop)      |
  * | 195 Kept·A header concentration Drop                                    | DS (conc strip Drop) + P3 (console `drop`)                                |
  * | 205 §3 prep toggle: label, aria-pressed, banner, 5 tabs                 | PREP + P3 (Q key hint on the toggle)                                      |
@@ -45,12 +46,12 @@ import {expect, test, type Page} from "@playwright/test";
  * | 451 §4 difficulty badge → XP popover                                    | P1 (badge XP drops for the defeated, back on revive). Popover: N/A, the real badge explains itself in its title |
  * | 458 §4 ⋯ menu → Show the how-to hint                                    | N/A: no how-to hint in the real cockpit (P1 checks the ⋯ menu itself)     |
  * | 467 §4 add modal stepper & party add                                    | ADD                                                                       |
- * | 490 Kept·A defeated list + Revive                                       | P1 (0 HP → Defeated; healing revives)                                     |
+ * | 490 Kept·A defeated list + Revive                                       | P1 (0 HP → Defeated; healing revives) + SB (statblock header Revive)      |
  * | 500 Kept·A "Back to active" banner (Space)                              | P1                                                                        |
  * | 510 Kept·A resource pips (spell slots) clickable                        | SWEEP (slot/use/legendary/recharge trackers on 30 monsters)               |
  * | 519 Kept·A shortcut hints on new controls + hover on area chip          | PREP (strip chip hover) + P3 (Q hint)                                     |
  * | 530 typing in inputs never triggers shortcuts                           | SHELL ("nc" in the HP box) + P1 ("qlgt" in the console)                   |
- * | 550 A4 mark conc from statblock (autocomplete)                          | DS (conc strip). Autocomplete prompt: N/A, the real path is the console `conc` |
+ * | 550 A4 mark conc from statblock (autocomplete)                          | SB (Tools › Conc mark) + P3 (console `conc`). Autocomplete list: N/A      |
  * | 561 A4 row ⋯ → Mark concentration…; console conc / conc off             | P3 (console `conc fly` / `drop`). Row ⋯ prompt: N/A                       |
  * | 572 A4 damage → CON save on concentration; 0 HP drops it                | DS                                                                        |
  * | 581 A4 pill glyphs ▲ ▼ ⬡ + legend in ⇧?                                 | P3 (▲ pill, ✦ template in the tally card). Glyph legend in ⇧?: N/A, the tally card names each item |

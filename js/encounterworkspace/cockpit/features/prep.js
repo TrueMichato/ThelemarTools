@@ -51,6 +51,11 @@ export function installCockpitPrepFeatures (api) {
 	api.getRegion("stageTop").append(strip);
 
 	installPrepStatblockEffects(api);
+	api.onOpenPrep?.(({tab = "creature", creSub = null} = {}) => {
+		if (creSub) S.creSub = creSub;
+		S.scope = "viewed";
+		setOpen(true, {tab});
+	});
 
 	let ctKey = null;
 	let ctToken = 0;

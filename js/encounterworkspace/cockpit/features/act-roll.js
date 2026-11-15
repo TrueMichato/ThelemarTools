@@ -232,5 +232,11 @@ export function createCockpitRollTab (api, {tray}) {
 		if (error) panel.append(h("p.ewc-error", {id: "ewc-roll-err", role: "alert"}, error.message));
 	}
 
-	return {id: "roll", label: "Roll", keys: ["R"], render};
+	const preset = patch => {
+		Object.assign(form, getCockpitEmptyRollForm(), patch);
+		error = null;
+		isOutcomeOpen = !!(form.damage || form.condition);
+	};
+
+	return {id: "roll", label: "Roll", keys: ["R"], render, preset};
 }

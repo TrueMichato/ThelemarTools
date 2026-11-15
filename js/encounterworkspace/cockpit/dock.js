@@ -70,6 +70,14 @@ export class EncounterCockpitDock {
 		if (this._ctx) this.render(this._ctx);
 	}
 
+	/** Open a tab with its form prefilled — only tabs that expose `preset(patch)` support it. */
+	presetTab (id, patch) {
+		const tab = this._tabs.find(it => it.id === id);
+		if (!tab?.preset) return false;
+		tab.preset(patch || {});
+		return this.setTab(id);
+	}
+
 	setTab (id, {isFocus = true} = {}) {
 		if (!this._tabs.some(it => it.id === id)) return false;
 		this._tab = id;

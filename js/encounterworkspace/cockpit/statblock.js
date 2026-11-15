@@ -5,20 +5,19 @@
  */
 
 import {getEncounterRollFromPackedDice} from "../encounterworkspace-roll.js";
-import {
-	getEncounterConcentrationButton,
-	getEncounterResourcePanel,
-	renderEncounterInlineResources,
-} from "../encounterworkspace-resource-view.js";
+import {getEncounterResourcePanel, renderEncounterInlineResources} from "../encounterworkspace-resource-view.js";
+import {getEncounterConcentration, getEncounterConcentrationTargets} from "../encounterworkspace-fx.js";
 import {h, kbd, replaceKeepingFocus} from "./dom.js";
 import {COCKPIT_TALLY_BUCKETS, getCockpitAcValue, getCockpitCrText, getCockpitHpState} from "./model.js";
+import {getCockpitSigned, getCockpitStageDeltas} from "./stage-model.js";
 
 export class EncounterCockpitStatblock {
 	/**
 	 * @param head Header container. @param body Statblock container (the scrolling pane is its parent).
 	 * callbacks: {onRoll({instance, roll, rollMode, evt}), onResourceAction(id, action), onError(message),
-	 *   onViewActive(), onToggleSelect(id)}
-	 * decorators: [(table, instance, ctx) => void] — run after every statblock render (P3 save/AC overlays).
+	 *   onViewActive(), onToggleSelect(id), onRevive(id), onDropConcentration(id)}
+	 * decorators: [(table, instance, ctx, tile) => void] — run after every statblock render (P3 save/AC overlays).
+	 *   `table` is the native statblock (null for party members, who get a PC card); `tile` the `.ewc-sb` article.
 	 */
 	constructor ({head, body, hover, callbacks, decorators = []}) {
 		this._head = head;
@@ -82,8 +81,14 @@ export class EncounterCockpitStatblock {
 		out.push(h("div.ewc-vh__top", null,
 			name,
 			ctx.isTurn(instance.id) ? h("span.ewc-vh__tag", null, "Their turn") : null,
-			hpState.cls === "is-down" ? h("span.ewc-vh__tag.ewc-vh__tag--bad", null, instance.defeated ? "Defeated" : "Down")
+			hpState.cls === "is-down" || instance.defeated ? h("span.ewc-vh__tag.ewc-vh__tag--bad", null, instance.defeated ? "Defeated" : "Down")
 				: hpState.word === "Bloodied" ? h("span.ewc-vh__tag.ewc-vh__tag--warn", null, "Bloodied") : null,
+			instance.defeated || hpState.cls === "is-down" ? h("button.ewc-btn.ewc-btn--sm.ewc-vh__revive", {
+				type: "button",
+				"data-ewc-fk": "vh-revive",
+				title: "Bring it back into the fight at 1 HP (clears death saves and the 0 HP Unconscious)",
+				onclick: () => this._cb.onRevive?.(instance.id),
+			}, "Revive") : null,
 			h("button.ewc-btn.ewc-btn--sm.ewc-vh__sel", {
 				type: "button",
 				"data-ewc-fk": "vh-sel",
@@ -96,7 +101,8 @@ export class EncounterCockpitStatblock {
 		const pct = hpState.fraction == null ? 0 : Math.round(100 * hpState.fraction);
 		let speed = null;
 		try { speed = derived.speedText ?? (effective?.speed ? Parser.getSpeedString(effective) : null); } catch (e) { /* unusual speed data */ }
-		const cr = getCockpitCrText(effective?.cr);
+		const isPc = instance.kind === "party";
+		const cr = isPc ? null : getCockpitCrText(effective?.cr);
 		let xp = null;
 		try { xp = cr ? Parser.crToXp(cr) : null; } catch (e) { /* non-standard CR */ }
 		out.push(h("div.ewc-vh__stats", null,
@@ -108,7 +114,27 @@ export class EncounterCockpitStatblock {
 			h("span.ewc-vh__stat", null, "Init ", h("b", null, `${ctx.initiativeOf(instance) ?? "—"}`)),
 			speed ? h("span.ewc-vh__stat", null, "Speed ", h("b", null, speed)) : null,
 			cr ? h("span.ewc-vh__stat", null, "CR ", h("b", null, cr), xp ? h("span.ewc-muted", null, ` ${xp} XP`) : null) : null,
+			isPc && instance.party?.passive != null ? h("span.ewc-vh__stat", {title: "Passive Perception"}, "Passive ", h("b", null, `${instance.party.passive}`)) : null,
 		));
+
+		const spell = getEncounterConcentration(instance);
+		if (spell) {
+			const n = getEncounterConcentrationTargets(ctx.state, instance.id).length;
+			const dis = derived.derived?.concentration?.disadvantage || [];
+			out.push(h("div.ewc-vh__line.ewc-vh__conc", null,
+				h("span.ewc-vh__lbl", null, "◉ Concentrating"),
+				h("b", null, spell),
+				n ? h("span", null, ` · on ${n} creature${n === 1 ? "" : "s"}`) : null,
+				h("span.ewc-muted", {title: "Damage calls for a Constitution save: DC 10 or half the damage, whichever is higher"},
+					" · CON save when damaged", dis.length ? h("span.ewc-vh__dis", {title: dis.map(it => it.label).join(", ")}, ` (disadv · ${dis.map(it => it.label).join(", ")})`) : null),
+				h("button.ewc-btn.ewc-btn--sm.ewc-btn--link.ewc-vh__drop", {
+					type: "button",
+					"data-ewc-fk": "vh-conc-drop",
+					title: `End concentration on ${spell}${n ? " and the effects it holds up" : ""}`,
+					onclick: () => this._cb.onDropConcentration?.(instance.id),
+				}, "Drop"),
+			));
+		}
 
 		const conditions = instance.conditions || [];
 		const items = (ctx.effectItems(instance) || []);
@@ -138,10 +164,11 @@ export class EncounterCockpitStatblock {
 	}
 
 	_renderBody (instance, ctx) {
+		if (instance.kind === "party") return this._renderPcCard(instance, ctx);
 		const effective = ctx.getEffective(instance);
 		const sig = JSON.stringify([instance.id, instance.statblockOperations, instance.resources, instance.monster?.name, instance.monster?.source, ctx.labels.get(instance.id), this._decorators.length]);
 		if (sig === this._sig) {
-			this._decorators.forEach(fn => fn(this._body.querySelector("table.ve-stats"), instance, ctx));
+			this._runDecorators(this._body.querySelector("table.ve-stats"), instance, ctx, this._body.querySelector(".ewc-sb"));
 			return;
 		}
 		const pane = this._body.parentElement;
@@ -174,10 +201,10 @@ export class EncounterCockpitStatblock {
 		panel.querySelectorAll("details[data-resource-key]").forEach(details => { details.open = openKeys.has(details.dataset.resourceKey); });
 		const manager = panel.querySelector(".ew__resource-manager");
 		if (manager && wasManagerOpen != null) manager.open = wasManagerOpen;
-		tile.append(getEncounterConcentrationButton({instance, label, onAction}), table, panel);
+		tile.append(table, panel);
 
 		this._body.replaceChildren(tile);
-		this._decorators.forEach(fn => fn(table, instance, ctx));
+		this._runDecorators(table, instance, ctx, tile);
 		this._sig = sig;
 		this._viewedId = instance.id;
 		if (pane) pane.scrollTop = scrollTop;
@@ -189,6 +216,50 @@ export class EncounterCockpitStatblock {
 				|| controls.find(it => it.dataset.resourceControl === opposite && !it.disabled);
 			control?.focus({preventScroll: true});
 		}
+	}
+
+	_runDecorators (table, instance, ctx, tile) {
+		this._decorators.forEach(fn => {
+			try {
+				fn(table, instance, ctx, tile);
+			} catch (e) {
+				setTimeout(() => { throw e; });
+			}
+		});
+	}
+
+	/** Party members have no monster statblock: a card with what the DM tracks; the player rolls at the table. */
+	_renderPcCard (instance, ctx) {
+		let tile = this._body.querySelector(".ewc-sb--pc");
+		if (!tile || tile.dataset.instanceId !== instance.id) {
+			tile = h("article.ewc-sb.ewc-sb--pc.ew__statblock", {"data-instance-id": instance.id}, h("div.ewc-pccard"));
+			this._body.replaceChildren(tile);
+			if (this._body.parentElement) this._body.parentElement.scrollTop = 0;
+		}
+		this._sig = null;
+		this._viewedId = instance.id;
+		const shell = ctx.getDerived(instance) || {};
+		const derived = shell.derived;
+		const party = instance.party || {};
+		const hp = instance.hp || {};
+		const acBase = party.ac ?? null;
+		const ac = shell.ac ?? derived?.ac?.value ?? acBase;
+		const deltas = getCockpitStageDeltas(derived).filter(it => it.text !== "AC");
+		const init = party.initBonus;
+		replaceKeepingFocus(tile.querySelector(".ewc-pccard"), [
+			h("h3.ewc-pccard__name", null, ctx.labels.get(instance.id)),
+			h("p.ewc-pccard__sub", null, "player character — the player rolls; you track."),
+			deltas.length ? h("div.ewc-pccard__active", null, h("span.ewc-pccard__k", null, "Active effects"),
+				h("span.ewc-sb__deltas", null, deltas.map((it, ix) => [ix ? " · " : null, it.from != null ? [it.text, " ", h("s", null, it.from), " ", h("b", null, it.to)] : it.text]))) : null,
+			h("dl.ewc-pccard__stats", null,
+				h("div", null, h("dt", null, "AC"), h("dd", null, ac !== acBase && acBase != null ? [h("s", null, `${acBase}`), " ", h("b.is-changed", null, `${ac}`)] : `${ac ?? "—"}`)),
+				h("div", null, h("dt", null, "HP"), h("dd", null, `${hp.current ?? "—"}`, h("small", null, ` / ${hp.max ?? "—"}`), hp.temp ? h("small", null, ` +${hp.temp} temp`) : null)),
+				h("div", null, h("dt", null, "Init bonus"), h("dd", null, init != null ? getCockpitSigned(init) : "—")),
+				h("div", null, h("dt", null, "Passive Perception"), h("dd", null, `${party.passive ?? "—"}`)),
+			),
+			h("p.ewc-pccard__note", null, "Saves and attacks are rolled at the table. Effects and conditions above still apply — the Save tool shows their modifiers for the player to add."),
+		].filter(Boolean));
+		this._runDecorators(null, instance, ctx, tile);
 	}
 
 	_onDiceClick (evt) {
