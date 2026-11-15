@@ -1,0 +1,70 @@
+// Encounter Workspace cockpit (?ew=2) — shortcut hint chips (kbd) and the Shift+? shortcut sheet.
+
+@layer vetools {
+	.ewc {
+		.ewc-kbd {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 20px;
+			height: 20px;
+			padding: 0 5px;
+			border: 1px solid var(--ewc-hair-3);
+			border-bottom-width: 2px;
+			border-radius: var(--ewc-r-xs);
+			background: var(--ewc-raised);
+			color: var(--ewc-ink-3);
+			font-family: var(--ewc-mono);
+			font-size: var(--ewc-f-2xs);
+			font-weight: 500;
+			line-height: 1;
+			white-space: nowrap;
+
+			& + .ewc-kbd {
+				margin-left: 2px;
+			}
+		}
+
+		.ewc-keys {
+			&__grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+				gap: 16px 22px;
+				margin-top: 14px;
+			}
+
+			&__h {
+				margin-bottom: 6px;
+				color: var(--ewc-ink-3);
+				font-size: var(--ewc-f-xs);
+				font-weight: 600;
+				letter-spacing: 0.03em;
+				text-transform: uppercase;
+			}
+
+			&__dl {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+
+			&__row {
+				display: grid;
+				grid-template-columns: minmax(84px, auto) 1fr;
+				align-items: center;
+				gap: 10px;
+				font-size: var(--ewc-f-s);
+
+				dt {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 2px;
+				}
+
+				dd {
+					color: var(--ewc-ink-2);
+				}
+			}
+		}
+	}
+}
