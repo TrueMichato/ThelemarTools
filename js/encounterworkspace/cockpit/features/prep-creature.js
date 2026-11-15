@@ -21,12 +21,14 @@ import {
 import {getEncounterCrEstimate, getEncounterCrInferences} from "../../encounterworkspace-assessment.js";
 import {BestiaryQuickActionsOperations} from "../../../bestiary/bestiary-quick-actions-engine.js";
 import {BestiaryQuickActionsStructuredEditor} from "../../../bestiary/bestiary-quick-actions-structured.js";
+import {BestiaryQuickActionsUi} from "../../../bestiary/bestiary-quick-actions-ui.js";
 import {
 	PREP_CREATURE_SUBS,
 	fmtPrepCr,
 	getPrepCrAssumptions,
 	getPrepCrText,
 	getPrepQuickEditChange,
+	getPrepAreaTraitGroups,
 	getPrepQuickEditCurrent,
 	getPrepQuickEditDiff,
 	validatePrepQuickEdit,
@@ -40,6 +42,7 @@ export const getPrepCreatureDraft = () => ({
 	tplSel: "elite",
 	tplPreview: false,
 	legendary: {name: "", cost: "1", text: ""},
+	traitSel: null,
 	crOverrides: {},
 });
 
@@ -303,14 +306,90 @@ function renderLegendary (P, ids) {
 
 /* -------------------------------------------- Habitat traits -------------------------------------------- */
 
-function renderTraits (P) {
-	const {api, ctx} = P;
+let _traits = null;
+let _pTraits = null;
+const pGetAreaTraits = () => (_pTraits ||= BestiaryQuickActionsUi._pLoadAreaTraits()
+	.then(list => { _traits = list; return list; })
+	.catch(e => { _pTraits = null; throw e; }));
+
+const getTraitUid = trait => BestiaryQuickActionsUi.getRuleUid(trait);
+const getTraitHover = trait => ({type: "entries", name: `${trait.name} (${trait._areaName})`, entries: trait.entries?.length ? trait.entries : ["No description."]});
+
+function getTraitPreview (P, ids, trait, choices = {}) {
+	const monsterIds = getTargets(P, ids).filter(it => it.kind !== "party").map(it => it.id);
+	if (!monsterIds.length) return {error: "Party members don't take habitat traits."};
+	try {
+		const operation = {...BestiaryQuickActionsUi.getAreaTraitOperation({trait, choices}), id: CryptUtil.uid()};
+		return {preview: EncounterWorkspaceState.previewBulkStatblockOperation(P.ctx.state, {operation, targetIds: monsterIds})};
+	} catch (e) {
+		return {error: getErrorText(e)};
+	}
+}
+
+function renderTraits (P, ids) {
+	const {api, ctx, S, rerender} = P;
 	const viewed = ctx.ui.viewedId;
-	const inst = ctx.state.instances.find(it => it.id === viewed);
-	if (!inst || inst.kind === "party") return [muted("View a monster to give it habitat traits.")];
+	const editorBtn = viewed && ctx.state.instances.find(it => it.id === viewed)?.kind !== "party"
+		? btn("Choose a habitat trait…", () => pOpenPrepStatblockEditor(api, viewed, {section: PREP_EDITOR_SECTIONS.area, label: "Habitat trait"}), {key: "traits-open", kind: "ghost"})
+		: null;
+	const intro = h("p.ewc-prep__desc", null, "From ", h("i", null, "Flee, Mortals!"), " (homebrew) — ", h("b", null, "illustrative"), ". Each trait really changes the statblock (speed, senses, resistances, entries). Hover a trait to read it.");
+	if (!_traits) {
+		pGetAreaTraits().then(() => rerender()).catch(e => api.toast(`Could not load habitat traits: ${getErrorText(e)}.`, {kind: "error"}));
+		return [intro, muted("Loading habitat traits…"), acts(editorBtn)];
+	}
+	const groups = getPrepAreaTraitGroups(_traits);
+	if (!groups.length) return [intro, muted("No habitat traits are loaded — add the Flee, Mortals! homebrew to browse them here."), acts(editorBtn)];
+	const sel = _traits.find(it => getTraitUid(it) === S.traitSel) || null;
+	const monsters = getTargets(P, ids).filter(it => it.kind !== "party");
+	const appliedTo = trait => monsters.filter(inst => (inst.statblockOperations || []).some(op => op.type === "applyAreaTrait" && op.sourceUid === getTraitUid(trait)));
+	const plan = sel ? getTraitPreview(P, ids, sel) : null;
+	const changed = plan?.preview?.changedIds || [];
+	const pApply = async () => {
+		const trait = sel;
+		const uid = getTraitUid(trait);
+		let choices;
+		try {
+			choices = await BestiaryQuickActionsUi._pGetAreaTraitChoices({traits: [trait]});
+		} catch (e) {
+			return api.toast(`Could not configure ${trait.name}: ${getErrorText(e)}.`, {kind: "error"});
+		}
+		if (choices == null) return api.toast(`${trait.name}: cancelled — no statblocks changed.`);
+		const fresh = getTraitPreview(P, P.getTargetIds(), trait, choices.get(uid) || {});
+		if (!fresh?.preview?.changedIds?.length) return api.toast(fresh?.error || `Nobody can take ${trait.name}.`, {kind: "error"});
+		const next = await api.pCommit(`Habitat trait: ${trait.name}`, () => fresh.preview.state);
+		if (!next) return;
+		api.toast(`${trait.name} → ${plural(fresh.preview.changedIds.length, "creature")}.`, {isUndo: true});
+		rerender();
+	};
 	return [
-		h("p.ewc-prep__desc", null, "Habitat and area traits really change the statblock — speed, senses, resistances and entries. Pick one for ", h("b", null, ctx.labels.get(viewed)), " in the statblock editor."),
-		acts(btn("Choose a habitat trait…", () => pOpenPrepStatblockEditor(api, viewed, {section: PREP_EDITOR_SECTIONS.area, label: "Habitat trait"}), {key: "traits-open", kind: "primary"})),
+		intro,
+		h("div.ewc-prep__traits", {dataset: {ewcTraits: "catalogue"}}, groups.map(group => h("div.ewc-prep__traitg", {role: "group", "aria-label": group.area},
+			h("p.ewc-prep__lbl.ewc-prep__lbl--block.ewc-prep__traitarea", null, group.area),
+			h("div.ewc-prep__acts", null, group.traits.map(trait => {
+				const uid = getTraitUid(trait);
+				const nApplied = appliedTo(trait).length;
+				const ele = h(`button.ewc-btn.ewc-btn--sm.ewc-prep__trait${S.traitSel === uid ? ".is-on" : ""}${nApplied ? ".is-applied" : ""}`, {
+					type: "button",
+					"aria-pressed": `${S.traitSel === uid}`,
+					dataset: {ewcFk: `trait-${uid}`, ewcTrait: uid},
+					onclick: () => { S.traitSel = S.traitSel === uid ? null : uid; rerender(); },
+				}, trait.name, nApplied ? h("span.ewc-prep__traitok", {"aria-label": `, on ${plural(nApplied, "creature")}`}, " ✓") : null);
+				api.hover.bindEntry(ele, `ewc-trait:${uid}`, getTraitHover(trait));
+				return ele;
+			})),
+		))),
+		sel
+			? h("div.ewc-prep__preview", {dataset: {ewcTraitPreview: getTraitUid(sel)}},
+				h("span.ewc-prep__lbl", null, plan?.preview ? `${sel.name} · ${changed.length} of ${monsters.length} eligible` : sel.name),
+				plan?.error ? h("p.ewc-error", {role: "alert"}, plan.error) : null,
+				plan?.preview?.skipped?.length ? h("p.ewc-muted", null, `Skipped: ${plan.preview.skipped.map(it => `${ctx.labels.get(it.id)} (${it.reason})`).join(", ")}`) : null,
+			)
+			: muted("Pick a trait to preview who gets it."),
+		acts(
+			sel ? btn(`Apply ${sel.name} → ${plural(changed.length, "creature")}`, pApply, {key: "trait-apply", kind: "primary", disabled: !changed.length}) : null,
+			editorBtn,
+		),
+		tip("Some traits ask a question first (a damage type, a sense). Applied traits are listed in the statblock editor, where each can be removed. Undoable."),
 	];
 }
 
@@ -392,12 +471,12 @@ export function renderPrepCreatureTab (P) {
 		sb: () => renderStatblockSub(P, ids),
 		tpl: () => renderTemplates(P, ids),
 		legendary: () => renderLegendary(P, ids),
-		traits: () => renderTraits(P),
+		traits: () => renderTraits(P, ids),
 		cr: () => renderCr(P, ids),
 	}[sub]();
 	return [
 		seg({label: "Creature tools", key: "cre-sub", value: sub, items: PREP_CREATURE_SUBS, onPick: id => { S.creSub = id; S.tplPreview = false; rerender(); }, isWrap: true}),
-		sub === "sb" || sub === "traits" ? null : scopeSeg(P),
+		sub === "sb" ? null : scopeSeg(P),
 		...body,
 	];
 }

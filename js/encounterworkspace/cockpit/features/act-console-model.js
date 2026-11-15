@@ -120,6 +120,23 @@ function getDamageRow (state, instance, {amount, damageType, settings}) {
 }
 
 /**
+ * The short live-preview badge a targeted rail row shows while a console command is typed ("−7 → 0", "+5 → 12",
+ * "+ prone"): {text, kind: "dmg"|"heal"|"add"|"skip"|"info"} or null when there is nothing worth a badge.
+ */
+export function getCockpitConsoleRowBadge (text, {max = 16} = {}) {
+	const raw = `${text ?? ""}`.trim();
+	if (!raw || raw === "select") return null;
+	const kind = /skipped|not set|doesn't have|already has|not making|not concentrating|defeated/i.test(raw) ? "skip"
+		: /^−\d/.test(raw) ? "dmg"
+			: /^\+\s?\d/.test(raw) ? "heal"
+				: /^[+−] /.test(raw) ? "add"
+					: "info";
+	if (/rolled on Enter/.test(raw)) return {text: "rolls on Enter", title: raw, kind: "info"};
+	const short = raw.split(" — ")[0].replace(/^\+ /, "+").replace(/^− /, "−");
+	return {text: short.length > max ? `${short.slice(0, max - 1)}…` : short, title: raw, kind};
+}
+
+/**
  * What a parsed command will do, before Enter: {title, rows: [{id, label, text}], isRoll}. `amount` overrides
  * dice for previews (dice show as an expression and are only rolled on Enter).
  */

@@ -61,23 +61,23 @@ function entryName (api, ctx, entry, {tag = "span.ewc-prep__bfn"} = {}) {
 	return ele;
 }
 
-/** The compact strip above the viewed creature: one quiet chip per active battlefield entry. */
-export function renderPrepBattlefieldStrip (api, ctx, {onEdit}) {
-	const entries = ctx.state.battlefield || [];
-	if (!entries.length) return [];
-	return [h("div.ewc-prep-strip", {role: "group", "aria-label": "On the battlefield"},
-		h("span.ewc-prep-strip__l", {"aria-hidden": "true"}, "Battlefield"),
-		entries.map(entry => {
-			const count = getEncounterBattlefieldTargets(ctx.state, entry).length;
-			const name = getEncounterBattlefieldDisplayName(entry);
-			return h("span.ewc-prep-strip__chip", {dataset: {ewcBf: entry.id}},
-				entryName(api, ctx, entry),
-				h("span.ewc-prep-strip__meta", null, entry.scope === "all" ? "everyone" : plural(count, "creature"), entry.rounds != null ? ` · ${entry.rounds} rnd` : ""),
-				h("button.ewc-prep-strip__x", {type: "button", "aria-label": `Edit ${name}`, title: "Edit", dataset: fk(`bf-edit-${entry.id}`), onclick: () => onEdit(entry.id)}, "✎"),
-				h("button.ewc-prep-strip__x", {type: "button", "aria-label": `End ${name}`, title: "End", dataset: fk(`bf-x-${entry.id}`), onclick: () => pRemoveEntry(api, entry)}, "×"),
-			);
-		}),
-	)];
+/**
+ * One quiet chip per active battlefield entry (name with hover, who/how long, ✎ edit, × end) — shown in the rail's
+ * BATTLEFIELD section. Lair actions get a ⌂ mark.
+ */
+export function getPrepBattlefieldChips (api, ctx, {onEdit}) {
+	return (ctx.state.battlefield || []).map(entry => {
+		const count = getEncounterBattlefieldTargets(ctx.state, entry).length;
+		const name = getEncounterBattlefieldDisplayName(entry);
+		const isLair = entry.rule === "lair-actions";
+		return h(`span.ewc-prep-strip__chip${isLair ? ".is-lair" : ""}`, {dataset: {ewcBf: entry.id}},
+			isLair ? h("span.ewc-prep-strip__glyph", {"aria-hidden": "true"}, "⌂") : null,
+			entryName(api, ctx, entry),
+			h("span.ewc-prep-strip__meta", null, isLair ? "init 20" : entry.scope === "all" ? "everyone" : plural(count, "creature"), entry.rounds != null ? ` · ${entry.rounds} rnd` : ""),
+			h("button.ewc-prep-strip__x", {type: "button", "aria-label": `Edit ${name}`, title: "Edit", dataset: fk(`bf-edit-${entry.id}`), onclick: () => onEdit(entry.id)}, "✎"),
+			h("button.ewc-prep-strip__x", {type: "button", "aria-label": `End ${name}`, title: "End", dataset: fk(`bf-x-${entry.id}`), onclick: () => pRemoveEntry(api, entry)}, "×"),
+		);
+	});
 }
 
 function renderActive (P) {
@@ -143,15 +143,18 @@ export function renderPrepAreaTab (P) {
 			h("span.ewc-prep__lbl", null, cat.name),
 			h("div.ewc-prep__rulebtns", null, cat.rules.map(it => {
 				const isLairTaken = it.rule === "lair-actions" && hasLair;
-				return h("button.ewc-prep__rule", {
+				const ele = h("button.ewc-prep__rule", {
 					type: "button",
 					role: "radio",
 					"aria-checked": `${it.rule === rule.rule}`,
 					disabled: isLairTaken,
-					title: isLairTaken ? "This encounter already has lair actions" : stripTags(it.description).slice(0, 240),
+					title: isLairTaken ? "This encounter already has lair actions" : null,
+					"aria-description": stripTags(it.description).slice(0, 240),
 					dataset: fk(`bf-rule-${it.rule}`),
 					onclick: () => { draft.rule = it.rule; rerender(); },
 				}, it.name);
+				if (!isLairTaken && it.description) api.hover.bindEntry(ele, `ewc-bf-rule:${it.rule}`, {type: "entries", name: `${it.name} (${cat.name})`, entries: [it.description]});
+				return ele;
 			})),
 		)),
 	);

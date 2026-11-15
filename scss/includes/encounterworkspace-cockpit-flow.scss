@@ -575,61 +575,59 @@
 		.ewc-flow-orderhint {
 			display: flex;
 			flex-wrap: wrap;
-			gap: 2px 12px;
-			margin: 6px 0 0;
+			align-items: center;
+			gap: 2px 4px;
+			margin: 4px 0 0;
 			padding: 0 8px;
 			color: var(--ewc-ink-4);
 			font-size: var(--ewc-f-2xs);
-
-			b {
-				color: var(--ewc-ink-3);
-				font-weight: 600;
-			}
+			line-height: 1.6;
 
 			&__g {
 				letter-spacing: -2px;
 			}
 		}
 
-		// ---------------- death saves ----------------
+		// ---------------- death saves: one compact line under the name ----------------
 		.ewc-ds {
-			grid-column: 2 / -1;
+			grid-column: 3 / -1;
 			display: flex;
 			flex-wrap: wrap;
 			align-items: center;
-			gap: 4px 10px;
-			margin-top: 2px;
-			padding: 4px 8px;
-			border-radius: var(--ewc-r-s);
-			background: var(--ewc-bad-soft);
+			gap: 3px 8px;
+			min-height: 20px;
 			font-size: var(--ewc-f-xs);
 			cursor: default;
-
-			&__head {
-				color: var(--ewc-bad-ink);
-				font-weight: 600;
-			}
 
 			&__set {
 				display: inline-flex;
 				align-items: center;
-				gap: 3px;
+				gap: 2px;
 			}
 
 			&__lbl {
-				width: 12px;
-				color: var(--ewc-ink-3);
+				width: 10px;
+				color: var(--ewc-ink-4);
+				font-size: var(--ewc-f-2xs);
 				text-align: center;
 			}
 
 			&__pip {
-				width: 14px;
-				height: 14px;
+				position: relative;
+				width: 11px;
+				height: 11px;
 				padding: 0;
 				border: 1.5px solid var(--ewc-hair-3);
 				border-radius: 50%;
-				background: var(--ewc-chrome);
+				background: transparent;
 				cursor: pointer;
+
+				// A larger hit area than the dot.
+				&::after {
+					content: "";
+					position: absolute;
+					inset: -4px -1px;
+				}
 
 				&:hover {
 					border-color: var(--ewc-ink-3);
@@ -664,19 +662,33 @@
 				}
 			}
 
-			.ewc-btn--sm {
-				min-height: 24px;
+			&__btn {
+				display: inline-flex;
+				align-items: center;
+				min-height: 20px;
 				padding: 0 7px;
-				font-size: var(--ewc-f-xs);
+				border: 1px solid var(--ewc-bad-bar);
+				border-radius: 999px;
+				background: var(--ewc-bad-soft);
+				color: var(--ewc-bad-ink);
+				font-size: var(--ewc-f-2xs);
+				font-weight: 600;
+				line-height: 1;
+
+				&:hover {
+					background: color-mix(in srgb, var(--ewc-bad-bar) 25%, transparent);
+				}
+
+				&--ghost {
+					border-color: var(--ewc-hair-2);
+					background: transparent;
+					color: var(--ewc-ink-2);
+
+					&:hover {
+						background: var(--ewc-raised);
+					}
+				}
 			}
-		}
-
-		.ewc-row.is-ds-stable .ewc-ds {
-			background: var(--ewc-ok-soft);
-		}
-
-		.ewc-row.is-ds-dead .ewc-ds {
-			background: var(--ewc-surface);
 		}
 
 		// ---------------- concentration checks (stage top) ----------------

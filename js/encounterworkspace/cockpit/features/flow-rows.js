@@ -1,4 +1,7 @@
-/** P3c — rail-row additions: death-save pips, turn-order drag grip and Alt+↑/↓, a quiet "number vs position" hint. */
+/**
+ * P3c — rail-row additions: compact death-save pips, turn-order drag grip and Alt+↑/↓, a quiet "number vs position"
+ * hint, and the row ⋯ menu's "Mark concentration…" and "Move before…".
+ */
 import {h, kbd} from "../dom.js";
 import {getCockpitKeyLabels} from "../keymap.js";
 import {EncounterWorkspaceState, getEncounterSharedGroup} from "../../encounterworkspace-state.js";
@@ -12,6 +15,7 @@ import {
 } from "../../encounterworkspace-deathsaves.js";
 import {getFlowReorderDir, getFlowReorderDrop, getFlowReorderStep, getFlowReorderText} from "./flow-model.js";
 import {isFlowKeyAllowed} from "./flow-util.js";
+import {getRailRowMenu} from "./rail-menu.js";
 
 const DRAG_TYPE = "application/x-ewc-entry";
 
@@ -145,11 +149,13 @@ export function installFlowRows (api) {
 			})),
 		);
 		const isDying = status === "dying";
-		const tag = status === "dead" ? h("span.ewc-ds__tag.is-dead", null, "Dead") : status === "stable" ? h("span.ewc-ds__tag.is-stable", null, "Stable") : h("span.ewc-ds__tag", null, "Dying");
-		const roll = isDying ? h("button.ewc-btn.ewc-btn--sm.ewc-ds__roll", {
+		const tag = status === "dead" ? h("span.ewc-ds__tag.is-dead", null, "Dead") : status === "stable" ? h("span.ewc-ds__tag.is-stable", null, "Stable") : null;
+		const roll = isDying ? h("button.ewc-ds__btn.ewc-ds__roll", {
 			type: "button",
 			"data-ewc-flow": "ds-roll",
+			"data-ewc-fk": `ds-roll-${instance.id}`,
 			title: "Roll a death save (d20: 10+ succeeds, 1 counts twice, 20 brings them back at 1 HP)",
+			"aria-label": `Roll a death save for ${label}`,
 			onclick: async evt => {
 				evt.stopPropagation();
 				let result = null;
@@ -157,19 +163,21 @@ export function installFlowRows (api) {
 				await api.pCommit(`${label}'s death save`, (draft, {log}) => { result = rollEncounterDeathSave(draft, {id: instance.id, d20, log}); });
 				if (result) api.toast(`${label} death save: ${result.n} — ${result.text}.`, {isUndo: true});
 			},
-		}, "🎲 Roll") : null;
-		const stab = isDying ? h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost", {
+		}, "Roll") : null;
+		const stab = isDying ? h("button.ewc-ds__btn.ewc-ds__btn--ghost", {
 			type: "button",
 			"data-ewc-flow": "ds-stable",
+			"data-ewc-fk": `ds-stable-${instance.id}`,
 			title: "Stabilize (Spare the Dying, a DC 10 Medicine check): stops death saves, stays at 0 HP",
+			"aria-label": `Stabilize ${label}`,
 			onclick: evt => {
 				evt.stopPropagation();
 				api.pCommit(`Stabilize ${label}`, (draft, {log}) => { stabilizeEncounterCreature(draft, {id: instance.id, log}); });
 			},
-		}, "Stabilize") : null;
+		}, "Stable") : null;
 		row.classList.add(`is-ds-${status}`);
-		row.append(h("div.ewc-ds", {"data-ewc-flow": "deathsaves", role: "group", "aria-label": `${label} death saves`},
-			h("span.ewc-ds__head", null, "Death saves"),
+		// One compact line under the name: ✓○○○ ✗○○○ Roll · Stable (the row's pills keep their own line).
+		row.append(h("div.ewc-ds", {"data-ewc-flow": "deathsaves", role: "group", "aria-label": `${label} death saves${isDying ? ", dying" : ""}`, title: isDying ? "Dying — death saves at the start of each turn" : null},
 			pips("s", ds.successes || 0, "Successes"),
 			pips("f", ds.failures || 0, "Failures"),
 			tag,
@@ -177,6 +185,69 @@ export function installFlowRows (api) {
 			stab,
 		));
 	}
+
+	/* ---------------- Row ⋯ menu ---------------- */
+	const menu = getRailRowMenu(api);
+	menu.addItem({
+		id: "conc",
+		order: 10,
+		label: "◉ Mark concentration…",
+		isShown: instance => !instance.defeated,
+		panel: (instance, ctx, m) => {
+			const conc = instance.resources?.concentration;
+			const label = ctx.labels.get(instance.id) || "Creature";
+			const input = h("input.ewc-input.ewc-input--sm", {
+				value: conc?.active ? conc.label || "" : "",
+				placeholder: "Spell, e.g. Bless",
+				"data-ewc-fk": `rm-conc-in-${instance.id}`,
+				"data-ewc-rowmenu": "conc-input",
+				"aria-label": `Spell ${label} concentrates on — Enter to mark`,
+				onkeydown: evt => { if (evt.key === "Enter") { evt.preventDefault(); pMark(); } },
+			});
+			const pMark = async () => {
+				m.close();
+				await api.actions.pResourceAction(instance.id, {kind: "concentration", active: true, label: input.value.trim()});
+			};
+			return [
+				h("div.ewc-rowmenu__row", null, input, h("button.ewc-btn.ewc-btn--sm.ewc-btn--primary", {type: "button", "data-ewc-rowmenu": "conc-mark", onclick: pMark}, "Mark")),
+				conc?.active
+					? h("button.ewc-rowmenu__i", {
+						type: "button",
+						"data-ewc-rowmenu": "conc-end",
+						onclick: async () => { m.close(); await api.actions.pResourceAction(instance.id, {kind: "concentration", active: false}); },
+					}, `End concentration${conc.label ? ` on ${conc.label}` : ""}`)
+					: null,
+			];
+		},
+	});
+	menu.addItem({
+		id: "move",
+		order: 20,
+		label: "Move before…",
+		isShown: (instance, ctx) => getOrder(ctx.state).length > 1 && getOrder(ctx.state).includes(getEntryId(ctx.state, instance.id)),
+		panel: (instance, ctx, m) => {
+			const state = ctx.state;
+			const entryId = getEntryId(state, instance.id);
+			const entries = EncounterWorkspaceState.getInitiativeOrder(state);
+			const order = entries.map(it => it.id);
+			const go = getMove => { m.close(); pMove(instance.id, getMove); };
+			const others = entries.filter(it => it.id !== entryId);
+			return h("ul.ewc-rowmenu__list", {role: "list"},
+				others.map(entry => h("li", null, h("button.ewc-rowmenu__i", {
+					type: "button",
+					"data-ewc-rowmenu": `before-${entry.id}`,
+					disabled: !getFlowReorderDrop(order, entryId, entry.id),
+					onclick: () => go((o, id) => getFlowReorderDrop(o, id, entry.id)),
+				}, h("span", null, getEntryLabel(state, entry.id, ctx.labels)), h("span.ewc-muted", null, `init ${entry.initiative}`)))),
+				h("li", null, h("button.ewc-rowmenu__i", {
+					type: "button",
+					"data-ewc-rowmenu": "before-end",
+					disabled: order.at(-1) === entryId,
+					onclick: () => go((o, id) => getFlowReorderDrop(o, id, o.filter(it => it !== id).at(-1), {isAfter: true})),
+				}, h("span", null, "To the end"))),
+			);
+		},
+	});
 
 	api.addRailRowDecorator((row, instance, ctx) => {
 		decorateDrag(row, instance, ctx);
@@ -186,9 +257,9 @@ export function installFlowRows (api) {
 	/* ---------------- "number vs position" hint under the rail ---------------- */
 	api.addRailFoot(ctx => {
 		if (!getOrder(ctx.state).length) return null;
-		return h("p.ewc-flow-orderhint", {"data-ewc-flow": "order-hint"},
-			h("span", null, h("b", null, "Initiative number"), ": click it to type"),
-			h("span", null, h("b", null, "Position"), ": drag ", h("span.ewc-flow-orderhint__g", {"aria-hidden": "true"}, "⋮⋮"), " or ", kbd(getCockpitKeyLabels(["Alt", "↑"], {isMac: ctx.isMac})), " ", kbd(getCockpitKeyLabels(["Alt", "↓"], {isMac: ctx.isMac}))),
+		// One quiet line (it used to be two, and covered the last row's pills).
+		return h("p.ewc-flow-orderhint", {"data-ewc-flow": "order-hint", title: "Click an initiative number to type a new one. Drag a row's ⋮⋮ grip, use Alt+↑/↓, or ⋯ → Move before… to change its place — the number adjusts to fit."},
+			"Reorder: drag ", h("span.ewc-flow-orderhint__g", {"aria-hidden": "true"}, "⋮⋮"), " or ", kbd(getCockpitKeyLabels(["Alt", "↑"], {isMac: ctx.isMac})), kbd(getCockpitKeyLabels(["Alt", "↓"], {isMac: ctx.isMac})),
 		);
 	});
 }

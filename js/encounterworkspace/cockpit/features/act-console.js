@@ -21,6 +21,7 @@ import {
 	getCockpitConsoleHistoryStep,
 	getCockpitConsoleHistoryWith,
 	getCockpitConsolePreview,
+	getCockpitConsoleRowBadge,
 	getCockpitConsoleSaveOutcome,
 	getCockpitCritExpr,
 } from "./act-console-model.js";
@@ -38,6 +39,7 @@ export function createCockpitConsole (api, {tray}) {
 	let pActive = null;
 	let pQueued = null;
 	let previewIds = [];
+	let previewTexts = new Map();
 	let returnFocus = null;
 
 	let isCheatOpen = false;
@@ -158,7 +160,10 @@ export function createCockpitConsole (api, {tray}) {
 		root.classList.toggle("is-error", !!parsed.error && !review);
 		syncOpen();
 		const ids = !parsed.error && parsed.cmd ? parsed.ids : [];
-		if (ids.join() !== previewIds.join()) {
+		const texts = new Map(!review && preview ? preview.rows.map(it => [it.id, it.text]) : []);
+		const isTextChanged = texts.size !== previewTexts.size || [...texts].some(([id, text]) => previewTexts.get(id) !== text);
+		previewTexts = texts;
+		if (ids.join() !== previewIds.join() || isTextChanged) {
 			previewIds = ids;
 			api.render();
 		}
@@ -194,8 +199,9 @@ export function createCockpitConsole (api, {tray}) {
 		histIndex = null;
 		root.classList.remove("is-error");
 		syncOpen();
-		if (previewIds.length) {
+		if (previewIds.length || previewTexts.size) {
 			previewIds = [];
+			previewTexts = new Map();
 			api.render();
 		}
 		if (isRestoreFocus && returnFocus?.isConnected) returnFocus.focus({preventScroll: true});
@@ -445,6 +451,14 @@ export function createCockpitConsole (api, {tray}) {
 
 	api.addRailRowDecorator((row, instance, ctx) => {
 		if (previewIds.includes(instance.id)) row.classList.add("ewc-row--con");
+		const badge = getCockpitConsoleRowBadge(previewTexts.get(instance.id));
+		if (badge) {
+			row.querySelector(".ewc-row__right")?.prepend(h(`span.ewc-row__pv.is-${badge.kind}`, {
+				"data-ewc-console-rowpv": instance.id,
+				title: `Console preview: ${badge.title}`,
+				"aria-label": `Console preview for ${ctx.labels.get(instance.id) || instance.id}: ${badge.title}`,
+			}, badge.text));
+		}
 		const qa = row.querySelector(".ewc-row__qa");
 		if (!qa) return;
 		const label = ctx.labels.get(instance.id) || instance.id;

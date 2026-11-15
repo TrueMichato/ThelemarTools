@@ -1,7 +1,8 @@
 /**
  * P3b — prep and the battlefield: prep mode (Q) with Creature · Effects · Battlefield · Items · Add tabs, the Add
- * dialog (⇧A), the full statblock editor (I) and the battlefield strip above the viewed creature.
- * Built only on the cockpit API: a bar toggle, a drawer in `stageBottom`, a strip in `stageTop`, a dialog in `layer`.
+ * dialog (⇧A), the full statblock editor (I), the rail's BATTLEFIELD section (rail-battlefield.js), the rail-row ⋯
+ * menu's Assess CR / Edit statblock and the rail's "+ Add creature" footer.
+ * Built only on the cockpit API: a bar toggle, a drawer in `stageBottom`, rail top/foot slots, a dialog in `layer`.
  */
 
 import {h, kbd, replaceKeepingFocus} from "../dom.js";
@@ -11,10 +12,12 @@ import {getPrepTargetIds} from "./prep-ui.js";
 import {PREP_EDITOR_SECTIONS, pOpenPrepStatblockEditor, pRenderPrepCreatureTypeEditor} from "./prep-editor.js";
 import {getPrepCreatureDraft, renderPrepCreatureTab} from "./prep-creature.js";
 import {renderPrepEffectsTab} from "./prep-effects.js";
-import {getPrepAreaDraft, renderPrepAreaTab, renderPrepBattlefieldStrip} from "./prep-area.js";
+import {getPrepAreaDraft, renderPrepAreaTab} from "./prep-area.js";
 import {renderPrepItemsTab} from "./prep-items.js";
 import {PrepAddDialog, renderPrepAddTab} from "./prep-add.js";
 import {installPrepStatblockEffects} from "./prep-statblock.js";
+import {installCockpitRailBattlefield} from "./rail-battlefield.js";
+import {getRailRowMenu} from "./rail-menu.js";
 
 export function installCockpitPrepFeatures (api) {
 	const S = {
@@ -46,16 +49,57 @@ export function installCockpitPrepFeatures (api) {
 	);
 	api.getRegion("stageBottom").append(drawer);
 
-	/* ---- Battlefield strip ---- */
-	const strip = h("div.ewc-prep-stripwrap");
-	api.getRegion("stageTop").append(strip);
-
 	installPrepStatblockEffects(api);
 	api.onOpenPrep?.(({tab = "creature", creSub = null} = {}) => {
 		if (creSub) S.creSub = creSub;
 		S.scope = "viewed";
 		setOpen(true, {tab});
 	});
+
+	/* ---- Rail: BATTLEFIELD section, row ⋯ menu items, "+ Add creature" footer ---- */
+	installCockpitRailBattlefield(api, {
+		onEdit: id => {
+			setOpen(true, {tab: "area", isFocus: false, focusId: id});
+			dyn.querySelector(`[data-ewc-bf-row="${CSS.escape(id)}"]`)?.scrollIntoView?.({block: "nearest"});
+		},
+		onAdd: () => {
+			setOpen(true, {tab: "area", isFocus: false});
+			dyn.querySelector(".ewc-prep__rule")?.focus({preventScroll: true});
+		},
+	});
+
+	const isCreature = instance => instance?.kind !== "party";
+	const menu = getRailRowMenu(api);
+	menu.addItem({
+		id: "assess",
+		label: "Assess CR",
+		order: 30,
+		isShown: isCreature,
+		run: instance => {
+			api.view(instance.id);
+			S.creSub = "cr";
+			setOpen(true, {tab: "creature", isFocus: false});
+		},
+	});
+	menu.addItem({
+		id: "edit",
+		label: "Edit statblock",
+		order: 40,
+		keys: ["I"],
+		isShown: isCreature,
+		run: instance => {
+			api.view(instance.id);
+			pOpenPrepStatblockEditor(api, instance.id, {section: PREP_EDITOR_SECTIONS.edit}).catch(e => api.toast(`Could not open the editor: ${e.message || e}.`, {kind: "error"}));
+		},
+	});
+
+	api.addRailFoot(() => h("div.ewc-rail__foot", null, h("button.ewc-rail__add", {
+		type: "button",
+		"aria-keyshortcuts": "Shift+A",
+		dataset: {ewcAct: "rail-add", ewcFk: "rail-add"},
+		title: "Add a creature or party member to the fight (⇧A)",
+		onclick: () => openAdd(null),
+	}, "+ Add creature", keyText(["Shift", "A"]))));
 
 	let ctKey = null;
 	let ctToken = 0;
@@ -137,18 +181,8 @@ export function installCockpitPrepFeatures (api) {
 		renderCreatureTypeMount(P);
 	}
 
-	function renderStrip (ctx) {
-		replaceKeepingFocus(strip, renderPrepBattlefieldStrip(api, ctx, {
-			onEdit: id => {
-				setOpen(true, {tab: "area", isFocus: false, focusId: id});
-				dyn.querySelector(`[data-ewc-bf-row="${CSS.escape(id)}"]`)?.scrollIntoView?.({block: "nearest"});
-			},
-		}));
-	}
-
 	function render (ctx = api.getCtx()) {
 		renderDrawer(ctx);
-		renderStrip(ctx);
 	}
 
 	api.onRender(ctx => render(ctx));

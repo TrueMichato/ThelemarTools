@@ -33,11 +33,7 @@
 			text-transform: uppercase;
 		}
 
-		// ---------------- battlefield strip (stageTop) ----------------
-		.ewc-prep-stripwrap:empty {
-			display: none;
-		}
-
+		// ---------------- battlefield chips (shown in the rail's BATTLEFIELD section) ----------------
 		.ewc-prep-strip {
 			display: flex;
 			flex-wrap: wrap;

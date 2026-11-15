@@ -17,6 +17,7 @@ import {expect, test, type Page} from "@playwright/test";
  *   SWEEP  encounter-cockpit-sweep.spec.ts › the four 30-monster encounters (+ "Zombie (DMG) applies …")
  *   SB     encounter-cockpit-statblock.spec.ts › roll chips, DC calls, header, Held by / Tools / Reminders, PC card, hint
  *   TOP    encounter-cockpit-topbar.spec.ts › difficulty badge & popover, kbd hints, List | Timeline, Keys, ⋯ menu, glyph legend
+ *   RAIL   encounter-cockpit-rail-restore.spec.ts › R1 rows / R2 battlefield, lair & console badge / R3 prep traits
  *   P1/P2/P3  the tests in this file (rail & turns / statblock roll feed / templates, effects & battlefield)
  *
  * | verify-a6 step                                                          | Real site                                                                 |
@@ -27,21 +28,21 @@ import {expect, test, type Page} from "@playwright/test";
  * |  85 §1 statblock damage roll → tray card → Apply to selection           | P2 (+ SWEEP: dice route to the feed for 30 monsters)                      |
  * | 108 §1 tray ½ / ×2 / → Viewed / attack + save cards / more              | P2. Save cards: ACT (Roll tab → tray)                                     |
  * | 142 Kept·A tray "Stage in console"                                      | P2                                                                        |
- * | 153 §2 caster chip ◉ Conc · Bless, target pills, click → view caster    | DS (conc chip, Con save) + P3 (◉ chip from console). Pill → caster jump: N/A, real pills open the native effect hover |
+ * | 153 §2 caster chip ◉ Conc · Bless, target pills, click → view caster    | DS (conc chip, Con save) + P3 (◉ chip from console) + RAIL R1 (pill / tally caster ↗ views the caster) |
  * | 167 §2 statblock concentration strip; Held-by link                      | DS (concentration strip) + SB (header conc line, Held by → caster)        |
  * | 184 §2 Drop concentration removes linked effects (+undo)                | ACT (switching concentration ends Bless everywhere) + DS (conc-drop)      |
  * | 195 Kept·A header concentration Drop                                    | DS (conc strip Drop) + P3 (console `drop`)                                |
  * | 205 §3 prep toggle: label, aria-pressed, banner, 5 tabs                 | PREP + P3 (Q key hint on the toggle)                                      |
  * | 217 §3 prep Quick edit (AC ±) with preview                              | PREP                                                                      |
  * | 231 §3 prep Templates: Elite → HP×2, AC+2                               | PREP (HP×2) + SWEEP (Elite/Weak HP on 30 monsters) + P3 (AC +2)           |
- * | 251 §3 Legendary adds resources; Lair adds init-20 row                  | PREP (legendary). Lair is a Battlefield rule, not a template: PREP lists it |
+ * | 251 §3 Legendary adds resources; Lair adds init-20 row                  | PREP (legendary). Lair is a Battlefield rule, not a template: RAIL R2 (init-20 rail row, loses ties) |
  * | 264 §3 Area: half cover → AC +2 & strip chip                            | ACT (half cover via Fx, +2 in the roll breakdown) + PREP (strip chip)     |
- * | 285 Kept·A area note edits (prep + strip)                               | PREP (strip chip Edit/End)                                                |
+ * | 285 Kept·A area note edits (prep + strip)                               | PREP (strip chip Edit/End) + RAIL R2 (rail Battlefield note, persists)     |
  * | 297 §3 Add tab +1 Goblin joins group; Effects durations; exit           | ADD + PREP                                                                |
  * | 317 §5 Groups: Roll once → equal init + adjacent                        | P1                                                                        |
  * | 331 §5 Stack group → one row ×N                                         | GROUPS (stacked row, summed HP, minis, picker, expand / collapse)         |
  * | 356 §5 group popover "Same initiative" + auto-group on add              | FLOW (group-setinit) + ADD (adds join their group) + GROUPS (anchored)    |
- * | 370 §6 rail quick actions never overlap name/HP/pills                   | ACT (hover ›_ keeps row height) + SHOTS + P1 (no overflow). FIXME test: the hover quick actions cover the effect tally (shell bug) |
+ * | 370 §6 rail quick actions never overlap name/HP/pills                   | ACT (hover ›_ keeps row height) + SHOTS + P1 (no overflow) + RAIL R1 (quick actions clear of the effect tally) |
  * | 389 §8 statblock centred, max-width ≤ ~760                              | SHOTS (visual). Exact mockup geometry: N/A                                |
  * | 398 §9 death-save pips; 3 fails → Dead; undo; 3 successes → Stable      | DS                                                                        |
  * | 424 §10 key labels ⇧ ?, Ctrl Z / ⌘Z                                     | SHELL (Shift+? sheet) + FLOW (Esc key hint on chip) + TOP (Space on the turn chip, ⌘Z / Ctrl Z on undo · redo, ⇧? on Keys) |
@@ -55,7 +56,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 519 Kept·A shortcut hints on new controls + hover on area chip          | PREP (strip chip hover) + P3 (Q hint)                                     |
  * | 530 typing in inputs never triggers shortcuts                           | SHELL ("nc" in the HP box) + P1 ("qlgt" in the console)                   |
  * | 550 A4 mark conc from statblock (autocomplete)                          | SB (Tools › Conc mark) + P3 (console `conc`). Autocomplete list: N/A      |
- * | 561 A4 row ⋯ → Mark concentration…; console conc / conc off             | P3 (console `conc fly` / `drop`). Row ⋯ prompt: N/A                       |
+ * | 561 A4 row ⋯ → Mark concentration…; console conc / conc off             | P3 (console `conc fly` / `drop`) + RAIL R1 (row ⋯ Mark concentration)     |
  * | 572 A4 damage → CON save on concentration; 0 HP drops it                | DS                                                                        |
  * | 581 A4 pill glyphs ▲ ▼ ⬡ + legend in ⇧?                                 | P3 (▲ pill, ✦ template in the tally card) + TOP (glyph legend in the ⇧? sheet) |
  * | 595 A4 §2a in-place edit (I, Esc, Ctrl↵)                                | N/A: real edits use the one statblock editor (PREP Creature › Edit)        |
@@ -65,9 +66,9 @@ import {expect, test, type Page} from "@playwright/test";
  * | 655 A4 §3 Templates → creature types, eligibility, one-step apply       | SWEEP (transform preview on 30 monsters + Zombie apply on Bugbear)        |
  * | 678 A4 §4 Effects catalogue, preset, rounds, remove                     | ACT (Bless/Bane, durations) + DOCK (stepper, readout) + PREP (effects tab) |
  * | 694 A4 §4 custom roll effect builder → affects a mass roll              | ACT (builder → Shield wall in the breakdown)                              |
- * | 710 A4 §5 darkness: no-darkvision creatures Blinded; dim for darkvision | P3 (Darkness → attack disadvantage without darkvision, none with it). Row/statblock "Blinded" badge: N/A, sight isn't surfaced on rows |
+ * | 710 A4 §5 darkness: no-darkvision creatures Blinded; dim for darkvision | P3 (Darkness → attack disadvantage without darkvision, none with it) + RAIL R2 (◐ Blinded row pill, statblock sight line) |
  * | 720 A4 §5 magical darkness / fog                                        | Rules: EncounterCockpitBattlefield Jest. UI: same path as 710 (P3)        |
- * | 728 A4 §5 area traits by environment → apply                            | N/A: illustrative mockup data, no such catalogue on the site              |
+ * | 728 A4 §5 area traits by environment → apply                            | RAIL R3 (habitat traits by environment → statblock)                       |
  * | 741 A4 §5 lair groups + magic item + add legendary action               | PREP (legendary action, items tab). Lair groups: N/A                      |
  * | 760 A4 §5 text-only area & lair reminders                               | PREP (battlefield strip)                                                  |
  * | 771 A4 §6 dock tabs H/R/C/E                                             | SHELL (C) + ACT (E) + P1 (H)                                              |
@@ -79,7 +80,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 835 A4 §8 saved-list import + DM Screen handoff                         | P1 (⋯ menu has the DM Screen entry); handoff behaviour is the handoff child's |
  * | 840 A4 §8 turns next/prev + Reset turns; roll init                      | SHELL (N/P) + P1 (Reset turns)                                            |
  * | 848 A4 §8 recharge auto-roll; recharge resource                         | SWEEP (recharge trackers) + TOP (⋯ Auto-roll recharge at turn start; foe re-roll Normal / Adv / Dis with Undo) |
- * | 853 A4 §8 Move before… and Alt↑                                         | FLOW (Alt+↑ and drag). Row ⋯ "Move before…": N/A                          |
+ * | 853 A4 §8 Move before… and Alt↑                                         | FLOW (Alt+↑ and drag) + RAIL R1 (row ⋯ Move before…)                      |
  * | 860 A4 §8 typed damage reviews conditional defences; heal/set/undo      | SWEEP (defence review) + P1 (heal / set / undo / redo)                    |
  * | 870 A4 §8 Assess CR                                                     | PREP                                                                      |
  * | 875 A4 §8 roster all/none/group/find/sort                               | FLOW (Esc clears, group chips) + GROUPS (Groups view find / sort, Party)  |

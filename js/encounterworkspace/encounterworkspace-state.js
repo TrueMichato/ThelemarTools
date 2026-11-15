@@ -126,13 +126,14 @@ const withStateV8Defaults = state => ({
 	log: [],
 	savedEffects: [],
 	combat: {status: state.turn?.round > 0 ? "active" : "setup"},
+	encounterNote: "",
 	...state,
 });
 
 function validateV8Instance (instance, ids) {
 	const invalid = what => { throw new Error(`The saved encounter contains invalid ${what}. It has not been changed.`); };
 	if (!INSTANCE_KINDS.includes(instance.kind) || (instance.kind === "party") !== getEncounterIsPartyHash(instance.hash)) invalid("creature kinds");
-	if (instance.kind === "party" && (!isRecord(instance.party) || !isOptionalString(instance.party.characterId)
+	if (instance.kind === "party" && (!isRecord(instance.party) || !isOptionalString(instance.party.characterId) || !isOptionalString(instance.party.classLine)
 		|| ["ac", "passive", "speed", "initBonus"].some(key => !Number.isSafeInteger(instance.party[key])))) invalid("party members");
 	if (!isOptionalString(instance.label) || typeof instance.note !== "string"
 		|| (instance.customGroup != null && !isNonEmptyString(instance.customGroup))
@@ -171,6 +172,7 @@ function validateV8State (raw, ids) {
 	if (!Array.isArray(raw.log) || raw.log.some(it => !isRecord(it) || typeof it.text !== "string")) invalid("log entries");
 	if (!Array.isArray(raw.savedEffects) || raw.savedEffects.some(it => !isRecord(it) || !isNonEmptyString(it.key) || !isNonEmptyString(it.name))) invalid("saved effects");
 	if (!isRecord(raw.combat) || !COMBAT_STATUSES.includes(raw.combat.status)) invalid("combat status");
+	if (typeof raw.encounterNote !== "string") invalid("encounter note");
 }
 
 function getV7ModifierMods (modifier, skill) {
@@ -340,6 +342,7 @@ export class EncounterWorkspaceState {
 			log: [],
 			savedEffects: [],
 			combat: {status: "setup"},
+			encounterNote: "",
 		};
 	}
 
@@ -477,10 +480,16 @@ export class EncounterWorkspaceState {
 			state.log = [];
 			state.savedEffects = [];
 			state.combat = {status: state.turn.round > 0 ? "active" : "setup"};
+			state.encounterNote = "";
 			migrateV7Effects(state, presetId => ENCOUNTER_ROLL_PRESET_SKILLS[presetId] || null);
 		} else Object.assign(state, withStateV8Defaults(state));
 		this._normalizeV8(state);
 		return state;
+	}
+
+	/** The encounter's free-text note (where, what the light is like…), trimmed and capped at 500 characters. */
+	static withEncounterNote (state, note) {
+		return {...state, encounterNote: `${note ?? ""}`.trim().slice(0, 500)};
 	}
 
 	/** Prunes v8 cross-references that legacy reducers can leave behind (removed creatures, cleared conditions). */

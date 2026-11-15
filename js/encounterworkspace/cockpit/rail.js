@@ -626,7 +626,7 @@ export class EncounterCockpitRail {
 	}
 
 	_getClassLine (effective, instance) {
-		if (instance.kind === "party") return "Party";
+		if (instance.kind === "party") return instance.party?.classLine || "Party";
 		const cr = getCockpitCrText(effective?.cr);
 		return cr ? `CR ${cr}` : "";
 	}
@@ -719,7 +719,24 @@ export class EncounterCockpitRail {
 		const effect = item.source === "effect" ? (instance.effects || []).find(it => it.id === item.id) : null;
 		if (effect) this._hover.bindEffect(pill, instance, effect);
 		else if (item.hoverEntry) this._hover.bindEntry(pill, `item:${instance.id}:${item.k}:${item.id}`, item.hoverEntry);
+		const caster = this._getCasterLink(effect, instance);
+		if (caster) pill.append(caster);
 		return pill;
+	}
+
+	/** "↗" on an effect another creature holds (usually by concentration): jumps to that caster. */
+	_getCasterLink (effect, instance) {
+		const casterId = effect?.casterId;
+		if (!casterId || casterId === instance.id || !this._ctx?.state.instances.some(it => it.id === casterId)) return null;
+		const casterLabel = this._ctx.labels.get(casterId) || "the caster";
+		const title = `${effect.name} comes from ${casterLabel}${effect.concOn ? "'s concentration" : ""} — view ${casterLabel}`;
+		return h("button.ewc-pill__caster", {
+			type: "button",
+			"data-ewc-caster": casterId,
+			title,
+			"aria-label": title,
+			onclick: evt => { evt.stopPropagation(); this.closePopover(); this._cb.onView(casterId); },
+		}, "↗");
 	}
 
 	_getTallyButton (instance, label, tally) {
@@ -756,7 +773,7 @@ export class EncounterCockpitRail {
 			if (effect) this._hover.bindEffect(name, instance, effect);
 			return h(`li.ewc-tc__i.ewc-tc__i--${item.k}`, null,
 				h("span.ewc-tc__g", {"aria-hidden": "true"}, glyph),
-				h("span.ewc-tc__t", null, name, h("small", null, `${src} · ${item.rounds != null ? `${item.rounds}r left` : "until removed"}`)),
+				h("span.ewc-tc__t", null, name, h("small", null, `${src} · ${item.rounds != null ? `${item.rounds}r left` : "until removed"}`, this._getCasterLink(effect, instance))),
 				this._cb.onEndEffect && item.source === "effect"
 					? h("button.ewc-tc__rm", {
 						type: "button",

@@ -58,11 +58,17 @@ function getArmorClass (character, dexMod) {
 	return total;
 }
 
+/** "Rogue 5", or "Fighter 3 / Wizard 2" for a multiclass character; "" when the sheet has no classes. */
+export function getEncounterCharacterClassLine (character) {
+	const classes = (Array.isArray(character?.classes) ? character.classes : []).filter(it => it && `${it.name || ""}`.trim());
+	return classes.map(it => `${`${it.name}`.trim()}${toInt(it.level, 0) > 0 ? ` ${toInt(it.level, 0)}` : ""}`).join(" / ");
+}
+
 /**
  * Encounter stats from a saved character record. AC, passive Perception and initiative are estimates from the saved
  * data (the sheet recomputes features and equipment live) — `approximate` lists them so the add dialog can let the DM
  * confirm. Pass `derived` (e.g. from a live CharacterSheetState: {ac, initBonus, passive, speed}) to override.
- * Returns {characterId, name, level, ac, hpMax, hpCurrent, hpTemp, speed, initBonus, passive, abilities, approximate}.
+ * Returns {characterId, name, level, classLine, ac, hpMax, hpCurrent, hpTemp, speed, initBonus, passive, abilities, approximate}.
  */
 export function getEncounterPartyStatsFromCharacter (character, {derived = {}} = {}) {
 	if (!character || typeof character !== "object") throw new Error("This saved character can't be read.");
@@ -77,6 +83,7 @@ export function getEncounterPartyStatsFromCharacter (character, {derived = {}} =
 		characterId: typeof character.id === "string" && character.id ? character.id : null,
 		name,
 		level,
+		classLine: getEncounterCharacterClassLine(character),
 		ac: getArmorClass(character, dexMod),
 		hpMax,
 		hpCurrent: Math.max(0, Math.min(hpMax, toInt(character.hp?.current, hpMax))),
@@ -109,10 +116,10 @@ export async function pGetEncounterSavedCharacters ({storage = globalThis.Storag
 }
 
 /**
- * Build a party instance from stats ({name, ac, hpMax, hpCurrent?, hpTemp?, speed, initBonus, passive, characterId?}),
+ * Build a party instance from stats ({name, ac, hpMax, hpCurrent?, hpTemp?, speed, initBonus, passive, characterId?, classLine?}),
  * from a saved character or from manual entry. The hash is `party:<characterId>` or `party:<slug>`; `id` is required.
  */
-export function createEncounterPartyInstance ({id, name, ac = 10, hpMax = 1, hpCurrent = null, hpTemp = 0, speed = 30, initBonus = 0, passive = 10, characterId = null, initiative = null}) {
+export function createEncounterPartyInstance ({id, name, ac = 10, hpMax = 1, hpCurrent = null, hpTemp = 0, speed = 30, initBonus = 0, passive = 10, characterId = null, initiative = null, classLine = null}) {
 	if (typeof id !== "string" || !id) throw new Error("A party member needs an id.");
 	const stats = {ac: toInt(ac, 10), speed: Math.max(0, toInt(speed, 30)), initBonus: toInt(initBonus, 0), passive: toInt(passive, 10)};
 	const max = Math.max(1, toInt(hpMax, 1));
@@ -131,7 +138,7 @@ export function createEncounterPartyInstance ({id, name, ac = 10, hpMax = 1, hpC
 		initiative: Number.isSafeInteger(initiative) ? initiative : null,
 		resources: getEncounterResourceDefaults(monster),
 		...getEncounterInstanceV8Defaults(hash),
-		party: {characterId: characterId || null, ...stats},
+		party: {characterId: characterId || null, ...stats, ...(typeof classLine === "string" && classLine.trim() ? {classLine: classLine.trim()} : {})},
 	};
 }
 

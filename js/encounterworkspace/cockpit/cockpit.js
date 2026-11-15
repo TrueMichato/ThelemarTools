@@ -94,8 +94,12 @@ const RULESET_LABELS = {phb: "PHB 2014", xphb: "PHB 2024", tgtt: "Thelemar"};
 const QUICK_ACTIONS = [
 	{id: "damage", label: "Dmg", title: "Damage this creature"},
 	{id: "heal", label: "Heal", title: "Heal this creature"},
+	{id: "save", label: "Save", title: "Roll a saving throw for this creature"},
 	{id: "cond", label: "Cond", title: "Conditions on this creature"},
+	{id: "fx", label: "Fx", title: "Add an effect to this creature"},
 ];
+/** Quick action → dock tab. The Roll tab opens on a saving throw by default. */
+const QUICK_ACTION_TABS = {damage: "hp", heal: "hp", save: "roll", cond: "cond", fx: "fx"};
 const RESOURCE_REDUCERS = {
 	slots: "withSpellSlots",
 	removeSlots: "withoutSpellSlots",
@@ -1064,7 +1068,7 @@ export class EncounterCockpit {
 		}
 		this._ui.viewedId = id;
 		this._render();
-		this._dock.setTab(actionId === "cond" ? "cond" : "hp", {isFocus: true});
+		this._dock.setTab(QUICK_ACTION_TABS[actionId] || "hp", {isFocus: true});
 	}
 
 	/* -------------------------------------------- Keyboard -------------------------------------------- */

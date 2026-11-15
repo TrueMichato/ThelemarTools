@@ -381,3 +381,20 @@ export function getPrepCrAssumptions (inferred, effective, overrides = {}) {
 		.map(({key, label}) => ({key, label: key === "attackValue" && values.attackType === "save" ? "save DC" : label}));
 	return {values, missing};
 }
+
+/**
+ * Loaded habitat/area traits (each with `_areaName`) grouped by environment for the Creature → Habitat traits
+ * catalogue: [{area, traits}] in first-seen order, traits by name. Traits without a name or source are dropped.
+ */
+export function getPrepAreaTraitGroups (traits) {
+	const groups = new Map();
+	(traits || []).forEach(trait => {
+		if (!trait?.name || !trait?.source) return;
+		const area = `${trait._areaName || "Environment"}`.trim() || "Environment";
+		if (!groups.has(area)) groups.set(area, []);
+		groups.get(area).push(trait);
+	});
+	return [...groups]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([area, list]) => ({area, traits: list.sort((a, b) => a.name.localeCompare(b.name))}));
+}
