@@ -95,6 +95,13 @@ describe("Encounter cockpit shell keymap", () => {
 			expect(mac).toContain("⌘+Z");
 			expect(new Set(pc).size).toBe(pc.length);
 		});
+
+		test("the sheet lists the prep tab and save keys, which the global keymap never matches", () => {
+			const prep = getCockpitShortcutSheet({isMac: true}).find(it => it.name === "Prep").rows.map(row => row.keys.join("+"));
+			expect(prep).toEqual(expect.arrayContaining(["←+→", "Home+End", "⌘+Enter"]));
+			expect(getCockpitKeyAction(key("ArrowRight"))).toBeNull();
+			expect(getCockpitKeyAction(key("Enter", {metaKey: true}), {isMac: true})).toBeNull();
+		});
 	});
 
 	describe("feature bindings", () => {

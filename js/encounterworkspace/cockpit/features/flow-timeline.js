@@ -13,17 +13,28 @@ export function installFlowTimeline (api) {
 
 	api.registerStageMode({id: MODE_ID, label: "Timeline", keys: ["T"], render: (el, ctx) => renderTimeline(api, el, ctx, toggle)});
 	api.registerKey({section: "View & select", keys: ["T"], label: "Timeline ↔ statblock view", action: "flow:timeline", run: () => { toggle(); }});
+	// List | Timeline: which view fills the stage. T toggles between the two.
 	api.addBarItem(ctx => {
 		if (!ctx.state.instances.length) return null;
 		const isOn = ctx.stageMode === MODE_ID;
-		return h("button.ewc-btn.ewc-btn--ghost.ewc-flow-tlbtn", {
-			type: "button",
-			"aria-pressed": `${isOn}`,
-			"aria-keyshortcuts": "T",
-			"data-ewc-flow": "timeline",
-			title: isOn ? "Back to the statblock (T)" : "Show the round as a timeline (T)",
-			onclick: toggle,
-		}, h("span.ewc-btn__lbl", null, "Timeline"), kbd(["T"]));
+		const isList = ctx.stageMode === "statblock";
+		return h("div.ewc-seg.ewc-flow-view", {role: "group", "aria-label": "View"},
+			h("button.ewc-seg__b", {
+				type: "button",
+				"aria-pressed": `${isList}`,
+				"data-ewc-flow": "list",
+				title: "List view: initiative order and statblock (T)",
+				onclick: () => api.setStageMode("statblock"),
+			}, "List"),
+			h("button.ewc-seg__b", {
+				type: "button",
+				"aria-pressed": `${isOn}`,
+				"aria-keyshortcuts": "T",
+				"data-ewc-flow": "timeline",
+				title: "Timeline view: the round as lanes, with effect spans (T)",
+				onclick: () => api.setStageMode(MODE_ID),
+			}, "Timeline", kbd(["T"])),
+		);
 	});
 }
 

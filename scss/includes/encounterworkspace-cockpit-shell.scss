@@ -6,6 +6,41 @@
 @layer vetools {
 	body.ewc-page {
 		overflow: hidden;
+
+		// The cockpit needs the height: fold the site banner and nav into one row (banner left, nav right).
+		// Too narrow for both, they wrap back to two thin rows; the cockpit re-measures its top either way.
+		[data-cancer-id="cancer-header"] {
+			flex-flow: row wrap !important;
+			align-items: stretch;
+		}
+
+		.page__header {
+			display: flex;
+			flex: 1 0 auto;
+			align-items: center;
+			padding: 0 12px 0 15px;
+
+			> .container {
+				width: auto;
+				margin: 0;
+				padding: 0;
+			}
+		}
+
+		.page__title {
+			font-size: 20px;
+			line-height: 32px;
+		}
+
+		.page__subtitle {
+			display: none;
+		}
+
+		.page__nav {
+			flex: 0 1 auto;
+			width: auto;
+			margin: 0 auto;
+		}
 	}
 
 	.ewc {
@@ -396,6 +431,137 @@
 				border-color: var(--ewc-bad-line);
 				color: var(--ewc-bad);
 			}
+
+			// With a rated word, only the word carries the colour; the XP stays quiet.
+			&__w {
+				font-weight: 600;
+
+				&.is-easy { color: var(--ewc-ok); }
+				&.is-medium { color: var(--ewc-warn); }
+
+				&.is-hard,
+				&.is-deadly {
+					color: var(--ewc-bad);
+				}
+			}
+
+			&--btn {
+				background: none;
+				cursor: pointer;
+
+				&:hover,
+				&[aria-expanded="true"] {
+					border-color: var(--ewc-hair-3);
+					color: var(--ewc-ink-2);
+				}
+			}
+		}
+
+		// ---------------- difficulty popover ----------------
+		.ewc-diffwrap {
+			position: relative;
+			flex: none;
+		}
+
+		.ewc-diffpop {
+			position: absolute;
+			z-index: 40;
+			top: calc(100% + 6px);
+			left: 0;
+			width: 300px;
+			padding: 12px;
+			border: 1px solid var(--ewc-hair-2);
+			border-radius: var(--ewc-r-m);
+			background: var(--ewc-chrome);
+			box-shadow: var(--ewc-shadow-pop);
+			color: var(--ewc-ink);
+			font-size: var(--ewc-f-s);
+
+			&__h {
+				margin: 0 0 6px;
+				color: var(--ewc-ink-3);
+				font-size: var(--ewc-f-xs);
+				font-weight: 600;
+				letter-spacing: 0.03em;
+				text-transform: uppercase;
+			}
+
+			&__sum {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 6px;
+				margin: 0 0 8px;
+
+				> div {
+					padding: 8px;
+					border-radius: var(--ewc-r-s);
+					background: var(--ewc-surface);
+				}
+
+				dt {
+					color: var(--ewc-ink-3);
+					font-size: var(--ewc-f-2xs);
+					font-weight: 400;
+				}
+
+				dd {
+					margin: 0;
+					font-size: var(--ewc-f-m);
+					font-weight: 600;
+					white-space: nowrap;
+				}
+			}
+
+			&__word {
+				&.is-easy { color: var(--ewc-ok); }
+				&.is-medium { color: var(--ewc-warn); }
+
+				&.is-hard,
+				&.is-deadly {
+					color: var(--ewc-bad);
+				}
+			}
+
+			&__p {
+				margin: 0 0 6px;
+				font-size: var(--ewc-f-xs);
+			}
+
+			&__list {
+				display: flex;
+				flex-direction: column;
+				margin: 0 0 6px;
+				padding: 0;
+				list-style: none;
+
+				li {
+					display: flex;
+					justify-content: space-between;
+					gap: 10px;
+					min-height: 24px;
+					align-items: baseline;
+					border-bottom: 1px solid var(--ewc-hair);
+
+					> span:first-child {
+						min-width: 0;
+						overflow: hidden;
+						color: var(--ewc-ink-2);
+						text-overflow: ellipsis;
+						white-space: nowrap;
+					}
+
+					> span:last-child {
+						flex: none;
+						color: var(--ewc-ink-3);
+					}
+				}
+			}
+
+			&__foot {
+				display: flex;
+				justify-content: flex-end;
+				margin-top: 10px;
+			}
 		}
 
 		// ---------------- top bar ----------------
@@ -413,7 +579,9 @@
 
 			&__enc {
 				display: flex;
-				flex: 1 1 auto;
+				// Shrinks well before the turn cluster, so a long title truncates first; at 1400px and below the title
+				// hides and this stops shrinking, so the difficulty badge never collapses.
+				flex: 1 9 auto;
 				align-items: center;
 				gap: 10px;
 				min-width: 0;
@@ -425,7 +593,7 @@
 
 			&__title {
 				flex: 0 1 auto;
-				min-width: 12ch;
+				min-width: 0;
 				overflow: hidden;
 				font-size: var(--ewc-f-l);
 				font-weight: 600;
@@ -436,9 +604,14 @@
 
 			&__turn {
 				display: flex;
-				flex: 0 0 auto;
+				flex: 0 1 auto;
 				align-items: center;
 				gap: 8px;
+				min-width: 0;
+
+				> :not(.ewc-turnchip) {
+					flex: none;
+				}
 			}
 
 			&__tools {
@@ -455,6 +628,20 @@
 				margin: 0 4px;
 				background: var(--ewc-hair-2);
 			}
+
+			&__hist {
+				gap: 5px;
+				padding: 0 7px;
+			}
+
+			&__hist-ico {
+				display: inline-flex;
+
+				svg {
+					width: 16px;
+					height: 16px;
+				}
+			}
 		}
 
 		.ewc-round {
@@ -470,8 +657,10 @@
 
 		.ewc-turnchip {
 			display: inline-flex;
+			flex: 0 1 auto;
 			align-items: center;
 			gap: 8px;
+			min-width: 72px;
 			max-width: 240px;
 			min-height: 32px;
 			padding: 0 10px;
@@ -494,6 +683,7 @@
 			}
 
 			&__n {
+				min-width: 0;
 				overflow: hidden;
 				font-weight: 600;
 				text-overflow: ellipsis;
@@ -787,6 +977,28 @@
 		}
 	}
 
+	// The one-row bar sheds secondary labels and kbd hints in tiers so the encounter cluster (title, difficulty badge)
+	// never collapses under the turn and tool clusters; at 1180px and below it becomes two rows.
+	@media (width <= 1600px) {
+		.ewc {
+			[data-ewc-act="prev"] .ewc-btn__lbl {
+				display: none;
+			}
+		}
+	}
+
+	@media (width <= 1400px) {
+		.ewc {
+			.ewc-bar__enc {
+				flex-shrink: 0;
+			}
+
+			.ewc-bar__title {
+				display: none;
+			}
+		}
+	}
+
 	@media (width <= 1340px) {
 		.ewc {
 			.ewc-bar {
@@ -796,31 +1008,23 @@
 			.ewc-turnchip {
 				max-width: 200px;
 			}
+		}
+	}
 
-			[data-ewc-act="prev"] .ewc-btn__lbl,
-			.ewc-bar__help .ewc-btn__lbl,
-			.ewc-con__lbl {
+	@media (width <= 1240px) {
+		.ewc {
+			.ewc-prep-toggle .ewc-kbd,
+			.ewc-flow-view .ewc-kbd {
 				display: none;
 			}
 		}
 	}
 
 	@media (width <= 1180px) {
+		// Too narrow for one row: the bar becomes two fixed rows (encounter + turn, then tools).
 		.ewc {
 			--ewc-rail-w: 320px;
 			--ewc-dock-w: 304px;
-
-			.ewc-bar__title {
-				display: none;
-			}
-		}
-	}
-
-	@media (width <= 1000px) {
-		// Too narrow for one row: the bar becomes two fixed rows (encounter + turn, then tools).
-		.ewc {
-			--ewc-rail-w: 240px;
-			--ewc-dock-w: 292px;
 			--ewc-bar-h: 86px;
 
 			.ewc-bar {
@@ -856,19 +1060,30 @@
 					}
 				}
 
-				&__sep,
-				&__help .ewc-btn__lbl {
+				&__sep {
 					display: none;
 				}
 			}
 
 			.ewc-turnchip {
-				max-width: 132px;
+				max-width: 200px;
 			}
 
 			.ewc-badge {
 				padding: 0 6px;
 			}
+
+			.ewc-prep-toggle .ewc-kbd,
+			.ewc-flow-view .ewc-kbd {
+				display: inline-flex;
+			}
+		}
+	}
+
+	@media (width <= 1000px) {
+		.ewc {
+			--ewc-rail-w: 240px;
+			--ewc-dock-w: 292px;
 
 			.ewc-stage__head {
 				padding: 12px 14px 8px;

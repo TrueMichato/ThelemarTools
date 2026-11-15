@@ -22,6 +22,16 @@ export const COCKPIT_KEY_BINDINGS = Object.freeze([
 	{section: "Help", keys: ["Shift", "?"], label: "Show this sheet", action: "help"},
 ]);
 
+/**
+ * Keys handled locally by a control rather than the global keymap — listed on the shortcut sheet so they are
+ * discoverable, never matched by getCockpitKeyAction.
+ */
+export const COCKPIT_SHEET_ONLY_ROWS = Object.freeze([
+	{section: "Prep", keys: ["←", "→"], label: "Switch prep tabs (on the tab strip)", action: "sheet:prepTabs"},
+	{section: "Prep", keys: ["Home", "End"], label: "First / last prep tab", action: "sheet:prepTabEnds"},
+	{section: "Prep", keys: ["mod", "Enter"], label: "Save the open edit", action: "sheet:saveEdit"},
+]);
+
 const _TEXT_INPUT_TYPES_EXCLUDED = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
 
 /** True if the element is somewhere the user types (so single-letter shortcuts must not fire). */
@@ -135,9 +145,9 @@ export function installCockpitKeymap ({root, handlers, isMac = getCockpitIsMac()
 }
 
 /** Shortcut sheet model, grouped by section with platform labels. */
-export function getCockpitShortcutSheet ({isMac = false, bindings = COCKPIT_KEY_BINDINGS} = {}) {
+export function getCockpitShortcutSheet ({isMac = false, bindings = COCKPIT_KEY_BINDINGS, extraRows = COCKPIT_SHEET_ONLY_ROWS} = {}) {
 	const sections = [];
-	bindings.forEach(binding => {
+	[...bindings, ...extraRows].forEach(binding => {
 		let section = sections.find(it => it.name === binding.section);
 		if (!section) sections.push(section = {name: binding.section, rows: []});
 		section.rows.push({label: binding.label, keys: getCockpitKeyLabels(binding.keys, {isMac}), action: binding.action});

@@ -16,6 +16,7 @@ import {expect, test, type Page} from "@playwright/test";
  *   GROUPS encounter-cockpit-groups.spec.ts › "Groups roster, headers, stacks, stack picker, find / sort, Party chip …"
  *   SWEEP  encounter-cockpit-sweep.spec.ts › the four 30-monster encounters (+ "Zombie (DMG) applies …")
  *   SB     encounter-cockpit-statblock.spec.ts › roll chips, DC calls, header, Held by / Tools / Reminders, PC card, hint
+ *   TOP    encounter-cockpit-topbar.spec.ts › difficulty badge & popover, kbd hints, List | Timeline, Keys, ⋯ menu, glyph legend
  *   P1/P2/P3  the tests in this file (rail & turns / statblock roll feed / templates, effects & battlefield)
  *
  * | verify-a6 step                                                          | Real site                                                                 |
@@ -43,10 +44,10 @@ import {expect, test, type Page} from "@playwright/test";
  * | 370 §6 rail quick actions never overlap name/HP/pills                   | ACT (hover ›_ keeps row height) + SHOTS + P1 (no overflow). FIXME test: the hover quick actions cover the effect tally (shell bug) |
  * | 389 §8 statblock centred, max-width ≤ ~760                              | SHOTS (visual). Exact mockup geometry: N/A                                |
  * | 398 §9 death-save pips; 3 fails → Dead; undo; 3 successes → Stable      | DS                                                                        |
- * | 424 §10 key labels ⇧ ?, Ctrl Z / ⌘Z                                     | SHELL (Shift+? sheet) + FLOW (Esc key hint on chip)                       |
+ * | 424 §10 key labels ⇧ ?, Ctrl Z / ⌘Z                                     | SHELL (Shift+? sheet) + FLOW (Esc key hint on chip) + TOP (Space on the turn chip, ⌘Z / Ctrl Z on undo · redo, ⇧? on Keys) |
  * | 439 §11 log header: no overflow, filters wrap                           | FLOW                                                                      |
- * | 451 §4 difficulty badge → XP popover                                    | P1 (badge XP drops for the defeated, back on revive). Popover: N/A, the real badge explains itself in its title |
- * | 458 §4 ⋯ menu → Show the how-to hint                                    | N/A: no how-to hint in the real cockpit (P1 checks the ⋯ menu itself)     |
+ * | 451 §4 difficulty badge → XP popover                                    | P1 (badge XP drops for the defeated, back on revive) + TOP (coloured difficulty word, popover: total / earned / defeated, End combat…) |
+ * | 458 §4 ⋯ menu → Show the how-to hint                                    | TOP (⋯ → Show the how-to hint brings back the dismissed card) + SB (the card itself) |
  * | 467 §4 add modal stepper & party add                                    | ADD                                                                       |
  * | 490 Kept·A defeated list + Revive                                       | P1 (0 HP → Defeated; healing revives) + SB (statblock header Revive)      |
  * | 500 Kept·A "Back to active" banner (Space)                              | P1                                                                        |
@@ -56,10 +57,10 @@ import {expect, test, type Page} from "@playwright/test";
  * | 550 A4 mark conc from statblock (autocomplete)                          | SB (Tools › Conc mark) + P3 (console `conc`). Autocomplete list: N/A      |
  * | 561 A4 row ⋯ → Mark concentration…; console conc / conc off             | P3 (console `conc fly` / `drop`). Row ⋯ prompt: N/A                       |
  * | 572 A4 damage → CON save on concentration; 0 HP drops it                | DS                                                                        |
- * | 581 A4 pill glyphs ▲ ▼ ⬡ + legend in ⇧?                                 | P3 (▲ pill, ✦ template in the tally card). Glyph legend in ⇧?: N/A, the tally card names each item |
+ * | 581 A4 pill glyphs ▲ ▼ ⬡ + legend in ⇧?                                 | P3 (▲ pill, ✦ template in the tally card) + TOP (glyph legend in the ⇧? sheet) |
  * | 595 A4 §2a in-place edit (I, Esc, Ctrl↵)                                | N/A: real edits use the one statblock editor (PREP Creature › Edit)        |
  * | 618 A4 §2b drawer Statblock tab "mixed"                                 | N/A: same reason as 595                                                   |
- * | 631 A4 §2c editor modal before/after, ⌘↵ saves                          | PREP (Creature › Edit opens the real editor)                              |
+ * | 631 A4 §2c editor modal before/after, ⌘↵ saves                          | PREP (Creature › Edit opens the real editor) + TOP (⌘↵ save and ←/→ prep tabs listed in the ⇧? sheet) |
  * | 643 A4 bulk quick edit on multi-select; JSON validates                  | PREP (quick edit, invalid AC blocks Apply)                                |
  * | 655 A4 §3 Templates → creature types, eligibility, one-step apply       | SWEEP (transform preview on 30 monsters + Zombie apply on Bugbear)        |
  * | 678 A4 §4 Effects catalogue, preset, rounds, remove                     | ACT (Bless/Bane, durations) + DOCK (stepper, readout) + PREP (effects tab) |
@@ -77,7 +78,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 827 A4 §7 Areas "Applies to" never overflows                            | P1 (dock doesn't overflow) + SHOTS                                        |
  * | 835 A4 §8 saved-list import + DM Screen handoff                         | P1 (⋯ menu has the DM Screen entry); handoff behaviour is the handoff child's |
  * | 840 A4 §8 turns next/prev + Reset turns; roll init                      | SHELL (N/P) + P1 (Reset turns)                                            |
- * | 848 A4 §8 recharge auto-roll; recharge resource                         | SWEEP (recharge trackers). Auto-roll toggle: N/A, not in the real cockpit |
+ * | 848 A4 §8 recharge auto-roll; recharge resource                         | SWEEP (recharge trackers) + TOP (⋯ Auto-roll recharge at turn start; foe re-roll Normal / Adv / Dis with Undo) |
  * | 853 A4 §8 Move before… and Alt↑                                         | FLOW (Alt+↑ and drag). Row ⋯ "Move before…": N/A                          |
  * | 860 A4 §8 typed damage reviews conditional defences; heal/set/undo      | SWEEP (defence review) + P1 (heal / set / undo / redo)                    |
  * | 870 A4 §8 Assess CR                                                     | PREP                                                                      |

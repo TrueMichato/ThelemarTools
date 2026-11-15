@@ -9,9 +9,22 @@
 		--ewc-tl-bf-ink: #065f46;
 
 		// ---------------- timeline (stage mode) ----------------
-		.ewc-flow-tlbtn[aria-pressed="true"] {
-			background: var(--ewc-ind-soft-2);
-			color: var(--ewc-ind-text);
+		// List | Timeline switch in the top bar.
+		.ewc-flow-view {
+			flex: none;
+
+			.ewc-seg__b {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				white-space: nowrap;
+			}
+
+			.ewc-seg__b[aria-pressed="true"] .ewc-kbd {
+				border-color: rgb(255 255 255 / 35%);
+				background: rgb(255 255 255 / 14%);
+				color: #fff;
+			}
 		}
 
 		.ewc-tl {

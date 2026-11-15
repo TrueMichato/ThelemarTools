@@ -11,6 +11,7 @@
 
 import {
 	EncounterCockpitSettingsStore,
+	EncounterWorkspaceSettingsStore,
 	EncounterWorkspaceState,
 	EncounterWorkspaceStore,
 	ENCOUNTER_RULESETS,
@@ -65,7 +66,16 @@ import {installCockpitPrepFeatures} from "./features/prep.js";
 import {installCockpitFlowFeatures} from "./features/flow.js";
 import {installCockpitStageAffordances} from "./features/stage-affordances.js";
 import {withCockpitRevived} from "./stage-model.js";
+import {installCockpitTopbarFeatures} from "./features/topbar.js";
 import {
+	COCKPIT_ROLL_MODES,
+	getCockpitFoeIds,
+	getCockpitRerollToast,
+	getCockpitTurnRecharges,
+	withCockpitRechargeRolls,
+} from "./topbar-model.js";
+import {
+	COCKPIT_TALLY_BUCKETS,
 	getCockpitDamageSummary,
 	getCockpitDockTargetIds,
 	getCockpitExhaustionLevel,
@@ -109,10 +119,14 @@ export class EncounterCockpit {
 		settingsStore = new EncounterCockpitSettingsStore(),
 		handoffStore = new EncounterWorkspaceHandoffStore(),
 		pGetReferenceData = pGetNpcTrackerReferenceData,
+		workspaceSettingsStore = new EncounterWorkspaceSettingsStore(),
 	}) {
 		this._root = root;
 		this._store = store;
 		this._settingsStore = settingsStore;
+		this._wsSettingsStore = workspaceSettingsStore;
+		/** Page-wide settings shared with the classic workspace (auto-roll recharge). */
+		this._wsSettings = {autoRollRecharge: false};
 		this._handoffStore = handoffStore;
 		this._pGetReferenceData = pGetReferenceData;
 		this._isMac = getCockpitIsMac();
@@ -148,6 +162,11 @@ export class EncounterCockpit {
 			this._settings = await this._settingsStore.pLoad();
 		} catch (e) {
 			errors.push(`Cockpit settings could not be loaded (${getErrorMessage(e)}); defaults are in use.`);
+		}
+		try {
+			this._wsSettings = {...this._wsSettings, ...await this._wsSettingsStore.pLoad()};
+		} catch (e) {
+			errors.push(`Workspace settings could not be loaded (${getErrorMessage(e)}); recharge rolls stay manual.`);
 		}
 		try {
 			await Promise.all([PrereleaseUtil.pInit(), BrewUtil2.pInit()]);
@@ -218,6 +237,9 @@ export class EncounterCockpit {
 		document.body.classList.add("ewc-page");
 		this._syncTopOffset();
 		window.addEventListener("resize", () => this._syncTopOffset());
+		// The site nav fills in after the cockpit mounts and may wrap the compact header onto two rows.
+		const siteHeader = document.querySelector("[data-cancer-id=\"cancer-header\"]");
+		if (siteHeader && typeof ResizeObserver === "function") new ResizeObserver(() => this._syncTopOffset()).observe(siteHeader);
 	}
 
 	/** The cockpit fills the viewport below the site navigation; the page never scrolls, the panes do. */
@@ -229,7 +251,7 @@ export class EncounterCockpit {
 	/** Each P3 feature module gets the public API; one failing module must not take the cockpit down. */
 	_installFeatures () {
 		const api = this.getApi();
-		[installCockpitActFeatures, installCockpitPrepFeatures, installCockpitFlowFeatures, installCockpitStageAffordances].forEach(install => {
+		[installCockpitActFeatures, installCockpitPrepFeatures, installCockpitFlowFeatures, installCockpitStageAffordances, installCockpitTopbarFeatures].forEach(install => {
 			try {
 				install(api);
 			} catch (e) {
@@ -305,7 +327,10 @@ export class EncounterCockpit {
 			setDerivedProvider: fn => { this._providers.getDerived = fn; this._render(); },
 			/** fn(state, instance) → [{k: "up"|"down"|"bf"|"tpl", label, rounds, id, ...}] for row tallies and statblock pills. */
 			setEffectItemsProvider: fn => { this._providers.effectItems = fn; this._render(); },
-			/** fn(state) → {text, cls, title} for the top-bar difficulty badge. */
+			/**
+			 * fn(state, ctx) → {text, word?, cls, title, ariaLabel?, renderPopover?(close) → Node} for the top-bar
+			 * difficulty badge. With renderPopover the badge becomes a button that opens it.
+			 */
 			setDifficultyProvider: fn => { this._providers.difficulty = fn; this._render(); },
 			/** Replace statblock d20 rolls: fn({instance, name, roll, rollMode, evt}) → Promise. */
 			setRollHandler: fn => { this._rollHandler = fn; },
@@ -375,7 +400,8 @@ export class EncounterCockpit {
 				pExhaustion: args => this._pExhaustion(args),
 				pNextTurn: () => this._pNextTurn(),
 				pPrevTurn: () => this._pPrevTurn(),
-				pRollInitiative: ids => this._pRollInitiative(ids),
+				/** opts: {isReroll, rollMode: "normal"|"advantage"|"disadvantage", toastText}. */
+				pRollInitiative: (ids, opts) => this._pRollInitiative(ids, opts),
 				pSetInitiative: (id, total) => this._pSetInitiative(id, total),
 				pResourceAction: (id, action) => this._pResourceAction(id, action),
 				pUndo: () => this._pUndo(),
@@ -624,20 +650,21 @@ export class EncounterCockpit {
 			? `${labels.get(ctx.activeInstanceId) || "Group"} +${sharedGroup.memberIds.length - 1}`
 			: ctx.activeInstanceId ? labels.get(ctx.activeInstanceId) : null;
 
-		const diff = this._getDifficulty(state);
+		const diff = this._getDifficulty(state, ctx);
 		const enc = h("div.ewc-bar__enc", null,
 			h("h1.ewc-bar__title", {title: state.sourceList?.name || ""}, state.sourceList?.name || "Encounter"),
-			diff ? h(`span.ewc-badge${diff.cls ? `.${diff.cls}` : ""}`, {title: diff.title || null}, diff.text) : null,
+			diff ? this._getDifficultyBadge(diff) : null,
 		);
 
 		const turn = h("div.ewc-bar__turn", {role: "group", "aria-label": "Turn"},
 			h("span.ewc-round", null, round ? ["Round ", h("b", {"data-ewc-round": ""}, `${round}`)] : h("span.ewc-muted", null, "Not started")),
 			turnName ? h("button.ewc-turnchip", {
 				type: "button",
-				title: "View the active creature (Space)",
+				title: `View ${turnName}, the active creature (Space)`,
+				"aria-keyshortcuts": "Space",
 				"data-ewc-turnchip": "",
 				onclick: () => this._viewActive(),
-			}, h("span.ewc-turnchip__dot", {"aria-hidden": "true"}), h("span.ewc-turnchip__n", null, turnName)) : null,
+			}, h("span.ewc-turnchip__dot", {"aria-hidden": "true"}), h("span.ewc-turnchip__n", null, turnName), kbd(getCockpitKeyLabels(["Space"], {isMac: this._isMac}))) : null,
 			h("button.ewc-btn.ewc-btn--ghost", {
 				type: "button",
 				"data-ewc-act": "prev",
@@ -667,7 +694,7 @@ export class EncounterCockpit {
 				"aria-keyshortcuts": "Shift+?",
 				"data-ewc-act": "help",
 				onclick: () => this._openHelp(),
-			}, h("span.ewc-btn__lbl", null, "Keys"), kbd(getCockpitKeyLabels(["Shift", "?"], {isMac: this._isMac}))),
+			}, h("span.ewc-btn__lbl", null, "Keys"), kbd(["⇧?"])),
 			this._getMenu(ctx),
 		);
 		this._ele.bar.replaceChildren(enc, turn, tools);
@@ -679,22 +706,91 @@ export class EncounterCockpit {
 		const can = isUndo ? this._engine.canUndo() : this._engine.canRedo();
 		const what = isUndo ? this._engine.getUndoLabel() : this._engine.getRedoLabel();
 		const verb = isUndo ? "Undo" : "Redo";
-		return h("button.ewc-btn.ewc-btn--icon", {
+		const label = getCockpitKeyLabels(keys, {isMac: this._isMac});
+		return h("button.ewc-btn.ewc-btn--ghost.ewc-bar__hist", {
 			type: "button",
 			"data-ewc-act": kind,
 			disabled: !can,
 			"aria-label": can ? `${verb}: ${what}` : `Nothing to ${kind}`,
-			title: can ? `${verb}: ${what} (${getCockpitKeyLabels(keys, {isMac: this._isMac}).join("+")})` : `Nothing to ${kind}`,
+			title: can ? `${verb}: ${what} (${label.join("+")})` : `Nothing to ${kind}`,
 			"aria-keyshortcuts": getCockpitAriaShortcut(keys, {isMac: this._isMac}),
-			html: isUndo ? SVG_UNDO : SVG_REDO,
 			onclick: () => isUndo ? this._pUndo() : this._pRedo(),
-		});
+		}, h("span.ewc-bar__hist-ico", {"aria-hidden": "true", html: isUndo ? SVG_UNDO : SVG_REDO}), kbd([this._getKbdCombo(label)]));
 	}
 
-	_getDifficulty (state) {
+	/** One compact chip per shortcut ("⌘Z", "Ctrl Y") keeps the bar narrow enough for the encounter cluster. */
+	_getKbdCombo (labels) {
+		return labels.join(this._isMac ? "" : " ");
+	}
+
+	/** The difficulty badge; a provider with renderPopover turns it into a button that opens a details popover. */
+	_getDifficultyBadge (diff) {
+		const cls = diff.cls && !diff.word ? `.${diff.cls}` : "";
+		const content = diff.word
+			? [h(`b.ewc-badge__w${diff.cls ? `.${diff.cls}` : ""}`, null, diff.word), h("span.ewc-badge__xp", null, diff.text)]
+			: diff.text;
+		if (typeof diff.renderPopover !== "function") return h(`span.ewc-badge${cls}`, {title: diff.title || null}, content);
+
+		const wasOpen = this._isDiffOpen;
+		const wrap = h("div.ewc-diffwrap");
+		const btn = h(`button.ewc-badge.ewc-badge--btn${cls}`, {
+			type: "button",
+			"aria-haspopup": "dialog",
+			"aria-expanded": "false",
+			"aria-controls": "ewc-diffpop",
+			"aria-label": diff.ariaLabel || null,
+			title: diff.title || null,
+			"data-ewc-act": "difficulty",
+		}, content);
+		const pop = h("div.ewc-diffpop", {id: "ewc-diffpop", role: "dialog", "aria-label": "Encounter difficulty and XP", hidden: true});
+		const onOutside = evt => { if (!wrap.contains(evt.target)) close(); };
+		const close = ({isFocus = false} = {}) => {
+			if (pop.hidden) return false;
+			pop.hidden = true;
+			this._isDiffOpen = false;
+			btn.setAttribute("aria-expanded", "false");
+			document.removeEventListener("pointerdown", onOutside, true);
+			if (isFocus) btn.focus();
+			return true;
+		};
+		const open = () => {
+			let body;
+			try {
+				body = diff.renderPopover(() => close({isFocus: true}));
+			} catch (e) {
+				rethrowLater(e);
+				body = h("p.ewc-muted", null, "Difficulty details are unavailable.");
+			}
+			pop.replaceChildren(body);
+			pop.hidden = false;
+			this._isDiffOpen = true;
+			btn.setAttribute("aria-expanded", "true");
+			document.addEventListener("pointerdown", onOutside, true);
+		};
+		btn.addEventListener("click", () => {
+			if (!pop.hidden) return close();
+			open();
+			(pop.querySelector("button:not([disabled]), a[href]") || pop).focus?.();
+		});
+		pop.tabIndex = -1;
+		pop.addEventListener("keydown", evt => {
+			if (evt.key !== "Escape") return;
+			evt.preventDefault();
+			evt.stopPropagation();
+			close({isFocus: true});
+		});
+		this._closeDiff?.();
+		this._closeDiff = close;
+		wrap.append(btn, pop);
+		if (wasOpen) open();
+		return wrap;
+	}
+
+	_getDifficulty (state, ctx) {
 		if (this._providers.difficulty) {
 			try {
-				return this._providers.difficulty(state);
+				const out = this._providers.difficulty(state, ctx);
+				if (out !== undefined) return out;
 			} catch (e) {
 				rethrowLater(e);
 			}
@@ -778,14 +874,34 @@ export class EncounterCockpit {
 		});
 		const unrolled = ctx.state.instances.filter(it => getEncounterInitiativeTotal(ctx.state, it) == null && !it.defeated);
 		const rollIds = (unrolled.length ? unrolled : ctx.state.instances).map(it => it.id);
+		const autoRecharge = h("input", {
+			type: "checkbox",
+			role: "switch",
+			checked: !!this._wsSettings.autoRollRecharge,
+			"data-ewc-setting": "autoRollRecharge",
+			onchange: () => this._pSaveWsSettings({autoRollRecharge: autoRecharge.checked}),
+		});
+		const foeIds = getCockpitFoeIds(ctx.state);
+		const foeReroll = h("div.ewc-seg", {role: "group", "aria-label": "Re-roll foe initiative"}, COCKPIT_ROLL_MODES.map(mode => h("button.ewc-seg__b", {
+			type: "button",
+			disabled: !foeIds.length,
+			title: foeIds.length ? `Re-roll initiative for ${getCockpitPlural(foeIds.length, "foe")} — ${mode.title}` : "No foes still fighting",
+			"data-ewc-menu": `rerollfoes-${mode.id}`,
+			onclick: () => {
+				close();
+				this._pRollInitiative(foeIds, {isReroll: true, rollMode: mode.id, toastText: getCockpitRerollToast(mode.id)});
+			},
+		}, mode.label)));
 
 		pop.append(
 			h("div.ewc-menu__h", null, "Encounter settings"),
 			h("div.ewc-menu__row", null, h("span", null, "Condition rules"), ruleset),
 			h("label.ewc-menu__row.ewc-menu__row--check", null, h("span", null, "Monsters make death saves"), deathSaves),
+			h("label.ewc-menu__row.ewc-menu__row--check", {title: "Roll 1d6 for each spent Recharge ability when its creature's turn starts"}, h("span", null, "Auto-roll recharge at turn start"), autoRecharge),
 			h("div.ewc-menu__sep", {role: "separator"}),
 			h("div.ewc-menu__h", null, "Initiative & turns"),
 			item(unrolled.length ? `Roll initiative for ${getCockpitPlural(unrolled.length, "creature")} without it` : "Re-roll everyone's initiative", () => this._pRollInitiative(rollIds, {isReroll: !unrolled.length}), {disabled: !ctx.state.instances.length, act: "rollinit"}),
+			h("div.ewc-menu__row", null, h("span", null, "Re-roll foe initiative"), foeReroll),
 			item("Reset turns to not started", () => this._pResetTurns(), {disabled: !ctx.state.turn?.round, act: "resetturns"}),
 			h("div.ewc-menu__sep", {role: "separator"}),
 			...this._ext.menuItems.map(it => item(it.keys ? [it.label, kbd(getCockpitKeyLabels(it.keys, {isMac: this._isMac}))] : it.label, () => it.onclick(), {disabled: !!it.disabled?.(ctx), title: it.title || null, act: it.id})),
@@ -793,11 +909,22 @@ export class EncounterCockpit {
 			item("Choose saved list…", () => this._pChooseList(), {disabled: !this._isCatalogReady, act: "choose"}),
 			item("Send to DM Screen", () => this._pSendToDmScreen(), {disabled: !ctx.state.instances.length, title: "Queue the selection (or everyone still fighting) for the DM Screen initiative tracker", act: "dmscreen"}),
 			h("a.ewc-menu__item", {role: "menuitem", href: "encounterworkspace.html?ew=1"}, "Open the classic workspace"),
+			item("Show the how-to hint", () => this._runHooks("showHint"), {act: "hint"}),
 			item(["Keyboard shortcuts", kbd(getCockpitKeyLabels(["Shift", "?"], {isMac: this._isMac}))], () => this._openHelp(), {act: "shortcuts"}),
 		);
 		wrap.append(btn, pop);
 		if (wasOpen) open();
 		return wrap;
+	}
+
+	async _pSaveWsSettings (patch) {
+		try {
+			this._wsSettings = await this._wsSettingsStore.pSave({...this._wsSettings, ...patch});
+			this.toast(this._wsSettings.autoRollRecharge ? "Recharge abilities roll at the start of each monster's turn." : "Recharge rolls are manual.");
+		} catch (e) {
+			this.toast(`Settings were not saved: ${getErrorMessage(e)}.`, {kind: "error"});
+		}
+		this._render();
 	}
 
 	async _pSaveSettings (patch) {
@@ -961,6 +1088,7 @@ export class EncounterCockpit {
 			},
 			escape: () => {
 				if (this._closeMenu?.({isFocus: true})) return;
+				if (this._closeDiff?.({isFocus: true})) return;
 				if (this._rail.closePopover({isRestoreFocus: true})) return;
 				if (this._rail._cb.group?.close?.()) return;
 				if (this._dock.cancelReview()) return;
@@ -993,13 +1121,29 @@ export class EncounterCockpit {
 				h("h2.ewc-dialog__title", {id: "ewc-keys-title"}, "Keyboard shortcuts"),
 				h("button.ewc-btn.ewc-btn--icon", {type: "button", "aria-label": "Close", "data-ewc-act": "close-keys", onclick: () => this._dlgHelp.close()}, "×"),
 			),
-			h("p.ewc-muted", null, "Shortcuts never fire while you're typing in a field — press Esc to leave the field first."),
+			h("p.ewc-muted", null, "Single keys work whenever you're not typing in a field — press Esc to leave the field first."),
 			h("div.ewc-keys__grid", null, sheet.map(section => h("section.ewc-keys__sec", null,
 				h("h3.ewc-keys__h", null, section.name),
 				h("dl.ewc-keys__dl", null, section.rows.map(row => h("div.ewc-keys__row", null, h("dt", null, kbd(row.keys)), h("dd", null, row.label)))),
 			))),
+			this._getGlyphLegend(),
 		);
 		this._dlgHelp.showModal();
+	}
+
+	/** D47: what the marks on rail rows and statblock pills mean — the same glyphs and pill styles the rail draws. */
+	_getGlyphLegend () {
+		const words = {up: "Buff", down: "Debuff", bf: "Battlefield effect", tpl: "Template"};
+		const rows = [
+			...COCKPIT_TALLY_BUCKETS.map(([k, glyph]) => [h(`span.ewc-pill.ewc-pill--fx.ewc-pill--${k}`, null, glyph), words[k]]),
+			[h("span.ewc-pill.ewc-pill--cond", null, "Prone ", h("small", null, "2r")), "Condition · rounds left"],
+			[h("span.ewc-keys__conc", null, "◉ Conc"), "Concentrating (click for the spell)"],
+			[h("span.ewc-pill.ewc-pill--more", null, "+2"), "More on the viewed creature"],
+		];
+		return h("section.ewc-keys__sec.ewc-keys__legend", {"data-ewc-legend": ""},
+			h("h3.ewc-keys__h", null, "Pill glyphs"),
+			h("dl.ewc-keys__dl", null, rows.map(([mark, label]) => h("div.ewc-keys__row", null, h("dt", null, mark), h("dd", null, label)))),
+		);
 	}
 
 	/* -------------------------------------------- Turns & initiative -------------------------------------------- */
@@ -1011,11 +1155,43 @@ export class EncounterCockpit {
 			return;
 		}
 		const isStart = !state.turn?.round;
-		const next = await this._pCommit(isStart ? "Start combat" : "Next turn", (draft, {log}) => withCockpitTurnAdvanced(
-			EncounterWorkspaceState.withTurn(draft, isStart ? "start" : "next"),
-			{previousTurn: state.turn, log},
-		));
-		if (next) this._afterTurnChange(state, next);
+		const mode = isStart ? "start" : "next";
+		const rolls = this._wsSettings.autoRollRecharge ? await this._pRollTurnRecharges(state, mode) : [];
+		if (this._engine.getState() !== state) return this.toast("The encounter changed while rolling recharge; the turn did not advance.", {kind: "error"});
+		let readyCount = 0;
+		const next = await this._pCommit(isStart ? "Start combat" : "Next turn", (draft, {log}) => {
+			const advanced = withCockpitTurnAdvanced(EncounterWorkspaceState.withTurn(draft, mode), {previousTurn: state.turn, log});
+			if (!rolls.length) return advanced;
+			const out = withCockpitRechargeRolls(advanced, rolls, {labels: this._getLabels(advanced), log});
+			readyCount = out.readyCount;
+			return out.state;
+		});
+		if (!next) return;
+		this._afterTurnChange(state, next);
+		if (rolls.length) this.toast(`Recharge: ${readyCount} of ${rolls.length} spent ${rolls.length === 1 ? "ability" : "abilities"} ready.`, {isUndo: true});
+	}
+
+	/** D6: roll 1d6 for each spent Recharge ability of whoever's turn is about to start. Rolls happen before the commit. */
+	async _pRollTurnRecharges (state, mode) {
+		let preview;
+		try {
+			preview = EncounterWorkspaceState.withTurn(state, mode);
+		} catch {
+			return [];
+		}
+		const labels = this._getLabels(preview);
+		const rolls = [];
+		for (const {id, recharge} of getCockpitTurnRecharges(preview)) {
+			let roll = null;
+			try {
+				roll = await Renderer.dice.pRoll2("1d6", {isUser: false, name: labels.get(id), label: `${recharge.name} recharge (${recharge.min}–6)`}, {isResultUsed: false});
+			} catch (e) {
+				rethrowLater(e);
+			}
+			if (!Number.isInteger(roll) || roll < 1 || roll > 6) roll = RollerUtil.randomise(6);
+			rolls.push({id, rechargeId: recharge.id, roll});
+		}
+		return rolls;
 	}
 
 	async _pPrevTurn () {
@@ -1045,7 +1221,7 @@ export class EncounterCockpit {
 		await this._pCommit(total == null ? `Clear initiative — ${label}` : `Initiative ${total} — ${label}`, draft => EncounterWorkspaceState.withInitiative(draft, {id, total}));
 	}
 
-	async _pRollInitiative (ids, {isReroll = false} = {}) {
+	async _pRollInitiative (ids, {isReroll = false, rollMode = "normal", toastText = null} = {}) {
 		const state = this._engine.getState();
 		const labels = this._getLabels(state);
 		const seen = new Set();
@@ -1064,7 +1240,7 @@ export class EncounterCockpit {
 				continue;
 			}
 			try {
-				const rolled = await pRollEncounterInstance({instance, name, rollType: "initiative", key: "dex", label: "Initiative (Dexterity check)"});
+				const rolled = await pRollEncounterInstance({instance, name, rollType: "initiative", key: "dex", label: "Initiative (Dexterity check)", rollMode});
 				results.push({id, total: rolled.total});
 				lines.push(`${name} ${rolled.total}`);
 			} catch (e) {
@@ -1072,12 +1248,12 @@ export class EncounterCockpit {
 			}
 		}
 		if (!results.length) return this.toast(lines.length ? `No initiative rolled. ${lines.join(" · ")}.` : "No initiative to roll.", {kind: "error"});
-		const summary = `Initiative: ${lines.join(" · ")}`;
+		const summary = `Initiative${rollMode === "normal" ? "" : ` (${rollMode})`}: ${lines.join(" · ")}`;
 		const next = await this._pCommit(isReroll ? "Re-roll initiative" : "Roll initiative", (draft, {log}) => {
 			log("roll", summary);
 			return EncounterWorkspaceState.withInitiativeResults(draft, results);
 		});
-		if (next) this.toast(`${summary}.`, {isUndo: true});
+		if (next) this.toast(toastText ? `${toastText} ${summary}.` : `${summary}.`, {isUndo: true});
 	}
 
 	/* -------------------------------------------- Rolls & resources -------------------------------------------- */

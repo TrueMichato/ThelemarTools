@@ -65,6 +65,34 @@
 					color: var(--ewc-ink-2);
 				}
 			}
+
+			&__legend {
+				margin-top: 16px;
+				padding-top: 12px;
+				border-top: 1px solid var(--ewc-hair);
+
+				.ewc-keys__dl {
+					display: grid;
+					grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+					gap: 6px 22px;
+				}
+
+				.ewc-pill {
+					cursor: default;
+				}
+			}
+
+			&__conc {
+				padding: 0 6px;
+				border: 1px solid var(--ewc-ind-line);
+				border-radius: 999px;
+				background: var(--ewc-ind-soft);
+				color: var(--ewc-ind-text);
+				font-size: var(--ewc-f-2xs);
+				font-weight: 600;
+				line-height: 18px;
+				white-space: nowrap;
+			}
 		}
 	}
 }
