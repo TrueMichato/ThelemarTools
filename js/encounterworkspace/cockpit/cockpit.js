@@ -193,7 +193,7 @@ export class EncounterCockpit {
 				h("div.ewc-stage__alt", {hidden: true}),
 				h("div.ewc-stage__bottom"),
 			),
-			h("aside.ewc-dock", {"aria-label": "Act on the target"}),
+			h("aside.ewc-dock", {"aria-label": "Act on the target"}, h("div.ewc-dock__top"), h("div.ewc-dock__main")),
 			h("div.ewc-layer"),
 			h("div.ewc-toasts", {"aria-live": "polite"}),
 		);
@@ -208,7 +208,8 @@ export class EncounterCockpit {
 			stageAlt: get(".ewc-stage__alt"),
 			stageBottom: get(".ewc-stage__bottom"),
 			layer: get(".ewc-layer"),
-			dock: get(".ewc-dock"),
+			dock: get(".ewc-dock__main"),
+			dockTop: get(".ewc-dock__top"),
 			toasts: get(".ewc-toasts"),
 		};
 		document.body.classList.add("ewc-page");
@@ -321,8 +322,11 @@ export class EncounterCockpit {
 			isMac: this._isMac,
 
 			/* ---- Regions: persistent elements the shell never re-renders. Features own their contents. ---- */
-			/** "stageTop" (strips above the viewed creature), "stageBottom" (drawers under it), "layer" (overlays, dialogs). */
-			getRegion: name => ({stageTop: this._ele.stageTop, stageBottom: this._ele.stageBottom, layer: this._ele.layer})[name] || null,
+			/**
+			 * "stageTop" (strips above the viewed creature), "stageBottom" (drawers under it), "dockTop" (the console, roll
+			 * tray and feed — persistent, above the dock tabs; never re-rendered by the dock), "layer" (overlays, dialogs).
+			 */
+			getRegion: name => ({stageTop: this._ele.stageTop, stageBottom: this._ele.stageBottom, dockTop: this._ele.dockTop, layer: this._ele.layer})[name] || null,
 			/** fn(ctx) after every render — keep persistent regions in sync. Returns an unsubscribe. */
 			onRender: fn => this._addHook("render", fn),
 

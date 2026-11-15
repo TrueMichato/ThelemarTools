@@ -7,6 +7,7 @@ import {expect, test, type Page} from "@playwright/test";
  * where the real site proves the same behaviour, to a test in this file, or to N/A with the reason. Abbreviations:
  *   SHELL  encounter-cockpit-shell.spec.ts › "drives a real saved encounter end-to-end with zero console errors"
  *   ACT    encounter-cockpit-act.spec.ts   › "roll tab, tray, fx, builder, console and row entry point on real data"
+ *   DOCK   encounter-cockpit-act.spec.ts   › "dock: docked console, tray in the dock column, duration stepper, skill chips, roll-time prompt"
  *   SHOTS  encounter-cockpit-act.spec.ts   › "screenshots: day and night, wide and narrow"
  *   PREP   encounter-cockpit-prep.spec.ts  › "Q toggles prep; creature, effects, battlefield and items tools …"
  *   ADD    encounter-cockpit-prep.spec.ts  › "Shift+A adds real bestiary creatures into their group, and party members"
@@ -59,7 +60,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 631 A4 §2c editor modal before/after, ⌘↵ saves                          | PREP (Creature › Edit opens the real editor)                              |
  * | 643 A4 bulk quick edit on multi-select; JSON validates                  | PREP (quick edit, invalid AC blocks Apply)                                |
  * | 655 A4 §3 Templates → creature types, eligibility, one-step apply       | SWEEP (transform preview on 30 monsters + Zombie apply on Bugbear)        |
- * | 678 A4 §4 Effects catalogue, preset, rounds, remove                     | ACT (Bless/Bane, durations) + PREP (effects tab)                          |
+ * | 678 A4 §4 Effects catalogue, preset, rounds, remove                     | ACT (Bless/Bane, durations) + DOCK (stepper, readout) + PREP (effects tab) |
  * | 694 A4 §4 custom roll effect builder → affects a mass roll              | ACT (builder → Shield wall in the breakdown)                              |
  * | 710 A4 §5 darkness: no-darkvision creatures Blinded; dim for darkvision | P3 (Darkness → attack disadvantage without darkvision, none with it). Row/statblock "Blinded" badge: N/A, sight isn't surfaced on rows |
  * | 720 A4 §5 magical darkness / fog                                        | Rules: EncounterCockpitBattlefield Jest. UI: same path as 710 (P3)        |
@@ -67,9 +68,9 @@ import {expect, test, type Page} from "@playwright/test";
  * | 741 A4 §5 lair groups + magic item + add legendary action               | PREP (legendary action, items tab). Lair groups: N/A                      |
  * | 760 A4 §5 text-only area & lair reminders                               | PREP (battlefield strip)                                                  |
  * | 771 A4 §6 dock tabs H/R/C/E                                             | SHELL (C) + ACT (E) + P1 (H)                                              |
- * | 780 A4 §6 Skill: search skills, adv, per-creature rows                  | ACT (Roll tab) + P3 (console `check stealth adv`)                         |
+ * | 780 A4 §6 Skill: search skills, adv, per-creature rows                  | DOCK (search chips) + ACT (Roll tab) + P3 (console `check stealth adv`)   |
  * | 794 A4 §6 Save DC + damage → Select those who failed                    | ACT                                                                       |
- * | 808 A4 §6 roll-time prompt before rolling                               | N/A: the real cockpit applies contributors without a pre-roll prompt      |
+ * | 808 A4 §6 roll-time prompt before rolling                               | DOCK (frightened: No / Cancel that roll / Esc). Answers apply per source, not per creature |
  * | 817 A4 §6 console roll/check/save                                       | ACT (save) + P3 (check)                                                   |
  * | 827 A4 §7 Areas "Applies to" never overflows                            | P1 (dock doesn't overflow) + SHOTS                                        |
  * | 835 A4 §8 saved-list import + DM Screen handoff                         | P1 (⋯ menu has the DM Screen entry); handoff behaviour is the handoff child's |

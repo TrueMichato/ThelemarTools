@@ -10,8 +10,11 @@ import {
 	getCockpitCasterOptions,
 	getCockpitConcentrationWarning,
 	getCockpitDefenseOf,
+	getCockpitDurationNormalized,
 	getCockpitDurationParts,
+	getCockpitDurationReadout,
 	getCockpitDurationRounds,
+	getCockpitDurationStep,
 	getCockpitEffectDef,
 	getCockpitEffectSummary,
 	getCockpitEmptyEffectForm,
@@ -40,6 +43,27 @@ describe("Encounter cockpit Act — effects", () => {
 		expect(getCockpitDurationParts(100)).toEqual({amount: "10", unit: "min"});
 		expect(getCockpitDurationParts(3)).toEqual({amount: "3", unit: "round"});
 		expect(getCockpitDurationParts(null)).toEqual({amount: "", unit: "until"});
+	});
+
+	test("the duration readout shows rounds and table time; the stepper steps the unit being typed", () => {
+		expect(getCockpitDurationReadout(3)).toBe("3 rounds");
+		expect(getCockpitDurationReadout(1)).toBe("1 round");
+		expect(getCockpitDurationReadout(10)).toBe("10 rounds · 1 min");
+		expect(getCockpitDurationReadout(15)).toBe("15 rounds · 1.5 min");
+		expect(getCockpitDurationReadout(4800)).toBe("4800 rounds · 8 h");
+		expect(getCockpitDurationReadout(null)).toBe("until removed");
+
+		expect(getCockpitDurationStep({amount: "1", unit: "min"}, 1)).toEqual({amount: "2", unit: "min"});
+		expect(getCockpitDurationStep({amount: "1", unit: "min"}, -1)).toEqual({amount: "1", unit: "min"});
+		expect(getCockpitDurationStep({amount: "8 h", unit: "round"}, -1)).toEqual({amount: "7", unit: "hour"});
+		expect(getCockpitDurationStep({amount: "", unit: "until"}, 1)).toEqual({amount: "1", unit: "round"});
+		expect(getCockpitDurationStep({amount: "soon", unit: "min"}, 1)).toEqual({amount: "1", unit: "min"});
+
+		expect(getCockpitDurationNormalized({amount: "10 r", unit: "min"})).toEqual({amount: "10", unit: "round"});
+		expect(getCockpitDurationNormalized({amount: "1.5 h", unit: "round"})).toEqual({amount: "1.5", unit: "hour"});
+		expect(getCockpitDurationNormalized({amount: "∞", unit: "round"})).toEqual({amount: "", unit: "until"});
+		expect(getCockpitDurationNormalized({amount: "12", unit: "until"})).toEqual({amount: "12", unit: "round"});
+		expect(getCockpitDurationNormalized({amount: "2 weeks", unit: "min"})).toEqual({amount: "2 weeks", unit: "min"});
 	});
 
 	test("targeted mods are grouped so Dex saves, one skill, attacks, AC, speed and initiative are each reachable", () => {

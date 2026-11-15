@@ -14,12 +14,11 @@ import {
 	getCockpitTrayCounts,
 	getCockpitTrayRows,
 } from "./act-roll-model.js";
-import {bindCockpitSource, getKbd, getSeg, getWhoText, plural, trackCockpitTrayRoom} from "./act-shared.js";
+import {bindCockpitSource, getKbd, getSeg, getWhoText, plural} from "./act-shared.js";
 
 export function createCockpitRollTray (api) {
 	const root = h("section.ewc-tray", {"aria-label": "Roll results", hidden: true, "data-ewc-tray": ""});
-	api.getRegion("layer").append(root);
-	const setRoom = trackCockpitTrayRoom(root);
+	api.getRegion("dockTop").append(root);
 
 	let tray = null; // {title, rolled, outcome, sort, open: Set, status, review}
 	const showListeners = [];
@@ -28,7 +27,6 @@ export function createCockpitRollTray (api) {
 		tray = null;
 		root.hidden = true;
 		root.replaceChildren();
-		setRoom();
 	};
 
 	const show = (rolled, {title, outcome = null, isFocus = true}) => {
@@ -36,7 +34,6 @@ export function createCockpitRollTray (api) {
 		showListeners.forEach(fn => fn());
 		root.hidden = false;
 		render();
-		setRoom();
 		if (isFocus) root.querySelector("[data-ewc-tray-primary]")?.focus({preventScroll: true});
 	};
 

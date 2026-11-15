@@ -57,22 +57,4 @@ export function getSeg ({label, options, value, onPick, fk, isFull = false}) {
 	}, it.label)));
 }
 
-/**
- * The floating trays cover the bottom of the stage. Publish the open tray's height (plus its 12px inset) as
- * `--ewc-tray-room` on the cockpit root so the stage can scroll its last lines — often the next attack to roll —
- * clear of it. Returns a function to call after showing or hiding without a resize (e.g. jsdom).
- */
-export function trackCockpitTrayRoom (trayRoot) {
-	const layer = trayRoot.parentElement;
-	const room = layer?.parentElement;
-	const update = () => {
-		const height = Math.max(0, ...[...layer.querySelectorAll(":scope > .ewc-tray")].filter(it => !it.hidden).map(it => it.offsetHeight));
-		if (height) room.style.setProperty("--ewc-tray-room", `${height + 12}px`);
-		else room.style.removeProperty("--ewc-tray-room");
-	};
-	if (!room) return () => {};
-	if (globalThis.ResizeObserver) new ResizeObserver(update).observe(trayRoot);
-	return update;
-}
-
 export const getOption = (value, label, selected) => h("option", {value, selected: value === selected}, label);

@@ -1,12 +1,10 @@
 // Encounter cockpit P3a (act): the dock Roll and Fx tabs, the custom-effect builder, the roll tray and the `/`
 // console. Scoped under `.ewc`, built only on the shell tokens (`--ewc-*`), so night mode comes for free.
-// The tray and console live in the shell's layer and float over the stage, between the rail and the dock.
+// The console, the roll tray and the statblock feed sit in the shell's dock-top region (mockup §6): they never cover
+// the stage or the statblock.
 
 @layer vetools {
 	.ewc {
-		--ewc-act-gap-l: calc(var(--ewc-rail-w) + 16px);
-		--ewc-act-gap-r: calc(var(--ewc-dock-w) + 16px);
-
 		// ---------------- shared dock bits ----------------
 		.ewc-act {
 			&__row {
@@ -14,6 +12,45 @@
 				flex-wrap: wrap;
 				align-items: center;
 				gap: 6px;
+			}
+
+			// Roll tab skill chips (a searchable radiogroup, mockup `.skchips`).
+			&__tchips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+				margin-top: 6px;
+			}
+
+			&__tchip {
+				min-height: 24px;
+				padding: 0 8px;
+				border: 1px solid var(--ewc-hair-2);
+				border-radius: 999px;
+				background: var(--ewc-raised);
+				color: var(--ewc-ink-2);
+				font-size: var(--ewc-f-xs);
+
+				small {
+					color: var(--ewc-ink-4);
+					font-size: var(--ewc-f-2xs);
+				}
+
+				&:hover {
+					border-color: var(--ewc-hair-3);
+					color: var(--ewc-ink);
+				}
+
+				&[aria-checked="true"] {
+					border-color: var(--ewc-ind-line);
+					background: var(--ewc-ind-soft-2);
+					color: var(--ewc-ink);
+					font-weight: 600;
+
+					small {
+						color: var(--ewc-ind-text);
+					}
+				}
 			}
 
 			&__segfull {
@@ -203,8 +240,52 @@
 				line-height: 1.45;
 			}
 
+			&__dur {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+
+				> select {
+					flex: 1 1 auto;
+					width: auto;
+					min-width: 0;
+				}
+			}
+
+			&__stepper {
+				display: inline-flex;
+				flex: none;
+				align-items: stretch;
+				overflow: hidden;
+				border: 1px solid var(--ewc-hair-2);
+				border-radius: var(--ewc-r-s);
+				background: var(--ewc-base);
+
+				&:focus-within {
+					border-color: var(--ewc-ind-line);
+				}
+			}
+
+			&__step {
+				width: 28px;
+				border: 0;
+				background: none;
+				color: var(--ewc-ink-2);
+				font-size: var(--ewc-f-l);
+				line-height: 1;
+
+				&:hover {
+					background: var(--ewc-raised);
+					color: var(--ewc-ink);
+				}
+			}
+
 			&__amt {
-				width: 64px;
+				width: 56px;
+				border: 0;
+				border-radius: 0;
+				box-shadow: none;
+				text-align: center;
 			}
 
 			&__warn {
@@ -444,38 +525,26 @@
 			}
 		}
 
-		// ---------------- floating surfaces (layer) ----------------
-		.ewc-tray,
-		.ewc-con {
-			position: fixed;
-			z-index: 40;
-			right: var(--ewc-act-gap-r);
-			left: var(--ewc-act-gap-l);
-			border: 1px solid var(--ewc-hair-2);
-			border-radius: var(--ewc-r-m);
-			background: var(--ewc-chrome);
-			box-shadow: var(--ewc-shadow-pop);
+		// ---------------- roll tray (dock top) ----------------
+		.ewc-tray {
+			display: flex;
+			flex: none;
+			flex-direction: column;
+			gap: 8px;
+			max-height: min(40vh, 380px);
+			margin: 8px 12px 0;
+			padding: 8px 10px 10px;
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			border: 1px solid var(--ewc-hair);
+			border-left: 3px solid var(--ewc-ind-line);
+			border-radius: var(--ewc-r-s);
+			background: var(--ewc-surface);
+			animation: ewc-act-in var(--ewc-t-fast) var(--ewc-ease);
 
 			&[hidden] {
 				display: none;
 			}
-		}
-
-		// ---------------- roll tray ----------------
-		// While the tray is open the stage can scroll its last lines above it (act-tray.js sets the height).
-		.ewc-stage__scroll {
-			padding-bottom: calc(24px + var(--ewc-tray-room, 0px));
-		}
-
-		.ewc-tray {
-			bottom: 12px;
-			display: flex;
-			flex-direction: column;
-			gap: 8px;
-			max-height: min(44vh, 420px);
-			padding: 10px 12px 12px;
-			overflow-y: auto;
-			overscroll-behavior: contain;
 
 			&__head {
 				display: flex;
@@ -521,9 +590,10 @@
 
 			&__row {
 				display: grid;
-				grid-template-columns: 12px minmax(0, 1fr) auto 34px minmax(0, 1.1fr) 58px;
+				// The dock is narrow: the verdict text lives in the total's title and the expanded lines.
+				grid-template-columns: 12px minmax(0, 1fr) auto 30px 52px;
 				align-items: center;
-				gap: 8px;
+				gap: 6px;
 				width: 100%;
 				min-height: 32px;
 				padding: 0 4px;
@@ -594,10 +664,7 @@
 			}
 
 			&__text {
-				overflow: hidden;
-				font-size: var(--ewc-f-xs);
-				text-overflow: ellipsis;
-				white-space: nowrap;
+				display: none;
 			}
 
 			&__verdict {
@@ -651,13 +718,17 @@
 				display: flex;
 				flex-wrap: wrap;
 				align-items: center;
-				gap: 6px;
+				gap: 4px;
 				padding-top: 8px;
 				border-top: 1px solid var(--ewc-hair);
 			}
 
 			&__apply {
-				margin-left: auto;
+				flex: 1 1 100%;
+				justify-content: flex-start;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
 
 			&__status {
@@ -669,6 +740,10 @@
 		// ---------------- statblock roll feed (shares the tray slot) ----------------
 		.ewc-feed {
 			gap: 6px;
+			padding: 6px 0 2px;
+			border: 0;
+			border-radius: 0;
+			background: none;
 
 			&__clear {
 				margin-left: auto;
@@ -692,12 +767,20 @@
 				border-radius: var(--ewc-r-s);
 				background: var(--ewc-surface);
 
-				&--atk .ewc-feed__k {
-					color: var(--ewc-ind-text);
+				&--atk {
+					border-left: 3px solid var(--ewc-ind-line);
+
+					.ewc-feed__k {
+						color: var(--ewc-ind-text);
+					}
 				}
 
-				&--dmg .ewc-feed__k {
-					color: var(--ewc-bad);
+				&--dmg {
+					border-left: 3px solid var(--ewc-bad-line);
+
+					.ewc-feed__k {
+						color: var(--ewc-bad);
+					}
 				}
 
 				&.is-applied {
@@ -804,10 +887,20 @@
 				display: flex;
 				flex-wrap: wrap;
 				gap: 4px;
+				margin-top: 2px;
+
+				.ewc-btn--primary {
+					flex: 1 1 100%;
+					justify-content: flex-start;
+					overflow: hidden;
+					text-overflow: ellipsis;
+					white-space: nowrap;
+				}
 
 				[aria-pressed="true"] {
-					border-color: var(--ewc-ind-text);
-					color: var(--ewc-ind-text);
+					border-color: var(--ewc-ind-line);
+					background: var(--ewc-ind-soft-2);
+					color: var(--ewc-ink);
 				}
 			}
 
@@ -815,6 +908,7 @@
 				margin: 0;
 				color: var(--ewc-ok);
 				font-size: var(--ewc-f-xs);
+				font-weight: 500;
 			}
 
 			&__more {
@@ -822,27 +916,102 @@
 			}
 		}
 
+		// Tray and feed actions are bordered chips, not bare ghost text (mockup `.tbtn`).
+		.ewc-tray .ewc-btn--sm.ewc-btn--ghost,
+		.ewc-tray__bulk .ewc-btn--sm:not(.ewc-btn--primary) {
+			border-color: var(--ewc-hair-2);
+			font-size: var(--ewc-f-xs);
+
+			&:hover:not(:disabled) {
+				border-color: var(--ewc-hair-3);
+				background: var(--ewc-raised);
+				color: var(--ewc-ink);
+			}
+		}
+
 		// ---------------- command console ----------------
 		.ewc-con {
-			top: calc(var(--ewc-top, 0px) + var(--ewc-bar-h) + 10px);
 			display: flex;
+			flex: none;
 			flex-direction: column;
-			max-height: calc(100vh - var(--ewc-top, 0px) - var(--ewc-bar-h) - 32px);
-			overflow: hidden auto;
+			min-width: 0;
 
 			&__bar {
 				display: flex;
 				align-items: center;
 				gap: 6px;
-				height: 42px;
-				padding: 0 6px 0 12px;
-				border-bottom: 1px solid var(--ewc-hair);
+				height: 38px;
+				margin: 10px 12px 0;
+				padding: 0 4px 0 10px;
+				border: 1px solid var(--ewc-hair-2);
+				border-radius: var(--ewc-r-s);
+				background: var(--ewc-base);
+				cursor: text;
+				transition: border-color var(--ewc-t-fast) var(--ewc-ease), box-shadow var(--ewc-t-fast) var(--ewc-ease);
+
+				&:hover {
+					border-color: var(--ewc-hair-3);
+				}
+			}
+
+			&.is-open &__bar,
+			&__bar:focus-within {
+				border-color: var(--ewc-ind-line);
+				box-shadow: 0 0 0 3px var(--ewc-ind-soft);
 			}
 
 			&__prompt {
-				color: var(--ewc-ind-text);
+				color: var(--ewc-ink-4);
 				font-family: var(--ewc-mono);
 				font-weight: 700;
+			}
+
+			&.is-open &__prompt {
+				color: var(--ewc-ind-text);
+			}
+
+			&__key {
+				flex: none;
+				padding-right: 4px;
+			}
+
+			&__run,
+			&__x {
+				display: none;
+			}
+
+			&.is-open &__key {
+				display: none;
+			}
+
+			&.is-open &__run {
+				display: inline-flex;
+				flex: none;
+			}
+
+			&.is-open &__x {
+				display: inline-flex;
+			}
+
+			&__idle {
+				margin: 5px 14px 0;
+				color: var(--ewc-ink-3);
+				font-size: var(--ewc-f-xs);
+				line-height: 1.45;
+
+				&[hidden] {
+					display: none;
+				}
+			}
+
+			&__panel {
+				max-height: min(46vh, 420px);
+				overflow-y: auto;
+				overscroll-behavior: contain;
+
+				&[hidden] {
+					display: none;
+				}
 			}
 
 			&__in {
@@ -867,15 +1036,12 @@
 				}
 			}
 
-			&:focus-within {
-				border-color: var(--ewc-ind-line);
-			}
-
-			&.is-error {
+			&.is-error &__bar {
 				border-color: var(--ewc-warn-line);
+				box-shadow: 0 0 0 3px var(--ewc-warn-soft);
 			}
 
-			&.is-shake {
+			&.is-shake &__bar {
 				animation: ewc-act-shake 220ms var(--ewc-ease);
 			}
 
@@ -888,7 +1054,7 @@
 				display: flex;
 				flex-direction: column;
 				gap: 8px;
-				padding: 10px 14px 12px;
+				padding: 8px 14px 10px;
 				color: var(--ewc-ink-3);
 				font-size: var(--ewc-f-xs);
 				line-height: 1.45;
@@ -898,10 +1064,26 @@
 				}
 			}
 
+			&__cheatwrap {
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
+			}
+
+			&__exs {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px;
+			}
+
+			&__more {
+				align-self: flex-start;
+			}
+
 			&__cheat {
-				display: grid;
-				grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-				gap: 6px 16px;
+				display: flex;
+				flex-direction: column;
+				gap: 6px;
 			}
 
 			&__cg {
@@ -921,8 +1103,9 @@
 			}
 
 			&__ex {
-				padding: 0 5px;
-				border: 1px solid transparent;
+				min-height: 22px;
+				padding: 0 6px;
+				border: 1px solid var(--ewc-hair-2);
 				border-radius: var(--ewc-r-xs);
 				background: var(--ewc-raised);
 				color: var(--ewc-ink-2);
@@ -971,8 +1154,8 @@
 			}
 
 			&__pvn {
-				flex: 0 0 auto;
-				min-width: 120px;
+				flex: 0 1 auto;
+				min-width: 90px;
 				color: var(--ewc-ink);
 				font-weight: 500;
 			}
@@ -990,14 +1173,6 @@
 				color: var(--ewc-ok);
 			}
 
-			&__open {
-				gap: 6px;
-			}
-
-			&__glyph {
-				font-family: var(--ewc-mono);
-				font-weight: 700;
-			}
 		}
 
 		// Row entry point: a compact `›_` next to the shell's Dmg / Heal / Cond quick actions.
@@ -1011,6 +1186,44 @@
 		.ewc-row--con {
 			box-shadow: inset 3px 0 0 var(--ewc-ind-strong), inset 0 0 0 1px var(--ewc-ind-line);
 		}
+
+		// D41 — "Before rolling…" prompt (mockup `.pq`).
+		.ewc-prompt {
+			&.ewc-dialog {
+				width: min(560px, calc(100vw - 32px));
+			}
+
+			&__sub {
+				margin: 2px 0 0;
+				color: var(--ewc-ink-3);
+				font-size: var(--ewc-f-s);
+			}
+
+			&__qs {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+				margin: 0;
+				padding-left: 18px;
+				font-size: var(--ewc-f-s);
+			}
+
+			&__text {
+				margin: 0 0 6px;
+
+				small {
+					display: block;
+					margin-top: 2px;
+				}
+			}
+
+			&__foot {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				margin-top: 16px;
+			}
+		}
 	}
 
 	@keyframes ewc-act-new {
@@ -1020,6 +1233,18 @@
 
 		100% {
 			background: transparent;
+		}
+	}
+
+	@keyframes ewc-act-in {
+		0% {
+			opacity: 0;
+			transform: translateY(-4px);
+		}
+
+		100% {
+			opacity: 1;
+			transform: none;
 		}
 	}
 
@@ -1038,36 +1263,9 @@
 		}
 	}
 
-	@media (width <= 1180px) {
-		.ewc .ewc-con__lbl {
-			display: none;
-		}
-	}
-
-	@media (width <= 1000px) {
-		.ewc {
-			--ewc-act-gap-l: calc(var(--ewc-rail-w) + 8px);
-			--ewc-act-gap-r: calc(var(--ewc-dock-w) + 8px);
-
-			.ewc-tray__row {
-				grid-template-columns: 12px minmax(0, 1fr) auto 30px 52px;
-			}
-
-			.ewc-tray__text {
-				display: none;
-			}
-		}
-	}
-
-	@media (width <= 760px) {
-		.ewc {
-			--ewc-act-gap-l: 8px;
-			--ewc-act-gap-r: 8px;
-		}
-	}
-
 	@media (prefers-reduced-motion: reduce) {
-		.ewc .ewc-con.is-shake,
+		.ewc .ewc-con.is-shake .ewc-con__bar,
+		.ewc .ewc-tray,
 		.ewc .ewc-fx__aitem.is-new {
 			animation: none;
 		}

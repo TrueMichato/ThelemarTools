@@ -27,7 +27,7 @@ import {
 	getCockpitStatblockDamage,
 	getCockpitStatblockRollQuery,
 } from "./act-feed-model.js";
-import {bindCockpitSource, getWhoText, plural, trackCockpitTrayRoom} from "./act-shared.js";
+import {bindCockpitSource, getWhoText, plural} from "./act-shared.js";
 
 const KIND_LABELS = {attack: "Attack", save: "Save", check: "Check", initiative: "Initiative", damage: "Damage"};
 
@@ -49,8 +49,7 @@ function getTrailingText (link) {
 
 export function createCockpitRollFeed (api, {tray, console: commandConsole}) {
 	const root = h("section.ewc-tray.ewc-feed", {"aria-label": "Statblock rolls", hidden: true, "data-ewc-feed": ""});
-	api.getRegion("layer").append(root);
-	const setRoom = trackCockpitTrayRoom(root);
+	api.getRegion("dockTop").append(root);
 
 	let cards = [];
 	let isAll = false;
@@ -59,7 +58,6 @@ export function createCockpitRollFeed (api, {tray, console: commandConsole}) {
 	const hide = () => {
 		root.hidden = true;
 		root.replaceChildren();
-		setRoom();
 	};
 	const clear = () => {
 		cards = [];
@@ -75,7 +73,6 @@ export function createCockpitRollFeed (api, {tray, console: commandConsole}) {
 		root.hidden = false;
 		api.engine.pLog("roll", getCockpitFeedLogText(card)).catch(() => {});
 		render();
-		setRoom();
 	};
 
 	/* ---------------- statblock → card ---------------- */

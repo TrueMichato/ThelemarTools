@@ -24,6 +24,9 @@ import {
 	getCockpitConcentrationWarning,
 	getCockpitDurationParts,
 	getCockpitDurationRounds,
+	getCockpitDurationNormalized,
+	getCockpitDurationReadout,
+	getCockpitDurationStep,
 	getCockpitDurationText,
 	getCockpitEffectSummary,
 	getCockpitFxGroups,
@@ -173,23 +176,27 @@ export function createCockpitFxTab (api) {
 		const def = getDef(ctx.state);
 		if (!def) return null;
 		const {parts, parsed} = getDuration(def);
+		// Handlers read the live duration: a focused input can outlive the render that made it and fire on blur later.
+		const getLive = () => ({...getDuration(def).parts, amount: amount.value});
 		const amount = h("input.ewc-input.ewc-input--sm.ewc-fx__amt", {
 			type: "text",
 			autocomplete: "off",
 			value: parts.amount,
-			disabled: parts.unit === "until",
-			placeholder: parts.unit === "until" ? "—" : "1",
+			placeholder: parts.unit === "until" ? "∞" : "1",
 			"aria-label": "Duration amount",
 			"aria-invalid": parsed.ok ? null : "true",
 			"data-ewc-fk": "fx-dur",
 			"data-ewc-fx-dur": "",
-			oninput: () => { duration = {...parts, amount: amount.value}; },
-			onchange: () => rerender(),
+			oninput: () => { duration = getLive(); },
+			onchange: () => {
+				duration = getCockpitDurationNormalized(getLive());
+				rerender();
+			},
 			onkeydown: evt => {
 				if (evt.key !== "Enter") return;
 				evt.preventDefault();
 				evt.stopPropagation();
-				duration = {...parts, amount: amount.value};
+				duration = getLive();
 				pApplySelected();
 			},
 		});
@@ -202,9 +209,20 @@ export function createCockpitFxTab (api) {
 				rerender();
 			},
 		}, COCKPIT_DURATION_UNITS.map(it => getOption(it.value, it.label, parts.unit)));
-		const defaultText = getCockpitDurationText(def.duration ?? null);
+		const getStep = delta => h("button.ewc-fx__step", {
+			type: "button",
+			"aria-label": delta < 0 ? "Shorter" : "Longer",
+			title: delta < 0 ? "Shorter" : "Longer",
+			"data-ewc-fk": `fx-dur-${delta < 0 ? "dn" : "up"}`,
+			"data-ewc-fx-step": delta < 0 ? "down" : "up",
+			onclick: () => {
+				duration = getCockpitDurationStep(getLive(), delta);
+				rerender();
+			},
+		}, delta < 0 ? "−" : "+");
+		const defaultKind = def.saved ? "saved" : def.cover ? "cover" : "spell";
 		const durHint = parsed.ok
-			? `= ${parsed.text}${parsed.rounds === (def.duration ?? null) ? ` · ${def.saved ? "saved" : def.cover ? "cover" : "spell"} default` : ` · default ${defaultText}`}`
+			? ["= ", h("b", null, getCockpitDurationReadout(parsed.rounds)), h("span.ewc-muted", null, parsed.rounds === (def.duration ?? null) ? ` · ${defaultKind} default` : ` · ${defaultKind} default ${getCockpitDurationText(def.duration ?? null)}`)]
 			: parsed.message;
 
 		const casterSel = h("select.ewc-input.ewc-input--sm", {
@@ -223,9 +241,11 @@ export function createCockpitFxTab (api) {
 		return h("div.ewc-fx__detail", {"aria-label": `${def.name} — apply`},
 			h("p.ewc-fx__sum", null, name, h("span.ewc-muted", null, ` — ${getCockpitEffectSummary(def)}`)),
 			h("div.ewc-field", null,
-				h("span.ewc-field__l", null, "Duration"),
-				h("div.ewc-act__row", null, amount, unit),
-				h(`small.ewc-field__hint${parsed.ok ? "" : ".ewc-error"}`, null, durHint)),
+				h("span.ewc-field__l", null, "Duration ", h("span.ewc-muted", null, "· type “1 min”, “10 r”, “8 h”")),
+				h("div.ewc-fx__dur", null,
+					h("span.ewc-fx__stepper", {role: "group", "aria-label": "Duration"}, getStep(-1), amount, getStep(1)),
+					unit),
+				h(`small.ewc-field__hint${parsed.ok ? "" : ".ewc-error"}`, {"data-ewc-fx-durread": ""}, durHint)),
 			h("div.ewc-field", null,
 				h("span.ewc-field__l", null, "Cast by"),
 				casterSel,

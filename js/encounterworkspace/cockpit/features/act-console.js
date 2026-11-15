@@ -1,8 +1,10 @@
 /**
- * P3a — the `/` command console. A single line in the layer, under the bar: type a command (`7 fire @gob`,
- * `save dex 14 8d6 fire half`, `prone 2r`, `bless 1 min by @mage`), see what it will do to whom before Enter, run it
- * through the shell actions / `pCommit` (undoable, logged). ↑/↓ walk the history, Esc clears then closes, errors
- * show inline. Rail rows get a `›_` quick action that opens the console pre-targeted at that creature.
+ * P3a — the `/` command console, docked at the top of the dock (mockup §6): an always-visible command line with a `/`
+ * hint. Type a command (`7 fire @gob`, `save dex 14 8d6 fire half`, `prone 2r`, `bless 1 min by @mage`), see what it
+ * will do to whom before Enter, run it through the shell actions / `pCommit` (undoable, logged). While active, the
+ * panel under the line shows example chips, the full grammar, the live preview or an inline error. ↑/↓ walk the
+ * history, Esc clears then closes. Rail rows get a `›_` quick action that opens the console pre-targeted at that
+ * creature.
  */
 
 import {endEncounterConcentration, getEncounterEffectPresets, applyEncounterEffect, removeEncounterEffect, startEncounterConcentration} from "../../encounterworkspace-fx.js";
@@ -12,6 +14,7 @@ import {getEncounterRolledAmount} from "../../encounterworkspace-massroll.js";
 import {h} from "../dom.js";
 import {
 	COCKPIT_CONSOLE_CHEATSHEET,
+	COCKPIT_CONSOLE_EXAMPLES,
 	getCockpitConsoleCommand,
 	getCockpitConsoleEffects,
 	getCockpitConsoleHandle,
@@ -22,7 +25,7 @@ import {
 	getCockpitCritExpr,
 } from "./act-console-model.js";
 import {getCockpitDurationText} from "./act-effect-model.js";
-import {rollCockpitToTray} from "./act-roll.js";
+import {pRollCockpitToTray} from "./act-roll.js";
 import {getKbd, getWhoText, toTitle} from "./act-shared.js";
 
 export function createCockpitConsole (api, {tray}) {
@@ -32,15 +35,18 @@ export function createCockpitConsole (api, {tray}) {
 	let draft = "";
 	let status = null; // {kind: "ok"|"error", text}
 	let review = null; // {run (decisions), unresolved, decisions, title}
-	let isBusy = false;
+	let pActive = null;
+	let pQueued = null;
 	let previewIds = [];
 	let returnFocus = null;
+
+	let isCheatOpen = false;
 
 	const input = h("input.ewc-con__in", {id: "ewc-console-in",
 		type: "text",
 		autocomplete: "off",
 		spellcheck: "false",
-		placeholder: "Type a command — 7 fire, heal 5, save dex 14, prone 2r, bless",
+		placeholder: "Type a command",
 		"aria-label": "Command",
 		"aria-describedby": "ewc-console-help",
 		"aria-keyshortcuts": "/",
@@ -48,10 +54,22 @@ export function createCockpitConsole (api, {tray}) {
 	});
 	const help = h("div.ewc-con__help", {id: "ewc-console-help", "aria-live": "polite"});
 	const close = h("button.ewc-btn.ewc-btn--icon.ewc-btn--ghost.ewc-con__x", {type: "button", title: "Close (Esc)", "aria-label": "Close the console", "data-ewc-console-close": ""}, "×");
-	const root = h("section.ewc-con", {hidden: true, "aria-label": "Command console", "data-ewc-console": ""},
-		h("div.ewc-con__bar", null, h("span.ewc-con__prompt", {"aria-hidden": "true"}, "›"), input, ...getKbd(["Enter"], api.isMac), close),
-		help);
-	api.getRegion("layer").append(root);
+	const bar = h("div.ewc-con__bar", null,
+		h("span.ewc-con__prompt", {"aria-hidden": "true"}, "›"),
+		input,
+		h("span.ewc-con__key", {"aria-hidden": "true"}, getKbd(["/"], api.isMac)),
+		h("span.ewc-con__run", null, getKbd(["Enter"], api.isMac)),
+		close);
+	// The whole line is the hit target: clicking its padding or prompt focuses the input.
+	bar.addEventListener("mousedown", evt => {
+		if (evt.target === input || evt.target.closest("button")) return;
+		evt.preventDefault();
+		input.focus();
+	});
+	const idle = h("p.ewc-con__idle", {"data-ewc-console-idle": ""}, "Press ", getKbd(["/"], api.isMac), " to type a command — or use the tools below.");
+	const panel = h("div.ewc-con__panel", {hidden: true, "data-ewc-console": ""}, help);
+	const root = h("section.ewc-con", {"aria-label": "Command console", "data-ewc-console-dock": ""}, bar, idle, panel);
+	api.getRegion("dockTop").prepend(root);
 
 	const getParseOpts = ctx => ({
 		state: ctx.state,
@@ -71,16 +89,28 @@ export function createCockpitConsole (api, {tray}) {
 
 	/* ---------------- Rendering ---------------- */
 
-	const getCheatSheet = () => h("div.ewc-con__cheat", {"aria-label": "Command grammar"},
-		COCKPIT_CONSOLE_CHEATSHEET.map(group => h("div.ewc-con__cg", null,
-			h("span.ewc-con__cgl", null, group.group),
-			group.items.map(item => h("button.ewc-con__ex", {
-				type: "button",
-				title: item.startsWith("@") ? `Target: ${item}` : `Stage “${item}”`,
-				"data-ewc-console-ex": item,
-				onclick: () => stage(item.startsWith("@") ? `${item} ` : `${input.value.match(/^(?:@\S+\s+)*/)?.[0] || ""}${item}`),
-			}, item)))),
-		h("p.ewc-con__keys.ewc-muted", null, getKbd(["Enter"], api.isMac), " run · ", ...getKbd(["↑"], api.isMac), getKbd(["↓"], api.isMac), " history · ", getKbd(["Esc"], api.isMac), " close · no @ = the dock targets"));
+	const getExample = (item, {label = item, title = null, onclick = null} = {}) => h("button.ewc-con__ex", {
+		type: "button",
+		title: title || (item.startsWith("@") ? `Target: ${item}` : `Stage “${item}”`),
+		"data-ewc-console-ex": item,
+		onclick: onclick || (() => stage(item.startsWith("@") ? `${item} ` : `${input.value.match(/^(?:@\S+\s+)*/)?.[0] || ""}${item}`)),
+	}, label);
+
+	const getCheatSheet = () => h("div.ewc-con__cheatwrap", null,
+		h("div.ewc-con__exs", {"aria-label": "Examples"},
+			COCKPIT_CONSOLE_EXAMPLES.map(it => getExample(it)),
+			history.length ? getExample("↑", {label: "↑ history", title: "Recall the last command (↑)", onclick: () => { input.focus(); step(-1); }}) : null),
+		h("button.ewc-btn.ewc-btn--link.ewc-act__disc.ewc-con__more", {
+			type: "button",
+			"aria-expanded": `${isCheatOpen}`,
+			"data-ewc-console-more": "",
+			onclick: () => { isCheatOpen = !isCheatOpen; draw(); input.focus(); },
+		}, isCheatOpen ? "▾ All commands" : "▸ All commands"),
+		isCheatOpen ? h("div.ewc-con__cheat", {"aria-label": "Command grammar"},
+			COCKPIT_CONSOLE_CHEATSHEET.map(group => h("div.ewc-con__cg", null,
+				h("span.ewc-con__cgl", null, group.group),
+				group.items.map(item => getExample(item))))) : null,
+		h("p.ewc-con__keys.ewc-muted", null, getKbd(["Enter"], api.isMac), " run · ", getKbd(["↑"], api.isMac), getKbd(["↓"], api.isMac), " history · ", getKbd(["Esc"], api.isMac), " close · no @ = the dock targets"));
 
 	const getReview = ctx => h("div.ewc-review.ewc-con__review", {role: "group", "aria-label": "Conditional defenses"},
 		h("p.ewc-review__head", null, h("b", null, review.title), " Does each defense apply?"),
@@ -126,6 +156,7 @@ export function createCockpitConsole (api, {tray}) {
 		}
 		help.replaceChildren(...nodes);
 		root.classList.toggle("is-error", !!parsed.error && !review);
+		syncOpen();
 		const ids = !parsed.error && parsed.cmd ? parsed.ids : [];
 		if (ids.join() !== previewIds.join()) {
 			previewIds = ids;
@@ -135,13 +166,19 @@ export function createCockpitConsole (api, {tray}) {
 
 	/* ---------------- Open / close / history ---------------- */
 
+	function syncOpen () {
+		root.classList.toggle("is-open", isOpen);
+		panel.hidden = !isOpen;
+		idle.hidden = isOpen;
+	}
+
 	function open ({text = null} = {}) {
 		if (!isOpen) returnFocus = document.activeElement instanceof HTMLElement && !root.contains(document.activeElement) ? document.activeElement : null;
 		isOpen = true;
-		root.hidden = false;
 		if (text != null) input.value = text;
 		histIndex = null;
 		status = null;
+		syncOpen();
 		input.focus();
 		const end = input.value.length;
 		input.setSelectionRange(end, end);
@@ -151,18 +188,19 @@ export function createCockpitConsole (api, {tray}) {
 	function hide ({isRestoreFocus = true} = {}) {
 		if (!isOpen) return;
 		isOpen = false;
-		root.hidden = true;
 		input.value = "";
 		review = null;
 		status = null;
 		histIndex = null;
+		root.classList.remove("is-error");
+		syncOpen();
 		if (previewIds.length) {
 			previewIds = [];
 			api.render();
 		}
 		if (isRestoreFocus && returnFocus?.isConnected) returnFocus.focus({preventScroll: true});
 		returnFocus = null;
-		// A hidden input can keep focus and would swallow the global keys (⌘Z, R, E…).
+		// An idle input keeping focus would swallow the global keys (⌘Z, R, E…).
 		if (root.contains(document.activeElement)) document.activeElement.blur();
 	}
 
@@ -184,6 +222,8 @@ export function createCockpitConsole (api, {tray}) {
 		draw();
 	}
 
+	// Clicking or tabbing into the always-visible line activates the console.
+	input.addEventListener("focus", () => { if (!isOpen) open(); });
 	input.addEventListener("input", () => {
 		histIndex = null;
 		status = null;
@@ -241,7 +281,8 @@ export function createCockpitConsole (api, {tray}) {
 		history = getCockpitConsoleHistoryWith(history, line);
 		draft = "";
 		histIndex = null;
-		input.value = "";
+		// A command typed while this one awaited stays put.
+		if (input.value.trim() === line) input.value = "";
 		status = text ? {kind: "ok", text} : null;
 		draw();
 	};
@@ -295,17 +336,29 @@ export function createCockpitConsole (api, {tray}) {
 		input.focus();
 	}
 
-	async function pRun () {
-		if (isBusy) return;
+	function pRun (opts) {
+		// Enter during an awaited command runs once it settles instead of being dropped.
+		if (pActive) {
+			pQueued ||= pActive.then(() => {
+				pQueued = null;
+				return pRun({isQueued: true});
+			});
+			return pQueued;
+		}
+		pActive = pRunNow(opts).finally(() => pActive = null);
+		return pActive;
+	}
+
+	async function pRunNow ({isQueued = false} = {}) {
 		const ctx = api.getCtx();
 		const line = input.value.trim();
-		if (!line) return hide();
+		// A repeated Enter finds its line already run and cleared.
+		if (!line) return isQueued ? undefined : hide();
 		const {parsed} = parse(ctx);
 		if (parsed.error) return fail(parsed.error);
 		const {cmd, ids, casterId} = parsed;
 		const who = getWhoText(ids, ctx.labels);
 		const ruleset = api.getSettings().ruleset;
-		isBusy = true;
 		try {
 			switch (cmd.verb) {
 				case "target":
@@ -349,7 +402,7 @@ export function createCockpitConsole (api, {tray}) {
 						? {kind: "save", ability: cmd.ability, skill: null, dc: cmd.dc, mode: cmd.mode}
 						: {kind: "check", ability: cmd.ability, skill: cmd.skill, dc: cmd.dc, mode: cmd.mode};
 					const title = `${cmd.skill ? toTitle(cmd.skill) : `${toTitle(cmd.ability)} ${cmd.verb}`}${cmd.dc != null ? ` DC ${cmd.dc}` : ""}`;
-					const rolled = rollCockpitToTray(api, tray, {ids, request, outcome: getCockpitConsoleSaveOutcome(cmd), title, forcedLabel: "Console", isFocus: false});
+					const rolled = await pRollCockpitToTray(api, tray, {ids, request, outcome: getCockpitConsoleSaveOutcome(cmd), title, forcedLabel: "Console", isFocus: false});
 					if (rolled) finish(null, line);
 					return;
 				}
@@ -377,8 +430,6 @@ export function createCockpitConsole (api, {tray}) {
 			}
 		} catch (e) {
 			fail(e.message);
-		} finally {
-			isBusy = false;
 		}
 	}
 
@@ -391,16 +442,6 @@ export function createCockpitConsole (api, {tray}) {
 		label: "Command console",
 		run: () => { open(); },
 	});
-
-	api.addBarItem(ctx => h("button.ewc-btn.ewc-btn--ghost.ewc-btn--sm.ewc-con__open", {
-		type: "button",
-		title: "Command console (/)",
-		"aria-label": "Open the command console",
-		"aria-expanded": `${isOpen}`,
-		"data-ewc-fk": "console-open",
-		"data-ewc-console-open": "",
-		onclick: () => isOpen ? input.focus() : open(),
-	}, h("span.ewc-con__glyph", {"aria-hidden": "true"}, "›_"), h("span.ewc-con__lbl", null, "Command"), ...getKbd(["/"], ctx.isMac)));
 
 	api.addRailRowDecorator((row, instance, ctx) => {
 		if (previewIds.includes(instance.id)) row.classList.add("ewc-row--con");

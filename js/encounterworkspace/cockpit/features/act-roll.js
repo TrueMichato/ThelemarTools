@@ -16,23 +16,110 @@ import {
 	COCKPIT_ROLL_MODES,
 	getCockpitEmptyRollForm,
 	getCockpitRollButtonText,
+	getCockpitAnsweredRoll,
 	getCockpitRollModeFromEvent,
+	getCockpitRollQuery,
+	getCockpitRollQuestions,
 	getCockpitRollRequest,
+	getCockpitSkillMatches,
 	getCockpitTrayLogText,
 	getCockpitWhoRolls,
 } from "./act-roll-model.js";
-import {getKbd, getOption, getSeg, toTitle} from "./act-shared.js";
+import {getKbd, getOption, getSeg, getWhoText, toTitle} from "./act-shared.js";
+import {isolateFlowKeys} from "./flow-util.js";
 
 const ABILITIES = Object.keys(ENCOUNTER_ABILITY_NAMES);
 
+const PROMPT_ANSWERS = Object.freeze([
+	{value: "yes", label: "Yes"},
+	{value: "no", label: "No"},
+	{value: "cancel", label: "Cancel that roll"},
+]);
+
+/**
+ * "Before rolling…" — asks each scene-dependent question (fear source in sight, heavy rain, …) once, defaulting to
+ * yes. Resolves {key: "yes"|"no"|"cancel"} on Roll, or null when the DM backs out (Esc, Cancel, backdrop).
+ */
+export function pAskCockpitRollQuestions (api, questions, {title, labels = new Map()}) {
+	return new Promise(resolve => {
+		const answers = Object.fromEntries(questions.map(it => [it.key, "yes"]));
+		let result = null;
+		const dlg = isolateFlowKeys(h("dialog.ewc-dialog.ewc-prompt", {"aria-labelledby": "ewc-prompt-title", "aria-describedby": "ewc-prompt-sub", "data-ewc-roll-prompt": ""}));
+		const finish = value => {
+			result = value;
+			dlg.close();
+		};
+		dlg.addEventListener("close", () => {
+			dlg.remove();
+			resolve(result);
+		});
+		dlg.addEventListener("click", evt => { if (evt.target === dlg) finish(null); });
+		const render = () => {
+			const focusFk = dlg.contains(document.activeElement) ? document.activeElement.dataset?.ewcFk : null;
+			dlg.replaceChildren(
+				h("div.ewc-dialog__head", null,
+					h("div", null,
+						h("h2.ewc-dialog__title", {id: "ewc-prompt-title"}, "Before rolling…"),
+						h("p.ewc-prompt__sub", {id: "ewc-prompt-sub"}, `${title} — some effects depend on the scene. Answer once; the roll uses it.`),
+					),
+					h("button.ewc-btn.ewc-btn--icon", {type: "button", "aria-label": "Cancel the roll", "data-ewc-prompt-close": "", onclick: () => finish(null)}, "×"),
+				),
+				h("ol.ewc-prompt__qs", null, questions.map((it, ix) => h("li.ewc-prompt__q", {"data-ewc-prompt-q": it.key}, [
+					h("p.ewc-prompt__text", {id: `ewc-prompt-q-${ix}`}, it.question, " ",
+						h("small.ewc-muted", null, [it.label, it.cite].filter(Boolean).join(" · "), " · ", getWhoText(it.ids, labels))),
+					getSeg({
+						label: `Answer: ${it.question}`,
+						options: PROMPT_ANSWERS,
+						value: answers[it.key],
+						fk: `prompt-${ix}`,
+						onPick: value => {
+							answers[it.key] = value;
+							render();
+						},
+					}),
+				]))),
+				h("div.ewc-prompt__foot", null,
+					h("span.ewc-grow"),
+					h("button.ewc-btn.ewc-btn--ghost", {type: "button", "data-ewc-prompt-cancel": "", onclick: () => finish(null)}, "Cancel"),
+					h("button.ewc-btn.ewc-btn--primary", {type: "button", autofocus: true, "data-ewc-fk": "prompt-go", "data-ewc-prompt-go": "", onclick: () => finish({...answers})}, "Roll ", getKbd(["Enter"], api.isMac)),
+				),
+			);
+			(focusFk ? dlg.querySelector(`[data-ewc-fk="${CSS.escape(focusFk)}"]`) : null)?.focus();
+		};
+		api.getRegion("layer").append(dlg);
+		render();
+		dlg.showModal();
+		dlg.querySelector("[data-ewc-prompt-go]")?.focus();
+	});
+}
+
 /**
  * Roll a save or check for `ids` through the shared mass-roll path (one contributor getter), log it and show the
- * tray. request: {kind: "save"|"check", ability, skill, dc, mode}. Returns the rolled result or null (toasted).
+ * tray. request: {kind: "save"|"check", ability, skill, dc, mode}. When a scene-dependent source touches the roll
+ * (frightened, heavy rain on Perception, …) the DM answers "Before rolling…" first. Resolves the rolled result, or
+ * null (cancelled, or toasted).
  */
-export function rollCockpitToTray (api, tray, {ids, request, outcome = null, title, forcedLabel = "Roll tab", isFocus = true}) {
+export async function pRollCockpitToTray (api, tray, {ids, request, outcome = null, title, forcedLabel = "Roll tab", isFocus = true}) {
 	const forcedMode = request.mode && request.mode !== "normal" ? request.mode : null;
-	const state = api.getState();
-	const getContributors = getCockpitContributorGetter(state, api.getSettings());
+	let state = api.getState();
+	let getContributors = getCockpitContributorGetter(state, api.getSettings());
+	const labels = api.getCtx().labels;
+	const questions = getCockpitRollQuestions({state, ids, query: getCockpitRollQuery(request), getContributors, labels});
+	if (questions.length) {
+		const answers = await pAskCockpitRollQuestions(api, questions, {title, labels});
+		if (!answers) return null;
+		({ids, getContributors} = getCockpitAnsweredRoll({ids, questions, answers, getContributors}));
+		if (!ids.length) {
+			api.toast("Every roll was cancelled; nobody rolled.");
+			return null;
+		}
+		// The dialog awaited; roll against the state as it is now, with the same answers.
+		const fresh = api.getState();
+		if (fresh !== state) {
+			state = fresh;
+			({getContributors} = getCockpitAnsweredRoll({ids, questions, answers, getContributors: getCockpitContributorGetter(state, api.getSettings())}));
+		}
+	}
 	let rolled;
 	try {
 		rolled = request.kind === "save"
@@ -55,6 +142,7 @@ export function rollCockpitToTray (api, tray, {ids, request, outcome = null, tit
 export function createCockpitRollTab (api, {tray}) {
 	const form = getCockpitEmptyRollForm();
 	let isOutcomeOpen = false;
+	let skillQuery = "";
 	let error = null; // {message, field}
 
 	const rerender = () => api.render();
@@ -84,7 +172,7 @@ export function createCockpitRollTab (api, {tray}) {
 		const {request, outcome, title} = parsed;
 		const isFromKey = mode !== form.mode;
 		const forcedLabel = isFromKey ? (mode === "advantage" ? "Shift" : api.isMac ? "⌘" : "Ctrl") : "Roll tab";
-		rollCockpitToTray(api, tray, {ids, request, outcome, title, forcedLabel});
+		return pRollCockpitToTray(api, tray, {ids, request, outcome, title, forcedLabel});
 	}
 
 	function getFieldAttrs (field) {
@@ -160,13 +248,61 @@ export function createCockpitRollTab (api, {tray}) {
 			getSeg({label: "Roll kind", options: COCKPIT_ROLL_KINDS, value: form.kind, fk: "roll-kind", isFull: true, onPick: kind => set({kind})})));
 
 		if (isSkill) {
-			const skill = h("select.ewc-input", {
-				"aria-label": "Skill",
-				"data-ewc-fk": "roll-skill",
+			const matches = getCockpitSkillMatches(COCKPIT_SKILLS, skillQuery);
+			const pickSkill = value => {
+				skillQuery = "";
+				set({skill: value});
+				document.querySelector(`[data-ewc-fk="roll-sk-${CSS.escape(value)}"]`)?.focus({preventScroll: true});
+			};
+			const search = h("input.ewc-input.ewc-input--sm", {
+				type: "search",
+				autocomplete: "off",
+				spellcheck: "false",
+				value: skillQuery,
+				placeholder: `Search ${COCKPIT_SKILLS.length} skills…`,
+				"aria-label": "Search skills",
+				"data-ewc-fk": "roll-skill-q",
+				"data-ewc-roll-skill-q": "",
 				...getFieldAttrs("skill"),
-				onchange: () => set({skill: skill.value}),
-			}, COCKPIT_SKILLS.map(it => getOption(it, `${toTitle(it)} (${toTitle(ENCOUNTER_SKILL_ABILITIES[it]).slice(0, 3)})`, form.skill)));
-			panel.append(h("div.ewc-field", null, h("span.ewc-field__l", null, "Skill"), skill));
+				oninput: () => { skillQuery = search.value; rerender(); },
+				onkeydown: evt => {
+					if (evt.key === "Enter") {
+						evt.preventDefault();
+						evt.stopPropagation();
+						// Enter with a query picks the first match; with none it rolls, like every other field.
+						if (skillQuery.trim() && matches.length) pickSkill(matches[0].skill);
+						else if (!skillQuery.trim()) pRoll(evt);
+					} else if (evt.key === "Escape" && skillQuery) {
+						evt.preventDefault();
+						evt.stopPropagation();
+						skillQuery = "";
+						rerender();
+					}
+				},
+			});
+			const chips = matches.map(it => h("button.ewc-act__tchip", {
+				type: "button",
+				role: "radio",
+				"aria-checked": `${form.skill === it.skill}`,
+				tabindex: form.skill === it.skill || (!matches.some(m => m.skill === form.skill) && it === matches[0]) ? "0" : "-1",
+				title: `${it.label} (${ENCOUNTER_ABILITY_NAMES[ENCOUNTER_SKILL_ABILITIES[it.skill]] || it.ability})`,
+				"data-ewc-fk": `roll-sk-${it.skill}`,
+				"data-ewc-roll-skill": it.skill,
+				onclick: () => pickSkill(it.skill),
+				onkeydown: evt => {
+					const ix = matches.indexOf(it);
+					const next = {ArrowRight: ix + 1, ArrowDown: ix + 1, ArrowLeft: ix - 1, ArrowUp: ix - 1, Home: 0, End: matches.length - 1}[evt.key];
+					if (next == null) return;
+					evt.preventDefault();
+					evt.stopPropagation();
+					pickSkill(matches[(next + matches.length) % matches.length].skill);
+				},
+			}, it.label, " ", h("small", null, it.ability)));
+			panel.append(h("div.ewc-field", null,
+				h("span.ewc-field__l", null, "Skill ", h("span.ewc-muted", null, toTitle(form.skill || ""))),
+				search,
+				h("div.ewc-act__tchips", {role: "radiogroup", "aria-label": "Skill", "data-ewc-roll-skills": ""},
+					chips.length ? chips : h("span.ewc-muted", {"data-ewc-roll-skill-none": ""}, "No skill matches"))));
 		} else {
 			panel.append(h("div.ewc-field", null,
 				h("span.ewc-field__l", null, form.kind === "save" ? "Saving throw" : "Ability"),
