@@ -1374,7 +1374,8 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		console.log(`M13c ${surface} ${fixture.uid}: default controls, independent effects/CR/XP, real Homebrew dialogs, JSON reload, removal/restoration; forms=${fixture.forms.map(form => form.id)}. Registry reload uses explicit JSON rehydration, not automatic persistence; Cocoa menus/screenreader UNTESTED.`);
 	}
 
-	private async fillRound72Bugbear () {
+	/** Answers every v2 source and post-source question for Zombie (DMG) on an MM Bugbear. Shared by the cockpit sweep. */
+	async fillRound72Bugbear () {
 		const root = this.root.locator(".bqa__transformation-resolution").first();
 		const source = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Source choices$/})});
 		await this.setRound72Field(source, "Armor policy", "retain");
