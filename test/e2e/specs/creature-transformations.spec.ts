@@ -1,6 +1,9 @@
 import {expect, test} from "@playwright/test";
 import {CreatureTransformationPage} from "../pages/CreatureTransformationPage";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test.describe("explicit version-1 compatibility and unchanged Species discovery", () => {
 	test.beforeEach(async ({page}) => { await new CreatureTransformationPage(page).useExplicitLegacyEntrypoints(); });

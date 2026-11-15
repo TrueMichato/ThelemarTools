@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("award XP follows effective minion conversion, explicit zero XP, unknown ratings, and reload", async ({page}) => {
 	const encounter = new EncounterRollPage(page);

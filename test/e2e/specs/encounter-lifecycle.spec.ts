@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("edited grouped monsters keep independent combat state through rolls, turns, reload and one-time handoff", async ({page}) => {
 	test.setTimeout(120_000);

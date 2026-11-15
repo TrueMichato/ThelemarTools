@@ -1,5 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {EncounterRollPage} from "../pages/EncounterRollPage";
+import {pinEncounterWorkspaceLegacyUi} from "../utils/encounterWorkspaceUi";
+
+test.beforeEach(({page}) => pinEncounterWorkspaceLegacyUi(page));
 
 test("effective-statblock roster group exposes mixed selection, collapse and independent member state", async ({page}) => {
 	const encounter = new EncounterRollPage(page);
