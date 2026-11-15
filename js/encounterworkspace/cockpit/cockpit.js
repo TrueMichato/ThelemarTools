@@ -358,6 +358,9 @@ export class EncounterCockpit {
 				pUndo: () => this._pUndo(),
 				pRedo: () => this._pRedo(),
 				openHelp: () => this._openHelp(),
+				/** Open the saved-encounter chooser (the same dialog as ⋯ → Choose saved list…). */
+				pChooseList: () => this._pChooseList(),
+				pSendToDmScreen: () => this._pSendToDmScreen(),
 			},
 		};
 	}
