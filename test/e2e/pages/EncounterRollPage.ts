@@ -28,7 +28,7 @@ export class EncounterRollPage {
 	constructor (readonly page: Page) {}
 
 	async seed ({count = 2, renameSecond, renameIndices = [], capFirstHistory = false, monsterOverride = {}}: {count?: number, renameSecond?: string, renameIndices?: number[], capFirstHistory?: boolean, monsterOverride?: Record<string, unknown>} = {}) {
-		await this.page.goto("/encounterworkspace.html");
+		await this.page.goto("/encounterworkspace.html?ew=1");
 		await this.page.locator("#encounter-workspace[aria-busy='false']").waitFor();
 		const effect = {id: "custom-attack", name: "Rally", scopes: ["attack"], mode: "advantage", bonus: 3};
 		const state = {

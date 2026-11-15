@@ -8,7 +8,7 @@ import {EncounterWorkspaceState, EncounterWorkspaceStore} from "../../js/encount
 
 const priorWindow = globalThis.window;
 globalThis.window = {addEventListener: jest.fn()};
-const {EncounterWorkspacePage} = await import("../../js/encounterworkspace.js");
+const {EncounterWorkspacePage} = await import("../../js/encounterworkspace/legacy/encounterworkspace-legacy.js");
 globalThis.window = priorWindow;
 
 const createPage = async ({isMissingHp = false, monsterOverride = {}} = {}) => {

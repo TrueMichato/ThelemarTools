@@ -7,7 +7,7 @@ export class CreatureTransformationPage {
 		await this.page.addInitScript(() => {
 			document.addEventListener("DOMContentLoaded", async () => {
 				const uiUrl = "/js/bestiary/bestiary-quick-actions-ui.js";
-				const encounterUrl = "/js/encounterworkspace.js";
+				const encounterUrl = "/js/encounterworkspace/legacy/encounterworkspace-legacy.js";
 				const [{BestiaryQuickActionsUi}, {EncounterWorkspacePage}] = await Promise.all([import(uiUrl), import(encounterUrl)]);
 				const open = BestiaryQuickActionsUi.pOpen;
 				BestiaryQuickActionsUi.pOpen = function (options: object) { return open.call(this, {...options, automationVersion: 1}); };
@@ -442,7 +442,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		"js/creature-transformation-vampire.js", "js/creature-transformation-lycanthrope.js",
 		"js/creature-transformation-fey-beast.js", "js/creature-transformation-fallen-angel.js", "js/creature-transformation-undead.js",
 		"js/bestiary/bestiary-creature-transformation.js",
-		"js/encounterworkspace.js", "js/encounterworkspace/encounterworkspace-quick-actions.js", "js/encounterworkspace/encounterworkspace-state.js",
+		"js/encounterworkspace.js", "js/encounterworkspace/legacy/encounterworkspace-legacy.js", "js/encounterworkspace/encounterworkspace-quick-actions.js", "js/encounterworkspace/encounterworkspace-state.js",
 		"js/render.js", "data/creature-transformations.json", "data/msbcr.json", "css/bestiary.css", "css/encounterworkspace.css",
 	];
 
@@ -924,7 +924,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	private async observeRound72 (staged: boolean | "default") {
 		await this.page.evaluate(async staged => {
 			const uiUrl = "/js/bestiary/bestiary-quick-actions-ui.js";
-			const pageUrl = "/js/encounterworkspace.js";
+			const pageUrl = "/js/encounterworkspace/legacy/encounterworkspace-legacy.js";
 			const storeUrl = "/js/encounterworkspace/encounterworkspace-state.js";
 			const [{BestiaryQuickActionsUi}, {EncounterWorkspacePage}, {EncounterWorkspaceStore}] = await Promise.all([import(uiUrl), import(pageUrl), import(storeUrl)]);
 			const globals = globalThis as Round72Globals;
@@ -1014,7 +1014,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 			await this.gotoRound72(`/bestiary.html#${encodeURIComponent(fixture.monster.toLowerCase())}_mm`);
 			await expect(this.page.locator(".bqa__btn-open:visible").first()).toBeVisible({timeout: 30_000});
 		} else {
-			await this.gotoRound72("/encounterworkspace.html");
+			await this.gotoRound72("/encounterworkspace.html?ew=1");
 			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
 			await this.page.evaluate(async name => {
 				const url = "/js/encounterworkspace/encounterworkspace-state.js";
@@ -1659,7 +1659,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	}
 
 	private async seedRound72Encounter () {
-		await this.gotoRound72("/encounterworkspace.html");
+		await this.gotoRound72("/encounterworkspace.html?ew=1");
 		await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
 		await this.page.evaluate(async () => {
 			const url = "/js/encounterworkspace/encounterworkspace-state.js";
@@ -1783,7 +1783,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	}
 
 	private async seedRound72Kernel (where: "registry" | "encounter", conflict = false) {
-		await this.gotoRound72(where === "registry" ? "/bestiary.html#bugbear_mm" : "/encounterworkspace.html");
+		await this.gotoRound72(where === "registry" ? "/bestiary.html#bugbear_mm" : "/encounterworkspace.html?ew=1");
 		if (where === "registry") await expect(this.page.locator(".bqa__btn-open:visible").first()).toBeVisible({timeout: 30_000});
 		else await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
 		// This is storage seeding, not a family producer or a simulated form-switch interaction.

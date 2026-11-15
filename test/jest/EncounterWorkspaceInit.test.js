@@ -41,7 +41,7 @@ const getElements = () => {
 beforeAll(async () => {
 	globalThis.window = {addEventListener: jest.fn()};
 	globalThis.Option = function (label, value) { this.label = label; this.value = value; };
-	({EncounterWorkspacePage} = await import("../../js/encounterworkspace.js"));
+	({EncounterWorkspacePage} = await import("../../js/encounterworkspace/legacy/encounterworkspace-legacy.js"));
 });
 
 afterAll(() => {

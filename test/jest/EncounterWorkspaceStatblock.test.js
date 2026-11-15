@@ -17,7 +17,7 @@ import {getEncounterRollFromPackedDice, pRollEncounterSelection} from "../../js/
 
 const priorWindow = globalThis.window;
 globalThis.window = {addEventListener: jest.fn()};
-const {EncounterWorkspacePage} = await import("../../js/encounterworkspace.js");
+const {EncounterWorkspacePage} = await import("../../js/encounterworkspace/legacy/encounterworkspace-legacy.js");
 globalThis.window = priorWindow;
 
 const monster = {
@@ -202,7 +202,7 @@ describe("Encounter Workspace instance statblock edits", () => {
 				saved.instances[0].modifiers = [{id: "bonus", name: "Fog", scopes: ["save"], mode: "advantage", bonus: 0}];
 			}
 			const loaded = await store.pLoad();
-			expect(loaded.version).toBe(7);
+			expect(loaded.version).toBe(8);
 			expect(loaded.instances[0].statblockOperations).toEqual([]);
 			if (version >= 3) {
 				expect(loaded.instances[0].areaNotes[0].kind).toBe("lair");

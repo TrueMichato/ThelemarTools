@@ -59,7 +59,7 @@ test("a generated unsaved Bestiary encounter opens through the actual button exa
 
 test("a saved active encounter hands over exact edited counts and a scaled variant only after confirmation", async ({page}) => {
 	test.setTimeout(120_000);
-	await page.goto("/encounterworkspace.html");
+	await page.goto("/encounterworkspace.html?ew=1");
 	await expect(page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await page.evaluate(async () => {
 		const {StorageUtil} = globalThis as typeof globalThis & {
@@ -126,14 +126,14 @@ test("a missing handoff is reported without changing the working copy; ordinary 
 			selectedIds: [], omissions: [], groups: [], ungroupedIds: [], turn: {round: 0, activeId: null},
 		}, {page: "encounterworkspace.html"});
 	});
-	await page.goto("/encounterworkspace.html?bestiaryEncounter=missing");
+	await page.goto("/encounterworkspace.html?ew=1&bestiaryEncounter=missing");
 	await expect(page.locator("#ew-status")).toContainText("handoff is missing or has already been opened", {timeout: WORKSPACE_INIT_TIMEOUT});
-	await expect(page).toHaveURL(/encounterworkspace\.html$/);
+	await expect(page).toHaveURL(/encounterworkspace\.html\?ew=1$/);
 	await expect(page.locator("#ew-choose")).toBeEnabled();
 	expect((await readWorkspace(page)).sourceList.name).toBe("Keep Me");
 
 	await page.evaluate(() => sessionStorage.setItem("bestiaryEncounterHandoff", "{damaged"));
-	await page.goto("/encounterworkspace.html?bestiaryEncounter=damaged");
+	await page.goto("/encounterworkspace.html?ew=1&bestiaryEncounter=damaged");
 	await expect(page.locator("#ew-status")).toContainText("handoff is damaged", {timeout: WORKSPACE_INIT_TIMEOUT});
 	expect((await readWorkspace(page)).sourceList.name).toBe("Keep Me");
 
@@ -142,7 +142,7 @@ test("a missing handoff is reported without changing the working copy; ordinary 
 			name: "Broken Bestiary Encounter", saveId: "", items: [{h: "missing_creature_tst"}],
 		},
 	})));
-	await page.goto("/encounterworkspace.html?bestiaryEncounter=partial");
+	await page.goto("/encounterworkspace.html?ew=1&bestiaryEncounter=partial");
 	await page.getByRole("button", {name: "Replace Encounter"}).click();
 	await expect(page.locator("#ew-status")).toContainText("missing_creature_tst", {timeout: WORKSPACE_INIT_TIMEOUT});
 	await expect(page.locator("#ew-status")).toContainText("working encounter is unchanged");

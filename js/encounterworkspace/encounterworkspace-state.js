@@ -2,6 +2,7 @@ import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate}
 import {getNpcTrackerHpAfterOperation} from "../dmscreen/npctracker/dmscreen-npctracker-hp.js";
 import {BestiaryQuickActionsEngine, BestiaryQuickActionsOperationTypes, BestiaryQuickActionsUtil} from "../bestiary/bestiary-quick-actions-engine.js";
 import {
+	ENCOUNTER_ROLL_PRESETS,
 	getEncounterEffectTargets,
 	getEncounterIsLegacyPresetId,
 	getEncounterModifierForPreset,
@@ -14,12 +15,23 @@ import {getEncounterDamageForMonster} from "./encounterworkspace-damage.js";
 const STORAGE_KEY = "encounterWorkspaceState";
 const SETTINGS_KEY = "encounterWorkspaceSettings";
 const PAGE = "encounterworkspace.html";
-const VERSION = 7;
+const COCKPIT_SETTINGS_KEY = "encounterCockpitSettings";
+const VERSION = 8;
 const MAX_INSTANCES = 1000;
+export const MAX_ENCOUNTER_LOG_ENTRIES = 400;
+export const ENCOUNTER_PARTY_SOURCE = "PARTY";
+export const ENCOUNTER_PARTY_HASH_PREFIX = "party:";
+export const ENCOUNTER_RULESETS = ["phb", "xphb", "tgtt"];
+const INSTANCE_KINDS = ["monster", "party"];
+const DEATH_SAVE_MODES = ["default", "on", "off"];
+const BATTLEFIELD_SCOPES = ["all", "group", "selection"];
+const COMBAT_STATUSES = ["setup", "active", "ended"];
+const V7_BATTLEFIELD_PRESET_IDS = new Set(["desecrated-dmg", "desecrated-house", "heavy-precipitation-xdmg", "blizzard-idrotf"]);
 export const MAX_ENCOUNTER_STATBLOCK_OPERATIONS = 100;
 const MAX_OPERATION_SIZE = 200_000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
+const ENCOUNTER_ROLL_PRESET_SKILLS = Object.fromEntries(ENCOUNTER_ROLL_PRESETS.filter(it => it.skill).map(it => [it.presetId, it.skill]));
 
 function freezeSnapshot (value) {
 	if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -48,6 +60,166 @@ function validateHp (hp) {
 }
 
 const isRecord = value => value && typeof value === "object" && !Array.isArray(value);
+const isFrozenRecord = value => isRecord(value) && Object.isFrozen(value);
+const isOptionalString = value => value == null || typeof value === "string";
+const isNonEmptyString = value => typeof value === "string" && !!value.trim();
+const isRounds = value => value == null || (Number.isSafeInteger(value) && value >= 0);
+const isCount = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max;
+
+/** Deep-copies an encounter state, sharing frozen monster snapshots instead of re-serialising them. */
+export function cloneEncounterState (state) {
+	if (!Array.isArray(state?.instances)) return copy(state);
+	const monsters = state.instances.map(it => it?.monster);
+	const out = copy({...state, instances: state.instances.map(it => isFrozenRecord(it?.monster) ? {...it, monster: null} : it)});
+	out.instances.forEach((it, ix) => { if (isFrozenRecord(monsters[ix])) it.monster = monsters[ix]; });
+	return out;
+}
+
+export function getEncounterIsPartyHash (hash) {
+	return typeof hash === "string" && hash.startsWith(ENCOUNTER_PARTY_HASH_PREFIX);
+}
+
+/** A monster-shaped snapshot for a party member, so statblock, resource and grouping code can treat it uniformly. */
+export function getEncounterPartyMonster ({name, ac = 10, hpMax = 1, speed = 30, initBonus = 0}) {
+	if (!isNonEmptyString(name)) throw new Error("A party member needs a name.");
+	const dex = Math.max(1, Math.min(30, 10 + 2 * (Number.isSafeInteger(initBonus) ? initBonus : 0)));
+	return freezeSnapshot({
+		name: name.trim(),
+		source: ENCOUNTER_PARTY_SOURCE,
+		size: ["M"],
+		type: "humanoid",
+		ac: [Number.isSafeInteger(ac) ? ac : 10],
+		hp: {average: isHpValue(hpMax) ? hpMax : 1, formula: String(isHpValue(hpMax) ? hpMax : 1)},
+		speed: {walk: Number.isSafeInteger(speed) && speed >= 0 ? speed : 30},
+		str: 10,
+		dex,
+		con: 10,
+		int: 10,
+		wis: 10,
+		cha: 10,
+		passive: 10,
+	});
+}
+
+/** v8 per-instance fields (all optional in v7 and earlier). */
+export function getEncounterInstanceV8Defaults (hash) {
+	return {
+		kind: getEncounterIsPartyHash(hash) ? "party" : "monster",
+		label: null,
+		conditionDetails: {},
+		effects: [],
+		deathSaves: null,
+		deathSaveMode: "default",
+		defeated: false,
+		templates: [],
+		note: "",
+		customGroup: null,
+		tieOrder: 0,
+	};
+}
+
+/** Fills v8 fields a caller omitted (hand-built or legacy-reducer instances); present-but-malformed fields are still rejected. */
+const withInstanceV8Defaults = instance => ({...getEncounterInstanceV8Defaults(instance.hash), ...instance});
+const withStateV8Defaults = state => ({
+	battlefield: [],
+	groupMeta: {},
+	log: [],
+	savedEffects: [],
+	combat: {status: state.turn?.round > 0 ? "active" : "setup"},
+	...state,
+});
+
+function validateV8Instance (instance, ids) {
+	const invalid = what => { throw new Error(`The saved encounter contains invalid ${what}. It has not been changed.`); };
+	if (!INSTANCE_KINDS.includes(instance.kind) || (instance.kind === "party") !== getEncounterIsPartyHash(instance.hash)) invalid("creature kinds");
+	if (instance.kind === "party" && (!isRecord(instance.party) || !isOptionalString(instance.party.characterId)
+		|| ["ac", "passive", "speed", "initBonus"].some(key => !Number.isSafeInteger(instance.party[key])))) invalid("party members");
+	if (!isOptionalString(instance.label) || typeof instance.note !== "string"
+		|| (instance.customGroup != null && !isNonEmptyString(instance.customGroup))
+		|| !Number.isSafeInteger(instance.tieOrder) || typeof instance.defeated !== "boolean") invalid("creature details");
+	if (!isRecord(instance.conditionDetails) || Object.values(instance.conditionDetails).some(it => !isRecord(it) || !isRounds(it.rounds))) invalid("condition details");
+	if (!Array.isArray(instance.effects)) invalid("effects");
+	const effectIds = new Set();
+	for (const effect of instance.effects) {
+		if (!isRecord(effect) || !isNonEmptyString(effect.id) || effectIds.has(effect.id) || !isNonEmptyString(effect.name)
+			|| !Array.isArray(effect.mods) || effect.mods.some(mod => !isRecord(mod) || typeof mod.target !== "string")
+			|| !isRounds(effect.rounds) || (effect.casterId != null && typeof effect.casterId !== "string")) invalid("effects");
+		effectIds.add(effect.id);
+	}
+	if (!DEATH_SAVE_MODES.includes(instance.deathSaveMode)) invalid("death saves");
+	if (instance.deathSaves !== null && (!isRecord(instance.deathSaves)
+		|| !isCount(instance.deathSaves.successes, 3) || !isCount(instance.deathSaves.failures, 3)
+		|| typeof instance.deathSaves.stable !== "boolean" || typeof instance.deathSaves.dead !== "boolean")) invalid("death saves");
+	if (!Array.isArray(instance.templates) || instance.templates.some(it => !isRecord(it) || !isNonEmptyString(it.key))) invalid("templates");
+	if (ids.has(instance.customGroup)) invalid("creature groups");
+}
+
+function validateV8State (raw, ids) {
+	const invalid = what => { throw new Error(`The saved encounter contains invalid ${what}. It has not been changed.`); };
+	if (!Array.isArray(raw.battlefield)) invalid("battlefield effects");
+	const battlefieldIds = new Set();
+	for (const entry of raw.battlefield) {
+		if (!isRecord(entry) || !isNonEmptyString(entry.id) || battlefieldIds.has(entry.id)
+			|| !isNonEmptyString(entry.rule) || !isNonEmptyString(entry.name)
+			|| !BATTLEFIELD_SCOPES.includes(entry.scope)
+			|| (entry.scope === "group" && !isNonEmptyString(entry.group))
+			|| !Array.isArray(entry.ids) || entry.ids.some(id => typeof id !== "string")
+			|| !isRounds(entry.rounds) || typeof (entry.note ?? "") !== "string") invalid("battlefield effects");
+		battlefieldIds.add(entry.id);
+	}
+	if (!isRecord(raw.groupMeta) || Object.values(raw.groupMeta).some(it => !isRecord(it))) invalid("group settings");
+	if (!Array.isArray(raw.log) || raw.log.some(it => !isRecord(it) || typeof it.text !== "string")) invalid("log entries");
+	if (!Array.isArray(raw.savedEffects) || raw.savedEffects.some(it => !isRecord(it) || !isNonEmptyString(it.key) || !isNonEmptyString(it.name))) invalid("saved effects");
+	if (!isRecord(raw.combat) || !COMBAT_STATUSES.includes(raw.combat.status)) invalid("combat status");
+}
+
+function getV7ModifierMods (modifier, skill) {
+	const kind = {advantage: "adv", disadvantage: "dis"}[modifier.mode];
+	return modifier.scopes.flatMap(target => [
+		...kind ? [{target, kind, value: "", ...skill && target === "skill" ? {skill} : {}}] : [],
+		...modifier.bonus ? [{target, kind: "bonus", value: modifier.bonus, ...skill && target === "skill" ? {skill} : {}}] : [],
+	]);
+}
+
+/** Converts v7 per-instance area notes and roll effects into v8 battlefield entries and effects. The v7 arrays are kept for the legacy UI. */
+function migrateV7Effects (state, getPresetSkill) {
+	const battlefield = new Map();
+	const addToBattlefield = (key, make, id) => {
+		if (!battlefield.has(key)) battlefield.set(key, make());
+		battlefield.get(key).ids.push(id);
+	};
+	state.instances.forEach(instance => {
+		instance.areaNotes.forEach(note => addToBattlefield(
+			`note:${JSON.stringify([note.kind, note.name, note.description])}`,
+			() => ({id: `bf:v7:${note.id}`, rule: "custom", name: note.name, scope: "selection", ids: [], rounds: null, note: note.description, origin: `v7-area-note:${note.kind}`}),
+			instance.id,
+		));
+		instance.modifiers.forEach(modifier => {
+			if (modifier.presetId && V7_BATTLEFIELD_PRESET_IDS.has(modifier.presetId)) {
+				return addToBattlefield(
+					`preset:${modifier.presetId}`,
+					() => ({id: `bf:v7:${modifier.presetId}`, rule: modifier.presetId, name: modifier.name, scope: "selection", ids: [], rounds: null, note: "", origin: "v7-roll-effect"}),
+					instance.id,
+				);
+			}
+			const isDebuff = modifier.mode === "disadvantage" || modifier.bonus < 0;
+			instance.effects.push({
+				id: `fx:v7:${modifier.id}`,
+				key: modifier.presetId ? `preset:${modifier.presetId}` : null,
+				name: modifier.name,
+				kind: modifier.presetId ? "item" : isDebuff ? "debuff" : "buff",
+				mods: getV7ModifierMods(modifier, modifier.presetId ? getPresetSkill(modifier.presetId) : null),
+				rounds: null,
+				totalRounds: null,
+				startRound: null,
+				casterId: null,
+				concOn: null,
+				source: "v7-roll-effect",
+			});
+		});
+	});
+	state.battlefield = [...battlefield.values()];
+}
 
 export function validateEncounterStatblockOperations (monster, operations) {
 	if (!Array.isArray(operations) || operations.length > MAX_ENCOUNTER_STATBLOCK_OPERATIONS) {
@@ -154,11 +326,25 @@ export async function pResolveSavedBestiaryItem (item) {
 
 export class EncounterWorkspaceState {
 	static getEmpty () {
-		return {version: VERSION, sourceList: null, instances: [], selectedIds: [], omissions: [], groups: [], ungroupedIds: [], turn: {round: 0, activeId: null}};
+		return {
+			version: VERSION,
+			sourceList: null,
+			instances: [],
+			selectedIds: [],
+			omissions: [],
+			groups: [],
+			ungroupedIds: [],
+			turn: {round: 0, activeId: null},
+			battlefield: [],
+			groupMeta: {},
+			log: [],
+			savedEffects: [],
+			combat: {status: "setup"},
+		};
 	}
 
 	static validate (raw) {
-		if (!raw || ![1, 2, 3, 4, 5, 6, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
+		if (!raw || ![1, 2, 3, 4, 5, 6, 7, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
 		if (
 			(raw.sourceList !== null && (typeof raw.sourceList?.name !== "string" || typeof raw.sourceList?.saveId !== "string"))
 			|| !Array.isArray(raw.instances)
@@ -202,6 +388,10 @@ export class EncounterWorkspaceState {
 			if (raw.version >= 5) validateEncounterStatblockOperations(instance.monster, instance.statblockOperations);
 			if (raw.version >= 7) validateEncounterResources(instance.resources);
 			ids.add(instance.id);
+		}
+		if (raw.version >= 8) {
+			raw.instances.forEach(instance => validateV8Instance(withInstanceV8Defaults(instance), ids));
+			validateV8State(withStateV8Defaults(raw), ids);
 		}
 		if (
 			raw.selectedIds.some(id => !ids.has(id))
@@ -248,7 +438,7 @@ export class EncounterWorkspaceState {
 							&& raw.instances.find(it => it.id === raw.turn.activeId)?.initiative != null)))
 		)) throw new Error("The saved encounter contains an invalid active turn. It has not been changed.");
 
-		const state = copy(raw);
+		const state = cloneEncounterState(raw);
 		state.version = VERSION;
 		if (raw.version < 4) state.turn = {round: 0, activeId: null};
 		if (raw.version < 6) {
@@ -276,9 +466,30 @@ export class EncounterWorkspaceState {
 			}
 			if (raw.version < 5) instance.statblockOperations = [];
 			if (raw.version < 7) instance.resources = getEncounterResourceDefaults(getEncounterEffectiveMonster(instance));
+			Object.assign(instance, withInstanceV8Defaults(instance));
 			freezeSnapshot(instance.monster);
 		});
+		if (raw.version < 8) {
+			state.groupMeta = {};
+			state.log = [];
+			state.savedEffects = [];
+			state.combat = {status: state.turn.round > 0 ? "active" : "setup"};
+			migrateV7Effects(state, presetId => ENCOUNTER_ROLL_PRESET_SKILLS[presetId] || null);
+		} else Object.assign(state, withStateV8Defaults(state));
+		this._normalizeV8(state);
 		return state;
+	}
+
+	/** Prunes v8 cross-references that legacy reducers can leave behind (removed creatures, cleared conditions). */
+	static _normalizeV8 (state) {
+		const ids = new Set(state.instances.map(it => it.id));
+		state.instances.forEach(instance => {
+			const conditions = new Set(instance.conditions.map(getNpcTrackerCanonicalConditionName));
+			instance.conditionDetails = Object.fromEntries(Object.entries(instance.conditionDetails)
+				.filter(([name]) => conditions.has(getNpcTrackerCanonicalConditionName(name))));
+		});
+		state.battlefield = state.battlefield.map(entry => entry.scope === "selection" ? {...entry, ids: entry.ids.filter(id => ids.has(id))} : entry);
+		if (state.log.length > MAX_ENCOUNTER_LOG_ENTRIES) state.log = state.log.slice(-MAX_ENCOUNTER_LOG_ENTRIES);
 	}
 
 	static async pFromSavedList ({exportedSublist, pResolveItem = pResolveSavedBestiaryItem, fnUid = () => CryptUtil.uid()}) {
@@ -328,6 +539,7 @@ export class EncounterWorkspaceState {
 					hp: getHpDefaults(resolved.entity),
 					initiative: null,
 					resources: getEncounterResourceDefaults(resolved.entity),
+					...getEncounterInstanceV8Defaults(hash),
 				});
 				state.selectedIds.push(id);
 			}
@@ -922,7 +1134,7 @@ export class EncounterWorkspaceStore {
 
 	async pSave (state) {
 		const valid = EncounterWorkspaceState.validate(state);
-		await this._storage.pSetForPage(STORAGE_KEY, copy(valid), {page: PAGE});
+		await this._storage.pSetForPage(STORAGE_KEY, cloneEncounterState(valid), {page: PAGE});
 		return valid;
 	}
 
@@ -955,5 +1167,29 @@ export class EncounterWorkspaceSettingsStore {
 		const settings = {autoRollRecharge};
 		await this._storage.pSetForPage(SETTINGS_KEY, settings, {page: PAGE});
 		return settings;
+	}
+}
+
+export class EncounterCockpitSettingsStore {
+	static getDefaults () { return {ruleset: "phb", monsterDeathSaves: false}; }
+
+	constructor ({storage = StorageUtil} = {}) { this._storage = storage; }
+
+	static _validate (settings) {
+		if (!isRecord(settings) || !ENCOUNTER_RULESETS.includes(settings.ruleset) || typeof settings.monsterDeathSaves !== "boolean") {
+			throw new Error("The saved encounter cockpit settings are invalid. They have not been changed.");
+		}
+		return {ruleset: settings.ruleset, monsterDeathSaves: settings.monsterDeathSaves};
+	}
+
+	async pLoad () {
+		const saved = await this._storage.pGetForPage(COCKPIT_SETTINGS_KEY, {page: PAGE});
+		return saved == null ? EncounterCockpitSettingsStore.getDefaults() : EncounterCockpitSettingsStore._validate(saved);
+	}
+
+	async pSave (settings) {
+		const valid = EncounterCockpitSettingsStore._validate(settings);
+		await this._storage.pSetForPage(COCKPIT_SETTINGS_KEY, valid, {page: PAGE});
+		return valid;
 	}
 }

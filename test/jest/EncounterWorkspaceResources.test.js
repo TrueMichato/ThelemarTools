@@ -183,7 +183,7 @@ describe("Encounter Workspace combat resources", () => {
 			if (version < 2) raw.instances.forEach(it => { delete it.conditions; });
 			storage.pGetForPage.mockResolvedValueOnce(raw);
 			const migrated = await store.pLoad();
-			expect(migrated.version).toBe(7);
+			expect(migrated.version).toBe(8);
 			expect(migrated.instances.map(it => it.resources)).toEqual(state.instances.map(it => it.resources));
 		}
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
