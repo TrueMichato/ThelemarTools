@@ -5,6 +5,7 @@
 
 import {ENCOUNTER_ABILITY_NAMES, ENCOUNTER_SKILL_ABILITIES} from "../../encounterworkspace-fx.js";
 import {getEncounterRollModifier, getEncounterSignedNumber} from "../../encounterworkspace-rollbreakdown.js";
+import {getEncounterPreset, getEncounterPresetCitation} from "../../encounterworkspace-effects.js";
 
 export const COCKPIT_ROLL_KINDS = Object.freeze([
 	{value: "save", label: "Save"},
@@ -219,4 +220,89 @@ export function getCockpitOutcomeSteps (state, rolled, outcome, {amount = 0} = {
 export function getCockpitTrayLogText (title, rolled) {
 	const parts = (rolled?.results || []).map(it => `${it.label} ${it.roll.text}${it.success == null ? "" : it.success ? " ✓" : " ✗"}`);
 	return `${title} — ${parts.join(", ")}`;
+}
+
+/**
+ * The Roll tab's skill chips, filtered by the search box: a name prefix or substring ("perc", "sleight"), or an
+ * ability ("dex", "wis") for every skill that uses it. Returns [{skill, label, ability}] in `skills` order.
+ */
+export function getCockpitSkillMatches (skills, query = "") {
+	const q = `${query ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
+	const all = skills.map(skill => {
+		const ability = ENCOUNTER_SKILL_ABILITIES[skill] || "";
+		return {skill, label: toTitle(skill), ability: ability.slice(0, 3)};
+	});
+	if (!q) return all;
+	return all.filter(it => it.skill.includes(q) || it.ability === q || ENCOUNTER_ABILITY_NAMES[ENCOUNTER_SKILL_ABILITIES[it.skill]]?.toLowerCase() === q);
+}
+
+/* ------------------------------------------ Roll-time prompt (D41) ------------------------------------------ */
+
+/** Conditions whose roll effect depends on the scene, keyed by condition → the question asked before rolling. */
+export const COCKPIT_ROLL_CONDITION_QUESTIONS = Object.freeze({
+	frightened: "Is the source of its fear in sight?",
+});
+
+const CONTRIBUTOR_LISTS = ["bonuses", "advantage", "disadvantage", "autoFail", "autoCrit"];
+
+/** The scene question behind one contributor `source` on `instance`, or null when the source always applies. */
+function getSourceQuestion (state, instance, source) {
+	const [kind, ...rest] = `${source || ""}`.split(":");
+	const id = rest.join(":");
+	if (kind === "condition") {
+		const question = COCKPIT_ROLL_CONDITION_QUESTIONS[id];
+		return question ? {question, cite: "Condition"} : null;
+	}
+	const presetId = kind === "battlefield" ? (state.battlefield || []).find(it => it.id === id)?.rule
+		: kind === "effect" ? (instance.effects || []).find(it => it.id === id)?.presetId
+			: null;
+	const preset = presetId ? getEncounterPreset(presetId) : null;
+	return preset?.contextQuestion ? {question: preset.contextQuestion, cite: getEncounterPresetCitation(preset)} : null;
+}
+
+/**
+ * Scene-dependent sources that would change this roll (frightened with its fear source out of sight, heavy rain on
+ * a Perception check, …), one question per source with every creature it touches:
+ * [{key, question, label, cite, ids, names}]. Only sources that actually contribute to the roll are asked about;
+ * defeated creatures (who won't roll) are skipped. `labels` is a Map id → display label.
+ */
+export function getCockpitRollQuestions ({state, ids, query, getContributors, labels = new Map()}) {
+	const byKey = new Map();
+	for (const id of ids) {
+		const instance = state.instances.find(it => it.id === id);
+		if (!instance || instance.defeated) continue;
+		const contributors = getContributors(instance, query) || {};
+		for (const list of CONTRIBUTOR_LISTS) {
+			for (const entry of contributors[list] || []) {
+				if (!entry?.source) continue;
+				const asked = getSourceQuestion(state, instance, entry.source);
+				if (!asked) continue;
+				const it = byKey.get(entry.source) || {key: entry.source, question: asked.question, label: entry.label, cite: asked.cite, ids: [], names: []};
+				if (!it.ids.includes(id)) {
+					it.ids.push(id);
+					it.names.push(labels.get(id) || instance.name || id);
+				}
+				byKey.set(entry.source, it);
+			}
+		}
+	}
+	return [...byKey.values()];
+}
+
+/**
+ * Applies the prompt's answers ({key: "yes"|"no"|"cancel"}): "no" drops that source from every contributor list,
+ * "cancel" drops the creatures it touches from the roll. Returns {ids, getContributors} — ids keep their order.
+ */
+export function getCockpitAnsweredRoll ({ids, questions, answers, getContributors}) {
+	const dropped = new Set(questions.filter(it => answers[it.key] === "no").map(it => it.key));
+	const cancelled = new Set(questions.filter(it => answers[it.key] === "cancel").flatMap(it => it.ids));
+	const answered = !dropped.size ? getContributors : (instance, query) => {
+		const contributors = getContributors(instance, query) || {};
+		const out = {...contributors};
+		for (const list of CONTRIBUTOR_LISTS) {
+			if (Array.isArray(contributors[list])) out[list] = contributors[list].filter(it => !dropped.has(it?.source));
+		}
+		return out;
+	};
+	return {ids: ids.filter(id => !cancelled.has(id)), getContributors: answered};
 }

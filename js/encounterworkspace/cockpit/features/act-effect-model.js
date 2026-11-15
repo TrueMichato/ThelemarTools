@@ -73,6 +73,35 @@ export function getCockpitDurationRounds ({amount = "", unit = "round"} = {}) {
 	return {ok: true, rounds, unit: unitOut, text: getCockpitDurationText(rounds)};
 }
 
+/** Rounds plus their table time, for the Fx readout: "3 rounds", "10 rounds · 1 min", "4800 rounds · 8 h". */
+export function getCockpitDurationReadout (rounds) {
+	if (rounds == null) return "until removed";
+	const head = `${rounds} round${rounds === 1 ? "" : "s"}`;
+	if (rounds < 10) return head;
+	const trim = n => `${Number(n.toFixed(1))}`;
+	if (rounds >= 600) return `${head} · ${trim(rounds / 600)} h`;
+	return `${head} · ${trim(rounds / 10)} min`;
+}
+
+/** A typed duration as the stepper / unit select show it: "1 min" typed over rounds → {amount: "1", unit: "min"}. */
+export function getCockpitDurationNormalized ({amount = "", unit = "round"} = {}) {
+	const parsed = getCockpitDurationRounds({amount, unit});
+	if (!parsed.ok) return {amount, unit};
+	if (parsed.rounds == null) return {amount: "", unit: "until"};
+	return {amount: `${Number((parsed.rounds / (ROUNDS_PER[parsed.unit] || 1)).toFixed(2))}`, unit: parsed.unit};
+}
+
+/**
+ * The Fx duration stepper: one more / fewer of the unit the DM is working in (a typed "1 min" steps minutes). Never
+ * below 1; stepping from "until removed" (or an unreadable value) starts again at 1 of the unit.
+ */
+export function getCockpitDurationStep ({amount = "", unit = "round"} = {}, delta) {
+	const parsed = getCockpitDurationRounds({amount, unit});
+	if (!parsed.ok || parsed.rounds == null) return {amount: "1", unit: unit === "until" ? "round" : unit};
+	const n = Math.round(parsed.rounds / (ROUNDS_PER[parsed.unit] || 1));
+	return {amount: `${Math.max(1, n + delta)}`, unit: parsed.unit};
+}
+
 /* -------------------------------------------- Mods -------------------------------------------- */
 
 const TARGET_BY_VALUE = new Map(ENCOUNTER_MOD_TARGETS.map(it => [it.value, it]));

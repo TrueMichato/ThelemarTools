@@ -241,6 +241,134 @@ test.describe("Encounter cockpit Act features (?ew=2)", () => {
 		expect(errors).toEqual([]);
 	});
 
+	test("dock: docked console, tray in the dock column, duration stepper, skill chips, roll-time prompt", async ({page}) => {
+		const errors = trackConsoleErrors(page);
+		await page.setViewportSize({width: 1280, height: 800});
+		await seed(page);
+		await openCockpit(page);
+
+		// D44: the console sits at the top of the dock, idle until `/`, with example chips once open.
+		const dock = page.locator(".ewc-dock");
+		const conDock = dock.locator(".ewc-dock__top [data-ewc-console-dock]");
+		await expect(conDock).toBeVisible();
+		await expect(conDock.locator("[data-ewc-console-idle]")).toContainText("Press");
+		await expect(conDock.locator("[data-ewc-console-idle] kbd")).toContainText("/");
+		await expect(page.locator("[data-ewc-console]")).toBeHidden();
+		const tabsBox = await dock.locator(".ewc-dock__tab").first().boundingBox();
+		expect((await conDock.boundingBox())!.y).toBeLessThan(tabsBox!.y);
+		await blur(page);
+		await page.keyboard.press("/");
+		const input = page.locator("[data-ewc-console-in]");
+		await expect(input).toBeFocused();
+		await expect(conDock.locator("[data-ewc-console-ex]")).not.toHaveCount(0);
+		// A command typed and entered while the previous one is still applying runs next — it is not
+		// dropped, and the first command finishing does not wipe it.
+		await input.evaluate((el: HTMLInputElement) => {
+			const enter = () => el.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", bubbles: true, cancelable: true}));
+			el.value = "frightened @goblin1";
+			enter();
+			el.value = "frightened @goblin2";
+			enter();
+		});
+		await expect(row(page, "gob-2").locator(".ewc-pill--cond")).toContainText("Frightened");
+		await expect(row(page, "gob-1").locator(".ewc-pill--cond")).toContainText("Frightened");
+		await expect(input).toHaveValue("");
+		await input.press("Escape");
+
+		// D43: searchable skill chips — by name or by ability, Enter picks the first match.
+		await selectThree(page);
+		await blur(page);
+		await page.keyboard.press("r");
+		await page.locator('[data-ewc-fk="roll-kind-skill"]').click();
+		const skillQ = page.locator("[data-ewc-roll-skill-q]");
+		const chips = page.locator("[data-ewc-roll-skill]");
+		await expect(chips).toHaveCount(18);
+		await skillQ.fill("dex");
+		await expect(chips).toHaveCount(3);
+		await skillQ.fill("zzz");
+		await expect(page.locator("[data-ewc-roll-skill-none]")).toBeVisible();
+		await skillQ.fill("perc");
+		await expect(chips).toHaveCount(1);
+		await skillQ.press("Enter");
+		await expect(chips).toHaveCount(18);
+		await expect(page.locator('[data-ewc-roll-skill="perception"]')).toHaveAttribute("aria-checked", "true");
+		await expect(page.locator('[data-ewc-roll-skill="perception"]')).toBeFocused();
+
+		// D41: frightened asks "Is the source of its fear in sight?" once for both goblins; "No" rolls them straight.
+		const prompt = page.locator("[data-ewc-roll-prompt]");
+		await page.locator('[data-ewc-fk="roll-dc"]').fill("10");
+		await page.locator("[data-ewc-roll-go]").click();
+		await expect(prompt).toBeVisible();
+		await expect(prompt.locator("[data-ewc-prompt-q]")).toHaveCount(1);
+		await expect(prompt.locator("[data-ewc-prompt-q]")).toContainText("fear");
+		await expect(prompt.locator("[data-ewc-prompt-q]")).toContainText("Goblin 1");
+		await expect(prompt.locator('[data-ewc-fk="prompt-0-yes"]')).toHaveAttribute("aria-checked", "true");
+		await prompt.locator('[data-ewc-fk="prompt-0-no"]').click();
+		await prompt.locator("[data-ewc-prompt-go]").click();
+		await expect(prompt).toHaveCount(0);
+		const tray = page.locator("[data-ewc-tray]");
+		await expect(tray.locator(".ewc-tray__item")).toHaveCount(3);
+		await expect(tray.locator(".ewc-tray__die")).toHaveCount(3); // no disadvantage: one die each
+		await expect(tray.locator(".ewc-tray__title")).toContainText(/perception/i);
+
+		// D45: the tray lives in the dock column and never covers the stage (statblock) or the rail.
+		await expect(dock.locator(".ewc-dock__top [data-ewc-tray]")).toBeVisible();
+		await expect(dock.locator("[data-ewc-feed]")).toHaveCount(1);
+		const trayBox = (await tray.boundingBox())!;
+		const stageBox = (await page.locator(".ewc-stage").boundingBox())!;
+		const dockBox = (await dock.boundingBox())!;
+		expect(trayBox.x).toBeGreaterThanOrEqual(stageBox.x + stageBox.width - 1);
+		expect(trayBox.x + trayBox.width).toBeLessThanOrEqual(dockBox.x + dockBox.width + 1);
+
+		// D46: tray chip buttons are bordered, not bare text.
+		for (const which of ["failed", "passed"]) {
+			const border = await tray.locator(`[data-ewc-tray-select="${which}"]`).evaluate(el => {
+				const cs = getComputedStyle(el);
+				return {style: cs.borderTopStyle, width: cs.borderTopWidth, color: cs.borderTopColor};
+			});
+			expect(border.style, which).toBe("solid");
+			expect(border.width, which).not.toBe("0px");
+			expect(border.color, which).not.toBe("rgba(0, 0, 0, 0)");
+		}
+
+		// "Cancel that roll" drops the frightened goblins; only the Skeleton rolls.
+		await tray.locator("[data-ewc-tray-close]").click();
+		await page.locator("[data-ewc-roll-go]").click();
+		await prompt.locator('[data-ewc-fk="prompt-0-cancel"]').click();
+		await prompt.locator("[data-ewc-prompt-go]").click();
+		await expect(tray.locator(".ewc-tray__item")).toHaveCount(1);
+		await expect(tray.locator('[data-ewc-tray-row="skel"]')).toBeVisible();
+
+		// Esc backs out of the prompt without rolling.
+		await tray.locator("[data-ewc-tray-close]").click();
+		await page.locator("[data-ewc-roll-go]").click();
+		await expect(prompt).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(prompt).toHaveCount(0);
+		await expect(tray).toBeHidden();
+
+		// D42: the Fx duration stepper and its "= 10 rounds · 1 min" readout; typed values normalise on blur.
+		await blur(page);
+		await page.keyboard.press("e");
+		await page.locator('[data-ewc-fx="bless"]').click();
+		const hint = page.locator(".ewc-fx__detail .ewc-field__hint").first();
+		const amt = page.locator("[data-ewc-fx-dur]");
+		await expect(hint).toContainText("10 rounds · 1 min");
+		await page.locator('[data-ewc-fx-step="up"]').click();
+		await expect(amt).toHaveValue("2");
+		await expect(hint).toContainText("20 rounds · 2 min");
+		await page.locator('[data-ewc-fx-step="down"]').click();
+		await page.locator('[data-ewc-fx-step="down"]').click();
+		await expect(amt).toHaveValue("1"); // never below 1
+		await page.locator("[data-ewc-fx-unit]").selectOption("round");
+		await amt.fill("15");
+		await amt.blur();
+		await expect(hint).toContainText("15 rounds · 1.5 min");
+		await expect(page.locator("[data-ewc-fx-unit]")).toHaveValue("round");
+
+		expect(errors).toEqual([]);
+	});
+
 	test("screenshots: day and night, wide and narrow", async ({page}) => {
 		const errors = trackConsoleErrors(page);
 		await seed(page);
@@ -277,7 +405,33 @@ test.describe("Encounter cockpit Act features (?ew=2)", () => {
 				await page.screenshot({path: `${SHOT_DIR}/act-console-${theme}-${width}.png`});
 				await page.locator("[data-ewc-console-in]").fill("");
 				await page.screenshot({path: `${SHOT_DIR}/act-console-cheat-${theme}-${width}.png`});
+
+				// Skill chips and the "Before rolling…" prompt (a frightened goblin), then put everything back.
+				await page.locator("[data-ewc-console-in]").fill("frightened @goblin1");
+				await page.keyboard.press("Enter");
+				await expect(page.locator("[data-ewc-console-in]")).toHaveValue("");
 				await page.keyboard.press("Escape");
+				await expect(page.locator("[data-ewc-console]")).toBeHidden();
+				await blur(page);
+				await page.keyboard.press("r");
+				await page.locator('[data-ewc-fk="roll-kind-skill"]').click();
+				await page.locator("[data-ewc-roll-skill-q]").fill("wis");
+				await page.screenshot({path: `${SHOT_DIR}/act-skill-chips-${theme}-${width}.png`});
+				await page.locator("[data-ewc-roll-skill-q]").press("Enter");
+				await page.locator("[data-ewc-roll-go]").click();
+				await expect(page.locator("[data-ewc-roll-prompt]")).toBeVisible();
+				await page.screenshot({path: `${SHOT_DIR}/act-roll-prompt-${theme}-${width}.png`});
+				await page.keyboard.press("Escape");
+				await expect(page.locator("[data-ewc-roll-prompt]")).toHaveCount(0);
+				await page.locator('[data-ewc-fk="roll-kind-save"]').click();
+				await blur(page);
+				await page.keyboard.press("/");
+				await page.locator("[data-ewc-console-in]").fill("-frightened @goblin1");
+				await page.keyboard.press("Enter");
+				await expect(page.locator("[data-ewc-console-in]")).toHaveValue("");
+				await page.keyboard.press("Escape");
+				await expect(page.locator("[data-ewc-console]")).toBeHidden();
+				await expect(row(page, "gob-1").locator(".ewc-pill--cond")).toHaveCount(0);
 			}
 		}
 		expect(errors).toEqual([]);

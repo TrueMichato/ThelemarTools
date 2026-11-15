@@ -1,12 +1,17 @@
 import {EncounterWorkspaceState} from "../../js/encounterworkspace/encounterworkspace-state.js";
 import {rollEncounterChecks, rollEncounterSaves} from "../../js/encounterworkspace/encounterworkspace-massroll.js";
 import {getCockpitContributorGetter} from "../../js/encounterworkspace/cockpit/rules.js";
+import {withEncounterBattlefieldEntry} from "../../js/encounterworkspace/encounterworkspace-battlefield.js";
 import {
+	getCockpitAnsweredRoll,
 	getCockpitOutcomeSteps,
 	getCockpitOutcomeText,
 	getCockpitRollModeFromEvent,
+	getCockpitRollQuery,
 	getCockpitRollQueryLabel,
+	getCockpitRollQuestions,
 	getCockpitRollRequest,
+	getCockpitSkillMatches,
 	getCockpitTrayCounts,
 	getCockpitTrayRows,
 	getCockpitEmptyRollForm,
@@ -101,5 +106,47 @@ describe("Encounter cockpit Act — roll tab and tray", () => {
 		expect(rows[1]).toMatchObject({label: "Goblin 2", text: "Dex +2", mode: "advantage", from: "Haste"});
 		const forced = getCockpitWhoRolls(state, ["c1"], {...request, mode: "disadvantage"}, {getContributors: getCockpitContributorGetter(state, {}), labels});
 		expect(forced[0].mode).toBe("disadvantage");
+	});
+
+	test("skill search filters chips by name fragment or ability, and an empty query lists all", () => {
+		const skills = ["acrobatics", "animal handling", "perception", "sleight of hand", "stealth", "insight"];
+		expect(getCockpitSkillMatches(skills, "").map(it => it.skill)).toEqual(skills);
+		expect(getCockpitSkillMatches(skills, "  PERC ")).toEqual([{skill: "perception", label: "Perception", ability: "wis"}]);
+		expect(getCockpitSkillMatches(skills, "dex").map(it => it.skill)).toEqual(["acrobatics", "sleight of hand", "stealth"]);
+		expect(getCockpitSkillMatches(skills, "wisdom").map(it => it.skill)).toEqual(["animal handling", "perception", "insight"]);
+		expect(getCockpitSkillMatches(skills, "of  hand").map(it => it.skill)).toEqual(["sleight of hand"]);
+		expect(getCockpitSkillMatches(skills, "zzz")).toEqual([]);
+	});
+
+	test("roll-time prompt asks about scene-dependent sources once each, and its answers drop sources or creatures", async () => {
+		let state = await pGetCockpitState([["Goblin", 3]]);
+		state = EncounterWorkspaceState.validate({...state, instances: state.instances.map(it => it.id === "c3" ? it : {...it, conditions: ["frightened"]})});
+		state = withEncounterBattlefieldEntry(state, {rule: "heavy-precipitation-xdmg", id: "rain"}).state;
+		state = withEncounterDraft(state, draft => { applyEncounterEffect(draft, {targetIds: ["c1"], def: getEncounterEffectPreset(state, "bless")}); }).state;
+		const getContributors = getCockpitContributorGetter(state, {});
+		const labels = new Map([["c1", "Goblin 1"], ["c2", "Goblin 2"], ["c3", "Goblin 3"]]);
+		const ids = ["c1", "c2", "c3"];
+		const perception = getCockpitRollQuery({kind: "check", skill: "perception", dc: 12});
+		const questions = getCockpitRollQuestions({state, ids, query: perception, getContributors, labels});
+		expect(questions.map(it => [it.key, it.names])).toEqual([
+			["condition:frightened", ["Goblin 1", "Goblin 2"]],
+			["battlefield:rain", ["Goblin 1", "Goblin 2", "Goblin 3"]],
+		]);
+		expect(questions[1].question).toMatch(/heavy rain or heavy snow/);
+		expect(questions[1].cite).toMatch(/XDMG/);
+		// A Dex save touches neither: frightened affects checks, the rain only Perception; Bless always applies.
+		const dexSave = getCockpitRollQuery({kind: "save", ability: "dex"});
+		expect(getContributors(state.instances[0], dexSave).bonuses.map(it => it.label)).toEqual(["Bless"]);
+		expect(getCockpitRollQuestions({state, ids, query: getCockpitRollQuery({kind: "save", ability: "dex"}), getContributors, labels})).toEqual([]);
+
+		const all = {"condition:frightened": "yes", "battlefield:rain": "yes"};
+		expect(getCockpitAnsweredRoll({ids, questions, answers: all, getContributors}).getContributors).toBe(getContributors);
+		const noFear = getCockpitAnsweredRoll({ids, questions, answers: {...all, "condition:frightened": "no"}, getContributors});
+		const c1 = state.instances.find(it => it.id === "c1");
+		expect(getContributors(c1, perception).disadvantage.map(it => it.source)).toEqual(expect.arrayContaining(["condition:frightened", "battlefield:rain"]));
+		expect(noFear.getContributors(c1, perception).disadvantage.map(it => it.source)).toEqual(["battlefield:rain"]);
+		expect(noFear.ids).toEqual(ids);
+		const cancelFear = getCockpitAnsweredRoll({ids, questions, answers: {...all, "condition:frightened": "cancel"}, getContributors});
+		expect(cancelFear.ids).toEqual(["c3"]);
 	});
 });

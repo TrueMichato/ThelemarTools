@@ -3,6 +3,7 @@ import {getEncounterEffectPresets} from "../../js/encounterworkspace/encounterwo
 import {getCockpitInstanceLabels} from "../../js/encounterworkspace/cockpit/model.js";
 import {
 	COCKPIT_CONSOLE_CHEATSHEET,
+	COCKPIT_CONSOLE_EXAMPLES,
 	COCKPIT_CONSOLE_HISTORY_MAX,
 	getCockpitConsoleCommand,
 	getCockpitConsoleEffects,
@@ -91,9 +92,9 @@ describe("Encounter cockpit Act — command console", () => {
 		expect(run(ctx, "@gob -bless").preview.rows.map(it => it.text)).toEqual(["doesn't have it", "doesn't have it"]);
 	});
 
-	test("every cheat-sheet example parses without an error", async () => {
+	test("every cheat-sheet and docked example chip parses without an error", async () => {
 		const ctx = await pGetCtx();
-		COCKPIT_CONSOLE_CHEATSHEET.flatMap(it => it.items).forEach(example => {
+		[...COCKPIT_CONSOLE_CHEATSHEET.flatMap(it => it.items), ...COCKPIT_CONSOLE_EXAMPLES].forEach(example => {
 			const {parsed} = run(ctx, example, {dockTargetIds: ["c1"], selectedIds: ["c1"], activeId: "c1", chipGroups: [{name: "Goblins", ids: ["c1", "c2"]}]});
 			expect({example, error: parsed.error}).toEqual({example, error: null});
 		});
