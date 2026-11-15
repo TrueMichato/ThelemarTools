@@ -1149,7 +1149,9 @@ export class EncounterWorkspaceStore {
 
 	async pReplace ({currentState, exportedSublist, pConfirm, pResolveItem, fnUid, isRequireAllItems = false}) {
 		if (currentState.sourceList && !await pConfirm()) return currentState;
-		const next = await EncounterWorkspaceState.pFromSavedList({exportedSublist, pResolveItem, fnUid});
+		const fresh = await EncounterWorkspaceState.pFromSavedList({exportedSublist, pResolveItem, fnUid});
+		// Saved custom effects are the DM's reusable library, not part of the encounter being replaced.
+		const next = currentState.savedEffects?.length ? {...fresh, savedEffects: copy(currentState.savedEffects)} : fresh;
 		if (isRequireAllItems && (!next.instances.length || next.omissions.length)) {
 			throw new Error(next.omissions.length
 				? `${next.omissions.length} creature ${next.omissions.length === 1 ? "entry could" : "entries could"} not be brought over (${next.omissions.map(it => `${it.hash}: ${it.reason}`).join("; ")}). Correct the encounter in Bestiary and try again`
