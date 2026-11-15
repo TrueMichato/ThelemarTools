@@ -92,17 +92,21 @@ describe("Encounter Workspace combat resources", () => {
 		})).toBeNull();
 	});
 
-	it("extracts only explicit counts, excluding implied legendary uses and daily spells", () => {
+	it("extracts explicit counts and the renderer's default 3 legendary actions, excluding daily spells", () => {
 		const resources = getEncounterResourceDefaults(monster);
 		expect(resources.spellSlots).toEqual({"1": {current: 4, max: 4}, "3": {current: 2, max: 2}});
 		expect(resources.abilities.map(({id, name, max}) => ({id, name, max}))).toEqual([
 			{id: "auto:ability:trait:0", name: "Legendary Resistance (3/Day, or 4/Day in Lair)", max: 3},
 			{id: "auto:ability:action:1", name: "Enslave (2/Day)", max: 2},
+			{id: "auto:legendary-actions", name: "Legendary Actions", max: 3},
 			{id: "auto:equipment:0", name: "Amber Wand", max: 5},
 		]);
 		expect(resources.recharges).toEqual([{id: "auto:recharge:action:0", name: "Breath", min: 5, ready: true}]);
 		expect(resources.concentration).toEqual({active: false, label: ""});
-		expect(getEncounterResourceSummary(resources)).toBe("L1 slots 4/4 · L3 slots 2/2 · Legendary Resistance (3/Day, or 4/Day in Lair) 3/3 · +3 more");
+		expect(getEncounterResourceSummary(resources)).toBe("L1 slots 4/4 · L3 slots 2/2 · Legendary Resistance (3/Day, or 4/Day in Lair) 3/3 · +4 more");
+		expect(getEncounterResourceDefaults({...monster, legendary: []}).abilities.some(it => it.id === "auto:legendary-actions")).toBe(false);
+		expect(getEncounterResourceDefaults({...monster, legendaryHeader: ["Custom wording with no count."]})
+			.abilities.some(it => it.id === "auto:legendary-actions")).toBe(false);
 		expect(getEncounterResourceDefaults({
 			...monster,
 			legendaryActions: 4,
