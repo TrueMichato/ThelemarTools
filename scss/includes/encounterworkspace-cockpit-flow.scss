@@ -794,11 +794,25 @@
 			}
 		}
 
+		// Non-modal popover, anchored below the button that opened it (placed by flow-groups.js).
 		.ewc-grp {
+			position: fixed;
+			z-index: 45;
 			width: min(380px, calc(100vw - 24px));
+			max-height: calc(100vh - 16px);
+			overflow: auto;
 			padding: 14px 16px;
+			border: 1px solid var(--ewc-hair-2);
+			border-radius: var(--ewc-r-m);
+			background: var(--ewc-chrome);
+			box-shadow: var(--ewc-shadow-pop);
+			color: var(--ewc-ink);
 
-			.ewc-dialog__head {
+			&[hidden] {
+				display: none;
+			}
+
+			&__head {
 				margin-bottom: 4px;
 			}
 

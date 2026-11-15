@@ -20,6 +20,7 @@ import {
 	getEncounterViewGroups,
 } from "../encounterworkspace-state.js";
 import {createEncounterEngine} from "../encounterworkspace-engine.js";
+import {getEncounterGroupsV8} from "../encounterworkspace-groups-v8.js";
 import {
 	endEncounterConcentration,
 	getEncounterConcentration,
@@ -132,7 +133,7 @@ export class EncounterCockpit {
 		};
 		this._hooks = {damageApplied: new Set(), turnChanged: new Set(), rolled: new Set(), render: new Set(), showHint: new Set(), openPrep: new Set()};
 		/** Feature extension points (P3): render callbacks, persistent regions, stage modes, extra keys. */
-		this._ext = {barItems: [], railTop: [], railFoot: [], rowDecorators: [], stageModes: [], keys: [], menuItems: []};
+		this._ext = {barItems: [], railTop: [], railHead: [], railFoot: [], rowDecorators: [], stageModes: [], keys: [], menuItems: []};
 		this._stageMode = "statblock";
 		this._rollHandler = null;
 	}
@@ -247,12 +248,14 @@ export class EncounterCockpit {
 			callbacks: {
 				onView: id => this._view(id),
 				onSelect: (id, mode) => this._select(id, mode),
+				onSelectIds: ids => this._setSelection(ids),
 				onGroupToggle: memberIds => this._toggleGroup(memberIds),
 				onClearSelection: () => this._clearSelection(),
 				onSetInitiative: (id, total) => this._pSetInitiative(id, total),
 				onRollInitiative: ids => this._pRollInitiative(ids),
 				onQuickAction: (id, actionId) => this._quickAction(id, actionId),
 				onEndEffect: null,
+				group: null,
 			},
 		});
 		this._statblock = new EncounterCockpitStatblock({
@@ -313,6 +316,8 @@ export class EncounterCockpit {
 			onRolled: fn => this._addHook("rolled", fn),
 			/** fn(instanceId, effectItem) — "End" button in the rail's effects popover. */
 			setOnEndEffect: fn => { this._rail._cb.onEndEffect = fn; this._render(); },
+			/** Group actions the rail's Groups view calls: {pSetInit(name, total), pRoll(name), pStack(name, isStacked), openRename(name, anchor), close() → bool}. */
+			setGroupHandlers: handlers => { this._rail._cb.group = handlers; this._render(); },
 			pCommit: (label, recipe) => this._pCommit(label, recipe),
 			toast: (text, opts) => this.toast(text, opts),
 			view: id => this._view(id),
@@ -345,6 +350,8 @@ export class EncounterCockpit {
 			/* ---- Render-time contributions: fn(ctx) → Node | Node[] | null, called on every render. ---- */
 			addBarItem: fn => this._addExt("barItems", fn),
 			addRailTop: fn => this._addExt("railTop", fn),
+			/** Controls in the rail head next to the view toggle; return a node or null. */
+			addRailHead: fn => this._addExt("railHead", fn),
 			addRailFoot: fn => this._addExt("railFoot", fn),
 			/** fn(rowEl, instance, ctx) — append pips, markers, drag handles to a rail row. */
 			addRailRowDecorator: fn => this._addExt("rowDecorators", fn),
@@ -553,6 +560,7 @@ export class EncounterCockpit {
 			getEffective: instance => this._getEffective(instance),
 			quickActions: QUICK_ACTIONS,
 			groupChips: getCockpitGroupChips({instances: state.instances, viewGroups: getEncounterViewGroups(state)}),
+			rosterGroups: getEncounterGroupsV8(state),
 			targetIds: targets.ids,
 			isSelection: targets.isSelection,
 			ruleset: this._settings.ruleset,
@@ -560,6 +568,7 @@ export class EncounterCockpit {
 			isMac: this._isMac,
 			stageMode: this._stageMode,
 			railTop: this._ext.railTop,
+			railHead: this._ext.railHead,
 			railFoot: this._ext.railFoot,
 			rowDecorators: this._ext.rowDecorators,
 		};
@@ -953,6 +962,7 @@ export class EncounterCockpit {
 			escape: () => {
 				if (this._closeMenu?.({isFocus: true})) return;
 				if (this._rail.closePopover({isRestoreFocus: true})) return;
+				if (this._rail._cb.group?.close?.()) return;
 				if (this._dock.cancelReview()) return;
 				if (this._clearSelection()) return;
 				return false;

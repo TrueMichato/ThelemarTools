@@ -13,6 +13,7 @@ import {expect, test, type Page} from "@playwright/test";
  *   ADD    encounter-cockpit-prep.spec.ts  › "Shift+A adds real bestiary creatures into their group, and party members"
  *   FLOW   encounter-cockpit-flow.spec.ts  › "timeline, log drawer, groups and turn-order moves"
  *   DS     encounter-cockpit-flow.spec.ts  › "death saves, concentration checks and end combat"
+ *   GROUPS encounter-cockpit-groups.spec.ts › "Groups roster, headers, stacks, stack picker, find / sort, Party chip …"
  *   SWEEP  encounter-cockpit-sweep.spec.ts › the four 30-monster encounters (+ "Zombie (DMG) applies …")
  *   SB     encounter-cockpit-statblock.spec.ts › roll chips, DC calls, header, Held by / Tools / Reminders, PC card, hint
  *   P1/P2/P3  the tests in this file (rail & turns / statblock roll feed / templates, effects & battlefield)
@@ -37,8 +38,8 @@ import {expect, test, type Page} from "@playwright/test";
  * | 285 Kept·A area note edits (prep + strip)                               | PREP (strip chip Edit/End)                                                |
  * | 297 §3 Add tab +1 Goblin joins group; Effects durations; exit           | ADD + PREP                                                                |
  * | 317 §5 Groups: Roll once → equal init + adjacent                        | P1                                                                        |
- * | 331 §5 Stack group → one row ×N                                         | N/A: real groups are a chip + shared turn (FLOW), no stacked row          |
- * | 356 §5 group popover "Same initiative" + auto-group on add              | FLOW (group-setinit) + ADD (adds join their group)                        |
+ * | 331 §5 Stack group → one row ×N                                         | GROUPS (stacked row, summed HP, minis, picker, expand / collapse)         |
+ * | 356 §5 group popover "Same initiative" + auto-group on add              | FLOW (group-setinit) + ADD (adds join their group) + GROUPS (anchored)    |
  * | 370 §6 rail quick actions never overlap name/HP/pills                   | ACT (hover ›_ keeps row height) + SHOTS + P1 (no overflow). FIXME test: the hover quick actions cover the effect tally (shell bug) |
  * | 389 §8 statblock centred, max-width ≤ ~760                              | SHOTS (visual). Exact mockup geometry: N/A                                |
  * | 398 §9 death-save pips; 3 fails → Dead; undo; 3 successes → Stable      | DS                                                                        |
@@ -80,7 +81,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 853 A4 §8 Move before… and Alt↑                                         | FLOW (Alt+↑ and drag). Row ⋯ "Move before…": N/A                          |
  * | 860 A4 §8 typed damage reviews conditional defences; heal/set/undo      | SWEEP (defence review) + P1 (heal / set / undo / redo)                    |
  * | 870 A4 §8 Assess CR                                                     | PREP                                                                      |
- * | 875 A4 §8 roster all/none/group/find/sort                               | FLOW (Esc clears, group chips). Find/sort: N/A, rail is initiative-ordered |
+ * | 875 A4 §8 roster all/none/group/find/sort                               | FLOW (Esc clears, group chips) + GROUPS (Groups view find / sort, Party)  |
  * | 884 A4 §8 Cond tab apply/remove                                         | SHELL                                                                     |
  * | 890 A4 §8 bulk edits with preview (minion, transform, legendary…)       | SWEEP (Elite/Weak on whole encounters, transform preview) + PREP          |
  * | 899 A4 §8 statblock d20 Shift = adv, Ctrl = dis                         | P2                                                                        |

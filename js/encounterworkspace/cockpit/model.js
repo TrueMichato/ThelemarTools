@@ -184,12 +184,13 @@ export function getCockpitExhaustionLevel (instance) {
 
 /** Ordered ids for the rail, highest initiative first, then creatures without initiative in roster order. */
 export function getCockpitRailOrder ({instances, initiativeOf}) {
+	// Ties break like the turn order (EncounterWorkspaceState.getInitiativeOrder): tieOrder, then roster order.
 	return instances
-		.map((it, index) => ({id: it.id, init: initiativeOf(it), index}))
+		.map((it, index) => ({id: it.id, init: initiativeOf(it), tie: it.tieOrder ?? 0, index}))
 		.sort((a, b) => {
 			const ai = a.init == null ? -Infinity : a.init;
 			const bi = b.init == null ? -Infinity : b.init;
-			return bi - ai || a.index - b.index;
+			return bi - ai || a.tie - b.tie || a.index - b.index;
 		})
 		.map(it => it.id);
 }
@@ -214,7 +215,8 @@ export function getCockpitDamageSummary ({amount, damageType, results = [], labe
 
 /**
  * Rail group chips. A creature's v8 `customGroup` name wins; otherwise creatures sharing a statblock (the state's view
- * groups) form a group named after the monster. Only groups of two or more get a chip.
+ * groups) form a group named after the monster. Only groups of two or more get a chip. Two or more party members also
+ * get a leading "Party" chip (reusing a group chip that holds exactly the party, e.g. prep's auto "Party" group).
  * viewGroups: [{id, memberIds}] (from getEncounterViewGroups). Returns [{key, name, memberIds}] in roster order.
  */
 export function getCockpitGroupChips ({instances = [], viewGroups = [], getName = it => it.monster?._displayName || it.monster?.name || "Creature"}) {
@@ -232,7 +234,14 @@ export function getCockpitGroupChips ({instances = [], viewGroups = [], getName 
 			else add(group.id, getName(byId.get(group.memberIds[0])), id);
 		});
 	});
-	return [...chips.values()].filter(it => it.memberIds.length >= 2);
+	const out = [...chips.values()].filter(it => it.memberIds.length >= 2);
+	// The party always gets a chip (first, so its number key stays put), unless a group already holds exactly them.
+	const partyIds = viewGroups.flatMap(group => group.memberIds).filter(id => byId.get(id)?.kind === "party");
+	if (partyIds.length < 2) return out;
+	const isSameParty = chip => chip.memberIds.length === partyIds.length && partyIds.every(id => chip.memberIds.includes(id));
+	const existing = out.find(isSameParty);
+	if (existing) return [existing, ...out.filter(it => it !== existing)];
+	return [{key: "party", name: out.some(it => it.name === "Party") ? "Whole party" : "Party", memberIds: partyIds}, ...out];
 }
 
 /** First listed AC as a number (statblock AC is an array of numbers or {ac, from, condition}). */

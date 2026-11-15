@@ -1,3 +1,4 @@
+import {EncounterWorkspaceState} from "../../js/encounterworkspace/encounterworkspace-state.js";
 import {
 	getCockpitConditionPressed,
 	getCockpitDockTargetIds,
@@ -69,6 +70,20 @@ describe("Encounter cockpit shell model", () => {
 		test("rail order is highest initiative first; creatures without initiative keep roster order at the bottom", () => {
 			const instances = [{id: "a", init: null}, {id: "b", init: 12}, {id: "c", init: 18}, {id: "d", init: null}, {id: "e", init: 12}];
 			expect(getCockpitRailOrder({instances, initiativeOf: it => it.init})).toEqual(["c", "b", "e", "a", "d"]);
+		});
+
+		test("rail ties follow the turn order's tieOrder, so a group given one initiative stays adjacent", () => {
+			const state = {
+				instances: [
+					{id: "g1", initiative: 16, tieOrder: 1},
+					{id: "pc", initiative: 16, tieOrder: 0},
+					{id: "g2", initiative: 16, tieOrder: 2},
+				],
+				groups: [],
+			};
+			const turnOrder = EncounterWorkspaceState.getInitiativeOrder(state).map(it => it.id);
+			expect(turnOrder).toEqual(["pc", "g1", "g2"]);
+			expect(getCockpitRailOrder({instances: state.instances, initiativeOf: it => it.initiative})).toEqual(turnOrder);
 		});
 
 		test("J/K stepping wraps around and starts from an end when nothing is viewed", () => {

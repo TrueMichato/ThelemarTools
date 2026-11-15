@@ -1,4 +1,8 @@
-/** P3c — groups: create a group from the selection (G), rename, add to, set or roll one initiative, share a turn, ungroup. */
+/**
+ * P3c — groups: create a group from the selection (G), rename, add to, set or roll one initiative, share a turn, ungroup.
+ * The group menu is a non-modal popover anchored to the button that opened it (A6 mockup), so the rail stays usable.
+ * The rail's Groups view calls back here for its per-group header (shared initiative, roll once, stack, rename).
+ */
 import {h, kbd} from "../dom.js";
 import {getCockpitContributorGetter} from "../rules.js";
 import {
@@ -13,6 +17,7 @@ import {
 	withEncounterGroupInitiative,
 	withEncounterGroupRename,
 	withEncounterGroupSharedTurn,
+	withEncounterGroupStack,
 	withEncounterUngroup,
 } from "../../encounterworkspace-groups-v8.js";
 import {getFlowGroupNameSuggestion, getFlowNewIds} from "./flow-model.js";
@@ -22,8 +27,9 @@ const getMonsterName = it => it.monster?._displayName || it.monster?.name || "";
 
 export function installFlowGroups (api) {
 	let dlg = null;
-	/** {ids, anchor} while the dialog is open. */
+	/** {ids, anchor, rename?} while the popover is open; `rename` is a group name for the header's rename-only mode. */
 	let open = null;
+	const isOpen = () => !!(open && dlg && !dlg.hidden);
 
 	const getTargetIds = () => {
 		const {selectedIds, viewedId} = api.getUi();
@@ -49,15 +55,49 @@ export function installFlowGroups (api) {
 		const same = getSharedGroup(ctx.state, ctx.ui.selectedIds);
 		return h("div.ewc-grpbar", {"data-ewc-flow": "group-bar"},
 			h("span.ewc-grpbar__n", null, `${getFlowPlural(n, "creature")} selected${same ? ` · ${same}` : ""}`),
-			h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost", {
-				type: "button",
-				"data-ewc-flow": "group-open",
-				"data-ewc-fk": "group-open",
-				title: same ? `Rename ${same}, set its initiative or ungroup` : "Group the selected creatures",
-				"aria-haspopup": "dialog",
-				onclick: evt => pOpen([...ctx.ui.selectedIds], evt.currentTarget),
-			}, "Group…", kbd(["G"])),
 		);
+	});
+
+	// Always in the rail head: disabled only when there is nothing to group (no selection and nobody viewed).
+	api.addRailHead(ctx => {
+		const {selectedIds, viewedId} = ctx.ui;
+		const ids = selectedIds.length ? selectedIds : viewedId && ctx.state.instances.some(it => it.id === viewedId) ? [viewedId] : [];
+		const same = ids.length ? getSharedGroup(ctx.state, ids) : null;
+		const title = !ids.length
+			? "Select creatures first, then Group… (G)"
+			: selectedIds.length
+				? (same ? `Rename ${same}, set its initiative or ungroup (G)` : `Group the ${getFlowPlural(ids.length, "selected creature")} — create, add to or ungroup (G)`)
+				: `Group ${ctx.labels.get(viewedId) || "the viewed creature"} — or tick several creatures first (G)`;
+		return h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost.ewc-grpbtn", {
+			type: "button",
+			"data-ewc-flow": "group-open",
+			"data-ewc-fk": "group-open",
+			disabled: !ids.length,
+			title,
+			"aria-haspopup": "dialog",
+			"aria-expanded": `${isOpen() && !open.rename}`,
+			onclick: evt => {
+				if (isOpen() && !open.rename) return close();
+				pOpen([...ids], evt.currentTarget);
+			},
+		}, "Group…", kbd(["G"]));
+	});
+
+	api.setGroupHandlers({
+		pSetInit: (name, total) => pSetInit(name, total),
+		pRoll: name => pRoll(name),
+		pStack: (name, isStacked) => pDo(isStacked ? `Stack ${name}` : `Unstack ${name}`, draft => withEncounterGroupStack(draft, {name, isStacked}), next => {
+			if (!isStacked) return `${name} unstacked`;
+			return isTurnsAdjacent(next, name) ? `${name} stacked into one row` : `${name} stacked in the Groups view. Their turns aren't together, so initiative order keeps one row each until they share an initiative (Roll once).`;
+		}),
+		openRename: (name, anchor) => pOpen([], anchor, {rename: name}),
+		close: () => close({isRestoreFocus: true}),
+	});
+
+	document.addEventListener("pointerdown", evt => {
+		if (!isOpen() || dlg.contains(evt.target)) return;
+		if (open.anchor?.contains?.(evt.target) || evt.target.closest?.("[data-ewc-flow='group-open']")) return;
+		close();
 	});
 
 	/** Every id is in the same custom group → that group's name. */
@@ -67,42 +107,59 @@ export function installFlowGroups (api) {
 		return groups.size === 1 && only ? only : null;
 	}
 
-	function pOpen (ids, anchor) {
+	/** Initiative view only folds a stack whose live members take consecutive turns (see getCockpitRailItems). */
+	function isTurnsAdjacent (state, name) {
+		const byId = new Map(state.instances.map(it => [it.id, it]));
+		const live = api.getCtx().orderIds.filter(id => byId.get(id) && !byId.get(id).defeated);
+		const pos = live.map((id, ix) => byId.get(id).customGroup === name ? ix : -1).filter(ix => ix >= 0);
+		return pos.every((p, ix) => p === pos[0] + ix);
+	}
+
+	const getGroupButton = () => api.getRegion("layer")?.parentElement?.querySelector("[data-ewc-flow='group-open']");
+
+	function pOpen (ids, anchor, {rename = null} = {}) {
 		if (!dlg) {
-			dlg = isolateFlowKeys(h("dialog.ewc-dialog.ewc-grp", {"aria-labelledby": "ewc-grp-title", "data-ewc-flow": "group-dialog"}));
-			dlg.addEventListener("click", evt => { if (evt.target === dlg) dlg.close(); });
-			dlg.addEventListener("close", () => {
-				const back = open?.anchor;
-				open = null;
-				if (back?.isConnected) back.focus();
-				else api.getRegion("layer")?.parentElement?.querySelector("[data-ewc-fk='group-open']")?.focus();
+			dlg = isolateFlowKeys(h("div.ewc-grp", {role: "dialog", "aria-labelledby": "ewc-grp-title", "data-ewc-flow": "group-dialog", hidden: true}));
+			dlg.addEventListener("keydown", evt => {
+				if (evt.key !== "Escape") return;
+				evt.preventDefault();
+				close({isRestoreFocus: true});
 			});
 			api.getRegion("layer").append(dlg);
 		}
-		open = {ids, anchor};
+		open = {ids, anchor: anchor || getGroupButton(), rename};
 		render();
-		if (!dlg.open) dlg.showModal();
+		dlg.hidden = false;
 		place();
+		getGroupButton()?.setAttribute("aria-expanded", `${!rename}`);
 		const field = dlg.querySelector("input");
 		field?.focus();
 		field?.select?.();
 	}
 
+	/** Below its anchor (the Group… button, or the header's Rename), kept inside the window. */
 	function place () {
-		const a = open?.anchor;
-		if (!a?.isConnected) {
-			dlg.style.removeProperty("margin");
-			dlg.style.removeProperty("left");
-			dlg.style.removeProperty("top");
-			return;
-		}
-		const r = a.getBoundingClientRect();
-		dlg.style.margin = "0";
-		dlg.style.left = `${Math.max(8, Math.min(innerWidth - dlg.offsetWidth - 8, r.left))}px`;
-		dlg.style.top = `${Math.max(8, Math.min(innerHeight - dlg.offsetHeight - 8, r.bottom + 6))}px`;
+		const a = open?.anchor?.isConnected ? open.anchor : getGroupButton();
+		const r = a?.getBoundingClientRect();
+		const left = r ? r.left : (innerWidth - dlg.offsetWidth) / 2;
+		const top = r ? r.bottom + 6 : 80;
+		dlg.style.left = `${Math.max(8, Math.min(innerWidth - dlg.offsetWidth - 8, left))}px`;
+		dlg.style.top = `${Math.max(8, Math.min(innerHeight - dlg.offsetHeight - 8, top))}px`;
 	}
 
-	const close = () => dlg?.open && dlg.close();
+	/** Returns true if the popover was open (so Esc does one thing at a time). */
+	function close ({isRestoreFocus = false} = {}) {
+		if (!isOpen()) return false;
+		const back = open.anchor;
+		const hadFocus = dlg.contains(document.activeElement);
+		dlg.hidden = true;
+		open = null;
+		getGroupButton()?.setAttribute("aria-expanded", "false");
+		if (isRestoreFocus || hadFocus) {
+			(back?.isConnected ? back : getGroupButton())?.focus();
+		}
+		return true;
+	}
 
 	async function pDo (label, recipe, toastText) {
 		const next = await api.pCommit(label, recipe);
@@ -112,7 +169,45 @@ export function installFlowGroups (api) {
 		return true;
 	}
 
+	function pSetInit (name, total) {
+		const n = getEncounterGroupMembers(api.getState(), name).length;
+		return pDo(`${name} initiative`, draft => withEncounterGroupInitiative(draft, {name, total}), `${name}: initiative ${total} for all ${n}`);
+	}
+
+	async function pRoll (name) {
+		const n = getEncounterGroupMembers(api.getState(), name).length;
+		let roll;
+		const ok = await pDo(`Roll ${name} initiative`, draft => {
+			const res = rollEncounterGroupInitiative(draft, {name, getContributors: getCockpitContributorGetter(draft, api.getSettings())});
+			roll = res.roll;
+			return res.state;
+		});
+		if (ok && roll) {
+			api.toast(`${name} rolled ${roll.text} — one initiative for all ${n}`, {isUndo: true});
+			api.engine.pLog("roll", `${name} initiative ${roll.text} (shared by ${getFlowPlural(n, "creature")})`).catch(() => {});
+		}
+		return ok;
+	}
+
+	function renderRename (from) {
+		if (!getEncounterGroupMembers(api.getState(), from).length) return close();
+		const field = h("input.ewc-input", {type: "text", value: from, "data-ewc-flow": "group-name", "aria-label": `New name for ${from}`, onkeydown: evt => { if (evt.key === "Enter") { evt.preventDefault(); doRename(); } }});
+		const doRename = () => {
+			const to = field.value.trim();
+			if (!to || to === from) return close({isRestoreFocus: true});
+			pDo(`Rename ${from}`, draft => withEncounterGroupRename(draft, {from, to}), `${from} renamed to ${to}`);
+		};
+		dlg.replaceChildren(
+			h("div.ewc-grp__head", null, h("h2.ewc-grp__title", {id: "ewc-grp-title"}, `Rename ${from}`)),
+			h("div.ewc-grp__sec", null,
+				h("div.ewc-grp__line", null, field, h("button.ewc-btn.ewc-btn--sm.ewc-btn--primary", {type: "button", "data-ewc-flow": "group-rename", onclick: doRename}, "Rename")),
+			),
+			h("div.ewc-grp__foot", null, h("span.ewc-grow"), h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost", {type: "button", "data-ewc-flow": "group-close", onclick: () => close({isRestoreFocus: true})}, "Cancel", kbd(["Esc"]))),
+		);
+	}
+
 	function render () {
+		if (open.rename) return renderRename(open.rename);
 		const state = api.getState();
 		const ids = open.ids.filter(id => state.instances.some(it => it.id === id));
 		if (!ids.length) return close();
@@ -142,20 +237,9 @@ export function installFlowGroups (api) {
 					fInit.reportValidity();
 					return;
 				}
-				pDo(`${same} initiative`, draft => withEncounterGroupInitiative(draft, {name: same, total}), `${same}: initiative ${total} for all ${members.length}`);
+				pSetInit(same, total);
 			};
-			const doRoll = async () => {
-				let roll;
-				const ok = await pDo(`Roll ${same} initiative`, draft => {
-					const res = rollEncounterGroupInitiative(draft, {name: same, getContributors: getCockpitContributorGetter(draft, api.getSettings())});
-					roll = res.roll;
-					return res.state;
-				});
-				if (ok && roll) {
-					api.toast(`${same} rolled ${roll.text} — one initiative for all ${members.length}`, {isUndo: true});
-					api.engine.pLog("roll", `${same} initiative ${roll.text} (shared by ${getFlowPlural(members.length, "creature")})`).catch(() => {});
-				}
-			};
+			const doRoll = () => pRoll(same);
 			const isShared = !!row?.sharedTurnId;
 			sections.push(
 				h("div.ewc-grp__sec", null,
@@ -226,11 +310,11 @@ export function installFlowGroups (api) {
 					pDo("Ungroup", draft => withEncounterUngroup(draft, {ids}), `Ungrouped ${getFlowPlural(ids.length, "creature")}`);
 				}}, "Ungroup selected"));
 		}
-		foot.push(h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost", {type: "button", "data-ewc-flow": "group-close", onclick: close}, "Close", kbd(["Esc"])));
+		foot.push(h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost", {type: "button", "data-ewc-flow": "group-close", onclick: () => close({isRestoreFocus: true})}, "Close", kbd(["Esc"])));
 
 		dlg.replaceChildren(
-			h("div.ewc-dialog__head", null,
-				h("h2.ewc-dialog__title.ewc-grp__title", {id: "ewc-grp-title"}, `${getFlowPlural(ids.length, "creature")}${same ? ` · ${same}` : " selected"}`),
+			h("div.ewc-grp__head", null,
+				h("h2.ewc-grp__title", {id: "ewc-grp-title"}, `${getFlowPlural(ids.length, "creature")}${same ? ` · ${same}` : " selected"}`),
 			),
 			h("p.ewc-grp__who", null, instances.map(it => api.getCtx().labels.get(it.id) || getMonsterName(it)).join(", ")),
 			...sections,
@@ -245,7 +329,7 @@ export function installFlowGroups (api) {
 		const ids = next.instances.map(it => it.id);
 		const fresh = getFlowNewIds(knownIds, ids);
 		knownIds = ids;
-		if (open && dlg?.open) render();
+		if (isOpen()) render();
 		// Only fresh commits: undo/redo restore earlier groupings, and "replace" is a different encounter.
 		if (!fresh.length || isAutoGrouping || meta?.type !== "commit") return;
 		const probe = withEncounterAutoGroup(next, fresh);
