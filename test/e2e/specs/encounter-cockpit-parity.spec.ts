@@ -469,7 +469,6 @@ test.describe("Encounter cockpit parity with the A6 mockup (?ew=2)", () => {
 		await view(page, "mage");
 		const tally = row(page, "gob-1").locator("[data-ewc-tally]");
 		await expect(tally).toBeVisible();
-		// Keyboard: with the mouse, the row's hover quick actions cover the tally (see the fixme test below).
 		await tally.focus();
 		await page.keyboard.press("Enter");
 		const pop = row(page, "gob-1").locator(".ewc-pop");
@@ -516,11 +515,8 @@ test.describe("Encounter cockpit parity with the A6 mockup (?ew=2)", () => {
 		expect(errors).toEqual([]);
 	});
 
-	// SHELL BUG (rail.js / encounterworkspace-cockpit-rail.scss, coordinator-owned): hovering a row reveals its quick
-	// actions (Dmg · Heal · Cond · ›_) on the meter line, exactly over the effect tally, so the tally can't be clicked
-	// with a mouse (verify-a6 step 370: "quick actions never overlap name/HP/pills"). Repro: seed, view the Mage,
-	// `bless @goblin1` in the console, then hover Goblin 1's row and click its "1 buff" tally — `.ewc-row__qa` intercepts.
-	test.fixme("row quick actions never cover the effect tally (mouse)", async ({page}) => {
+	// verify-a6 step 370: hover quick actions sit in the pills slot, which ends where the effect tally begins.
+	test("row quick actions never cover the effect tally (mouse)", async ({page}) => {
 		const errors = trackConsoleErrors(page);
 		await seed(page);
 		await view(page, "mage");
@@ -531,6 +527,11 @@ test.describe("Encounter cockpit parity with the A6 mockup (?ew=2)", () => {
 		await input.press("Enter");
 		await input.press("Escape");
 		const tally = row(page, "gob-1").locator("[data-ewc-tally]");
+		await tally.hover();
+		const qa = row(page, "gob-1").locator(".ewc-row__qa");
+		await expect(qa).toBeVisible();
+		const [qaBox, tallyBox] = [await qa.boundingBox(), await tally.boundingBox()];
+		expect(qaBox!.x + qaBox!.width).toBeLessThanOrEqual(tallyBox!.x);
 		await tally.click({timeout: 5_000});
 		await expect(row(page, "gob-1").locator(".ewc-pop li.ewc-tc__i--up")).toContainText("Bless");
 		expect(errors).toEqual([]);

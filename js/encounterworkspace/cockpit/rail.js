@@ -219,8 +219,14 @@ export class EncounterCockpitRail {
 			h(`span.ewc-row__ac${ac !== acBase ? ".is-changed" : ""}`, {title: `Armor Class ${ac ?? "unknown"}`}, `AC ${ac ?? "—"}`),
 		);
 
-		row.append(check, initCell, main, right, this._getSubline(instance, ctx, {label, isViewed, hpState}));
-		if (!instance.defeated && ctx.quickActions.length) row.append(this._getQuickActions(instance, label, ctx));
+		const sub = this._getSubline(instance, ctx, {label, isViewed, hpState});
+		row.append(check, initCell, main, right, sub);
+		if (!instance.defeated && ctx.quickActions.length) {
+			const qa = this._getQuickActions(instance, label, ctx);
+			// Other rows overlay their actions inside the pills slot, which ends where the effect tally begins.
+			if (isViewed) row.append(qa);
+			else sub.querySelector(".ewc-row__slot").append(qa);
+		}
 		(ctx.rowDecorators || []).forEach(fn => {
 			try {
 				fn(row, instance, ctx);
@@ -308,7 +314,7 @@ export class EncounterCockpitRail {
 		const {shown, more} = getCockpitConditionPills(conditions, {max: conc ? 2 : 3});
 		const pills = h("span.ewc-row__pills", null, shown.map(cond => this._getConditionPill(cond, instance, ctx)));
 		if (more) pills.append(h("span.ewc-pill.ewc-pill--more", {title: `${getCockpitPlural(more, "more condition")} — view the creature to see all`}, `+${more}`));
-		if (shown.length || more) sub.append(pills);
+		sub.append(h("span.ewc-row__slot", null, shown.length || more ? pills : null));
 		const tally = getCockpitTally(items);
 		if (tally) sub.append(this._getTallyButton(instance, label, tally));
 		return sub;

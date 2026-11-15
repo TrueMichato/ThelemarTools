@@ -435,6 +435,18 @@
 				}
 			}
 
+			// Fills the status line up to the effect tally; holds the pills and anchors the hover quick actions,
+			// so those can never cover the tally.
+			&__slot {
+				position: relative;
+				display: flex;
+				flex: 1 1 auto;
+				align-self: stretch;
+				align-items: center;
+				min-width: 0;
+				min-height: 18px;
+			}
+
 			&__pills {
 				display: flex;
 				flex: 1 1 auto;
@@ -457,14 +469,15 @@
 				display: flex;
 			}
 
-			// Any other row overlays compact actions at the end of its status line on hover or focus, so no
-			// row ever shifts under the pointer mid-click and the name, HP and AC stay readable.
+			// Any other row overlays compact actions at the end of its pills slot on hover or focus, so no
+			// row ever shifts under the pointer mid-click and the name, HP, AC and effect tally stay usable.
 			&:not(.is-viewed):hover .ewc-row__qa,
 			&:not(.is-viewed):has(:focus-visible) .ewc-row__qa {
 				position: absolute;
-				right: 6px;
-				bottom: 5px;
+				top: 50%;
+				right: 0;
 				z-index: 1;
+				transform: translateY(-50%);
 				display: flex;
 				padding: 0 0 0 12px;
 				background: linear-gradient(90deg, transparent, var(--ewc-surface) 12px);
