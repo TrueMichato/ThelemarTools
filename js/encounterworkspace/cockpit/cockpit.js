@@ -62,6 +62,8 @@ import {
 import {installCockpitActFeatures} from "./features/act.js";
 import {installCockpitPrepFeatures} from "./features/prep.js";
 import {installCockpitFlowFeatures} from "./features/flow.js";
+import {installCockpitStageAffordances} from "./features/stage-affordances.js";
+import {withCockpitRevived} from "./stage-model.js";
 import {
 	getCockpitDamageSummary,
 	getCockpitDockTargetIds,
@@ -128,7 +130,7 @@ export class EncounterCockpit {
 			effectItems: (state, instance) => getCockpitEffectItems(state, instance),
 			difficulty: null,
 		};
-		this._hooks = {damageApplied: new Set(), turnChanged: new Set(), rolled: new Set(), render: new Set()};
+		this._hooks = {damageApplied: new Set(), turnChanged: new Set(), rolled: new Set(), render: new Set(), showHint: new Set(), openPrep: new Set()};
 		/** Feature extension points (P3): render callbacks, persistent regions, stage modes, extra keys. */
 		this._ext = {barItems: [], railTop: [], railFoot: [], rowDecorators: [], stageModes: [], keys: [], menuItems: []};
 		this._stageMode = "statblock";
@@ -226,7 +228,7 @@ export class EncounterCockpit {
 	/** Each P3 feature module gets the public API; one failing module must not take the cockpit down. */
 	_installFeatures () {
 		const api = this.getApi();
-		[installCockpitActFeatures, installCockpitPrepFeatures, installCockpitFlowFeatures].forEach(install => {
+		[installCockpitActFeatures, installCockpitPrepFeatures, installCockpitFlowFeatures, installCockpitStageAffordances].forEach(install => {
 			try {
 				install(api);
 			} catch (e) {
@@ -263,6 +265,8 @@ export class EncounterCockpit {
 				onError: msg => this.toast(msg, {kind: "error"}),
 				onViewActive: () => this._viewActive(),
 				onToggleSelect: id => this._select(id, "toggle"),
+				onRevive: id => this._pRevive(id),
+				onDropConcentration: id => this._pDropConcentration(id),
 			},
 		});
 		this._dock = new EncounterCockpitDock({
@@ -314,6 +318,14 @@ export class EncounterCockpit {
 			view: id => this._view(id),
 			setSelection: ids => this._setSelection(ids),
 			setDockTab: id => this._dock.setTab(id),
+			/** Open a dock tab with its form prefilled (tabs that support it: "roll" → {kind, ability, dc, damage, …}). */
+			presetDockTab: (id, patch) => this._dock.presetTab(id, patch),
+			/** Show the stage's how-to hint card again (⋯ menu "Show the how-to hint"). */
+			showHint: () => this._runHooks("showHint"),
+			onShowHint: fn => this._addHook("showHint", fn),
+			/** Open the prep drawer: {tab?: "creature" | …, creSub?: "cr" | …}. */
+			openPrep: opts => this._runHooks("openPrep", opts || {}),
+			onOpenPrep: fn => this._addHook("openPrep", fn),
 			render: () => this._render(),
 			hover: this._hover,
 			getSettings: () => ({...this._settings}),
@@ -1093,6 +1105,15 @@ export class EncounterCockpit {
 			return;
 		}
 		await this._pCommit(text, draft => EncounterWorkspaceState[reducer](draft, {...action, id}));
+	}
+
+	async _pRevive (id) {
+		const name = this._getLabels().get(id);
+		await this._pCommit(`Revive ${name}`, (draft, {log}) => { withCockpitRevived(draft, id, {log, name}); });
+	}
+
+	async _pDropConcentration (id) {
+		await this._pCommit(`End concentration — ${this._getLabels().get(id)}`, (draft, {log}) => { endEncounterConcentration(draft, id, {log}); });
 	}
 
 	/* -------------------------------------------- HP -------------------------------------------- */
