@@ -113,7 +113,8 @@ const writeCockpitSave = async (page: Page) => {
 			next = withEncounterGroupStack(next, {name: "Goblins", isStacked: true});
 			next = withEncounterBattlefieldEntry(next, {rule: "dim-light", scope: "group", group: "Goblins", rounds: 5, note: "Torches gutter"}).state;
 			next = withEncounterTemplate(next, {key: "elite", ids: ["ew-6"]}).state;
-			return withEncounterCombatStatus(next, "active");
+			// A real cockpit has already run its one load-time grouping pass on this save.
+			return {...withEncounterCombatStatus(next, "active"), autoGrouped: true};
 		});
 		return engine.getState();
 	});
@@ -123,6 +124,7 @@ const writeCockpitSave = async (page: Page) => {
 const cockpitOnly = (state: Record<string, unknown> & {instances: Record<string, unknown>[]}) => ({
 	savedEffects: state.savedEffects,
 	groupMeta: state.groupMeta,
+	autoGrouped: state.autoGrouped,
 	log: state.log,
 	combat: state.combat,
 	battlefield: state.battlefield,

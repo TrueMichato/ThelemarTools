@@ -6,6 +6,7 @@ import {
 	getEncounterGroupsV8,
 	rollEncounterGroupInitiative,
 	withEncounterAutoGroup,
+	withEncounterLoadAutoGroup,
 	withEncounterCustomGroup,
 	withEncounterGroupInitiative,
 	withEncounterGroupRename,
@@ -58,6 +59,24 @@ describe("Encounter Cockpit groups (v8)", () => {
 		expect(getEncounterGroupPlural("Harpy")).toBe("Harpies");
 		expect(getEncounterGroupPlural("Lich")).toBe("Liches");
 		expect(withEncounterAutoGroup(await pGetCockpitState([["Goblin", 1]]), ["c1"]).grouped).toEqual([]);
+	});
+
+	it("groups a whole loaded encounter by kind once, and a later Ungroup survives the next load", async () => {
+		const loaded = withParty(await pGetCockpitState([["Goblin", 3], ["Wolf", 2], ["Bandit Captain", 1]]), "c1");
+		const {autoGrouped, ...olderSave} = structuredClone(loaded);
+		expect(EncounterWorkspaceState.validate(olderSave).autoGrouped).toBe(false);
+		expect(() => EncounterWorkspaceState.validate({...structuredClone(loaded), autoGrouped: "yes"})).toThrow(/group settings/);
+
+		const first = withEncounterLoadAutoGroup(loaded);
+		expect(first.grouped).toEqual([{name: "Goblins", ids: ["c2", "c3"]}, {name: "Wolves", ids: ["c4", "c5"]}]);
+		expect(groupsOf(first.state)).toEqual([null, "Goblins", "Goblins", "Wolves", "Wolves", null]);
+		const saved = EncounterWorkspaceState.validate(structuredClone(first.state));
+		expect(saved.autoGrouped).toBe(true);
+
+		const ungrouped = withEncounterUngroup(saved, {ids: ["c4", "c5"]});
+		const reloaded = withEncounterLoadAutoGroup(EncounterWorkspaceState.validate(structuredClone(ungrouped)));
+		expect(reloaded.grouped).toEqual([]);
+		expect(groupsOf(reloaded.state)).toEqual([null, "Goblins", "Goblins", null, null, null]);
 	});
 
 	it("sets or rolls one initiative for a whole group, with the best member's bonus and a breakdown", async () => {

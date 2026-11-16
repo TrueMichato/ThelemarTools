@@ -147,6 +147,18 @@ export function withEncounterAutoGroup (state, newIds) {
 	return {state: withCustomGroups(state, groupById), grouped: [...grouped].map(([name, ids]) => ({name, ids}))};
 }
 
+/**
+ * One-time grouping for an encounter that arrived whole (Bestiary handoff, saved list, a save from before auto-grouping):
+ * every ungrouped same-kind monster joins or forms its kind's group, and `autoGrouped` is set so a later Ungroup sticks.
+ * Returns {state, grouped: [{name, ids}]}; state is unchanged when the flag is already set.
+ */
+export function withEncounterLoadAutoGroup (state) {
+	if (state.autoGrouped) return {state, grouped: []};
+	const ungroupedIds = state.instances.filter(it => it.kind !== "party" && !it.customGroup).map(it => it.id);
+	const {state: grouped, grouped: groups} = withEncounterAutoGroup(state, ungroupedIds);
+	return {state: {...grouped, autoGrouped: true}, grouped: groups};
+}
+
 /** Persisted UI preference: show the group as one stacked row. */
 export function withEncounterGroupStack (state, {name, isStacked}) {
 	if (!getEncounterGroupMembers(state, name).length) throw new Error(`There's no group called ${name}.`);

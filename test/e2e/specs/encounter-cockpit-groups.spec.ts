@@ -10,10 +10,11 @@ import {expect, test, type Locator, type Page} from "@playwright/test";
 
 const SHOT_DIR = process.env.EWC_GROUPS_SHOT_DIR || "test-results/encounter-cockpit-groups";
 
-const seed = async (page: Page) => {
+/** `autoGrouped: false` seeds an encounter as a handoff or older save would arrive: never grouped by kind. */
+const seed = async (page: Page, {autoGrouped = true} = {}) => {
 	await page.goto("/encounterworkspace.html?ew=1");
 	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
-	await page.evaluate(async () => {
+	await page.evaluate(async autoGrouped => {
 		localStorage.removeItem("ewc-rail-view");
 		const res = await fetch("data/bestiary/bestiary-mm.json");
 		const {monster: monsters} = await res.json();
@@ -60,12 +61,13 @@ const seed = async (page: Page) => {
 			log: [],
 			savedEffects: [],
 			combat: {status: "setup"},
+			...autoGrouped ? {autoGrouped: true} : {},
 		};
 		const {StorageUtil} = globalThis as typeof globalThis & {
 			StorageUtil: {pSetForPage: (key: string, value: unknown, options: {page: string}) => Promise<void>},
 		};
 		await StorageUtil.pSetForPage("encounterWorkspaceState", state, {page: "encounterworkspace.html"});
-	});
+	}, autoGrouped);
 };
 
 const openCockpit = async (page: Page) => {
@@ -125,6 +127,27 @@ const createGoblins = async (page: Page) => {
 };
 
 test.describe("Encounter cockpit group view (?ew=2)", () => {
+	test("an encounter that arrives whole is grouped by kind on open, and an Ungroup survives a reload", async ({page}) => {
+		const errors = trackConsoleErrors(page);
+		await seed(page, {autoGrouped: false});
+		await openCockpit(page);
+		await expect(toasts(page)).toContainText("Grouped by kind: Goblins ×3");
+		await page.locator('[data-ewc-rail-view="groups"]').click();
+		await expect.poll(() => railSequence(page)).toEqual(["# Goblins", "gob-1", "gob-3", "gob-2", "# Party", "tarn", "brenna", "# Ungrouped", "mage", "owlbear"]);
+		await expect(ghead(page, "Goblins").locator("[data-ewc-ginit]")).toHaveCount(1);
+
+		for (const id of GOBLINS) await row(page, id).locator(".ewc-row__chk input").check();
+		await flow(page, "group-open").click();
+		await flow(page, "group-ungroup").click();
+		await expect.poll(() => railSequence(page)).toEqual(["# Party", "tarn", "brenna", "# Ungrouped", "gob-1", "mage", "owlbear", "gob-3", "gob-2"]);
+
+		await openCockpit(page);
+		await page.locator('[data-ewc-rail-view="groups"]').click();
+		await expect.poll(() => railSequence(page)).toEqual(["# Party", "tarn", "brenna", "# Ungrouped", "gob-1", "mage", "owlbear", "gob-3", "gob-2"]);
+		await expect(toasts(page)).not.toContainText("Grouped by kind");
+		expect(errors).toEqual([]);
+	});
+
 	test("Groups roster, headers, stacks, stack picker, find / sort, Party chip and the anchored group popover", async ({page}) => {
 		const errors = trackConsoleErrors(page);
 		await seed(page);

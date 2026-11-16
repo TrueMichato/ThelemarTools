@@ -51,6 +51,8 @@ const seed = async (page: Page) => {
 			turn: {round: 0, activeId: null},
 			battlefield: [],
 			groupMeta: {},
+			// Already grouped once, so the goblins stay ungrouped and the test builds its own group.
+			autoGrouped: true,
 			log: [],
 			savedEffects: [],
 			combat: {status: "setup"},

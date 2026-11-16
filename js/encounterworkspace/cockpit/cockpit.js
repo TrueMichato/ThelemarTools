@@ -348,6 +348,8 @@ export class EncounterCockpit {
 			/** Group actions the rail's Groups view calls: {pSetInit(name, total), pRoll(name), pStack(name, isStacked), openRename(name, anchor), close() → bool}. */
 			setGroupHandlers: handlers => { this._rail._cb.group = handlers; this._render(); },
 			pCommit: (label, recipe) => this._pCommit(label, recipe),
+			/** True while the saved encounter could not be read: features must not write over it. */
+			isSaveUnreadable: () => this._hasUnreadableSave,
 			toast: (text, opts) => this.toast(text, opts),
 			view: id => this._view(id),
 			setSelection: ids => this._setSelection(ids),

@@ -297,17 +297,14 @@ test.describe("Encounter cockpit parity with the A6 mockup (?ew=2)", () => {
 		await input.press("Escape");
 		await expect(input).not.toBeFocused();
 
-		// §5 Group the goblins, roll their initiative once: equal numbers, adjacent rows.
+		// §5 The goblins arrived grouped by kind (this v4 save is grouped once on load); roll their initiative once: equal numbers, adjacent rows.
 		await row(page, "gob-1").locator(".ewc-row__chk input").check();
 		await row(page, "gob-2").locator(".ewc-row__chk input").check();
 		await blur(page);
 		await page.keyboard.press("g");
 		const dlg = flow(page, "group-dialog");
 		await expect(dlg).toBeVisible();
-		await dlg.locator('[data-ewc-flow="group-name"]').fill("Goblin pack");
-		await dlg.locator('[data-ewc-flow="group-create"]').click();
-		await expect(dlg).toBeHidden();
-		await flow(page, "group-open").click();
+		await expect(dlg.locator('[data-ewc-flow="group-name"]')).toHaveValue("Goblins");
 		await dlg.locator('[data-ewc-flow="group-roll"]').click();
 		await expect.poll(async () => {
 			const [a, b] = await Promise.all(["gob-1", "gob-2"].map(id => row(page, id).locator(".ewc-row__init").innerText()));

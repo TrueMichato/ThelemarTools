@@ -13,6 +13,7 @@ import {
 	getEncounterGroupsV8,
 	rollEncounterGroupInitiative,
 	withEncounterAutoGroup,
+	withEncounterLoadAutoGroup,
 	withEncounterCustomGroup,
 	withEncounterGroupInitiative,
 	withEncounterGroupRename,
@@ -322,16 +323,38 @@ export function installFlowGroups (api) {
 		);
 	}
 
-	// Creatures added later join their kind's group (two or more of a kind form one). Loads and list swaps don't count.
-	let knownIds = api.getState().instances.map(it => it.id);
+	// An encounter that arrives whole (handoff, saved list, a save from before auto-grouping) is grouped by kind once,
+	// outside undo history. `autoGrouped` then stays set, so a DM's Ungroup survives reloads.
 	let isAutoGrouping = false;
+	const pGroupLoaded = () => {
+		const state = api.getState();
+		if (state.autoGrouped || !state.instances.length || isAutoGrouping || api.isSaveUnreadable?.()) return;
+		isAutoGrouping = true;
+		let grouped = [];
+		api.engine.pCommit("Auto-group", draft => {
+			const res = withEncounterLoadAutoGroup(draft);
+			grouped = res.grouped;
+			return res.state;
+		}, {isUndoable: false})
+			.then(() => {
+				if (grouped.length) api.toast(`Grouped by kind: ${grouped.map(g => `${g.name} ×${g.ids.length}`).join(" · ")}`);
+			})
+			.catch(e => api.toast(`Could not group the creatures by kind: ${e?.message || e}`, {kind: "error"}))
+			.finally(() => { isAutoGrouping = false; });
+	};
+
+	// Creatures added later join their kind's group (two or more of a kind form one).
+	let knownIds = api.getState().instances.map(it => it.id);
 	api.engine.subscribe((next, meta) => {
 		const ids = next.instances.map(it => it.id);
 		const fresh = getFlowNewIds(knownIds, ids);
 		knownIds = ids;
 		if (isOpen()) render();
-		// Only fresh commits: undo/redo restore earlier groupings, and "replace" is a different encounter.
-		if (!fresh.length || isAutoGrouping || meta?.type !== "commit") return;
+		if (isAutoGrouping) return;
+		// A new encounter, or the first creatures of one that started empty: the one-time pass covers everyone.
+		if (meta?.type === "replace" || (meta?.type === "commit" && !next.autoGrouped)) return pGroupLoaded();
+		// Only fresh commits: undo/redo restore earlier groupings.
+		if (!fresh.length || meta?.type !== "commit") return;
 		const probe = withEncounterAutoGroup(next, fresh);
 		if (!probe.grouped.length) return;
 		isAutoGrouping = true;
@@ -341,4 +364,5 @@ export function installFlowGroups (api) {
 			})
 			.finally(() => { isAutoGrouping = false; });
 	});
+	pGroupLoaded();
 }

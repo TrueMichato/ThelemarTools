@@ -127,6 +127,7 @@ const withStateV8Defaults = state => ({
 	savedEffects: [],
 	combat: {status: state.turn?.round > 0 ? "active" : "setup"},
 	encounterNote: "",
+	autoGrouped: false,
 	...state,
 });
 
@@ -173,6 +174,7 @@ function validateV8State (raw, ids) {
 	if (!Array.isArray(raw.savedEffects) || raw.savedEffects.some(it => !isRecord(it) || !isNonEmptyString(it.key) || !isNonEmptyString(it.name))) invalid("saved effects");
 	if (!isRecord(raw.combat) || !COMBAT_STATUSES.includes(raw.combat.status)) invalid("combat status");
 	if (typeof raw.encounterNote !== "string") invalid("encounter note");
+	if (typeof raw.autoGrouped !== "boolean") invalid("group settings");
 }
 
 function getV7ModifierMods (modifier, skill) {
@@ -343,6 +345,8 @@ export class EncounterWorkspaceState {
 			savedEffects: [],
 			combat: {status: "setup"},
 			encounterNote: "",
+			// Set once same-kind monsters were grouped on load, so a DM's later Ungroup survives a reload.
+			autoGrouped: false,
 		};
 	}
 
@@ -481,6 +485,7 @@ export class EncounterWorkspaceState {
 			state.savedEffects = [];
 			state.combat = {status: state.turn.round > 0 ? "active" : "setup"};
 			state.encounterNote = "";
+			state.autoGrouped = false;
 			migrateV7Effects(state, presetId => ENCOUNTER_ROLL_PRESET_SKILLS[presetId] || null);
 		} else Object.assign(state, withStateV8Defaults(state));
 		this._normalizeV8(state);
