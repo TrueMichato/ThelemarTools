@@ -98,12 +98,13 @@ export class EncounterCockpitRail {
 
 		const unrolled = rows.filter(it => ctx.initiativeOf(it) == null && !it.defeated);
 		const isGroups = this._roster.view === "groups";
+		const headTools = this._getExtras(ctx.railHead, ctx);
 		const head = h("div.ewc-rail__head", null,
 			h("h2.ewc-rail__title.ewc-sr", {id: "ewc-rail-title"}, isGroups ? "Creatures by group" : "Initiative order"),
 			this._getViewToggle(rows.length),
-			...this._getExtras(ctx.railHead, ctx),
+			headTools.length ? h("div.ewc-rail__tools", {role: "group", "aria-label": "Roster actions"}, ...headTools) : null,
 			unrolled.length
-				? h("button.ewc-btn.ewc-btn--sm", {
+				? h("button.ewc-btn.ewc-btn--sm.ewc-rail__roll", {
 					type: "button",
 					"data-ewc-fk": "rail-roll",
 					title: "Roll initiative for every creature without one",
@@ -176,7 +177,8 @@ export class EncounterCockpitRail {
 			onclick: () => this._setView(id),
 		}, text, extra);
 		return h("div.ewc-seg.ewc-rail__views", {role: "group", "aria-label": "Roster view"},
-			button("init", "Initiative", "Everyone in turn order; a stacked group shows as one row", h("span.ewc-rail__n", null, ` ${count}`)),
+			// The rail head is one line at every width: a narrow rail swaps "Initiative" for "Init" (CSS container query).
+			button("init", [h("span.ewc-rail__vlong", null, "Initiative"), h("span.ewc-rail__vshort", {"aria-hidden": "true"}, "Init")], "Everyone in turn order; a stacked group shows as one row", h("span.ewc-rail__n", null, ` ${count}`)),
 			button("groups", "Groups", "Creatures under their group, with each group's shared initiative, roll and stack"),
 		);
 	}

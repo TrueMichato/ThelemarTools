@@ -100,7 +100,7 @@ export function installCockpitPrepFeatures (api) {
 		dataset: {ewcAct: "rail-add", ewcFk: "rail-add"},
 		title: "Add a creature or party member to the fight (⇧A)",
 		onclick: () => openAdd(null),
-	}, "+ Add", kbd([getCockpitKeyLabels(["Shift", "A"], {isMac: api.isMac}).join("")])));
+	}, h("span.ewc-ico.ewc-ico--add", {"aria-hidden": "true"}), h("span.ewc-rail__tlbl", null, "Add"), kbd([getCockpitKeyLabels(["Shift", "A"], {isMac: api.isMac}).join("")])));
 
 	let ctKey = null;
 	let ctToken = 0;

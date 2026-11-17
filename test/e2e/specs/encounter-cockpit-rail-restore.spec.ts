@@ -202,7 +202,7 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 
 		// D18 — "+ Add" sits in the rail head beside Group…, on the same line; there is no rail footer. ⇧A does the same.
 		const add = page.locator('[data-ewc-act="rail-add"]');
-		await expect(add).toContainText("+ Add");
+		await expect(add).toContainText("Add");
 		await expect(add.locator(".ewc-kbd"), "+ Add shows its ⇧A hint").toBeVisible();
 		await expect(page.locator(".ewc-rail__head [data-ewc-act='rail-add']")).toHaveCount(1);
 		await expect(page.locator(".ewc-rail__foot")).toHaveCount(0);
@@ -218,6 +218,27 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 		await page.keyboard.press("Shift+A");
 		await expect(page.locator("dialog.ewc-add")).toBeVisible();
 		await page.keyboard.press("Escape");
+
+		// The rail head is one toolbar line — view switch left, Add/Group… cluster right — folding words into icons as the
+		// rail narrows (key chips and accessible names stay); too narrow for one line it stacks into two full-width bars.
+		const views = page.locator(".ewc-rail__head .ewc-rail__views");
+		const tools = page.locator(".ewc-rail__head .ewc-rail__tools");
+		for (const [width, layout] of [[1280, "line"], [1180, "line"], [900, "stack"]] as const) {
+			await page.setViewportSize({width, height: 800});
+			const v = (await views.boundingBox())!;
+			const t = (await tools.boundingBox())!;
+			if (layout === "line") {
+				expect(Math.abs((v.y + v.height / 2) - (t.y + t.height / 2)), `switch and actions share a line at ${width}`).toBeLessThanOrEqual(2);
+				expect(v.x + v.width, `switch and actions don't overlap at ${width}`).toBeLessThanOrEqual(t.x);
+			} else {
+				expect(t.y, `actions stack under the switch at ${width}`).toBeGreaterThanOrEqual(v.y + v.height);
+				expect(Math.abs(t.width - v.width), `stacked bars are equally wide at ${width}`).toBeLessThanOrEqual(1);
+			}
+			await expect(add.locator(".ewc-kbd")).toBeVisible();
+			await expect(page.locator(".ewc-rail__head .ewc-grpbtn .ewc-kbd")).toBeVisible();
+			await expect(add).toHaveAccessibleName(/Add/);
+			await expect(page.locator(".ewc-rail__head .ewc-grpbtn")).toHaveAccessibleName(/Group/);
+		}
 
 		// D19 — scrolled to the end, nothing (order hint) sits on top of the last row; the head never squeezes the list
 		// below one row.

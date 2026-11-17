@@ -416,14 +416,142 @@
 			}
 		}
 
-		// ---------------- rail head: + Add (next to Group…) ----------------
-		// Shares the head's second line with Group… — see the line-break block below.
-		.ewc-rail__add {
-			gap: 5px;
-			margin-left: auto;
+		// ---------------- rail head: one toolbar line ----------------
+		// View switch on the left, a matching joined cluster of actions (+ Add ⇧A · Group… G) on the right. The head is
+		// its own size container, so the line steps down with the rail instead of wrapping: first "Initiative" → "Init",
+		// then the action words fold into their icons, then the padding tightens. Key chips never hide; folded words stay
+		// in the accessible name and the tooltip.
+		.ewc-rail__head {
+			container: ewc-railhead / inline-size;
+			flex-wrap: wrap;
+			row-gap: 6px;
+		}
 
-			+ .ewc-grpbtn {
+		.ewc-rail__vshort {
+			display: none;
+		}
+
+		.ewc-rail__tools {
+			display: inline-flex;
+			flex: none;
+			align-items: center;
+			gap: 2px;
+			margin-left: auto;
+			padding: 2px;
+			border: 1px solid var(--ewc-hair);
+			border-radius: var(--ewc-r-s);
+			background: var(--ewc-surface);
+
+			> .ewc-btn {
+				position: relative;
+				gap: 4px;
+				min-height: 26px;
+				padding: 0 7px;
+				border: 0;
+				border-radius: calc(var(--ewc-r-s) - 2px);
+				background: none;
+				color: var(--ewc-ink-2);
+
+				&:hover:not(:disabled) {
+					background: var(--ewc-raised);
+					color: var(--ewc-ink);
+				}
+
+				&[aria-expanded="true"] {
+					background: var(--ewc-raised);
+					color: var(--ewc-ink);
+				}
+
+				.ewc-kbd {
+					height: 18px;
+					min-width: 18px;
+					padding: 0 4px;
+				}
+			}
+
+			// A hairline between the two actions, hidden while either side is hovered so the hover fill reads cleanly.
+			> .ewc-btn + .ewc-btn::before {
+				position: absolute;
+				top: 7px;
+				bottom: 7px;
+				left: -2px;
+				width: 1px;
+				background: var(--ewc-hair-2);
+				content: "";
+			}
+
+			> .ewc-btn:hover + .ewc-btn::before,
+			> .ewc-btn + .ewc-btn:hover::before {
+				opacity: 0;
+			}
+		}
+
+		.ewc-ico {
+			display: inline-block;
+			flex: none;
+			width: 13px;
+			height: 13px;
+			background: currentcolor;
+			mask: var(--ewc-ico) center / contain no-repeat;
+
+			&--add {
+				--ewc-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M7 2h2v5h5v2H9v5H7V9H2V7h5z'/%3E%3C/svg%3E");
+			}
+
+			&--group {
+				--ewc-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='5.5' cy='5' r='2.6'/%3E%3Ccircle cx='11.3' cy='5.6' r='2.1'/%3E%3Cpath d='M.8 13.6c0-2.7 2.1-4.4 4.7-4.4s4.7 1.7 4.7 4.4z'/%3E%3Cpath d='M10.9 9.4c2.5-.2 4.4 1.3 4.4 4.2h-4.1c0-1.6-.1-3-.3-4.2z'/%3E%3C/svg%3E");
+			}
+		}
+
+		// Setup only: "Roll initiative (N)" takes its own full-width line under the toolbar.
+		.ewc-rail__roll {
+			flex: 1 1 100%;
+		}
+
+		// Tiers show the most words that fit (head content width; measured: switch "Init" 125 / "Initiative" 158, cluster
+		// labelled 192 / icons 111, gap 8). Too narrow for one line, the head stacks on purpose into two full-width bars
+		// and every word comes back.
+		@container ewc-railhead ((334px <= width < 368px) or (252px <= width < 282px)) {
+			.ewc-rail__vlong {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+				clip-path: inset(50%);
+				white-space: nowrap;
+			}
+
+			.ewc-rail__vshort {
+				display: inline;
+			}
+
+			.ewc-rail__views .ewc-seg__b {
+				padding: 0 8px;
+			}
+		}
+
+		@container ewc-railhead (252px <= width < 334px) {
+			.ewc-rail__tlbl {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+				clip-path: inset(50%);
+				white-space: nowrap;
+			}
+		}
+
+		@container ewc-railhead (width < 252px) {
+			.ewc-rail__views,
+			.ewc-rail__tools {
+				flex: 1 1 100%;
 				margin-left: 0;
+
+				> .ewc-btn,
+				> .ewc-seg__b {
+					flex: 1 1 0;
+					justify-content: center;
+				}
 			}
 		}
 
@@ -452,22 +580,6 @@
 		.ewc-prep__traitok {
 			color: var(--ewc-ok);
 			font-weight: 700;
-		}
-	}
-
-	// The rail can't hold the view toggle and both head buttons with their key chips on one
-	// line, so + Add and Group… always share a second line (an invisible line break).
-	.ewc .ewc-rail__head {
-		row-gap: 3px;
-
-		&::after {
-			flex-basis: 100%;
-			order: 1;
-			content: "";
-		}
-
-		> .ewc-btn {
-			order: 2;
 		}
 	}
 

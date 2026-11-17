@@ -81,7 +81,7 @@ export function installFlowGroups (api) {
 				if (isOpen() && !open.rename) return close();
 				pOpen([...ids], evt.currentTarget);
 			},
-		}, "Group…", kbd(["G"]));
+		}, h("span.ewc-ico.ewc-ico--group", {"aria-hidden": "true"}), h("span.ewc-rail__tlbl", null, "Group…"), kbd(["G"]));
 	});
 
 	api.setGroupHandlers({
