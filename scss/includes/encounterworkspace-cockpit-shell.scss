@@ -85,6 +85,14 @@
 		--ewc-down: #9a3412;
 		--ewc-bf: #047857;
 		--ewc-shadow-pop: 0 14px 36px rgb(15 23 42 / 18%), 0 2px 6px rgb(15 23 42 / 10%);
+		// Ink on solid fills, and the scrims/shadows themes recolour (see encounterworkspace-cockpit-themes.scss).
+		--ewc-on-ind: #fff;
+		--ewc-bad-strong: #b91c1c;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #fff;
+		--ewc-scrim: rgb(2 6 23 / 45%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(2 6 23 / 28%);
+		--ewc-shade: rgb(0 0 0 / 20%);
 		--ewc-r-xs: 4px;
 		--ewc-r-s: 6px;
 		--ewc-r-m: 10px;
@@ -272,7 +280,7 @@
 			&--primary {
 				border-color: var(--ewc-ind-strong);
 				background: var(--ewc-ind-strong);
-				color: #fff;
+				color: var(--ewc-on-ind);
 				font-weight: 600;
 
 				&:hover:not(:disabled) {
@@ -281,9 +289,9 @@
 				}
 
 				.ewc-kbd {
-					border-color: rgb(255 255 255 / 35%);
-					background: rgb(255 255 255 / 14%);
-					color: #fff;
+					border-color: color-mix(in srgb, var(--ewc-on-ind) 35%, transparent);
+					background: color-mix(in srgb, var(--ewc-on-ind) 14%, transparent);
+					color: var(--ewc-on-ind);
 				}
 			}
 
@@ -294,9 +302,9 @@
 				font-weight: 600;
 
 				&:hover:not(:disabled) {
-					border-color: #b91c1c;
-					background: #b91c1c;
-					color: #fff;
+					border-color: var(--ewc-bad-strong);
+					background: var(--ewc-bad-strong);
+					color: var(--ewc-on-bad);
 				}
 			}
 
@@ -405,7 +413,7 @@
 				&[aria-checked="true"],
 				&[aria-pressed="true"] {
 					background: var(--ewc-ind-strong);
-					color: #fff;
+					color: var(--ewc-on-ind);
 					font-weight: 600;
 				}
 			}
@@ -703,7 +711,10 @@
 				display: flex;
 				flex-direction: column;
 				gap: 2px;
+				overflow-y: auto;
+				overscroll-behavior: contain;
 				width: 300px;
+				max-height: calc(100dvh - 7rem);
 				padding: 6px;
 				border: 1px solid var(--ewc-hair-2);
 				border-radius: var(--ewc-r-m);
@@ -947,7 +958,7 @@
 			color: var(--ewc-ink);
 
 			&::backdrop {
-				background: rgb(2 6 23 / 45%);
+				background: var(--ewc-scrim);
 			}
 
 			&__head {
