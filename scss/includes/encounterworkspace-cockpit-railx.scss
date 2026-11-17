@@ -417,15 +417,10 @@
 		}
 
 		// ---------------- rail head: + Add (next to Group…) ----------------
-		// At full rail width the head stays one line, so the ⇧A chip yields; the shortcut
-		// stays in the tooltip and the Keys sheet. Narrower rails wrap — see the ≤1180 block.
+		// Shares the head's second line with Group… — see the line-break block below.
 		.ewc-rail__add {
 			gap: 5px;
 			margin-left: auto;
-
-			.ewc-kbd {
-				display: none;
-			}
 
 			+ .ewc-grpbtn {
 				margin-left: 0;
@@ -460,25 +455,19 @@
 		}
 	}
 
-	// Narrower rails can't hold the view toggle and both head buttons on one line, so
-	// + Add and Group… drop together onto a second line (an invisible line break).
-	@media (width <= 1180px) {
-		.ewc .ewc-rail__head {
-			row-gap: 3px;
+	// The rail can't hold the view toggle and both head buttons with their key chips on one
+	// line, so + Add and Group… always share a second line (an invisible line break).
+	.ewc .ewc-rail__head {
+		row-gap: 3px;
 
-			&::after {
-				flex-basis: 100%;
-				order: 1;
-				content: "";
-			}
-
-			> .ewc-btn {
-				order: 2;
-			}
+		&::after {
+			flex-basis: 100%;
+			order: 1;
+			content: "";
 		}
 
-		.ewc .ewc-rail__add .ewc-kbd {
-			display: inline-flex;
+		> .ewc-btn {
+			order: 2;
 		}
 	}
 

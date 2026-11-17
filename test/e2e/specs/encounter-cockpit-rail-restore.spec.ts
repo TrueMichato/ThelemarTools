@@ -203,6 +203,7 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 		// D18 — "+ Add" sits in the rail head beside Group…, on the same line; there is no rail footer. ⇧A does the same.
 		const add = page.locator('[data-ewc-act="rail-add"]');
 		await expect(add).toContainText("+ Add");
+		await expect(add.locator(".ewc-kbd"), "+ Add shows its ⇧A hint").toBeVisible();
 		await expect(page.locator(".ewc-rail__head [data-ewc-act='rail-add']")).toHaveCount(1);
 		await expect(page.locator(".ewc-rail__foot")).toHaveCount(0);
 		const addBox = (await add.boundingBox())!;
