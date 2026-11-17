@@ -659,14 +659,40 @@ test.describe("mobile touch and night mode", () => {
 
 import {Round72CreatureTransformationPage, TEMPLATE_RELEASE_CASES} from "../pages/CreatureTransformationPage";
 
-test.describe("M13c public default all14 two-consumer release", () => {
+test.describe("source-first creature transformation flow", () => {
+	const editors = new WeakMap<import("@playwright/test").Page, Round72CreatureTransformationPage>();
+	test.afterEach(async ({page}, info) => { await editors.get(page)?.captureRound72Evidence(info); });
+	test("@simple-template SCRE Undead asks an ordinary Knight alignment question instead of the internal worksheet", async ({page}, info) => {
+		test.setTimeout(120_000);
+		const editor = new Round72CreatureTransformationPage(page);
+		editors.set(page, editor);
+		const fixture = {...TEMPLATE_RELEASE_CASES.find(fixture => fixture.uid === "undead|scre")!, monster: "Knight"};
+		await editor.beginRound72Evidence(info);
+		await editor.simpleSourceFamily("Bestiary", fixture, info);
+		await editor.finishRound72Evidence(info, "simple-undead-knight-alignment", {estimate: false});
+	});
+	for (const surface of ["Bestiary", "Encounter"] as const) {
+		for (const fixture of TEMPLATE_RELEASE_CASES.filter(fixture => ["half-dragon|mm", "skeleton|dmg", "zombie|dmg", "spore servant|mm", "fey beast|scre", "fallen angel|scre", "undead|scre"].includes(fixture.uid))) {
+			test(`@simple-template ${surface} ${fixture.uid} transforms from offered choices without CR worksheets`, async ({page}, info) => {
+				test.setTimeout(120_000);
+				const editor = new Round72CreatureTransformationPage(page);
+				editors.set(page, editor);
+				await editor.beginRound72Evidence(info);
+				await editor.simpleSourceFamily(surface, fixture, info);
+				await editor.finishRound72Evidence(info, `simple-${surface}-${fixture.uid.replace(/\W+/g, "-")}`, {estimate: false});
+			});
+		}
+	}
+});
+
+test.describe("M13c optional advanced all14 two-consumer release", () => {
 	test.describe.configure({retries: 0});
 	const editors = new WeakMap<import("@playwright/test").Page, Round72CreatureTransformationPage>();
 	test.afterEach(async ({page}, info) => { await editors.get(page)?.captureRound72Evidence(info); });
 	for (const surface of ["Bestiary", "Encounter"] as const) {
 		for (const fixture of TEMPLATE_RELEASE_CASES) {
 			test(`@m13c ${surface} ${fixture.uid} complete source effects, estimate, Homebrew, reload and removal`, async ({page}, info) => {
-				test.setTimeout(240_000);
+				test.setTimeout(240_000 + 120_000 * (fixture.forms.length - 1));
 				const editor = new Round72CreatureTransformationPage(page);
 				editors.set(page, editor);
 				await editor.beginRound72Evidence(info);

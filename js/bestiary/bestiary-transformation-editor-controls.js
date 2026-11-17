@@ -44,7 +44,7 @@ export function entryFact (parent, entry) {
 	paragraph(parent, Renderer.stripTags(describeFact(entry.entry.entries ?? entry.entry.headerEntries)));
 }
 
-export function createEditorFields ({onChange, error}) {
+export function createEditorFields ({onChange, error, simple = false}) {
 	const fields = [];
 	const field = (parent, label, {options, type = "text", min, max, required = true, value, onEdit} = {}) => {
 		const wrapper = element("label", {className: "bqa__field"});
@@ -69,7 +69,9 @@ export function createEditorFields ({onChange, error}) {
 		input.addEventListener(options ? "change" : "input", () => { onEdit?.(); onChange(); });
 		return item;
 	};
-	const reason = (parent, label = "Reason / source policy") => field(parent, label, {type: "textarea"});
+	const reason = (parent, label = "Reason / source policy") => simple
+		? {read: () => "Selected source policy; other rules are preserved."}
+		: field(parent, label, {type: "textarea"});
 	const number = (parent, label, min, max, options = {}) => field(parent, label, {type: "number", min, max, ...options});
 	const select = (parent, label, options, extra = {}) => field(parent, label, {options, ...extra});
 	const bool = (parent, label) => {
@@ -83,7 +85,9 @@ export function createEditorFields ({onChange, error}) {
 		body.disabled = body.hidden = true;
 		parent.append(body);
 		const read = render(body);
-		return () => enabled.read() ? read() : undefined;
+		const result = () => enabled.read() ? read() : undefined;
+		result.activate = () => { enabled.set("declare"); body.disabled = body.hidden = false; };
+		return result;
 	};
 	const enabled = (node, root) => {
 		if (!node.isConnected || !root.contains(node)) return false;

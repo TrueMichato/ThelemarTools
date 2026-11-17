@@ -4,8 +4,9 @@ import Ajv from "ajv/dist/2020.js";
 import "../../../js/parser.js";
 import "../../../js/utils.js";
 import {getCreatureTransformationCandidates, resolveCreatureTransformation} from "../../../js/creature-transformations.js";
-import {observeCreatureTransformationBindings} from "../../../js/creature-transformation-bindings.js";
-import {inspectCreatureTransformationSourceInputs, previewCreatureTransformationSourceInputs, compileCreatureTransformationSourceInputs, SOURCE_ESTIMATE_MODE} from "../../../js/bestiary/bestiary-transformation-source-inputs.js";
+import {compileCreatureTransformationBindings, observeCreatureTransformationBindings} from "../../../js/creature-transformation-bindings.js";
+import {inspectCreatureTransformationSourceInputs, previewCreatureTransformationSourceInputs, compileCreatureTransformationSourceInputs, SOURCE_ESTIMATE_MODE, SOURCE_ONLY_MODE} from "../../../js/bestiary/bestiary-transformation-source-inputs.js";
+import {getCreatureTransformationNumericDefaults, getCreatureTransformationSourceDefault} from "../../../js/bestiary/bestiary-transformation-defaults.js";
 import {createCreatureTransformationChanges, previewCreatureTransformationTargets, previewCreatureTransformationForm, createCreatureTransformationFormChanges} from "../../../js/bestiary/bestiary-transformation-workflow.js";
 import {BestiaryQuickActionsOperations, BestiaryQuickActionsRegistry, BestiaryQuickActionsUtil} from "../../../js/bestiary/bestiary-quick-actions-engine.js";
 import {BestiaryQuickActionsUi} from "../../../js/bestiary/bestiary-quick-actions-ui.js";
@@ -204,6 +205,22 @@ describe("M13a production guided source -> estimate -> adapter/executor", () => 
 		["Fallen Angel", "SCRE", "Deva", {allegiance: ["fallen"]}, () => ({}), "Mace", out => expect(out.action.some(item => item.name.startsWith("Corrupting Touch"))).toBe(true)],
 		["Undead", "SCRE", "Bugbear", {category: ["zombie"]}, current => ({undead: {bindings: {armor: {mode: "retain"}, entries: bindings(current).entries}}}), "Morningstar", out => expect(out.int).toBe(3)],
 	];
+	it.each(cases)("%s|%s applies complete source rules without inventing a CR estimate", (name, book, monster, selections, inputs, attack, check) => {
+		const subject = target(source(monster));
+		const resolved = pending(name, book, selections);
+		const answers = {...sourceAnswers(subject, resolved, inputs(effective(subject))), mode: SOURCE_ONLY_MODE};
+		const {batch, owner} = saved(subject, resolved, answers);
+		const out = effective({...subject, operations: JSON.parse(JSON.stringify([owner]))});
+		check(out);
+		expect(out.cr).toEqual(subject.baseCreature.cr);
+		expect(batch.guidedModels[0].estimates).toEqual([]);
+		expect(owner.data.resolved.estimation).toBeUndefined();
+		expect(owner.data.resolved.changes.some(step => step.type === "setChallengeRating")).toBe(false);
+		const stale = {...answers, targetKey: "different history"};
+		expect(preview(subject, resolved, stale).previews).toEqual([]);
+		expect(() => createCreatureTransformationChanges({batch, targets: batch.targets, guidedAnswers: {[subject.id]: stale}})).toThrow(/stale/i);
+	});
+
 	it.each(cases)("%s|%s reaches the real guided producer and freezes each actual source form", (name, book, monster, selections, inputs, attack, check) => {
 		const subject = target(source(monster));
 		const resolved = pending(name, book, selections);
@@ -222,6 +239,75 @@ describe("M13a production guided source -> estimate -> adapter/executor", () => 
 		const validate = raw.frozenForms ? validateForms : validateLeaf;
 		expect(validate(JSON.parse(JSON.stringify(raw))) ? null : validate.errors).toBeNull();
 		console.log(`REACH ${name}|${book}: guided -> source -> CR -> operation/replay; forms=${model.forms.map(item => item.id).join(",")}; entries=${model.forms.map(item => item.entries.length).join(",")}`);
+	});
+
+	describe("derived source inputs", () => {
+		const items = read("data/items-base.json").baseitem;
+		function defaults (subject, resolved) {
+			const model = inspectCreatureTransformationSourceInputs({target: subject, resolved});
+			const source = Object.fromEntries(model.controls.flatMap(control => {
+				if (resolved.id === "catalog:undead|scre" && control.path[1] !== "bindings") return [];
+				const value = getCreatureTransformationSourceDefault({control, model, items});
+				return value === undefined ? [] : [[control.id, {value, reason: "Derived from this creature and reviewed in its preview."}]];
+			}));
+			return {mode: SOURCE_ONLY_MODE, targetKey: model.targetKey, source};
+		}
+		it.each([
+			["Bugbear", "Zombie", "DMG", {}, {str: 16, hp: {average: 32}}, "2d8 + 3"],
+			["Goblin", "Skeleton", "DMG", {}, {dex: 16, ac: [{ac: 16}]}, "1d6 + 3"],
+			["Bugbear", "Undead", "SCRE", {category: ["zombie"]}, {int: 3, speed: {walk: 20}}, "2d8 + 2"],
+			["Wolf", "Fey Beast", "SCRE", {features: ["barkskin", "entangle"]}, {type: "fey", ac: [{ac: 16}]}, "2d4 + 2"],
+			["Deva", "Fallen Angel", "SCRE", {allegiance: ["fallen"]}, {speed: {fly: 60}}, "4d8"],
+			["Bugbear", "Spore Servant", "MM", {}, {int: 2, wis: 6, cha: 1}, "1d8 + 2"],
+		])("%s -> %s derives common source inputs and survives real Store reload/removal", async (monster, name, book, selections, expected, dice) => {
+			const subject = target(source(monster));
+			const resolved = pending(name, book, selections);
+			const answers = defaults(subject, resolved);
+			const {owner} = saved(subject, resolved, answers);
+			const persisted = await persistence(subject.baseCreature);
+			await persisted.adapter.applyChanges({addOperations: [owner], removeIds: []});
+			await persisted.reload();
+			const instance = persisted.state().instances[0];
+			const out = BestiaryQuickActionsUtil.applyOperations({baseCreature: instance.monster, operations: instance.statblockOperations});
+			expect(out).toMatchObject(expected);
+			expect(JSON.stringify(out.action)).toContain(dice);
+			expect(out.cr).toEqual(subject.baseCreature.cr);
+			await persisted.adapter.applyChanges({addOperations: [], removeIds: [owner.id]});
+			await persisted.reload();
+			expect(persisted.state().instances[0].statblockOperations).toEqual([]);
+		});
+
+		it("does not turn custom weapon bonuses, ambiguous attack abilities or opaque DCs into guesses", () => {
+			const current = source("Bugbear");
+			current.action[0].entries[0] = current.action[0].entries[0].replace("{@hit 4}", "{@hit 7}");
+			expect(getCreatureTransformationNumericDefaults({current, entries: observeCreatureTransformationBindings({current}), items})).toBeUndefined();
+			const wolf = source("Wolf");
+			expect(getCreatureTransformationNumericDefaults({current: wolf, entries: observeCreatureTransformationBindings({current: wolf}), items})).toBeUndefined();
+		});
+
+		it("keeps a zero weapon modifier ability-bound and refuses unknown armor when Dexterity changes", () => {
+			const current = source("Bugbear");
+			current.str = 10;
+			current.dex = 8;
+			current.action = [{name: "Morningstar", entries: ["{@atk mw} {@hit 2} to hit, reach 5 ft., one target. {@h}4 ({@damage 1d8}) piercing damage."]}];
+			const entries = observeCreatureTransformationBindings({current});
+			const declarations = getCreatureTransformationNumericDefaults({current, entries, items, includeArmor: false});
+			const changes = compileCreatureTransformationBindings({current, abilities: {str: 16}, armor: {mode: "retain"}, ...declarations});
+			const attack = changes.find(change => change.op === "setEntryNumbers");
+			expect(attack.entries[0]).toContain("{@hit 5}");
+			expect(attack.entries[0]).toContain("7 ({@damage 1d8 + 3})");
+			current.ac = [{ac: 16, from: ["custom enchanted carapace"]}];
+			expect(getCreatureTransformationNumericDefaults({current, entries, items, dexChanges: true})).toBeUndefined();
+		});
+
+		it("rejects estimate answers smuggled into source-only mode", () => {
+			const subject = target();
+			const resolved = pending("Zombie", "DMG");
+			const answers = {...defaults(subject, resolved), forms: {}};
+			const result = compileCreatureTransformationSourceInputs({target: subject, resolved, answers});
+			expect(result.status).toBe("needs-answers");
+			expect(result.requirements[0].reason).toMatch(/unreviewed estimate/);
+		});
 	});
 
 	it("uses actual post-history Zombie HP/damage and never falls back to the old numeric-only profile", () => {

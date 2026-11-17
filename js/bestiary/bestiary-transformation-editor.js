@@ -1,7 +1,8 @@
 import {createCreatureTransformationChanges, createCreatureTransformationFormChanges, previewCreatureTransformationForm, previewCreatureTransformationTargets} from "./bestiary-transformation-workflow.js";
 import {pLoadCreatureTransformationInputTable} from "./bestiary-transformation-inputs.js";
 import {renderGuidedTarget as renderSourceGuidedTarget} from "./bestiary-transformation-editor-guided.js";
-import {inspectCreatureTransformationSourceInputs} from "./bestiary-transformation-source-inputs.js";
+import {inspectCreatureTransformationSourceInputs, SOURCE_ESTIMATE_MODE} from "./bestiary-transformation-source-inputs.js";
+import {BestiaryQuickActionsUtil} from "./bestiary-quick-actions-engine.js";
 
 let nextOptionGroupId = 0;
 
@@ -555,7 +556,7 @@ function renderSavedFormEditor ({mount, getTargets, getStamp, getConsequences, v
 	preview();
 }
 
-export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, validateChange = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true, automationVersion = 2, savedOperationId = null, onCancel = null}) {
+export async function pRenderCreatureTransformationEditor ({mount, getTargets, getStamp = () => "", getConsequences = () => null, validateOperation = null, validateChange = null, pApply, isBulk = false, pLoadCandidates = null, isCurrent = () => true, automationVersion = 2, estimateCr = false, savedOperationId = null, onCancel = null}) {
 	if (savedOperationId != null) return renderSavedFormEditor({mount, getTargets, getStamp, getConsequences, validateChange, pApply, isCurrent, savedOperationId, onCancel});
 	if (![1, 2].includes(automationVersion)) throw new Error("Unsupported transformation editor version.");
 	const container = element("section", {className: "bqa__transformation"});
@@ -582,6 +583,8 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	status.textContent = "Loading site, prerelease, and homebrew transformation candidates…";
 	const showError = message => { error.textContent = message; };
 	let candidates;
+	let items = [];
+	let legendaryGroups;
 	let load;
 	const loadWithWarnings = async () => {
 		const skipped = [];
@@ -601,12 +604,18 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		load = pLoadCandidates || (await import("../creature-transformations.js")).pLoadCreatureTransformationCandidates;
 		candidates = await loadWithWarnings();
 		if (!Array.isArray(candidates)) throw new Error("The transformation catalog did not return a candidate list.");
+		if (automationVersion === 2) {
+			const [equipment, groups] = await Promise.all([DataUtil.loadJSON("data/items-base.json"), DataUtil.loadJSON("data/bestiary/legendarygroups.json")]);
+			if (!Array.isArray(equipment.baseitem) || !Array.isArray(groups.legendaryGroup)) throw new Error("Creature equipment or lair context is unavailable.");
+			items = equipment.baseitem;
+			legendaryGroups = groups.legendaryGroup;
+		}
 	} catch (e) {
 		if (!isActive()) return;
 		status.textContent = "";
 		showError(`Could not load creature transformations: ${e.message}`);
 		container.append(button("Retry catalog load", () => pRenderCreatureTransformationEditor({
-			mount, getTargets, getStamp, getConsequences, validateOperation, validateChange, pApply, isBulk, pLoadCandidates, isCurrent, automationVersion,
+			mount, getTargets, getStamp, getConsequences, validateOperation, validateChange, pApply, isBulk, pLoadCandidates, isCurrent, automationVersion, estimateCr,
 		})));
 		return;
 	}
@@ -665,7 +674,6 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	let isCommitting = false;
 	let generation = 0;
 	let crTable;
-	let legendaryGroups;
 	let tableRequest = 0;
 	let tableLoading = false;
 	let tableError = "";
@@ -815,7 +823,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		}));
 		details.append(heading);
 		if (isGuided()) {
-			paragraph(details, "Opt-in source transformation: complete the source choices, then review every actual post-source form and its DMG 2014 estimate. Nothing is saved until you confirm.");
+			paragraph(details, "Choose abilities and review your transformed creature. Source rules are applied automatically where the creature supplies the needed facts. CR estimation is optional.");
 		}
 		if (candidate.duplicateVariant) paragraph(details, `Variant ${candidate.duplicateVariant}: multiple different race definitions share this name and source. Compare their changes before applying one.`);
 		paragraph(details, `Eligibility: ${describeEligibility(candidate.eligibility)}. Details and source rules are available from each info button.`);
@@ -891,6 +899,17 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 				}
 			}
 		};
+		if (isGuided() && candidate.id === "catalog:half-dragon|mm") {
+			const brackets = {T: "large-or-smaller", S: "large-or-smaller", M: "large-or-smaller", L: "large-or-smaller", H: "huge", G: "gargantuan"};
+			const sizes = getTargets().map(target => {
+				const size = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations}).size;
+				return size?.length === 1 ? brackets[size[0]] : null;
+			});
+			if (sizes.length && sizes[0] && sizes.every(size => size === sizes[0])) {
+				selections.size = [sizes[0]];
+				groupControls.get("size").controls.forEach(control => { control.checked = control.value === sizes[0]; });
+			}
+		}
 		const updateSelection = (group, values) => {
 			selections[group.id] = values;
 			invalidate();
@@ -903,12 +922,12 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		syncConditional();
 		const config = element("div", {className: "bqa__transformation-config"});
 		resolution = element("div");
-		details.append(resolution);
 		delta = element("div", {className: "bqa__transformation-delta"});
 		if (candidate.optionGroups.length) config.append(options);
 		else config.classList.add("bqa__transformation-config--no-options");
 		config.append(delta);
 		details.append(config);
+		details.append(resolution);
 		if (isGuided()) details.append(consequenceReview);
 		confirmation = element("fieldset", {className: "bqa__transformation-group bqa__transformation-confirm"});
 		confirmation.hidden = true;
@@ -941,15 +960,14 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	const renderReview = () => {
 		const review = details.querySelector(".bqa__transformation-review");
 		if (!review) return;
-		if (isGuided()) {
-			review.hidden = true;
-			return;
-		}
 		const items = [...candidate.manualReview];
 		for (const group of candidate.optionGroups) {
 			for (const option of group.options) if (selections[group.id]?.includes(option.id)) items.push(...option.manualReview);
 		}
-		review.replaceChildren(element("summary", {text: `DM review · ${items.length} item${items.length === 1 ? "" : "s"} not applied automatically`}));
+		review.replaceChildren(element("summary", {text: isGuided()
+			? `Original source notes · ${items.length} item${items.length === 1 ? "" : "s"}`
+			: `DM review · ${items.length} item${items.length === 1 ? "" : "s"} not applied automatically`}));
+		if (isGuided()) paragraph(review, "Source mechanics are included in the preview. Attribution and any discretionary choices remain for DM review.");
 		if (items.length) list(review, items.map(it => `${it.field}: ${it.reason}`));
 	};
 	search.addEventListener("input", onFilterChange);
@@ -960,7 +978,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		result.replaceChildren();
 		action?.replaceChildren();
 		if (!batch) return;
-		if (isGuided() && tableError) action.append(button("Retry CR table load", loadTable));
+		if (isGuided() && tableError && Object.values(readGuidedAnswers(batch.targets)).some(answer => answer.mode === SOURCE_ESTIMATE_MODE)) action.append(button("Retry CR table load", loadTable));
 		if (isGuided()) {
 			for (const target of batch.targets) {
 				const panel = guidedPanels.get(`${candidate.id}:${target.id}`);
@@ -969,7 +987,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		}
 		const summary = element("div", {className: "bqa__transformation-summary"});
 		paragraph(summary, `${batch.previews.length} eligible · ${batch.skipped.length} skipped. ${isGuided()
-			? "Preview includes source rules and the reviewed estimate; no changes have been saved."
+			? "Preview includes the selected source rules. CR/XP stay unchanged unless you request an estimate; nothing has been saved."
 			: "Statblocks show only automatic changes; DM review remains separate."}`);
 		if (batch.skipped.length) {
 			summary.append(element("h5", {text: "Skipped · unchanged"}));
@@ -1046,14 +1064,24 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		for (const target of targets) {
 			const key = `${candidate.id}:${target.id}`;
 			let panel = guidedPanels.get(key);
+			let estimate = estimateCr;
 			const model = inspectCreatureTransformationSourceInputs({target, resolved});
+			if (panel && panel.recipeKey !== JSON.stringify(resolved) && panel.targetSnapshot === JSON.stringify(target) && !panel.stale) {
+				estimate = panel.isEstimating();
+				panel.root.remove();
+				guidedPanels.delete(key);
+				panel = null;
+			}
 			if (!panel) {
 				panel = renderSourceGuidedTarget({parent: resolution,
 					target,
 					resolved,
+					simple: !estimate,
+					items,
 					getLegendaryGroups: () => legendaryGroups,
 					onChange: () => { if (!isCommitting) { invalidate(target.id); doPreview(); } }});
 				panel.recipeKey = JSON.stringify(resolved);
+				panel.targetSnapshot = JSON.stringify(target);
 				guidedPanels.set(key, panel);
 			} else if ((panel.model.targetKey !== model.targetKey || panel.recipeKey !== JSON.stringify(resolved) || panel.stale) && !panel.staleNotice) {
 				panel.stale = true;
@@ -1083,6 +1111,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 	};
 	const doPreview = () => {
 		clearPreview();
+		resolution?.replaceChildren();
 		try {
 			if (!candidate || picker.value !== candidate.id || !visibleIds.has(candidate.id)) throw new Error("Choose a visible source-qualified recipe.");
 			const missing = candidate.optionGroups.find(group =>
@@ -1095,7 +1124,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 			const targets = getTargets();
 			if (isGuided()) {
 				syncGuidedPanels(targets);
-				if (crTable === undefined) {
+				if (crTable === undefined && Object.values(readGuidedAnswers(targets)).some(answer => answer.mode === SOURCE_ESTIMATE_MODE)) {
 					status.textContent = tableError || "Loading version-matched CR table…";
 					if (!tableError && !tableLoading) loadTable();
 				}
@@ -1112,7 +1141,7 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 			renderBatch();
 			if (!batch.previews.length) {
 				showError(isGuided() && batch.guidedModels.some(model => model.status === "needs-answers")
-					? "Complete the source and post-source form answers below. Review answers opens the next unresolved field."
+					? "Complete the remaining source choices below. Advanced CR judgments are required only if you enabled estimation."
 					: "No eligible monster can use this recipe; review the skipped targets below.");
 			}
 		} catch (e) { showError(e.message); }
@@ -1147,13 +1176,14 @@ export async function pRenderCreatureTransformationEditor ({mount, getTargets, g
 		const selectedTable = structuredClone(crTable);
 		const selectedResolved = resolved;
 		const guided = isGuided();
+		const needsEstimate = guided && Object.values(selectedAnswers).some(answer => answer.mode === SOURCE_ESTIMATE_MODE);
 		const apply = action.querySelector(".bqa__transformation-apply");
 		apply.disabled = true;
 		status.textContent = "Checking the live catalog, targets, and storage before saving…";
 		try {
 			const currentCandidates = await loadWithWarnings();
 			const [currentTable, currentGroups] = guided
-				? await Promise.all([pLoadCreatureTransformationInputTable({requested: true}), DataUtil.loadJSON("data/bestiary/legendarygroups.json")])
+				? await Promise.all([needsEstimate ? pLoadCreatureTransformationInputTable({requested: true}) : crTable, DataUtil.loadJSON("data/bestiary/legendarygroups.json")])
 				: [crTable, null];
 			if (!isActive()) return;
 			if (guided && JSON.stringify(currentTable) !== JSON.stringify(selectedTable)) {

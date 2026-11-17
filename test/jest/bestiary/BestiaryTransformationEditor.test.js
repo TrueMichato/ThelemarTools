@@ -91,7 +91,8 @@ beforeEach(() => {
 	globalThis.Option = class extends Node { constructor (text, value) { super("option"); this.text = text; this.value = value; } };
 	globalThis.DataUtil = {...originalGlobals.DataUtil,
 		loadJSON: jest.fn(async path => path.includes("msbcr") ? {cr: structuredClone(table)}
-			: path.includes("legendarygroups") ? JSON.parse(fs.readFileSync("data/bestiary/legendarygroups.json", "utf8")) : structuredClone(catalog)),
+			: path.includes("items-base") ? JSON.parse(fs.readFileSync("data/items-base.json", "utf8"))
+				: path.includes("legendarygroups") ? JSON.parse(fs.readFileSync("data/bestiary/legendarygroups.json", "utf8")) : structuredClone(catalog)),
 		generic: {...originalGlobals.DataUtil.generic, getVersions: () => []},
 		race: {loadJSON: async () => ({race: []}), loadPrerelease: async () => ({}), loadBrew: async () => ({})}};
 	jest.spyOn(Renderer.hover, "getMakePredefinedHover").mockReturnValue({mouseOver () {}, mouseMove () {}, mouseLeave () {}, touchStart () {}, show () {}});
@@ -407,6 +408,7 @@ const target = (baseCreature = source("Bugbear")) => ({id: "current", label: bas
 async function open ({subject = target(), registry = new BestiaryQuickActionsRegistry(), load = async () => candidates, ...options} = {}) {
 	const getTargets = () => [{...subject, operations: registry.getOperations({monster: subject.baseCreature})}];
 	await pRenderCreatureTransformationEditor({mount,
+		estimateCr: true,
 		getTargets,
 		pLoadCandidates: load,
 		pApply: changes => registry.applyChanges({monster: subject.baseCreature, ...changes[0]}),
@@ -503,6 +505,8 @@ async function fillEstimate (root, form, {attack = "Morningstar", fixedDamage = 
 }
 
 async function fillBugbear (root = mount.querySelector(".bqa__transformation-resolution"), subject = target()) {
+	const toggle = all(root, "input").find(node => node.type === "checkbox" && node.parentElement.textContent.includes("Customize source and estimate CR"));
+	if (toggle && !toggle.checked) { toggle.checked = true; await toggle.emit("change"); }
 	const resolved = resolveCreatureTransformation({candidates, id: "catalog:zombie|dmg", automationVersion: 2});
 	const model = inspectCreatureTransformationSourceInputs({target: subject, resolved});
 	const sourceRoot = all(root, "details").find(it => it.children[0]?.textContent === "Source choices");
@@ -582,6 +586,142 @@ async function fillSourceControl (root, control, model, resolved) {
 	}
 	await edit(all(root, "textarea").at(-1), "Deliberately reviewed this actual source clause and target.");
 }
+
+describe("simple source-first public workflow", () => {
+	const pick = async value => {
+		const node = all(mount, "input").find(node => node.value === value);
+		expect(node).toBeDefined();
+		for (const sibling of node.parentElement.parentElement.parentElement.querySelectorAll("input")) if (sibling.type === "radio") sibling.checked = false;
+		node.checked = true;
+		await node.emit("change");
+	};
+	it.each([
+		["catalog:zombie|dmg", "Bugbear", [], {str: 16, con: 15, hp: {average: 32}}, "2d8 + 3"],
+		["catalog:skeleton|dmg", "Goblin", [], {dex: 16, ac: [{ac: 16}]}, "1d6 + 3"],
+		["catalog:undead|scre", "Bugbear", ["zombie"], {int: 3, speed: {walk: 20}}, "2d8 + 2"],
+		["catalog:fey beast|scre", "Wolf", ["barkskin", "entangle"], {ac: [{ac: 16}]}, "2d4 + 2"],
+		["catalog:fallen angel|scre", "Deva", ["fallen"], {speed: {fly: 60}}, "4d8"],
+		["catalog:half-dragon|mm", "Bugbear", ["red"], {resist: ["fire"]}, "7d6"],
+		["catalog:spore servant|mm", "Bugbear", [], {int: 2, wis: 6, cha: 1}, "1d8 + 2"],
+	])("%s needs only offered choices before applying actual rules", async (id, name, choices, expected, dice) => {
+		const {subject, registry} = await open({subject: target(source(name)), estimateCr: false});
+		await choose(id);
+		for (const value of choices) await pick(value);
+		expect(mount.textContent).not.toContain("stale");
+		expect(all(mount, "details").filter(node => node.dataset.estimateForm)).toHaveLength(0);
+		expect(DataUtil.loadJSON).not.toHaveBeenCalledWith("data/msbcr.json");
+		expect(findButton(mount, "Apply transformation")).toBeDefined();
+		await consent(); await findButton(mount, "Apply transformation").emit("click");
+		const out = registry.getCreature({monster: subject.baseCreature});
+		expect(out).toMatchObject(expected);
+		expect(JSON.stringify(out.action)).toContain(dice);
+		expect(out.cr).toEqual(subject.baseCreature.cr);
+		expect(registry.getOperations({monster: subject.baseCreature})).toHaveLength(1);
+	});
+
+	it("refreshes SCRE abilities without a stale-draft detour and exposes genuine spell choices directly", async () => {
+		const {subject, registry} = await open({estimateCr: false});
+		await choose("catalog:undead|scre");
+		await pick("zombie");
+		await pick("chill-touch");
+		expect(mount.textContent).not.toContain("stale");
+		expect(findButton(mount, "Apply transformation")).toBeUndefined();
+		await edit(findField(mount, "Innate spellcasting ability"), "wis");
+		for (const label of all(mount, "label").filter(node => node.children[0]?.textContent.startsWith("Required spell component:"))) await edit(label.children[1], "no");
+		expect(findButton(mount, "Apply transformation")).toBeDefined();
+		await consent(); await findButton(mount, "Apply transformation").emit("click");
+		const out = registry.getCreature({monster: subject.baseCreature});
+		expect(out.spellcasting[0]).toMatchObject({ability: "wis", will: ["{@spell chill touch|PHB}"]});
+		expect(out.int).toBe(3);
+	});
+
+	it.each([
+		["skeletal", [], {int: 6, wis: 5, cha: 4, vulnerable: ["bludgeoning"]}, "2d8 + 2"],
+		["ghoulish", [], {int: 8, conditionImmune: ["poisoned", "exhaustion", "charmed"]}, "2d8 + 2"],
+		["mummified", [], {int: 4, speed: {walk: 20}, vulnerable: ["fire"]}, "2d8 + 2"],
+		["vampiric", [["Draining Strikes attack", "0"]], {int: 8}, "2d8 + 2"],
+		["ghostly", [["Ghost strike damage", "force"], ["Ability for former Strength-based attacks", "dex"]], {str: 7, speed: {walk: 0, fly: 30, canHover: true}}, "2d8 + 2"],
+	])("applies the %s SCRE category with only its real remaining choices", async (category, answers, expected, dice) => {
+		const {subject, registry} = await open({estimateCr: false});
+		await choose("catalog:undead|scre");
+		await pick(category);
+		for (const [label, value] of answers) await edit(findField(mount, label), value);
+		expect(findButton(mount, "Apply transformation")).toBeDefined();
+		await consent(); await findButton(mount, "Apply transformation").emit("click");
+		const out = registry.getCreature({monster: subject.baseCreature});
+		expect(out).toMatchObject(expected);
+		expect(JSON.stringify(out.action)).toContain(dice);
+		if (category === "ghostly") expect(JSON.stringify(out.action)).toContain("force damage");
+		if (category === "ghoulish") expect(JSON.stringify(out.trait)).toContain("{@dc 11}");
+		if (category === "vampiric") expect(JSON.stringify(out.action)).toContain("hit point maximum");
+	});
+
+	it.each([[35, undefined, 20], [45, "up", 23]])("asks about mummy rounding only when %s ft. actually yields fractional movement", async (walk, rounding, expected) => {
+		const creature = source("Bugbear");
+		creature.speed = {walk};
+		const {subject, registry} = await open({subject: target(creature), estimateCr: false});
+		await choose("catalog:undead|scre");
+		await pick("mummified");
+		const field = findField(mount, "Fractional movement rounding");
+		if (rounding) await edit(field, rounding);
+		else expect(field).toBeUndefined();
+		expect(findButton(mount, "Apply transformation")).toBeDefined();
+		await consent(); await findButton(mount, "Apply transformation").emit("click");
+		expect(registry.getCreature({monster: subject.baseCreature}).speed.walk).toBe(expected);
+	});
+
+	it("reuses literal conditional sense ranges without asking to retype them or touching unrelated blindsight", async () => {
+		const creature = source("Bugbear");
+		creature.senses = ["darkvision 90 ft. while in darkness", "blindsight 10 ft. while underwater"];
+		const {subject, registry} = await open({subject: target(creature), estimateCr: false});
+		await choose("catalog:undead|scre");
+		await pick("zombie");
+		expect(findButton(mount, "Apply transformation")).toBeDefined();
+		await consent(); await findButton(mount, "Apply transformation").emit("click");
+		expect(registry.getCreature({monster: subject.baseCreature}).senses).toEqual([...creature.senses, "darkvision 60 ft."]);
+	});
+
+	it("never guesses unsupported attack bonuses and keeps the optional estimate available", async () => {
+		const creature = source("Bugbear");
+		creature.action[0].entries[0] = creature.action[0].entries[0].replace("{@hit 4}", "{@hit 7}");
+		await open({subject: target(creature), estimateCr: false});
+		await choose();
+		expect(findButton(mount, "Apply transformation")).toBeUndefined();
+		expect(findField(mount, "Armor policy")).toBeDefined();
+		const toggle = all(mount, "input").find(node => node.type === "checkbox" && node.parentElement.textContent.includes("Customize source and estimate CR"));
+		toggle.checked = true; await toggle.emit("change");
+		expect(DataUtil.loadJSON).toHaveBeenCalledWith("data/msbcr.json");
+	});
+
+	it("keeps an explicitly enabled advanced mode when offered abilities change", async () => {
+		await open({estimateCr: false});
+		await choose("catalog:undead|scre");
+		await pick("zombie");
+		const toggle = all(mount, "input").find(node => node.type === "checkbox" && node.parentElement.textContent.includes("Customize source and estimate CR"));
+		toggle.checked = true; await toggle.emit("change");
+		await pick("chill-touch");
+		expect(all(mount, "input").find(node => node.type === "checkbox" && node.parentElement.textContent.includes("Customize source and estimate CR")).checked).toBe(true);
+		expect(mount.textContent).not.toContain("stale");
+		expect(findField(mount, "Armor policy")).toBeDefined();
+		expect(findButton(mount, "Apply transformation")).toBeUndefined();
+	});
+
+	it("replaces the ambiguous-alignment blocker with one plain choice, without irrelevant ghost/spell worksheets", async () => {
+		const creature = source("Bugbear");
+		creature.alignment = [{alignment: ["C", "E"], chance: 50}, {alignment: ["N"], chance: 50}];
+		const {subject, registry} = await open({subject: target(creature), estimateCr: false});
+		await choose("catalog:undead|scre");
+		await pick("zombie");
+		expect(findButton(mount, "Apply transformation")).toBeUndefined();
+		expect(mount.textContent).toContain("Choose an alignment for the transformed creature below.");
+		const visibleKeys = all(mount, "details").filter(node => node.dataset.sourceControl).map(node => JSON.parse(node.dataset.sourceControl)[3].at(-1));
+		expect(new Set(visibleKeys)).toEqual(new Set(["alignment", "bindings"]));
+		const alignment = findField(mount, "Alignment after transformation");
+		await edit(alignment, alignment.options.find(option => option.textContent.toLowerCase() === "unaligned").value);
+		await consent(); await findButton(mount, "Apply transformation").emit("click");
+		expect(registry.getCreature({monster: subject.baseCreature})).toMatchObject({alignment: ["U"], int: 3, speed: {walk: 20}});
+	});
+});
 
 describe("M13b finite shared native source controls", () => {
 	it.each([
@@ -921,8 +1061,9 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 	});
 
 	it("surfaces and retries a CR-table load failure without inventing a ready estimate", async () => {
+		await open();
 		globalThis.DataUtil.loadJSON.mockRejectedValueOnce(new Error("Table offline"));
-		await open(); await choose();
+		await choose();
 		expect(mount.textContent).toContain("Table offline");
 		expect(findButton(mount, "Apply transformation")).toBeUndefined();
 		await findButton(mount, "Retry CR table load").emit("click");
@@ -1109,6 +1250,10 @@ describe("C1 native staged editor against production workflow/consumers", () => 
 			_btnBulkPreview: new Node("button"),
 			_eleBulkTransformation: mount});
 		await page._pRenderBulkChoices({automationVersion: 2}); await choose();
+		for (const panel of mount.querySelectorAll(".bqa__transformation-resolution")) {
+			const toggle = all(panel, "input").find(node => node.type === "checkbox" && node.parentElement.textContent.includes("Customize source and estimate CR"));
+			toggle.checked = true; await toggle.emit("change");
+		}
 		for (const [i, panel] of mount.querySelectorAll(".bqa__transformation-resolution").entries()) {
 			if (i >= 3) break;
 			const instance = state.instances[i];

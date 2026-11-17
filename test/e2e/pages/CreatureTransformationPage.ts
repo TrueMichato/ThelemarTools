@@ -433,6 +433,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		"js/bestiary/bestiary-transformation-editor.js", "js/bestiary/bestiary-quick-actions-ui.js",
 		"js/bestiary/bestiary-transformation-editor-controls.js", "js/bestiary/bestiary-transformation-editor-source.js",
 		"js/bestiary/bestiary-transformation-editor-estimate.js", "js/bestiary/bestiary-transformation-editor-guided.js",
+		"js/bestiary/bestiary-transformation-defaults.js", "data/items-base.json", "data/bestiary/legendarygroups.json",
 		"js/bestiary/bestiary-transformation-source-inputs.js", "js/creature-transformation-estimate.js", "js/creature-transformation-routines.js",
 		"js/bestiary/bestiary-transformation-workflow.js", "js/bestiary/bestiary-transformation-inputs.js",
 		"js/bestiary/bestiary-transformation-catalog-adapter.js", "js/bestiary/bestiary-quick-actions-engine.js",
@@ -448,6 +449,8 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 
 	async beginRound72Evidence (info: TestInfo) {
 		this.diagnosticInfo = info;
+		await this.page.route("**/homebrew/index.json", route => route.fulfill({contentType: "application/json", body: JSON.stringify({toImport: []})}));
+		console.log("Template browser scope: real site catalogue and MM creatures; external auto-import homebrew disabled. Homebrew destination storage alone is stubbed.");
 		expect(info.project.name).toBe("chromium");
 		expect(info.config.workers).toBeLessThanOrEqual(2);
 		expect(info.project.retries).toBe(0);
@@ -511,21 +514,25 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		} finally { clearTimeout(timer); }
 	}
 
-	async finishRound72Evidence (info: TestInfo, label: string) {
+	async finishRound72Evidence (info: TestInfo, label: string, {estimate = true}: {estimate?: boolean} = {}) {
 		await this.settleRound72Responses();
 		for (const path of [
 			"js/bestiary/bestiary-transformation-editor.js", "js/bestiary/bestiary-quick-actions-ui.js",
 			"js/bestiary/bestiary-transformation-editor-controls.js", "js/bestiary/bestiary-transformation-editor-source.js",
 			"js/bestiary/bestiary-transformation-editor-estimate.js", "js/bestiary/bestiary-transformation-editor-guided.js",
+			"js/bestiary/bestiary-transformation-defaults.js",
 			"js/bestiary/bestiary-transformation-source-inputs.js", "js/creature-transformation-estimate.js", "js/creature-transformation-routines.js",
 			"js/bestiary/bestiary-transformation-workflow.js", "js/bestiary/bestiary-transformation-inputs.js", "js/render.js",
 			new URL(this.page.url()).pathname.slice(1),
 			this.page.url().includes("/encounterworkspace.html") ? "css/encounterworkspace.css" : "css/bestiary.css",
-			"data/creature-transformations.json", "data/msbcr.json",
+			"data/creature-transformations.json", ...estimate ? ["data/msbcr.json"] : ["data/items-base.json", "data/bestiary/legendarygroups.json"],
 			...this.assets.filter(path => path.startsWith("js/creature-transformation")),
 		]) expect([...this.loaded.keys()].some(url => new URL(url).pathname === `/${path}`), `Loaded real ${path}`).toBe(true);
 		expect(this.provenanceErrors, "Loaded bytes allow only raw bytes or removal of the local leading UTF-8 BOM").toEqual([]);
 		expect(this.errors).toEqual([]);
+		if (!estimate && !this.page.url().includes("/encounterworkspace.html")) {
+			expect([...this.loaded.keys()].some(url => new URL(url).pathname === "/data/msbcr.json"), "Source-only Bestiary does not load a CR worksheet").toBe(false);
+		}
 		this.evidenceComplete = true;
 		await this.page.screenshot({path: info.outputPath(`${label}.png`), fullPage: true});
 	}
@@ -537,7 +544,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 				completion: this.evidenceComplete ? "complete" : "partial-not-accepted",
 				testStatus: info.status, primaryErrors: info.errors.map(error => error.message),
 				entrypoint: await this.page.evaluate(() => (globalThis as Round72Globals).__round72?.staged ?? "not-observed"),
-				limits: "Registry overrides are session-local; JSON rehydration is explicit. Homebrew tests drive real dialogs with only the destination stubbed. Native Cocoa menus and screenreader behavior are not tested.",
+				limits: "Site catalogue/MM fixtures; external auto-import homebrew is disabled. Registry overrides are session-local; JSON rehydration is explicit. Homebrew tests drive real dialogs with destination storage stubbed. Encounter's own CR panel may load its table; source-only editor calls are separately rejected. Native OS menus and screenreader behavior are not tested.",
 				servedRaw: Object.fromEntries(this.served), localBomRemoved: Object.fromEntries(this.bomRemoved),
 				harnessSources: this.harnessSources,
 				loaded: Object.fromEntries(this.loaded), responseCount: this.responses.length, responsesSettled: this.responsesSettled,
@@ -1030,7 +1037,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 				await new Store().pSave(state);
 			}, fixture.monster);
 			await this.page.reload();
-			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
 		}
 		await this.observeRound72("default");
 		if (surface === "Bestiary") await this.page.locator(".bqa__btn-open:visible").first().click();
@@ -1271,11 +1278,112 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await expect.poll(async () => (await this.round72Snapshot()).operations.length).toBe(1);
 	}
 
+	async simpleSourceFamily (surface: "Bestiary" | "Encounter", fixture: ReleaseCase, info: TestInfo) {
+		await this.openReleaseConsumer(surface, fixture);
+		await this.rejectSimpleCrLoads();
+		const before = await this.round72Snapshot();
+		this.releaseSnapshots.push({phase: "source-only-before", surface, family: fixture.uid, snapshot: before});
+		await this.choose(`catalog:${fixture.uid}`);
+		for (const [group, value] of fixture.options || []) await this.chooseOption(group, value);
+		if (fixture.monster === "Knight") {
+			await expect(this.round72ApplyButton()).toHaveCount(0);
+			const alignment = this.root.getByRole("combobox", {name: "Alignment after transformation", exact: true});
+			await expect(alignment).toBeVisible();
+			await alignment.selectOption({label: "unaligned"});
+			const choices = this.root.locator(".bqa__transformation-resolution");
+			await expect(choices).not.toContainText("Ghost attack ability");
+			await expect(choices).not.toContainText("Overlapping ability clauses");
+			await expect(choices).not.toContainText("Spell components");
+		}
+		await expect(this.root.getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true})).not.toBeChecked();
+		await expect(this.root.getByRole("button", {name: "Discard stale draft and start new answers", exact: true})).toHaveCount(0);
+		await expect(this.root.locator("[data-estimate-form]")).toHaveCount(0);
+		await this.expectLivePreview();
+		await expect(this.root).toContainText("Existing CR and XP are retained");
+		expect((await this.round72Snapshot()).operations).toEqual([]);
+		if (fixture.uid === "fey beast|scre") {
+			const teleport = this.optionControl("Fey traits and actions", "teleport");
+			await teleport.uncheck();
+			await expect(this.afterStatblock).not.toContainText("Teleport");
+			await teleport.check();
+			await expect(this.afterStatblock).toContainText("Teleport");
+			await expect(this.root.getByRole("button", {name: /Discard stale draft/})).toHaveCount(0);
+		}
+		await this.root.locator(".bqa__transformation-resolution").scrollIntoViewIfNeeded();
+		await this.page.screenshot({path: info.outputPath("simple-desktop.png"), fullPage: true});
+		await this.page.setViewportSize({width: 390, height: 844});
+		await this.root.locator(".bqa__transformation-resolution").scrollIntoViewIfNeeded();
+		await expect(this.round72ApplyButton()).toBeVisible();
+		expect(await this.root.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+		await this.page.screenshot({path: info.outputPath("simple-mobile.png"), fullPage: true});
+		await this.page.setViewportSize({width: 1280, height: 900});
+		await this.applyRelease();
+		const applied = await this.round72Snapshot();
+		this.assertReleaseMechanics(fixture, applied.effective!);
+		if (fixture.monster === "Knight") expect(applied.effective!.alignment).toEqual(["U"]);
+		expect(applied.effective!.cr).toEqual(before.effective!.cr);
+		expect(applied.operations[0].data.resolved).not.toHaveProperty("estimation");
+		if (surface === "Encounter") {
+			expect(applied.state).toEqual(applied.persisted);
+			expect(applied.encounterEffective[1]).toEqual(before.encounterEffective[1]);
+		}
+		const homebrew = await this.saveReleaseHomebrew(fixture, applied.effective!);
+		expect(await this.page.evaluate(() => (globalThis as Round72Globals).__round72.forbidden)).toEqual([]);
+		this.releaseSnapshots.push({phase: "source-only-applied", surface, family: fixture.uid, snapshot: applied, homebrew});
+		if (surface === "Bestiary") await this.page.evaluate(() => {
+			const probe = (globalThis as Round72Globals).__round72;
+			sessionStorage.setItem("release-registry-json", JSON.stringify({monster: probe.monster, operations: probe.consumer!.getOperations({monster: probe.monster!})}));
+		});
+		await this.closeRound72Modal();
+		const previousTimeOrigin = await this.page.evaluate(() => performance.timeOrigin);
+		await this.page.reload();
+		if (surface === "Bestiary") {
+			await this.waitReleaseBestiaryReady(fixture.monster, previousTimeOrigin);
+			await this.observeRound72("default");
+			await this.page.evaluate(() => {
+				const probe = (globalThis as Round72Globals).__round72;
+				const saved = JSON.parse(sessionStorage.getItem("release-registry-json")!);
+				probe.registry.applyChanges({monster: saved.monster, addOperations: saved.operations, removeIds: []});
+			});
+		} else {
+			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
+			await this.observeRound72("default");
+		}
+		if (surface === "Bestiary") await this.page.locator(".bqa__btn-open:visible").first().click();
+		else await this.page.locator("#ew-focus-edit").click();
+		await this.rejectSimpleCrLoads();
+		await this.page.getByRole("tab", {name: "Templates", exact: true}).click();
+		const restored = await this.round72Snapshot();
+		this.assertReleaseMechanics(fixture, restored.effective!);
+		expect(restored.effective!.cr).toEqual(before.effective!.cr);
+		await this.page.locator(".bqa__changes .bqa__row").getByRole("button", {name: "Remove", exact: true}).click();
+		await expect.poll(async () => (await this.round72Snapshot()).operations.length).toBe(0);
+		const removed = await this.round72Snapshot();
+		expect(removed.effective).toEqual(before.effective);
+		expect(await this.page.evaluate(() => (globalThis as Round72Globals).__round72.forbidden)).toEqual([]);
+		this.releaseSnapshots.push({phase: "source-only-restored-and-removed", surface, family: fixture.uid, restored, removed});
+	}
+
+	private async rejectSimpleCrLoads () {
+		await this.page.evaluate(() => {
+			const globals = globalThis as Round72Globals;
+			const load = globals.DataUtil.loadJSON;
+			globals.DataUtil.loadJSON = async function (url) {
+				if (/(?:^|\/)msbcr\.json(?:\?|$)/.test(url)) {
+					globals.__round72.forbidden.push(url);
+					throw new Error("Source-only editor requested the optional CR table.");
+				}
+				return load.call(this, url);
+			};
+		});
+	}
+
 	async releaseFamily (surface: "Bestiary" | "Encounter", fixture: ReleaseCase, info: TestInfo) {
 		await this.openReleaseConsumer(surface, fixture);
 		const before = await this.round72Snapshot();
 		await this.choose(`catalog:${fixture.uid}`);
 		for (const [group, value] of fixture.options || []) await this.chooseOption(group, value);
+		await this.root.getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true}).check();
 		const discard = this.root.getByRole("button", {name: "Discard stale draft and start new answers", exact: true});
 		if (await discard.count()) await discard.click();
 		await expect(this.root.locator(".bqa__transformation-resolution")).toHaveCount(1);
@@ -1340,7 +1448,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.page.reload({waitUntil: "domcontentloaded"});
 		if (surface === "Encounter") {
 			await this.page.waitForLoadState("load");
-			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false");
+			await expect(this.page.locator("#encounter-workspace")).toHaveAttribute("aria-busy", "false", {timeout: 30_000});
 			await this.observeRound72("default");
 		} else {
 			const ready = await this.waitReleaseBestiaryReady(fixture.monster, previousTimeOrigin);
@@ -1376,6 +1484,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 
 	/** Answers every v2 source and post-source question for Zombie (DMG) on an MM Bugbear. Shared by the cockpit sweep. */
 	async fillRound72Bugbear () {
+		await this.root.getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true}).check();
 		const root = this.root.locator(".bqa__transformation-resolution").first();
 		const source = root.locator("details").filter({has: this.page.locator(":scope > summary", {hasText: /^Source choices$/})});
 		await this.setRound72Field(source, "Armor policy", "retain");
@@ -1488,6 +1597,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 	}
 
 	private async fillRound72Dracolich (root: Locator) {
+		await root.getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true}).check();
 		for (const [label, value] of [
 			["Age", "adult"], ["age source reason", "Actual adult dragon."],
 			["Is this a true dragon?", "yes"], ["True dragon identity source reason", "Actual true dragon."],
@@ -1608,6 +1718,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		const source = await this.round72Snapshot();
 		expect(source.effective!.name).toBe("Bugbear");
 		await this.choose("catalog:zombie|dmg");
+		await this.root.getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true}).check();
 		await expect(this.root.getByRole("button", {name: "Apply transformation"})).toHaveCount(0);
 		await this.fillRound72Bugbear();
 		if (info) await this.captureM13bLayouts(info, "bestiary");
@@ -1756,6 +1867,9 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.choose("catalog:dracolich|mm");
 		const allPanels = this.root.locator(".bqa__transformation-resolution");
 		await expect(allPanels).toHaveCount(5);
+		for (let ix = 0; ix < await allPanels.count(); ix++) {
+			await allPanels.nth(ix).getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true}).check();
+		}
 		const panels = allPanels.filter({has: this.page.locator("legend", {hasText: /^Adult Black Dragon/})});
 		await expect(panels).toHaveCount(4);
 		for (let ix = 0; ix < 3; ix++) {
@@ -2134,6 +2248,7 @@ export class Round72CreatureTransformationPage extends CreatureTransformationPag
 		await this.openRound72Bestiary();
 		await this.useNightMode();
 		await this.choose("catalog:zombie|dmg");
+		await this.root.getByRole("checkbox", {name: "Customize source and estimate CR (advanced)", exact: true}).check();
 		await this.root.getByRole("button", {name: /^Review answers for /}).click();
 		await expect(this.root.getByRole("combobox", {name: "Armor policy", exact: true})).toBeFocused();
 		await this.fillRound72Bugbear();
