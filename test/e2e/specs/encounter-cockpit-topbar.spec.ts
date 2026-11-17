@@ -1,4 +1,5 @@
 import {expect, test, type Page} from "@playwright/test";
+import {readEncounterCockpitLayout} from "../utils/encounterWorkspaceUi";
 
 /*
  * Lantern Cockpit (encounterworkspace.html?ew=2) top bar, ⋯ menu and Keys sheet on real Monster Manual data plus two
@@ -7,10 +8,10 @@ import {expect, test, type Page} from "@playwright/test";
  * foe initiative re-rolls with advantage, the ⋯ menu's how-to hint, and the glyph legend. Fails on any console error.
  */
 
-const seed = async (page: Page, {isHoundSpent = false} = {}) => {
+const seed = async (page: Page, {isHoundSpent = false, extraCreatures = 0} = {}) => {
 	await page.goto("/encounterworkspace.html?ew=1");
 	await page.locator("#encounter-workspace[aria-busy='false']").waitFor();
-	await page.evaluate(async ({isHoundSpent}) => {
+	await page.evaluate(async ({isHoundSpent, extraCreatures}) => {
 		const res = await fetch("data/bestiary/bestiary-mm.json");
 		const {monster: monsters} = await res.json();
 		const {getEncounterResourceDefaults} = await import("/js/encounterworkspace/encounterworkspace-resources.js");
@@ -47,6 +48,7 @@ const seed = async (page: Page, {isHoundSpent = false} = {}) => {
 				createEncounterPartyInstance({id: "cael", name: "Cael", ac: 13, hpMax: 18, initiative: 11}),
 				mk("owlbear", "Owlbear", 12),
 				mk("gob-2", "Goblin", 9),
+				...Array.from({length: extraCreatures}, (_, ix) => mk(`extra-${ix}`, ix ? "Goblin" : "Adult Black Dragon", ix ? 8 - ix : 24)),
 			],
 			selectedIds: [],
 			omissions: [],
@@ -67,13 +69,13 @@ const seed = async (page: Page, {isHoundSpent = false} = {}) => {
 		};
 		await StorageUtil.pSet("charsheet-characters", [{id: "char-brenna", name: "Brenna", classes: [{name: "Fighter", level: 3}], _savedAt: 1}]);
 		await StorageUtil.pSetForPage("encounterWorkspaceState", state, {page: "encounterworkspace.html"});
-	}, {isHoundSpent});
+	}, {isHoundSpent, extraCreatures});
 };
 
-const openCockpit = async (page: Page) => {
+const openCockpit = async (page: Page, count = 6) => {
 	await page.goto("/encounterworkspace.html?ew=2");
 	await page.locator("#ew-cockpit[aria-busy='false']").waitFor();
-	await expect(page.locator(".ewc-row")).toHaveCount(6);
+	await expect(page.locator(".ewc-row")).toHaveCount(count);
 };
 
 const row = (page: Page, id: string) => page.locator(`.ewc-row[data-ewc-id="${id}"]`);
@@ -106,6 +108,45 @@ const trackConsoleErrors = (page: Page) => {
 
 test.describe("Encounter cockpit top bar (?ew=2)", () => {
 	test.use({viewport: {width: 1280, height: 800}});
+
+	for (const platform of ["Win32", "MacIntel"]) {
+		test(`desktop layout keeps the statblock readable with ${platform} shortcuts`, async ({page}) => {
+			await page.addInitScript(platform => {
+				Object.defineProperty(navigator, "platform", {get: () => platform});
+				localStorage.setItem("ewc-theme", "thelemar");
+			}, platform);
+			await seed(page, {extraCreatures: 6});
+			await openCockpit(page, 12);
+			await page.locator("[data-ewc-act='next']").click();
+			await page.locator(".ewc-hint__x").click();
+
+			// Budget for classic desktop scrollbars instead of depending on Mac-style overlay gutters.
+			await page.addStyleTag({content: ".ewc ::-webkit-scrollbar {width: 17px; height: 17px;}"});
+			for (const [width, minStatblock] of [[1600, 720], [1440, 700], [1280, 600], [1241, 560], [1181, 520]]) {
+				await page.setViewportSize({width, height: 893});
+				await expect.poll(async () => {
+					const layout = await readEncounterCockpitLayout(page);
+					const [enc, turn, tools] = layout.clusters;
+					const fits = layout.statblock.width >= minStatblock
+						&& layout.turnFits
+						&& layout.turnChip.scrollWidth <= layout.turnChip.clientWidth + 1
+						&& enc.right <= turn.left && turn.right <= tools.left && tools.right <= layout.bar.right
+						&& layout.clusters.every(cluster => cluster.scrollWidth <= cluster.clientWidth + 1)
+						&& layout.documentWidth <= width
+						&& layout.rail.right <= layout.stage.left && layout.stage.right <= layout.dock.left
+						&& layout.log.bottom <= layout.viewportHeight;
+					return fits ? null : layout;
+				}, {message: `unclipped desktop cockpit at ${width}px (${platform})`}).toBeNull();
+				await expect(page.locator("[data-ewc-act='next']")).toBeInViewport();
+				await expect(page.locator("[data-ewc-act='menu']")).toBeInViewport();
+				await expect(page.locator(".ewc-dock__tab").first()).toBeInViewport();
+			}
+
+			const last = page.locator(".ewc-row").last();
+			await last.scrollIntoViewIfNeeded();
+			await expect(last).toBeInViewport({ratio: 1});
+		});
+	}
 
 	test("difficulty badge, kbd hints, List | Timeline, Keys button and the compact site header", async ({page}) => {
 		const errors = trackConsoleErrors(page);
