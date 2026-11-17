@@ -10,7 +10,7 @@ The workspace opens in the **cockpit**, a three-column combat view over the same
 
 - **Top bar:** the encounter name, a **difficulty badge**, the round with the active combatant (**Space** views it), **Prev/Next turn**, and tools: **›_ Command /** (the command console), **Enter/Exit Prep Mode**, a **List | Timeline** switch, **End combat**, undo and redo with their keys, **Keys ⇧?** and the **⋯** menu. On this page the site banner and navigation share one thin row, and wrap to two only when they don't fit. As the window narrows, the bar drops secondary labels and key hints, then the encounter name; at 1180px and below it becomes two rows.
   - **Difficulty badge:** the Bestiary encounter builder's rating for the foes still in the fight (for example Easy, Hard, Deadly or Absurd under the 2014 rules; Low, Moderate or High under 2024), coloured by tier, beside the encounter's award XP. The rules follow the condition-rules setting. Party levels come from linked characters; an unlinked party member counts at the party's average level, and the popover says so. Click the badge for total, earned (defeated) and per-creature XP, and **End combat…**.
-  - **⋯ menu:** condition rules, monster death saves, **Auto-roll recharge at turn start** (rolls 1d6 for each spent Recharge ability when its creature's turn starts, and logs the result; the same stored setting as the older view's **Recharge settings**), re-roll everyone's initiative, **Re-roll foe initiative** with **Normal / Adv / Dis** (party members keep theirs; the toast has **Undo**), reset turns, add, end combat, saved lists, the DM Screen, the classic view, **Show the how-to hint** and the shortcut sheet.
+  - **⋯ menu:** condition rules, monster death saves, **Auto-roll recharge at turn start** (rolls 1d6 for each spent Recharge ability when its creature's turn starts, and logs the result; the same stored setting as the older view's **Recharge settings**), re-roll everyone's initiative, **Re-roll foe initiative** with **Normal / Adv / Dis** (party members keep theirs; the toast has **Undo**), reset turns, add, end combat, saved lists, the DM Screen, the classic view, **Show the how-to hint** and the shortcut sheet. At the foot of the menu, **Theme** recolours the cockpit (see [Themes](#themes)).
 - **Initiative rail (left):** one row per creature, showing its initiative, HP bar, AC, conditions and effects. Group chips sit at the top. A **Party** chip comes first whenever there are two or more party members. Press **1–9** to select a group, and press it again to unselect. The viewed row has **HP / Save / Cond / Fx / ⋯** quick actions, and other rows show them on hover or keyboard focus; they never cover the effect tally. **HP** views the creature and opens the dock's HP tab, where Damage and Heal both sit. Party members show their class line, such as "Rogue 5". Clicking an initiative number lets you type it. **Drag the ⠿ handle**, or press **Alt+↑/↓**, to change the creature's *position* in the turn order; its initiative number adjusts to match. Downed party members show compact death-save pips (✓✓✓ ✗✗✗) inline on the row. Monsters get them only when the setting is on. **+ Add** (⇧A) sits in the rail head beside **Group…**; the rail has no footer, and the last row always scrolls clear of the order hint.
   - **Row ⋯ menu:** **Console…** (opens the command console already aimed at that creature, such as `@owlbear `), **Mark concentration…** (type the spell), **Move before…** (pick a creature to act just ahead of), **Assess CR** and **Edit (I)**.
   - **Effect pills:** an effect cast by another creature has a **↗** link, on the pill and in the effect-tally list, that views its caster.
@@ -44,6 +44,30 @@ The workspace opens in the **cockpit**, a three-column combat view over the same
 - **End combat:** shows a summary, awards XP, then offers to choose another encounter or send this one to the DM Screen.
 
 Every change is one undoable step (**⌘/Ctrl+Z**, redo with **⌘/Ctrl+Shift+Z**), and the undo toast names what changed. Shortcuts never fire while you are typing in a field. **Shift+?** (or **Keys**) lists every shortcut, including the prep editor's **⌘/Ctrl+Enter** to save an edit and **←/→**, **Home/End** to switch prep tabs, and a legend for the pill glyphs (▲ ▼ effects, ◉ concentration, ⬡ area, ✦ template). Hovering a creature, spell, condition or effect name opens the site's normal hover window.
+
+### Themes
+
+**⋯ → Theme** offers seven colour themes as a row of swatches. Each swatch's pie shows the theme's ground, its accent and its turn colour. The active swatch has a check, its name sits beside the heading, and hovering a swatch names and describes it. The checked swatch is the group's Tab stop; the arrow keys, **Home** and **End** pick a neighbouring theme, and focus stays on it. Every theme has a day and a night version that follow the site's night mode, and every text and state colour meets WCAG AA in both. That includes HP bars, Bloodied and Down, condition and effect pills, difficulty tiers, focus rings, selected and turn rows, roll chips, toasts, popovers and the Keys sheet.
+
+| Theme | Look |
+|---|---|
+| **Default** | Slate and indigo: the cockpit's standard look. |
+| **Thelemar** | The Traveler's Guide's sea-teal and gilt, with Illrigger crimson for blood. |
+| **Parchment** | Vellum and iron-gall ink, lapis and gilt: a classic tabletop page. |
+| **Forest** | Pine and leaf on lichen, with an oiled-bark turn. |
+| **Arcane** | Grimoire violet with a teal ward-glow for the turn. |
+| **Forge** | Ember on cold iron, with a quench-steel turn. |
+| **High contrast** | Pure grounds, heavy rules and maximum text contrast. |
+
+The choice is a view preference for this browser. It is stored in `localStorage` under `ewc-theme`; choosing **Default** removes the key. It is never written to the encounter save and never adds an undo step. The page applies the stored theme before the cockpit is first shown, so a reload doesn't flash the default colours. If the browser refuses to store it, the theme still applies for this visit and a toast says so. The native statblock keeps the site's own colours; only its roll chips follow the theme.
+
+For developers: a theme is the `data-ewc-theme` attribute on `#ew-cockpit` (`js/encounterworkspace/cockpit/theme-model.js`, picker in `features/theme.js`). It overrides **only** `--ewc-*` custom properties, in `scss/includes/encounterworkspace-cockpit-themes.scss`. That file is `@use`d last in `scss/encounterworkspace.scss`, so its day blocks beat the base night tokens. Components must use tokens and never hardcode colours. Inks on filled grounds come from `--ewc-on-ind`, `--ewc-on-bad`, `--ewc-on-bad-fill` and `--ewc-gold-tag-ink`. Overlays use `--ewc-scrim`, `--ewc-shade` and `--ewc-shadow-sheet`. To add a theme:
+1. Add a `.ewc[data-ewc-theme="id"]` block and a `.ve-night-mode .ewc[data-ewc-theme="id"]` block that declare the same token set.
+2. Add the `--ewc-sw-*` swatch colours for both.
+3. Add an entry to `COCKPIT_THEMES`.
+4. Add the id to the theme list in `test/e2e/specs/encounter-cockpit-themes.spec.ts`.
+
+`test/jest/EncounterCockpitThemes.test.js` fails if the day and night blocks drift apart or a theme lacks a swatch. The E2E spec contrast-scans every theme in day and night.
 
 ## Loading and the older view
 

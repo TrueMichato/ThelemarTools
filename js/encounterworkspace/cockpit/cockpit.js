@@ -150,7 +150,7 @@ export class EncounterCockpit {
 		};
 		this._hooks = {damageApplied: new Set(), turnChanged: new Set(), rolled: new Set(), render: new Set(), showHint: new Set(), openPrep: new Set()};
 		/** Feature extension points (P3): render callbacks, persistent regions, stage modes, extra keys. */
-		this._ext = {barItems: [], railTop: [], railHead: [], railFoot: [], rowDecorators: [], stageModes: [], keys: [], menuItems: []};
+		this._ext = {barItems: [], railTop: [], railHead: [], railFoot: [], rowDecorators: [], stageModes: [], keys: [], menuItems: [], menuSections: []};
 		this._stageMode = "statblock";
 		this._rollHandler = null;
 	}
@@ -388,6 +388,8 @@ export class EncounterCockpit {
 			addRailRowDecorator: fn => this._addExt("rowDecorators", fn),
 			/** {id, label, onclick(), keys?} entries in the ⋯ menu. */
 			addMenuItem: item => this._addExt("menuItems", item),
+			/** fn(ctx, {close}) → Node | Node[] | null — a whole section (heading and controls) near the end of the ⋯ menu. */
+			addMenuSection: fn => this._addExt("menuSections", fn),
 
 			/* ---- Stage modes: alternative views of the stage (e.g. the timeline); "statblock" is the default. ---- */
 			/** {id, label, keys?, render(el, ctx)} — while active, the statblock is hidden and render() fills `el`. */
@@ -917,10 +919,23 @@ export class EncounterCockpit {
 			h("a.ewc-menu__item", {role: "menuitem", href: "encounterworkspace.html?ew=1"}, "Open the classic workspace"),
 			item("Show the how-to hint", () => this._runHooks("showHint"), {act: "hint"}),
 			item(["Keyboard shortcuts", kbd(getCockpitKeyLabels(["Shift", "?"], {isMac: this._isMac}))], () => this._openHelp(), {act: "shortcuts"}),
+			...this._getMenuSections(ctx, close),
 		);
 		wrap.append(btn, pop);
 		if (wasOpen) open();
 		return wrap;
+	}
+
+	_getMenuSections (ctx, close) {
+		return this._ext.menuSections.flatMap(fn => {
+			try {
+				const nodes = [fn(ctx, {close: () => close({isFocus: true})})].flat().filter(Boolean);
+				return nodes.length ? [h("div.ewc-menu__sep", {role: "separator"}), ...nodes] : [];
+			} catch (e) {
+				rethrowLater(e);
+				return [];
+			}
+		});
 	}
 
 	async _pSaveWsSettings (patch) {

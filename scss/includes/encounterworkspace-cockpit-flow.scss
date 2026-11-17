@@ -21,9 +21,9 @@
 			}
 
 			.ewc-seg__b[aria-pressed="true"] .ewc-kbd {
-				border-color: rgb(255 255 255 / 35%);
-				background: rgb(255 255 255 / 14%);
-				color: #fff;
+				border-color: color-mix(in srgb, var(--ewc-on-ind) 35%, transparent);
+				background: color-mix(in srgb, var(--ewc-on-ind) 14%, transparent);
+				color: var(--ewc-on-ind);
 			}
 		}
 

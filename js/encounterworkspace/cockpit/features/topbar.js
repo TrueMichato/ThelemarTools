@@ -6,6 +6,7 @@
 import {h} from "../dom.js";
 import {getEncounterCharacterLevel, pGetEncounterSavedCharacters} from "../../encounterworkspace-party.js";
 import {getCockpitDifficulty, getCockpitDifficultyAriaLabel} from "../topbar-model.js";
+import {installCockpitThemePicker} from "./theme.js";
 
 const REASON_NOTES = {
 	"no-party": "Add the party (Prep → Add → Party) to rate the difficulty.",
@@ -16,6 +17,7 @@ const REASON_NOTES = {
 
 export function installCockpitTopbarFeatures (api) {
 	installDifficulty(api);
+	installCockpitThemePicker(api);
 }
 
 function installDifficulty (api) {

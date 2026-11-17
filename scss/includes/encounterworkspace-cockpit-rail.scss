@@ -431,7 +431,7 @@
 
 				&:hover {
 					background: var(--ewc-ind-strong);
-					color: #fff;
+					color: var(--ewc-on-ind);
 				}
 			}
 
@@ -507,7 +507,7 @@
 			&:focus-visible {
 				border-color: var(--ewc-ind-strong);
 				background: var(--ewc-ind-strong);
-				color: #fff;
+				color: var(--ewc-on-ind);
 			}
 		}
 
@@ -679,7 +679,7 @@
 			text-align: center;
 
 			[aria-pressed="true"] > & {
-				background: rgb(255 255 255 / 22%);
+				background: color-mix(in srgb, var(--ewc-on-ind) 22%, transparent);
 			}
 		}
 
@@ -890,7 +890,7 @@
 				&.ewc-btn--primary {
 					border-color: var(--ewc-ind-strong);
 					background: var(--ewc-ind-strong);
-					color: #fff;
+					color: var(--ewc-on-ind);
 					font-weight: 600;
 				}
 			}

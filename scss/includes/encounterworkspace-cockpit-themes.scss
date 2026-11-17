@@ -1,0 +1,898 @@
+// Optional cockpit colour themes (⋯ menu → Theme; js/encounterworkspace/cockpit/theme-model.js). Default — the
+// tokens in encounterworkspace-cockpit-shell.scss and -flow.scss — stays the default and carries no attribute.
+// Each theme overrides ONLY `--ewc-*` tokens, once for day and once for the site's night mode; it never changes
+// layout. Every night block sets every token its day block sets, so a day theme value can never leak into night.
+// Loaded last: a day theme block (0,2,0) ties with `.ve-night-mode .ewc` and must win by order.
+
+// Contrast: every text token clears WCAG AA 4.5:1 over every ground and every soft tint it can sit on (incl. the
+// 75% pill numerals), fills clear 4.5:1 against their on-* ink, and bars/focus rings clear 3:1 against every
+// ground. The statblock keeps the site's own colours, so only its roll chips are themed (checked over #fff/#222).
+// The palettes were tuned against that matrix; re-check by eye and with the themes E2E spec when editing them.
+@layer vetools {
+	// Thelemar — the Traveler's Guide's colours: TGTT sea-teal hand, gilt turn, Illrigger crimson for blood.
+	.ewc[data-ewc-theme="thelemar"] {
+		--ewc-base: #eef3f2;
+		--ewc-chrome: #f9fbfa;
+		--ewc-surface: #e5eceb;
+		--ewc-raised: #dae3e2;
+		--ewc-elev: #ccd8d7;
+		--ewc-hair: rgb(10 50 55 / 11%);
+		--ewc-hair-2: rgb(10 50 55 / 18%);
+		--ewc-hair-3: rgb(10 50 55 / 32%);
+		--ewc-ink: #10201f;
+		--ewc-ink-2: #283b3a;
+		--ewc-ink-3: #364948;
+		--ewc-ink-4: #435756;
+		--ewc-ind: #005e66;
+		--ewc-ind-strong: #005961;
+		--ewc-ind-hover: #006a73;
+		--ewc-ind-text: #003b3f;
+		--ewc-ind-soft: rgb(0 94 102 / 9%);
+		--ewc-ind-soft-2: rgb(0 94 102 / 16%);
+		--ewc-ind-line: rgb(0 94 102 / 48%);
+		--ewc-ok: #295d2e;
+		--ewc-ok-bar: #377a3d;
+		--ewc-ok-soft: rgb(63 138 69 / 13%);
+		--ewc-warn: #6f4d00;
+		--ewc-warn-bar: #906700;
+		--ewc-warn-soft: rgb(200 150 0 / 17%);
+		--ewc-warn-line: rgb(140 100 0 / 52%);
+		--ewc-warn-ink: #462f00;
+		--ewc-bad: #8e2f42;
+		--ewc-bad-bar: #b23a52;
+		--ewc-bad-soft: rgb(178 58 82 / 11%);
+		--ewc-bad-line: rgb(147 58 76 / 44%);
+		--ewc-bad-ink: #6f2233;
+		--ewc-gold: #463110;
+		--ewc-gold-tag: #d9b257;
+		--ewc-gold-tag-ink: #1e1606;
+		--ewc-gold-soft: rgb(217 178 87 / 22%);
+		--ewc-gold-line: rgb(140 104 24 / 55%);
+		--ewc-up: #003b3f;
+		--ewc-down: #472f00;
+		--ewc-bf: #19391e;
+		--ewc-on-ind: #fff;
+		--ewc-bad-strong: #7a2638;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #fff;
+		--ewc-tl-up: rgb(0 94 102 / 14%);
+		--ewc-tl-up-ink: #003f45;
+		--ewc-tl-down: rgb(200 150 0 / 20%);
+		--ewc-tl-down-ink: #4a3200;
+		--ewc-tl-bf: rgb(63 138 69 / 18%);
+		--ewc-tl-bf-ink: #1d4a21;
+		--ewc-shadow-pop: 0 14px 36px rgb(5 40 45 / 18%), 0 2px 6px rgb(5 40 45 / 10%);
+		--ewc-scrim: rgb(3 25 28 / 45%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(5 40 45 / 26%);
+
+		color-scheme: light;
+	}
+
+	// Night: deep-sea ground with a pale teal hand (dark ink on the teal fills).
+	.ve-night-mode .ewc[data-ewc-theme="thelemar"] {
+		--ewc-base: #0b1617;
+		--ewc-chrome: #0e1a1b;
+		--ewc-surface: #132223;
+		--ewc-raised: #1a2c2d;
+		--ewc-elev: #233839;
+		--ewc-hair: rgb(200 240 240 / 8%);
+		--ewc-hair-2: rgb(200 240 240 / 14%);
+		--ewc-hair-3: rgb(200 240 240 / 24%);
+		--ewc-ink: #eaf4f3;
+		--ewc-ink-2: #c8d9d8;
+		--ewc-ink-3: #a9bfbe;
+		--ewc-ink-4: #a3b6b6;
+		--ewc-ind: #4fb9c1;
+		--ewc-ind-strong: #4fb9c1;
+		--ewc-ind-hover: #6cc8cf;
+		--ewc-ind-text: #8ad7dd;
+		--ewc-ind-soft: rgb(79 185 193 / 12%);
+		--ewc-ind-soft-2: rgb(79 185 193 / 21%);
+		--ewc-ind-line: rgb(79 185 193 / 55%);
+		--ewc-ok: #8fd59a;
+		--ewc-ok-bar: #6cc27a;
+		--ewc-ok-soft: rgb(108 194 122 / 14%);
+		--ewc-warn: #f2cf55;
+		--ewc-warn-bar: #e5bf35;
+		--ewc-warn-soft: rgb(229 191 53 / 13%);
+		--ewc-warn-line: rgb(242 207 85 / 46%);
+		--ewc-warn-ink: #faedbd;
+		--ewc-bad: #ff94a5;
+		--ewc-bad-bar: #e26c82;
+		--ewc-bad-soft: rgb(224 98 122 / 15%);
+		--ewc-bad-line: rgb(255 138 156 / 44%);
+		--ewc-bad-ink: #ffd0d8;
+		--ewc-gold: #e7c87c;
+		--ewc-gold-tag: #d9b257;
+		--ewc-gold-tag-ink: #1e1606;
+		--ewc-gold-soft: rgb(217 178 87 / 14%);
+		--ewc-gold-line: rgb(217 178 87 / 55%);
+		--ewc-up: #bfe9ec;
+		--ewc-down: #f8e3a6;
+		--ewc-bf: #c4ecca;
+		--ewc-on-ind: #031314;
+		--ewc-bad-strong: #ff8a9c;
+		--ewc-on-bad: #1a060b;
+		--ewc-on-bad-fill: #1a060b;
+		--ewc-tl-up: rgb(79 185 193 / 24%);
+		--ewc-tl-up-ink: #d6f2f4;
+		--ewc-tl-down: rgb(242 207 85 / 20%);
+		--ewc-tl-down-ink: #fbf0c6;
+		--ewc-tl-bf: rgb(108 194 122 / 22%);
+		--ewc-tl-bf-ink: #d6f3db;
+		--ewc-shadow-pop: 0 14px 36px rgb(1 8 9 / 60%), 0 2px 6px rgb(1 8 9 / 45%);
+		--ewc-scrim: rgb(1 8 9 / 60%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(1 8 9 / 50%);
+
+		color-scheme: dark;
+	}
+
+	// Parchment — vellum and iron-gall ink; lapis for the hand, gilt for the turn, vermilion for blood.
+	.ewc[data-ewc-theme="parchment"] {
+		--ewc-base: #f2e9d6;
+		--ewc-chrome: #fbf6ea;
+		--ewc-surface: #eee3cb;
+		--ewc-raised: #e7d9bc;
+		--ewc-elev: #ddcca9;
+		--ewc-hair: rgb(74 50 22 / 12%);
+		--ewc-hair-2: rgb(74 50 22 / 20%);
+		--ewc-hair-3: rgb(74 50 22 / 34%);
+		--ewc-ink: #2a1d10;
+		--ewc-ink-2: #433120;
+		--ewc-ink-3: #54402b;
+		--ewc-ink-4: #5f4a33;
+		--ewc-ind: #2c4c8c;
+		--ewc-ind-strong: #2c4c8c;
+		--ewc-ind-hover: #36589b;
+		--ewc-ind-text: #1c2f59;
+		--ewc-ind-soft: rgb(44 76 140 / 9%);
+		--ewc-ind-soft-2: rgb(44 76 140 / 16%);
+		--ewc-ind-line: rgb(44 76 140 / 48%);
+		--ewc-ok: #29592d;
+		--ewc-ok-bar: #39733e;
+		--ewc-ok-soft: rgb(63 127 68 / 14%);
+		--ewc-warn: #774308;
+		--ewc-warn-bar: #94590f;
+		--ewc-warn-soft: rgb(190 120 30 / 16%);
+		--ewc-warn-line: rgb(150 90 20 / 52%);
+		--ewc-warn-ink: #452805;
+		--ewc-bad: #922619;
+		--ewc-bad-bar: #b3392a;
+		--ewc-bad-soft: rgb(179 57 42 / 12%);
+		--ewc-bad-line: rgb(146 38 25 / 44%);
+		--ewc-bad-ink: #7a1d12;
+		--ewc-gold: #3d2a0e;
+		--ewc-gold-tag: #d8b062;
+		--ewc-gold-tag-ink: #2a1d0c;
+		--ewc-gold-soft: rgb(196 146 52 / 22%);
+		--ewc-gold-line: rgb(140 96 26 / 56%);
+		--ewc-up: #1c2f59;
+		--ewc-down: #4e2310;
+		--ewc-bf: #17331b;
+		--ewc-on-ind: #fffaf0;
+		--ewc-bad-strong: #84221a;
+		--ewc-on-bad: #fffaf0;
+		--ewc-on-bad-fill: #fffaf0;
+		--ewc-tl-up: rgb(44 76 140 / 16%);
+		--ewc-tl-up-ink: #1f3563;
+		--ewc-tl-down: rgb(190 120 30 / 20%);
+		--ewc-tl-down-ink: #5c2a0b;
+		--ewc-tl-bf: rgb(63 127 68 / 18%);
+		--ewc-tl-bf-ink: #204a24;
+		--ewc-shadow-pop: 0 14px 36px rgb(60 40 15 / 20%), 0 2px 6px rgb(60 40 15 / 12%);
+		--ewc-scrim: rgb(40 26 10 / 45%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(60 40 15 / 26%);
+
+		color-scheme: light;
+	}
+
+	// Night: candlelit sepia.
+	.ve-night-mode .ewc[data-ewc-theme="parchment"] {
+		--ewc-base: #1b1510;
+		--ewc-chrome: #201913;
+		--ewc-surface: #261e16;
+		--ewc-raised: #2f251b;
+		--ewc-elev: #3a2e22;
+		--ewc-hair: rgb(255 236 200 / 8%);
+		--ewc-hair-2: rgb(255 236 200 / 14%);
+		--ewc-hair-3: rgb(255 236 200 / 24%);
+		--ewc-ink: #f4e9d3;
+		--ewc-ink-2: #dccbab;
+		--ewc-ink-3: #c8b391;
+		--ewc-ink-4: #bdab8c;
+		--ewc-ind: #8fa9e0;
+		--ewc-ind-strong: #8fa9e0;
+		--ewc-ind-hover: #a7bcea;
+		--ewc-ind-text: #b9cbf0;
+		--ewc-ind-soft: rgb(120 150 220 / 12%);
+		--ewc-ind-soft-2: rgb(120 150 220 / 22%);
+		--ewc-ind-line: rgb(140 168 228 / 52%);
+		--ewc-ok: #8fd294;
+		--ewc-ok-bar: #74bf7a;
+		--ewc-ok-soft: rgb(116 191 122 / 14%);
+		--ewc-warn: #eab865;
+		--ewc-warn-bar: #e2a743;
+		--ewc-warn-soft: rgb(226 167 67 / 14%);
+		--ewc-warn-line: rgb(234 184 101 / 46%);
+		--ewc-warn-ink: #f7e3bf;
+		--ewc-bad: #f29484;
+		--ewc-bad-bar: #e8735f;
+		--ewc-bad-soft: rgb(232 115 95 / 14%);
+		--ewc-bad-line: rgb(242 148 132 / 44%);
+		--ewc-bad-ink: #f9d2ca;
+		--ewc-gold: #ecce94;
+		--ewc-gold-tag: #e6c27e;
+		--ewc-gold-tag-ink: #2a1d0c;
+		--ewc-gold-soft: rgb(230 194 126 / 16%);
+		--ewc-gold-line: rgb(230 194 126 / 58%);
+		--ewc-up: #c6d4f4;
+		--ewc-down: #f5d8ad;
+		--ewc-bf: #bfe6c2;
+		--ewc-on-ind: #16110b;
+		--ewc-bad-strong: #a8352a;
+		--ewc-on-bad: #fffaf0;
+		--ewc-on-bad-fill: #1b1510;
+		--ewc-tl-up: rgb(120 150 220 / 30%);
+		--ewc-tl-up-ink: #e3eafb;
+		--ewc-tl-down: rgb(234 184 101 / 22%);
+		--ewc-tl-down-ink: #f9e8c9;
+		--ewc-tl-bf: rgb(116 191 122 / 22%);
+		--ewc-tl-bf-ink: #d3f0d5;
+		--ewc-shadow-pop: 0 14px 36px rgb(6 4 2 / 60%), 0 2px 6px rgb(6 4 2 / 45%);
+		--ewc-scrim: rgb(6 4 2 / 60%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(6 4 2 / 50%);
+
+		color-scheme: dark;
+	}
+
+	// Forest — lichen-pale grounds, pine for the hand, leaf for health, oiled bark and amber for the turn.
+	.ewc[data-ewc-theme="forest"] {
+		--ewc-base: #eef1e8;
+		--ewc-chrome: #f8faf4;
+		--ewc-surface: #e6eadf;
+		--ewc-raised: #dce2d3;
+		--ewc-elev: #cfd7c4;
+		--ewc-hair: rgb(30 45 25 / 11%);
+		--ewc-hair-2: rgb(30 45 25 / 18%);
+		--ewc-hair-3: rgb(30 45 25 / 32%);
+		--ewc-ink: #17201a;
+		--ewc-ink-2: #2f3b31;
+		--ewc-ink-3: #3e4a40;
+		--ewc-ink-4: #49544b;
+		--ewc-ind: #2d5f3f;
+		--ewc-ind-strong: #295839;
+		--ewc-ind-hover: #336a47;
+		--ewc-ind-text: #183726;
+		--ewc-ind-soft: rgb(45 95 63 / 10%);
+		--ewc-ind-soft-2: rgb(45 95 63 / 17%);
+		--ewc-ind-line: rgb(45 95 63 / 48%);
+		--ewc-ok: #375a10;
+		--ewc-ok-bar: #4e761a;
+		--ewc-ok-soft: rgb(91 138 31 / 14%);
+		--ewc-warn: #6f4c00;
+		--ewc-warn-bar: #8d6500;
+		--ewc-warn-soft: rgb(200 150 0 / 17%);
+		--ewc-warn-line: rgb(140 100 0 / 52%);
+		--ewc-warn-ink: #462e00;
+		--ewc-bad: #9c271c;
+		--ewc-bad-bar: #c23a2c;
+		--ewc-bad-soft: rgb(194 58 44 / 11%);
+		--ewc-bad-line: rgb(161 40 29 / 42%);
+		--ewc-bad-ink: #82190f;
+		--ewc-gold: #412b10;
+		--ewc-gold-tag: #d6b07a;
+		--ewc-gold-tag-ink: #24170a;
+		--ewc-gold-soft: rgb(160 110 50 / 16%);
+		--ewc-gold-line: rgb(110 70 25 / 52%);
+		--ewc-up: #183726;
+		--ewc-down: #472e00;
+		--ewc-bf: #243710;
+		--ewc-on-ind: #fff;
+		--ewc-bad-strong: #8c2016;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #fff;
+		--ewc-tl-up: rgb(45 95 63 / 15%);
+		--ewc-tl-up-ink: #1b3d27;
+		--ewc-tl-down: rgb(200 150 0 / 20%);
+		--ewc-tl-down-ink: #4a3100;
+		--ewc-tl-bf: rgb(91 138 31 / 18%);
+		--ewc-tl-bf-ink: #2c4a0b;
+		--ewc-shadow-pop: 0 14px 36px rgb(20 35 15 / 18%), 0 2px 6px rgb(20 35 15 / 10%);
+		--ewc-scrim: rgb(12 22 10 / 45%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(20 35 15 / 26%);
+
+		color-scheme: light;
+	}
+
+	// Night: under the canopy, with dark ink on the pale pine fills.
+	.ve-night-mode .ewc[data-ewc-theme="forest"] {
+		--ewc-base: #0f1410;
+		--ewc-chrome: #121813;
+		--ewc-surface: #172019;
+		--ewc-raised: #1e2920;
+		--ewc-elev: #273428;
+		--ewc-hair: rgb(220 240 215 / 8%);
+		--ewc-hair-2: rgb(220 240 215 / 14%);
+		--ewc-hair-3: rgb(220 240 215 / 24%);
+		--ewc-ink: #edf2ea;
+		--ewc-ink-2: #cdd8cb;
+		--ewc-ink-3: #b2c0b0;
+		--ewc-ink-4: #acb6aa;
+		--ewc-ind: #7cc796;
+		--ewc-ind-strong: #7cc796;
+		--ewc-ind-hover: #92d3a8;
+		--ewc-ind-text: #a6dfb8;
+		--ewc-ind-soft: rgb(124 199 150 / 12%);
+		--ewc-ind-soft-2: rgb(124 199 150 / 21%);
+		--ewc-ind-line: rgb(124 199 150 / 55%);
+		--ewc-ok: #bfe27e;
+		--ewc-ok-bar: #9cc94f;
+		--ewc-ok-soft: rgb(156 201 79 / 14%);
+		--ewc-warn: #f2cc52;
+		--ewc-warn-bar: #e5bd35;
+		--ewc-warn-soft: rgb(229 189 53 / 13%);
+		--ewc-warn-line: rgb(242 204 82 / 46%);
+		--ewc-warn-ink: #faecbd;
+		--ewc-bad: #ff978a;
+		--ewc-bad-bar: #ec6a5a;
+		--ewc-bad-soft: rgb(236 106 90 / 15%);
+		--ewc-bad-line: rgb(255 138 122 / 44%);
+		--ewc-bad-ink: #ffd3cc;
+		--ewc-gold: #e4c595;
+		--ewc-gold-tag: #d9b47a;
+		--ewc-gold-tag-ink: #1c130a;
+		--ewc-gold-soft: rgb(217 180 122 / 14%);
+		--ewc-gold-line: rgb(217 180 122 / 55%);
+		--ewc-up: #c2ead0;
+		--ewc-down: #f8e3a6;
+		--ewc-bf: #d6efaa;
+		--ewc-on-ind: #0b140e;
+		--ewc-bad-strong: #ff8a7a;
+		--ewc-on-bad: #140906;
+		--ewc-on-bad-fill: #140906;
+		--ewc-tl-up: rgb(124 199 150 / 24%);
+		--ewc-tl-up-ink: #dcf3e3;
+		--ewc-tl-down: rgb(242 204 82 / 20%);
+		--ewc-tl-down-ink: #fbf0c6;
+		--ewc-tl-bf: rgb(156 201 79 / 22%);
+		--ewc-tl-bf-ink: #e6f5c9;
+		--ewc-shadow-pop: 0 14px 36px rgb(2 5 2 / 60%), 0 2px 6px rgb(2 5 2 / 45%);
+		--ewc-scrim: rgb(2 5 2 / 60%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(2 5 2 / 50%);
+
+		color-scheme: dark;
+	}
+
+	// Arcane — grimoire violet; the turn glows teal like a ward circle.
+	.ewc[data-ewc-theme="arcane"] {
+		--ewc-base: #f5f3fb;
+		--ewc-chrome: #fdfcff;
+		--ewc-surface: #efebf8;
+		--ewc-raised: #e7e1f4;
+		--ewc-elev: #dad2ec;
+		--ewc-hair: rgb(40 20 80 / 10%);
+		--ewc-hair-2: rgb(40 20 80 / 17%);
+		--ewc-hair-3: rgb(40 20 80 / 30%);
+		--ewc-ink: #1c1430;
+		--ewc-ink-2: #382c54;
+		--ewc-ink-3: #493d66;
+		--ewc-ink-4: #574a76;
+		--ewc-ind: #6a3fcf;
+		--ewc-ind-strong: #5e33c4;
+		--ewc-ind-hover: #6c41d2;
+		--ewc-ind-text: #421e8e;
+		--ewc-ind-soft: rgb(106 63 207 / 8%);
+		--ewc-ind-soft-2: rgb(106 63 207 / 15%);
+		--ewc-ind-line: rgb(106 63 207 / 46%);
+		--ewc-ok: #1a6236;
+		--ewc-ok-bar: #2a7e4c;
+		--ewc-ok-soft: rgb(45 138 82 / 13%);
+		--ewc-warn: #824706;
+		--ewc-warn-bar: #a16110;
+		--ewc-warn-soft: rgb(220 140 30 / 15%);
+		--ewc-warn-line: rgb(170 100 20 / 50%);
+		--ewc-warn-ink: #512d04;
+		--ewc-bad: #a3203a;
+		--ewc-bad-bar: #c8344f;
+		--ewc-bad-soft: rgb(200 52 79 / 11%);
+		--ewc-bad-line: rgb(163 32 58 / 42%);
+		--ewc-bad-ink: #86182f;
+		--ewc-gold: #0b3a39;
+		--ewc-gold-tag: #7fd3cc;
+		--ewc-gold-tag-ink: #052726;
+		--ewc-gold-soft: rgb(20 160 150 / 16%);
+		--ewc-gold-line: rgb(12 110 108 / 52%);
+		--ewc-up: #421e8e;
+		--ewc-down: #5d2610;
+		--ewc-bf: #0b3a39;
+		--ewc-on-ind: #fff;
+		--ewc-bad-strong: #8f1c33;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #fff;
+		--ewc-tl-up: rgb(106 63 207 / 17%);
+		--ewc-tl-up-ink: #41208f;
+		--ewc-tl-down: rgb(220 140 30 / 19%);
+		--ewc-tl-down-ink: #5f2a0c;
+		--ewc-tl-bf: rgb(20 160 150 / 18%);
+		--ewc-tl-bf-ink: #064947;
+		--ewc-shadow-pop: 0 14px 36px rgb(40 20 80 / 18%), 0 2px 6px rgb(40 20 80 / 10%);
+		--ewc-scrim: rgb(20 10 45 / 45%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(40 20 80 / 26%);
+
+		color-scheme: light;
+	}
+
+	// Night: deep indigo-black with a pale violet hand (dark ink on the violet fills).
+	.ve-night-mode .ewc[data-ewc-theme="arcane"] {
+		--ewc-base: #120e21;
+		--ewc-chrome: #161129;
+		--ewc-surface: #1b1531;
+		--ewc-raised: #241c3d;
+		--ewc-elev: #2e254b;
+		--ewc-hair: rgb(225 210 255 / 8%);
+		--ewc-hair-2: rgb(225 210 255 / 14%);
+		--ewc-hair-3: rgb(225 210 255 / 24%);
+		--ewc-ink: #f1edfb;
+		--ewc-ink-2: #d0c7e9;
+		--ewc-ink-3: #b8acd8;
+		--ewc-ink-4: #ab9ecd;
+		--ewc-ind: #a68cff;
+		--ewc-ind-strong: #a68cff;
+		--ewc-ind-hover: #b8a3ff;
+		--ewc-ind-text: #cdbfff;
+		--ewc-ind-soft: rgb(150 120 255 / 13%);
+		--ewc-ind-soft-2: rgb(150 120 255 / 23%);
+		--ewc-ind-line: rgb(170 145 255 / 55%);
+		--ewc-ok: #7ddc9c;
+		--ewc-ok-bar: #5cc983;
+		--ewc-ok-soft: rgb(92 201 131 / 14%);
+		--ewc-warn: #f3c25a;
+		--ewc-warn-bar: #ecb23e;
+		--ewc-warn-soft: rgb(236 178 62 / 14%);
+		--ewc-warn-line: rgb(243 194 90 / 46%);
+		--ewc-warn-ink: #fbe7bd;
+		--ewc-bad: #ff8aa0;
+		--ewc-bad-bar: #f26a85;
+		--ewc-bad-soft: rgb(242 106 133 / 15%);
+		--ewc-bad-line: rgb(255 138 160 / 44%);
+		--ewc-bad-ink: #ffd0da;
+		--ewc-gold: #62e0d3;
+		--ewc-gold-tag: #62e0d3;
+		--ewc-gold-tag-ink: #052726;
+		--ewc-gold-soft: rgb(98 224 211 / 14%);
+		--ewc-gold-line: rgb(98 224 211 / 55%);
+		--ewc-up: #d2c6ff;
+		--ewc-down: #fbdcb3;
+		--ewc-bf: #b0f0e8;
+		--ewc-on-ind: #140f24;
+		--ewc-bad-strong: #b02446;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #120e21;
+		--ewc-tl-up: rgb(150 120 255 / 30%);
+		--ewc-tl-up-ink: #ebe4ff;
+		--ewc-tl-down: rgb(243 194 90 / 22%);
+		--ewc-tl-down-ink: #fdeccb;
+		--ewc-tl-bf: rgb(98 224 211 / 22%);
+		--ewc-tl-bf-ink: #cff7f2;
+		--ewc-shadow-pop: 0 14px 36px rgb(4 2 12 / 60%), 0 2px 6px rgb(4 2 12 / 45%);
+		--ewc-scrim: rgb(4 2 12 / 60%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(4 2 12 / 50%);
+
+		color-scheme: dark;
+	}
+
+	// Forge — ember on cold iron; quench-steel blue marks the turn, brass the bloodied.
+	.ewc[data-ewc-theme="forge"] {
+		--ewc-base: #f1eeea;
+		--ewc-chrome: #faf8f5;
+		--ewc-surface: #ebe6e0;
+		--ewc-raised: #e2dbd3;
+		--ewc-elev: #d6cdc3;
+		--ewc-hair: rgb(45 30 20 / 11%);
+		--ewc-hair-2: rgb(45 30 20 / 18%);
+		--ewc-hair-3: rgb(45 30 20 / 32%);
+		--ewc-ink: #1e1915;
+		--ewc-ink-2: #3a312b;
+		--ewc-ink-3: #4a403a;
+		--ewc-ink-4: #584d45;
+		--ewc-ind: #b23a0b;
+		--ewc-ind-strong: #ad3809;
+		--ewc-ind-hover: #b23c0e;
+		--ewc-ind-text: #5f2006;
+		--ewc-ind-soft: rgb(200 70 15 / 9%);
+		--ewc-ind-soft-2: rgb(200 70 15 / 16%);
+		--ewc-ind-line: rgb(184 60 11 / 46%);
+		--ewc-ok: #225d36;
+		--ewc-ok-bar: #307b4a;
+		--ewc-ok-soft: rgb(51 131 78 / 13%);
+		--ewc-warn: #6c4d00;
+		--ewc-warn-bar: #886500;
+		--ewc-warn-soft: rgb(200 150 0 / 17%);
+		--ewc-warn-line: rgb(140 100 0 / 52%);
+		--ewc-warn-ink: #422d00;
+		--ewc-bad: #a11d1d;
+		--ewc-bad-bar: #c73030;
+		--ewc-bad-soft: rgb(199 48 48 / 11%);
+		--ewc-bad-line: rgb(161 29 29 / 42%);
+		--ewc-bad-ink: #841616;
+		--ewc-gold: #1f2e3d;
+		--ewc-gold-tag: #a9bfd3;
+		--ewc-gold-tag-ink: #101b26;
+		--ewc-gold-soft: rgb(70 110 150 / 16%);
+		--ewc-gold-line: rgb(50 80 110 / 52%);
+		--ewc-up: #5f2006;
+		--ewc-down: #412d00;
+		--ewc-bf: #113723;
+		--ewc-on-ind: #fff;
+		--ewc-bad-strong: #8c1919;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #fff;
+		--ewc-tl-up: rgb(200 70 15 / 15%);
+		--ewc-tl-up-ink: #7c2604;
+		--ewc-tl-down: rgb(200 150 0 / 20%);
+		--ewc-tl-down-ink: #4a3300;
+		--ewc-tl-bf: rgb(51 131 78 / 18%);
+		--ewc-tl-bf-ink: #1b4a2b;
+		--ewc-shadow-pop: 0 14px 36px rgb(40 24 12 / 20%), 0 2px 6px rgb(40 24 12 / 12%);
+		--ewc-scrim: rgb(30 18 8 / 45%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(40 24 12 / 26%);
+
+		color-scheme: light;
+	}
+
+	// Night: banked coals, with dark ink on the ember fills.
+	.ve-night-mode .ewc[data-ewc-theme="forge"] {
+		--ewc-base: #131110;
+		--ewc-chrome: #171413;
+		--ewc-surface: #1d1917;
+		--ewc-raised: #26211e;
+		--ewc-elev: #312a26;
+		--ewc-hair: rgb(255 230 210 / 8%);
+		--ewc-hair-2: rgb(255 230 210 / 14%);
+		--ewc-hair-3: rgb(255 230 210 / 24%);
+		--ewc-ink: #f5efe9;
+		--ewc-ink-2: #d8cec5;
+		--ewc-ink-3: #bfb2a6;
+		--ewc-ink-4: #b1a599;
+		--ewc-ind: #f07f3f;
+		--ewc-ind-strong: #f07f3f;
+		--ewc-ind-hover: #f5925a;
+		--ewc-ind-text: #ffab78;
+		--ewc-ind-soft: rgb(240 127 63 / 12%);
+		--ewc-ind-soft-2: rgb(240 127 63 / 21%);
+		--ewc-ind-line: rgb(240 127 63 / 55%);
+		--ewc-ok: #7fd49a;
+		--ewc-ok-bar: #5fbf7e;
+		--ewc-ok-soft: rgb(95 191 126 / 14%);
+		--ewc-warn: #f2d04a;
+		--ewc-warn-bar: #e8c330;
+		--ewc-warn-soft: rgb(232 195 48 / 13%);
+		--ewc-warn-line: rgb(242 208 74 / 46%);
+		--ewc-warn-ink: #faeebb;
+		--ewc-bad: #ff8577;
+		--ewc-bad-bar: #f0655a;
+		--ewc-bad-soft: rgb(240 101 90 / 15%);
+		--ewc-bad-line: rgb(255 133 119 / 44%);
+		--ewc-bad-ink: #ffd1cb;
+		--ewc-gold: #aecae2;
+		--ewc-gold-tag: #a9c6e0;
+		--ewc-gold-tag-ink: #0e1822;
+		--ewc-gold-soft: rgb(169 198 224 / 14%);
+		--ewc-gold-line: rgb(169 198 224 / 55%);
+		--ewc-up: #ffc8a3;
+		--ewc-down: #f8e3a6;
+		--ewc-bf: #bfeccd;
+		--ewc-on-ind: #1a0c04;
+		--ewc-bad-strong: #ff8577;
+		--ewc-on-bad: #1a0c04;
+		--ewc-on-bad-fill: #1a0c04;
+		--ewc-tl-up: rgb(240 127 63 / 26%);
+		--ewc-tl-up-ink: #ffe3d0;
+		--ewc-tl-down: rgb(242 208 74 / 20%);
+		--ewc-tl-down-ink: #fbf0c6;
+		--ewc-tl-bf: rgb(95 191 126 / 22%);
+		--ewc-tl-bf-ink: #d2f3dc;
+		--ewc-shadow-pop: 0 14px 36px rgb(0 0 0 / 65%), 0 2px 6px rgb(0 0 0 / 50%);
+		--ewc-scrim: rgb(0 0 0 / 60%);
+		--ewc-shadow-sheet: 0 -12px 32px rgb(0 0 0 / 55%);
+
+		color-scheme: dark;
+	}
+
+	// High contrast — pure grounds, heavy rules, near-black/near-white text (AAA for body copy).
+	.ewc[data-ewc-theme="contrast"] {
+		--ewc-base: #fff;
+		--ewc-chrome: #fff;
+		--ewc-surface: #f4f4f4;
+		--ewc-raised: #e9e9e9;
+		--ewc-elev: #dcdcdc;
+		--ewc-hair: rgb(0 0 0 / 30%);
+		--ewc-hair-2: rgb(0 0 0 / 55%);
+		--ewc-hair-3: rgb(0 0 0 / 80%);
+		--ewc-ink: #000;
+		--ewc-ink-2: #000;
+		--ewc-ink-3: #1a1a1a;
+		--ewc-ink-4: #262626;
+		--ewc-ind: #0037c8;
+		--ewc-ind-strong: #0037c8;
+		--ewc-ind-hover: #002ea8;
+		--ewc-ind-text: #00279a;
+		--ewc-ind-soft: rgb(0 55 200 / 9%);
+		--ewc-ind-soft-2: rgb(0 55 200 / 16%);
+		--ewc-ind-line: #0037c8;
+		--ewc-ok: #004d1a;
+		--ewc-ok-bar: #007a2a;
+		--ewc-ok-soft: rgb(0 122 42 / 12%);
+		--ewc-warn: #5c3500;
+		--ewc-warn-bar: #9a5c00;
+		--ewc-warn-soft: rgb(230 150 0 / 18%);
+		--ewc-warn-line: #7a4800;
+		--ewc-warn-ink: #3d2300;
+		--ewc-bad: #8f0000;
+		--ewc-bad-bar: #c20000;
+		--ewc-bad-soft: rgb(220 0 0 / 10%);
+		--ewc-bad-line: #a00000;
+		--ewc-bad-ink: #6e0000;
+		--ewc-gold: #4d3300;
+		--ewc-gold-tag: #ffd34d;
+		--ewc-gold-tag-ink: #000;
+		--ewc-gold-soft: rgb(255 200 40 / 30%);
+		--ewc-gold-line: #6b4700;
+		--ewc-up: #00279a;
+		--ewc-down: #5c2300;
+		--ewc-bf: #004114;
+		--ewc-on-ind: #fff;
+		--ewc-bad-strong: #8f0000;
+		--ewc-on-bad: #fff;
+		--ewc-on-bad-fill: #fff;
+		--ewc-tl-up: rgb(0 55 200 / 14%);
+		--ewc-tl-up-ink: #001f7a;
+		--ewc-tl-down: rgb(230 150 0 / 22%);
+		--ewc-tl-down-ink: #3d1800;
+		--ewc-tl-bf: rgb(0 122 42 / 16%);
+		--ewc-tl-bf-ink: #003612;
+		--ewc-shadow-pop: 0 0 0 1px rgb(0 0 0 / 100%), 0 10px 28px rgb(0 0 0 / 28%);
+		--ewc-scrim: rgb(0 0 0 / 65%);
+		--ewc-shadow-sheet: 0 0 0 1px rgb(0 0 0 / 100%), 0 -10px 28px rgb(0 0 0 / 28%);
+
+		color-scheme: light;
+	}
+
+	// Night: black ground, light blue hand with black ink on fills.
+	.ve-night-mode .ewc[data-ewc-theme="contrast"] {
+		--ewc-base: #000;
+		--ewc-chrome: #000;
+		--ewc-surface: #0d0d0d;
+		--ewc-raised: #1a1a1a;
+		--ewc-elev: #262626;
+		--ewc-hair: rgb(255 255 255 / 32%);
+		--ewc-hair-2: rgb(255 255 255 / 55%);
+		--ewc-hair-3: rgb(255 255 255 / 80%);
+		--ewc-ink: #fff;
+		--ewc-ink-2: #fff;
+		--ewc-ink-3: #ededed;
+		--ewc-ink-4: #e0e0e0;
+		--ewc-ind: #8fb8ff;
+		--ewc-ind-strong: #8fb8ff;
+		--ewc-ind-hover: #b0ceff;
+		--ewc-ind-text: #b5d0ff;
+		--ewc-ind-soft: rgb(143 184 255 / 14%);
+		--ewc-ind-soft-2: rgb(143 184 255 / 24%);
+		--ewc-ind-line: #8fb8ff;
+		--ewc-ok: #7cf0a0;
+		--ewc-ok-bar: #4fdc7c;
+		--ewc-ok-soft: rgb(79 220 124 / 15%);
+		--ewc-warn: #ffd84d;
+		--ewc-warn-bar: #ffc61a;
+		--ewc-warn-soft: rgb(255 198 26 / 15%);
+		--ewc-warn-line: #ffd84d;
+		--ewc-warn-ink: #fff0bf;
+		--ewc-bad: #ff9a9a;
+		--ewc-bad-bar: #ff6b6b;
+		--ewc-bad-soft: rgb(255 107 107 / 16%);
+		--ewc-bad-line: #ff9a9a;
+		--ewc-bad-ink: #ffd6d6;
+		--ewc-gold: #ffd34d;
+		--ewc-gold-tag: #ffd34d;
+		--ewc-gold-tag-ink: #000;
+		--ewc-gold-soft: rgb(255 211 77 / 18%);
+		--ewc-gold-line: #ffd34d;
+		--ewc-up: #cfe0ff;
+		--ewc-down: #ffe2b8;
+		--ewc-bf: #c2f7d3;
+		--ewc-on-ind: #000;
+		--ewc-bad-strong: #ff9a9a;
+		--ewc-on-bad: #000;
+		--ewc-on-bad-fill: #000;
+		--ewc-tl-up: rgb(143 184 255 / 28%);
+		--ewc-tl-up-ink: #fff;
+		--ewc-tl-down: rgb(255 216 77 / 24%);
+		--ewc-tl-down-ink: #fff;
+		--ewc-tl-bf: rgb(79 220 124 / 24%);
+		--ewc-tl-bf-ink: #fff;
+		--ewc-shadow-pop: 0 0 0 1px rgb(255 255 255 / 100%), 0 10px 28px rgb(0 0 0 / 80%);
+		--ewc-scrim: rgb(0 0 0 / 75%);
+		--ewc-shadow-sheet: 0 0 0 1px rgb(255 255 255 / 100%), 0 -10px 28px rgb(0 0 0 / 80%);
+
+		color-scheme: dark;
+	}
+
+	// ⋯ menu → Theme picker.
+	// Each swatch is a pie of its own theme's ground, turn gold and hand (primary) — in the current site mode.
+	.ewc .ewc-themes {
+		display: grid;
+		grid-template-columns: repeat(7, minmax(0, 1fr));
+		gap: 2px;
+		padding: 2px 2px 4px;
+
+		&__h {
+			display: flex;
+			align-items: baseline;
+			justify-content: space-between;
+		}
+
+		&__now {
+			color: var(--ewc-ink-2);
+			font-weight: 600;
+			letter-spacing: normal;
+			text-transform: none;
+		}
+
+		&__b {
+			display: grid;
+			place-items: center;
+			min-width: 0;
+			padding: 5px 0;
+			border: 0;
+			border-radius: var(--ewc-r-s);
+			background: none;
+
+			&:hover,
+			&:focus-visible {
+				background: var(--ewc-raised);
+			}
+		}
+
+		&__sw {
+			position: relative;
+			display: grid;
+			flex: none;
+			place-items: center;
+			width: 30px;
+			height: 30px;
+			border: 1px solid var(--ewc-hair-3);
+			border-radius: 50%;
+			background: conic-gradient(var(--ewc-sw-turn) 0 25%, var(--ewc-sw-hand) 0 50%, var(--ewc-sw-ground) 0);
+		}
+
+		&__b[aria-checked="true"] .ewc-themes__sw {
+			outline: 2px solid var(--ewc-ind);
+			outline-offset: 2px;
+		}
+
+		&__chk {
+			display: none;
+			place-items: center;
+			width: 16px;
+			height: 16px;
+			border-radius: 50%;
+			background: var(--ewc-sw-ground);
+			color: var(--ewc-sw-ink);
+
+			svg {
+				width: 11px;
+				height: 11px;
+			}
+		}
+
+		&__b[aria-checked="true"] .ewc-themes__chk {
+			display: grid;
+		}
+
+		&__sw--default {
+			--ewc-sw-ground: #fff;
+			--ewc-sw-hand: #4f46e5;
+			--ewc-sw-turn: #e7b58a;
+			--ewc-sw-ink: #0f172a;
+		}
+
+		&__sw--thelemar {
+			--ewc-sw-ground: #f9fbfa;
+			--ewc-sw-hand: #005e66;
+			--ewc-sw-turn: #d9b257;
+			--ewc-sw-ink: #10201f;
+		}
+
+		&__sw--parchment {
+			--ewc-sw-ground: #fbf6ea;
+			--ewc-sw-hand: #2c4c8c;
+			--ewc-sw-turn: #d8b062;
+			--ewc-sw-ink: #2a1d10;
+		}
+
+		&__sw--forest {
+			--ewc-sw-ground: #f8faf4;
+			--ewc-sw-hand: #2d5f3f;
+			--ewc-sw-turn: #d6b07a;
+			--ewc-sw-ink: #17201a;
+		}
+
+		&__sw--arcane {
+			--ewc-sw-ground: #fdfcff;
+			--ewc-sw-hand: #6a3fcf;
+			--ewc-sw-turn: #7fd3cc;
+			--ewc-sw-ink: #1c1430;
+		}
+
+		&__sw--forge {
+			--ewc-sw-ground: #faf8f5;
+			--ewc-sw-hand: #b23a0b;
+			--ewc-sw-turn: #a9bfd3;
+			--ewc-sw-ink: #1e1915;
+		}
+
+		&__sw--contrast {
+			--ewc-sw-ground: #fff;
+			--ewc-sw-hand: #0037c8;
+			--ewc-sw-turn: #ffd34d;
+			--ewc-sw-ink: #000;
+		}
+	}
+
+	.ve-night-mode .ewc .ewc-themes {
+		&__sw--default {
+			--ewc-sw-ground: #121a2c;
+			--ewc-sw-hand: #7681f5;
+			--ewc-sw-turn: #e7b58a;
+			--ewc-sw-ink: #eef2f8;
+		}
+
+
+		&__sw--thelemar {
+			--ewc-sw-ground: #0e1a1b;
+			--ewc-sw-hand: #4fb9c1;
+			--ewc-sw-turn: #d9b257;
+			--ewc-sw-ink: #eaf4f3;
+		}
+
+
+		&__sw--parchment {
+			--ewc-sw-ground: #201913;
+			--ewc-sw-hand: #8fa9e0;
+			--ewc-sw-turn: #e6c27e;
+			--ewc-sw-ink: #f4e9d3;
+		}
+
+
+		&__sw--forest {
+			--ewc-sw-ground: #121813;
+			--ewc-sw-hand: #7cc796;
+			--ewc-sw-turn: #d9b47a;
+			--ewc-sw-ink: #edf2ea;
+		}
+
+
+		&__sw--arcane {
+			--ewc-sw-ground: #161129;
+			--ewc-sw-hand: #a68cff;
+			--ewc-sw-turn: #62e0d3;
+			--ewc-sw-ink: #f1edfb;
+		}
+
+
+		&__sw--forge {
+			--ewc-sw-ground: #171413;
+			--ewc-sw-hand: #f07f3f;
+			--ewc-sw-turn: #a9c6e0;
+			--ewc-sw-ink: #f5efe9;
+		}
+
+
+		&__sw--contrast {
+			--ewc-sw-ground: #000;
+			--ewc-sw-hand: #8fb8ff;
+			--ewc-sw-turn: #ffd34d;
+			--ewc-sw-ink: #fff;
+		}
+	}
+}
