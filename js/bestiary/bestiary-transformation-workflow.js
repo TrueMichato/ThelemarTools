@@ -5,7 +5,9 @@ import {selectFrozenCreatureTransformation} from "../creature-transformation-for
 import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation.js";
 import {compileCreatureTransformationInputs, freezeCreatureTransformationInputs, proposeCreatureTransformationResidual} from "./bestiary-transformation-inputs.js";
 import {getLycanthropeProfile} from "../creature-transformation-lycanthrope.js";
-import {compileCreatureTransformationSourceEstimate, compileCreatureTransformationSourceInputs, SOURCE_ESTIMATE_MODE} from "./bestiary-transformation-source-inputs.js";
+import {compileCreatureTransformationSourceEstimate, compileCreatureTransformationSourceInputs, SOURCE_ESTIMATE_MODE, SOURCE_ONLY_MODE} from "./bestiary-transformation-source-inputs.js";
+
+const isSourceAnswers = answers => [SOURCE_ESTIMATE_MODE, SOURCE_ONLY_MODE].includes(answers?.mode);
 
 const SKIPPABLE_CODES = new Set([
 	"CREATURE_TRANSFORMATION_INELIGIBLE",
@@ -127,7 +129,7 @@ export function previewCreatureTransformationTargets ({targets, resolved, automa
 		try {
 			if (guided) {
 				const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
-				const compiler = guidedAnswers[target.id]?.mode === SOURCE_ESTIMATE_MODE ? compileCreatureTransformationSourceInputs : compileCreatureTransformationInputs;
+				const compiler = isSourceAnswers(guidedAnswers[target.id]) ? compileCreatureTransformationSourceInputs : compileCreatureTransformationInputs;
 				const model = compiler({target, resolved: recipe, answers: guidedAnswers[target.id], table: crTable, proficiencyContext: getProficiencyContext({target, current}), legendaryGroups});
 				guidedModels.push(model);
 				if (model.status !== "ready") {
@@ -191,7 +193,7 @@ export function createCreatureTransformationChanges ({batch, targets, conflictDe
 		for (const {id} of batch.previews) {
 			const target = targets.find(it => it.id === id);
 			const current = BestiaryQuickActionsUtil.applyOperations({baseCreature: target.baseCreature, operations: target.operations});
-			const compiler = guidedAnswers[id]?.mode === SOURCE_ESTIMATE_MODE ? compileCreatureTransformationSourceInputs : compileCreatureTransformationInputs;
+			const compiler = isSourceAnswers(guidedAnswers[id]) ? compileCreatureTransformationSourceInputs : compileCreatureTransformationInputs;
 			const model = compiler({target, resolved, answers: guidedAnswers[id], table: crTable, proficiencyContext: getProficiencyContext({target, current}), legendaryGroups});
 			if (model.status !== "ready" || JSON.stringify(model.automationInputs) !== JSON.stringify(automationInputs[id])) throw new Error("Transformation preview is stale: guided target inputs changed. Preview again.");
 		}

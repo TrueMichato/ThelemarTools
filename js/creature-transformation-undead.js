@@ -469,9 +469,10 @@ function validStep (step) {
 }
 
 export function observeUndead ({current, selected, chassisSource = current.source}) {
-	selections(selected);
+	const activeTraits = [...selections(selected)];
 	return {key: "profile",
 		facts: {
+			activeTraits,
 			additionalTraits: EXTRA,
 			alignment: ALIGNMENTS,
 			creatureType: current.type,
