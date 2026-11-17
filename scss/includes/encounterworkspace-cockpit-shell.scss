@@ -108,8 +108,8 @@
 		--ewc-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 		--ewc-t-fast: 140ms;
 		--ewc-t: 200ms;
-		--ewc-rail-w: 360px;
-		--ewc-dock-w: 324px;
+		--ewc-rail-w: clamp(280px, 22.5vw, 360px);
+		--ewc-dock-w: clamp(280px, 20.25vw, 324px);
 		--ewc-bar-h: 52px;
 
 		display: grid;
@@ -587,12 +587,10 @@
 
 			&__enc {
 				display: flex;
-				// Shrinks well before the turn cluster, so a long title truncates first; at 1400px and below the title
-				// hides and this stops shrinking, so the difficulty badge never collapses.
 				flex: 1 9 auto;
 				align-items: center;
 				gap: 10px;
-				min-width: 0;
+				min-width: min-content;
 
 				.ewc-badge {
 					flex: none;
@@ -600,7 +598,9 @@
 			}
 
 			&__title {
-				flex: 0 1 auto;
+				// Keep the badge's intrinsic width; only the title consumes (and truncates in) the spare space.
+				flex: 1 1 0;
+				width: 0;
 				min-width: 0;
 				overflow: hidden;
 				font-size: var(--ewc-f-l);
@@ -615,7 +615,7 @@
 				flex: 0 1 auto;
 				align-items: center;
 				gap: 8px;
-				min-width: 0;
+				min-width: min-content;
 
 				> :not(.ewc-turnchip) {
 					flex: none;
@@ -668,7 +668,7 @@
 			flex: 0 1 auto;
 			align-items: center;
 			gap: 8px;
-			min-width: 72px;
+			min-width: 100px;
 			max-width: 240px;
 			min-height: 32px;
 			padding: 0 10px;
@@ -988,13 +988,18 @@
 		}
 	}
 
-	// The one-row bar sheds secondary labels and kbd hints in tiers so the encounter cluster (title, difficulty badge)
-	// never collapses under the turn and tool clusters; at 1180px and below it becomes two rows.
+	// Reserve room for Windows' wider Ctrl shortcuts as well as Mac glyphs. Below 1180px the tools get their own row.
 	@media (width <= 1600px) {
 		.ewc {
 			[data-ewc-act="prev"] .ewc-btn__lbl {
 				display: none;
 			}
+		}
+	}
+
+	@media (width <= 1500px) {
+		.ewc .ewc-bar__hist .ewc-kbd {
+			display: none;
 		}
 	}
 
@@ -1019,11 +1024,7 @@
 			.ewc-turnchip {
 				max-width: 200px;
 			}
-		}
-	}
 
-	@media (width <= 1240px) {
-		.ewc {
 			.ewc-prep-toggle .ewc-kbd,
 			.ewc-flow-view .ewc-kbd {
 				display: none;
@@ -1031,11 +1032,15 @@
 		}
 	}
 
+	@media (width <= 1240px) {
+		.ewc .ewc-turnchip {
+			max-width: 140px;
+		}
+	}
+
 	@media (width <= 1180px) {
 		// Too narrow for one row: the bar becomes two fixed rows (encounter + turn, then tools).
 		.ewc {
-			--ewc-rail-w: 320px;
-			--ewc-dock-w: 304px;
 			--ewc-bar-h: 86px;
 
 			.ewc-bar {
@@ -1085,7 +1090,8 @@
 			}
 
 			.ewc-prep-toggle .ewc-kbd,
-			.ewc-flow-view .ewc-kbd {
+			.ewc-flow-view .ewc-kbd,
+			.ewc-bar__hist .ewc-kbd {
 				display: inline-flex;
 			}
 		}
