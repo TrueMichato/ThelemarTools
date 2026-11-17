@@ -1,7 +1,7 @@
 // Encounter cockpit P3a (act): the dock Roll and Fx tabs, the custom-effect builder, the roll tray and the `/`
 // console. Scoped under `.ewc`, built only on the shell tokens (`--ewc-*`), so night mode comes for free.
-// The console, the roll tray and the statblock feed sit in the shell's dock-top region (mockup §6): they never cover
-// the stage or the statblock.
+// The roll tray and the statblock feed sit in the shell's dock-top region (mockup §6): they never cover the stage or
+// the statblock. The `/` console opens from its top-bar button and floats under the bar, between the rail and the dock.
 
 @layer vetools {
 	.ewc {
@@ -930,88 +930,78 @@
 		}
 
 		// ---------------- command console ----------------
+		// Top-bar entry point: `›_ Command /` (the label drops with the bar's other secondary labels).
+		.ewc-con__open {
+			gap: 6px;
+
+			&[aria-expanded="true"] {
+				border-color: var(--ewc-ind-line);
+				background: var(--ewc-ind-soft);
+				color: var(--ewc-ind-text);
+			}
+		}
+
+		.ewc-con__glyph {
+			font-family: var(--ewc-mono);
+			font-weight: 700;
+			letter-spacing: -0.02em;
+		}
+
+		// The console itself: a popover dropped from under the bar, over the stage, clear of the rail and the dock.
 		.ewc-con {
+			position: fixed;
+			z-index: 40;
+			top: calc(var(--ewc-top, 0px) + var(--ewc-bar-h) + 8px);
+			right: calc(var(--ewc-dock-w) + 16px);
+			left: calc(var(--ewc-rail-w) + 16px);
 			display: flex;
-			flex: none;
 			flex-direction: column;
 			min-width: 0;
+			max-height: calc(100vh - var(--ewc-top, 0px) - var(--ewc-bar-h) - 32px);
+			border: 1px solid var(--ewc-hair-2);
+			border-radius: var(--ewc-r-m);
+			background: var(--ewc-chrome);
+			box-shadow: var(--ewc-shadow-pop);
+
+			&[hidden] {
+				display: none;
+			}
 
 			&__bar {
 				display: flex;
+				flex: none;
 				align-items: center;
 				gap: 6px;
-				height: 38px;
-				margin: 10px 12px 0;
+				height: 40px;
+				margin: 8px 8px 0;
 				padding: 0 4px 0 10px;
-				border: 1px solid var(--ewc-hair-2);
+				border: 1px solid var(--ewc-ind-line);
 				border-radius: var(--ewc-r-s);
 				background: var(--ewc-base);
-				cursor: text;
-				transition: border-color var(--ewc-t-fast) var(--ewc-ease), box-shadow var(--ewc-t-fast) var(--ewc-ease);
-
-				&:hover {
-					border-color: var(--ewc-hair-3);
-				}
-			}
-
-			&.is-open &__bar,
-			&__bar:focus-within {
-				border-color: var(--ewc-ind-line);
 				box-shadow: 0 0 0 3px var(--ewc-ind-soft);
+				cursor: text;
 			}
 
 			&__prompt {
-				color: var(--ewc-ink-4);
+				color: var(--ewc-ind-text);
 				font-family: var(--ewc-mono);
 				font-weight: 700;
 			}
 
-			&.is-open &__prompt {
-				color: var(--ewc-ind-text);
-			}
-
+			// The popover only exists while open: the run hint and × replace the idle `/` hint.
 			&__key {
-				flex: none;
-				padding-right: 4px;
-			}
-
-			&__run,
-			&__x {
 				display: none;
 			}
 
-			&.is-open &__key {
-				display: none;
-			}
-
-			&.is-open &__run {
+			&__run {
 				display: inline-flex;
 				flex: none;
-			}
-
-			&.is-open &__x {
-				display: inline-flex;
-			}
-
-			&__idle {
-				margin: 5px 14px 0;
-				color: var(--ewc-ink-3);
-				font-size: var(--ewc-f-xs);
-				line-height: 1.45;
-
-				&[hidden] {
-					display: none;
-				}
 			}
 
 			&__panel {
-				max-height: min(46vh, 420px);
+				min-height: 0;
 				overflow-y: auto;
 				overscroll-behavior: contain;
-
-				&[hidden] {
-					display: none;
-				}
 			}
 
 			&__in {
@@ -1175,13 +1165,6 @@
 
 		}
 
-		// Row entry point: a compact `›_` next to the shell's Dmg / Heal / Cond quick actions.
-		.ewc-qa--con {
-			flex: 0 0 auto;
-			font-family: var(--ewc-mono);
-			font-weight: 700;
-		}
-
 		// Rows the console line currently resolves to (no layout change: an inset ring only).
 		.ewc-row--con {
 			box-shadow: inset 3px 0 0 var(--ewc-ind-strong), inset 0 0 0 1px var(--ewc-ind-line);
@@ -1260,6 +1243,26 @@
 
 		75% {
 			transform: translateX(4px);
+		}
+	}
+
+	@media (width <= 1600px) {
+		.ewc .ewc-con__lbl {
+			display: none;
+		}
+	}
+
+	// Where the bar tightens, the button keeps just its glyph; `/` stays in its tooltip and the Keys sheet.
+	@media (width <= 1340px) {
+		.ewc .ewc-con__open .ewc-kbd {
+			display: none;
+		}
+	}
+
+	@media (width <= 760px) {
+		.ewc .ewc-con {
+			right: 8px;
+			left: 8px;
 		}
 	}
 

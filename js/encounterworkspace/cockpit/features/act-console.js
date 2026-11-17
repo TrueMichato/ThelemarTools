@@ -1,10 +1,10 @@
 /**
- * P3a — the `/` command console, docked at the top of the dock (mockup §6): an always-visible command line with a `/`
- * hint. Type a command (`7 fire @gob`, `save dex 14 8d6 fire half`, `prone 2r`, `bless 1 min by @mage`), see what it
- * will do to whom before Enter, run it through the shell actions / `pCommit` (undoable, logged). While active, the
- * panel under the line shows example chips, the full grammar, the live preview or an inline error. ↑/↓ walk the
- * history, Esc clears then closes. Rail rows get a `›_` quick action that opens the console pre-targeted at that
- * creature.
+ * P3a — the `/` command console. A top-bar `›_ /` button (or `/`) drops a command line from under the bar, floating
+ * over the stage between the rail and the dock. Type a command (`7 fire @gob`, `save dex 14 8d6 fire half`,
+ * `prone 2r`, `bless 1 min by @mage`), see what it will do to whom before Enter, run it through the shell actions /
+ * `pCommit` (undoable, logged). The panel under the line shows example chips, the full grammar, the live preview or
+ * an inline error. ↑/↓ walk the history, Esc clears then closes. A rail row's ⋯ menu has "Console…", which opens the
+ * console pre-targeted at that creature.
  */
 
 import {endEncounterConcentration, getEncounterEffectPresets, applyEncounterEffect, removeEncounterEffect, startEncounterConcentration} from "../../encounterworkspace-fx.js";
@@ -28,9 +28,11 @@ import {
 import {getCockpitDurationText} from "./act-effect-model.js";
 import {pRollCockpitToTray} from "./act-roll.js";
 import {getKbd, getWhoText, toTitle} from "./act-shared.js";
+import {getRailRowMenu} from "./rail-menu.js";
 
 export function createCockpitConsole (api, {tray}) {
 	let isOpen = false;
+	let isOpenAtPointerDown = null;
 	let history = [];
 	let histIndex = null;
 	let draft = "";
@@ -68,10 +70,9 @@ export function createCockpitConsole (api, {tray}) {
 		evt.preventDefault();
 		input.focus();
 	});
-	const idle = h("p.ewc-con__idle", {"data-ewc-console-idle": ""}, "Press ", getKbd(["/"], api.isMac), " to type a command — or use the tools below.");
-	const panel = h("div.ewc-con__panel", {hidden: true, "data-ewc-console": ""}, help);
-	const root = h("section.ewc-con", {"aria-label": "Command console", "data-ewc-console-dock": ""}, bar, idle, panel);
-	api.getRegion("dockTop").prepend(root);
+	const panel = h("div.ewc-con__panel", {"data-ewc-console": ""}, help);
+	const root = h("section.ewc-con", {id: "ewc-console", hidden: true, "aria-label": "Command console", "data-ewc-console-pop": ""}, bar, panel);
+	api.getRegion("layer").append(root);
 
 	const getParseOpts = ctx => ({
 		state: ctx.state,
@@ -173,8 +174,44 @@ export function createCockpitConsole (api, {tray}) {
 
 	function syncOpen () {
 		root.classList.toggle("is-open", isOpen);
-		panel.hidden = !isOpen;
-		idle.hidden = isOpen;
+		root.hidden = !isOpen;
+		// The bar re-renders only on state changes; keep its toggle honest in between.
+		document.querySelectorAll("[data-ewc-console-open]").forEach(it => it.setAttribute("aria-expanded", `${isOpen}`));
+		if (isOpen) {
+			document.addEventListener("pointerdown", onOutside, true);
+			window.addEventListener("resize", place);
+			place();
+		} else {
+			document.removeEventListener("pointerdown", onOutside, true);
+			window.removeEventListener("resize", place);
+		}
+	}
+
+	// Pin the popover under the bar, between the rail and the dock, from their real boxes — the page around the
+	// cockpit pads it, so CSS offsets alone (kept as the fallback, and used as-is on narrow screens) can drift.
+	function place () {
+		const shell = root.closest(".ewc");
+		const [bar, rail, dock] = [".ewc-bar", ".ewc-rail", ".ewc-dock"].map(sel => shell?.querySelector(sel)?.getBoundingClientRect());
+		const isWide = window.matchMedia?.("(width > 760px)").matches ?? true;
+		if (!isWide || !bar?.height || !rail?.width || !dock?.width) {
+			root.style.removeProperty("top");
+			root.style.removeProperty("left");
+			root.style.removeProperty("right");
+			root.style.removeProperty("max-height");
+			return;
+		}
+		const top = Math.round(bar.bottom + 8);
+		root.style.top = `${top}px`;
+		root.style.left = `${Math.round(rail.right + 16)}px`;
+		root.style.right = `${Math.round(window.innerWidth - dock.left + 16)}px`;
+		root.style.maxHeight = `${Math.max(160, window.innerHeight - top - 16)}px`;
+	}
+
+	// A click elsewhere puts an empty console away; a half-typed command (or a pending review) stays until Esc.
+	function onOutside (evt) {
+		if (root.contains(evt.target) || evt.target.closest?.("[data-ewc-console-open]")) return;
+		if (input.value.trim() || review || pActive) return;
+		hide({isRestoreFocus: false});
 	}
 
 	function open ({text = null} = {}) {
@@ -228,8 +265,6 @@ export function createCockpitConsole (api, {tray}) {
 		draw();
 	}
 
-	// Clicking or tabbing into the always-visible line activates the console.
-	input.addEventListener("focus", () => { if (!isOpen) open(); });
 	input.addEventListener("input", () => {
 		histIndex = null;
 		status = null;
@@ -449,6 +484,35 @@ export function createCockpitConsole (api, {tray}) {
 		run: () => { open(); },
 	});
 
+	api.addBarItem(ctx => h("button.ewc-btn.ewc-btn--ghost.ewc-con__open", {
+		type: "button",
+		title: "Command console (/)",
+		"aria-label": "Command console",
+		"aria-controls": "ewc-console",
+		"aria-expanded": `${isOpen}`,
+		"aria-keyshortcuts": "/",
+		"data-ewc-fk": "console-open",
+		"data-ewc-console-open": "",
+		// Snapshot before the click: pressing the button blurs the input, and the focusout auto-hide would otherwise
+		// close an empty console just in time for the click to reopen it.
+		onpointerdown: () => { isOpenAtPointerDown = isOpen; },
+		// Open → put away an empty console; with a half-typed command, just return to it.
+		onclick: () => {
+			const wasOpen = isOpenAtPointerDown ?? isOpen;
+			isOpenAtPointerDown = null;
+			if (!wasOpen) open();
+			else if (isOpen && (input.value.trim() || review)) input.focus();
+			else hide();
+		},
+	}, h("span.ewc-con__glyph", {"aria-hidden": "true"}, "›_"), h("span.ewc-btn__lbl.ewc-con__lbl", null, "Command"), getKbd(["/"], ctx.isMac ?? api.isMac)));
+
+	getRailRowMenu(api).addItem({
+		id: "console",
+		label: "Console…",
+		order: 5,
+		run: (instance, ctx) => open({text: `${getCockpitConsoleHandle(ctx.labels.get(instance.id) || instance.id)} `}),
+	});
+
 	api.addRailRowDecorator((row, instance, ctx) => {
 		if (previewIds.includes(instance.id)) row.classList.add("ewc-row--con");
 		const badge = getCockpitConsoleRowBadge(previewTexts.get(instance.id));
@@ -459,20 +523,6 @@ export function createCockpitConsole (api, {tray}) {
 				"aria-label": `Console preview for ${ctx.labels.get(instance.id) || instance.id}: ${badge.title}`,
 			}, badge.text));
 		}
-		const qa = row.querySelector(".ewc-row__qa");
-		if (!qa) return;
-		const label = ctx.labels.get(instance.id) || instance.id;
-		qa.append(h("button.ewc-qa.ewc-qa--con", {
-			type: "button",
-			title: `Type a command for ${label} (opens the console at ${getCockpitConsoleHandle(label)})`,
-			"aria-label": `Command for ${label}`,
-			"data-ewc-fk": `qa-con-${instance.id}`,
-			"data-ewc-qa": "console",
-			onclick: evt => {
-				evt.stopPropagation();
-				open({text: `${getCockpitConsoleHandle(label)} `});
-			},
-		}, "›_"));
 	});
 
 	api.onRender(() => { if (isOpen && !review && document.activeElement !== input) draw(); });

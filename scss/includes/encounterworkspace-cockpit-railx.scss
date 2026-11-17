@@ -1,10 +1,10 @@
 // Rail-row and battlefield restorations: the row "⋯" menu, the caster ↗ link, the blinded badge, the console's
-// per-row preview, the lair-actions row, the rail BATTLEFIELD section with its note, the "+ Add creature" footer,
-// the statblock sight line and the Habitat traits catalogue.
+// per-row preview, the lair-actions row, the stage BATTLEFIELD strip with its note, the rail head's "+ Add", the
+// statblock sight line and the Habitat traits catalogue.
 @layer vetools {
 	.ewc {
 		// ---------------- short viewports: never clip the last row ----------------
-		// The head, legend, chips and battlefield section can leave the list shorter than one row; keep room for two
+		// The head, legend and chips can leave the list shorter than one row; keep room for two
 		// and let the whole rail scroll instead, so the last row can always be brought fully into view.
 		.ewc-rail {
 			overflow: hidden auto;
@@ -277,19 +277,26 @@
 			}
 		}
 
-		// ---------------- rail BATTLEFIELD section ----------------
+		// ---------------- stage BATTLEFIELD strip ----------------
+		// One quiet line above the viewed statblock, aligned with its head: label, chips, "+ Battlefield", the note.
 		.ewc-rbf {
-			display: flex;
 			flex: none;
-			flex-direction: column;
-			gap: 4px;
-			padding: 0 12px 8px;
+			width: 100%;
+			max-width: 800px;
+			margin: 0 auto;
+			padding: 10px 20px 0;
+
+			&[hidden] {
+				display: none;
+			}
 
 			&__row {
 				display: flex;
 				flex-wrap: wrap;
 				align-items: center;
-				gap: 4px;
+				gap: 4px 6px;
+				padding-bottom: 8px;
+				border-bottom: 1px solid var(--ewc-hair);
 			}
 
 			&__l {
@@ -302,11 +309,12 @@
 
 				&--note {
 					flex: none;
-					padding-top: 4px;
+					margin-left: 6px;
 				}
 			}
 
 			&__add {
+				flex: none;
 				min-height: 24px;
 				padding: 0 9px;
 				border: 1px dashed var(--ewc-hair-3);
@@ -323,11 +331,23 @@
 				}
 			}
 
+			// The note shares the line and takes what is left; editing gives it a line of its own.
 			&__note {
 				display: flex;
-				flex-wrap: wrap;
-				align-items: flex-start;
-				gap: 2px 6px;
+				flex: 1 1 160px;
+				align-items: center;
+				gap: 2px 4px;
+				min-width: 0;
+
+				&.is-editing {
+					flex-wrap: wrap;
+					flex-basis: 100%;
+					align-items: flex-start;
+
+					.ewc-rbf__l--note {
+						margin: 4px 0 0;
+					}
+				}
 
 				&.is-editing .ewc-rbf__hint {
 					flex-basis: 100%;
@@ -339,7 +359,7 @@
 			&__notetext {
 				flex: 1 1 0;
 				min-width: 0;
-				padding: 3px 8px;
+				padding: 2px 6px;
 				border: 1px dashed transparent;
 				border-radius: var(--ewc-r-s);
 				background: none;
@@ -351,7 +371,7 @@
 				overflow-wrap: anywhere;
 				display: -webkit-box;
 				overflow: hidden;
-				-webkit-line-clamp: 3;
+				-webkit-line-clamp: 2;
 				-webkit-box-orient: vertical;
 
 				&:hover,
@@ -396,32 +416,19 @@
 			}
 		}
 
-		// ---------------- rail footer: + Add creature ----------------
-		.ewc-rail__foot {
-			display: flex;
-			flex: none;
-			justify-content: flex-end;
-			padding: 6px 10px;
-			border-top: 1px solid var(--ewc-hair);
-		}
-
+		// ---------------- rail head: + Add (next to Group…) ----------------
+		// At full rail width the head stays one line, so the ⇧A chip yields; the shortcut
+		// stays in the tooltip and the Keys sheet. Narrower rails wrap — see the ≤1180 block.
 		.ewc-rail__add {
-			display: inline-flex;
-			align-items: center;
-			gap: 6px;
-			min-height: 26px;
-			padding: 0 10px;
-			border: 1px solid var(--ewc-hair-2);
-			border-radius: var(--ewc-r-s);
-			background: var(--ewc-surface);
-			color: var(--ewc-ink-2);
-			font-size: var(--ewc-f-xs);
-			font-weight: 600;
+			gap: 5px;
+			margin-left: auto;
 
-			&:hover,
-			&:focus-visible {
-				border-color: var(--ewc-ind-strong);
-				color: var(--ewc-ind-text);
+			.ewc-kbd {
+				display: none;
+			}
+
+			+ .ewc-grpbtn {
+				margin-left: 0;
 			}
 		}
 
@@ -453,10 +460,35 @@
 		}
 	}
 
+	// Narrower rails can't hold the view toggle and both head buttons on one line, so
+	// + Add and Group… drop together onto a second line (an invisible line break).
+	@media (width <= 1180px) {
+		.ewc .ewc-rail__head {
+			row-gap: 3px;
+
+			&::after {
+				flex-basis: 100%;
+				order: 1;
+				content: "";
+			}
+
+			> .ewc-btn {
+				order: 2;
+			}
+		}
+
+		.ewc .ewc-rail__add .ewc-kbd {
+			display: inline-flex;
+		}
+	}
+
 	@media (width <= 1000px) {
 		.ewc .ewc-lairrow {
 			grid-template-columns: 18px 32px minmax(0, 1fr) auto;
 			gap: 0 4px;
+		}
+		.ewc .ewc-rbf {
+			padding: 8px 14px 0;
 		}
 	}
 }

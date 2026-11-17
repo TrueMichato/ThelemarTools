@@ -7,7 +7,7 @@ import {expect, test, type Page} from "@playwright/test";
  * where the real site proves the same behaviour, to a test in this file, or to N/A with the reason. Abbreviations:
  *   SHELL  encounter-cockpit-shell.spec.ts › "drives a real saved encounter end-to-end with zero console errors"
  *   ACT    encounter-cockpit-act.spec.ts   › "roll tab, tray, fx, builder, console and row entry point on real data"
- *   DOCK   encounter-cockpit-act.spec.ts   › "dock: docked console, tray in the dock column, duration stepper, skill chips, roll-time prompt"
+ *   DOCK   encounter-cockpit-act.spec.ts   › "dock: top-bar console, tray in the dock column, duration stepper, skill chips, roll-time prompt"
  *   SHOTS  encounter-cockpit-act.spec.ts   › "screenshots: day and night, wide and narrow"
  *   PREP   encounter-cockpit-prep.spec.ts  › "Q toggles prep; creature, effects, battlefield and items tools …"
  *   ADD    encounter-cockpit-prep.spec.ts  › "Shift+A adds real bestiary creatures into their group, and party members"
@@ -42,7 +42,7 @@ import {expect, test, type Page} from "@playwright/test";
  * | 317 §5 Groups: Roll once → equal init + adjacent                        | P1                                                                        |
  * | 331 §5 Stack group → one row ×N                                         | GROUPS (stacked row, summed HP, minis, picker, expand / collapse)         |
  * | 356 §5 group popover "Same initiative" + auto-group on add              | FLOW (group-setinit) + ADD (adds join their group) + GROUPS (anchored)    |
- * | 370 §6 rail quick actions never overlap name/HP/pills                   | ACT (hover ›_ keeps row height) + SHOTS + P1 (no overflow) + RAIL R1 (quick actions clear of the effect tally) |
+ * | 370 §6 rail quick actions never overlap name/HP/pills                   | ACT (hover ⋯ keeps row height) + SHOTS + P1 (no overflow) + RAIL R1 (quick actions clear of the effect tally) |
  * | 389 §8 statblock centred, max-width ≤ ~760                              | SHOTS (visual). Exact mockup geometry: N/A                                |
  * | 398 §9 death-save pips; 3 fails → Dead; undo; 3 successes → Stable      | DS                                                                        |
  * | 424 §10 key labels ⇧ ?, Ctrl Z / ⌘Z                                     | SHELL (Shift+? sheet) + FLOW (Esc key hint on chip) + TOP (Space on the turn chip, ⌘Z / Ctrl Z on undo · redo, ⇧? on Keys) |

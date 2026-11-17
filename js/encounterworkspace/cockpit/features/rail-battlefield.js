@@ -1,12 +1,12 @@
 /**
- * The rail's battlefield extras, built only on the cockpit API:
- * - a BATTLEFIELD section above the rows: one chip per active entry, an always-visible "+ Battlefield" and the
- *   encounter note;
+ * The battlefield extras, built only on the cockpit API:
+ * - a BATTLEFIELD strip at the top of the stage, above the viewed statblock: one chip per active entry, an
+ *   always-visible "+ Battlefield" and the encounter note;
  * - a "◐ Blinded" badge on rows (and a line on the statblock) when darkness or fog leaves a creature unable to see;
  * - a "Lair actions · init 20 · loses ties" row in initiative, with a reminder when the turn passes count 20.
  */
 
-import {h} from "../dom.js";
+import {h, replaceKeepingFocus} from "../dom.js";
 import {EncounterWorkspaceState} from "../../encounterworkspace-state.js";
 import {getEncounterBattlefieldTurnRows, getEncounterSight} from "../../encounterworkspace-battlefield.js";
 import {getPrepBattlefieldChips, getPrepBattlefieldHoverEntry} from "./prep-area.js";
@@ -98,20 +98,27 @@ export function installCockpitRailBattlefield (api, {onEdit, onAdd}) {
 			}, note || "Add a note…"));
 	}
 
-	api.addRailTop(ctx => h("section.ewc-rbf", {"aria-label": "Battlefield", "data-ewc-rbf": "section"},
-		h("div.ewc-rbf__row", null,
-			h("span.ewc-rbf__l", {"aria-hidden": "true"}, "Battlefield"),
-			getPrepBattlefieldChips(api, ctx, {onEdit}),
-			h("button.ewc-rbf__add", {
-				type: "button",
-				"data-ewc-fk": "rbf-add",
-				"data-ewc-rbf": "add",
-				title: "Add light, cover, terrain, weather, a hazard or lair actions (opens prep mode → Battlefield)",
-				onclick: () => onAdd(),
-			}, "+ Battlefield"),
-		),
-		renderNote(ctx),
-	));
+	// Persistent, so a note being typed keeps its focus and caret across renders (replaceKeepingFocus).
+	const section = h("section.ewc-rbf", {"aria-label": "Battlefield", "data-ewc-rbf": "section", hidden: true});
+	api.getRegion("stageTop").append(section);
+	api.onRender(ctx => {
+		section.hidden = !ctx.state.instances.length;
+		if (section.hidden) return section.replaceChildren();
+		replaceKeepingFocus(section, [
+			h("div.ewc-rbf__row", null,
+				h("span.ewc-rbf__l", {"aria-hidden": "true"}, "Battlefield"),
+				getPrepBattlefieldChips(api, ctx, {onEdit}),
+				h("button.ewc-rbf__add", {
+					type: "button",
+					"data-ewc-fk": "rbf-add",
+					"data-ewc-rbf": "add",
+					title: "Add light, cover, terrain, weather, a hazard or lair actions (opens prep mode → Battlefield)",
+					onclick: () => onAdd(),
+				}, "+ Battlefield"),
+				renderNote(ctx),
+			),
+		]);
+	});
 
 	/* ---------------- Sight: row badge + statblock line ---------------- */
 

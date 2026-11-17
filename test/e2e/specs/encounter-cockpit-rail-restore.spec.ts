@@ -3,12 +3,12 @@ import {expect, test, type Page} from "@playwright/test";
 /*
  * Restored A6 mockup features on the cockpit's rail rows and battlefield (encounterworkspace.html?ew=2), on real
  * Monster Manual data plus one party member:
- *   D9  row quick actions Dmg · Heal · Save · Cond · Fx · ⋯     D10 row ⋯ menu (concentration, move, assess, edit)
+ *   D9  row quick actions HP · Save · Cond · Fx · ⋯             D10 row ⋯ menu (console, concentration, move, …)
  *   D11 party class line                                        D12 effect pill caster ↗
  *   D13 ◐ Blinded from darkness (row + statblock)               D14 console live-preview badge on targeted rows
  *   D15 compact one-line death saves                            D17 Lair actions row at initiative 20 (loses ties)
- *   D18 "+ Add creature ⇧A" rail footer                         D19 last row not covered by the order hint
- *   D28 rail BATTLEFIELD section (+ Battlefield, note)           D29 habitat-trait catalogue by environment, rule hover
+ *   D18 "+ Add ⇧A" in the rail head, no rail footer             D19 last row not covered by the order hint
+ *   D28 BATTLEFIELD strip above the statblock (+ Battlefield, note)  D29 habitat traits by environment, rule hover
  * Fails on any console error.
  */
 
@@ -102,17 +102,32 @@ const trackConsoleErrors = (page: Page) => {
 };
 
 test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", () => {
-	test("R1 rows: quick actions, ⋯ menu, class line, caster ↗, compact death saves, add footer, last row clear", async ({page}) => {
+	test("R1 rows: quick actions, ⋯ menu, class line, caster ↗, compact death saves, rail-head add, last row clear", async ({page}) => {
 		const errors = trackConsoleErrors(page);
 		await seed(page);
 		await openCockpit(page);
 
-		// D9 — the row's quick actions, in the mockup's order, on hover/view.
+		// D9 — the row's quick actions on hover/view: one HP action (damage and heal live in its tab), no ›_ — the
+		// console moved into ⋯.
 		await view(page, "owlbear");
 		const qa = row(page, "owlbear").locator(".ewc-row__qa .ewc-qa");
 		await row(page, "owlbear").hover();
-		await expect(qa.filter({hasNotText: /^(›_|⋯)$/})).toHaveText(["Dmg", "Heal", "Save", "Cond", "Fx"]);
+		await expect(qa.filter({hasNotText: /^⋯$/})).toHaveText(["HP", "Save", "Cond", "Fx"]);
 		await expect(row(page, "owlbear").locator('[data-ewc-qa="more"]')).toBeVisible();
+		await expect(row(page, "owlbear").locator('[data-ewc-qa="damage"], [data-ewc-qa="heal"], [data-ewc-qa="console"]')).toHaveCount(0);
+		// The same set persists on the viewed row once the pointer leaves.
+		await page.mouse.move(640, 4);
+		await expect(qa.filter({hasNotText: /^⋯$/})).toHaveText(["HP", "Save", "Cond", "Fx"]);
+		// HP opens the dock's HP tab on that creature, with both Damage and Heal at hand.
+		await row(page, "gob-1").hover();
+		await row(page, "gob-1").locator('[data-ewc-qa="hp"]').click();
+		await expect(row(page, "gob-1")).toHaveClass(/is-viewed/);
+		await expect(fk(page, "tab-hp")).toHaveAttribute("aria-selected", "true");
+		await expect(page.locator(".ewc-dock__target b")).toHaveText("Goblin 1");
+		await expect(fk(page, "hp-damage")).toBeVisible();
+		await expect(fk(page, "hp-heal")).toBeVisible();
+		await view(page, "owlbear");
+		await row(page, "owlbear").hover();
 		// …and never sit on top of the effect tally (Goblin 2 carries Bless).
 		await row(page, "gob-2").hover();
 		const tallyBox = (await fk(page, "tally-gob-2").boundingBox())!;
@@ -121,12 +136,12 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 			expect(isOverlap, `quick action at ${box.left},${box.top} covers the tally`).toBe(false);
 		}
 
-		// D10 — ⋯ opens a menu: Mark concentration / Move before / Assess CR / Edit statblock (I).
+		// D10 — ⋯ opens a menu: Console… / Mark concentration / Move before / Assess CR / Edit statblock (I).
 		await row(page, "owlbear").locator('[data-ewc-qa="more"]').click();
 		const menu = page.locator(".ewc-rowmenu");
 		await expect(menu).toBeVisible();
 		await expect(row(page, "owlbear")).toHaveClass(/is-menu-open/);
-		await expect(menu.locator(".ewc-rowmenu__i")).toHaveText([/Mark concentration/, /Move before/, /Assess CR/, /Edit statblock/]);
+		await expect(menu.locator(".ewc-rowmenu__i")).toHaveText([/Console…/, /Mark concentration/, /Move before/, /Assess CR/, /Edit statblock/]);
 		await menu.locator('[data-ewc-rowmenu="conc"]').click();
 		await menu.locator('[data-ewc-rowmenu="conc-input"]').fill("Fly");
 		await menu.locator('[data-ewc-rowmenu="conc-input"]').press("Enter");
@@ -180,9 +195,20 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 		await ds.locator('[data-ewc-flow="ds-roll"]').click();
 		await expect(toasts(page)).toContainText("Brenna death save:");
 
-		// D18 — the rail footer adds a creature; ⇧A does the same.
+		// D28 — with no battlefield rules the stage strip is a single quiet line (label, "+ Battlefield", note) above the statblock.
+		const emptyStrip = page.locator(".ewc-stage__top [data-ewc-rbf='section']");
+		await expect(emptyStrip).toBeVisible();
+		expect((await emptyStrip.boundingBox())!.height, "empty battlefield strip is one line").toBeLessThanOrEqual(48);
+
+		// D18 — "+ Add" sits in the rail head beside Group…, on the same line; there is no rail footer. ⇧A does the same.
 		const add = page.locator('[data-ewc-act="rail-add"]');
-		await expect(add).toContainText("+ Add creature");
+		await expect(add).toContainText("+ Add");
+		await expect(page.locator(".ewc-rail__head [data-ewc-act='rail-add']")).toHaveCount(1);
+		await expect(page.locator(".ewc-rail__foot")).toHaveCount(0);
+		const addBox = (await add.boundingBox())!;
+		const grpBox = (await page.locator(".ewc-rail__head .ewc-grpbtn").boundingBox())!;
+		expect(Math.abs(addBox.y - grpBox.y)).toBeLessThanOrEqual(2);
+		expect(addBox.x + addBox.width).toBeLessThanOrEqual(grpBox.x);
 		await add.click();
 		await expect(page.locator("dialog.ewc-add")).toBeVisible();
 		await page.keyboard.press("Escape");
@@ -192,7 +218,8 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 		await expect(page.locator("dialog.ewc-add")).toBeVisible();
 		await page.keyboard.press("Escape");
 
-		// D19 — scrolled to the end, nothing (order hint, footer) sits on top of the last row.
+		// D19 — scrolled to the end, nothing (order hint) sits on top of the last row; the head never squeezes the list
+		// below one row.
 		for (const size of [{width: 1280, height: 800}, {width: 900, height: 560}]) {
 			await page.setViewportSize(size);
 			const last = page.locator(".ewc-row").last();
@@ -200,6 +227,8 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 			await last.scrollIntoViewIfNeeded();
 			// At the short size the list must actually scroll, or "the end" says nothing.
 			if (size.height < 600) expect(await page.locator(".ewc-rail__list").evaluate(ele => ele.scrollHeight > ele.clientHeight)).toBe(true);
+			const listH = (await page.locator(".ewc-rail__list").boundingBox())!.height;
+			expect(listH, `rail list shorter than a row at ${size.width}×${size.height}`).toBeGreaterThanOrEqual((await last.boundingBox())!.height);
 			const isClear = await last.evaluate(ele => {
 				const r = ele.getBoundingClientRect();
 				return [0.25, 0.5, 0.75].every(fx => document.elementFromPoint(r.left + r.width * fx, r.bottom - 3)?.closest(".ewc-row") === ele);
@@ -210,14 +239,20 @@ test.describe("Encounter cockpit restored rail rows and battlefield (?ew=2)", ()
 		expect(errors).toEqual([]);
 	});
 
-	test("R2 battlefield: rail section, note, darkness ◐ Blinded, lair row at 20 losing ties, console preview badge", async ({page}) => {
+	test("R2 battlefield: stage strip, note, darkness ◐ Blinded, lair row at 20 losing ties, console preview badge", async ({page}) => {
 		const errors = trackConsoleErrors(page);
 		await seed(page, {lair: true, darkness: true});
 		await openCockpit(page);
 
-		// D28 — the BATTLEFIELD section is always there, with chips, "+ Battlefield" and a note.
+		// D28 — the BATTLEFIELD strip sits in the stage column above the statblock (not in the rail), with chips,
+		// "+ Battlefield" and a note.
 		const section = rbf(page, "section");
 		await expect(section).toBeVisible();
+		await expect(page.locator(".ewc-stage__top [data-ewc-rbf='section']")).toHaveCount(1);
+		await expect(page.locator(".ewc-rail [data-ewc-rbf]")).toHaveCount(0);
+		const sectionBox = (await section.boundingBox())!;
+		expect(sectionBox.y + sectionBox.height).toBeLessThanOrEqual((await page.locator(".ewc-stage__head").boundingBox())!.y + 1);
+		expect(sectionBox.height, "two rules and a note wrap to at most two compact lines at 1280 wide").toBeLessThanOrEqual(80);
 		await expect(section.locator(".ewc-prep-strip__chip[data-ewc-bf]")).toHaveCount(2);
 		await expect(section.locator('.ewc-prep-strip__chip.is-lair[data-ewc-bf="bf-lair"]')).toContainText("init 20");
 		await rbf(page, "add").click();

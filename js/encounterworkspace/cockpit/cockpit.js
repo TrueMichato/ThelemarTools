@@ -92,14 +92,13 @@ import {
 const TOAST_MS = 7000;
 const RULESET_LABELS = {phb: "PHB 2014", xphb: "PHB 2024", tgtt: "Thelemar"};
 const QUICK_ACTIONS = [
-	{id: "damage", label: "Dmg", title: "Damage this creature"},
-	{id: "heal", label: "Heal", title: "Heal this creature"},
+	{id: "hp", label: "HP", title: "Damage or heal this creature"},
 	{id: "save", label: "Save", title: "Roll a saving throw for this creature"},
 	{id: "cond", label: "Cond", title: "Conditions on this creature"},
 	{id: "fx", label: "Fx", title: "Add an effect to this creature"},
 ];
-/** Quick action → dock tab. The Roll tab opens on a saving throw by default. */
-const QUICK_ACTION_TABS = {damage: "hp", heal: "hp", save: "roll", cond: "cond", fx: "fx"};
+/** Quick action → dock tab. HP opens the dock's HP tab (Enter = Damage, Shift+Enter = Heal); Roll opens on a saving throw. */
+const QUICK_ACTION_TABS = {hp: "hp", save: "roll", cond: "cond", fx: "fx"};
 const RESOURCE_REDUCERS = {
 	slots: "withSpellSlots",
 	removeSlots: "withoutSpellSlots",
@@ -371,8 +370,9 @@ export class EncounterCockpit {
 
 			/* ---- Regions: persistent elements the shell never re-renders. Features own their contents. ---- */
 			/**
-			 * "stageTop" (strips above the viewed creature), "stageBottom" (drawers under it), "dockTop" (the console, roll
-			 * tray and feed — persistent, above the dock tabs; never re-rendered by the dock), "layer" (overlays, dialogs).
+			 * "stageTop" (strips above the viewed creature: battlefield, concentration…), "stageBottom" (drawers under it),
+			 * "dockTop" (the roll tray and feed — persistent, above the dock tabs; never re-rendered by the dock), "layer"
+			 * (overlays, dialogs and the command console popover).
 			 */
 			getRegion: name => ({stageTop: this._ele.stageTop, stageBottom: this._ele.stageBottom, dockTop: this._ele.dockTop, layer: this._ele.layer})[name] || null,
 			/** fn(ctx) after every render — keep persistent regions in sync. Returns an unsubscribe. */

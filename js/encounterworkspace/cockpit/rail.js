@@ -440,7 +440,7 @@ export class EncounterCockpitRail {
 		return row;
 	}
 
-	/** "Damage — which Goblins?": all of them (selected together) or one member. */
+	/** "HP — which Goblins?": all of them (selected together) or one member. */
 	_openStackPick (name, action, anchor, {isFocus}) {
 		this.closePopover();
 		const ctx = this._ctx;
@@ -449,7 +449,7 @@ export class EncounterCockpitRail {
 		const members = ctx.orderIds.map(id => byId.get(id)).filter(it => it && it.customGroup === name && !it.defeated);
 		if (!members.length) return;
 		const ids = members.map(it => it.id);
-		const verb = {damage: "Damage", heal: "Heal", cond: "Conditions"}[action.id] || action.label;
+		const verb = {hp: "HP", save: "Save", cond: "Conditions", fx: "Effect"}[action.id] || action.label;
 		const title = `${verb} — which ${name}?`;
 		const pick = (id, text, extra, isPrimary = false) => h(`button.ewc-btn.ewc-btn--sm${isPrimary ? ".ewc-btn--primary" : ""}`, {
 			type: "button",

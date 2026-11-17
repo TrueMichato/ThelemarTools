@@ -1,6 +1,6 @@
 /**
  * The rail row's "⋯" menu: one shared popover per cockpit that features fill with items
- * (Mark concentration… · Move before… · Assess CR · Edit statblock). Items either act at once (`run`) or swap the
+ * (Console… · Mark concentration… · Move before… · Assess CR · Edit statblock). Items either act at once (`run`) or swap the
  * menu for a small panel (`panel`) — a spell-name field, a list of places in turn order.
  */
 import {h, kbd} from "../dom.js";
@@ -124,7 +124,7 @@ export function getRailRowMenu (api) {
 			"aria-haspopup": "menu",
 			"aria-expanded": `${isOpen}`,
 			"aria-label": `More actions for ${label}`,
-			title: `More: concentration, move in turn order, CR, edit statblock — ${label}`,
+			title: `More: console, concentration, move in turn order, CR, edit statblock — ${label}`,
 			onclick: evt => {
 				evt.stopPropagation();
 				if (S.openId === instance.id) return close();

@@ -280,7 +280,7 @@ test.describe("Encounter cockpit group view (?ew=2)", () => {
 
 		// D23 stack picker: Esc closes back to its button; one member; then all of them.
 		await stack.hover();
-		const qaDamage = stack.locator('[data-ewc-stackqa="damage"]');
+		const qaDamage = stack.locator('[data-ewc-stackqa="hp"]');
 		await qaDamage.click();
 		const picker = stack.locator("[data-ewc-stackpick]");
 		await expect(picker).toBeVisible();
@@ -369,7 +369,7 @@ test.describe("Encounter cockpit group view (?ew=2)", () => {
 				const stack = stackRow(page, "Goblins");
 				await stack.hover();
 				await page.screenshot({path: `${SHOT_DIR}/groups-stack-${theme}-${width}.png`});
-				await stack.locator('[data-ewc-stackqa="damage"]').click();
+				await stack.locator('[data-ewc-stackqa="hp"]').click();
 				await expect(stack.locator("[data-ewc-stackpick]"), "the picker flips up rather than being cut off by the rail").toBeInViewport({ratio: 0.98});
 				await page.screenshot({path: `${SHOT_DIR}/groups-stackpick-${theme}-${width}.png`});
 				await page.keyboard.press("Escape");

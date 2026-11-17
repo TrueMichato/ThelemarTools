@@ -1,7 +1,7 @@
 /**
  * P3b — prep and the battlefield: prep mode (Q) with Creature · Effects · Battlefield · Items · Add tabs, the Add
  * dialog (⇧A), the full statblock editor (I), the rail's BATTLEFIELD section (rail-battlefield.js), the rail-row ⋯
- * menu's Assess CR / Edit statblock and the rail's "+ Add creature" footer.
+ * menu's Assess CR / Edit statblock and the rail head's "+ Add" button.
  * Built only on the cockpit API: a bar toggle, a drawer in `stageBottom`, rail top/foot slots, a dialog in `layer`.
  */
 
@@ -56,7 +56,7 @@ export function installCockpitPrepFeatures (api) {
 		setOpen(true, {tab});
 	});
 
-	/* ---- Rail: BATTLEFIELD section, row ⋯ menu items, "+ Add creature" footer ---- */
+	/* ---- Stage BATTLEFIELD strip, rail row ⋯ menu items, the rail head's "+ Add" ---- */
 	installCockpitRailBattlefield(api, {
 		onEdit: id => {
 			setOpen(true, {tab: "area", isFocus: false, focusId: id});
@@ -93,13 +93,14 @@ export function installCockpitPrepFeatures (api) {
 		},
 	});
 
-	api.addRailFoot(() => h("div.ewc-rail__foot", null, h("button.ewc-rail__add", {
+	api.addRailHead(() => h("button.ewc-btn.ewc-btn--sm.ewc-btn--ghost.ewc-rail__add", {
 		type: "button",
 		"aria-keyshortcuts": "Shift+A",
+		"aria-label": "Add a creature",
 		dataset: {ewcAct: "rail-add", ewcFk: "rail-add"},
 		title: "Add a creature or party member to the fight (⇧A)",
 		onclick: () => openAdd(null),
-	}, "+ Add creature", keyText(["Shift", "A"]))));
+	}, "+ Add", kbd([getCockpitKeyLabels(["Shift", "A"], {isMac: api.isMac}).join("")])));
 
 	let ctKey = null;
 	let ctToken = 0;

@@ -26,7 +26,7 @@ export const COCKPIT_CONSOLE_CHEATSHEET = Object.freeze([
 	{group: "Targets", items: ["@gob", "@goblin2", "@g1", "@sel", "@all", "@foes", "@turn"]},
 ]);
 
-/** The few example chips the docked console shows while it's active (mockup §6); the full grammar is one click away. */
+/** The few example chips the console shows while it's open (mockup §6); the full grammar is one click away. */
 export const COCKPIT_CONSOLE_EXAMPLES = Object.freeze(["7 fire", "heal 5", "save dex 14 8d6 fire half", "prone 2r", "bless", "@gob", "@sel"]);
 
 const toTitle = text => `${text ?? ""}`.replace(/\b\w/g, it => it.toUpperCase());

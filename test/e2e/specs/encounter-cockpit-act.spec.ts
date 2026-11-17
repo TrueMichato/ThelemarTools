@@ -3,7 +3,8 @@ import {expect, test, type Page} from "@playwright/test";
 /*
  * Lantern Cockpit "Act" features (encounterworkspace.html?ew=2) on real Monster Manual data:
  * the Roll tab + roll tray, the Fx tab (presets, cover, concentration, hand-typed durations), the custom
- * effect builder, the `/` command console and the rail's `›_` row entry point. Fails on any console error.
+ * effect builder, the `/` command console (a top-bar button) and the row ⋯ → Console… entry point. Fails on any
+ * console error.
  */
 
 const SHOT_DIR = process.env.EWC_ACT_SHOT_DIR || "test-results/encounter-cockpit-act";
@@ -222,14 +223,17 @@ test.describe("Encounter cockpit Act features (?ew=2)", () => {
 		await page.keyboard.press("ControlOrMeta+z");
 		await expect(row(page, "mage").locator("[data-ewc-tally]")).toHaveCount(0);
 
-		// Row hover ›_ opens the console pre-targeted at that creature without moving the row.
+		// Row ⋯ → Console… opens the console pre-targeted at that creature; hovering never moves the row, and
+		// there is no separate ›_ quick action any more.
 		const mageRow = row(page, "mage");
 		const before = await mageRow.boundingBox();
 		await mageRow.hover();
-		const qa = mageRow.locator('[data-ewc-qa="console"]');
-		await expect(qa).toBeVisible();
+		const more = mageRow.locator('[data-ewc-qa="more"]');
+		await expect(more).toBeVisible();
+		await expect(mageRow.locator('[data-ewc-qa="console"]')).toHaveCount(0);
 		expect((await mageRow.boundingBox())!.height).toBe(before!.height);
-		await qa.click();
+		await more.click();
+		await page.locator('.ewc-rowmenu [data-ewc-rowmenu="console"]').click();
 		await expect(con).toBeVisible();
 		await expect(input).toHaveValue("@mage ");
 		await expect(input).toBeFocused();
@@ -241,26 +245,44 @@ test.describe("Encounter cockpit Act features (?ew=2)", () => {
 		expect(errors).toEqual([]);
 	});
 
-	test("dock: docked console, tray in the dock column, duration stepper, skill chips, roll-time prompt", async ({page}) => {
+	test("dock: top-bar console, tray in the dock column, duration stepper, skill chips, roll-time prompt", async ({page}) => {
 		const errors = trackConsoleErrors(page);
 		await page.setViewportSize({width: 1280, height: 800});
 		await seed(page);
 		await openCockpit(page);
 
-		// D44: the console sits at the top of the dock, idle until `/`, with example chips once open.
+		// The console is a top-bar button (›_ /), not part of the dock: closed until clicked or `/`, it opens as a
+		// popover under the bar, over the stage only — never covering the rail or the dock.
 		const dock = page.locator(".ewc-dock");
-		const conDock = dock.locator(".ewc-dock__top [data-ewc-console-dock]");
-		await expect(conDock).toBeVisible();
-		await expect(conDock.locator("[data-ewc-console-idle]")).toContainText("Press");
-		await expect(conDock.locator("[data-ewc-console-idle] kbd")).toContainText("/");
-		await expect(page.locator("[data-ewc-console]")).toBeHidden();
-		const tabsBox = await dock.locator(".ewc-dock__tab").first().boundingBox();
-		expect((await conDock.boundingBox())!.y).toBeLessThan(tabsBox!.y);
+		const openBtn = page.locator(".ewc-bar [data-ewc-console-open]");
+		const pop = page.locator("[data-ewc-console-pop]");
+		await expect(openBtn).toBeVisible();
+		await expect(openBtn).toHaveAttribute("aria-expanded", "false");
+		await expect(openBtn.locator("kbd")).toContainText("/");
+		await expect(dock.locator("[data-ewc-console-pop], [data-ewc-console], [data-ewc-console-in]")).toHaveCount(0);
+		await expect(pop).toBeHidden();
+		await openBtn.click();
+		const input = page.locator("[data-ewc-console-in]");
+		await expect(pop).toBeVisible();
+		await expect(input).toBeFocused();
+		await expect(openBtn).toHaveAttribute("aria-expanded", "true");
+		await expect(pop.locator("[data-ewc-console-ex]")).not.toHaveCount(0);
+		const popBox = (await pop.boundingBox())!;
+		const barBox = (await page.locator(".ewc-bar").boundingBox())!;
+		const railBox = (await page.locator(".ewc-rail").boundingBox())!;
+		const dockColBox = (await dock.boundingBox())!;
+		expect(popBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
+		expect(popBox.x).toBeGreaterThanOrEqual(railBox.x + railBox.width);
+		expect(popBox.x + popBox.width).toBeLessThanOrEqual(dockColBox.x);
+		// The button toggles: an empty console goes away on a second click — held like a real click, so the input's
+		// blur (and its auto-hide) lands between press and release…
+		await openBtn.click({delay: 120});
+		await expect(pop).toBeHidden();
+		await expect(openBtn).toHaveAttribute("aria-expanded", "false");
+		// …and `/` opens it straight into the input.
 		await blur(page);
 		await page.keyboard.press("/");
-		const input = page.locator("[data-ewc-console-in]");
 		await expect(input).toBeFocused();
-		await expect(conDock.locator("[data-ewc-console-ex]")).not.toHaveCount(0);
 		// A command typed and entered while the previous one is still applying runs next — it is not
 		// dropped, and the first command finishing does not wipe it.
 		await input.evaluate((el: HTMLInputElement) => {

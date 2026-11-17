@@ -108,7 +108,7 @@ describe("Encounter cockpit Act — command console", () => {
 		expect(getCockpitConsoleSaveOutcome({verb: "save", damage: null, condition: null})).toBeNull();
 	});
 
-	test("the row ›_ handle resolves back to exactly that creature, multi-word and numbered names included", async () => {
+	test("the row ⋯ → Console… handle resolves back to exactly that creature, multi-word and numbered names included", async () => {
 		const state = await pGetCockpitState([["Goblin", 2], ["Young Red Dragon", 1], ["Giant Spider", 2], ["Bandit Captain", 1]]);
 		const labels = getCockpitInstanceLabels(state.instances);
 		state.instances.forEach(it => {
