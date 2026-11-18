@@ -11,6 +11,7 @@ import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation
 import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog-adapter.js";
 
 export const SOURCE_ESTIMATE_MODE = "source-estimate-m13";
+export const SOURCE_ONLY_MODE = "source-only";
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const keys = (value, required, optional = []) => record(value) && required.every(key => Object.hasOwn(value, key))
 	&& Object.keys(value).every(key => [...required, ...optional].includes(key));
@@ -32,7 +33,7 @@ function entries (current, source, scope) {
 export function inspectCreatureTransformationSourceInputs ({target, resolved}) {
 	const {creature: current} = BestiaryQuickActionsUtil._getReplayState({baseCreature: target.baseCreature, operations: target.operations});
 	const targetKey = JSON.stringify({target, resolved});
-	const model = {mode: SOURCE_ESTIMATE_MODE, targetId: target.id, targetKey, chassisSource: target.baseCreature.source, current, controls: [], requirements: []};
+	const model = {mode: SOURCE_ESTIMATE_MODE, resolvedId: resolved.id, targetId: target.id, targetKey, chassisSource: target.baseCreature.source, current, controls: [], requirements: []};
 	const add = (path, facts, choices, required = true) => model.controls.push({
 		id: JSON.stringify([target.id, `${target.baseCreature.name}|${target.baseCreature.source}`.toLowerCase(), resolved.id, path]),
 		path,
@@ -126,8 +127,9 @@ export function inspectCreatureTransformationSourceInputs ({target, resolved}) {
 }
 
 function sourceInputs (model, answers) {
-	requireAnswer(keys(answers, ["mode", "targetKey", "source"], ["forms"]) && answers.mode === SOURCE_ESTIMATE_MODE
+	requireAnswer(keys(answers, ["mode", "targetKey", "source"], ["forms"]) && [SOURCE_ESTIMATE_MODE, SOURCE_ONLY_MODE].includes(answers.mode)
 		&& answers.targetKey === model.targetKey && record(answers.source), "Source answers are stale or belong to another target/history/recipe.", "answers");
+	requireAnswer(answers.mode !== SOURCE_ONLY_MODE || !Object.hasOwn(answers, "forms"), "Source-only answers cannot include an unreviewed estimate.", "answers");
 	requireAnswer(Object.keys(answers.source).every(id => model.controls.some(item => item.id === id)), "An answer references an unknown source control.", "answers");
 	const inputs = {};
 	if (["catalog:zombie|dmg", "catalog:skeleton|dmg"].includes(model.resolvedId)) inputs.reanimation = {};
@@ -203,6 +205,9 @@ export function compileCreatureTransformationSourceEstimate ({target, resolved, 
 export function compileCreatureTransformationSourceInputs ({target, resolved, answers, table, proficiencyContext = null, legendaryGroups}) {
 	const model = previewCreatureTransformationSourceInputs({target, resolved, answers, legendaryGroups});
 	if (model.status !== "source-ready") return model;
+	if (answers.mode === SOURCE_ONLY_MODE) {
+		return {...model, status: "ready", automationInputs: model.sourceInputs, compiled: model.source, estimates: []};
+	}
 	try {
 		requireAnswer(record(answers.forms) && Object.keys(answers.forms).length === model.forms.length, "Declare complete post-source CR judgments for every permitted form.", "forms");
 		const forms = {};

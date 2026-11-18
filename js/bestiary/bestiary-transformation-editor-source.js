@@ -3,11 +3,58 @@ import {compileCreatureTransformation} from "../creature-transformations.js";
 import {observeCreatureTransformationBindings} from "../creature-transformation-bindings.js";
 import {BestiaryCreatureTransformation} from "./bestiary-creature-transformation.js";
 import {normalizeCreatureTransformation} from "./bestiary-transformation-catalog-adapter.js";
+import {getCreatureTransformationSourceDefault} from "./bestiary-transformation-defaults.js";
 
 const named = values => values.map(value => [value, String(value).replaceAll("-", " ")]);
 const address = entry => ({section: entry.section, match: structuredClone(entry.match)});
 const title = entry => `${entry.section || "trait"}: ${entry.match.name} (${entry.match.source})`;
 const weaponEntries = entries => entries.filter(entry => /\{@atk(?:r)? [^}]*[mr]w/.test(JSON.stringify(entry.entry.entries)));
+
+function needsUndeadChoice (control, model, resolved) {
+	const key = control.path.at(-1);
+	const features = new Set(control.facts?.activeTraits || []);
+	const has = (...ids) => ids.some(id => features.has(id));
+	const category = resolved.selectedOptions.category[0];
+	if (key === "bindings") return ["ghostly", "skeletal", "zombie", "mummified"].includes(category);
+	if (key === "ghostAbility") return has("ghost-abilities");
+	if (key === "ghostDamage") return category === "ghostly" && !has("spectral-strikes", "withering-strikes");
+	if (key === "ghostWeapons") return category === "ghostly" || has("spectral-strikes", "withering-strikes");
+	if (key === "ghostFlight") {
+		const fly = model.current.speed?.fly;
+		return has("ghost-flight") && !((typeof fly === "number" ? fly : fly?.number) > 0)
+		&& ["walk", "swim"].some(mode => typeof model.current.speed?.[mode] === "object" || model.current.speed?.alternate?.[mode]?.length);
+	}
+	if (key === "drainAttack") {
+		return has("draining-strikes")
+		&& model.entries.filter(entry => /^bite\b/i.test(entry.match.name)).length !== 1;
+	}
+	if (["spellAbility", "components"].includes(key)) return has("bestow-curse", "chill-touch");
+	if (key === "glareAbility") return has("dreadful-glare");
+	if (key === "headless") return has("headless");
+	if (key === "movementRounding") {
+		const values = typeof model.current.speed === "number" ? [model.current.speed]
+			: Object.values(model.current.speed || {}).flatMap(value => typeof value === "number" ? [value] : value?.number !== undefined ? [value.number] : []);
+		const alternates = Object.values(model.current.speed?.alternate || {}).flat().map(value => value?.number ?? value);
+		return has("mummy-movement") && [...values, ...alternates].some(value => Number.isFinite(value) && value > 40 && value % 2);
+	}
+	if (key === "senses") {
+		return (model.current.senses || []).some(value => /darkvision/i.test(value) && !/^darkvision \d+ ft\.$/i.test(value))
+		|| (has("headless") && (model.current.senses || []).some(value => /blindsight/i.test(value) && !/^blindsight \d+ ft\.$/i.test(value)));
+	}
+	if (key === "challengeRating") {
+		return has("stench", "rotting-strikes", "turn-immunity", "touch-of-death")
+		&& !CR_CHOICES.some(([value]) => value === String(model.current.cr?.cr ?? model.current.cr));
+	}
+	if (key === "proficiencyBonus") {
+		return !Number.isInteger(model.current.profBonus) && !model.current.pbNote
+		&& !CR_CHOICES.some(([value]) => value === String(model.current.cr?.cr ?? model.current.cr))
+		&& (["ghostly", "skeletal", "zombie", "mummified", "ghoulish"].includes(category)
+			|| has("bestow-curse", "chill-touch", "ghoulish-strikes", "stench", "rotting-strikes", "dreadful-glare"));
+	}
+	if (key === "allowUnusualType") return !["beast", "dragon", "giant", "humanoid", "monstrosity"].includes(model.current.type?.type ?? model.current.type);
+	if (key === "alignment") return model.current.alignmentPrefix || !control.facts.alignment.some(alignment => JSON.stringify(alignment) === JSON.stringify(model.current.alignment));
+	return false;
+}
 
 function renderChecks (parent, values, ui, label) {
 	const reads = values.map(([value, name]) => [value, ui.bool(parent, `${label}: ${name}`)]);
@@ -160,7 +207,7 @@ function renderFallen (parent, key, facts, ui) {
 	throw new Error(`Missing Fallen Angel editor for ${key}.`);
 }
 
-function renderControl ({parent, control, model, resolved, ui, getLegendaryGroups, getSourceInputs}) {
+function renderControl ({parent, control, model, resolved, ui, getLegendaryGroups, getSourceInputs, simple = false}) {
 	const [namespace, key] = control.path;
 	const facts = control.facts;
 	const current = model.current;
@@ -242,7 +289,8 @@ function renderControl ({parent, control, model, resolved, ui, getLegendaryGroup
 	if (namespace === "undead") {
 		if (key === "additionalTraits") return renderChecks(parent, named(facts.additionalTraits), ui, "Additional source clause");
 		if (key === "alignment") {
-			const input = ui.select(parent, "Concrete alignment", facts.alignment.map((value, i) => [i, Parser.alignmentListToFull(value)]));
+			if (simple) paragraph(parent, "The original creature does not have one definite alignment. Choose the alignment you want after it becomes undead; unaligned is also allowed.");
+			const input = ui.select(parent, simple ? "Alignment after transformation" : "Concrete alignment", facts.alignment.map((value, i) => [i, Parser.alignmentListToFull(value)]));
 			return () => input.read() === undefined ? undefined : facts.alignment[Number(input.read())];
 		}
 		if (["abilityOrder", "movementOrder"].includes(key)) {
@@ -268,6 +316,7 @@ function renderControl ({parent, control, model, resolved, ui, getLegendaryGroup
 			const reads = facts.senses.flatMap((value, index) => {
 				const found = /^(darkvision|blindsight) (\d+) ft\..+$/i.exec(value);
 				if (!found) return [];
+				if (simple && found[1].toLowerCase() === "blindsight" && !facts.activeTraits.includes("headless")) return [];
 				const range = ui.number(parent, `Actual ${value} range (ft.)`, 0, 1000);
 				return [() => ({sense: found[1].toLowerCase(), index, range: range.read()})];
 			});
@@ -345,16 +394,67 @@ const LABELS = {
 	challengeRating: "Missing source CR",
 	drainAttack: "Draining Strikes attack",
 };
+const SIMPLE_LABELS = {
+	alignment: "Choose an alignment",
+	allowUnusualType: "Use this creature type?",
+	bindings: "Review existing armor and attacks",
+	ghostAbility: "Which ability powers its attacks?",
+	ghostDamage: "Choose force or necrotic damage",
+	ghostWeapons: "Which weapon damage changes?",
+	ghostFlight: "Choose its flying speed",
+	drainAttack: "Choose the attack that drains life",
+	spellAbility: "Choose a spellcasting ability",
+	components: "Choose spell components",
+	glareAbility: "Choose Dreadful Glare's ability",
+	headless: "Confirm the creature is headless",
+	movementRounding: "Round an uneven movement speed",
+	proficiencyBonus: "Missing proficiency bonus",
+	challengeRating: "Missing original challenge rating",
+	senses: "Review conditional senses",
+};
 
-export function renderSourceChoices ({parent, model, resolved, ui, getLegendaryGroups}) {
-	const source = group(parent, "Source choices");
-	paragraph(source, "Observed facts are read-only. Choose source policies and explain them; optional declarations are needed only when the source asks for them. Source-fixed retention never skips a source grant or removal.");
+export function renderSourceChoices ({parent, model, resolved, ui, getLegendaryGroups, simple = false, items = []}) {
+	const source = group(parent, simple ? "Remaining choices" : "Source choices");
+	paragraph(source, simple
+		? "Only unresolved source choices need an answer. Values derived from this creature are listed below; customize them if needed."
+		: "Observed facts are read-only. Choose source policies and explain them; optional declarations are needed only when the source asks for them. Source-fixed retention never skips a source grant or removal.");
 	const refreshers = [];
 	let sourceInputs = {};
-	const reads = model.controls.map(control => {
+	const derivedRoot = simple ? group(source, "Derived values (review or customize)", {open: false}) : source;
+	const optionalRoot = simple ? group(source, "Additional source options (optional)", {open: false}) : source;
+	const activators = new Map();
+	const controls = model.controls.filter(control => !simple || control.path[0] !== "undead" || needsUndeadChoice(control, model, resolved));
+	const reads = controls.map(control => {
 		const key = control.path.at(-1);
-		const body = group(source, LABELS[key] || key.replace(/([A-Z])/g, " $1"), {open: control.required});
+		const label = (simple ? SIMPLE_LABELS[key] : null) || LABELS[key] || key.replace(/([A-Z])/g, " $1");
+		const undeadRequired = control.path[0] === "undead" && needsUndeadChoice(control, model, resolved);
+		const required = control.required || (simple && undeadRequired);
+		let derived;
+		let derivationError;
+		if (simple && (control.path[0] !== "undead" || undeadRequired)) {
+			try { derived = getCreatureTransformationSourceDefault({control, model, items}); } catch (error) {
+				if (error.code !== "CREATURE_TRANSFORMATION_INPUT_REQUIRED") throw error;
+				derivationError = error.message;
+			}
+		}
+		if (derived !== undefined) {
+			const body = group(derivedRoot, `${label} - from creature`, {open: false});
+			body.dataset.sourceControl = control.id;
+			paragraph(body, key === "bindings"
+				? "Attacks use the creature's source-qualified weapon and exact ability + proficiency totals. Worn armor follows its listed equipment; other AC alternatives retain their printed value. No CR or proficiency change is inferred."
+				: `Using ${describeFact(derived)}.`);
+			paragraph(body, describeFact(derived));
+			const customize = ui.select(body, `Customize ${LABELS[key] || key}?`, [["custom", "Choose a different source policy"]], {required: false});
+			const custom = element("fieldset", {className: "bqa__transformation-optional"});
+			custom.hidden = custom.disabled = true;
+			body.append(custom);
+			ui.toggle(customize, custom, () => customize.read() === "custom");
+			const read = renderControl({parent: custom, control, model, resolved, ui, getLegendaryGroups, getSourceInputs: () => sourceInputs, simple});
+			return () => [control.id, {value: customize.read() ? read() : structuredClone(derived), reason: customize.read() ? "Selected source policy." : "Derived from this creature's source data; reviewed in the transformation preview."}];
+		}
+		const body = group(simple && !required ? optionalRoot : source, label, {open: required});
 		body.dataset.sourceControl = control.id;
+		if (derivationError) paragraph(body, `An automatic value is unavailable: ${derivationError} Complete this source choice instead.`);
 		const render = parent => {
 			let read;
 			if (control.path[0] === "spore" && key === "bindings") {
@@ -392,14 +492,21 @@ export function renderSourceChoices ({parent, model, resolved, ui, getLegendaryG
 					}
 				});
 				read = () => ({entries: []});
-			} else read = renderControl({parent, control, model, resolved, ui, getLegendaryGroups, getSourceInputs: () => sourceInputs});
+			} else read = renderControl({parent, control, model, resolved, ui, getLegendaryGroups, getSourceInputs: () => sourceInputs, simple});
 			const reason = ui.reason(parent, `${LABELS[key] || key} source reason`);
 			return () => ({value: read(), reason: reason.read()});
 		};
-		const read = control.required ? render(body) : ui.optional(body, `Declare ${LABELS[key] || key}?`, render);
+		if (simple && !required) body.open = false;
+		const read = required ? render(body) : ui.optional(body, `Declare ${LABELS[key] || key}?`, render);
+		if (!required) activators.set(control.id, read.activate);
 		return () => [control.id, read()];
 	});
-	return () => {
+	if (simple) {
+		derivedRoot.hidden = !derivedRoot.querySelector("details");
+		optionalRoot.hidden = !optionalRoot.querySelector("details");
+		source.hidden = !controls.length;
+	}
+	const read = () => {
 		const answers = () => Object.fromEntries(reads.map(read => read()).filter(([, answer]) => answer !== undefined));
 		const current = answers();
 		const inputs = {};
@@ -414,4 +521,14 @@ export function renderSourceChoices ({parent, model, resolved, ui, getLegendaryG
 		refreshers.forEach(refresh => refresh(inputs));
 		return answers();
 	};
+	read.focusRequirement = reason => {
+		const control = model.controls.find(control => new RegExp(`\\b${control.path.at(-1)}\\b`, "i").test(reason || ""));
+		const body = control && [...source.querySelectorAll("details")].find(node => node.dataset.sourceControl === control.id);
+		if (body) {
+			activators.get(control.id)?.();
+			for (let node = body; node && node !== source; node = node.parentElement) if (node.tagName === "DETAILS") node.open = true;
+		}
+		return body;
+	};
+	return read;
 }
