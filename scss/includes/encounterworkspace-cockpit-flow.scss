@@ -589,8 +589,10 @@
 		}
 
 		// ---------------- death saves: one compact line under the name ----------------
+		// Starts under the initiative like the row's sub-line, so the four parts stay on one line down to the
+		// narrowest rail (280px).
 		.ewc-ds {
-			grid-column: 3 / -1;
+			grid-column: 2 / -1;
 			display: flex;
 			flex-wrap: wrap;
 			align-items: center;

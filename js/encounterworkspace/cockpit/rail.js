@@ -55,7 +55,7 @@ export class EncounterCockpitRail {
 		this._popover = null;
 		this._ctx = null;
 		/** Roster view state: which view, the Groups view's find text and sort, and which stacked groups are expanded. */
-		this._roster = {view: getStoredView(), query: "", sort: "init", stackOpen: new Set()};
+		this._roster = {view: getStoredView(), query: "", sort: "init", stackOpen: new Set(), isDefeatedOpen: false};
 
 		this._onDocPointerDown = evt => {
 			if (!this._popover) return;
@@ -94,6 +94,9 @@ export class EncounterCockpitRail {
 		const {state, ui} = ctx;
 		const byId = new Map(state.instances.map(it => [it.id, it]));
 		const rows = ctx.orderIds.map(id => byId.get(id)).filter(Boolean);
+		// Defeated creatures leave the order for a folded "Defeated" list under it, so the live order stays short.
+		const liveIds = rows.filter(it => !it.defeated).map(it => it.id);
+		const defeated = rows.filter(it => it.defeated);
 		if (this._editInitId && !byId.has(this._editInitId)) this._editInitId = null;
 
 		const unrolled = rows.filter(it => ctx.initiativeOf(it) == null && !it.defeated);
@@ -101,7 +104,7 @@ export class EncounterCockpitRail {
 		const headTools = this._getExtras(ctx.railHead, ctx);
 		const head = h("div.ewc-rail__head", null,
 			h("h2.ewc-rail__title.ewc-sr", {id: "ewc-rail-title"}, isGroups ? "Creatures by group" : "Initiative order"),
-			this._getViewToggle(rows.length),
+			this._getViewToggle(liveIds.length),
 			headTools.length ? h("div.ewc-rail__tools", {role: "group", "aria-label": "Roster actions"}, ...headTools) : null,
 			unrolled.length
 				? h("button.ewc-btn.ewc-btn--sm.ewc-rail__roll", {
@@ -120,16 +123,21 @@ export class EncounterCockpitRail {
 		const stackedNames = new Set(groups.filter(it => it.kind === "custom" && it.isStacked).map(it => it.name));
 		[...stackOpen].filter(name => !stackedNames.has(name)).forEach(name => stackOpen.delete(name));
 		const items = isGroups
-			? this._getRosterItems(ctx, byId, groups)
-			: getCockpitRailItems({orderIds: ctx.orderIds, byId, groups, stackOpen}).map(item => {
+			? this._getRosterItems(ctx, byId, groups, liveIds)
+			: getCockpitRailItems({orderIds: liveIds, byId, groups, stackOpen}).map(item => {
 				if (item.type === "stack") return this._getStackRow(item.name, item.ids, ctx);
 				if (item.type === "stackHead") return this._getStackHead(item.name, item.count);
 				return this._getRow(byId.get(item.id), ctx);
 			});
-		const list = h(`ol.ewc-rail__list${isGroups ? ".ewc-rail__list--groups" : ""}`, {"aria-labelledby": "ewc-rail-title"}, items);
+		// The folded Defeated section is the list's last item, so it scrolls with the order instead of eating rail height.
+		const fallen = defeated.length ? [
+			liveIds.length ? null : h("li.ewc-rail__empty", {"data-ewc-roster-empty": "true"}, "Every creature is defeated."),
+			this._getDefeated(defeated, ctx),
+		] : [];
+		const list = h(`ol.ewc-rail__list${isGroups ? ".ewc-rail__list--groups" : ""}`, {"aria-labelledby": "ewc-rail-title"}, items, fallen);
 		const tools = isGroups && rows.length ? this._getRosterTools() : null;
 		const empty = rows.length
-			? (items.length ? null : h("p.ewc-rail__empty", {"data-ewc-roster-empty": "true"}, `No creature or group matches “${this._roster.query.trim()}”.`))
+			? (items.length || !liveIds.length ? null : h("p.ewc-rail__empty", {"data-ewc-roster-empty": "true"}, `No creature or group matches “${this._roster.query.trim()}”.`))
 			: h("p.ewc-rail__empty", null, "No creatures yet. Use ", h("b", null, "⋯ → Choose saved list"), " or send an encounter from the Bestiary.");
 
 		const top = this._getExtras(ctx.railTop, ctx);
@@ -216,18 +224,31 @@ export class EncounterCockpitRail {
 		);
 	}
 
-	/** Groups view: one header per group (custom groups, the party, then "Ungrouped") followed by its rows. */
-	_getRosterItems (ctx, byId, groups) {
-		const sections = getCockpitRosterSections({orderIds: ctx.orderIds, byId, groups, labels: ctx.labels, query: this._roster.query, sort: this._roster.sort});
+	/** Groups view: one header per group (custom groups, the party, then "Ungrouped") followed by its live rows. */
+	_getRosterItems (ctx, byId, groups, liveIds) {
+		const sections = getCockpitRosterSections({orderIds: liveIds, byId, groups, labels: ctx.labels, query: this._roster.query, sort: this._roster.sort});
 		return sections.flatMap(section => {
 			const head = this._getGroupHead(section, ctx, byId);
 			const isStack = section.kind === "custom" && section.group?.isStacked && !this._roster.stackOpen.has(section.name);
-			const live = section.ids.filter(id => !byId.get(id).defeated);
-			if (isStack && live.length > 1) {
-				return [head, this._getStackRow(section.name, live, ctx), ...section.ids.filter(id => byId.get(id).defeated).map(id => this._getRow(byId.get(id), ctx))];
-			}
+			if (isStack && section.ids.length > 1) return [head, this._getStackRow(section.name, section.ids, ctx)];
 			return [head, ...section.ids.map(id => this._getRow(byId.get(id), ctx))];
 		});
+	}
+
+	/** The folded list under the order: defeated creatures in initiative order. Healing one above 0 brings it back. */
+	_getDefeated (instances, ctx) {
+		const isOpen = this._roster.isDefeatedOpen || instances.some(it => it.id === ctx.ui?.viewedId);
+		return h("li.ewc-rail__defeated", {"data-ewc-defeated": ""},
+			h("details", {
+				open: isOpen,
+				ontoggle: evt => { this._roster.isDefeatedOpen = evt.currentTarget.open; },
+			},
+			h("summary.ewc-rail__defeated-sum", {
+				"data-ewc-fk": "rail-defeated",
+				title: "Defeated creatures are out of the turn order. Heal one above 0 HP to bring it back.",
+			}, "Defeated", h("span.ewc-rail__defeated-n", null, `${instances.length}`)),
+			h("ol.ewc-rail__dlist", {"aria-label": "Defeated creatures"}, instances.map(it => this._getRow(it, ctx))),
+			));
 	}
 
 	_getGroupHead (section, ctx, byId) {
@@ -549,7 +570,7 @@ export class EncounterCockpitRail {
 		const ac = derived.ac ?? acBase;
 		const initiative = ctx.initiativeOf(instance);
 
-		const row = h(`li.ewc-row${isTurn ? ".is-turn" : ""}${isViewed ? ".is-viewed" : ""}${isSel ? ".is-sel" : ""}${instance.defeated ? ".is-defeated" : ""}.${hpState.cls}`, {
+		const row = h(`li.ewc-row${isTurn ? ".is-turn" : ""}${isViewed ? ".is-viewed" : ""}${isSel ? ".is-sel" : ""}${instance.defeated ? ".is-defeated" : ""}${instance.kind === "party" ? ".is-party" : ""}.${hpState.cls}`, {
 			"data-ewc-id": id,
 			"aria-current": isViewed ? "true" : null,
 		});

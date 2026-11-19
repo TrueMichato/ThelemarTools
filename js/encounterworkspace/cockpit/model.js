@@ -77,6 +77,46 @@ export function getCockpitPrevTurn ({turn, orderIds}) {
 	return {round: turn.round - 1, activeId: orderIds[orderIds.length - 1]};
 }
 
+/**
+ * Which turn-order entries the cockpit steps over: a defeated creature, or a shared group turn whose members are all
+ * defeated. Returns `id => boolean` for ids from `EncounterWorkspaceState.getInitiativeOrder`.
+ */
+export function getCockpitTurnSkip (state) {
+	const byId = new Map((state?.instances || []).map(it => [it.id, it]));
+	const groups = new Map((state?.groups || []).map(it => [it.id, it]));
+	return id => {
+		if (byId.has(id)) return !!byId.get(id).defeated;
+		const members = (groups.get(id)?.memberIds || []).map(memberId => byId.get(memberId)).filter(Boolean);
+		return members.length > 0 && members.every(it => it.defeated);
+	};
+}
+
+/**
+ * The turn after `mode` ("start" | "next" | "prev") with skipped entries stepped over, as `{round, activeId, steps}`;
+ * `steps` is how many single `withTurn` moves reach it. Same rules as `EncounterWorkspaceState.withTurn` otherwise.
+ * When every entry is skipped nobody is stepped over (the marker still moves). Null when there is no such turn.
+ */
+export function getCockpitLiveTurn ({turn, orderIds, mode, isSkipped = () => false}) {
+	if (!orderIds?.length) return null;
+	const skip = orderIds.every(id => isSkipped(id)) ? () => false : isSkipped;
+	const stepNext = current => {
+		const index = orderIds.indexOf(current.activeId);
+		if (index < 0) return null;
+		const isWrap = index === orderIds.length - 1;
+		return {round: current.round + Number(isWrap), activeId: orderIds[isWrap ? 0 : index + 1]};
+	};
+	const step = mode === "prev" ? current => getCockpitPrevTurn({turn: current, orderIds}) : stepNext;
+	let current;
+	if (mode === "start") current = turn?.round ? null : {round: 1, activeId: orderIds[0]};
+	else current = turn?.round ? step(turn) : null;
+	let steps = 1;
+	while (current && skip(current.activeId) && steps <= orderIds.length) {
+		current = step(current);
+		steps++;
+	}
+	return current ? {...current, steps} : null;
+}
+
 /** Display labels: a v8 `label` wins; otherwise the name, numbered only when the name repeats. */
 export function getCockpitInstanceLabels (instances, {getName = it => it.monster?._displayName || it.monster?.name || "Creature"} = {}) {
 	const counts = new Map();

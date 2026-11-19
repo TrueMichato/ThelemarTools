@@ -69,6 +69,64 @@
 				color: var(--ewc-ink-3);
 				font-size: var(--ewc-f-s);
 			}
+
+			// Folded list of the fallen, the order's last item: out of the turn order, one click from view.
+			&__defeated {
+				margin-top: 10px;
+				list-style: none;
+
+				> details > summary {
+					display: flex;
+					align-items: center;
+					gap: 6px;
+					min-height: 30px;
+					padding: 0 8px;
+					border-top: 1px solid var(--ewc-hair);
+					border-radius: var(--ewc-r-s);
+					color: var(--ewc-ink-3);
+					font-size: var(--ewc-f-xs);
+					font-weight: 600;
+					letter-spacing: 0.03em;
+					text-transform: uppercase;
+					cursor: pointer;
+					list-style: none;
+
+					&::-webkit-details-marker {
+						display: none;
+					}
+
+					&::before {
+						content: "▸";
+						font-size: var(--ewc-f-2xs);
+						transition: transform var(--ewc-t-fast) var(--ewc-ease);
+					}
+
+					&:hover {
+						background: var(--ewc-surface);
+						color: var(--ewc-ink-2);
+					}
+				}
+
+				> details[open] > summary::before {
+					transform: rotate(90deg);
+				}
+			}
+
+			&__defeated-n {
+				min-width: 18px;
+				padding: 0 5px;
+				border-radius: 999px;
+				background: var(--ewc-surface);
+				color: var(--ewc-ink-3);
+				font-weight: 700;
+				letter-spacing: 0;
+				text-align: center;
+			}
+
+			&__dlist {
+				margin: 2px 0 0;
+				padding: 0;
+			}
 		}
 
 		.ewc-lg {
@@ -183,6 +241,47 @@
 			}
 
 			&.is-sel.is-viewed {
+				box-shadow: inset 3px 0 0 var(--ewc-ink-2), inset 0 0 0 1px var(--ewc-ind);
+			}
+
+			// Party and turn tints are washes over whatever surface the row has (hover, viewed), never a replacement.
+			&.is-party {
+				--ewc-row-wash: color-mix(in srgb, var(--ewc-party) 7%, transparent);
+				--ewc-row-edge: inset 2px 0 0 color-mix(in srgb, var(--ewc-party) 60%, transparent);
+
+				background-image: linear-gradient(var(--ewc-row-wash), var(--ewc-row-wash));
+				box-shadow: var(--ewc-row-edge);
+			}
+
+			&.is-party.is-sel {
+				box-shadow: var(--ewc-row-edge), inset 0 0 0 1px var(--ewc-ind);
+			}
+
+			&.is-party.is-viewed {
+				box-shadow: inset 3px 0 0 var(--ewc-ink-2);
+			}
+
+			&.is-party.is-sel.is-viewed {
+				box-shadow: inset 3px 0 0 var(--ewc-ink-2), inset 0 0 0 1px var(--ewc-ind);
+			}
+
+			&.is-turn {
+				--ewc-row-wash: color-mix(in srgb, var(--ewc-gold-soft) 75%, transparent);
+
+				background-image: linear-gradient(var(--ewc-row-wash), var(--ewc-row-wash));
+				box-shadow: inset 0 0 0 1px var(--ewc-gold-line);
+			}
+
+			&.is-turn.is-viewed {
+				box-shadow: inset 3px 0 0 var(--ewc-ink-2), inset 0 0 0 1px var(--ewc-gold-line);
+			}
+
+			// Selection outranks the turn hairline; the gold wash still marks the turn.
+			&.is-turn.is-sel {
+				box-shadow: inset 0 0 0 1px var(--ewc-ind);
+			}
+
+			&.is-turn.is-sel.is-viewed {
 				box-shadow: inset 3px 0 0 var(--ewc-ink-2), inset 0 0 0 1px var(--ewc-ind);
 			}
 

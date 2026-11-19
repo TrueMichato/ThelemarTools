@@ -81,12 +81,13 @@ import {
 	getCockpitExhaustionLevel,
 	getCockpitGroupChips,
 	getCockpitInstanceLabels,
+	getCockpitLiveTurn,
 	getCockpitPlural,
-	getCockpitPrevTurn,
 	getCockpitRailOrder,
 	getCockpitSelectionAfterClick,
 	getCockpitSelectionAfterGroupToggle,
 	getCockpitStepId,
+	getCockpitTurnSkip,
 } from "./model.js";
 
 const TOAST_MS = 7000;
@@ -199,7 +200,7 @@ export class EncounterCockpit {
 		this._engine.subscribe((next, meta) => this._onEngineChange(meta));
 		this._mountParts();
 		this._installFeatures();
-		this._ui.viewedId = this._getActiveInstanceId(state) ?? this._getOrderIds(state)[0] ?? null;
+		this._ui.viewedId = this._getDefaultViewedId(state);
 		this._render();
 
 		this._root.setAttribute("aria-busy", "false");
@@ -536,6 +537,13 @@ export class EncounterCockpit {
 	}
 
 	/** The creature whose turn it is. For a shared group turn, the first member still standing. */
+	/** The creature whose turn it is, else the first one still fighting, else the first in the order. */
+	_getDefaultViewedId (state) {
+		const orderIds = this._getOrderIds(state);
+		const isSkipped = getCockpitTurnSkip(state);
+		return this._getActiveInstanceId(state) ?? orderIds.find(id => !isSkipped(id)) ?? orderIds[0] ?? null;
+	}
+
 	_getActiveInstanceId (state) {
 		const activeId = state.turn?.activeId;
 		if (!state.turn?.round || !activeId) return null;
@@ -570,7 +578,7 @@ export class EncounterCockpit {
 		const ids = new Set(state.instances.map(it => it.id));
 		this._ui.selectedIds = this._ui.selectedIds.filter(id => ids.has(id));
 		if (this._ui.anchorId && !ids.has(this._ui.anchorId)) this._ui.anchorId = null;
-		if (!ids.has(this._ui.viewedId)) this._ui.viewedId = this._getActiveInstanceId(state) ?? this._getOrderIds(state)[0] ?? null;
+		if (!ids.has(this._ui.viewedId)) this._ui.viewedId = this._getDefaultViewedId(state);
 	}
 
 	_getCtx () {
@@ -650,7 +658,7 @@ export class EncounterCockpit {
 		const {state, labels} = ctx;
 		const round = state.turn?.round || 0;
 		const turnOrderIds = this._getTurnOrderIds(state);
-		const prevTurn = round ? getCockpitPrevTurn({turn: state.turn, orderIds: turnOrderIds}) : null;
+		const prevTurn = round ? getCockpitLiveTurn({turn: state.turn, orderIds: turnOrderIds, mode: "prev", isSkipped: getCockpitTurnSkip(state)}) : null;
 		const hasInit = turnOrderIds.length > 0;
 		const sharedGroup = round && state.turn?.activeId && !state.instances.some(it => it.id === state.turn.activeId)
 			? state.groups.find(it => it.id === state.turn.activeId) : null;
@@ -1181,7 +1189,8 @@ export class EncounterCockpit {
 		if (this._engine.getState() !== state) return this.toast("The encounter changed while rolling recharge; the turn did not advance.", {kind: "error"});
 		let readyCount = 0;
 		const next = await this._pCommit(isStart ? "Start combat" : "Next turn", (draft, {log}) => {
-			const advanced = withCockpitTurnAdvanced(EncounterWorkspaceState.withTurn(draft, mode), {previousTurn: state.turn, log});
+			const advanced = this._withLiveTurn(draft, mode, {log, isAdvance: true});
+			if (!advanced) throw new Error("There is no turn to move to.");
 			if (!rolls.length) return advanced;
 			const out = withCockpitRechargeRolls(advanced, rolls, {labels: this._getLabels(advanced), log});
 			readyCount = out.readyCount;
@@ -1196,10 +1205,11 @@ export class EncounterCockpit {
 	async _pRollTurnRecharges (state, mode) {
 		let preview;
 		try {
-			preview = EncounterWorkspaceState.withTurn(state, mode);
+			preview = this._withLiveTurn(state, mode);
 		} catch {
 			return [];
 		}
+		if (!preview) return [];
 		const labels = this._getLabels(preview);
 		const rolls = [];
 		for (const {id, recharge} of getCockpitTurnRecharges(preview)) {
@@ -1217,11 +1227,28 @@ export class EncounterCockpit {
 
 	async _pPrevTurn () {
 		const state = this._engine.getState();
-		const turn = getCockpitPrevTurn({turn: state.turn, orderIds: this._getTurnOrderIds(state)});
+		const turn = getCockpitLiveTurn({turn: state.turn, orderIds: this._getTurnOrderIds(state), mode: "prev", isSkipped: getCockpitTurnSkip(state)});
 		if (!turn) return this.toast(state.turn?.round ? "This is the first turn of combat." : "Combat hasn't started.");
 		// Going back only moves the marker; durations are not un-ticked (undo is the way to rewind them).
-		const next = await this._pCommit("Previous turn", draft => EncounterWorkspaceState.withTurn(draft, "prev"));
+		const next = await this._pCommit("Previous turn", draft => this._withLiveTurn(draft, "prev"));
 		if (next) this._afterTurnChange(state, next);
+	}
+
+	/**
+	 * Start / next / previous turn, stepping over defeated creatures (and shared turns whose members are all down).
+	 * Each step is one `withTurn` move; with `isAdvance`, every forward step also runs the turn-advance rules, so a
+	 * skipped caster's battlefield entries still count down and durations tick once when the round wraps.
+	 * Returns the new state, or null when there is no turn to move to.
+	 */
+	_withLiveTurn (state, mode, {log, isAdvance = false} = {}) {
+		const target = getCockpitLiveTurn({turn: state.turn, orderIds: this._getTurnOrderIds(state), mode, isSkipped: getCockpitTurnSkip(state)});
+		if (!target) return null;
+		let out = state;
+		for (let ix = 0; ix < target.steps; ix++) {
+			const stepped = EncounterWorkspaceState.withTurn(out, ix === 0 ? mode : mode === "prev" ? "prev" : "next");
+			out = isAdvance ? withCockpitTurnAdvanced(stepped, {previousTurn: out.turn, log}) : stepped;
+		}
+		return out;
 	}
 
 	async _pResetTurns () {
@@ -1484,7 +1511,7 @@ export class EncounterCockpit {
 		this._hasUnreadableSave = false;
 		await this._engine.pReplace(next);
 		const state = this._engine.getState();
-		this._ui.viewedId = this._getOrderIds(state)[0] ?? null;
+		this._ui.viewedId = this._getDefaultViewedId(state);
 		this._render();
 		this.toast(`Loaded ${getCockpitPlural(state.instances.length, "creature")} from “${state.sourceList?.name || "saved list"}”${isFromBestiary ? " in Bestiary" : ""}.${state.omissions?.length ? ` ${state.omissions.length} could not be loaded.` : ""}`);
 	}

@@ -6,12 +6,14 @@ import {
 	getCockpitGroupChips,
 	getCockpitHpState,
 	getCockpitInstanceLabels,
+	getCockpitLiveTurn,
 	getCockpitPrevTurn,
 	getCockpitRailOrder,
 	getCockpitSelectionAfterClick,
 	getCockpitSelectionAfterGroupToggle,
 	getCockpitStepId,
 	getCockpitTally,
+	getCockpitTurnSkip,
 	parseCockpitAmount,
 	parseCockpitRounds,
 } from "../../js/encounterworkspace/cockpit/model.js";
@@ -65,6 +67,36 @@ describe("Encounter cockpit shell model", () => {
 			expect(getCockpitPrevTurn({turn: {round: 0, activeId: null}, orderIds})).toBeNull();
 			// The active creature was removed: fall back to the top of the order.
 			expect(getCockpitPrevTurn({turn: {round: 3, activeId: "gone"}, orderIds})).toEqual({round: 3, activeId: "a"});
+		});
+
+		test("defeated creatures and wholly defeated group turns are skipped; a living member keeps the group turn", () => {
+			const isSkipped = getCockpitTurnSkip({
+				instances: [{id: "a", defeated: true}, {id: "b"}, {id: "g1", defeated: true}, {id: "g2", defeated: true}, {id: "h1", defeated: true}, {id: "h2"}],
+				groups: [{id: "G", memberIds: ["g1", "g2"]}, {id: "H", memberIds: ["h1", "h2"]}],
+			});
+			expect(["a", "b", "G", "H", "unknown"].map(isSkipped)).toEqual([true, false, true, false, false]);
+		});
+
+		test("live turns step over the skipped, wrap with a round increment, and report the withTurn steps taken", () => {
+			const orderIds = ["a", "b", "c", "d"];
+			const dead = new Set(["a", "c"]);
+			const isSkipped = id => dead.has(id);
+			// Start lands on the first living creature.
+			expect(getCockpitLiveTurn({turn: {round: 0, activeId: null}, orderIds, mode: "start", isSkipped})).toEqual({round: 1, activeId: "b", steps: 2});
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "b"}, orderIds, mode: "start", isSkipped})).toBeNull();
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "b"}, orderIds, mode: "next", isSkipped})).toEqual({round: 1, activeId: "d", steps: 2});
+			// d → (a dead) → b crosses the round boundary.
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "d"}, orderIds, mode: "next", isSkipped})).toEqual({round: 2, activeId: "b", steps: 2});
+			expect(getCockpitLiveTurn({turn: {round: 2, activeId: "b"}, orderIds, mode: "prev", isSkipped})).toEqual({round: 1, activeId: "d", steps: 2});
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "d"}, orderIds, mode: "prev", isSkipped})).toEqual({round: 1, activeId: "b", steps: 2});
+			// Nothing living before the first living turn of round 1.
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "b"}, orderIds, mode: "prev", isSkipped})).toBeNull();
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "gone"}, orderIds, mode: "next", isSkipped})).toBeNull();
+		});
+
+		test("when everyone is defeated nobody is skipped, so the marker still moves one entry", () => {
+			const orderIds = ["a", "b"];
+			expect(getCockpitLiveTurn({turn: {round: 1, activeId: "a"}, orderIds, mode: "next", isSkipped: () => true})).toEqual({round: 1, activeId: "b", steps: 1});
 		});
 
 		test("rail order is highest initiative first; creatures without initiative keep roster order at the bottom", () => {

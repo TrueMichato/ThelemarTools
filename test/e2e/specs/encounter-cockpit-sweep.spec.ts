@@ -307,7 +307,11 @@ const checkTransformPreview = async (page: Page, encounter: SweepEncounter) => {
 	console.log(`[sweep] ${encounter.title} · Undead (${encounter.undeadCategory}): ${eligible} eligible · ${skipped} skipped`);
 	expect(eligible + skipped).toBe(count);
 	await expect(editor.root.getByRole("button", {name: /^Review answers for /})).toHaveCount(skipped);
-	for (const {name} of encounter.creatures) await expect(summary).toContainText(name);
+	// Skipped creatures are named in the summary; eligible ones each get a preview card beside it.
+	const cards = summary.locator("xpath=..").locator(".bqa__transformation-target > h5");
+	await expect(cards).toHaveCount(eligible);
+	const accounted = `${await summary.innerText()}\n${(await cards.allInnerTexts()).join("\n")}`;
+	for (const {name} of encounter.creatures) expect(accounted).toContain(name);
 	expect(await statblockOps(page)).toEqual(before);
 };
 
