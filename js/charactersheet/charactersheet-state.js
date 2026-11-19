@@ -36840,6 +36840,11 @@ class CharacterSheetState {
 						calculations.sealDamageDieCount = 1;
 					}
 					calculations.sealDamageDie = 6;
+					if (["IllriggerRevised", "TGTT-IllR"].includes(illriggerSource)) {
+						const trueNameBonus = Math.max(0, ...this.getTrueNameWeapons().map(item => item.tier));
+						calculations.sealDamageDieCount += trueNameBonus;
+						calculations.sealDamage = `${calculations.sealDamageDieCount}d6`;
+					}
 
 					// Interdict Boons Known — scaling by level
 					const boonsTable = [0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4];
@@ -59109,12 +59114,14 @@ class CharacterSheetState {
 		if (this.hasFeature?.("Second Wind")) {
 			const max = this.getSecondWindUsesMax();
 			if (max > 0) {
+				const uses = this.getFeature("Second Wind")?.uses;
 				out.push({
 					id: "__synthetic-second-wind",
 					name: "Second Wind",
 					current: this.getSecondWindUsesRemaining(),
 					max,
-					recharge: "short",
+					recharge: uses?.recharge || "short",
+					...(uses?.shortRestRecovery ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 					synthetic: true,
 					kind: "secondWind",
 				});
@@ -59646,6 +59653,7 @@ class CharacterSheetState {
 	}
 
 	recoverResources (rechargeType) {
+		this.ensureFighterFeatureUses();
 		const recoveredFeatureIds = new Set();
 		this._data.resources.forEach(r => {
 			let current = null;
@@ -59838,6 +59846,67 @@ class CharacterSheetState {
 		return v;
 	}
 
+	/** Restore only the available pool, without expiring placements or resetting turn gates. */
+	regainSeals (count = 1) {
+		const before = this.getSealsAvailable();
+		const amount = Math.max(0, Math.floor(Number(count) || 0));
+		return this._setSealsAvailable(before + amount) - before;
+	}
+
+	static _getTrueNameWeaponTier (item) {
+		if (String(item?.source || "").toLowerCase() !== "illriggerrevised") return null;
+		if (!["M", "R", "weapon"].includes(item.type) && !item.weaponCategory) return null;
+		const match = item._variantName
+			? /^(?:\+([123]) )?True Name$/i.exec(item._variantName)
+			: /^(?:\+([123]) )?True Name(?: |$)/i.exec(item.name || "");
+		return match ? Number(match[1] || 0) : null;
+	}
+
+	getTrueNameWeapons () {
+		if (!(this._data.classes || []).some(cls => cls.name === "Illrigger" && ["IllriggerRevised", "TGTT-IllR"].includes(cls.source))) return [];
+		return (this._data.inventory || []).flatMap(row => {
+			if (!row.equipped || !row.attuned || row.quantity <= 0) return [];
+			const tier = CharacterSheetState._getTrueNameWeaponTier(row.item);
+			return tier == null ? [] : [{
+				id: row.id,
+				name: row.item.name,
+				tier,
+				recoveryAvailable: tier >= 2 && (row.item.itemPowerUses?.trueNameRecovery ?? 1) > 0,
+			}];
+		});
+	}
+
+	canPlaceTrueNameExtraSeal ({attack, naturalRoll} = {}) {
+		return !attack?.isSpell
+			&& Number.isInteger(naturalRoll) && naturalRoll >= 18 && naturalRoll <= 20
+			&& this.getSealsAvailable() >= 2
+			&& this.getTrueNameWeapons().some(item => item.id === attack?.sourceItem?.id);
+	}
+
+	regainSealsFromTrueName (itemId, {enemyDefeated = false} = {}) {
+		const weapon = this.getTrueNameWeapons().find(item => item.id === itemId && item.tier >= 2);
+		if (!weapon) return {ok: false, label: "Equip and attune a +2 or +3 True Name weapon first."};
+		if (!enemyDefeated) return {ok: false, label: "True Name requires that you reduced an enemy to 0 HP."};
+		if (!weapon.recoveryAvailable) return {ok: false, label: "True Name recovery has already been used; it recharges at the following dusk."};
+		const regained = this.regainSeals(weapon.tier === 3 ? 2 : 1);
+		if (weapon.tier === 3) {
+			const level = this._data.classes.find(cls => cls.name === "Illrigger").level;
+			this.setTempHp(Math.max(this.getTempHp(), level));
+		}
+		const row = this._findInventoryRow(itemId);
+		row.item.itemPowerUses ||= {};
+		row.item.itemPowerUses.trueNameRecovery = 0;
+		return {ok: true, label: `${weapon.name}: regained ${regained} seal${regained === 1 ? "" : "s"}${weapon.tier === 3 ? `; temporary HP: ${this.getTempHp()}` : ""}. Recharges at dusk.`};
+	}
+
+	resetTrueNameRecovery (itemId) {
+		const row = this._findInventoryRow(itemId);
+		if ((CharacterSheetState._getTrueNameWeaponTier(row?.item) ?? 0) < 2) return false;
+		row.item.itemPowerUses ||= {};
+		row.item.itemPowerUses.trueNameRecovery = 1;
+		return true;
+	}
+
 	/** @returns {Array<{id:string, target:string, count:number}>} a copy of live seal placements. */
 	getSealPlacements () {
 		return this._ensureSealStore().placements.map(p => ({...p}));
@@ -59878,10 +59947,11 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Place one seal on a creature (spends one from the pool). Merges into an existing
+	 * Place a seal on a creature (or two on an eligible, opted-in True Name hit).
+	 * Each seal spends one from the pool. Merges into an existing
 	 * placement on the same target. Respects the once-per-turn gate.
 	 * @param {string} target
-	 * @param {{round?: number, force?: boolean}} [opts] `force` bypasses the per-turn gate.
+	 * @param {{round?: number, force?: boolean, extraSeal?: boolean, attack?: object, naturalRoll?: number}} [opts] `force` bypasses the per-turn gate.
 	 * @returns {{id:string, target:string, count:number}|null} the placement, or null if blocked.
 	 */
 	placeSeal (target, opts = {}) {
@@ -59891,13 +59961,14 @@ class CharacterSheetState {
 		const round = opts.round != null ? opts.round : this._currentCombatRoundOrNull();
 		if (!opts.force && !this.canPlaceSealThisTurn(round)) return null;
 
+		const count = opts.extraSeal && this.canPlaceTrueNameExtraSeal(opts) ? 2 : 1;
 		const store = this._ensureSealStore();
 		const tgt = (target || "").trim() || "Target";
 		let placement = store.placements.find(p => p.target.toLowerCase() === tgt.toLowerCase());
-		if (placement) placement.count += 1;
-		else { placement = {id: CryptUtil.uid(), target: tgt, count: 1}; store.placements.push(placement); }
+		if (placement) placement.count += count;
+		else { placement = {id: CryptUtil.uid(), target: tgt, count}; store.placements.push(placement); }
 
-		this._setSealsAvailable(avail - 1);
+		this._setSealsAvailable(avail - count);
 		store.lastPlacedRound = round;
 		return {...placement};
 	}
@@ -59919,7 +59990,7 @@ class CharacterSheetState {
 
 	/**
 	 * Burn N seals on an interdicted creature. Burned seals are CONSUMED (they do not
-	 * return to the pool until a rest), so `available` is unchanged. Returns the rolled
+	 * return to the pool), so `available` is unchanged. Returns the rolled
 	 * damage descriptor for the caller to display/apply.
 	 * @param {string} placementIdOrTarget placement id, or the creature name.
 	 * @param {number} count how many seals to burn.
@@ -67446,7 +67517,7 @@ class CharacterSheetState {
 	 * @param {number} desiredMax Correct per-rest maximum (0 / null = nothing to do yet).
 	 * @private
 	 */
-	_ensureFighterFeatureUses (featureName, desiredMax) {
+	_ensureFighterFeatureUses (featureName, desiredMax, {shortRestRecovery = null} = {}) {
 		if (!desiredMax || desiredMax <= 0) return;
 		const feature = this._data.features.find(f => f.name?.toLowerCase() === featureName.toLowerCase());
 		if (!feature) return;
@@ -67456,9 +67527,11 @@ class CharacterSheetState {
 		} else {
 			const wasFull = (feature.uses.current ?? 0) >= (feature.uses.max ?? 0);
 			feature.uses.max = desiredMax;
-			feature.uses.recharge = "short";
 			feature.uses.current = wasFull ? desiredMax : Math.min(feature.uses.current ?? 0, desiredMax);
 		}
+		feature.uses.recharge = shortRestRecovery ? "long" : "short";
+		if (shortRestRecovery) feature.uses.shortRestRecovery = shortRestRecovery;
+		else delete feature.uses.shortRestRecovery;
 
 		// Sync the mirrored resource that addFeature creates (Combat Resources pips read it).
 		const resource = this._data.resources.find(r => r.featureId === feature.id)
@@ -67466,14 +67539,19 @@ class CharacterSheetState {
 		if (resource) {
 			resource.max = desiredMax;
 			resource.current = Math.max(0, Math.min(feature.uses.current, desiredMax));
-			resource.recharge = "short";
+			resource.recharge = feature.uses.recharge;
+			resource.mirrorsFeatureUses = true;
+			if (shortRestRecovery) resource.shortRestRecovery = shortRestRecovery;
+			else delete resource.shortRestRecovery;
 			if (!resource.featureId) resource.featureId = feature.id;
 		} else {
 			this.addResource({
 				name: feature.name,
 				max: desiredMax,
 				current: feature.uses.current,
-				recharge: "short",
+				recharge: feature.uses.recharge,
+				...(shortRestRecovery ? {shortRestRecovery} : {}),
+				mirrorsFeatureUses: true,
 				featureId: feature.id,
 			});
 		}
@@ -67482,7 +67560,9 @@ class CharacterSheetState {
 	/** Ensure Second Wind + Action Surge uses are scaled to the current Fighter level. */
 	ensureFighterFeatureUses () {
 		const calcs = this.getFeatureCalculations();
-		this._ensureFighterFeatureUses("Second Wind", calcs.secondWindUses);
+		const fighter = this._data.classes.find(cls => cls.name === "Fighter");
+		const hasModernSecondWind = fighter?.source === "XPHB" || fighter?.source === "TGTT";
+		this._ensureFighterFeatureUses("Second Wind", calcs.secondWindUses, {shortRestRecovery: hasModernSecondWind ? 1 : null});
 		this._ensureFighterFeatureUses("Action Surge", calcs.actionSurgeUses);
 	}
 
@@ -67657,7 +67737,7 @@ class CharacterSheetState {
 		return true;
 	}
 
-	/** Restore all Second Wind uses (short or long rest). */
+	/** Restore all Second Wind uses (long rest or manual reset). */
 	restoreSecondWind () {
 		this.ensureFighterFeatureUses();
 		const f = this.getFeature("Second Wind");
@@ -95392,6 +95472,7 @@ class CharacterSheetState {
 	 */
 	onDusk () {
 		this._rechargeItems("dusk");
+		for (const row of this._data.inventory || []) this.resetTrueNameRecovery(row.id);
 	}
 
 	/**

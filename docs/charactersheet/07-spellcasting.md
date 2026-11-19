@@ -15,6 +15,13 @@ The `CharacterSheetSpells` module handles all spellcasting functionality:
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661
 
+## Feywild Shard and cantrips
+
+An attuned Feywild Shard is an opt-in option on a **metamagic** cast, including
+a cantrip. Both the casting-options menu and **Cast w/ Metamagic** dialog offer
+it. Applying a metamagic with the option enabled rolls the PHB Wild Magic Surge
+table and records the result; a plain cast or **Cast without metamagic** does not.
+
 ## Player Simulacrum creation
 
 The Spells tab, Overview/favorites quick casts, and Play Mode route Simulacrum

@@ -5173,8 +5173,11 @@ class CharacterSheetPage {
 			return;
 		}
 
-		elProgress.textContent = `${xpToNext.toLocaleString()} XP to level ${nextLevel} (${currentXp.toLocaleString()}/${xpRequired.toLocaleString()} XP).`;
-		setFill(xpRequired > 0 ? (currentXp / xpRequired) * 100 : 0);
+		const levelFloor = this._state.getXpRequiredForCurrentLevel();
+		const levelSpan = xpRequired - levelFloor;
+		const earnedThisLevel = Math.max(0, currentXp - levelFloor);
+		elProgress.textContent = `${xpToNext.toLocaleString()} XP to level ${nextLevel} (${earnedThisLevel.toLocaleString()}/${levelSpan.toLocaleString()} XP this level).`;
+		setFill(levelSpan > 0 ? (earnedThisLevel / levelSpan) * 100 : 0);
 	}
 
 	_renderLevelUpBanner () {

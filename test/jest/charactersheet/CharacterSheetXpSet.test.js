@@ -9,6 +9,44 @@ const __dirname = dirname(__filename);
 const REPO_ROOT = resolve(__dirname, "../../..");
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+let CharacterSheetPage;
+beforeAll(async () => {
+	globalThis.window ||= {addEventListener: () => {}};
+	await import("../../../js/charactersheet/charactersheet.js");
+	CharacterSheetPage = globalThis.CharacterSheetPage;
+});
+
+describe("XP progress within the current level", () => {
+	it.each([
+		[1, 150, 50],
+		[5, 6500, 0],
+		[5, 10250, 50],
+		[5, 14000, 100],
+		[5, 20000, 100],
+		[5, 1000, 0],
+		[20, 355000, 100],
+		[0, 0, 0],
+	])("renders level %i at %i XP as %i%%", (level, xp, percent) => {
+		const state = new CharacterSheetState();
+		if (level) state.addClass({name: "Fighter", source: "PHB", level});
+		state.setXp(xp);
+		const nodes = {
+			"charsheet-disp-xp-current": {},
+			"charsheet-disp-xp-progress": {},
+			"charsheet-xp-fill": {style: {}},
+		};
+		const originalDocument = globalThis.document;
+		globalThis.document = {getElementById: id => nodes[id]};
+		try {
+			CharacterSheetPage.prototype._renderXpTracking.call({_state: state});
+			expect(Number.parseFloat(nodes["charsheet-xp-fill"].style.width)).toBe(percent);
+			expect(nodes["charsheet-disp-xp-current"].textContent).toBe(xp.toLocaleString());
+			if (level === 5 && xp === 10250) expect(nodes["charsheet-disp-xp-progress"].textContent).toContain("3,750/7,500 XP this level");
+		} finally {
+			globalThis.document = originalDocument;
+		}
+	});
+});
 
 if (!globalThis.Parser.LEVEL_XP_REQUIRED) {
 	globalThis.Parser.LEVEL_XP_REQUIRED = [0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 100000, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000];

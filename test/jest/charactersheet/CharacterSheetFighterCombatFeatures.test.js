@@ -18,6 +18,7 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
+import "../../../js/charactersheet/charactersheet-rest.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 
@@ -193,6 +194,45 @@ describe("Second Wind / Action Surge uses scale with level", () => {
 // PART 4: use / restore semantics
 // ==========================================================================
 describe("Second Wind / Action Surge use and restore", () => {
+	describe.each(["XPHB", "TGTT"])("%s rest recovery", source => {
+		it.each(["state", "dialog"])("restores one use per short rest through the %s path, all on long rest", path => {
+			const state = buildFighter(17, source);
+			addSecondWind(state);
+			addActionSurge(state);
+			state.setSecondWindUsesRemaining(0);
+			state.setActionSurgeRemaining(0);
+			const rest = Object.create(globalThis.CharacterSheetRest.prototype);
+			rest._state = state;
+			rest._page = {};
+			const recover = type => path === "dialog" ? rest._restoreResources(type)
+				: type === "short" ? state.onShortRest() : state.onLongRest();
+			const expectUses = expected => {
+				expect(state.getSecondWindUsesRemaining()).toBe(expected);
+				expect(state.getResources().find(r => r.name === "Second Wind").current).toBe(expected);
+				expect(state.getSyntheticCombatResources().find(r => r.kind === "secondWind").current).toBe(expected);
+			};
+			// Old saves still contain full short-rest recharge metadata on both surfaces.
+			const feature = state.getFeature("Second Wind");
+			const resource = state._data.resources.find(r => r.name === "Second Wind");
+			feature.uses.recharge = resource.recharge = "short";
+			delete feature.uses.shortRestRecovery;
+			delete resource.shortRestRecovery;
+			delete resource.mirrorsFeatureUses;
+			recover("short");
+			expectUses(1);
+			expect(state.getActionSurgeUsesRemaining()).toBe(2);
+			recover("short");
+			expectUses(2);
+			const loaded = new CharacterSheetState();
+			loaded.loadFromJson(state.toJson());
+			expect(loaded.getSecondWindUsesRemaining()).toBe(2);
+			recover("long");
+			expectUses(5);
+			recover("short");
+			expectUses(5);
+		});
+	});
+
 	it("useSecondWind decrements and returns false when exhausted", () => {
 		const state = buildFighter(1, "XPHB"); // 2 uses
 		addSecondWind(state);

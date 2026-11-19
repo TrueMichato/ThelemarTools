@@ -4682,10 +4682,10 @@ class CharacterSheetSpells {
 		}
 
 		// Metamagic — one entry per currently-available active metamagic (at base level).
-		// Feywild Shard (TCE): when attuned, a metamagic cast of a leveled spell can also
+		// Feywild Shard (TCE): when attuned, a metamagic cast (including a cantrip) can also
 		// discharge the shard to roll a PHB Wild Magic Surge — surfaced as a metamagic-gated
 		// variant (never on a plain cast), mirroring the toggle in the metamagic picker modal.
-		const isFeywildShardAttuned = !isCantrip && (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
+		const isFeywildShardAttuned = (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
 		const metamagics = this._state.getCastableActiveMetamagics?.({spell, spellData, slotLevel: isCantrip ? 0 : spell.level}) || [];
 		const availableMm = metamagics.filter(m => m.isAvailable);
 		for (const meta of availableMm) {
@@ -4842,10 +4842,10 @@ class CharacterSheetSpells {
 			html: `Select an active metamagic for this cast. You currently have <strong>${this._state.getSorceryPoints().current}</strong> sorcery points.`,
 		}));
 
-		// Feywild Shard (TCE): a metamagic cast of a leveled spell can also discharge an
+		// Feywild Shard (TCE): a metamagic cast can also discharge an
 		// attuned shard to roll a PHB Wild Magic Surge. Opt-in only — and only honoured when
 		// a metamagic is actually applied (the "Cast without metamagic" row ignores it).
-		const isFeywildShardAttuned = slotLevel > 0 && (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
+		const isFeywildShardAttuned = (this._state.getAttunedItems?.() || []).some(it => (it?.item?.name || it?.name) === "Feywild Shard");
 		let feywildToggle = null;
 		if (isFeywildShardAttuned) {
 			const feywildWrap = e_({tag: "label",
@@ -6017,11 +6017,11 @@ class CharacterSheetSpells {
 			wildMagicSurgeResult = this._rollVariantWildMagicSurge(normalizedCastMeta.variantComponent.componentCount);
 		}
 
-		// Feywild Shard (TCE): casting a leveled spell while attuned rolls on the 2014
+		// Feywild Shard (TCE): an opted-in metamagic cast rolls on the 2014
 		// PHB Wild Magic Surge table. The spell still resolves normally; this is purely
 		// an additional surge roll reported in the result toast.
 		let feywildSurgeResult = null;
-		if (normalizedCastMeta.feywildShard && (slotLevel || spell.level) > 0) {
+		if (normalizedCastMeta.feywildShard) {
 			feywildSurgeResult = this._rollPhbWildMagicSurge();
 		}
 

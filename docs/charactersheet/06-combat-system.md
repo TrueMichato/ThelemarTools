@@ -18,6 +18,26 @@ The `CharacterSheetCombat` module handles all combat-related functionality:
 
 ## Core Classes
 
+### Illrigger seal recovery and True Name
+
+The Combat tab's **Interdiction** panel provides **Regain 1 (manual)** for
+recovery granted by a rule or the DM. It restores only the available pool,
+up to its maximum; existing placements and the placement turn gate stay intact.
+Superior Interdict retains its separate, limited bonus-action recovery.
+
+Equipped, attuned **True Name** weapons from *The Illrigger Revised* are
+recognized across weapon types, not only swords. A natural 18–20 with that
+weapon offers an optional second seal in the attack follow-up, spending two
+available seals total. The +1/+2/+3 variants add 1d6/2d6/3d6 to each seal's
+damage; multiple variants do not stack.
+
+The +2/+3 variants also expose **True Name recovery** after confirming that
+you reduced an enemy to 0 HP. They regain one/two seals, respectively; +3 also
+grants temporary HP equal to Illrigger level without replacing a larger pool.
+Each weapon's use persists through saving/loading and rests until the following
+dusk. **Recharge at dusk** asks for confirmation before resetting that weapon;
+the State `onDusk()` event resets all eligible weapons.
+
 ### CharacterSheetCombat
 
 Main combat controller that manages all combat interactions.

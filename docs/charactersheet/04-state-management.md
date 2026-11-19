@@ -2,6 +2,15 @@
 
 This document provides an in-depth exploration of `CharacterSheetState`, the heart of the character sheet system.
 
+## XP progress within a level
+
+Total XP remains an absolute saved value. The sheet's progress bar and
+“XP this level” label measure only the interval between the current total
+character level's threshold and the next threshold. For example, level 5
+starts at 6,500 XP: 10,250 XP is halfway through its 7,500-XP interval.
+The bar clamps at zero below the current threshold and fills when ready to
+level up or at level 20; multiclass characters use their combined level.
+
 ## Overview
 
 `CharacterSheetState` is the largest module in the character sheet system (~16,315 lines). It serves as both the **data store** and **calculation engine** for all character mechanics.

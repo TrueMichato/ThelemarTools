@@ -560,8 +560,9 @@ describe("Spellcasting flow — Bug #9: Feywild Shard cast appends surge to the 
 		expect(toast).toContain("Rolled 100");
 	});
 
-	it("does NOT roll a surge for a cantrip cast", async () => {
+	it("rolls the opted-in surge for a metamagic cantrip and records it", async () => {
 		globalThis.RollerUtil.randomise = jest.fn(() => 100);
+		page._rollHistory = {addRoll: jest.fn()};
 		spells._allSpells = [{name: "Fire Bolt", source: "XPHB", level: 0, duration: [{type: "instant"}], entries: ["ranged spell attack {@damage 1d10}"], spellAttack: ["R"]}];
 
 		await spells._handleSpellEffects(
@@ -573,7 +574,11 @@ describe("Spellcasting flow — Bug #9: Feywild Shard cast appends surge to the 
 		);
 
 		const toast = getLastToastContent();
-		expect(toast).not.toContain("Feywild Shard");
+		expect(toast).toContain("Feywild Shard");
+		expect(toast).toContain("Rolled 100");
+		expect(page._rollHistory.addRoll).toHaveBeenCalledWith(expect.objectContaining({
+			title: "Feywild Shard — Wild Magic Surge: Fire Bolt", total: 100,
+		}));
 	});
 
 	it("queries a spell-scoped critical range when resolving a cast attack", async () => {

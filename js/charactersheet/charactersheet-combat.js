@@ -6599,6 +6599,8 @@ class CharacterSheetCombat {
 			const finalize = (applied = false) => { if (isResolved) return; isResolved = true; resolve(applied); };
 
 			const placeholder = ctx.attack?.name ? `creature hit by ${ctx.attack.name}` : "creature";
+			const sealOptions = {attack: ctx.attack, naturalRoll: ctx.rollResult?.roll ?? ctx.rollFollowup?.naturalRoll};
+			const canPlaceExtra = this._state.canPlaceTrueNameExtraSeal?.(sealOptions);
 			modalInner.innerHTML = `
 				<div class="charsheet__interdict-place">
 					<p class="mb-2">On a hit you may place a <strong>magical seal</strong> on the target (no action, once per turn). The seal lasts 1 minute or until burned.</p>
@@ -6607,6 +6609,7 @@ class CharacterSheetCombat {
 						<input type="text" class="form-control input-sm charsheet__interdict-target-ipt" placeholder="${placeholder}" style="max-width: 16rem;">
 					</div>
 					<div class="ve-muted ve-small mb-2">Seals available: <strong>${avail}</strong>${dc != null ? ` &middot; Interdict save DC <strong>${dc}</strong>` : ""}</div>
+					${canPlaceExtra ? `<label class="ve-flex-v-center mb-2"><input type="checkbox" class="mr-2 charsheet__interdict-true-name-extra"><span>True Name: place an additional seal (spend 2 seals total)</span></label>` : ""}
 					<div class="ve-flex ve-flex-h-right gap-2">
 						<button class="ve-btn ve-btn-default ve-btn-sm charsheet__interdict-skip" type="button">Skip</button>
 						<button class="ve-btn ve-btn-primary ve-btn-sm charsheet__interdict-confirm" type="button">Place Seal</button>
@@ -6617,7 +6620,8 @@ class CharacterSheetCombat {
 			modalInner.querySelector(".charsheet__interdict-skip")?.addEventListener("click", () => { finalize(); doClose(false); });
 			modalInner.querySelector(".charsheet__interdict-confirm")?.addEventListener("click", () => {
 				const target = (ipt?.value || "").trim() || (ctx.attack?.name ? `Target of ${ctx.attack.name}` : "Target");
-				const placed = this._state.placeSeal?.(target);
+				const extraSeal = !!modalInner.querySelector(".charsheet__interdict-true-name-extra")?.checked;
+				const placed = this._state.placeSeal?.(target, {...sealOptions, extraSeal});
 				if (placed) {
 					JqueryUtil.doToast({type: "success", content: `🔥 Baleful Interdict seal placed on ${placed.target}. Seals left: ${this._state.getSealsAvailable?.()}`});
 					this.renderCombatInterdiction();
@@ -6799,12 +6803,20 @@ class CharacterSheetCombat {
 			})()
 			: "";
 
+		const trueNameHtml = (this._state.getTrueNameWeapons?.() || []).filter(item => item.tier >= 2).map(item => `
+			<div class="ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
+				<span class="ve-small">${CharacterSheetClassUtils.escapeHtml(item.name)}: when you reduce an enemy to 0 HP, regain ${item.tier === 3 ? "2 seals and gain temporary HP equal to your Illrigger level" : "1 seal"} (no action; once until the following dusk).</span>
+				<button type="button" class="cs-combat-btn charsheet__interdict-true-name-regain" data-item-id="${CharacterSheetClassUtils.escapeHtml(item.id)}" ${item.recoveryAvailable ? "" : "disabled"}>True Name recovery</button>
+				${!item.recoveryAvailable ? `<button type="button" class="cs-combat-btn charsheet__interdict-true-name-dusk" data-item-id="${CharacterSheetClassUtils.escapeHtml(item.id)}">Recharge at dusk</button>` : ""}
+			</div>`).join("");
+
 		container.innerHTML = `
 			<div class="charsheet__interdict-panel">
 				<div class="charsheet__interdict-summary ve-flex ve-flex-v-center ve-flex-wrap gap-2 mb-2">
 					<span class="charsheet__interdict-dc" title="Interdict save DC = 8 + proficiency + CHA">${csCombatIcon("dc")}Save DC <strong>${dc != null ? dc : "—"}</strong></span>
 					<span class="charsheet__interdict-pool" title="Seals refresh on a short or long rest">${csCombatIcon("fire")}Seals <strong>${avail}</strong> / ${max}</span>
 					<span class="ve-muted ve-small" title="Burn damage per seal">${sealDamage} per seal</span>
+					<button class="cs-combat-btn charsheet__interdict-regain" type="button" ${avail < max ? "" : "disabled"} title="Manual recovery when a rule or your DM grants a seal; does not end existing placements">Regain 1 (manual)</button>
 					<button class="cs-combat-btn cs-combat-btn--primary charsheet__interdict-place-btn ml-auto" type="button" ${avail > 0 ? "" : "disabled"} title="Place a seal on a creature (bonus action, or no action on a weapon hit)">Place seal</button>
 				</div>
 				<div class="charsheet__interdict-seals mb-2">
@@ -6813,11 +6825,50 @@ class CharacterSheetCombat {
 				</div>
 				${charmEnemyHtml}
 				${superiorInterdictHtml}
+				${trueNameHtml}
 				<div class="charsheet__interdict-boons">
 					<div class="ve-muted ve-small mb-1">Known interdict boons</div>
 					${boonsHtml}
 				</div>
 			</div>`;
+
+		container.querySelector(".charsheet__interdict-regain")?.addEventListener("click", () => {
+			const regained = this._state.regainSeals(1);
+			JqueryUtil.doToast({type: regained ? "success" : "warning", content: regained ? "Regained 1 seal (manual adjustment)." : "Your seal pool is already full."});
+			this.renderCombatInterdiction();
+			this._page._features?._renderResources();
+			this._page.saveCharacter?.();
+		});
+		container.querySelectorAll(".charsheet__interdict-true-name-regain").forEach(btn => btn.addEventListener("click", async () => {
+			const enemyDefeated = await CharacterSheetModal.pGetUserBoolean({
+				title: "True Name recovery",
+				htmlDescription: "Have you reduced an enemy to 0 HP? This uses this weapon's recovery until the following dusk.",
+				textYes: "Yes — use recovery",
+				textNo: "Cancel",
+			});
+			if (enemyDefeated !== true) return;
+			const result = this._state.regainSealsFromTrueName(btn.dataset.itemId, {enemyDefeated: true});
+			JqueryUtil.doToast({type: result.ok ? "success" : "warning", content: result.label});
+			this.renderCombatInterdiction();
+			this._page._renderHp?.();
+			this._page._features?._renderResources();
+			this._page.saveCharacter?.();
+		}));
+		container.querySelectorAll(".charsheet__interdict-true-name-dusk").forEach(btn => btn.addEventListener("click", async () => {
+			const isDusk = await CharacterSheetModal.pGetUserBoolean({
+				title: "Recharge True Name at dusk",
+				htmlDescription: "Has the following dusk occurred since this weapon's recovery was used? A rest alone does not recharge it.",
+				textYes: "Dusk has occurred — recharge",
+				textNo: "Cancel",
+			});
+			if (isDusk !== true) return;
+			if (!this._state.resetTrueNameRecovery(btn.dataset.itemId)) {
+				JqueryUtil.doToast({type: "warning", content: "That True Name weapon is no longer in your inventory."});
+				return;
+			}
+			this.renderCombatInterdiction();
+			this._page.saveCharacter?.();
+		}));
 
 		// --- Superior Interdict: regain a seal (bonus action, 1/long rest) ---
 		container.querySelector(".charsheet__interdict-superior-regain")?.addEventListener("click", () => {

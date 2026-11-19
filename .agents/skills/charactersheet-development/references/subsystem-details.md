@@ -4998,6 +4998,34 @@ Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog va
 
 ## Rest Mechanics
 
+### Fighter Second Wind recovery
+
+`ensureFighterFeatureUses()` derives edition from the Fighter class source,
+not the feature's printing. XPHB/TGTT Second Wind has `recharge: "long"` and
+`shortRestRecovery: 1` on both feature uses and its mirrored resource; PHB
+retains full short-rest recovery of its single use. Action Surge is unchanged.
+Both State recovery and the Rest dialog normalize older metadata before
+recovering. `mirrorsFeatureUses: true` prevents the dialog from adding the
+same partial recovery twice. Never follow the generic short-rest loop with
+`restoreSecondWind()`; that method deliberately remains a full/manual reset.
+
+### True Name and manual Illrigger recovery
+
+`regainSeals(count)` writes through the existing seal setter without clearing
+placements or resetting the placement gate. True Name's external-source
+fallback recognizes source-qualified `IllriggerRevised` weapon variants,
+requires equipped/attuned inventory ownership, and derives the strongest
+nonstacking seal-damage bonus in `getFeatureCalculations()`. Extra placement
+checks the actual attack's `sourceItem.id` and natural 18–20 in State as well
+as in the Combat follow-up. It spends an additional available seal.
+
+`regainSealsFromTrueName(id, {enemyDefeated: true})` requires confirmation and
+stores its one-until-dusk counter in the existing inventory
+`item.itemPowerUses.trueNameRecovery`. Missing counters default to available.
+`resetTrueNameRecovery(id)`/`onDusk()` recharge it; a rest alone does not.
+The Interdiction panel rerenders HP/resources after the corresponding controls.
+See `CharacterSheetTrueName.test.js` for real State and Combat-handler coverage.
+
 ### Optional XPHB Simulacrum Paid Repair
 
 Rest's `_showLongRestDialog({focusSimulacrum: companionId})` stages optional

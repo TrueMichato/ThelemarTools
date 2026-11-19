@@ -3183,6 +3183,7 @@ class CharacterSheetRest {
 
 	_restoreResources (restType) {
 		this._state.resetRelentlessRageDc();
+		this._state.ensureFighterFeatureUses?.();
 		// Restore class resources
 		const resources = this._state.getResources();
 		resources.forEach(resource => {
@@ -3245,11 +3246,9 @@ class CharacterSheetRest {
 			this._state.restoreInfernalConduit?.();
 		}
 
-		// Restore Fighter Second Wind / Action Surge - recharge on short OR long rest.
-		// Explicit (in addition to the generic feature-uses loop above) so the per-rest max
-		// is re-scaled to the current Fighter level before refilling.
+		// Second Wind's edition-specific partial recovery is handled by the mirrored
+		// resource above; refilling it here would erase the one-use short-rest limit.
 		if (this._state.hasFighterFeatures?.()) {
-			this._state.restoreSecondWind?.();
 			this._state.restoreActionSurge?.();
 		}
 

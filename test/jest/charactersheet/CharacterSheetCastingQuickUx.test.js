@@ -152,6 +152,21 @@ describe("R17 Bug #3b: Feywild Shard only fires under an applied metamagic", () 
 		expect(castMetaSeen.appliedMetamagic).toEqual(expect.objectContaining({key: "twinned"}));
 		expect(castMetaSeen.feywildShard).toBe(true);
 	});
+
+	it("carries metamagic and shard opt-in through the slot-free cantrip cast path", async () => {
+		spells._allSpells = [{name: "Fire Bolt", source: "PHB", level: 0, duration: [{type: "instant"}]}];
+		spells._state.getSpells = () => [{id: "bolt", name: "Fire Bolt", source: "PHB", level: 0}];
+		spells._pChooseActiveMetamagic = jest.fn(async () => ({
+			cancelled: false, metamagic: {key: "quickened", name: "Quickened Spell", cost: 2}, feywildShard: true,
+		}));
+		const useSp = jest.fn(() => true);
+		spells._state.useSorceryPoint = useSp;
+		await spells._castSpell("bolt", {withMetamagic: true});
+		expect(spells._pChooseActiveMetamagic).toHaveBeenCalledWith(expect.objectContaining({slotLevel: 0}));
+		expect(castMetaSeen).toMatchObject({feywildShard: true, appliedMetamagic: {key: "quickened"}});
+		expect(useSp).toHaveBeenCalledWith(2);
+		expect(spells._state.setSpellSlots).not.toHaveBeenCalled();
+	});
 });
 
 describe("R17 Bug #3b: cast-options menu surfaces Feywild only as a metamagic variant", () => {
@@ -194,10 +209,16 @@ describe("R17 Bug #3b: cast-options menu surfaces Feywild only as a metamagic va
 		expect(feywildItems.every(it => /Feywild Shard/.test(it.label) && /🌀/.test(it.label))).toBe(true);
 	});
 
-	it("does NOT offer Feywild for a cantrip even when attuned", () => {
+	it("offers the same metamagic-gated Feywild choice for a cantrip", () => {
 		spells._state = makeMenuState({attuned: true, metamagics: [{key: "twinned", name: "Twinned Spell", cost: 2, isAvailable: true}]});
 		const items = spells._buildCastOptionItems({id: "fbolt", name: "Fire Bolt", source: "XPHB", level: 0}, {name: "Fire Bolt", source: "XPHB", level: 0});
-		expect(items.some(it => /Feywild/.test(it.label))).toBe(false);
+		const shard = items.find(it => /Feywild Shard/.test(it.label));
+		expect(shard).toBeDefined();
+		shard.onSelect();
+		expect(spells._castSpell).toHaveBeenCalledWith("fbolt", {decision: expect.objectContaining({
+			metamagic: expect.objectContaining({key: "twinned"}),
+			feywildShard: true,
+		})});
 	});
 });
 // endregion
